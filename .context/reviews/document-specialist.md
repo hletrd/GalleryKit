@@ -1,54 +1,96 @@
-# Document-Specialist Review — Run-9 Cycle-1 (HEAD bb463062)
+# Document Specialist Review — Run 6 Cycle 10 (HEAD 0502ae86)
 
-**Date:** 2026-06-17
-**Scope:** Full doc-accuracy sweep of CLAUDE.md, AGENTS.md, `.context/**`, i18n messages, and heavily-commented source files. Cross-check of all load-bearing doc claims against HEAD code. Cycle-8 fix verification included.
+## Scope
 
-**Findings: 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW.**
-
----
-
-## Cycle-8 fix verification
-
-All three cycle-8 doc findings are confirmed fixed at HEAD:
-
-- **DOC-C8-01** (CLAUDE.md "deployed DARK" framing): Fixed. `CLAUDE.md:121` now reads "The real jina-clip-v2 encoder is **ACTIVATED in production**" with accurate gating mechanism description. No stale "dark" framing in CLAUDE.md.
-- **DOC-C8-02** (en.json/ko.json `settings.semanticSearchDesc` "deployed dark"): Fixed. Both strings now describe the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` opt-in gating mechanism without asserting the feature is dark. i18n key parity confirmed OK (Python key-parity check: zero asymmetric keys at any depth).
-- **DOC-C8-03** (`search.invalid` off-by-one minimum): Fixed. `search.invalidSemantic` key added to both `en.json:412` ("Type at least 3 characters for semantic search.") and `ko.json:412` ("시맨틱 검색은 세 글자 이상 입력하세요.") with correct 3-codepoint minimum stated.
+Spot-checked all load-bearing doc claims in CLAUDE.md against code at HEAD.
 
 ---
 
-## DOC-C9-01 [LOW, confidence Medium] — Inline code comments say "deployed DARK" after production activation
+## Items Verified and Confirmed Correct
 
-**Files:**
-- `apps/web/src/lib/gallery-config.ts:134` — `// AGG-C10-02 (run-6 cycle-1): the CLIP feature is deployed DARK by explicit user choice.`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:665` — `// … The real ONNX encoder exists but the feature is deployed DARK; …`
-
-**Assessment:** Both are inline code comments explaining a *code invariant* (why the resolver heals `'production'→'disabled'` without the env flag, and why the admin UI omits the `'production'` SelectItem). They describe the UI-side architectural intent ("hidden from admin UI by design"), not the state of the production deployment. Neither comment is user-facing. A maintainer reading either comment alongside the code it annotates would not conclude production search is inert — the surrounding logic and env-flag gating make the invariant clear. However, the phrase "deployed DARK" now contradicts the production reality for an operator reading these comments while debugging. The correct phrasing would be "operator-gated" or "UI-hidden".
-
-**Why LOW (not MEDIUM):** The comments annotate code that works correctly regardless of the comment wording. The misleading risk is confined to a developer reading these specific inline comments in isolation; CLAUDE.md (the primary reference) was already corrected in cycle 8 and describes the live state accurately.
-
-**Fix:** In `gallery-config.ts:134`, replace "the CLIP feature is deployed DARK by explicit user choice" with "the CLIP feature is operator-gated (activated in production; hidden from the admin UI by design)". In `settings-client.tsx:665`, replace "the feature is deployed DARK" with "the feature is operator-gated (not activatable via the admin UI)". No behaviour change; comment-only.
-
-**Confidence:** Medium — the phrase is genuinely stale relative to production reality, but the code invariant it describes remains architecturally correct (production mode IS intentionally hidden from the UI). A reasonable reviewer could treat this as non-actionable.
+| Claim (CLAUDE.md section) | Code source | Result |
+|---|---|---|
+| `IMAGE_PIPELINE_VERSION = 7` | `gallery-config-shared.ts:21` | PASS |
+| `COLOR_IMPACTING_KEYS` covers **9** keys (ETag section, line 264) | `settings-hash.ts:41-53` (9 entries confirmed) | PASS |
+| Advisory lock names: `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}` | `advisory-locks.ts:19-44` | PASS |
+| Login rate limit: 5 attempts / 15-min window, two buckets (per-IP + per-account `acct:` key) | `rate-limit.ts:62-63`, `auth-rate-limit.ts` | PASS |
+| Upload caps: 200 MiB/file (`MAX_UPLOAD_FILE_BYTES`), 2 GiB window (`UPLOAD_MAX_TOTAL_BYTES`), 100 files (`UPLOAD_MAX_FILES_PER_WINDOW`) | `upload-limits.ts:1-16` | PASS |
+| nginx body caps: 2 MiB default, 64 KiB login, 250 MiB `/admin/db`, 216 MiB dashboard | `nginx/default.conf:31,58,75,92` | PASS |
+| Backfill column set: `pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit` | `admin-backfill-runner.ts:543-568`, `backfill-color-pipeline.ts:83-105` | PASS |
+| `avif_effort` default: 6 | `gallery-config-shared.ts:128` | PASS |
+| `image_quality_webp` default: 90, `image_quality_avif` default: 85, `image_quality_jpeg` default: 90 | `gallery-config-shared.ts:97-99` | PASS |
+| `QUEUE_CONCURRENCY` env var (PQueue default 1) | `image-queue.ts:168` | PASS |
+| `ADMIN_BACKFILL_CONCURRENCY` env var (in-app backfill default 1) | `admin-backfill-runner.ts:662` | PASS |
+| `BACKFILL_CONCURRENCY` env var (sidecar script, default 2) | `backfill-color-pipeline.ts` + CLAUDE.md sidecar docker run command | PASS |
+| `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env var gates `'production'` mode | `gallery-config.ts:144` | PASS |
+| `semantic_search_mode` states: `'disabled'` \| `'stub'` \| `'production'` | `gallery-config-shared.ts:173` | PASS |
+| CLIP min query: 3 codepoints client-side (`SEMANTIC_MIN_QUERY_CODEPOINTS`) | `search.tsx:27,165` | PASS |
+| Embedding: MEDIUMBLOB, 512-dim float32, 2048 bytes | `clip-embeddings.ts:8-9`, `schema.ts:259` | PASS |
+| `PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8'` | `clip-embeddings.ts:146` | PASS |
+| React `cache()` wraps 10 functions | `data.ts:1332,1608-1662` (10 confirmed) | PASS |
+| Transfer function enum: `srgb \| gamma22 \| gamma18 \| gamma24 \| gamma26 \| pq \| hlg \| linear \| unknown` | `color-detection.ts:25` | PASS |
+| NCLX matrix map `8=bt2020-ncl`, `9=bt2020-ncl`, `10=bt2020-cl` | `color-detection.ts:204-210` | PASS |
+| `HASH_LENGTH = 8` (ETag settings hash) | `settings-hash.ts:55` | PASS |
+| `--production` flag for CLIP backfill script | `backfill-clip-embeddings.ts:73` | PASS |
+| HDR honesty rule: `is_hdr`/`transfer_function`/`matrix_coefficients` admin-only until WI-09 | `CLAUDE.md` describes as admin-only; no public-facing code exposes them | PASS |
 
 ---
 
-## Verified-consistent (no mismatch found)
+## Real Finding
 
-The following claims in CLAUDE.md were verified against code at HEAD:
+**FINDING-DS-C10-01** — Nginx body cap for `/api/admin/lr/upload` not documented; misleads LR plugin operators
+Confidence: **H**
+Severity: **Operational / deploy-breaking**
 
-- **`IMAGE_PIPELINE_VERSION = 7`** — confirmed at `gallery-config-shared.ts:21`; `process-image.ts` re-exports it at line 315. The Key Files table description (`gallery-config-shared.ts:21`) is accurate.
-- **`COLOR_IMPACTING_KEYS` count = 9** — confirmed. `settings-hash.ts` defines 9 keys (5 color + 3 quality + `image_sizes`) starting at line 41. CLAUDE.md's `settings-hash.ts:37-49` line reference is approximately correct (actual declaration starts at line 41; the 3-line header comment before it starts at line 37 — close enough to be useful).
-- **Advisory-lock names** — all 6 names in the CLAUDE.md advisory-lock scope note are confirmed in `src/lib/advisory-locks.ts`: `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`.
-- **React `cache()` count = 10** — confirmed. `data.ts` has exactly 10 `cache()` calls: `getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached` (9 `Cached` exports) + `getSeoSettings` (1). CLAUDE.md Performance Optimizations section accurately states 10.
-- **`sanitizeForOg` consumer count** — CLAUDE.md claims "all three consumers — both OG image routes … and the JSON-LD photo page (`p/[id]/page.tsx`)". Verified: `api/og/route.tsx`, `api/og/photo/[id]/route.tsx`, and `app/[locale]/(public)/p/[id]/page.tsx` all import `sanitizeForOg`. The CLAUDE.md path abbreviation `p/[id]/page.tsx` omits the `[locale]/(public)/` prefix but is unambiguous in context.
-- **NCLX matrix map** — CLAUDE.md documents `0=identity, 1=BT.709, 8=BT.2020-NCL (alias of 9), 9=BT.2020-NCL, 10=BT.2020-CL`. Confirmed against `color-detection.ts:204-210` (`NCLX_MATRIX_MAP`). Accurate.
-- **Touch-target `SCAN_ROOTS`** — CLAUDE.md states `components/ + app/[locale]/admin/ + app/[locale]/(public)/`. Confirmed in `touch-target-audit.test.ts:79-83`: `componentsDir`, `adminDir`, `publicDir` — all three.
-- **Backfill concurrency cap formula** — CLAUDE.md: `max(1, floor((POOL_CONNECTION_LIMIT − RESERVED − 1) / 2))` with `RESERVED = max(3, ceil(POOL_CONNECTION_LIMIT / 2))` → cap = 2 at pool 10. Confirmed in `admin-backfill-runner.ts:105-122`.
-- **`sw.template.js` + `sw.js`** — both files exist at `public/sw.template.js` and `public/sw.js`.
-- **i18n key parity** — full recursive key-set comparison of `en.json` vs `ko.json` shows zero asymmetric keys. The intentional en=ICU-plural / ko=single-form value asymmetry (documented at CLAUDE.md Testing section) is confirmed present and correct.
-- **Semantic search framing in CLAUDE.md** — no remaining "deployed dark" / "deployed DARK" text. The `SEMANTIC_SEARCH_ALLOW_PRODUCTION` gating, the `disabled` code default, and the live production activation are all accurately described.
-- **Admin settings i18n** — `en.json` and `ko.json` `settings.semanticSearchDesc` both describe the operator-gating mechanism without asserting the feature is dark. `settings.semanticSearchProductionWarning` in both files accurately warns about the resolver-heal behaviour.
-- **Lint gates count** — CLAUDE.md states "Four lint scripts". `apps/web/package.json` has exactly 4 lint scripts: `lint`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`. Accurate.
-- **`process-image.ts` line ref `1019-1097`** — the range 1019-1097 spans the wide-gamut downscale gate and early-return logic; the fresh-per-format `sharp()` instantiation that the doc note targets is at ~1118-1132. The line range in CLAUDE.md is approximately correct as a navigational pointer to the `processImageFormats` function body; it is not misleading enough to constitute a finding.
-- **`gallery-config-shared.ts:21`** — confirmed: `export const IMAGE_PIPELINE_VERSION = 7;` is at line 21.
+### What the doc says
+
+CLAUDE.md line 514 (Important Notes section):
+
+> Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 MiB** by default, **64 KiB** for login, **250 MiB** for `/admin/db` restore requests, and **216 MiB** for admin dashboard uploads.
+
+### What the code does
+
+`nginx/default.conf` has a `location ^~ /api/admin/` catch-all at line 124 with `client_max_body_size 2M`. The Lightroom Classic publish-plugin route — `POST /api/admin/lr/upload` — falls under this catch-all. There is no specific location block for `/api/admin/lr/` or `/api/admin/lr/upload` that raises the body limit.
+
+The route itself (`src/app/api/admin/lr/upload/route.ts`) uses `request.formData()` to read a multipart body. Nginx enforces `client_max_body_size` on the entire request before passing it to Node.js, so any LR upload exceeding 2 MiB is rejected by nginx with 413 before the app sees it.
+
+The app-layer code (`upload-limits.ts`) defines `MAX_UPLOAD_FILE_BYTES = 200 * 1024 * 1024` and the LR route does check cumulative tracker limits — but those checks are dead code for real-world photo files (RAW exports are typically 10–50 MB) because nginx has already rejected the request.
+
+### Why it misleads
+
+An operator adding Lightroom Classic integration would:
+1. Read "nginx config uses 2 MiB by default, 216 MiB for admin dashboard uploads"
+2. Conclude LR upload is covered by one of these
+3. Find LR uploads silently fail for any photo > 2 MiB
+
+The doc enumerates all four nginx body limits explicitly and does not mention the `/api/admin/` 2 MiB catch-all applies to LR upload. An operator aligned to the doc table would never look for a missing location block.
+
+### Fix
+
+Add a specific nginx location for the LR upload route with an appropriate body cap, **and** update the doc table. In `nginx/default.conf`, before the `/api/admin/` catch-all:
+
+```nginx
+# Lightroom Classic PAT upload — same 216 MiB budget as dashboard uploads.
+location ~ ^/api/admin/lr/upload$ {
+    client_max_body_size 216M;
+    limit_req zone=admin burst=10 nodelay;
+    limit_req_status 429;
+
+    proxy_pass http://nextjs;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $gallerykit_forwarded_proto;
+}
+```
+
+Then update CLAUDE.md line 514 to add: _and **216 MiB** for the Lightroom PAT upload endpoint (`/api/admin/lr/upload`)_.
+
+---
+
+## Conclusion
+
+One real load-bearing mismatch found: CLAUDE.md documents nginx body caps but omits that `/api/admin/lr/upload` falls under the generic `/api/admin/` catch-all at 2 MiB, rendering the Lightroom plugin non-functional for any photo exceeding 2 MiB. All other doc claims verified against code (IMAGE_PIPELINE_VERSION, COLOR_IMPACTING_KEYS count, advisory-lock names, rate-limit buckets, upload caps, backfill column set, env var names, CLIP/semantic-search guards, embedding size, React cache() count, nginx cap values) are accurate.

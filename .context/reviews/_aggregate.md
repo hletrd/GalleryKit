@@ -1,106 +1,125 @@
-# Aggregate Review — Run-6 Cycle-9 (HEAD `af9ae6c5`)
+# Aggregate Review — Run-6 Cycle-10 (HEAD `0502ae86`)
 
 **Date:** 2026-06-17
-**Agents fanned out (11/11 returned + persisted):** security-reviewer, code-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer.
-**Gate state (verifier, fresh foreground run):** ESLint exit 0; typecheck exit 0; Vitest **2214 passed / 4 skipped / 0 failed** (237 files); lint:api-auth / lint:action-origin / lint:public-route-rate-limit all exit 0. The 4 skips are the model-weight-gated `clip-offline-load` + `clip-semantic-integration` suites (gated by design).
+**Agents fanned out (11/11 returned + persisted):** code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer.
+**Gate state (verifier, fresh foreground run):** ESLint exit 0; typecheck exit 0; Vitest **2227 passed / 4 skipped / 0 failed** (238 files); lint:api-auth / lint:action-origin / lint:public-route-rate-limit all exit 0. The 4 skips are the model-weight-gated `clip-offline-load` + `clip-semantic-integration` suites (gated by design).
 
 ## Context
 
-The pre-activation code converged at cycle-7 (0 findings). Cycle-8 turned CLIP semantic search LIVE in production and found+fixed 13 activation-surface findings (plan-360, archived). This cycle independently re-verified those 13 fixes AND swept the whole system. The verdict is **near-total convergence**: the non-CLIP repo is byte-identical to the cycle-7 baseline and re-swept clean by every agent; the only NEW HIGH finding is **one incomplete cycle-8 fix** flagged by 4 agents independently (the downloader-idempotency manifest does not cover the full offline-loader fatal-required file set). All HARD GUARDS were respected by every agent — no `server-only` re-added to `clip-model.ts`/`@/db`; the `semantic_search_mode: 'disabled'` code default left intact; no weakening of `SEMANTIC_SEARCH_ALLOW_PRODUCTION` / the revision pin / `allowRemoteModels=false` / model_version isolation. The security reviewer explicitly rejected the `server-only` temptation and cited the guard.
+The pre-activation code converged at cycle-7 (0 findings). Cycle-8 turned CLIP semantic search LIVE in production and found+fixed 13 activation-surface findings (plan-360, archived). Cycle-9 found+fixed 5 (downloader loader-fatal idempotency, short-query test, similar-route test symmetry, SimilarResult interface, stale comment). This cycle-10 independently re-verified the cycle-9 fixes AND swept the whole system.
 
-**Findings trend across run-6:** cycle-1 ~30 → … → cycle-7 **0** → cycle-8 **13** (activation surface) → cycle-9 **1 HIGH + 1 MED + 3 LOW**.
+**Verdict: near-total convergence.** 8 of 11 agents (code-reviewer, security-reviewer, perf-reviewer, critic, tracer, architect, debugger, and verifier's blocker count) report **0 findings**. Two NEW real findings landed (one HIGH operational, one MEDIUM test-gap). One designer finding was **rejected** after authoritative-source verification (it contradicts MDN/ARIA guidance), and one designer finding is **deferred LOW**.
+
+All NEW HARD GUARDS were respected by every agent — no `server-only` re-added to `clip-model.ts`/`@/db`; the `semantic_search_mode: 'disabled'` code default left intact; no weakening of `SEMANTIC_SEARCH_ALLOW_PRODUCTION` / the revision pin / `allowRemoteModels=false` / model_version isolation. The security reviewer and code-reviewer both explicitly rejected the `server-only` temptation and cited the guard.
+
+**All 5 cycle-9 findings (AGG-C9-01..05) independently verified CLOSED at HEAD** by verifier (foreground gate run + line-level checks), critic, and tracer:
+- AGG-C9-01 (loader-fatal manifest): `LOADER_FATAL_FILES` + `verifyLoaderFatalFiles()` present, dual-gated fast-path, 3 dedicated tests (commit 26609da8).
+- AGG-C9-02 (short-query test): `search-short-query-guard.test.ts` pins constant + countCodePoints + invalidSemantic + return-before-fetch + en/ko parity.
+- AGG-C9-03 (similar-route symmetry): 503/429/404 cases added (commit 2b7ca75e).
+- AGG-C9-04 (SimilarResult interface): `lens_model` + `capture_date` added, typecheck passes (commit 2fb8e4e7).
+- AGG-C9-05 (stale "deployed DARK" comment): zero hits repo-wide.
+
+**Findings trend across run-6:** cycle-1 ~30 → … → cycle-7 **0** → cycle-8 **13** → cycle-9 **5** → cycle-10 **2 schedulable (1 HIGH + 1 MED)** + 1 deferred-LOW + 1 rejected.
 
 ---
 
 ## Merged findings (deduped; highest severity/confidence preserved; cross-agent agreement noted)
 
-### AGG-C9-01 [HIGH] — Downloader-idempotency manifest omits 2 of the 4 offline-loader fatal-required files → the AGG-C8-02 503-storm class is only partially closed
-**Agents (5-agent agreement):** code-reviewer (CR-C9-01, HIGH/conf-M), architect (ARCH-C9-01, MED/conf-H), critic (CRT-C9-01, MED/conf-H), corroborated by debugger (robustness analysis of the same path) and tracer (Trace 3). Severity preserved at **HIGH** per the highest-severity rule (code-reviewer); the operational blast radius — an indefinitely wedged LIVE production search — is high-impact even though the trigger is operator-side and the fix is trivial.
+### AGG-C10-01 [HIGH] — nginx `client_max_body_size 2M` on `/api/admin/` 413-blocks the Lightroom Classic publish-plugin upload (`/api/admin/lr/upload`) for any real photo
+**Agent:** document-specialist (DS-C10-01, HIGH/conf-H). Independently confirmed by aggregator (read nginx config + LR route).
 
 **Where:**
-- `apps/web/scripts/clip-model-manifest.ts:25-30` — `CLIP_MODEL_MANIFEST` contains only `onnx/model_quantized.onnx` + `tokenizer.json`.
-- `apps/web/scripts/download-clip-models.ts:72-84` — the idempotency fast-path calls `verifyAndCleanArtifacts(modelCacheDir, MANIFEST, false)` and early-returns "already up to date" when `preCheck.ok`. The comment at line 69 asserts it verifies "the same set the runtime reads back" — **this premise is false** for the two omitted files.
-- `apps/web/src/lib/clip-model.ts` — the offline `from_pretrained` (`allowRemoteModels=false`) loads all four files.
+- `apps/web/nginx/default.conf:124-137` — `location ^~ /api/admin/ { client_max_body_size 2M; ... }`. This catch-all matches `POST /api/admin/lr/upload`. There is no preceding, more-specific location that raises the cap for the LR route.
+- `apps/web/src/app/api/admin/lr/upload/route.ts` — the route accepts a multipart photo upload and re-uses `saveOriginalAndGetMetadata` + `enqueueImageProcessing` (the same infra as the browser upload path), enforcing the app-level `MAX_UPLOAD_FILE_BYTES = 200 MiB` (`lib/upload-limits.ts`). Comment block (lines 10-17) documents this as the server-side counterpart to the Lightroom plugin's `GalleryKitAPI.lua` (US-P53).
+- `nginx/default.conf:91-104` shows the precedent fix: `/admin/dashboard` already carries a dedicated `client_max_body_size 216M` block for the same reason (browser dashboard uploads).
 
-**Evidence (verified against the installed `@huggingface/transformers` v3.8.1 source):**
-- `node_modules/@huggingface/transformers/src/configs.js:54` — `getModelJSON(pretrained_model_name_or_path, 'config.json', true, options)` (the `true` arg = `fatal`).
-- `node_modules/@huggingface/transformers/src/tokenizers.js:70-71` — `getModelJSON(..., 'tokenizer.json', true, ...)` AND `getModelJSON(..., 'tokenizer_config.json', true, ...)`.
-- So the offline loader's fatal-required set is **{ onnx/model_quantized.onnx, tokenizer.json, config.json, tokenizer_config.json }**, but the verified manifest covers only the first two.
+**Failure scenario:** nginx enforces `client_max_body_size` BEFORE proxying to Node. A Lightroom Classic publish exports a rendered JPEG (typical 24 MP export 8-15 MiB; originals far larger). Every upload over 2 MiB returns HTTP **413 Request Entity Too Large** at the edge, before the route runs. The app-layer 200 MiB cap and the upload-tracker checks are dead code for real photos. The LR publish plugin — a shipped feature (US-P53) — is non-functional behind the documented/shipped reverse proxy for essentially all real photos. Silent to the app (no audit log, no diagnostic) because the request never reaches Node.
 
-**Failure scenario:** a partial / corrupt / truncated seed where `onnx/model_quantized.onnx` + `tokenizer.json` are intact but `config.json` or `tokenizer_config.json` is missing/corrupt passes `verifyAndCleanArtifacts`, the script prints "already up to date" and exits 0 across every re-run. The first live semantic/similar query then throws inside `from_pretrained`, `loadPromise` is nulled by the catch, and every subsequent request returns 503 indefinitely — the exact failure class AGG-C8-02 set out to eliminate, narrowed to the two config JSONs the manifest never covered. No compensating runtime probe exists.
+**Fix (config + doc):**
+1. Add a dedicated location for `/api/admin/lr/upload` with `client_max_body_size 216M` (mirroring `/admin/dashboard`), ordered so it wins over the `^~ /api/admin/` catch-all. Keep the `admin` rate-limit zone + the security/proxy headers. (nginx longest-prefix `^~` vs. regex ordering: an exact-path regex location, or a more-specific `^~ /api/admin/lr/upload` prefix, must be ordered to match first.)
+2. Add the LR upload cap to the CLAUDE.md body-cap table (line ~514) so operators know the LR route needs the larger cap.
 
-**Why the cycle-8 test missed it:** `apps/web/src/__tests__/clip-model-manifest.test.ts:38-41` asserts only that the manifest *contains* `onnx/model_quantized.onnx` + `tokenizer.json` with 64-hex SHAs — it does NOT require manifest ⊇ loader-fatal-set parity. `download-clip-models.test.ts:29-32` only asserts the call shape (`verifyAndCleanArtifacts(... MANIFEST ... false)`), not the manifest contents. Both pass with the incomplete manifest.
+**Repo-policy note:** Operational/availability defect on a shipped feature — schedule, do not defer. **Confidence: H.**
 
-**Fix (additive, low-risk):** add `config.json` and `tokenizer_config.json` to `CLIP_MODEL_MANIFEST` with their pinned-revision SHA-256 digests (compute from a known-good seeded cache at the pinned revision). Then strengthen the test to assert the manifest is a SUPERSET of the loader's fatal-required set (so a future loader/file drift re-surfaces here). This is the natural companion to the deferred DEF-C8-2 (runtime first-load checksum).
-**Repo-policy note:** correctness/availability finding on a LIVE path — must be scheduled, not deferred.
-**Caveat for the fix step:** the pinned-revision SHA-256 digests for `config.json` / `tokenizer_config.json` must be computed from a real known-good seeded cache; they cannot be invented. If a seeded cache is not reachable in this environment, the manifest-superset TEST and the call-site widening can still land (asserting the keys are present), with the SHA values filled from the seed-time spike — record that dependency in the plan rather than fabricating a digest.
+**Severity-calibration caveat for the plan step:** the fix is a reverse-proxy config change shipped in the repo (`apps/web/nginx/default.conf`); the running deploy's effective nginx may already carry a hand-patched cap. The repo's committed config is what new deployments and the documented setup use, so the committed config must be corrected regardless. Verify location-ordering semantics (the more-specific block must take precedence over the `^~ /api/admin/` prefix).
 
-### AGG-C9-02 [MEDIUM] — The AGG-C8-04 short-semantic-query client guard has ZERO source-contract test coverage
-**Agents:** test-engineer (TE-C9-01, MEDIUM). Confirmed at HEAD.
-**Where:** `apps/web/src/components/search.tsx:21,27,165-168` — `SEMANTIC_MIN_QUERY_CODEPOINTS = 3`, the `countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS` check, and the `setSearchStatus('invalidSemantic'); return` branch are all unprotected. `grep -rln invalidSemantic apps/web/src/__tests__/` returns **nothing** — no test references the key or the guard.
-**Problem:** a refactor that silently regresses any of the three contract points (the constant value, the `countCodePoints` call, or routing to `invalidSemantic` instead of `error`) passes the full suite. The fix would silently revert to the misleading "Search failed. Please try again." UX that AGG-C8-04 closed, with no failing test.
-**Fix:** add a source-contract test that reads `search.tsx` from disk and asserts the three contract points (same pattern as the existing `search-stale-response.test.ts`). Also pin the `search.invalidSemantic` key parity in `en.json` / `ko.json`.
-**Severity:** MEDIUM (a fixed UX defect with no regression guard on a LIVE surface).
+### AGG-C10-02 [MEDIUM] — `similar-route.test.ts` 200-path is false-confidence: the `@/db` mock omits `lens_model`/`capture_date`, so a SELECT-drop regression passes silently
+**Agents:** test-engineer (TE-C10-01, MEDIUM). Corroborated by tracer (Path 2 — confirmed the route DOES select+return both fields) and verifier (confirmed the cycle-9 SimilarResult interface fix that this test should now guard).
 
-### AGG-C9-03 [LOW] — `similar-route.test.ts` missing three failure-mode cases its sibling test covers (maintenance-503, 429, corrupt-embedding-404)
-**Agents:** test-engineer (TE-C9-02/03/04, LOW each).
-**Where:** `apps/web/src/__tests__/similar-route.test.ts` — the restore-maintenance mock is wired but never flipped to `true` (no 503 case); `preIncrementSemanticAttempt` mock always returns `false` (no 429 case); no corrupt-embedding case where `decodeEmbeddingColumn` returns null on a non-empty row (the 404 path).
-**Problem:** the `/api/search/similar/[id]` route's maintenance-window, rate-limit, and corrupt-embedding rejection paths are untested, even though `semantic-search-route.test.ts` covers the equivalent cases for the sibling route. A regression in any of these three guards on the similar route would not be caught.
-**Fix:** add the three symmetry cases, mirroring `semantic-search-route.test.ts`.
-**Severity:** LOW (defense-in-depth coverage symmetry; the guards themselves are present and correct per tracer Trace 2).
+**Where:**
+- `apps/web/src/__tests__/similar-route.test.ts` — the `vi.mock('@/db', ...)` `images` schema stub declares only `id, title, description, filename_jpeg, width, height, topic, processed, camera_model`. It omits `lens_model` and `capture_date`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:205-206,227-228` — the production route SELECTs `lens_model: images.lens_model` + `capture_date: images.capture_date` and maps both into the enriched result (parity with the semantic route, AGG-C8-10).
+- `apps/web/src/components/similar-photos.tsx:29-30` — `SimilarResult` interface requires both fields (the cycle-9 AGG-C9-04 fix), with a comment that the interface must match the wire shape.
 
-### AGG-C9-04 [LOW] — `SimilarResult` interface drifts from the `/api/search/similar/[id]` response shape
-**Agents:** debugger (DBG-C9-01, LOW), corroborated by code-reviewer (CR-C9-OBS-1) and tracer (Trace 2) as informational.
-**Where:** `apps/web/src/components/similar-photos.tsx:14-25` — the `SimilarResult` interface omits `lens_model: string | null` and `capture_date: string | null`, which the route added in cycle-8 (AGG-C8-10) and now returns (`route.ts:205-206,227-228`).
-**Problem:** no runtime impact — the component never reads those fields and TypeScript silently ignores extra JSON keys — but the client type contract diverges from the API response shape. A maintenance hazard if a shared result-card component is later introduced and assumes the interface is complete.
-**Fix:** add the two optional fields to `SimilarResult` (the lens/date parity was an intentional AGG-C8-10 fix, so completing the interface is the conservative choice).
-**Severity:** LOW (type-contract drift, no behavioral defect).
+**Problem:** the 200-path test only asserts `res.status` and `body.results[0].imageId`. A future refactor that drops either field from the route SELECT passes every test silently, re-opening the cycle-8 AGG-C8-10 "blank lens/date on similar cards" defect with no failing test. This is a coverage gap on a LIVE-surface contract that was deliberately established two cycles ago.
 
-### AGG-C9-05 [LOW] — Stale "deployed DARK" developer comment in `gallery-config.ts` after production activation
-**Agents:** document-specialist (DOC-C9-01, LOW).
-**Where:** `apps/web/src/lib/gallery-config.ts:134` — `// AGG-C10-02 (run-6 cycle-1): the CLIP feature is deployed DARK by …`. (The document-specialist also cited `settings-client.tsx:665`, but at current HEAD only the `gallery-config.ts` comment still contains the "deployed DARK" phrasing — `grep` confirms the settings-client one no longer matches; the agent read a marginally stale tree. One comment remains.)
-**Problem:** the comment annotates a CORRECT invariant (production mode is intentionally absent from the admin dropdown — admin can only set disabled/stub), but the "deployed DARK" framing is stale present-tense now that the feature is LIVE via the operator gate. Developer-only, not user-visible, does not mislead about code behavior.
-**Fix:** reword from "deployed DARK" to "operator-gated (production not activatable via the admin UI; requires SEMANTIC_SEARCH_ALLOW_PRODUCTION + the DB row)".
-**Severity:** LOW (comment-only wording).
+**Fix:** add `lens_model: 'lens_model'` and `capture_date: 'capture_date'` to the mock `images` schema, populate both in `imageRows`, and add `toHaveProperty('lens_model')` / `toHaveProperty('capture_date')` (and value) assertions on the result item in the 200-path test.
+
+**Repo-policy note:** genuinely-missing regression guard on a LIVE-surface contract — schedule, do not defer. **Confidence: H** (the gap is real; severity MEDIUM because the guards/route are correct, only the test is weak).
 
 ---
 
-## Verified CLEAN (recomputed at each agent's angle, not inherited)
+## Deferred (existing findings; severity/confidence preserved per deferred-fix rules)
 
-- **All 13 cycle-8 fixes re-verified CLOSED at HEAD** by verifier (10 directly-verifiable, file+line evidence each), code-reviewer, critic, tracer, architect, perf-reviewer. AGG-C9-01 is the lone partial (the manifest-coverage gap inside the otherwise-correct AGG-C8-02 fast-path); the early-return mechanics, `deleteOnMismatch=false` inspection semantics, and re-download fallback are all correct.
-- **Security:** 0 CRITICAL/HIGH/MED/LOW. Live semantic + similar routes — same-origin fail-closed, mode gate fail-closed (`production` only with the env true), Pattern-2 rate limit with rollback on early exits, full input hardening, query embedded to a vector BEFORE any SQL (no injection), enrichment SELECTs public-only (grep for `latitude|longitude|filename_original|user_filename` in `api/search` = empty). Auth/sessions, DB backup/restore (`MYSQL_PWD` env, dangerous-SQL scan, advisory lock, header validation, 0o600), paid-download (token-shape gate, constant-time verify, atomic single-use claim, symlink/realpath containment), PAT auth, Stripe mandatory signature verify, CSV/bidi/XSS sanitizers, `_PrivacySensitiveKeys` guard — all intact. `npm audit --omit=dev --audit-level=high`: 0 HIGH/CRITICAL.
-- **Performance:** migration 0022 `(model_version, updated_at)` index confirmed effective (journal `when` 1781687094232 is the strict global max → drizzle applies it, not skips; three-way consistent across migration/migrate.js reconcile/schema.ts). Production-gated `dotProduct` correct (stub vectors aren't unit-normalized → cosine mandatory; production unit-vectors → dotProduct valid). No new sync-fs on hot paths, no fetch/loop/sort regressions. AGG-C8-01 (main-thread inference + 5000-row scan) re-examined for a NEW angle — none; subsumed by the existing DEF-C8-1 deferral.
-- **Tracer:** all 4 LIVE flows clean — guard-chain ordering correct (rate-limit after cheap validation, before embedding), model_version isolation airtight across all 4 writers/readers, both backfill entry points persist the same column set + serialize on the advisory lock, singleton nulls-on-failure retry confirmed.
-- **Architect:** privacy-guard union architecture auto-extends both compile-time guards; `image_embeddings` adds zero PII surface; production-heal double-gate intact; process-local state consistent with single-instance topology (queue quiesces before the embedding hook can run during restore).
-- **Designer:** 0 findings. UI rendered surface byte-identical to the cycle-5 clean baseline except the now-fixed HDR-badge contrast (DES-C6-M1, `text-amber-950`, worst stop 6.62:1 vs 4.5:1 floor, test-locked). Touch-target audit 15/15, hdr-badge-contrast 12/12. Full contrast/token/focus/keyboard/ARIA/reduced-motion/forced-colors surface re-passes AA in all three themes. Semantic toggle + similar-photos ARIA (aria-controls/id pairing, IME guards) clean.
-- **Document-specialist:** all major CLAUDE.md load-bearing claims verified accurate (`IMAGE_PIPELINE_VERSION=7`, COLOR_IMPACTING_KEYS count, 6 advisory-lock names, `cache()` count=10, NCLX matrix map, SCAN_ROOTS, backfill concurrency formula, full i18n key parity, the CLIP gating description). Cycle-8 doc fixes (DOC-C8-01/02/03) confirmed closed.
+### DEF-C10-01 [LOW] — Search dialog `<Input>` is 32 px tall (`h-8`), below the repo's documented 44 px touch-target floor
+**Agent:** designer (FIND-D2, originally MEDIUM/conf-M). **Aggregator re-graded to LOW** and deferred (rationale below; original severity preserved on record).
+
+**Where:** `apps/web/src/components/search.tsx:374` — `className="border-0 p-0 h-8 shadow-none ..."` on the search combobox `<Input>` (inside a `flex items-center gap-2 p-4 border-b` row).
+
+**Why deferred (not fixed-now), real-world severity LOW:**
+- The control is a single-line **text-entry field** spanning the full dialog width (~470 px). The tappable target is enormous horizontally; only the vertical extent is 32 px. WCAG 2.5.5 (AAA, 44 px — the repo's stated bar) and 2.5.8 (AA, 24 px — which 32 px already clears) target discrete tap targets; a full-width text input behaves differently (tap anywhere in the field; on mobile the keyboard opens on focus).
+- This `h-8` has existed since commit `1312d29b` and survived 9 review cycles including dedicated photographer-rN UI passes and the blocking `touch-target-audit.test.ts`. The audit deliberately scans `Button`/`button`/`Badge asChild`/`select` but NOT `<Input>` (text fields are intentionally out of scope).
+- Promoting this to fix-now would be either a one-line `h-8`→`h-11` change with negligible UX benefit on an already-large target, or audit-fixture churn. The orchestrator's strong anti-manufacturing directive applies.
+
+**Original severity/confidence (not downgraded for the record):** designer rated MEDIUM/conf-M. Aggregator assessment: a genuine but marginal vertical-only sub-44 on a wide text field, LOW real-world impact.
+
+**Exit criterion (re-open):** re-open and fix (h-8→h-11 + extend the audit to cover `<Input>` sub-44 heights) IF (a) the search field is reworked into a multi-control composite where the input is no longer full-width, OR (b) a real mobile-usability report cites the search field height, OR (c) the repo decides to bring `<Input>` under the touch-target-audit scope (at which point this becomes a hard test failure that must be fixed). **File+line:** `apps/web/src/components/search.tsx:374`.
+
+---
+
+## Rejected findings (recorded with rationale — NOT scheduled, NOT deferred)
+
+### REJ-C10-01 — designer FIND-D1 (claimed HIGH, WCAG 4.1.2): `aria-controls` referencing a conditionally-unmounted element
+**Agent:** designer (FIND-D1, claimed HIGH/conf-H). **Rejected by aggregator after authoritative-source verification.**
+
+**Claim:** `similar-photos.tsx:116` (`aria-controls="similar-photos-results"`) and `color-details-section.tsx:290` (`aria-controls={colorDetailsId}`) always set `aria-controls`, but the referenced `<div>` is only in the DOM when the disclosure is open (`similar-photos.tsx:126`, `color-details-section.tsx:329`). Designer claimed JAWS/NVDA cannot navigate to a non-existent target → WCAG 4.1.2 failure.
+
+**Why rejected (MDN/ARIA authoritative guidance, verified 2026-06-17):** MDN's `aria-controls` page states verbatim: *"The `aria-controls` only needs to be set when the popup is visible, but it is valid and easier to program to reference an element that is not visible."* Referencing a not-currently-present/visible controlled element is **explicitly valid and recommended** — NOT a WCAG conformance failure. The cycle-8 wiring (AGG-C8-11) chose exactly the pattern MDN endorses: keep `aria-controls` set consistently + conditionally render the controlled region. When collapsed (`aria-expanded=false`) there is correctly nothing to navigate to; when expanded the element exists and the reference resolves. Both call sites already pair `aria-controls` with the correct `aria-expanded` state.
+
+**Disposition:** No change. Acting on this would introduce churn that contradicts MDN/ARIA guidance and the orchestrator's anti-manufacturing directive. The designer correctly verified the rest of the a11y surface clean (i18n parity, lightbox, tag chips, masonry alt text, admin forms, histogram, color pip, search combobox aria-controls correctly omitted when listbox absent).
 
 ---
 
-## Deferred items still open (NOT re-raised as new findings — tracked in plan-361 with preserved severity + fired exit criteria)
+## Documentation-accuracy notes (non-findings — optional doc-only touch-ups, no behavioral defect)
 
-- **DEF-C8-1 [HIGH]** — main-thread synchronous CLIP inference + ≤5000-row JS cosine scan on the request thread. Architecture-dependent (worker_threads / queue / scan cap). AGG-C9-01's manifest widening is the natural companion to DEF-C8-2.
-- **DEF-C8-2 [MEDIUM]** — no runtime ONNX/config checksum at load time (the seed-time manifest is the only integrity gate). AGG-C9-01 tightens the seed-time half of this.
-- **DEF-C8-3 [LOW]** — CSP / reload-storm hardening on repeated 503s.
+Doc-code drifts flagged by multiple agents. None is a defect. Not counted as findings. Per the convergence directive, doc nitpicks are NOT findings; they may be folded into an opportunistic doc-touch-up but do not block convergence. (The LR body-cap doc half of AGG-C10-01 IS load-bearing and rides that scheduled finding.)
 
-All three remain architecturally correct deferrals; their reasoning holds at HEAD.
+- **DOC-N1** (verifier): CLAUDE.md line ~139 tags `avif_10bit` "admin-only (AGG-D6/DOC-06)", but the code deliberately exposes it publicly (`data.ts:275-277`, R10-M4); `privacy-fields.test.ts` + `color-details-section.tsx` are consistent treating it public-safe. Fix → "public-safe (R10-M4)".
+- **DOC-N2** (verifier): CLAUDE.md cites `settings-hash.ts:37-49` for `COLOR_IMPACTING_KEYS`; the array starts at `:41`. Count (9) and key names correct; only the line ref is off.
+- **DOC-N3** (perf-reviewer): CLAUDE.md describes the masonry grid as using "useMemo for reorder", but it's pure CSS columns now. Doc drift, no perf impact.
 
 ---
+
+## Per-agent finding counts
+
+| Agent | New findings | Notes |
+|---|---|---|
+| code-reviewer | 0 | APPROVE — honest convergence; verified dotProduct unit-vector path, buffer round-trip, inArray guard, operator-gate, lazy-singleton retry, backfill NaN guard. 63/63 CLIP tests pass. |
+| security-reviewer | 0 | LOW risk — 11 routes + 14 actions + auth core + CLIP surface examined; no SQLi/SSRF/path/privesc/PII-leak; 3 lint gates + 72/72 security fixtures pass. |
+| perf-reviewer | 0 | Semantic scan hard-capped at 5000 + composite-index-backed; no N+1; SW LRU O(n); bounded retry Maps. (1 cosmetic doc nit → DOC-N3.) |
+| critic | 0 | ACCEPT — disproved 2 self-hunted candidate doc-mismatches (COLOR_IMPACTING_KEYS count, phantom 7th advisory lock); verified all 5 cycle-9 fixes closed + live-feature invariants. |
+| verifier | 0 blockers | PASS — full suite 2227 pass; all 5 cycle-9 fixes + documented invariants verified at line level. (2 doc-only nits → DOC-N1, DOC-N2.) |
+| test-engineer | 1 | TE-C10-01 → **AGG-C10-02** (MEDIUM). |
+| tracer | 0 | All 4 end-to-end paths clean at HEAD; capture_date `mode:'string'` serialization verified; downloader checks all 4 loader-fatal files. |
+| architect | 0 | Sound at documented single-writer scale; CLIP model-load singleton + model_version query-layer isolation + config double-gate all consistent fail-closed. |
+| debugger | 0 | 15 runtime-critical paths examined; no crash/throw/hang/corruption; decodeEmbeddingColumn case-2, libheif probe, advisory-lock release, view-count flush all correct. |
+| document-specialist | 1 | DS-C10-01 → **AGG-C10-01** (HIGH). All other load-bearing doc claims (IMAGE_PIPELINE_VERSION=7, 9 color keys, 6 advisory locks, rate limits, upload caps, backfill column set, env var names, CLIP guards) verified accurate. |
+| designer | 2 | FIND-D1 → **REJ-C10-01** (rejected, MDN-cited). FIND-D2 → **DEF-C10-01** (deferred LOW). Rest of a11y surface verified clean. |
+
+**Net schedulable findings this cycle: 2 (AGG-C10-01 HIGH, AGG-C10-02 MEDIUM).**
+**Deferred: 1 (DEF-C10-01 LOW).**
+**Rejected: 1 (REJ-C10-01).**
 
 ## AGENT FAILURES
 
-None. All 11 agents returned and persisted their review files. (The designer's final chat message was truncated mid-investigation, but its written `designer.md` file is complete and concludes with zero findings — confirmed by reading the file.)
-
----
-
-## Cross-agent agreement summary
-
-| Finding | Agents in agreement | Consensus severity |
-|---|---|---|
-| AGG-C9-01 (manifest gap) | code-reviewer, architect, critic, debugger, tracer (5) | HIGH (preserved from code-reviewer) |
-| AGG-C9-02 (short-query test gap) | test-engineer (1) | MEDIUM |
-| AGG-C9-03 (similar-route test symmetry) | test-engineer (1) | LOW |
-| AGG-C9-04 (SimilarResult interface drift) | debugger, code-reviewer, tracer (3) | LOW |
-| AGG-C9-05 (stale comment) | document-specialist (1) | LOW |
-
-**5 distinct findings: 1 HIGH, 1 MEDIUM, 3 LOW. Zero CRITICAL. Strong convergence; the HIGH is a contained incomplete-fix, the rest are test/contract/doc hardening.**
+None. All 11 agents returned and persisted. (tracer + debugger returned mid-investigation messages on the first pass and were each resumed once via SendMessage; both then wrote complete cycle-10 reports — tracer at HEAD 0502ae86 across all 4 mandated paths, debugger across 15 runtime-critical paths.)

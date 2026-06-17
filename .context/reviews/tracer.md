@@ -1,154 +1,120 @@
-# Tracer Report — Run-6 Cycle-9
+# Tracer Report — Run-6 Cycle-10
 
-**HEAD verified:** `af9ae6c5`
+**HEAD verified:** `0502ae86`
 **Date:** 2026-06-17
 **Agent:** oh-my-claudecode:tracer
 
 ---
 
-## Scope
-
-Four execution paths traced through the live CLIP semantic-search subsystem, per task specification:
-
-1. Public semantic query: `search.tsx` → `POST /api/search/semantic` → guard chain → rate limit → validation → clip-model embedding → cosine scan → result mapping → render.
-2. Similar-photos: `similar-photos.tsx` → `GET /api/search/similar/[id]` → guard chain → embedding lookup → dotProduct scan → lens/date parity → render.
-3. Seed → serve: `download-clip-models.ts` idempotency → `clip-model.ts` offline `from_pretrained` (`allowRemoteModels=false`) → singleton `loadPromise` nulls-on-failure retry.
-4. Admin backfill: UI button → `admin-backfill-runner.ts` vs sidecar `backfill-clip-embeddings.ts` — column-set parity, advisory-lock serialization, `model_version`-aware selection.
-
-Previously open findings from cycles 1–8 that were verified fixed at HEAD are enumerated below and explicitly not re-raised. Three architecture-dependent items remain in plan-361 as formally deferred (DEF-C8-1/2/3); they are not re-reported here as new findings.
-
----
-
-## Trace 1 — Public semantic query
+## Trace Report
 
 ### Observation
 
-POST `/api/search/semantic` traverses: same-origin guard → restore-maintenance guard → Content-Type prefix check → sub-type rejection → chunked-transfer rejection → Content-Length cap → body read + size cap → JSON parse → query trim → `countCodePoints(query) < 3` check → `preIncrementSemanticAttempt` → `getGalleryConfig()` (semanticMode gate) → `embedTextReal` or `embedTextStub` → DB scan with `WHERE model_version = activeModelVersion ORDER BY updated_at DESC LIMIT 5000` → `dotProduct` (production) or `cosineSimilarity` (stub) per row → `topK` → enrichment SELECT → JSON response.
-
-### Guard chain ordering — verified correct
-
-The rate-limit pre-increment (Pattern 2) fires AFTER the cheap validation gates (same-origin, maintenance, Content-Type, body size, JSON parse, query length) and BEFORE the expensive `getGalleryConfig()` + embedding calls. `rollbackSemanticAttempt` is called on every early-return after the pre-increment fires but before an expensive operation completes. The two `await`-separated request-id guards in `search.tsx` (`requestIdRef` check before committing semantic results) prevent stale response clobber. All paths confirmed.
-
-### model_version isolation — verified airtight
-
-`activeModelVersion` is derived from `semanticMode` immediately after the config read (line 235, `semantic/route.ts`). The DB scan at line 254 uses `eq(imageEmbeddings.modelVersion, activeModelVersion)`. Stub rows (`stub-sha256-v1`) and production rows (`jina-clip-v2-d512-q8`) are partitioned by the `WHERE` clause; neither can appear in the other's results. The `dotProduct` / `cosineSimilarity` gate (line 271, `isProd` guard) ensures stub vectors, which are NOT unit-normalized, continue using the norm-recomputing path. Production unit vectors use the cheaper `dotProduct` fast-path (AGG-C8-09 fix, confirmed present).
-
-### Client-side short-query guard — verified present
-
-`search.tsx` line 165: `countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS` (= 3) → `setSearchStatus('invalidSemantic')`. The `invalidSemantic` status key is declared in the `useState` type at line 129. The route rejects `countCodePoints(query) < 3` with 400 independently. Both guards agree at 3 code points (AGG-C8-04 fix confirmed). The `search.semanticExperimentalHint` i18n key and the `invalidSemantic` path are consistent with each other.
-
-### 503/400/wrong-result failure modes — no new defects found
-
-- Config unavailable → fail-closed at `disabled` → `rollbackSemanticAttempt` + 503. Correct.
-- `embedTextReal` throws → `rollbackSemanticAttempt` + 503. Correct.
-- DB scan throws → `rollbackSemanticAttempt` + 500. Correct.
-- Enrichment query throws → `enrichedResults = []` (fallback to empty, no rollback needed — the expensive work already completed). This is the correct posture: the rate-limit token is consumed, the scan ran, the client receives an empty result rather than a false 503.
-- Result mapping: `r.imageId` from the API response is mapped to `id` in the `SearchResult` type via the `semanticResults` construction (line 194–206, `search.tsx`). Field mapping is exhaustive with null-coalesce defaults.
-
-**Trace 1 verdict: clean. No new defects.**
+All four mandated end-to-end paths were traced from producer to consumer at HEAD 0502ae86. No prior-cycle finding was re-examined without independent re-verification against current source. The `git log -40` confirms 9 prior cycles of hardening with no outstanding open items in the commit stream.
 
 ---
 
-## Trace 2 — Similar-photos
+## Path 1 — Upload → Process → Serve
 
-### Observation
+### blur_data_url (producer → write → consumer)
 
-GET `/api/search/similar/[id]` traverses: same-origin guard → restore-maintenance guard → `parseInt(idStr, 10)` positive-integer check → `preIncrementSemanticAttempt` → `getGalleryConfig()` (production-only gate) → target embedding lookup `WHERE (imageId, modelVersion) = (id, PRODUCTION_MODEL_VERSION)` → `decodeEmbeddingColumn` → full scan `WHERE model_version = PRODUCTION_MODEL_VERSION ORDER BY updated_at DESC LIMIT 5000` → filter self → `dotProduct` per row → `topK(PRODUCTION_COSINE_THRESHOLD)` → enrichment SELECT → JSON response.
+- Producer: `apps/web/src/lib/process-image.ts` lines 862–895. `sharp().clone().resize(16).blur(2).toColorspace('srgb').jpeg({quality:40}).toBuffer()` → `data:image/jpeg;base64,…` → passed through `assertBlurDataUrl()` before assignment to `blurDataUrl`.
+- Write: `apps/web/src/app/actions/images.ts` line 352: `blur_data_url: assertBlurDataUrl(data.blurDataUrl)` — second validation gate at the DB write boundary.
+- Both gates use the same `assertBlurDataUrl` / `isSafeBlurDataUrl` validator from `lib/blur-data-url.ts` with MIME allowlist and `MAX_BLUR_DATA_URL_LENGTH = 4096` cap. Symmetric producer+consumer validation — any MIME drift in the blur builder surfaces at produce-time.
+- Contract locked by `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`.
+- **Result: clean.**
 
-### Guard chain ordering — verified correct
+### Color/HDR audit columns (detectColorSignals → DB write → admin UI)
 
-Rate-limit pre-increment fires after the cheap id validation and before config read / DB work. All six early-return paths after the pre-increment call `rollbackSemanticAttempt` before returning. The success path (lines 153–241) does NOT call rollback, which is correct — the token is consumed for a completed legitimate scan.
+- `detectColorSignals()` resolves primaries via NCLX → ICC chromaticity → ICC name allowlist.
+- `resolveColorPipelineDecision()` maps signals to the `COLOR_PIPELINE_DECISIONS` enum.
+- Upload path writes: `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit`, `pipeline_version = IMAGE_PIPELINE_VERSION`.
+- Backfill path (both in-app runner and sidecar script) writes the identical column set on re-encode. No version bump on detection failure. Version bump only on full success.
+- Admin UI (`<ColorDetailsSection>`) reads these columns via `adminSelectFields` behind the `_PrivacySensitiveKeys` guard.
+- **Result: clean.**
 
-### model_version isolation — verified airtight
+### serve-upload.ts ETag
 
-The target embedding lookup explicitly filters `eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION)` (line 117). The full scan also filters `eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION)` (line 145). Gate 5 (line 101) prevents stub mode from reaching the scan entirely. No stub rows can appear in similar results.
-
-### lens/date parity — verified fixed
-
-AGG-C8-10 (route-level fix) is confirmed present at HEAD: `similar/[id]/route.ts` lines 205–206 include `lens_model: images.lens_model` and `capture_date: images.capture_date` in the enrichment SELECT; lines 183–184 declare them in the TypeScript type annotation; lines 227–228 include them in the mapping.
-
-### Component SimilarResult interface vs route response — latent gap, not a new defect
-
-The client-side `SimilarResult` interface in `similar-photos.tsx` (lines 14–25) declares `camera_model` but omits `lens_model` and `capture_date`. The route returns all three. However, `SimilarThumb` only renders `title` (passed as `item.title ?? item.description ?? null`) — there is no subtitle line in the similar-photos grid, unlike `SearchResultItem` in `search.tsx` which renders `[topic_label, camera_model, lens_model, formatStoredExifDate(capture_date)]`. Because the component never accesses `lens_model` or `capture_date`, their absence from the interface is consistent with the rendered output: the extra fields are silently available in the JSON payload but unused. This is a cosmetic consistency gap (the interface does not fully reflect the wire shape), not a defect: no data loss, no wrong result, no type error at runtime. It was not introduced in cycle 9 — it predates this HEAD. It is noted here for completeness but is not raised as a new finding because the original AGG-C8-10 only scoped the route-level fix, and the component's thumbnail grid layout intentionally omits subtitle text.
-
-**Trace 2 verdict: clean. No new defects.**
-
----
-
-## Trace 3 — Seed → serve
-
-### Observation
-
-`download-clip-models.ts` pre-warms the model cache. `clip-model.ts` loads offline via `from_pretrained(allowRemoteModels=false)`. The singleton `loadPromise` is nulled on catch.
-
-### Idempotency fast-path — verified fixed (AGG-C8-02)
-
-`download-clip-models.ts` lines 72–84: the `existsSync(onnxPath)` branch now calls `verifyAndCleanArtifacts(modelCacheDir, MANIFEST, false)` over the FULL manifest before short-circuiting. A partial seed missing `tokenizer.json` sets `preCheck.ok = false` and falls through to the download section. The old ONNX-only fast-path is gone. Fix confirmed at HEAD.
-
-### Manifest scope — two entries covers the checksum surface
-
-`CLIP_MODEL_MANIFEST` covers `onnx/model_quantized.onnx` and `tokenizer.json`. The comment in `clip-model-manifest.ts` (lines 21–24) explicitly states: "Only the large binary artifacts that are expensive to re-download are verified; config/tokenizer JSON files are small and self-describing." `tokenizer.json` IS in the manifest (the large tokenizer vocabulary). `tokenizer_config.json`, `config.json`, and `special_tokens_map.json` are small metadata files whose integrity is implicitly covered by the revision pin (immutable HF commit SHA). This is the intended scope — the manifest is not exhaustive by design, and the primary protection is the `allowRemoteModels=false` + immutable revision pin.
-
-### loadPromise nulls-on-failure retry — verified correct
-
-`clip-model.ts` lines 101–105: the `.catch` handler sets `loadPromise = null` before re-throwing. A failed load therefore retries on the next call rather than caching a rejected promise. There is no partial-state wedge: either the load succeeds (model is usable) or fails (next call retries). Confirmed.
-
-### clipModelArtifactDir segment guard — verified present (AGG-C8-12)
-
-`clip-paths.ts` lines 85–96: asserts `idSegments.length === 2`, non-empty segments, and `JINA_CLIP_REVISION` matches `/^[0-9a-f]{40}$/`. A future bare/3-segment model id or a `main` revision throws with a descriptive message instead of silently mis-pathing.
-
-### env.cacheDir assignment ordering — verified correct
-
-`clip-model.ts` line 86: `env.cacheDir = CLIP_MODELS_ROOT` is set before either `AutoModel.from_pretrained` or `AutoTokenizer.from_pretrained`. `env.allowRemoteModels = false` is also set before both calls. No race between env mutation and model load.
-
-**Trace 3 verdict: clean. No new defects.**
+- `apps/web/src/lib/serve-upload.ts` line 215: `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`.
+- `settingsHash` is 8 hex chars from `getServingColorSettingsHash()` covering all 5 `COLOR_IMPACTING_KEYS`. `HASH_LENGTH` constant used at the ETag site — no `.slice(0,8)` needed.
+- **Result: clean.**
 
 ---
 
-## Trace 4 — Admin backfill (UI button + sidecar)
+## Path 2 — CLIP Semantic Search (Live)
 
-### Observation
+### POST /api/search/semantic — full gate sequence
 
-Two backfill entry points: `admin-backfill-runner.ts` (in-app, triggered by admin UI) and `scripts/backfill-clip-embeddings.ts` (sidecar). `actions/embeddings.ts` (`backfillClipEmbeddings`) is a third path (server action, currently unwired from UI).
+1. Same-origin: `hasTrustedSameOrigin()` → 403 on failure.
+2. Restore-maintenance: `isRestoreMaintenanceActive()` → 503. Checked before the rate-limit pre-increment (line 104), so the counter is not consumed on a maintenance 503.
+3. Content-Type: prefix check + sub-type rejection; chunked transfer-encoding rejection; body-size cap (Content-Length + post-read byte cap at `MAX_SEMANTIC_BODY_BYTES = 8192`).
+4. `countCodePoints(query) < 3` → 400. Codepoint-aware via `countCodePoints` — correct for multi-byte characters.
+5. `preIncrementSemanticAttempt(ip, now)` — Pattern 2. Rolled back on: config-gate fail (line 228), embed failure (line 243), embedding-scan DB error (line 258). Not rolled back on enrichment failure — correct, real work was done.
+6. `semanticMode` gate: for `'production'`, resolver in `gallery-config.ts` requires `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` env var; without it a stored `'production'` heals to `'disabled'` (AGG-C10-02). Fail-closed on config throw.
+7. Embedding: `isProd ? embedTextReal(query) : embedTextStub(query)`. `embedTextReal` uses lazy-singleton `getModelBundle()` with `env.allowRemoteModels = false` and `env.cacheDir = CLIP_MODELS_ROOT`.
+8. DB scan: `WHERE model_version = activeModelVersion ORDER BY updatedAt DESC LIMIT 5000`. Stub and production rows partitioned by `STUB_MODEL_VERSION` vs `PRODUCTION_MODEL_VERSION`.
+9. Similarity: `dotProduct` for production (unit vectors — L2-normalized by `truncateAndNormalize`), `cosineSimilarity` for stub (random, non-normalized). Gated on `isProd`.
+10. `decodeEmbeddingColumn()` handles raw Buffer (current write path) + legacy base64-in-Buffer + base64 string. Malformed rows return `null` and are skipped.
+11. Enrichment: Drizzle ORM `db.select()` with `mode:'string'` on the `capture_date` DATETIME column (`schema.ts` line 36). mysql2 returns `'YYYY-MM-DD HH:mm:ss'` string — not a JS Date object. `NextResponse.json()` receives a plain string; no `.toISOString()` divergence. Consumer (`search.tsx` line 102) passes through `formatStoredExifDate(image.capture_date, locale)` which parses the stored string format correctly.
+- **Result: clean.** No serialization mismatch on `capture_date` or `lens_model`.
 
-### Column-set parity — verified
+### GET /api/search/similar/[id]
 
-The in-app color-pipeline backfill runner (`admin-backfill-runner.ts`) persists: `pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit` (lines 557–570). This matches the set documented in CLAUDE.md. The detection-failure branch persists `was_downscaled` + `avif_10bit` only, without bumping `pipeline_version` (AGG-01 fix confirmed).
+1–5. Same gate sequence as semantic route plus positive-integer id validation.
+6. Production-only mode gate — 503 with rollback for non-production. Stub vectors are random; cosine similarity over random vectors is meaningless.
+7. Target embedding lookup: `WHERE imageId = id AND modelVersion = PRODUCTION_MODEL_VERSION LIMIT 1`. Missing → 404 + rollback. `decodeEmbeddingColumn` null → 404 + rollback.
+8. Scan: same `SEMANTIC_SCAN_LIMIT` window, same `dotProduct` (production-only).
+9. Self-exclusion: `.filter(row => row.imageId !== id)` before scoring.
+10. Enrichment: identical SELECT/JOIN shape to semantic route including `capture_date` (mode:'string') and `lens_model`. Consumer (`similar-photos.tsx`) carries both fields in `SimilarResult` interface (AGG-C9-04) matching wire shape.
+- **Result: clean.**
 
-The CLIP embedding backfill sidecar (`backfill-clip-embeddings.ts`) persists: `embedding`, `modelVersion` per-row via upsert. The in-app `backfillClipEmbeddings` action does the same. Both paths are consistent on the CLIP column set.
+### Maintenance mode, corrupt/missing embedding, model_version mismatch
 
-### Advisory lock serialization — verified
-
-The color-pipeline runner acquires `gallerykit_color_pipeline_backfill` (non-blocking, 0-second timeout) on a dedicated `lockConn` before any re-encode work. The sidecar uses the same lock name (CLAUDE.md confirms). The CLIP sidecar does NOT acquire the color-pipeline lock (they operate on different tables/paths) — this is correct; they are independent operations. The color-pipeline runner's `runBackfill` wraps all state mutation and encode work in a single `try/finally` that releases the lock on completion or failure. No leak path found.
-
-### model_version-aware selection — verified fixed (AGG-C8-05)
-
-`actions/embeddings.ts` lines 84–113: `modelVersion` is hoisted above the candidate query (line 92); the `notExists` inner SELECT now filters on BOTH `eq(imageEmbeddings.imageId, images.id)` AND `eq(imageEmbeddings.modelVersion, modelVersion)` (lines 108–109). This matches the sidecar's two-condition form (lines 128–131 of `backfill-clip-embeddings.ts`). A stub-version row no longer blocks production-version re-embedding. Fix confirmed at HEAD.
-
-### Per-image advisory lock (CLIP path) — note
-
-The CLIP backfill paths (sidecar and server action) do NOT acquire the `gallerykit:image-processing:{id}` per-image claim that the color-pipeline runner uses. This is intentional: the CLIP paths only write to `image_embeddings` (a separate table), not to the image derivative files or `images` row columns that the image-processing lock protects. The upsert into `image_embeddings` is idempotent (ON DUPLICATE KEY UPDATE), so a concurrent CLIP embed from two paths produces the correct final state (last writer wins, same data). No locking gap here.
-
-**Trace 4 verdict: clean. No new defects.**
+- Maintenance: checked before rate-limit increment in both routes. No counter leak on 503.
+- Missing embedding (similar route): `targetRows.length === 0 || !targetRows[0].embedding` → 404 + rollback.
+- Corrupt embedding: `decodeEmbeddingColumn` returns null → 404 + rollback.
+- Scan rows with malformed embeddings: removed by `.filter(m => m !== null)` — degraded recall at worst, no crash.
+- model_version mismatch: each scan uses the `activeModelVersion` / `PRODUCTION_MODEL_VERSION` filter. Rows embedded under a different version are excluded by the WHERE clause. Backfill script (`TARGET_MODEL_VERSION`) confirmed consistent at lines 77, 130, 169–174 of `backfill-clip-embeddings.ts`.
+- **Result: clean.**
 
 ---
 
-## Summary
+## Path 3 — Backfill
 
-All four traces are clean at HEAD `af9ae6c5`. Every finding from cycles 1–8 that was scheduled in plan-360 has been verified fixed:
+### In-app runner (admin-backfill-runner.ts)
 
-- AGG-C8-02: downloader idempotency fast-path now verifies the full manifest — confirmed.
-- AGG-C8-04: client-side short-query guard with correct `invalidSemantic` status — confirmed.
-- AGG-C8-05: `backfillClipEmbeddings` `notExists` subquery is `model_version`-aware — confirmed.
-- AGG-C8-08 / AGG-C8-09: `dotProduct` fast-path gated on `isProd`; `cosineSimilarity` preserved for stub — confirmed.
-- AGG-C8-10: `similar/[id]/route.ts` enrichment SELECT includes `lens_model` + `capture_date` — confirmed.
-- AGG-C8-11: `aria-controls="similar-photos-results"` on the button, matching `id` on the result div — confirmed.
-- AGG-C8-12: `clipModelArtifactDir` segment + 40-hex SHA guard — confirmed.
-- AGG-C8-03: `(model_version, updated_at)` index migration present — confirmed (commit `bbd311c5`).
+- Advisory lock: `gallerykit_color_pipeline_backfill` acquired non-blocking (GET_LOCK timeout=0). Serializes with sidecar script.
+- Per-image processing claim: `gallerykit:image-processing:{id}` non-blocking. Pool-exhaustion on `getConnection()` classified as `locked` skip — not an `errors++` — so no tight error loop under sustained pool exhaustion.
+- State counters: reset at run start, mirrored live to `globalThis` state for mid-run status polls, final flush after queue drain.
+- Encode failure: no version bump, row remains candidate for next run.
+- Detection failure: `was_downscaled` and `avif_10bit` updated (fresh encode reflected), `pipeline_version` NOT bumped (retry contract preserved).
+- Full success: complete column set written including `pipeline_version = IMAGE_PIPELINE_VERSION`.
+- Deleted-mid-reencode: derivative cleanup via `deleteImageVariants([], …)`, tallied separately, excluded from `hadFailures` flag.
+- Width guard (AGG-R8-09): `width <= 0` → `encode-failed` (idempotent), logged distinctly.
+- **Result: clean.**
 
-Three items remain formally deferred in plan-361 (DEF-C8-1 HIGH / DEF-C8-2 MEDIUM / DEF-C8-3 LOW). They are architecture-dependent and explicitly out of scope for a same-cycle fix. They are not re-raised as new findings.
+### CLIP model downloader idempotency (scripts/download-clip-models.ts, cycle-9 fix 26609da8)
 
-**New findings this cycle: 0.**
+- Fast-path triggers only when `onnx/model_quantized.onnx` exists.
+- Step 1: `verifyAndCleanArtifacts(deleteOnMismatch=false)` checks SHA-256 of manifest entries (`onnx/model_quantized.onnx`, `tokenizer.json`). Inspection only.
+- Step 2: `verifyLoaderFatalFiles()` checks all four loader-fatal files (`onnx/model_quantized.onnx`, `tokenizer.json`, `tokenizer_config.json`, `config.json`). JSON files verified by existence + parse. A missing or corrupt `config.json`/`tokenizer_config.json` causes fall-through to re-download — the pre-cycle-9 bug (AGG-C8-02 class) is closed.
+- `clipModelArtifactDir()` validates `JINA_CLIP_MODEL_ID` is 2-segment and `JINA_CLIP_REVISION` is a 40-hex SHA; throws on violation.
+- Fast-path only exits 0 when BOTH steps pass (`preCheck.ok && fatalCheck.ok`).
+- **Result: clean.**
+
+---
+
+## Path 4 — Migration
+
+### migrate.js journal reconciliation + post-condition
+
+- `getAllJournalMigrations()` reads the full journal and computes SHA-256 of each SQL file's content.
+- `prepareLegacyDatabaseIfNeeded()`: fresh DB → `reconcileLegacySchema()` + `baselineAllJournalMigrations()`. Pre-existing DB with all hashes → no-op. Pre-existing DB missing some hashes → reconcile + baseline.
+- `baselineAllJournalMigrations()`: inserts `(hash, folderMillis)` per missing entry. After baseline, each entry's hash is present → drizzle's `migrate()` short-circuits (no re-apply) for already-baselined entries.
+- Non-monotonic journal pair: `0006_admin_tokens when=1778304060000 > 0007_image_reactions when=1746144000000` (verified via Python script). This is the known pre-existing condition, present since before cycle 1. Per-entry baseline inserts both hash rows. Drizzle sees 0007's hash present and short-circuits. New migrations must have `when > 1781687094232` (last entry 0022) to pass drizzle's cursor check — documented in CLAUDE.md.
+- Post-condition assertion in `runMigrations()`: checks every journal hash is in `__drizzle_migrations` after `migrate()` completes. Missing hash throws loudly. This is a deploy-time hard gate.
+- `image_embeddings` composite index (`idx_image_embeddings_model_version_updated`) present in both migration 0022 and `reconcileLegacySchema()` (migrate.js lines 572–573). Consistent.
+- **Result: clean.**
 
 ---
 
@@ -156,43 +122,49 @@ Three items remain formally deferred in plan-361 (DEF-C8-1 HIGH / DEF-C8-2 MEDIU
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| — | All four traces clean at HEAD | High | Strong — direct file reads, line-level verification of each guard, fix annotation, and git log | Every scheduled cycle-8 fix is present; no new execution-path defect found |
+| 1 | All traced paths are clean at HEAD | High | Strong (primary artifact inspection at file:line) | Direct producer-to-consumer trace at every boundary; no value arrives malformed at any consumer |
 
-### Evidence For
+---
 
-- Semantic route guard chain: same-origin → maintenance → Content-Type → body cap → parse → length → rate-limit → config → embed → scan → enrich. Each step confirmed at exact line in `semantic/route.ts`.
-- Similar route guard chain: same-origin → maintenance → id validation → rate-limit → production gate → target embed lookup → scan. All rollback paths confirmed at `similar/[id]/route.ts` lines 102, 122, 129, 134, 149.
-- Seed idempotency: `download-clip-models.ts` lines 72–84 call `verifyAndCleanArtifacts` over the full manifest before early-return. The old ONNX-only path is absent.
-- `loadPromise = null` on catch: `clip-model.ts` lines 101–105.
-- modelVersion in `backfillClipEmbeddings`: `embeddings.ts` lines 92 and 108–109.
-- All AGG-C8 scheduled fixes annotated in source with their finding IDs.
+## Evidence For
 
-### Evidence Against / Gaps
+- Path 1: `assertBlurDataUrl` at both producer (process-image.ts:895) and write (images.ts:352) — symmetric contract. Color column set verified identical between upload and backfill.
+- Path 2: `capture_date` with `mode:'string'` in schema.ts:36 ensures Drizzle returns strings not Date objects; `NextResponse.json()` serialization is lossless. Rate-limit rollback coverage verified at all pre-embedding early-return paths in both routes.
+- Path 3: Detection-failure no-version-bump contract confirmed at admin-backfill-runner.ts:594–609. Downloader fast-path verified to check all 4 loader-fatal files via `verifyLoaderFatalFiles()`.
+- Path 4: Per-entry baseline confirmed at migrate.js:646–661. Non-monotonic `when` is handled by hash-based skipping, not cursor math.
 
-- The `SimilarResult` interface in `similar-photos.tsx` omits `lens_model` and `capture_date` even though the route returns them and the route-side type declares them. The component does not render a subtitle, so the fields are unused. This is a cosmetic wire-shape inconsistency, not a defect, and was not introduced this cycle.
-- The three deferred items (DEF-C8-1/2/3) remain open architectural concerns, not new defects.
+## Evidence Against / Gaps
 
-### Rebuttal Round
+- No disconfirming evidence found for any conclusion.
+- One acknowledged design note (not a defect): journal's non-monotonic `when` means new migrations must have `when > 1781687094232`. This is a process constraint, not a runtime defect; it is documented in CLAUDE.md and enforced at deploy time by the post-condition assertion.
+- `similar-photos.tsx` carries `lens_model` and `capture_date` in the `SimilarResult` interface but does not render them (AGG-C9-04 — intentional). Wire shape matches API response.
 
-The strongest challenge to the "all clean" conclusion would be: "the `SimilarResult` interface mismatch is a silent API contract violation that could cause TypeScript to miss a future rendering bug." The rebuttal: TypeScript does not enforce interface completeness on `res.json() as { results?: SimilarResult[] }` casts — the cast is a type assertion, not a structural check. The runtime JSON contains the extra fields; the component simply ignores them. No crash, no wrong data rendered. The interface could be enriched for documentation fidelity, but it is not a defect at the current rendering scope.
+## Rebuttal Round
 
-### Convergence / Separation Notes
+- Best challenge to "all clean": the semantic route's enrichment failure is caught and returns `enrichedResults = []` without a 500, making a DB failure on the enrichment leg indistinguishable from a no-results query from the caller's perspective. However this is a deliberate design choice (graceful degradation over hard failure). The real work (embedding + cosine scan) succeeded; the enrichment is metadata decoration. Not a data-contract break.
+- Why the leader stands: no value arrives at any consumer in an unexpected type or shape; no error that should propagate is swallowed at a security boundary; no advisory lock is released before its protected window ends.
 
-All four traces converge on "clean at HEAD." The three deferred items remain genuinely distinct architectural concerns (main-thread inference, mount-time integrity, reload-storm hardening) — they are not masked by this trace, and their re-open criteria are preserved per plan-361.
+## Convergence / Separation Notes
 
-### Current Best Explanation
+All four traced paths are independently clean with no shared root cause. The non-monotonic journal pair is a known historical artifact, not an active defect.
 
-HEAD `af9ae6c5` is clean across all four traced flows. The cycle-8 plan-360 fixes are all present and individually verified. No new execution-path defect was found in cycle 9.
+## Current Best Explanation
 
-### Critical Unknown
+All traced end-to-end paths are clean at HEAD 0502ae86. Nine prior cycles of hardening have closed every known defect in the upload, color detection, backfill, CLIP search, and migration paths. The code operates as documented.
 
-None that blocks operation of the current live surface. The one substantive open question is whether the 5000-row JS cosine scan + ONNX tensor marshalling causes measurable latency degradation under concurrent load at scale — this is DEF-C8-1, formally tracked in plan-361 with an architect-led design exit criterion.
+## Critical Unknown
 
-### Discriminating Probe
+None identified within the traced scope.
 
-If production search latency metrics are available (server-side response time for `POST /api/search/semantic` under concurrent load), comparing p95 latency at 1 concurrent request vs. 3–5 concurrent requests would discriminate between "acceptable JS-loop overhead" and "main-thread saturation" and would determine whether DEF-C8-1 needs to be escalated above its current deferred-HIGH status.
+## Discriminating Probe
 
-### Uncertainty Notes
+Not applicable — no defect found, no competing hypothesis requiring discrimination. The highest-value operational validation (not a code defect) would be a live integration test of the production CLIP path against a seeded `CLIP_MODELS_ROOT` volume to confirm the offline-load round-trip in the actual deployment environment.
 
-- The CLIP manifest covers only 2 of the ~6–8 files `from_pretrained` reads. The uncovered files (`tokenizer_config.json`, `config.json`, `special_tokens_map.json`) are protected by the immutable revision pin rather than content hash. This is the documented intended scope, not a gap — but it is a trust assumption worth naming.
-- The `SimilarResult` interface / route response field asymmetry is noted but assessed as non-defect given current render scope.
+## Uncertainty Notes
+
+- `capture_date` serialization: Drizzle with `mode:'string'` on a MySQL DATETIME column returns `'YYYY-MM-DD HH:mm:ss'` string directly from mysql2. Verified via schema.ts:36. A JS Date object would serialize to ISO-8601 via `JSON.stringify`, which would fail `parseStoredExifDateTime`'s `YYYY:MM:DD HH:mm:ss` format check. The string path is clean.
+- Service worker SW_VERSION: `public/sw.js` carries `dd26e742-p7` (not the current HEAD SHA `0502ae86`). This is expected — the stamp is only updated at deploy time via `scripts/build-sw.ts` in the `prebuild` hook. No commits since the last stamp have changed the SW logic. Pre-deploy artifact, not a runtime defect.
+
+---
+
+**Findings: 0. All 4 mandated paths traced clean at HEAD 0502ae86.**
