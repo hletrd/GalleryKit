@@ -30,6 +30,11 @@ After the dev server starts, log in at `/en/admin`, upload one photo, and confir
 | `npm run db:push` | Push schema to MySQL |
 | `npm run db:seed` | Seed admin user |
 | `npm run init` | Apply committed migrations, then seed admin |
+| `npm test` | Vitest unit suite (2000+ tests) |
+| `npm run typecheck` | Type gate (app + scripts) |
+| `npx tsx scripts/download-clip-models.ts` | Seed CLIP model weights into the models volume (sidecar) |
+| `npx tsx scripts/backfill-clip-embeddings.ts --production` | (Re)generate CLIP embeddings for existing photos (sidecar) |
+| `npx tsx scripts/backfill-color-pipeline.ts` | Re-encode derivatives at the current pipeline/settings (sidecar) |
 
 ## Environment notes
 
@@ -81,3 +86,24 @@ The flag defaults to off so production deployments do not leak tokens into log s
 ### Refunds
 
 `/admin/sales` lists all entitlements with a Refund button. Refunds are confirmed via dialog (irreversible — Stripe refund + immediate token invalidation) and surface localized error messages for known Stripe error codes (`charge_already_refunded`, `resource_missing`, network errors).
+
+## Semantic search (CLIP — US-P51)
+
+GalleryKit ships a fully self-hosted, multilingual **natural-language photo search** (English + Korean) and **"similar photos"** (image→image), powered by an in-process CLIP encoder. No per-query API cost; runs on CPU in the standalone container.
+
+- **Model:** `jinaai/jina-clip-v2` (int8 ONNX via `@huggingface/transformers`), embeddings truncated to 512-dim (Matryoshka) and L2-normalized. Model-version tag: `jina-clip-v2-d512-q8`. Production cosine threshold `0.22`.
+- **Modes** (`semantic_search_mode` admin setting): `disabled` (default — routes return 503) · `stub` (deterministic non-meaningful vectors, experimental demo, disclaimer shown) · `production` (real encoder).
+- **Weights are NOT baked into the image.** They load **offline** (`allowRemoteModels=false`) from the `CLIP_MODELS_ROOT` bind-mount (under `./data/models/clip`), so seed them once on the host before going live. The `onnxruntime-node` CPU binding ships inside the npm tarball — no extra Dockerfile step.
+- **Honesty gate:** `production` serves results only from rows matching the active `model_version`; if no real embeddings exist yet it returns 503 rather than serving stub or empty results under the production label.
+- **Same posture as other public routes:** same-origin guard on the query endpoints + bounded per-IP rate limiting.
+
+### Going live (operator-only, deliberate)
+
+The resolver heals a stored `semantic_search_mode='production'` back to `disabled` **unless** the env opt-in is set — there is intentionally no one-click production toggle in the admin UI (it offers only Disabled/Stub). To activate:
+
+1. **Seed weights** (sidecar `--rm`): `scripts/download-clip-models.ts` with `CLIP_MODELS_ROOT` set to the bind-mount path.
+2. **Backfill embeddings** for existing photos: `scripts/backfill-clip-embeddings.ts --production`.
+3. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
+4. Set the DB row `admin_settings.semantic_search_mode='production'`.
+
+New uploads are embedded automatically (fire-and-forget, lower priority than derivative generation). See `CLAUDE.md` → **"CLIP semantic search — seeding model weights on the deploy host"** for the exact `--rm` sidecar commands (the prod runtime container has no `tsx`/source, so model ops run from a sidecar off `web-web:latest` with read-only source mounts).

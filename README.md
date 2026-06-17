@@ -34,6 +34,9 @@
 - **Topics & Albums** -- organize photos into categories with slug aliases
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- full metadata search across titles, descriptions, cameras, and tags
+- **Semantic Search (AI, self-hosted)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). Live on the [demo](https://gallery.atik.kr)
+- **Paid Downloads** -- optional per-image licensing via Stripe Checkout with single-use, scanner-safe download links
+- **Progressive Web App** -- installable PWA with a service worker (stale-while-revalidate image cache + offline HTML fallback)
 - **Sharing** -- per-photo and group share links with Base56 short keys
 - **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
 - **Internationalization** -- English and Korean (next-intl), incl. localized color metadata
@@ -176,6 +179,8 @@ docker compose -f apps/web/docker-compose.yml up -d --build
 
 The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
 
+`npm run deploy` (which runs `apps/web/deploy.sh` on the host) **auto-prunes stale Docker images, build cache, and dangling volumes after every deploy**, so a disk-constrained host stays clean without manual cleanup. The prune runs after the stack is back up, and bind-mounted data (`./data`, `./public`) plus the live container/image are never touched.
+
 Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
 The container liveness probe now uses `/api/live`. `/api/health` is liveness-only by default; set `HEALTH_CHECK_DB=true` only on private monitoring paths that intentionally need a DB readiness probe.
 
@@ -190,8 +195,10 @@ If you serve `/uploads/*` directly from nginx, make the filesystem path match th
 | Database | MySQL 8.0+, Drizzle ORM |
 | Auth | Argon2, HMAC-SHA256 sessions |
 | Images | Sharp (parallel AVIF/WebP/JPEG pipeline) |
+| Semantic search | jina-clip-v2 (int8 ONNX) via Transformers.js — in-process, CPU |
+| Payments | Stripe Checkout (optional paid downloads) |
 | i18n | next-intl (en, ko) |
-| Deploy | Docker (standalone output) |
+| Deploy | Docker (standalone output, self-pruning deploy) |
 
 ## License
 
