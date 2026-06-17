@@ -32,4 +32,22 @@ describe('clip-model module contract', () => {
   it('pins a real HF revision (defined in clip-model-id.ts)', () => {
     expect(idSrc).toMatch(/JINA_CLIP_REVISION\s*=\s*['"][0-9a-f]{7,40}['"]/);
   });
+
+  // AGG-C10-FIX: clip-model.ts must NOT contain `import 'server-only'` because
+  // tsx operator scripts (scripts/backfill-clip-embeddings.ts) import this module
+  // at runtime under plain Node/tsx — where `server-only` resolves to its default
+  // condition (index.js) and throws immediately, crashing the backfill before it
+  // embeds anything. @/db/index.ts has the same constraint for the same reason.
+  // Client-safety is instead enforced by the native sharp + @huggingface/transformers
+  // imports, which the client-server-only-boundary test's hasNativeModuleImport()
+  // detector catches if a client component ever incorrectly imports this module.
+  it('must NOT contain `import "server-only"` — tsx backfill scripts import this module at runtime (AGG-C10-FIX)', () => {
+    // Strip comments before matching so an explanatory comment that mentions the
+    // absent import (e.g. "// NOTE: `import 'server-only'` is intentionally ABSENT")
+    // does not false-positive. The actual statement form always appears outside comments.
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+      .replace(/\/\/[^\n]*/g, '');       // line comments
+    expect(stripped).not.toMatch(/\bimport\s+['"`]server-only['"`]/);
+  });
 });

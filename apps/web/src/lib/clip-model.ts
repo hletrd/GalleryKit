@@ -14,7 +14,17 @@
  * L2-normalized at native dim 1024; truncateAndNormalize() reduces to 512.
  */
 
-import 'server-only';
+// NOTE: `import 'server-only'` is intentionally ABSENT here.
+// This module is imported by tsx operator scripts (scripts/backfill-clip-embeddings.ts,
+// scripts/download-clip-models.ts import chain) that run under plain Node/tsx — where
+// `server-only` resolves to its default condition (index.js) and throws immediately.
+// @/db/index.ts has the same constraint for the same reason (see client-server-only-boundary
+// test for the documented rationale). Client-safety is instead enforced by:
+//   1. The sharp + @huggingface/transformers (onnxruntime-node) native imports — these
+//      are unambiguously server-only and are caught by the boundary test's native-import
+//      scan if a client component ever (incorrectly) imports this module.
+//   2. The client-server-only-boundary test that walks every 'use client' module's
+//      transitive import closure.
 import type * as Transformers from '@huggingface/transformers';
 import sharp from 'sharp';
 import { truncateAndNormalize, EMBEDDING_DIM } from '@/lib/clip-embeddings';

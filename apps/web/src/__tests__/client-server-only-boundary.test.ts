@@ -223,7 +223,16 @@ function extractAliasedImports(source: string): string[] {
 }
 
 function hasServerOnlyImport(source: string): boolean {
-    return /\bimport\s+['"`]server-only['"`]/.test(source);
+    // Strip single-line (`// …`) and block (`/* … */`) comments before matching
+    // so a comment that merely MENTIONS `import 'server-only'` (e.g. an explanation
+    // of why the import is absent) does not false-positive. The actual statement
+    // form — `import 'server-only';` — always appears at the start of a non-comment
+    // line. This matters for clip-model.ts (AGG-C10-FIX) whose explanatory comment
+    // contains the literal text `import 'server-only'`.
+    const stripped = source
+        .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+        .replace(/\/\/[^\n]*/g, '');       // line comments
+    return /\bimport\s+['"`]server-only['"`]/.test(stripped);
 }
 
 /**
@@ -239,8 +248,27 @@ function hasServerOnlyDriverImport(source: string): boolean {
     return /\b(?:import|export)\b[^'"`;]*?['"`]mysql2(?:\/promise)?['"`]/.test(source);
 }
 
+/**
+ * AGG-C10-FIX (run-6 fix): `sharp` and `@huggingface/transformers` are native
+ * Node-only packages that cannot run in a browser bundle. `lib/clip-model.ts`
+ * intentionally does NOT carry `import 'server-only'` because tsx operator scripts
+ * import it under the throwing `default` condition — the same reason `@/db` lacks
+ * the marker. Its client-safety is guaranteed by these native imports instead.
+ * Matching them here closes the gap so a future `'use client'` → `@/lib/clip-model`
+ * value leak would still fail this test RED.
+ *
+ * Pattern anchors the package name to a quote so substrings like `sharp-extra` or
+ * `@huggingface/transformers-extra` do not false-positive.
+ */
+function hasNativeModuleImport(source: string): boolean {
+    return (
+        /\b(?:import|export)\b[^'"`;]*?['"`]sharp['"`]/.test(source) ||
+        /\b(?:import|export)\b[^'"`;]*?['"`]@huggingface\/transformers['"`]/.test(source)
+    );
+}
+
 function reachesServerOnly(source: string): boolean {
-    return hasServerOnlyImport(source) || hasServerOnlyDriverImport(source);
+    return hasServerOnlyImport(source) || hasServerOnlyDriverImport(source) || hasNativeModuleImport(source);
 }
 
 function isUseClient(source: string): boolean {
@@ -354,6 +382,46 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
         // …but the driver import makes it a server-only-equivalent the walk flags.
         expect(hasServerOnlyDriverImport(source)).toBe(true);
         expect(reachesServerOnly(source)).toBe(true);
+    });
+
+    // AGG-C10-FIX: clip-model.ts intentionally omits `import 'server-only'` because
+    // tsx operator scripts (backfill-clip-embeddings.ts) import it at runtime under
+    // the throwing `default` condition — identical to the @/db constraint.
+    // Client-safety is guaranteed by its native `sharp` and `@huggingface/transformers`
+    // imports, which hasNativeModuleImport() now detects. This pin proves the guard
+    // is non-vacuous: clip-model.ts IS recognized as server-only-equivalent, so a
+    // future `'use client'` → `@/lib/clip-model` value leak would fail RED.
+    it('@/lib/clip-model.ts is recognized as server-only-equivalent via native imports, and must NOT carry import "server-only" (AGG-C10-FIX)', () => {
+        const clipModel = resolveAliasedModule('@/lib/clip-model');
+        expect(clipModel, '@/lib/clip-model must resolve to an on-disk module').not.toBeNull();
+        const source = fs.readFileSync(clipModel!, 'utf8');
+        // Must NOT carry the server-only marker — tsx scripts import this module
+        // under the throwing `default` condition (same as @/db).
+        expect(
+            hasServerOnlyImport(source),
+            'clip-model.ts must NOT have import "server-only" — tsx backfill imports it at runtime',
+        ).toBe(false);
+        // …but its native imports make it server-only-equivalent.
+        expect(
+            hasNativeModuleImport(source),
+            'clip-model.ts must import sharp or @huggingface/transformers so the boundary walk flags it',
+        ).toBe(true);
+        expect(reachesServerOnly(source)).toBe(true);
+    });
+
+    it('native-module import detection is correctly anchored (AGG-C10-FIX)', () => {
+        // Positive: forms that pull the native packages into a bundle.
+        expect(hasNativeModuleImport("import sharp from 'sharp';")).toBe(true);
+        expect(hasNativeModuleImport('import sharp from "sharp";')).toBe(true);
+        expect(hasNativeModuleImport("import type { Sharp } from 'sharp';")).toBe(true);
+        expect(hasNativeModuleImport("import { AutoModel } from '@huggingface/transformers';")).toBe(true);
+        expect(hasNativeModuleImport("import type * as T from '@huggingface/transformers';")).toBe(true);
+        expect(hasNativeModuleImport("export { AutoModel } from '@huggingface/transformers';")).toBe(true);
+        // Negative: must not false-positive on substrings or similar names.
+        expect(hasNativeModuleImport("import x from 'sharp-extra';")).toBe(false);
+        expect(hasNativeModuleImport("import x from '@huggingface/transformers-extra';")).toBe(false);
+        expect(hasNativeModuleImport("// uses sharp for image processing")).toBe(false);
+        expect(hasNativeModuleImport("const s = 'sharp is a great library';")).toBe(false);
     });
 
     it('mysql2 driver-import detection is correctly anchored (AGG-C5-01)', () => {
