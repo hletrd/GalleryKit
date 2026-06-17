@@ -16,6 +16,7 @@ import {
     PRODUCTION_MODEL_VERSION,
     EMBEDDING_BYTES,
 } from '@/lib/clip-embeddings';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 vi.mock('@/lib/gallery-config', () => ({ getGalleryConfig: vi.fn() }));
 vi.mock('@/lib/request-origin', () => ({ hasTrustedSameOrigin: vi.fn(() => true) }));
@@ -137,6 +138,7 @@ describe('GET /api/search/similar/[id]', () => {
         selectCallCount = 0;
         activeQuery = 0;
         vi.mocked(hasTrustedSameOrigin).mockReset().mockReturnValue(true);
+        vi.mocked(isRestoreMaintenanceActive).mockReset().mockReturnValue(false);
         vi.mocked(preIncrementSemanticAttempt).mockReset().mockReturnValue(false);
         vi.mocked(rollbackSemanticAttempt).mockReset();
         vi.mocked(getGalleryConfig).mockResolvedValue({ semanticSearchMode: 'production' } as never);
@@ -188,6 +190,45 @@ describe('GET /api/search/similar/[id]', () => {
         // The db mock returns no rows for the target lookup.
         targetRows = [];
         const res = await GET(req('99') as never, params('99'));
+        expect(res.status).toBe(404);
+        expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
+    });
+
+    // --- AGG-C9-03 (run-6 cycle-9): the three failure modes the sibling
+    // semantic-search-route.test.ts already covers but similar-route omitted. ---
+
+    it('returns 503 when restore-maintenance is active (before rate-limit is charged)', async () => {
+        // Gate 2 (maintenance) fires before the rate-limit pre-increment, so no token
+        // is consumed and nothing is rolled back.
+        vi.mocked(isRestoreMaintenanceActive).mockReturnValue(true);
+        targetRows = [{ embedding: TARGET_EMBEDDING_B64 }];
+        const res = await GET(req('42') as never, params('42'));
+        expect(res.status).toBe(503);
+        expect(preIncrementSemanticAttempt).not.toHaveBeenCalled();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
+    });
+
+    it('returns 429 when the per-IP semantic rate limit is exceeded', async () => {
+        // preIncrementSemanticAttempt returning true means "over limit"; the route must
+        // 429 without consuming DB work, and must NOT roll back (the increment stands).
+        vi.mocked(preIncrementSemanticAttempt).mockReturnValue(true);
+        targetRows = [{ embedding: TARGET_EMBEDDING_B64 }];
+        const res = await GET(req('42') as never, params('42'));
+        expect(res.status).toBe(429);
+        expect(res.headers.get('retry-after')).toBeTruthy();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the target embedding row is present but corrupt', async () => {
+        // A non-empty row whose base64 decodes to the wrong byte length: real
+        // decodeEmbeddingColumn (NOT mocked) returns null → the corrupt-embedding 404
+        // path, distinct from the missing-row 404 above. The rate-limit token is
+        // rolled back since no similarity result is served.
+        const corruptB64 = Buffer.from('not-a-512-dim-vector').toString('base64');
+        // Sanity: this is intentionally NOT EMBEDDING_BYTES long once decoded.
+        expect(Buffer.from(corruptB64, 'base64').length).not.toBe(EMBEDDING_BYTES);
+        targetRows = [{ embedding: corruptB64 }];
+        const res = await GET(req('42') as never, params('42'));
         expect(res.status).toBe(404);
         expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
     });
