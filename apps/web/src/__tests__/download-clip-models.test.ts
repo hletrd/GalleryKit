@@ -34,4 +34,14 @@ describe('download-clip-models', () => {
     // no bare `actual === expected` comparison gating the early return on one file.
     expect(src).not.toMatch(/const expected = MANIFEST\['onnx\/model_quantized\.onnx'\]/);
   });
+  // AGG-C9-01 (run-6 cycle-9): the manifest SHA-pins only onnx + tokenizer.json, but
+  // the offline loader fatal-requires config.json + tokenizer_config.json too. The
+  // fast-path must ALSO verify the loader-fatal set (verifyLoaderFatalFiles) and gate
+  // the early-return on BOTH checks, so a partial seed missing a config JSON falls
+  // through to re-download instead of being reported "already up to date".
+  it('idempotency fast-path also verifies the loader-fatal file set before short-circuiting', () => {
+    expect(src).toContain('verifyLoaderFatalFiles');
+    // The early-return "up to date" must require BOTH preCheck.ok AND fatalCheck.ok.
+    expect(src).toMatch(/preCheck\.ok\s*&&\s*fatalCheck\.ok/);
+  });
 });

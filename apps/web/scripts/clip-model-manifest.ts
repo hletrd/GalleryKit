@@ -13,14 +13,18 @@
  */
 
 import { createHash } from 'crypto';
-import { createReadStream, existsSync, rmSync } from 'fs';
+import { createReadStream, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
 /**
  * SHA-256 manifest for the key artifacts downloaded by Transformers.js, as cached
  * from the HF hub at the pinned revision (Task 1 spike, 2026-06-15). Only the large
- * binary artifacts that are expensive to re-download are verified; config/tokenizer
- * JSON files are small and self-describing.
+ * binary artifacts that are expensive to re-download are checksum-pinned here;
+ * config/tokenizer JSON files are small and self-describing, so they are integrity-
+ * checked by existence+parse via LOADER_FATAL_FILES / verifyLoaderFatalFiles rather
+ * than a pinned SHA. (A pinned SHA for the two config JSONs is the future hardening —
+ * AGG-C9-01 layer 4 — but requires a known-good seeded cache at the pinned revision
+ * to compute; do NOT invent a digest, a wrong SHA would wedge a valid seed.)
  */
 export const CLIP_MODEL_MANIFEST: Record<string, string> = {
     'onnx/model_quantized.onnx':
@@ -28,6 +32,31 @@ export const CLIP_MODEL_MANIFEST: Record<string, string> = {
     'tokenizer.json':
         '6601c4120779a1a3863897ba332fe3481d548e363bec2c91eba10ef8640a5e93',
 };
+
+/**
+ * AGG-C9-01 (run-6 cycle-9): the full set of files the offline runtime loader
+ * (clip-model.ts `from_pretrained` with `allowRemoteModels=false`) requires with
+ * `fatal=true` — verified against the installed @huggingface/transformers v3.8.1:
+ *   - onnx/model_quantized.onnx — the int8 ONNX weights (AutoModel)
+ *   - tokenizer.json            — tokenizers.js:70  getModelJSON(..., true)
+ *   - tokenizer_config.json     — tokenizers.js:71  getModelJSON(..., true)
+ *   - config.json               — configs.js:54     getModelJSON(..., true)
+ *
+ * The CLIP_MODEL_MANIFEST above SHA-pins only the first two (the large/expensive
+ * artifacts). The downloader idempotency fast-path historically verified only the
+ * manifest set, so a partial seed missing config.json or tokenizer_config.json was
+ * reported "already up to date" → first live query threw → loadPromise nulled →
+ * indefinite 503 storm (the AGG-C8-02 failure class, narrowed to the two config
+ * JSONs the manifest never covered). This constant is the source-of-truth for the
+ * loader's fatal-required set; verifyLoaderFatalFiles() checks ALL of them so the
+ * idempotency check can never green-light a seed the loader will reject.
+ */
+export const LOADER_FATAL_FILES: readonly string[] = [
+    'onnx/model_quantized.onnx',
+    'tokenizer.json',
+    'tokenizer_config.json',
+    'config.json',
+] as const;
 
 /** Compute the SHA-256 hex digest of a file by streaming it. */
 export async function sha256File(filePath: string): Promise<string> {
@@ -94,4 +123,71 @@ export async function verifyAndCleanArtifacts(
     }
 
     return { ok: failures.length === 0, log, failures, deleted };
+}
+
+/**
+ * AGG-C9-01: verify every file the offline loader requires with `fatal=true`
+ * (LOADER_FATAL_FILES) is present AND usable in `modelCacheDir`:
+ *
+ *   - Files that have a pinned SHA in `manifest` are verified by checksum (reusing
+ *     verifyAndCleanArtifacts semantics; a mismatch is a failure).
+ *   - Files NOT in the manifest (the small self-describing config JSONs) are checked
+ *     for existence AND JSON-parseability — the two corruption modes that wedge the
+ *     offline loader (missing file, or truncated/garbage JSON). A `.onnx` fatal file
+ *     with no manifest SHA falls back to an existence check (it should always be in
+ *     the manifest, but this stays correct if that ever changes).
+ *
+ * This NEVER mutates the cache (no delete) — it is the inspection the downloader
+ * idempotency fast-path runs before short-circuiting "already up to date". The
+ * post-download checksum verify (verifyAndCleanArtifacts, deleteOnMismatch=true)
+ * still owns poisoned-file deletion.
+ */
+export async function verifyLoaderFatalFiles(
+    modelCacheDir: string,
+    manifest: Record<string, string> = CLIP_MODEL_MANIFEST,
+    fatalFiles: readonly string[] = LOADER_FATAL_FILES,
+): Promise<ManifestVerifyResult> {
+    const log: string[] = [];
+    const failures: string[] = [];
+
+    for (const relativePath of fatalFiles) {
+        const filePath = join(modelCacheDir, relativePath);
+        if (!existsSync(filePath)) {
+            log.push(`MISSING ${relativePath}`);
+            failures.push(relativePath);
+            continue;
+        }
+
+        const expectedHash = manifest[relativePath];
+        if (expectedHash) {
+            const actual = await sha256File(filePath);
+            if (actual === expectedHash) {
+                log.push(`OK   ${relativePath} (sha256)`);
+            } else {
+                log.push(`FAIL ${relativePath} (sha256 expected ${expectedHash}, actual ${actual})`);
+                failures.push(relativePath);
+            }
+            continue;
+        }
+
+        // No pinned SHA: integrity-check small JSON config files by parse, others by
+        // existence (already confirmed above).
+        if (relativePath.endsWith('.json')) {
+            try {
+                JSON.parse(readFileSync(filePath, 'utf-8'));
+                log.push(`OK   ${relativePath} (parse)`);
+            } catch (err) {
+                log.push(
+                    `FAIL ${relativePath} (not valid JSON: ${err instanceof Error ? err.message : String(err)})`,
+                );
+                failures.push(relativePath);
+            }
+            continue;
+        }
+
+        log.push(`OK   ${relativePath} (exists)`);
+    }
+
+    // deleted is always empty: this helper never mutates the cache.
+    return { ok: failures.length === 0, log, failures, deleted: [] };
 }

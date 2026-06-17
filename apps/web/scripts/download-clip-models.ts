@@ -34,7 +34,11 @@ import { join } from 'path';
 import { env, AutoModel, AutoTokenizer } from '@huggingface/transformers';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '../src/lib/clip-model-id';
 import { resolveClipModelsRoot, clipModelArtifactDir } from '../src/lib/clip-paths';
-import { CLIP_MODEL_MANIFEST, verifyAndCleanArtifacts } from './clip-model-manifest';
+import {
+    CLIP_MODEL_MANIFEST,
+    verifyAndCleanArtifacts,
+    verifyLoaderFatalFiles,
+} from './clip-model-manifest';
 
 // Alias so the rest of the script is unchanged.
 const MODEL_ID = JINA_CLIP_MODEL_ID;
@@ -74,12 +78,23 @@ async function main(): Promise<void> {
         console.log('[download-clip-models] Existing artifacts present — verifying full manifest...');
         const preCheck = await verifyAndCleanArtifacts(modelCacheDir, MANIFEST, /*deleteOnMismatch*/ false);
         for (const line of preCheck.log) console.log(`[download-clip-models] ${line}`);
-        if (preCheck.ok) {
-            console.log('[download-clip-models] All checksums OK — already up to date. Nothing to do.');
+        // AGG-C9-01 (run-6 cycle-9): the manifest SHA-pins only the large artifacts
+        // (onnx + tokenizer.json). The offline loader ALSO fatal-requires config.json
+        // and tokenizer_config.json. Verify the full loader-fatal set (existence +
+        // JSON-parse for the un-pinned config JSONs) before short-circuiting, so a
+        // partial seed missing/corrupt in a config JSON is no longer reported "up to
+        // date" → it falls through to re-download instead of wedging the first live
+        // query at 503. Inspection only (no mutation); the post-download verify owns
+        // delete-on-mismatch.
+        const fatalCheck = await verifyLoaderFatalFiles(modelCacheDir, MANIFEST);
+        for (const line of fatalCheck.log) console.log(`[download-clip-models] ${line}`);
+        if (preCheck.ok && fatalCheck.ok) {
+            console.log('[download-clip-models] All artifacts present and verified — already up to date. Nothing to do.');
             return;
         }
+        const missing = [...new Set([...preCheck.failures, ...fatalCheck.failures])];
         console.log(
-            `[download-clip-models] Manifest incomplete/mismatched (${preCheck.failures.join(', ')}) — re-downloading...`,
+            `[download-clip-models] Artifacts incomplete/mismatched (${missing.join(', ')}) — re-downloading...`,
         );
     }
 
