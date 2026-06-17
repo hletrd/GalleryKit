@@ -61,9 +61,12 @@ function detect(): DisplayCapability {
         } else if (window.matchMedia('(color-gamut: p3)').matches) {
             gamut = 'p3';
         }
-        // R9-R1: Firefox 110+ supports (color-gamut: p3) MQ and reaches this branch.
-        // Firefox ≤109 matches neither MQ and falls through, defaulting to 'srgb'.
-        // screen.colorGamut is unsupported in Firefox across all versions.
+        // R9-R1: Firefox parses the (color-gamut: p3) MQ syntax since v110, but
+        // it ALWAYS returns false because Firefox does not implement wide-gamut
+        // rendering (Mozilla bug 1626624, still open). So all Firefox versions
+        // effectively fall through to the conservative 'srgb' default here.
+        // Firefox ≤109 lacks the MQ entirely. screen.colorGamut is unsupported
+        // in Firefox across all versions.
     }
 
     const isHdr = typeof window.matchMedia === 'function'

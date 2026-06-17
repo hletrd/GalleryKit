@@ -267,7 +267,7 @@ On the paths it serves, `serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-$
 
 - **`<ColorDetailsSection>`** — accordion in photo viewer + mobile bottom sheet. Default-open for non-trivial color (`isNonTrivialColor` = wide-gamut OR HDR OR non-`srgb` decision). Renders ICC name, primaries, transfer function, decision (admin), source bit depth, delivered bit depth, delivered formats chips, HDR badge, gain map row (admin), copy-to-clipboard button.
 - **`<LightboxColorPip>`** (`components/lightbox-color-pip.tsx`) — slide-up panel in lightbox showing the same color metadata + a compact lazy-mounted `<Histogram>`. Closed-state pip uses `min-h-11` for a 44 px touch target.
-- **`<WideGamutHint>`** — shown to sRGB-display visitors viewing a wide-gamut photo. Uses `useDisplayCapability` (NOT raw matchMedia) so Firefox ≤ 109 (no `color-gamut` MQ) doesn't false-positive the hint; FF 110+ uses the MQ path.
+- **`<WideGamutHint>`** — shown to sRGB-display visitors viewing a wide-gamut photo. Uses `useDisplayCapability` (NOT raw matchMedia) so Firefox (all versions) doesn't false-positive the hint; Firefox parses the MQ syntax since v110 but it always returns false (wide-gamut rendering not implemented, Mozilla bug 1626624).
 - **`<Histogram>`** — 256-px-canvas worker-driven RGB / luminance histogram with grid + clip blink (≥ 0.5% bins above white / below black). Priority chain: AVIF (if wide-gamut + P3 display + canvas-P3 supported) → sized JPEG → fallback base JPEG. URLs that fail an `<img>` load are short-circuited so legacy photos missing a `_640.jpg` derivative cleanly fall through to the base filename (always exists per encoder atomic-rename contract).
 - **`force_show_color_chips`** admin opt-in unhides the `gamut-p3-badge` / `hdr-badge` on non-matching displays via `:root[data-force-show-color-chips="true"]` — useful for photographer demos on sRGB laptops.
 
@@ -324,20 +324,20 @@ docker run --rm \
 | Safari 17+ | macOS / iOS | P3 (+HDR on Pro) | ✓ | ✓ | ✓ | Safari 18+ TP |
 | Chrome 122+ | macOS / Win / Android 14+ | P3 | ✓ | ✓ | ✗ (Chromium gap) | ✓ |
 | Edge 122+ | Windows 11 | P3 + Auto HDR | ✓ | ✓ | ✓ (Auto HDR ON) | ✓ |
-| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | ✓ (FF 110+) | ✗ | ✗ |
+| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | ✓ (parsed, always false — bug 1626624) | ✗ | ✗ |
 | Chrome | Android 13- | sRGB-only mid-range | sRGB-clipped delivery | ✗ | ✗ | varies |
 
 `useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default (for browsers that support neither). The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Source: caniuse mdn-css_at-rules_media_color-gamut (verified 2026-06-12).
 
 **Firefox photographer-visible impact (R10-H4):**
-- Firefox 110+ supports the `(color-gamut: p3)` MQ, so `useDisplayCapability` reaches the MQ-branch — P3 badges and `WideGamutHint` behave like Chrome's MQ path on Firefox 110+. `screen.colorGamut` remains unsupported in Firefox across all versions.
-- **Firefox ≤ 109:** no `color-gamut` MQ support, so `useDisplayCapability` falls back to the conservative `'srgb'` default. P3 badges and the `WideGamutHint` are suppressed for all Firefox ≤ 109 visitors regardless of actual display capability.
+- Firefox parses the `(color-gamut: p3)` MQ syntax since v110, but it **always returns false** because Firefox does not implement wide-gamut rendering (Mozilla bug 1626624, still open). So `useDisplayCapability` falls back to the conservative `'srgb'` default on ALL Firefox versions. P3 badges and the `WideGamutHint` are suppressed for all Firefox visitors regardless of actual display capability. `screen.colorGamut` is unsupported in Firefox across all versions.
+- **Firefox ≤ 109:** no `color-gamut` MQ support at all, so the same conservative `'srgb'` fallback applies.
 - **Consequence — HDR detection gap (all Firefox):** the `(dynamic-range: high)` MQ is not implemented in Firefox, so `isHdr` always returns `false` on Firefox regardless of version.
 - **Mitigation:** The `force_show_color_chips` admin toggle overrides display detection and renders P3/HDR badges unconditionally — useful for demos on Firefox ≤ 109 or when testing HDR metadata display. The admin settings UI documents this gap (R10-H4-FULL).
 
 **Display-change limitations:**
 - `screen.colorGamut` has no change-event API. Chrome/Safari/Edge compensate via the `color-gamut` MQ change event, but the MQ may fire before `screen.colorGamut` updates, causing a brief mismatch.
-- Firefox ≤ 109 has no `color-gamut` MQ at all, so display-gamut changes (dragging between monitors) are only detected on `focus` / `visibilitychange` (R9-R3). Firefox 110+ uses the MQ change event like Chrome.
+- Firefox ≤ 109 has no `color-gamut` MQ at all, so display-gamut changes (dragging between monitors) are only detected on `focus` / `visibilitychange` (R9-R3). Firefox 110+ parses the MQ syntax but it always returns false (wide-gamut rendering not implemented), so the practical behavior is the same as ≤109.
 - Dual-monitor macOS: when a browser window spans P3 + sRGB displays, `screen.colorGamut` reports the primary/focused display, leaving the other half incorrect (R9-M12). There is no web-platform per-display gamut API.
 
 ## Race Condition Protections
