@@ -409,6 +409,7 @@
     "rateLimited": "Too many searches. Please wait a moment and try again.",
     "maintenance": "Search is temporarily unavailable during maintenance.",
     "invalid": "Type at least 2 characters to search.",
+    "invalidSemantic": "Type at least 3 characters for semantic search.",
     "semanticToggle": "Semantic search",
     "semanticExperimentalHint": "Experimental — results may not match your query.",
     "similarPhotos": "Similar photos",

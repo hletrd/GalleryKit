@@ -18,6 +18,13 @@ import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embeddings';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
+import { countCodePoints } from '@/lib/utils';
+
+// AGG-C8-04 (run-6 cycle-8): the semantic route rejects queries shorter than this
+// many code points with HTTP 400 (api/search/semantic/route.ts: `countCodePoints(query) < 3`).
+// Mirror that minimum client-side so a short semantic query shows the helpful
+// "too short" message instead of mapping the 400 to "Search failed. Please try again."
+const SEMANTIC_MIN_QUERY_CODEPOINTS = 3;
 
 interface SearchProps {
     previewImageSizes?: number[];
@@ -119,7 +126,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | null>(null);
+    const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | null>(null);
     const [useSemanticSearch, setUseSemanticSearch] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
@@ -150,6 +157,17 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         setSearchStatus(null);
         try {
             if (semantic) {
+                // AGG-C8-04 (run-6 cycle-8): guard the semantic minimum client-side.
+                // Without this, a 1-2 char query reaches the route, returns 400, and
+                // falls through to the generic 'error' branch ("Search failed."). The
+                // keyword path surfaces a helpful message for the analogous case, so the
+                // semantic path should too.
+                if (countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS) {
+                    setLoading(false);
+                    setResults([]);
+                    setSearchStatus('invalidSemantic');
+                    return;
+                }
                 // Semantic search: POST to /api/search/semantic
                 const resp = await fetch('/api/search/semantic', {
                     method: 'POST',
