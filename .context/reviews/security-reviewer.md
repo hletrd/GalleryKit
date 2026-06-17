@@ -1,7 +1,7 @@
-# Security Review — GalleryKit (cycle 8, run-6)
+# Security Review — GalleryKit (cycle 9, run-6)
 
-**HEAD:** 1a325fa6 · **Reviewer:** security-reviewer · **Date:** 2026-06-17
-**Scope:** Whole repo from a security angle, PRIORITY on the three now-live CLIP activation commits (e0da12ee, b1d6331c, 1a325fa6) and the production CLIP/semantic-search surface.
+**HEAD:** af9ae6c5 · **Reviewer:** security-reviewer · **Date:** 2026-06-17
+**Scope:** Whole-repo deep security sweep (auth/sessions, file upload, path traversal, SSRF, injection, CSV/XSS/bidi, rate limiting, advisory locks, DB backup/restore, the same-origin guard chain, the LIVE public semantic/similar API routes, privacy field guards, secrets, PAT auth, Stripe webhook). PRIORITY on the now-landed cycle-8 fix commits (`17f6e37c`…`e5fe98f3`) and the production CLIP/semantic-search surface.
 **Risk Level:** LOW (clean)
 
 ## Summary — findings by severity
@@ -9,95 +9,86 @@
 - CRITICAL: 0
 - HIGH: 0
 - MEDIUM: 0
-- LOW: 0 actionable (1 informational note recorded, NOT a vulnerability)
+- LOW: 0
+- INFORMATIONAL (NOT vulnerabilities): 1 (recorded, no action required)
 
-**Verdict: honest convergence.** The only non-test, non-doc source delta since the last converged review (e8e61c5d) is exactly three files — `apps/web/src/lib/clip-paths.ts` (new), `apps/web/src/lib/clip-model.ts` (server-only removed), `apps/web/scripts/download-clip-models.ts` (absolute-root + revision-subdir verify). All three were given hard, fresh scrutiny. The now-LIVE production CLIP paths (semantic route, similar route, upload-hook embed, backfill) were re-reviewed end-to-end with the production branches treated as exercised. No real, HEAD-verified, worth-fixing security issue was found.
-
----
-
-## What changed since last converged review (attack-surface delta)
-
-`git diff --stat e8e61c5d..HEAD` — non-test/non-doc source files:
-- `apps/web/src/lib/clip-paths.ts` (NEW, 80 lines)
-- `apps/web/src/lib/clip-model.ts` (+22/-3: `server-only` import removed, shared resolver adopted)
-- `apps/web/scripts/download-clip-models.ts` (+30/-15: absolute-aware root, revision-subdir manifest verify)
-
-Everything else in the range is `__tests__/`, `.context/`, `plan/`, or `*.md`. The semantic/similar routes, embed hooks, `embeddings.ts`, and `backfill-clip-embeddings.ts` were unchanged at the source level but are now LIVE (the prod env carries `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` + the DB `semantic_search_mode='production'` row), so I re-walked their production branches.
+**Verdict: honest convergence.** No new, HEAD-verified, worth-fixing security issue exists. The codebase converged at cycle-7 (0 findings), the activation surface was re-reviewed at cycle-8 (13 latent gaps surfaced + fixed in plan-360), and this cycle finds the cycle-8 fixes correctly landed and the remaining surface byte-for-byte at the converged baseline. The CLIP feature is LIVE; its guard chain (same-origin → maintenance → content-type/size → JSON-shape → codepoint-min → Pattern-2 rate-limit → operator-gated mode → model_version-isolated scan → public-only enrichment SELECT) holds end-to-end. All HARD GUARDS were respected — no `server-only` re-added, no `disabled`-default change, no weakening of `SEMANTIC_SEARCH_ALLOW_PRODUCTION` / revision pin / `allowRemoteModels=false` / model_version isolation. I explicitly REJECT any temptation to "tighten" by re-adding `server-only` to `clip-model.ts` (it would break the tsx backfill; client-safety is already enforced by the native-import boundary test).
 
 ---
 
-## Priority review: the three activation-fix commits
+## Attack-surface delta since cycle-8 review (1a325fa6 → af9ae6c5)
 
-### e0da12ee — `clip-paths.ts` absolute-root + revision-subdir verify (CLEAN)
+`git diff --stat 1a325fa6..HEAD` — non-test/non-doc SOURCE files only:
+- `apps/web/src/app/actions/embeddings.ts` (+21/-): AGG-C8-05 — `modelVersion` hoisted above the candidate query; `notExists` now filters on `modelVersion`. **Reviewed: correct, and still UNWIRED (no UI binds it). No security consequence.**
+- `apps/web/src/app/api/search/semantic/route.ts` (+11/-): AGG-C8-09 — `isProd ? dotProduct : cosineSimilarity` gate. **Reviewed: score-identical for unit vectors; stub keeps cosine; no behavior change to inputs.**
+- `apps/web/src/app/api/search/similar/[id]/route.ts` (+18/-): AGG-C8-09/10 — `dotProduct` swap + lens/date enrichment parity. **Reviewed: enrichment SELECT still public-only (no GPS/PII).**
+- `apps/web/src/components/search.tsx` (+20/-): AGG-C8-04 — client short-query guard → `invalidSemantic`. **Reviewed: client-side only; the server's <3-codepoint 400 is unchanged and authoritative.**
+- `apps/web/src/components/similar-photos.tsx` (+5/-): a11y `aria-controls` — no security surface.
+- `apps/web/src/lib/clip-paths.ts` (+20/-): AGG-C8-12 — `clipModelArtifactDir` now asserts a 2-segment model id + 40-hex (non-`main`) revision. **Reviewed: fail-loud guard on hardcoded constants; no request-reachable input; strictly defensive.**
+- `apps/web/src/db/schema.ts` (+6/-): index declaration for migration 0022.
+- `apps/web/drizzle/0022_image_embeddings_model_version_idx.sql` (+9) + `_journal.json` (+7) + `migrate.js` (+4): additive composite index `(model_version, updated_at)`. **Reviewed: journal `when=1781687094232` is strictly > prior max 1781183604120 (monotonic per the migration runbook); `migrate.js` reconciles it via `ensureIndex`; CREATE INDEX is non-destructive.**
+- `apps/web/messages/{en,ko}.json` (+3 each): `search.invalidSemantic` key + reworded `semanticSearchDesc`. No security surface.
 
-`resolveClipModelsRoot()` (clip-paths.ts:60-66) uses `path.isAbsolute()` to honor an absolute `CLIP_MODELS_ROOT` verbatim and resolve a relative/unset value against cwd. `clipModelArtifactDir()` (clip-paths.ts:77-80) joins the resolved root with `JINA_CLIP_MODEL_ID.split('/')` + `JINA_CLIP_REVISION`.
-
-- **Path-traversal:** Both `JINA_CLIP_MODEL_ID` (`'jinaai/jina-clip-v2'`) and `JINA_CLIP_REVISION` (40-hex SHA, clip-model-id.ts:13/25) are hardcoded constants — no user/env input feeds the join, so no `..`/absolute-escape is constructible. `CLIP_MODELS_ROOT` is an operator-controlled env value (trust boundary is the operator, not a request).
-- **Downloader/loader agreement:** The shared resolver is the whole point — `env.cacheDir` is set to the SAME `resolvedRoot` in both the downloader (download-clip-models.ts:85) and the loader (clip-model.ts:86), so the seed-write key and offline-read key cannot diverge. No security impact; correctness fix.
-
-### e0da12ee — checksum-manifest verification (REAL post-download integrity gate, honestly documented)
-
-`verifyAndCleanArtifacts()` (clip-model-manifest.ts:62-97) streams SHA-256 over each on-disk artifact under the revision subdir, compares to the hardcoded `CLIP_MODEL_MANIFEST`, and `rmSync()`-deletes any mismatching file before the caller aborts non-zero (download-clip-models.ts:106-116).
-
-- **Is it a real trust boundary or post-parse?** It is correctly and explicitly documented as a **post-download integrity check, NOT a pre-parse trust boundary** (download-clip-models.ts:19-24): Transformers.js `from_pretrained` downloads AND instantiates the ONNX session in one call, so the bytes are parsed before the checksum runs. This is the honest and correct framing. The PRIMARY protections are the pinned immutable `JINA_CLIP_REVISION` + HTTPS to the HF hub, and the fact that the runtime NEVER downloads (`allowRemoteModels = false`, clip-model.ts:88). The checksum's job is to stop a poisoned/partial file from being LEFT ON DISK for the next run / runtime loader to trust — and the delete-on-mismatch achieves exactly that. No weakening proposed; this is the established, sound rationale.
-- The download script is operator-run from a trusted network (documented), so the parse-before-verify window is not a request-reachable surface.
-
-### 1a325fa6 — `import 'server-only'` removed from clip-model.ts (CLEAN — no client-leak risk)
-
-The removal is required so the tsx backfill (`scripts/backfill-clip-embeddings.ts`) can import the module under plain Node/tsx, where `server-only` resolves to its throwing `default` condition (identical to the `@/db` constraint). **This is a HARD GUARD I was asked not to re-introduce — confirmed correct.**
-
-Critically, removing the sentinel does **not** open a client-leak vector, because the client→server-only boundary test (`client-server-only-boundary.test.ts`) was widened to treat `sharp` and `@huggingface/transformers` native imports as server-only-equivalent (`hasNativeModuleImport`, lines 263-268; `reachesServerOnly`, line 270-272). The test walks every `'use client'` module's transitive `@/lib`/`@/db` VALUE-import closure (following dynamic `import()` and import-equals forms, AGG-C6-02) and would fail RED if any client component value-imported `@/lib/clip-model`. clip-model.ts unambiguously imports `sharp` (line 29) and `@huggingface/transformers` (line 28, type-only — but the regex also matches `import type`), so it is flagged. A non-vacuous pin (lines 394-410) proves the guard recognizes clip-model.ts as server-only-equivalent. The compensating control is in place and tested.
+Everything else in the range is `__tests__/`, `.context/`, `plan/`, or docs. The attack surface delta is small, defensive, and security-neutral.
 
 ---
 
-## Now-live production-path re-review (fresh eyes, all CLEAN)
+## Live production-path re-review (fresh eyes, all CLEAN)
 
-### `POST /api/search/semantic` (semantic/route.ts)
-- **Auth posture:** Intentionally public + same-origin (`hasTrustedSameOrigin`, line 99) — correct for a visitor search box; not an admin surface. Fails closed (403) on missing/mismatched Origin/Referer (`hasTrustedSameOriginWithOptions` defaults `allowMissingSource=false`, request-origin.ts:90-94).
-- **Fail-closed mode gate:** Server authoritatively re-reads `semanticSearchMode` (line 221) and 503s unless `'stub'`/`'production'` (line 226). On config-read throw it stays `'disabled'` (line 223-224). `'production'` only resolves when `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (gallery-config.ts:143-145) — the operator opt-in I was told not to weaken.
-- **Rate limit (Pattern 2):** `preIncrementSemanticAttempt` consumed AFTER cheap validation, BEFORE the embedding work (line 208); rolled back on every early return that never reached the guarded CPU (lines 227, 242, 257). 30/min/IP. The `unknown`-bucket fail-safe (lines 197-205) keeps the control applied even without TRUST_PROXY (a fail-open semantic endpoint would be a DoS amplifier) — correct.
-- **Input hardening:** Content-Type prefix+param check (lines 114-124), chunked-TE rejection (127-130), Content-Length guard + post-read body cap at 8 KiB (133-162), JSON shape validation (168-174), codepoint min-length (184), `clampSemanticTopK` rejects non-number raw and clamps to [1,50] (87-91). No ReDoS (`countCodePoints` is `[...s].length`, utils.ts:18-20; the only regex is the anchored `^[\s;]` Content-Type check).
-- **Vector query construction:** `embedTextReal(query)` returns a fixed 512-dim Float32Array; the DB scan is a Drizzle parameterized `eq(modelVersion, activeModelVersion)` + `desc(updatedAt)` + `limit(SEMANTIC_SCAN_LIMIT=5000)` (lines 250-255). Cosine is computed in JS over decoded buffers (`decodeEmbeddingColumn` returns null for malformed rows). No SQL injection; no unbounded scan; the user query never reaches SQL.
-- **No PII leak:** Enrichment SELECT (lines 284-306) is title/description/filename_jpeg/width/height/topic/topic_label/camera_model/lens_model/capture_date — all public (already returned by keyword search), none in `_PrivacySensitiveKeys`. `processed=true` filter applied. Grep confirmed zero latitude/longitude/filename_original/user_filename/uploaded_by/ICC/HDR fields selected.
+### `POST /api/search/semantic` (semantic/route.ts) — CLEAN
+- **Same-origin fail-closed:** `hasTrustedSameOrigin` (line 100) → 403; `hasTrustedSameOriginWithOptions` defaults `allowMissingSource=false` (request-origin.ts:90), so a missing/mismatched Origin AND Referer is rejected.
+- **Mode gate fail-closed:** server re-reads `semanticSearchMode` (line 223), 503s unless `'stub'`/`'production'` (227); config-read throw stays `'disabled'` (224). `'production'` only resolves with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (gallery-config.ts:143) — the operator opt-in, intact.
+- **Rate limit Pattern 2:** `preIncrementSemanticAttempt` consumed AFTER cheap validation, BEFORE embedding (line 209); rolled back on every early-return that never reached the guarded CPU (228, 243, 258). 30/min/IP; the `unknown`-bucket stays applied (fail-safe; a fail-open semantic endpoint would be a DoS amplifier — correct).
+- **Input hardening:** Content-Type prefix+param check (116-125), chunked-TE reject (129), Content-Length guard + 8 KiB post-read body cap (135-163), JSON shape (169-174), `countCodePoints<3` 400 (185), `clampSemanticTopK` rejects non-number raw + clamps [1,50] (88-91). No ReDoS (the only regex is the anchored `^[\s;]`; `countCodePoints` is spread-based).
+- **No SQL injection:** the user query is embedded to a Float32Array BEFORE any DB access; the scan is a Drizzle parameterized `eq(modelVersion, …)` + `desc(updatedAt)` + `limit(5000)` (250-256). Query string never reaches SQL.
+- **No PII leak:** enrichment SELECT (291-307) = id/title/description/filename_jpeg/width/height/topic/topic_label/camera_model/lens_model/capture_date — all public (already on keyword search), `processed=true` filtered. Grep of `src/app/api/search` for `latitude|longitude|filename_original|user_filename` returns EMPTY.
 
-### `GET /api/search/similar/[id]` (similar/[id]/route.ts)
-- Same-origin (line 62) + maintenance gate (67) + positive-int id validation (74-77) + Pattern-2 rate limit shared with semantic (83, rolled back at 102/122/129/134/149) + **production-only** gate (101) + target-embedding lookup with model_version filter (112-119) → 404 on absent/corrupt (121-131).
-- **IDOR check:** `id` is the auto-increment image PK; an embedding exists only for processed images; the returned fields are public (grep confirmed NO private fields in the enrichment SELECT, lines 185-201). Returning "similar public photos" for any public photo id is the intended product behavior — no authorization object to enforce, no private data exposed. Not an IDOR.
-- Scan is the same bounded Drizzle parameterized query; self excluded (line 154).
+### `GET /api/search/similar/[id]` (similar/[id]/route.ts) — CLEAN
+- Same-origin (62) + maintenance (67) + positive-int id (75) + Pattern-2 rate-limit shared with semantic (83, rolled back 102/122/129/134/149) + **production-only** gate (101) + target-embedding lookup with `model_version` filter (112-119) → 404 on absent/corrupt (121-131). Scan is the same bounded parameterized query; self excluded (159).
+- **Not an IDOR:** `id` is the auto-increment image PK; an embedding exists only for processed images; returned fields are public (enrichment SELECT 191-207, no private field). "Similar public photos for any public photo id" is the intended product behavior.
 
-### Upload-hook embed path (image-queue.ts:412-478) + backfill (backfill-clip-embeddings.ts) + embeddings.ts action
-- Fire-and-forget, fully wrapped in try/catch, never blocks the queue job; `'disabled'` short-circuits (image-queue.ts:442). `originalPath` is `resolveOriginalUploadPath(job.filenameOriginal)` (image-queue.ts:293) where `filename_original` is a server-generated `randomUUID()` derivative (process-image.ts:812) joined under a fixed dir — no user-controlled path reaches `sharp(imagePath)` (clip-model.ts:161).
-- Write path stores the raw 2048-byte little-endian float32 buffer to the MEDIUMBLOB (cast through `unknown` at the single write site); `modelVersion` is one of two hardcoded constants. mysql2 inserts Buffer bytes verbatim — no injection.
-- model_version partitioning (`STUB_MODEL_VERSION` vs `PRODUCTION_MODEL_VERSION`) keeps stub and production vectors from ever co-ranking — the isolation I was told not to weaken is intact across writer (queue/backfill) and reader (both routes).
+### Upload-hook embed + backfill action — CLEAN
+- `embeddings.ts` (`backfillClipEmbeddings`) is fully gated: `isAdmin()` + `requireSameOriginAdmin()` + per-admin hourly rate-limit (50-59), disabled→no-op (80), production→real encoder + `PRODUCTION_MODEL_VERSION`. `resolveOriginalUploadPath(filenameOriginal)` where `filename_original` is a server-generated `randomUUID()` derivative — no user-controlled path to `sharp()`. Buffer stored via mysql2 verbatim — no injection. **Still UNWIRED; sidecar is canonical.**
+- `clip-model.ts` `embedImageReal` resizes via Sharp with `autoOrient`/`toColourspace('srgb')`/`removeAlpha` (channel-count asserted) — no path or decode surface from request input.
+
+---
+
+## Cross-cutting verifications (all PASS at HEAD)
+
+| Area | Verification |
+|---|---|
+| **Auth/sessions** | `session.ts`: HMAC-SHA256 verified FIRST, `timingSafeEqual`, shape checks AFTER crypto (no timing oracle), 24 h age window, prod refuses DB-secret fallback. `proxy.ts` cookie-presence guard on `/[locale]/admin/*` (full crypto in server actions, defense-in-depth). |
+| **SQL injection** | All raw-SQL sites are Drizzle tagged-template `sql\`…${param}\`` (admin-tokens.ts, topics.ts, admin-backfill-runner.ts, health) or `conn.query(…, [params])` placeholders (admin-users.ts, advisory-lock releases). No string concatenation of untrusted input. |
+| **Command injection** | `db-actions.ts` is the only `child_process` user: `spawn('mysqldump'/'mysql', [fixed-args, DB_NAME])` with credentials in `MYSQL_PWD` env (not `/proc/cmdline`), HOME excluded (no `~/.my.cnf`), `--one-database` on restore. No shell, no interpolation. |
+| **XSS** | All `dangerouslySetInnerHTML` sites inject JSON-LD via `safeJsonLd` (escapes `<`→`<`, U+2028/2029) + CSP nonce. `sanitizeAdminString`/`UNICODE_FORMAT_CHARS` reject bidi/zero-width at every admin string write; `sanitizeForOg`/`stripUnicodeFormatting` scrub machine-derived EXIF on render. |
+| **CSV injection** | `csv-escape.ts`: C0/C1 strip, derived bidi/zero-width strip, CRLF collapse, leading-whitespace-tolerant `^\s*[=+\-@]` formula-prefix quote, RFC-quote wrap. |
+| **Path traversal / symlink** | Paid-download (`/api/download/[imageId]`): `path.resolve` + `startsWith(uploadsDir+sep)` + `lstat` symlink reject + `realpath` containment + open-before-claim. Upload routes: `SAFE_SEGMENT` + whitelist + `randomUUID` filenames. CLIP path math uses hardcoded constants + operator env only. |
+| **SSRF** | Runtime `env.allowRemoteModels=false` (clip-model.ts:88); grep confirms NO `allowRemoteModels=true` anywhere. Only outbound fetch is the operator-run download script (HTTPS, pinned revision). OG origin-pinning defense unchanged. |
+| **Privacy field guard** | `publicSelectFields` derived from `adminSelectFields` by omitting latitude/longitude/filename_original/user_filename/original_format/original_file_size; `_PrivacySensitiveKeys` compile-time guard + symmetric `privacy-fields.test.ts` SENSITIVE_KEYS (incl. uploaded_by). Live search paths reference zero PII columns (grep-verified). |
+| **PAT auth (admin-tokens)** | `gk_`+43-char shape gate before DB; SHA-256 stored only; `timingSafeEqual`; `expires_at` enforced; scope set authorizes; `verifyToken`/`list`/`revoke` fail-closed; revoke scoped by `user_id` (no IDOR); plaintext never reaches a query param. |
+| **Stripe webhook** | Mandatory `constructStripeEvent` signature verify before any DB work; `payment_status==='paid'` gate; tier allowlist; zero-amount reject; `sessionId`-UNIQUE idempotency + dup-key-loser disambiguation; PII never logged at error level; deleted-image FK → 200 (no retry storm). |
+| **Rate-limit lint gates** | `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit` ALL exit 0 at HEAD. |
+| **Secrets** | Source/script secret scan EMPTY; no `hf_`/`HF_TOKEN`/hardcoded keys; `.env*.example` carry placeholders only; CLIP model download is anonymous (public model). |
+| **Dependency audit** | `npm audit --omit=dev --audit-level=high`: 0 HIGH/CRITICAL. 2 MODERATE (postcss `<8.5.10` CSS-stringify XSS, transitive under Next) — build-time only, no runtime user-content path, same item closed in cycle-7. |
+| **Error-path info leak** | All route catch blocks return generic `{error}` JSON with `NO_STORE` headers; detail to server logs only. Localized generic messages across action boundaries (no raw SQL/driver internals to client). |
 
 ---
 
 ## Informational note (NOT a vulnerability — recorded for completeness)
 
-`apps/web/src/app/actions/embeddings.ts` (`backfillClipEmbeddings`) selects pending images with `notExists(... eq(imageEmbeddings.imageId, images.id))` (lines 92-96) — i.e. images with NO embedding row at ANY model_version — whereas the canonical sidecar (`backfill-clip-embeddings.ts`) correctly scopes the `notExists` by `TARGET_MODEL_VERSION` (lines 125-131), so the sidecar re-embeds stub→production rows while this action would skip a row that already has a stub embedding when running in production mode. This is a **correctness/completeness gap, not a security issue** (no auth, injection, or data-exposure consequence — the action is fully auth-gated via `isAdmin()` + `requireSameOriginAdmin()` + per-admin rate limit, lines 50-59), and the action is **explicitly unwired** — no UI calls it; the sidecar is the canonical entry point (documented at lines 70-73). It cannot be triggered by any request today. Out of scope for a security report; flagged only so a future wiring effort matches the sidecar's model_version-scoped selection. No action required from a security standpoint.
-
----
-
-## Cross-cutting verifications (all PASS)
-
-- **SSRF / model download:** Runtime `env.allowRemoteModels = false` (clip-model.ts:88) — never hits the network. Grep confirmed NO `allowRemoteModels = true` anywhere. The only network fetch is the operator-run download script over HTTPS to the pinned HF revision. (The pre-existing OG-photo origin-pinning SSRF defense is unchanged.)
-- **Secrets:** No `HF_TOKEN`/`hf_`/`Authorization`/`apiKey`/`accessToken` in any clip file or script; `git log -S "hf_"` over apps/web returns nothing; `.env*.example` carry no CLIP/HF secret. Model download is anonymous (public model). No hardcoded secrets introduced.
-- **Path traversal / symlink:** Unchanged whitelist + `SAFE_SEGMENT` + `lstat` posture on serving paths; the new CLIP path math uses only hardcoded constants + operator env. No request-reachable traversal.
-- **Command/SQL injection:** No `exec`/`eval`/`new Function` in the new code; all DB access is Drizzle-parameterized; the user query never reaches SQL (embedded to a vector first).
-- **Client→server-only boundary:** Widened and pinned (above). Removing `server-only` from clip-model.ts is fully compensated by native-import detection.
-- **Regex DoS:** Validation regexes (`validation.ts`) are anchored with linear quantifiers (`[a-zA-Z0-9._-]*`, `[\p{Letter}\p{Number}-]+`) — no nested/ambiguous quantifiers. `countCodePoints` is spread-based, not regex.
-- **Error-path info leak:** All route catch blocks return generic `{error}` JSON with `NO_STORE_HEADERS`; detail goes to server logs only (embeddings.ts:153, image-queue.ts:476).
-- **Prior closed items (NOT re-reported):** bidi/invisible-char rejection (UNICODE_FORMAT_CHARS), Argon2id, timing-safe HMAC sessions, dual login rate buckets, advisory locks, GPS byte-strip, CSV formula-injection, smart-collection AST allowlist, `withAdminAuth`/`requireSameOriginAdmin` lint gates, paid-download token IDOR defense, postcss transitive (build-time only), single-writer topology — all verified DONE in cycles 1-7 and the cycle-7 security-reviewer record; re-confirmed unchanged.
+`embeddings.ts` `backfillClipEmbeddings` remains **UNWIRED** — no UI calls it; the canonical entry point is the sidecar `scripts/backfill-clip-embeddings.ts` (documented at embeddings.ts:70-73, 89-91). The cycle-8 AGG-C8-05 fix (model_version-aware `notExists`) is correct and now matches the sidecar's per-version selection, but because the action is unreachable from any request today, it carries no live security or correctness consequence. Flagged only so a future wiring effort knows the selection is already model_version-scoped. No action required.
 
 ## Security Checklist
-- [x] No hardcoded secrets (clip files + scripts + git history + env examples clean)
-- [x] All inputs validated (Content-Type/Length/body caps, codepoint length, topK clamp, JSON shape)
-- [x] Injection prevention verified (Drizzle params; query embedded before SQL; no exec/eval)
-- [x] Authentication/authorization verified (semantic/similar are intentionally public+same-origin; embeddings action auth-gated; production mode operator-gated, fail-closed)
+- [x] No hardcoded secrets (source + scripts + env examples clean; git-history pattern scan clean)
+- [x] All inputs validated (Content-Type/Length/body caps, codepoint length, topK clamp, JSON shape, slug/filename/email shape)
+- [x] Injection prevention verified (Drizzle params everywhere; query embedded before SQL; no exec/eval/Function; spawn with fixed argv)
+- [x] Authentication/authorization verified (sessions HMAC+timing-safe; admin actions isAdmin+same-origin; PAT scoped+constant-time; semantic/similar intentionally public+same-origin; production mode operator-gated, fail-closed)
 - [x] SSRF — runtime allowRemoteModels=false; no request-reachable outbound host
-- [x] Path traversal — CLIP path math uses hardcoded constants + operator env; sharp path is server-generated UUID
-- [x] Integrity gate on model weights — present, honestly documented as post-download (not pre-parse); delete-on-mismatch prevents trusting poisoned bytes
-- [x] Client→server-only boundary — server-only removal compensated by native-import detection (tested non-vacuous)
-- [x] Rate limits on public search routes (Pattern 2, fail-safe on unknown IP)
-- [x] No private-field leakage in enrichment SELECTs (grep-verified)
-- [x] No ReDoS in validation/length helpers
+- [x] Path traversal / symlink — resolve+startsWith+lstat+realpath on download; UUID filenames on upload; CLIP path uses constants+env
+- [x] XSS — JSON-LD via safeJsonLd + nonce; bidi/zero-width rejected/stripped on all rendered strings
+- [x] CSV formula injection — escapeCsvField full hygiene pass
+- [x] Privacy — publicSelectFields omits PII (compile-time + test guard); live search SELECTs public-only (grep-verified)
+- [x] Rate limits on public surfaces (Pattern 2, fail-safe on unknown IP); three lint gates green
+- [x] Dependencies audited (0 HIGH/CRITICAL; 2 build-time MODERATE noted)
+- [x] Migration 0022 additive + monotonic journal + reconciled in migrate.js
+- [x] HARD GUARDS respected (server-only NOT re-added; disabled default intact; prod-gate/revision-pin/offline/model_version isolation untouched)

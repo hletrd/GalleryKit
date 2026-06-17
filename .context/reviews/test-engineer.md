@@ -1,41 +1,111 @@
-# Test-Engineer Review — Run-6 Cycle-8 (HEAD 1a325fa6)
+# Test-Engineer Review — Run-6 Cycle-9 (HEAD `af9ae6c5`)
 
-**Scope:** test coverage of the now-LIVE CLIP semantic-search activation (commits e0da12ee, b1d6331c, 1a325fa6) plus a sweep of the security-critical test surface.
-
-**Gate state (verified by verifier this cycle):** Vitest 2207 passed / 4 skipped / 0 failed. The 4 skipped are the model-weight-gated `clip-offline-load.test.ts` (`CLIP_OFFLINE_LOAD=1`) and `clip-semantic-integration.test.ts` (`CLIP_INTEGRATION=1`) — gated by design, not dead.
-
-**Findings: 0 CRITICAL / 0 HIGH / 1 MEDIUM / 1 LOW** (both are coverage gaps that mirror live-code findings other agents raised; the underlying code findings are tracked separately).
+**Date:** 2026-06-17
+**Suite state (verified):** 2214 passed / 4 skipped (model-weight-gated by design) / 0 failed.
 
 ---
 
-## TE-C8-01 [MEDIUM, confidence High] — No test pins the downloader idempotency fast-path against a partial seed
+## Method
 
-**File:** `apps/web/scripts/download-clip-models.ts:63-76` (the early-return fast path); test surface `apps/web/src/__tests__/clip-paths.test.ts` (12 tests, none cover the downloader's verify/idempotency branch).
-
-The idempotency fast-path checks only `onnx/model_quantized.onnx`'s SHA-256 before printing "already up to date" and exiting 0. `tokenizer.json` / `tokenizer_config.json` / `config.json` are not checked on the fast path, yet `from_pretrained` (offline, `allowRemoteModels=false`) treats them as fatal. No test exercises a seed dir that has a valid ONNX but a missing/corrupt config — so the "report MISSING and abort" guarantee the manifest gate is supposed to provide is untested for the fast-path.
-
-**Bug that slips through:** a future edit that leaves the fast-path ONNX-only (or that adds a new required artifact to the manifest without updating the fast path) would ship a downloader that green-lights a partial seed; the regression surfaces only as a production 503 storm, not a red test.
-
-**Test to add:** a Vitest that builds a temp cache dir with a correct ONNX checksum but an absent `tokenizer.json`, runs the verify helper the script uses (`verifyAndCleanArtifacts(dir, MANIFEST, false)`), and asserts it reports the missing file rather than "up to date". (This also locks the recommended fix for the code-level HIGH the debugger filed.)
+Full inventory of all 235 test files under `apps/web/src/__tests__/` plus 5 Playwright e2e specs.
+For each cycle-8 fix I traced: (1) the fix location in source, (2) whether a test pins the fix, (3) what failure scenario an absent/wrong test would miss.
+Sources read directly for every finding — no sampling.
 
 ---
 
-## TE-C8-02 [LOW, confidence Medium] — `backfillClipEmbeddings` model_version selection gap is untested
+## Findings
 
-**File:** `apps/web/src/app/actions/embeddings.ts:86-99` (the `notExists` candidate query); no test covers this action's selection semantics.
+### TE-C9-01 [MEDIUM] — AGG-C8-04 client-side short-query `invalidSemantic` guard has zero test coverage
 
-The `notExists` subquery filters only on `imageEmbeddings.imageId`, not `modelVersion`, so an image carrying a stub-version row is excluded even when the action runs in `production` mode (it can never upgrade stub→production rows). The canonical sidecar `scripts/backfill-clip-embeddings.ts:125-131` applies the correct two-condition filter. The action is currently **unwired** from any UI, so there is no live impact — but there is also no test asserting the selection matches the sidecar, so wiring it later would silently ship the gap.
+**Fix shipped:** `apps/web/src/components/search.tsx:165-169`
 
-**Bug that slips through:** if a future cycle binds this action to the admin "re-embed" button, a deployment that already has stub rows would report `processed: 0` with no error and no failing test.
+AGG-C8-04 added a `countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS` guard in the semantic branch of `performSearch`. When the query is too short it calls `setSearchStatus('invalidSemantic')` and returns early, preventing the misleading "Search failed." response that a server-side 400 would produce.
 
-**Test to add:** a unit/integration test asserting that, given an image with a stub-version embedding, `backfillClipEmbeddings` in production mode selects it (after the code fix) — i.e. pin the selection to be model_version-aware, matching the sidecar's documented contract.
+**Coverage gap:** `grep -r "invalidSemantic\|SEMANTIC_MIN_QUERY_CODEPOINTS" apps/web/src/__tests__/` returns zero results. No test in the repository pins this guard. `search-disclaimer.test.ts` only checks that `semanticExperimentalHint` renders in stub mode. `search-stale-response.test.ts` checks the request-id stale-response guard. Neither touches this path.
+
+**Missing test:** A source-contract test (same pattern as `search-stale-response.test.ts`) asserting:
+- `SEMANTIC_MIN_QUERY_CODEPOINTS` constant equals 3 and is present in the source.
+- The short-path guard fires before the `fetch('/api/search/semantic'` call site.
+- `setSearchStatus('invalidSemantic')` is the branch outcome, not `'error'`.
+- A `return` statement immediately follows so no fetch is fired.
+
+**Failure scenario without this test:** A refactor that deletes or reorders the guard, or changes the status string from `'invalidSemantic'` back to `'error'`, passes all 2214 tests silently. The regression reverts to the original symptom: a 1–2 character semantic query reaches the route, gets a 400, and the user sees "Search failed. Please try again." — the UX bug AGG-C8-04 was filed to fix.
+
+**Confidence:** H
 
 ---
 
-## Verified-solid coverage (no gap)
+### TE-C9-02 [LOW] — `similar-route.test.ts` missing restore-maintenance 503 case
 
-- **`clip-paths.test.ts` (12 tests)** correctly pins: absolute-vs-relative `resolveClipModelsRoot` (the `/app/apps/web/app/...` path-doubling anti-pattern is explicitly asserted absent), the revision-subdir layout (`dir !== flat` assertion), and a no-drift grep proving both downloader and loader route through the shared resolver. The path-doubling regression cannot silently return.
-- **`client-server-only-boundary.test.ts`** is **non-vacuous** for the `server-only` removal: it reads `clip-model.ts` from disk, asserts `server-only` absent + the `sharp`/`@huggingface/transformers` native imports present (the server-only-equivalent signal), and the closure walk would flag any `'use client'` → `@/lib/clip-model` value import. The comment-stripping in `hasServerOnlyImport` prevents a false-positive from the explanatory comment block.
-- The semantic + similar route guard behaviors (same-origin 403, <3-char 400, topK clamp, rate-limit) are covered by the existing route/lib test suites and re-confirmed by the verifier's green gate run.
+**Fix in route:** `apps/web/src/app/api/search/similar/[id]/route.ts:67-69` (Gate 2 — `isRestoreMaintenanceActive()` → 503).
 
-**No re-reports of cycle 1-7 closed items.** The many fixture-lock tests (blur wiring, tag-names SQL, touch-target audit, privacy-fields, sw-template-contract, backfill column set) remain green and were not re-litigated.
+**Coverage gap:** `similar-route.test.ts` mocks `isRestoreMaintenanceActive` as a fixed `() => false` at the describe-block level. No test flips it to `true`. `semantic-search-route.test.ts` explicitly covers the symmetric 503 maintenance case for the POST endpoint; the similar route has no equivalent.
+
+**Missing test:** An `it('returns 503 when restore maintenance is active')` case — flip `isRestoreMaintenanceActive` to `() => true`, assert `res.status === 503` and `body.error === 'Maintenance'`. Also assert `preIncrementSemanticAttempt` was not called (maintenance fires before Gate 4).
+
+**Failure scenario without this test:** A refactor that drops or reorders Gate 2 in the similar route (e.g. moves maintenance check after the rate-limit increment, charging a user's rate-limit slot during a restore window) passes all tests.
+
+**Confidence:** M
+
+---
+
+### TE-C9-03 [LOW] — `similar-route.test.ts` missing 429 rate-limit case
+
+**Coverage gap:** `similar-route.test.ts` mocks `preIncrementSemanticAttempt` as a fixed `vi.fn(() => false)` and never flips it to `true`. The semantic route's companion test covers the 429 path. The similar route shares the same Pattern 2 rate-limit contract (`preIncrementSemanticAttempt` / `rollbackSemanticAttempt`) but that contract is untested on this route.
+
+**Missing test:** An `it('returns 429 when rate limit is exceeded')` case — set `preIncrementSemanticAttempt` to return `true`, assert `res.status === 429`, `res.headers.get('Retry-After') === '60'`, and that `rollbackSemanticAttempt` was NOT called (429 is a consumed slot, not a rollback case per route.ts:84-89).
+
+**Failure scenario without this test:** A refactor that accidentally moves the rate-limit increment after the mode gate (or removes it) in the similar route passes all tests without surfacing the change.
+
+**Confidence:** M
+
+---
+
+### TE-C9-04 [LOW] — `similar-route.test.ts` missing corrupt-embedding 404 case
+
+**Fix in route:** `apps/web/src/app/api/search/similar/[id]/route.ts:128-131` (Gate 6 second branch — `decodeEmbeddingColumn(targetRows[0].embedding) === null` → 404 `'Embedding data is corrupt'`).
+
+**Coverage gap:** The existing test at the Gate 6 position covers `targetRows = []` (no row found) — the first 404 branch at line 121. The second 404 branch (non-null row with a corrupt MEDIUMBLOB that decodes to null) at lines 128-131 has no test. The `rollbackSemanticAttempt` call on that path is also untested.
+
+**Missing test:** Set `targetRows = [{ embedding: Buffer.from('not-a-valid-embedding') }]` (non-empty row, corrupt value that `decodeEmbeddingColumn` returns null for), assert status 404 and `body.error === 'Embedding data is corrupt'`, and assert `rollbackSemanticAttempt` called once.
+
+**Failure scenario without this test:** A refactor that removes the `decoded === null` check (collapsing both 404 branches into a single `!targetRows[0].embedding` check) or that changes the error body string passes all tests silently.
+
+**Confidence:** L
+
+---
+
+## Verified clean (no gap found)
+
+- **Semantic route guard chain** (`semantic-search-route.test.ts`): all 12 cases — 403, 503 maintenance, 400 content-length NaN/413, 400 invalid JSON, 400 missing query, 400 query < 3 chars, 503 disabled, 200 production (real encoder), 429, 200 empty, 200 enriched, 500 + rollback. Comprehensive.
+- **Rate-limit pre-increment / rollback** (`semantic-search-rate-limit.test.ts`): bucket fill, window expiry, IP independence, rollback from 1 (entry deletion), multi-rollback, no-op on missing entry. Comprehensive.
+- **`clampSemanticTopK`** (`semantic-search-params.test.ts`): 15 cases including boolean/array/object/NaN/Infinity/numeric-string rejection. Comprehensive.
+- **Downloader full-manifest idempotency** (`download-clip-models.test.ts:29-36`, AGG-C8-02 fix): asserts `verifyAndCleanArtifacts` called with full `MANIFEST + false` on the fast-path; the ONNX-only single-file shortcut is asserted absent. The cycle-8 gap TE-C8-01 is closed.
+- **`backfillClipEmbeddings` action model_version selection** (`backfill-clip-embeddings-reembed.test.ts:26-35`, AGG-C8-05 fix): pins `eq(imageEmbeddings.modelVersion, modelVersion)` in the action source and that `const modelVersion =` is hoisted above `notExists(`. The cycle-8 gap TE-C8-02 is closed.
+- **`resolveBackfillConcurrency` pool-budget cap** (`admin-backfill-concurrency-cap.test.ts`): 8 arithmetic cases including small-pool degenerate and large-pool scaling.
+- **Backfill fatal-counter honesty** (`admin-backfill-runner-fatal-counters.test.ts`): fatal-only run, mixed run (processed=1 + errors=1 simultaneously), corrupt-width skip (encodeFailures=1, processImageFormats not called). Comprehensive.
+- **Migration journal monotonicity** (`migration-journal-monotonicity.test.ts`): idx ordering, when-monotonicity with documented allowlist, allowlist staleness check, post-condition predicate, and `migrate.js` loud-fail throw. Comprehensive.
+- **CLIP path resolver / revision-subdir layout** (`clip-paths.test.ts`, AGG-C8-12 fix): absolute/relative/empty `CLIP_MODELS_ROOT`, path-doubling regression explicitly asserted absent, revision-subdir nesting depth, 40-hex revision pin, model-id 2-segment guard.
+- **`clip-model.ts` source contracts** (`clip-model-contract.test.ts`): exports, `server-only` absence, 40-hex revision pin, singleton, volume path. Comprehensive.
+- **Similar route core paths** (`similar-route.test.ts`): 403, 503 mode gates (stub + disabled), 400 non-numeric id, 400 id=0, 404 no-embedding (rows = []), 200 self-exclusion, model_version WHERE filter, Cache-Control no-store. The three missing cases are TE-C9-02/03/04 above; the tested paths are adequate.
+- **`dotProduct` fast-path** for production mode: the similar route is production-only (Gate 5); `dotProduct` vs `cosineSimilarity` dispatch tested in `clip-embeddings.test.ts`; integration via production mode confirmed in `semantic-search-route.test.ts`.
+- **i18n key parity** (`i18n-key-parity.test.ts`): the new `search.invalidSemantic` key is present in both `en.json:412` and `ko.json:412`; the full leaf-key parity gate pins this automatically.
+- **Privacy fields** (`privacy-fields.test.ts`): enrichment SELECTs in both CLIP routes exclude GPS/filename_original/ICC/HDR per the `_PrivacySensitiveKeys` compile-time guard; no privacy-field drift detected.
+- **API auth scanner** (`check-api-auth.test.ts`): both CLIP routes are public (correctly excluded from `withAdminAuth` scan).
+- **Action origin scanner** (`check-action-origin.test.ts`): `embeddings.ts` actions carry `requireSameOriginAdmin()` and pass.
+- **Model-weight-gated suites** (`clip-offline-load.test.ts` × 2, `clip-semantic-integration.test.ts` × 2): skip by design — correct, not a gap.
+
+---
+
+## Summary
+
+**4 gaps found (1 MEDIUM, 3 LOW).**
+
+| ID | Severity | One-line description |
+|----|----------|----------------------|
+| TE-C9-01 | MEDIUM | AGG-C8-04 `invalidSemantic` short-query guard in `search.tsx` has zero source-contract test coverage — regression is invisible |
+| TE-C9-02 | LOW | `similar-route.test.ts` missing restore-maintenance 503 case (mock wired but never flipped) |
+| TE-C9-03 | LOW | `similar-route.test.ts` missing 429 rate-limit case (`preIncrementSemanticAttempt` never returns true in tests) |
+| TE-C9-04 | LOW | `similar-route.test.ts` missing corrupt-embedding 404 path (`decodeEmbeddingColumn` returns null) |
+
+No CRITICAL or HIGH gaps. Both cycle-8 open items (TE-C8-01, TE-C8-02) are closed by the committed regression tests. TE-C9-01 is the only finding worth prioritizing in a fix cycle — the others are edge-case coverage symmetry improvements on an already well-tested route.

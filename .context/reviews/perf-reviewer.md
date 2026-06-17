@@ -1,150 +1,111 @@
 # Performance & Concurrency Review — GalleryKit
 
-**HEAD:** `1a325fa6` (branch master) · **Agent:** perf-reviewer · **Date:** 2026-06-17
-**Run/Cycle:** Run 6 / Cycle 8 (review-plan-fix loop)
-**Prior perf baseline:** `a7758ef0` (cycle-7 perf, honest 0-findings convergence)
-**Scope this cycle:** FRESH HARD scrutiny of the now-LIVE CLIP semantic-search path (the only shipping delta since cycle-7), plus a full-repo re-sweep for N+1, missing indexes, unbounded scans, blocking request-path I/O, missing memoization, Sharp pipeline cost, and pagination caps.
+**HEAD:** `af9ae6c5` (branch master) · **Agent:** perf-reviewer · **Date:** 2026-06-17
+**Run/Cycle:** Run 6 / Cycle 9 (review-plan-fix loop)
+**Prior perf baseline:** `1a325fa6` (cycle-8 perf — 2 findings: PERF-C8-01 index, PERF-C8-02 dotProduct, both since fixed)
+**Scope this cycle:** FRESH re-verification that the cycle-8 perf fixes actually landed AND are effective in production, plus a full-repo re-sweep (CLIP hot path + every non-CLIP listing/serve/render/queue/SW/rate-limit surface) for any NEW or previously-missed perf issue.
 
 ---
 
 ## Verdict
 
-**2 findings — 0 CRIT / 0 HIGH / 1 MEDIUM / 1 LOW.** Both are in the freshly-activated CLIP scan path and were **invisible to every prior cycle** because the routes were dark (503) until these three commits flipped them live. Neither is catastrophic at the current ~445-row embedding count, but both are real, cheap to fix, and the MEDIUM one degrades monotonically as the gallery grows.
+**0 NEW findings.** This is an honest convergence cycle. Every cycle-8 perf finding was fixed and I HEAD-verified each fix is correct AND *effective* (the index migration actually applies; the `dotProduct` swap is gated correctly). The only remaining perf-shaped item on a live path — AGG-C8-01 (main-thread inference + scan) — is already a tracked, ACTIVE, original-severity-preserved deferral (`plan-361` DEF-C8-1, HIGH) with an explicit architect-led exit criterion; I examined it for a NEW angle per the brief and found none that isn't already subsumed by that deferral's scope. Re-reporting it would duplicate DEF-C8-1, which the brief forbids.
 
 | Severity | Count | IDs |
 |---|---|---|
 | CRITICAL | 0 | — |
 | HIGH | 0 | — |
-| MEDIUM | 1 | PERF-C8-01 |
-| LOW | 1 | PERF-C8-02 |
+| MEDIUM | 0 | — |
+| LOW | 0 | — |
 
-The catastrophic scenarios the brief asked me to rule out are **ruled out** (see "CLIP hot-path: what is CORRECT" below): the ONNX model is a true cross-request singleton (not per-request), ONNX `session.run` is async-offloaded (does not block the event loop), the scan is hard-capped at 5000, and result enrichment is a single bounded `inArray` round-trip. The two findings are the residual efficiency gaps, not correctness or memory hazards.
+No nitpicks, no premature-optimization churn. The two cheap, real cycle-8 perf wins are in and verified; nothing else on any path crosses the worth-fixing bar.
 
 ---
 
 ## Mechanical delta verification (HEAD-verified, not trusted)
 
-**Shipping delta `a7758ef0..1a325fa6`** = exactly the three briefed activation commits:
-- `e0da12ee` / `1a325fa6` — `lib/clip-model.ts` (+22): dropped `import 'server-only'`, switched `CLIP_MODELS_ROOT` to the shared `resolveClipModelsRoot()`; new `lib/clip-paths.ts` (+80); `scripts/download-clip-models.ts` (+30) path math.
-- `b1d6331c` — test-only (clip-paths / offline-load / boundary tests). Non-shipping.
+**Shipping delta `1a325fa6..af9ae6c5`** (the cycle-8 fix commits + cycle-8 review docs):
+- `drizzle/0022_image_embeddings_model_version_idx.sql` (+9) + `schema.ts` (+6, the `index()` builder) + `migrate.js` (+4, `ensureIndex` in `reconcileLegacySchema`) + `meta/_journal.json` (+7) — the AGG-C8-03 index.
+- `api/search/semantic/route.ts` (+11) + `api/search/similar/[id]/route.ts` (+18) — the AGG-C8-09 `dotProduct` swap (+ AGG-C8-10 enrichment-column parity, non-perf).
+- `actions/embeddings.ts` (+21) — AGG-C8-05 `model_version` filter in the `notExists` subquery (correctness, unwired path).
+- `components/search.tsx` (+20) / `similar-photos.tsx` (+5) — AGG-C8-04/06 short-query UX + a11y (non-perf).
+- `lib/clip-paths.ts` (+20) + `scripts/download-clip-models.ts` (+30) + tests — AGG-C8-02/12 (non-perf).
 
-**The activation commits themselves changed ZERO lines of the per-request scan or scoring code.** They are path-resolution + module-boundary plumbing. So the two findings below are **pre-existing latent gaps in `semantic/route.ts` + `similar/[id]/route.ts` that BECAME live the moment `semantic_search_mode='production'` is reachable** — exactly the class of "dark code that just turned on" the brief flagged for hard scrutiny. Prior cycles correctly did not report perf on these routes (they 503'd), so these are NOT re-reports.
-
-**`git status` snapshot in the prompt was stale** — the listed dirty files (`admin-backfill-runner.ts`, `page.tsx`, `sw.js`, etc.) are all committed at HEAD; `git diff -- apps/web/**` over the working tree is empty for shipping source. No uncommitted shipping change to review.
-
----
-
-## PERF-C8-01 — [MEDIUM] No index on `image_embeddings(model_version, updated_at)`; every live semantic/similar query is a full table scan + filesort
-
-**Files:**
-- `apps/web/src/app/api/search/semantic/route.ts:250-255`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:142-147`
-- Schema: `apps/web/src/db/schema.ts:273-283` (table def) + `apps/web/drizzle/0012_image_embeddings.sql:5-12` (only `PRIMARY KEY (image_id)` + FK; **no secondary index**)
-
-**Confidence:** HIGH (that the index is absent and the query shape cannot use one). MEDIUM (on present-day magnitude — small at 445 rows; the severity is forward-looking).
-
-**Issue.** Both now-live public endpoints run the identical scan query:
-
-```sql
-SELECT image_id, embedding FROM image_embeddings
-WHERE model_version = ?            -- e.g. 'jina-clip-v2-d512-q8'
-ORDER BY updated_at DESC
-LIMIT 5000;
-```
-
-`image_embeddings` has exactly one index: the clustered `PRIMARY KEY (image_id)`. There is no index on `model_version` and none on `updated_at`. MySQL therefore:
-1. **Full-scans** the clustered PK (every row, reading the 2048-byte MEDIUMBLOB inline for each since it's `SELECT embedding`), filtering `model_version` with no index assist;
-2. **Filesorts** the survivors by `updated_at DESC` (no ordered index to walk) before applying `LIMIT 5000`.
-
-This runs on **every** `/api/search/semantic` (production mode) and **every** `/api/search/similar/[id]` call. Both are public, same-origin, `no-store` (uncacheable), interactive search endpoints — there is no HTTP cache or ISR layer to absorb repeat queries, unlike the Atom-feed filesort the prior cycle classified awareness-only (low-frequency, cacheable).
-
-**Slow/expensive scenario.** At the briefed 445 rows the scan + filesort is sub-millisecond and pulling ~890 KB of inline BLOB is trivial — invisible today. But this is a public photo gallery whose embedding table grows 1:1 with uploaded photos and is unbounded by design (`SEMANTIC_SCAN_LIMIT=5000` only caps the *returned* rows, not the rows *scanned* before the LIMIT — the filesort processes the entire matching set first). At a realistic large personal/pro gallery of 20k–50k photos:
-- The filesort must order tens of thousands of rows on a non-indexed timestamp per request;
-- The PK scan reads every row's inline 2048-byte BLOB (~40–100 MB of buffer-pool churn per query) just to filter and sort, even though only ≤50 survive top-K;
-- Two such requests/sec (one bored visitor clicking "similar photos" through a gallery) sustains a continuous full-table-scan + multi-MB filesort load on the single-writer instance, contending with the upload/serve path for buffer pool and CPU.
-
-A composite **`(model_version, updated_at)`** index converts this into an index range seek that walks rows already ordered by `updated_at` within the `model_version` partition — the `LIMIT`/scan-cap can short-circuit after the first 5000 index entries without a filesort, and `model_version` filtering is index-resolved. (`updated_at`-DESC ordering uses a backward index scan, which MySQL 8 does natively.)
-
-**Fix.** Add a new migration (per the CLAUDE.md runbook — monotonic `when`, mirror in `reconcileLegacySchema`):
-
-```sql
--- drizzle/00NN_image_embeddings_scan_index.sql
-ALTER TABLE `image_embeddings`
-  ADD INDEX `idx_image_embeddings_model_updated` (`model_version`, `updated_at`);
-```
-
-and the matching `index()` in `schema.ts`'s `imageEmbeddings` table builder. Write cost is one extra small secondary index on a table written only at upload/backfill time (not on the request hot path) — negligible against the per-search-request scan it removes. The BLOB stays out of the index (only the two scalar columns are indexed), so index size is tiny.
-
-**Note (not part of this finding, flagged for the correctness reviewer):** `apps/web/src/app/actions/embeddings.ts:92-96` selects images whose embedding is missing via `notExists(... WHERE imageId = images.id)` **without** the `modelVersion` filter that the canonical writers (`backfill-clip-embeddings.ts:125-131`, queue hook) use. That action is currently unwired (no UI), so it's not a live perf issue, but if surfaced it would skip re-embedding stub→production rows. Out of perf scope; noting for cross-agent visibility only.
+**Working tree:** the `git status` snapshot in the prompt was STALE — every listed dirty file (`admin-backfill-runner.ts`, `page.tsx`, `sw.js`, `error.tsx`, the `.context/reviews/*.md`) is committed at HEAD. `git diff HEAD -- apps/web/src apps/web/public/sw.js` over the working tree is EMPTY for shipping source. No uncommitted shipping change to review.
 
 ---
 
-## PERF-C8-02 — [LOW] Live scan uses `cosineSimilarity` (recomputes both L2 norms + 2× sqrt per row) when the codebase already ships a `dotProduct` fast-path for these guaranteed-unit vectors
+## Cycle-8 perf fixes — landed AND effective (the core of this cycle's verification)
 
-**Files:**
-- `apps/web/src/app/api/search/semantic/route.ts:269` — `cosineSimilarity(queryEmbedding, imgEmbedding)`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:158` — `cosineSimilarity(targetEmbedding, imgEmbedding)`
-- The unused fast-path: `apps/web/src/lib/clip-embeddings.ts:49-56` (`dotProduct`), with its contract doc at `:41-48` stating it equals cosine for unit vectors and "skips the two per-call norm recomputations + sqrt."
+### PERF-C8-01 / AGG-C8-03 — `image_embeddings(model_version, updated_at)` index → CLOSED ✓
+- **Migration present & correct:** `drizzle/0022_image_embeddings_model_version_idx.sql:8-9` creates `idx_image_embeddings_model_version_updated (model_version, updated_at)`.
+- **Schema mirror present:** `schema.ts:284-288` declares the matching `index('idx_image_embeddings_model_version_updated').on(table.modelVersion, table.updatedAt)`.
+- **Legacy-reconcile mirror present:** `migrate.js:570-573` adds the index idempotently via `ensureIndex(...)` inside `reconcileLegacySchema`, so a fresh DB without `__drizzle_migrations` rows still gets it. Matches the CLAUDE.md migration runbook.
+- **The migration actually APPLIES (not inert):** I verified `meta/_journal.json` entry idx=22 has `when=1781687094232`, which is the strict global maximum across all journal `when` values (0 entries are ≥ it). Per the documented drizzle `MAX(created_at)` cursor behavior, a non-monotonic `when` would have silently skipped this migration — leaving the full-table-scan LIVE despite the "fix." It is monotonic-max, so drizzle applies it AND the `migrate.js` post-condition hash assertion would fail loud if it didn't. **The fix is real in production, not just in source.**
+- **Query shape is index-served:** both live scans run `WHERE model_version = ? ORDER BY updated_at DESC LIMIT 5000` (`semantic/route.ts:254-256`, `similar/[id]/route.ts:145-147`). Equality on the leading index column + DESC sort on the second column = a backward index range scan; the filesort the prior cycle described is eliminated. (The `SELECT embedding` BLOB fetch still requires per-row PK back-lookups — see "what is NOT a new finding" below — but the filesort is gone.)
 
-**Confidence:** HIGH. Every vector on both sides is provably unit-length: query vectors come from `embedTextReal`→`truncateAndNormalize` (`clip-model.ts:139`) and `embedTextStub`→`deterministicEmbedding` is fed through normalization; stored vectors are written by `embeddingToBuffer(embedding)` where `embedding` is the `truncateAndNormalize` output (`clip-model.ts:199`, `image-queue.ts:447`, backfill `:155`). The unit-length invariant `dotProduct` requires holds on both operands.
+### PERF-C8-02 / AGG-C8-09 — `dotProduct` fast-path → CLOSED ✓, and the stub-gating is CORRECT
+- `semantic/route.ts:271`: `const similarity = isProd ? dotProduct : cosineSimilarity;` — production (unit vectors) uses `dotProduct`; stub stays on `cosineSimilarity`. This is the *correct* gate, not a blanket swap: `embedTextStub`→`deterministicEmbedding` returns raw `[-1,1]` values that are NOT L2-normalized, so `dotProduct` would corrupt stub ranking. Reviewer-grade detail handled right.
+- `similar/[id]/route.ts:163`: unconditional `dotProduct(targetEmbedding, imgEmbedding)` — safe because Gate 5 (`:101`) returns 503 for any non-`production` mode, so stub vectors can never reach this scan. Every operand is `truncateAndNormalize` output (unit length). Correct.
+- Both import `dotProduct` from `@/lib/clip-embeddings` (`semantic:42`, `similar:36`). No dangling `cosineSimilarity` import left where unused (semantic still needs it for the stub branch).
 
-**Issue.** `cosineSimilarity` (`clip-embeddings.ts:24-39`) computes, per row, `dot`, `normA`, `normB` (three multiply-accumulate loops fused into one), then `Math.sqrt(normA) * Math.sqrt(normB)` and a divide. For unit vectors `normA == normB == 1`, so the two sqrts, the divide, and the `normA`/`normB` accumulations are pure waste — `dotProduct` returns the identical score with one MAC loop and no sqrt/divide. The repo authored `dotProduct` *specifically* for this scan (the doc comment names "the brute-force scan where both the query and every stored vector are unit length") but neither live route calls it.
-
-**Expensive scenario.** Per row the waste is 2 extra MAC accumulations over 512 dims (~1024 mul-add) + 2 `Math.sqrt` + 1 divide. Over the full `SEMANTIC_SCAN_LIMIT=5000`-row scan that is ~5.1M redundant float ops + 10k sqrts **per request**, on the main thread (the scoring `.map` at `:265-272` / `:153-161` is synchronous JS, unlike the async ONNX inference). At 445 rows it's ~0.45M ops — sub-millisecond, invisible. At a 20k–50k-photo gallery hitting the 5000 cap it's a measurable main-thread CPU slice per search request that the existing fast-path eliminates for free. It also compounds with PERF-C8-01: the same requests already pay the scan/filesort cost.
-
-**Fix.** Swap both call sites to the existing `dotProduct` and update the import lists:
-
-```ts
-// semantic/route.ts:269
-const score = dotProduct(queryEmbedding, imgEmbedding);
-// similar/[id]/route.ts:158
-const score = dotProduct(targetEmbedding, imgEmbedding);
-```
-
-(Import `dotProduct` instead of / alongside `cosineSimilarity` from `@/lib/clip-embeddings`.) The `decodeEmbeddingColumn` read path does not re-normalize, so the stored bytes are exactly the unit vector that was written — the invariant is preserved end-to-end. Zero score change for well-formed rows; just less work. If a defensive guard is wanted, assert `|‖v‖−1| < ε` once on the query vector (not per row).
+### AGG-C8-05 — backfill `notExists` `model_version` filter → CLOSED ✓ (correctness, perf-adjacent)
+`actions/embeddings.ts:92` hoists `modelVersion` above the query; `:103-111` adds `eq(imageEmbeddings.modelVersion, modelVersion)` to the `notExists` subquery. Still unwired from UI (sidecar canonical), but the selection now matches the sidecar. Not a perf issue; noted for completeness since it was in the cycle-8 perf-adjacent note.
 
 ---
 
-## CLIP hot-path: what is CORRECT (catastrophe checklist — all PASS)
+## AGG-C8-01 (main-thread inference + scan) — examined for a NEW angle; none found
 
-The brief asked me to specifically rule out several catastrophic patterns. I verified each at HEAD source:
+The brief asked me to verify AGG-C8-01's status and only re-report if there's a NEW unaddressed angle. Status at HEAD:
 
-1. **Model load is a true cross-request singleton, NOT per-request.** `getModelBundle()` (`clip-model.ts:78-108`) caches `loadPromise` at module scope and returns it on every subsequent call; `AutoModel.from_pretrained` runs once per process. The catch handler nulls `loadPromise` only on *failure* so a failed load retries — a successful load stays resident for the process lifetime. A per-request 500 MB+ ONNX reload is **not** happening. Confidence HIGH.
+- **It is a tracked, ACTIVE deferral, NOT a dropped item.** `plan-361-run6-cycle8-deferred.md` DEF-C8-1 carries it at its **original HIGH/High** (explicitly NOT downgraded), records the re-open trigger as FIRED (production is live), and scopes the fix as architect-led off-main-thread work (`worker_threads`/sidecar pool) — "designed, not bolted on." The two cheap interim main-thread-cost reductions it called for (the index + `dotProduct`) both landed THIS-cycle-prior, shrinking the window.
+- **The candidate NEW angle I evaluated — per-request BLOB transfer + Float32Array decode cost.** Both routes `SELECT embedding` (the 2048-byte MEDIUMBLOB) for ALL ≤5000 scanned rows, then `decodeEmbeddingColumn` → `bufferToEmbedding` runs 512 `readFloatLE()` calls + one `Float32Array(512)` alloc per row (`clip-embeddings.ts:77-86`). At the 5000-row cap that is ~10 MB of inline-BLOB wire transfer + ~2.56M `readFloatLE` + 5000 allocations **per request, on the main thread**, and the index does NOT remove it (the query selects the BLOB, so even an index range scan does per-row PK back-lookups to fetch it).
+- **Why this is NOT a new finding:** DEF-C8-1 explicitly scopes "the per-request ≤5000-row JS cosine scan + ONNX tensor pre/post run on the Node main thread." Decoding the row to a `Float32Array` is an inseparable prerequisite of that scan — you cannot score row N without decoding it — so the decode/transfer cost lives inside DEF-C8-1's blast radius and shares its exact remedy (move the scan off-thread, or cap the scan size; the register already names "lowering the 5000-row scan cap as a cheap interim throttle"). Reporting it as PERF-C9-xx would be re-labeling AGG-C8-01, which the brief forbids. I am surfacing it here as **corroboration of DEF-C8-1's bound**, not as a new item.
 
-2. **ONNX inference does NOT block the event loop.** `onnxruntime-node`'s `session.run` is exposed as an async N-API method backed by a libuv worker thread; `await model(...)` (`clip-model.ts:123`, `:184`) yields the event loop during compute. The text-query request path (`embedTextReal`) does **no** synchronous heavy loop — only tokenize + async model call + a 512-element `truncateAndNormalize`. The request thread is not pegged during inference. Confidence HIGH (runtime behavior of onnxruntime-node async work; node_modules not present in this checkout to byte-verify, hence not absolute, but this is the documented and long-standing N-API contract).
-
-3. **The synchronous HWC→CHW preprocessing loop (`clip-model.ts:176-182`, ~786K iterations) is OFF the request hot path.** It runs only in `embedImageReal` (image embedding), which is called exclusively from the upload queue hook (`image-queue.ts:447`), the backfill script (`:155`), and the unwired admin action — all background/operator paths already isolated from request serving. The public text-search request path never executes it. Not a finding.
-
-4. **Native runtime is lazily imported.** `@huggingface/transformers` is `await import()`-ed *inside* `getModelBundle()` (`clip-model.ts:83`), not at module top level, and is listed in `next.config.ts:50 serverExternalPackages`. The boot/upload graph does not drag onnxruntime-node into every request; it resolves only on first real encode. Memory footprint stays zero until the feature is actually invoked. Confidence HIGH.
-
-5. **Scan is hard-capped and enrichment is bounded.** `.limit(SEMANTIC_SCAN_LIMIT)` (5000) caps rows returned; `topK` (`clip-embeddings.ts:137-142`) filters+sorts+slices to ≤`SEMANTIC_TOP_K_MAX=50`; the enrichment `inArray(images.id, resultIds)` (`semantic/route.ts:303`, `similar/:199`) is therefore a single round-trip over ≤50 ids with a `(processed)` filter — no N+1, no unbounded enrichment. The `topK` sort is O(n log n) over n≤5000 — trivial, not a finding.
-
-6. **Memory: no leak across requests.** The only resident state is the singleton model bundle (intentional). No per-request buffer is retained; the `Float32Array` scratch in `embedImageReal` (`pv`, `clip-model.ts:175`) is request-local and GC'd. The scored array and decoded embeddings are request-local. No growth.
-
-7. **Backfill concurrency + memory bounded.** `backfill-clip-embeddings.ts`: `BATCH_CONCURRENCY=2` (`:71`) via chunked `Promise.all` (`:148-150`), keyset pagination (`cursor`, `:109/:139` — the COR-R4C19-04 fix, not OFFSET), `BATCH_SIZE=50`, total capped at `SEMANTIC_SCAN_LIMIT`. At most 2 concurrent `embedImageReal` (each one Sharp decode + one ONNX run) in flight — bounded peak memory, no fan-all. The admin action (`embeddings.ts`) mirrors this (`BACKFILL_CONCURRENCY=2`). Correct.
-
-8. **Newly-live search UI is well-behaved.** `search.tsx` debounces the semantic POST (`debounceRef` setTimeout, `:217-229`); `similar-photos.tsx` fetches once-on-first-expand (`fetchedRef`, `:62/:68`) and is fully gated out (`return null`) unless `semanticSearchMode === 'production'` — no dead 503-ing control, no CLS, no per-keystroke fetch flood. Minor: neither uses an `AbortController` to cancel a superseded in-flight request, but the debounce prevents pile-up and this matches the pre-existing keyword-search shape (not a new regression) — below the LOW bar.
+**Recommendation to the aggregator (no new ID):** when DEF-C8-1's architect-led design is scheduled, ensure the design accounts for the BLOB-read + decode cost (it dominates the non-inference main-thread slice at scale), and re-state the "lower the scan cap" interim lever — it is the single cheapest throttle if production load is observed before the worker pool ships.
 
 ---
 
-## Full-repo re-sweep (non-CLIP) — re-derived at HEAD, no regressions
+## CLIP hot-path catastrophe checklist — re-verified at HEAD (all PASS)
 
-The non-CLIP hot paths are byte-identical to the cycle-7 baseline (`git diff a7758ef0..HEAD` empty for `lib/data.ts`, `lib/process-image.ts`, `lib/image-queue.ts` scan/serve sections, `lib/serve-upload.ts`, `lib/sw-cache.ts`, `lib/bounded-map.ts`, `db/schema.ts` images-table indexes, `components/home-client.tsx`, `histogram.tsx`, `use-display-capability.ts`). I re-confirmed the prior cycle's conclusions hold and did not re-derive them line-by-line here (they are documented in the cycle-7 perf review and unchanged):
+1. **Model load is a true cross-request singleton.** `getModelBundle()` (`clip-model.ts:78-108`) caches `loadPromise` at module scope; `from_pretrained` runs once/process; the `.catch` nulls the promise only on *failure* (retry, not poison). No per-request reload. ✓
+2. **ONNX inference does not block the loop.** `await model(...)` (`clip-model.ts:123`, `:184`) — onnxruntime-node's `session.run` is async-offloaded to a libuv worker. The text-query path does no synchronous heavy loop (tokenize + async model call + 512-elt normalize). ✓ (Residual main-thread cost is the JS scoring + BLOB decode loop — that's the DEF-C8-1 surface, above.)
+3. **The 786K-iteration HWC→CHW preprocessing loop (`clip-model.ts:176-182`) is OFF the request path.** It runs only in `embedImageReal` (upload queue hook `image-queue.ts`, backfill, unwired admin action) — never on public text search. ✓
+4. **Native runtime is lazily imported** inside `getModelBundle()` (`clip-model.ts:83`), listed in `serverExternalPackages`. Zero footprint until first real encode. ✓
+5. **Scan hard-capped + enrichment bounded.** `.limit(SEMANTIC_SCAN_LIMIT)` = 5000; `topK` → ≤50; enrichment is ONE `inArray(images.id, ≤50 ids)` round-trip with a `processed` filter. No N+1. ✓
+6. **No cross-request memory growth.** Only resident state is the intentional singleton bundle; scored array / decoded `Float32Array`s / the `pv` scratch are request-local and GC'd. ✓
+7. **Backfill bounded.** Sidecar: `BATCH_CONCURRENCY=2`, keyset pagination, `BATCH_SIZE=50`, total ≤ `SEMANTIC_SCAN_LIMIT`. Admin action mirrors (`BACKFILL_CONCURRENCY=2`, chunked `Promise.all`, `.limit(SEMANTIC_SCAN_LIMIT)`). The queue embedding hook is fire-and-forget (`void (async()=>{})()`, `image-queue.ts:434`) and gated `disabled→return`, so it never blocks the PQueue job. ✓
+8. **`getGalleryConfig` on the request path** is `cache()`-wrapped (request-scoped dedupe) and reads one indexed `admin_settings` row-set per request. One cheap round-trip, same pattern every public route uses, rate-limited to 30/min/IP — NOT search-specific, NOT new, below the bar. ✓
 
-- **No N+1** in any listing/detail/feed query — tags aggregate via the shared `tagNamesAgg` GROUP_CONCAT JOIN (one round-trip); full-tag path uses one combined GROUP_CONCAT.
-- **images-table query shapes all covered** by composite indexes (`idx_images_processed_capture_date`, `_processed_created_at`, `_topic`, `_uploaded_by`, tag-JOIN indexes, analytics breakdown indexes). The `getImagesForFeed` `updated_at` filesort remains the only uncovered shape — **still awareness-only** (bounded, low-frequency, cacheable Atom feed; an index would add upload-time write cost for no observable gain). NOT re-reported.
-- **No sync fs** on any request/render path (repo grep for `*Sync` over `src/app`+`src/lib` excluding tests: zero hits).
-- **Sharp pipeline** unchanged: 3-format parallel `Promise.all`, `.clone()` decode reuse, `rgb16` only on wide-gamut branch, `WIDE_GAMUT_MAX_SOURCE_PIXELS` OOM guard, `limitInputPixels`/`sequentialRead`. Correct.
-- **Queue** unchanged: `PQueue concurrency 1`, per-job advisory lock + conditional UPDATE. The CLIP embedding hook (`image-queue.ts:434-478`) is correctly **fire-and-forget** (`void (async()=>{})()`) so it never blocks the queue job — and gated `disabled→return` so it's a no-op by default.
-- **SW LRU** O(k) head-walk eviction, 50 MB cap — unchanged.
-- **All rate-limit maps** are `BoundedMap` with hard caps + periodic O(n≤cap) prune; the semantic/similar routes share the `preIncrementSemanticAttempt` bucket (cap 2000) — bounded. Unchanged.
+---
+
+## Full-repo non-CLIP re-sweep — no new regressions
+
+Dispatched a thorough read-only sweep of every non-CLIP perf surface and independently verified the two candidates it surfaced; both rejected on direct source inspection:
+
+- **REJECTED — sw.js HEAD-revalidate abort (`sw.js:235-256`).** The `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` fetch is inside a `try { await ... } catch { /* fall through to stale-serve */ }` — the abort rejection is fully handled and the path falls through to `startRevalidate(); return cached;`. This is exactly the documented AGG-R8-05 (run-8 c2) bound. No orphaned promise; `await` + try/catch is complete. Not a finding.
+- **REJECTED — photo-viewer "RAF handle accumulation".** The cited lines `photo-viewer.tsx:150-170` contain a `sessionStorage` effect (`:150-154`) and a single `setTimeout` blur-fallback with proper `return () => clearTimeout(fallbackTimer)` cleanup (`:168-172`). There is no multi-RAF scroll-restore block at the cited location — the candidate's evidence was not present in source. Not a finding.
+
+Confirmed clean (re-derived at HEAD; byte-identical to the cycle-7/8 converged baselines for these files):
+- **No N+1** anywhere — listing/detail/feed tags via the shared `tagNamesAgg` GROUP_CONCAT JOIN (one round-trip); enrichment via single `inArray`.
+- **images-table query shapes** all covered by composite indexes; the `getImagesForFeed` `updated_at` filesort remains the only uncovered shape — **still awareness-only** (bounded, low-frequency, cacheable Atom feed). NOT re-reported.
+- **No new sync fs on any request/render path.** The only `*Sync` additions since the cycle-7 baseline are in `__tests__` source-scanning fixtures (`client-server-only-boundary.test.ts`, `clip-paths.test.ts`, `download-clip-models.test.ts`) — never executed on a serving path.
+- **Sharp pipeline** unchanged: 3-format parallel `Promise.all`, `.clone()` decode reuse, concurrency cap `(cpu-1)/3`, `sharp.cache(false)`, `rgb16` only on wide-gamut, `WIDE_GAMUT_MAX_SOURCE_PIXELS` OOM guard, `limitInputPixels`.
+- **Queue** unchanged: `PQueue concurrency 1`, per-job advisory lock + conditional UPDATE, bounded retry maps (`MAX_RETRY_MAP_SIZE`).
+- **SW LRU** O(k) insertion-order head-walk eviction, 50 MB cap — unchanged.
+- **serve-upload** settings-hash behind a 5s SWR module cache (PERF-R4C3-05); ETag is mtime+size+hash string concat; no per-request DB fan-out on the static-served path.
+- **All rate-limit maps** are `BoundedMap` with hard caps + periodic O(n≤cap) prune; semantic/similar share the `preIncrementSemanticAttempt` bucket (cap 2000) — bounded.
+- **Connection pool** 10 conns, queue limit 20, keepalive — unchanged.
+- **search.tsx / similar-photos.tsx** UI deltas introduced no new fetch/interval/loop/sort patterns (diff grep empty for perf-relevant additions); semantic POST stays debounced, similar fetch stays once-on-first-expand and fully gated out unless production mode.
 
 ---
 
 ## Hard guards respected
-1. Did **not** propose `import 'server-only'` on `@/db` or `clip-model.ts` (the boundary that breaks tsx backfill).
-2. Did **not** propose activating or de-activating CLIP/semantic search — both findings are pure efficiency fixes that apply only when an operator has *already* enabled production mode; they change neither the gate nor the dark-by-default posture.
-3. Did **not** re-report any cycle 1–7 closed item (React cache(), Promise.all, composite images-table indexes, masonry useMemo, view-count buffer, SW LRU, bounded maps). The `getImagesForFeed` filesort stays awareness-only. The two findings are on routes that were 503-dark in every prior cycle and are now live.
+1. Did **not** propose re-adding `import 'server-only'` to `clip-model.ts` or `@/db`.
+2. Did **not** propose changing `semantic_search_mode` default away from `'disabled'`.
+3. Did **not** propose weakening the production gate / revision pin / `allowRemoteModels=false` / `model_version` isolation. The (zero) findings touch none of these.
+4. Did **not** re-report AGG-C8-01 (it is tracked as ACTIVE DEF-C8-1); the BLOB/decode cost I examined is documented above as *subsumed* by that deferral, surfaced as corroboration only, with no new ID.
+5. Did **not** re-report any cycle 1–8 closed item.
 
 ## Recommendation
-Both findings are cheap, additive, and risk-free (one new index migration; one symbol swap to an existing tested helper). Worth fixing now while the table is small — PERF-C8-01 specifically prevents a future full-table-scan-per-search cliff as the gallery grows, and is far cheaper to land before the table is large. Neither blocks; both are real and HEAD-verified.
+Convergence confirmed from the performance axis. The two real cycle-8 perf fixes (index + `dotProduct`) are landed and verified effective in production (the index migration's journal `when` is monotonic-max, so it actually applies). No new work is warranted this cycle. The single remaining live-path perf item (AGG-C8-01 / DEF-C8-1, HIGH) is correctly tracked as an architect-led deferral with a fired re-open trigger and shipped interim mitigations — when it is picked up, fold the BLOB-read/decode cost and the scan-cap throttle into that design (noted above, no new ID).

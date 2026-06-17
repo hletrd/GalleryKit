@@ -1,149 +1,97 @@
-# Code Reviewer — Deep Review (Run-6 Cycle-8)
+# Code Reviewer — Run-6 Cycle-9 Deep Code-Quality + Correctness Review
 
-- **HEAD:** `1a325fa6`
-- **Agent:** code-reviewer (oh-my-claudecode:code-reviewer)
-- **Date:** 2026-06-17
-- **Angle:** logic bugs, edge cases, error handling, data-flow/state, resource leaks, async/await correctness, path math, adherence to project conventions.
-- **Focus:** the three activation-fix commits that turned the CLIP semantic-search feature LIVE (`e0da12ee`, `b1d6331c`, `1a325fa6`) + a full sweep of the now-live CLIP consumers, plus a whole-repo regression sweep.
+**Date:** 2026-06-17
+**HEAD reviewed:** `af9ae6c5` (working tree clean)
+**Reviewer:** code-reviewer (oh-my-claudecode)
+**Scope:** Entire repo, with deep focus on the CLIP/semantic-search activation surface (the only code that changed since the cycle-7 0-finding baseline `a7758ef0`).
+
+---
 
 ## Verdict
 
-**APPROVE — 0 blocking findings. 2 LOW robustness notes (non-blocking).** (CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 2.)
+**REQUEST CHANGES** — **1 new real finding** (CR-C9-01, HIGH).
 
-| Severity | Count | Confidence |
+The cycle-8 activation closed 13 findings cleanly. This pass re-verified each against current HEAD (none re-opened) and swept the whole system for fresh correctness issues. I found **one genuine, HEAD-verified residual gap** in the AGG-C8-02 fix: the downloader idempotency fast-path now verifies "the full manifest," but the manifest itself omits two files (`config.json`, `tokenizer_config.json`) that are **fatal-for-offline-load** in `@huggingface/transformers` v3.8.1 — so the exact partial-seed → 503-storm failure mode AGG-C8-02 set out to eliminate is only partially closed.
+
+No CRITICAL. No HIGH/CRITICAL at HIGH confidence other than CR-C9-01 (rated HIGH severity / MEDIUM confidence — see below). All HARD GUARDS respected; nothing here proposes weakening the live feature.
+
+### By severity
+- CRITICAL: 0
+- HIGH: 1 (CR-C9-01)
+- MEDIUM: 0
+- LOW: 0 (1 informational observation, CR-C9-OBS-1, non-actionable)
+
+---
+
+## Findings
+
+### CR-C9-01 [HIGH] — CLIP manifest omits `config.json` + `tokenizer_config.json`; partial-seed idempotency fast-path still green-lights a runtime 503 storm
+
+- **Where:**
+  - `apps/web/scripts/clip-model-manifest.ts:25-30` — `CLIP_MODEL_MANIFEST` has only **two** entries: `onnx/model_quantized.onnx` and `tokenizer.json`.
+  - `apps/web/scripts/download-clip-models.ts:72-84` — idempotency fast-path: `if (existsSync(onnxPath))` → `verifyAndCleanArtifacts(modelCacheDir, MANIFEST, false)` → if `preCheck.ok`, prints "already up to date" and `return`s (exit 0).
+  - `apps/web/src/lib/clip-model.ts:90-98` — offline load: `AutoModel.from_pretrained` (→ `AutoConfig` → `config.json`) and `AutoTokenizer.from_pretrained` (→ `tokenizer.json` + `tokenizer_config.json`), all with `env.allowRemoteModels=false`.
+
+- **Why it's a problem:** The AGG-C8-02 fix (cycle-8, scheduled in plan-360 TASK-1, NOT deferred) replaced the ONNX-only early-return with a *full-manifest* `verifyAndCleanArtifacts` call so that "a partial/corrupt seed missing a config file is [no longer] reported up-to-date." The original finding text explicitly named the fatal files: "`tokenizer.json` / `tokenizer_config.json` / `config.json` … the offline `from_pretrained` (`allowRemoteModels=false`) treats them as **fatal**." But the manifest the fast-path checks contains **neither `config.json` nor `tokenizer_config.json`**. I verified fatality against the pinned runtime version:
+  - `@huggingface/transformers` v3.8.1 `src/configs.js:54` — `loadConfig` → `getModelJSON(..., 'config.json', true, ...)` (3rd arg `true` = **fatal**).
+  - v3.8.1 `src/tokenizers.js:67-71` — `loadTokenizer` → `getModelJSON(..., 'tokenizer.json', true, ...)` **and** `getModelJSON(..., 'tokenizer_config.json', true, ...)` (both **fatal**); line 2742 documents "Throws … if the tokenizer.json or tokenizer_config.json files are not found."
+
+  So a seed where `config.json` or `tokenizer_config.json` is missing/truncated/corrupt — but `onnx/model_quantized.onnx` and `tokenizer.json` are intact — passes `verifyAndCleanArtifacts` (it only inspects the 2 manifest entries), the downloader reports "All checksums OK — already up to date" and exits 0, and the operator believes the seed is healthy. The first live semantic/similar query then calls `from_pretrained`, which throws on the missing/corrupt config → `getModelBundle()`'s `.catch` nulls `loadPromise` (clip-model.ts:101-105) → every subsequent request retries the load, throws again, and returns 503 **indefinitely**. This is precisely the failure class AGG-C8-02 was created to prevent; the fix narrowed but did not eliminate it.
+
+  The test `apps/web/src/__tests__/download-clip-models.test.ts` ("idempotency fast-path verifies the full manifest (not ONNX-only)") asserts the script calls `verifyAndCleanArtifacts(...MANIFEST...false)` — it pins that the *manifest* is checked, but cannot catch that the *manifest* is itself incomplete, so it gives false confidence the gap is closed.
+
+- **Failure scenario:** Operator runs the canonical `docker run --rm ... download-clip-models.ts` seed. The download is interrupted after ONNX + tokenizer.json finish but while `config.json` is half-written (network blip, disk-full mid-write, container OOM-kill, or a manual partial copy of the bind-mount). Operator re-runs the seed to "make sure"; the fast-path verifies the 2 manifest entries (both intact), prints "already up to date," exits 0. Operator flips `semantic_search_mode='production'` + `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. First visitor query → `from_pretrained` throws on the truncated `config.json` → 503 → every search and every "similar photos" expansion 503s indefinitely with no operator-visible cause (the seed reported success).
+
+- **Fix (small, additive, low-risk):** Add `config.json` and `tokenizer_config.json` to `CLIP_MODEL_MANIFEST` with their pinned-revision SHA-256 hashes (compute once from a verified good seed at revision `e10d47f5…b74cb436`). They are small JSON files, so the hashing cost is trivial and the integrity guarantee becomes complete. `verifyAndCleanArtifacts` and both call sites then cover every fatal-for-offline-load artifact with no further code change. Strengthen the test to assert the manifest *contains* `config.json` and `tokenizer_config.json` (not merely that "the manifest" is checked), so the completeness invariant is pinned. (Lower-quality alternative: add explicit `existsSync` + non-empty checks for the two files in the fast-path without hashes — catches "missing" but not "corrupt/truncated"; the manifest-SHA route is strictly better and reuses existing machinery.)
+
+- **Confidence:** **HIGH** on the mechanism (config.json + tokenizer_config.json are provably fatal in the pinned v3.8.1; manifest provably omits them; fast-path provably short-circuits on the incomplete manifest). **MEDIUM** on real-world trigger probability (requires partial corruption of exactly those JSON files while onnx + tokenizer.json stay valid — a plausible interrupted/disk-full seed, the same event class AGG-C8-02 itself targeted). Severity preserved **HIGH** to match AGG-C8-02's consensus rating: a wedged production search with no operator-visible cause is high operational impact even though the trigger is operator-side.
+
+- **Repo-policy note:** Correctness/availability residual on a LIVE path. Per the review-plan-fix deferred-fix rules, schedule it or formally defer with a quoted basis and preserved severity — do not silently drop. Cheap to land this cycle.
+
+---
+
+## Informational (not a finding to action)
+
+### CR-C9-OBS-1 — similar route enrichment returns `lens_model` + `capture_date` that `SimilarPhotos` discards
+- **Where:** `apps/web/src/app/api/search/similar/[id]/route.ts:205-206, 227-228` add `lens_model` + `capture_date` to the enrichment SELECT (the AGG-C8-10 cycle-8 fix), but `apps/web/src/components/similar-photos.tsx` `SimilarResult` (lines 14-25) does not declare those fields and `SimilarThumb` renders only `title`/`description`.
+- **Assessment:** Harmless. The two extra columns are public, non-PII, and already returned by keyword + semantic search; the only effect is a few unused bytes per result in the JSON. AGG-C8-10's stated rationale ("parity with the semantic route's enrichment … without these, similar-result cards rendered with the shared component show blank lens/date") anticipates a *future* shared result-card component; the current `SimilarThumb` is a distinct minimal component. Not worth a code change — flagged only so a future reviewer doesn't re-discover the SELECT/component asymmetry and mistake it for a bug. **Confidence: HIGH** (verified both files at HEAD).
+
+---
+
+## Cycle-8 findings re-verified at HEAD (all CLOSED — none re-opened)
+
+| Finding | Status at `af9ae6c5` | Evidence |
 |---|---|---|
-| CRITICAL | 0 | — |
-| HIGH | 0 | — |
-| MEDIUM | 0 | — |
-| LOW | 2 | Medium / Medium |
-
-The activation work is correct. The path-math fix (`resolveClipModelsRoot`), the revision-subdir layout (`clipModelArtifactDir`), and the `server-only` removal are all sound, well-tested, and respect every stated HARD GUARD. The two LOW notes are pre-existing robustness gaps in the download seed script (NOT regressions introduced by these commits, and NOT production blockers) — surfaced for completeness, not gating. Honest near-convergence consistent with the documented trend (11 -> 45 -> 14 -> 5 -> 1 -> 2 -> 0 -> this).
-
-## HARD GUARDS — all respected (independently verified at HEAD)
-
-- **`server-only` NOT re-added to clip-model.ts** — confirmed absent (`clip-model.ts:17` carries the explanatory comment only). The boundary test (`client-server-only-boundary.test.ts`) uses the sharp + `@huggingface/transformers` native-import signal as the server-only-equivalent, and `clip-model-contract.test.ts` pins that the marker never returns. Correct alternative; I did not propose re-adding it.
-- **`semantic_search_mode: 'disabled'` default in gallery-config-shared.ts:108** — left intact. The prod-DB override + the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env heal-to-disabled (gallery-config.ts:143) are unchanged.
-- **`SEMANTIC_SEARCH_ALLOW_PRODUCTION` / revision pin / `allowRemoteModels=false` / model_version isolation** — all unchanged and not weakened. The routes filter every scan by `activeModelVersion` (semantic) / `PRODUCTION_MODEL_VERSION` (similar), so stub and production rows never co-rank.
-
-## What HEAD actually is
-
-The three commits under scrutiny:
-
-- **`e0da12ee`** — new `lib/clip-paths.ts` (`resolveClipModelsRoot` + `clipModelArtifactDir`); `download-clip-models.ts` routes through them; `clip-model.ts` swaps its inline `process.env.CLIP_MODELS_ROOT ?? join(cwd, ...)` for `resolveClipModelsRoot()`.
-- **`b1d6331c`** — `clip-paths.test.ts` (always-on) + `clip-offline-load.test.ts` (gated `CLIP_OFFLINE_LOAD=1`).
-- **`1a325fa6`** — drops `import 'server-only'` from `clip-model.ts`; extends the boundary test's comment-stripping + native-import detector; adds the never-reacquire pin.
-
-The other now-live CLIP consumers (`api/search/semantic/route.ts`, `api/search/similar/[id]/route.ts`, `actions/embeddings.ts`, `scripts/backfill-clip-embeddings.ts`, the `image-queue.ts` embed hook) were last modified in PRIOR cycles (`46c5864e`, `ec50158b`, `c00e034b`, `7bad8477`) and were reviewed then — but I re-scrutinized them fresh because activation makes the real-encoder path reachable.
-
-**Working tree note:** the session-start git status showed `sw.js` / `page.tsx` / `error.tsx` / `admin-backfill-runner.ts` as modified, but those were already committed before HEAD; the live working tree has only two regenerated review `.md` files. The review is against a clean source HEAD with no uncommitted source drift.
-
-## Path-math analysis (the explicit ask) — CORRECT for all real cases
-
-`resolveClipModelsRoot(cwd, env)` = `isAbsolute(root) ? root : join(cwd, root)` with `root = env?.length>0 ? env : 'data/models/clip'`. I exercised every edge case via a Node harness:
-
-| Input | Output | Verdict |
-|---|---|---|
-| abs `/app/data/models/clip` | `/app/data/models/clip` | OK — no doubling (the production fix) |
-| abs trailing slash `/app/data/models/clip/` | `/app/data/models/clip/` (verbatim) | OK — `clipModelArtifactDir` `join()` normalizes the slash away; both downloader and loader share the identical `env.cacheDir` value, so no divergence |
-| relative `data/models/clip` | `join(cwd, 'data/models/clip')` | OK — matches historical default |
-| relative `./data/models/clip` | `<cwd>/data/models/clip` | OK |
-| relative `../shared/clip` | `<cwd>/../shared/clip` normalized | OK |
-| empty `''` | `join(cwd, default)` | OK — treated as unset |
-| `undefined` | `join(cwd, default)` | OK |
-
-POSIX/Windows: the codebase is Linux-container-only (Docker standalone), and `path.isAbsolute`/`path.join` are platform-correct on the target. No portability concern in scope. The only degenerate input is a **whitespace-only** `CLIP_MODELS_ROOT="   "` -> a directory literally named three spaces; that is an operator misconfiguration that fails loudly at download (mkdir/write), not a silent corruption — not worth a guard.
-
-**Revision-subdir layout:** `clipModelArtifactDir` = `join(root, ...JINA_CLIP_MODEL_ID.split('/'), JINA_CLIP_REVISION)` = `<root>/jinaai/jina-clip-v2/<sha>`. The loader sets `env.cacheDir = <root>` (resolved root, NOT the artifact dir) and calls `from_pretrained(id, { revision })`, letting transformers append `<repoId>/<revision>/` internally. The downloader sets the SAME `env.cacheDir = <root>` and verifies at the artifact dir. The two are internally consistent by construction, and the actual transformers-3.8.x nesting behavior is asserted by the gated `clip-offline-load.test.ts` round-trip (download-seed -> offline load, no symlinks). The single-file `model_quantized.onnx` (q8, ~580 MB, no `.onnx_data` external-weights split) is fully covered by the manifest. **No finding.**
+| AGG-C8-02 (partial-seed idempotency) | **PARTIAL** — fast-path verifies the manifest, but manifest is incomplete → **CR-C9-01** | manifest.ts:25-30; download.ts:72-84 |
+| AGG-C8-03 (missing index) | CLOSED | migration `0022_…`; schema.ts:287; migrate.js `reconcileLegacySchema` ensureIndex mirror; journal `when` monotonic (0022 = max) |
+| AGG-C8-04 (short-query UX) | CLOSED | search.tsx:165-170 guard → `invalidSemantic` before fetch |
+| AGG-C8-05 (backfill model_version) | CLOSED | embeddings.ts:92 hoists `modelVersion`; notExists subquery filters `eq(modelVersion)` (109); matches sidecar:125-131 |
+| AGG-C8-06 (i18n 2-vs-3) | CLOSED | en.json/ko.json `search.invalidSemantic` present + correct ("3 characters" / "세 글자"); `search.invalid` correctly retains "2" for keyword path; key parity holds |
+| AGG-C8-07 (deployed-dark docs) | CLOSED | zero "deployed dark" remnants in CLAUDE.md / en.json / ko.json; `settings.semanticSearchDesc` now describes the operator-gating mechanism |
+| AGG-C8-09 (dotProduct fast-path) | CLOSED | semantic route gates `isProd ? dotProduct : cosineSimilarity` (route.ts:271 — correct: stub vectors are NOT unit-length so MUST keep cosine); similar route uses dotProduct unconditionally (production-only, route.ts:163) |
+| AGG-C8-10 (lens/date parity) | CLOSED (payload); see CR-C9-OBS-1 | similar route SELECT:205-206 |
+| AGG-C8-11 (aria-controls) | CLOSED | similar-photos.tsx:110 `aria-controls` + :121 region `id` |
+| AGG-C8-12 (model-id split guard) | CLOSED | clip-paths.ts:84-96 asserts 2-segment id + 40-hex non-main revision; live constants verified 40-hex (`e10d47f5…`) so guard passes |
+| AGG-C8-01 / -08 / -13 | DEFERRED (plan-361, architect-led design) | not re-opened here — all three correctly recorded with preserved severity + fired re-open criteria |
 
 ---
 
-## LOW-1 — Idempotency fast-path verifies only the ONNX, not `tokenizer.json`, so a partial re-seed can report "up to date" while the offline load fails
+## What was verified clean (no finding)
 
-- **File:** `apps/web/scripts/download-clip-models.ts:62-76`
-- **Confidence:** Medium
-- **Severity:** LOW (operator seed script; narrow corruption-between-runs trigger; fails loudly at runtime with a clear tokenizer error, not silent data loss)
+- **Both search routes** (`semantic/route.ts`, `similar/[id]/route.ts`): same-origin 403 → maintenance 503 → content-type/JSON-subtype reject → chunked reject → Content-Length + raw-body size cap (413) → JSON shape → ≥3-codepoint → rate-limit pre-increment (Pattern 2, rolled back on **every** subsequent early return) → authoritative config re-read failing closed → mode-correct model_version + threshold + similarity fn → bounded ≤5000 scan → null-safe `decodeEmbeddingColumn` skip → `topK` → enrichment with `processed=true` + score re-sort + empty-array fallback. `clampSemanticTopK` correctly rejects non-number `raw` (booleans/arrays). No leaked private fields (no GPS / filename_original / ICC / HDR) in either enrichment SELECT.
+- **clip-model.ts** singleton: lazy native import inside `getModelBundle`; `loadPromise` nulls on failure → retries (not poisoned); `embedText/ImageReal` validate output key presence + `data.length >= EMBEDDING_DIM` before `truncateAndNormalize`; image preprocessing forces `srgb` + `removeAlpha` + asserts `channels === 3` (defends CHW indexing). `server-only` correctly absent (boundary-test backed).
+- **clip-embeddings.ts**: `cosineSimilarity` / `dotProduct` dim-mismatch throws + zero-denom guard; `decodeEmbeddingColumn` covers raw-Buffer / legacy-base64-in-Buffer / base64-string, length-checked, malformed → null; `embeddingToBuffer`/`bufferToEmbedding` dim/byte guards; `truncateAndNormalize` `subarray(0,512)` safe (native dim 1024) + re-normalize; `normalizeEmbedding` zero-vector → no NaN.
+- **clip-paths.ts**: absolute-verbatim / relative-vs-cwd resolution (no path doubling); revision-subdir layout + 2-segment/40-hex guards. **clip-model-id.ts**: 40-hex non-main pin verified.
+- **embeddings.ts** action: isAdmin + same-origin + per-hour rate-limit; mode-aware (disabled no-op / stub / production); `!filenameOriginal` skip before `resolveOriginalUploadPath`; bounded concurrency; localized generic error + server-log detail. (Single-PK + `onDuplicateKeyUpdate` overwrite is internally consistent with the global single-mode invariant — see note below.)
+- **image-queue.ts** embedding IIFE (line 434): self-contained try/catch fire-and-forget (must not fail upload); `originalPath` defined+`fs.access`-validated at 293-296 before the IIFE; mode-aware writer.
+- **download-clip-models.ts**: absolute-aware resolver shared with loader; verifies revision-subdir; post-download delete-on-mismatch + abort. **migrate.js**: 0022 mirrored idempotently via `ensureIndex` after the table create; journal monotonic.
+- **rate-limit.ts** semantic helpers: pre-increment/rollback correct; bounded map (2000 keys); single-threaded Node → no decrement race.
+- **Non-CLIP high-risk routes** (stripe webhook, checkout, download, serve-upload, download-tokens, stripe, sw-cache): swept via Explore — all clean, confirming the cycle-7 baseline. Entire non-CLIP `src` tree is byte-identical to `a7758ef0` (git diff confirmed: only CLIP/search/schema/migrate + similar-photos.tsx changed).
 
-**Issue.** The idempotency short-circuit checks existence + checksum of **only** `onnx/model_quantized.onnx`:
-
-```ts
-const onnxPath = join(modelCacheDir, 'onnx', 'model_quantized.onnx');
-if (existsSync(onnxPath)) {
-    const actual = await sha256File(onnxPath);
-    if (actual === MANIFEST['onnx/model_quantized.onnx']) {
-        console.log('... already up to date. Nothing to do.');
-        return;            // <-- returns WITHOUT checking tokenizer.json
-    }
-    ...
-}
-```
-
-The manifest has **two** entries (`onnx/model_quantized.onnx` AND `tokenizer.json`, manifest lines 26-29), and the runtime offline loader reads BOTH (`embedTextReal` -> `AutoTokenizer.from_pretrained`). The full `verifyAndCleanArtifacts` (which checks both and deletes mismatches) only runs on the download path — the fast-path bypasses it.
-
-**Failure scenario.** A prior run wrote both files. Later `tokenizer.json` is truncated/deleted/corrupted on the bind mount (interrupted rsync, partial volume restore, disk hiccup) while the ONNX stays intact. An operator re-runs the seed script as a "verify before deploy" step -> it prints "Checksum OK — already up to date. Nothing to do." and exits 0. The deploy proceeds, and the first `embedTextReal` call fails at runtime loading the tokenizer. The seed script's whole job is to *prove* the volume is loadable; this path can green-light an unloadable volume.
-
-**Fix.** Make the fast-path verify the full manifest (read-only — `deleteOnMismatch=false`) before returning, e.g.:
-
-```ts
-if (existsSync(onnxPath)) {
-    const pre = await verifyAndCleanArtifacts(modelCacheDir, MANIFEST, /*deleteOnMismatch*/ false);
-    if (pre.ok) {
-        console.log('[download-clip-models] All artifacts present + verified — up to date.');
-        return;
-    }
-    console.log('[download-clip-models] Incomplete/mismatched cache — re-downloading...');
-    // fall through to the download + full verify path
-}
-```
-
-This reuses the existing helper, costs one extra small hash on the happy path, and makes "up to date" mean "the offline loader will succeed" — which is the contract the file's own docstring claims.
+### Data-model note (verified consistent, NOT a finding)
+`image_embeddings` has a single-column `PRIMARY KEY (image_id)` (migration 0012), so only one row per image exists — yet all selection logic filters by `model_version`. I traced this end-to-end and it is **internally consistent**, not a bug: `semantic_search_mode` is one global setting, so a deployment is in exactly one mode at a time; stub and production rows never need to coexist for the same image. The `notExists(… AND model_version = TARGET)` selection correctly matches a stale-version row, and `onDuplicateKeyUpdate` overwrites that single row in place (embedding + model_version) — so the documented "upgrade stub→production" path works via overwrite. The image-queue.ts:431-433 comment ("no schema migration is needed for that future encoder to tell stub vectors apart") is accurate for the single-mode model. No action.
 
 ---
 
-## LOW-2 — `clipModelArtifactDir` silently assumes a non-`main` revision; a future `JINA_CLIP_REVISION = 'main'` would break the verify path with no guard
-
-- **Files:** `apps/web/src/lib/clip-paths.ts:77-80`, `apps/web/src/lib/clip-model-id.ts:25`
-- **Confidence:** Medium
-- **Severity:** LOW (no current bug — the revision is a pinned SHA `e10d47f5...`, so nesting applies today; this is forward-fragility, not a HEAD defect)
-
-**Issue.** `clipModelArtifactDir` unconditionally appends `JINA_CLIP_REVISION` as a path segment. `clip-paths.ts`'s own header (and the transformers.js `getModelFile` behavior) documents that the `<revision>/` subdir nesting happens **"when a NON-`main` revision is pinned."** If a maintainer ever upgrades the model and sets `JINA_CLIP_REVISION = 'main'` (a natural-looking value), transformers may cache at the FLAT `<repoId>/` path (no revision segment), the downloader would verify the wrong (nested) directory, every artifact would read MISSING, and the download would abort — reintroducing the exact production failure these commits just fixed, but for a different reason.
-
-**Failure scenario.** Model bump -> maintainer sets `JINA_CLIP_REVISION='main'` (or a branch/tag rather than a commit SHA), follows the documented "update the SHA + MANIFEST" runbook, and the seed sidecar aborts with `MISSING onnx/model_quantized.onnx ... Aborting.` despite a successful download. The `clip-paths.test.ts` cases all pass a SHA-shaped revision, so they would not catch this.
-
-**Fix (cheap, documentation-or-assertion).** Either (a) add a one-line guard/comment at the `JINA_CLIP_REVISION` definition: *"MUST be an immutable commit SHA, never `main`/a branch/a tag — `clipModelArtifactDir` assumes revision-subdir nesting"*, or (b) assert it in `clip-model-id.ts`'s test surface (`/^[0-9a-f]{40}$/`). Option (b) is strongest because it fails at test time the moment someone sets a non-SHA revision. Not urgent — purely guards a future edit.
-
----
-
-## CLIP surface — what I verified is CORRECT (no findings)
-
-- **`embedImageReal` HWC->CHW conversion** (`clip-model.ts:174-182`): `rawData[i*3 + c]` (HWC) -> `pv[c*pixelCount + i]` (CHW), normalized by per-channel CLIP mean/std. Indexing is correct. `autoOrient` + `toColourspace('srgb')` + `removeAlpha()` defensively force a 3-channel buffer; the `info.channels !== 3` guard (line 168) catches any residual mismatch before the loop. Grayscale / CMYK / RGBA sources are handled.
-- **`getModelBundle` lazy singleton** (`clip-model.ts:78-108`): caches the load Promise; nulls it in `.catch` so a failed load retries on the next call; concurrent callers await one shared load (no double ONNX-session creation). Native `@huggingface/transformers` import stays lazy/inside the async body so the boot graph never drags onnxruntime-node into every request — consistent with the AGG-C10-03 rationale and `serverExternalPackages`.
-- **`truncateAndNormalize`** (`clip-embeddings.ts:178-181`): `subarray(0,512)` then `Float32Array.from` + L2 renormalize. Native 1024->512 Matryoshka. If a model ever output exactly 512 the `subarray` is a no-op and it still renormalizes — safe. Zero-vector returns unchanged (no NaN).
-- **`decodeEmbeddingColumn`** (`clip-embeddings.ts:108-126`): the AGG-C10-01 raw-Buffer / legacy-base64 / string trichotomy is correct; anything not yielding exactly 2048 bytes returns null and the row is skipped, not crashed. Both routes route reads through it.
-- **Routes' rate-limit posture** (semantic + similar): Pattern-2 pre-increment after cheap gates, `rollbackSemanticAttempt` on every early return before expensive work (config read, embed, scan, target lookup). `preIncrement`/`rollback` are symmetric (`rate-limit.ts:346-368`). The semantic endpoint MUST stay applied even on the shared `unknown` IP bucket (documented at route lines 197-205) — correct, a fail-open semantic scan would be a DoS amplifier.
-- **`clampSemanticTopK`** (`semantic/route.ts:87-91`): rejects non-`number` raw (booleans/arrays/strings -> default), floors + clamps to `[1, 50]`. The caller-contract comment (numeric strings deliberately fall to default) is internally consistent with the single JSON-number caller.
-- **Backfill `--production` null-safety**: `filename_original` is `notNull()` in schema (`schema.ts:21`), so the backfill script reading it without a null-check is type-safe; `embeddings.ts`'s extra `if (!filenameOriginal)` is belt-and-braces, not a required guard. `resolveOriginalUploadPath` returning `candidates[0]` for a missing original means `embedImageReal` throws -> caught -> counted failed/skipped. Graceful.
-- **Model-version isolation after activation**: with both stale `stub-sha256-v1` and new `jina-clip-v2-d512-q8` rows coexisting, every scan filters by the active version; the backfill re-embeds stub->production by version-mismatch selection (keyset cursor `gt(id, cursor)`, COR-R4C19-04). No cross-contamination.
-- **`dotProduct` vs `cosineSimilarity`**: routes use `cosineSimilarity` uniformly. This is CORRECT (not a bug): stub vectors are NOT unit-length, so the `dotProduct` fast path would be wrong in stub mode. Using `cosineSimilarity` everywhere is the safe uniform choice; the documented `dotProduct` optimization is intentionally unused. No finding.
-
-## Whole-repo regression sweep (delegated Explore, very-thorough) — CLEAN
-
-Independent read-only sweep of the NON-CLIP surfaces returned zero findings, each surface opened at HEAD:
-
-- `data.ts` — privacy guards (`publicSelectFields` omit-derivation + `_SensitiveKeysInPublic`), `tagNamesAgg` GROUP_CONCAT shape, React `cache()`, cursor pagination null branches, view-count atomic-swap buffering, GPS-leak runtime defense in `getMapImages`.
-- `process-image.ts` — 10-bit AVIF Promise-singleton probe, 3x-format concurrency math, NCLX bounds-checked walker.
-- `image-queue.ts` (non-CLIP) — retry-Map FIFO eviction, claim retry vs fatal distinction, deleted-mid-processing `affectedRows===0` cleanup, lock release in `finally`.
-- `admin-backfill-runner.ts` + `admin-backfill.ts` — pool-budget concurrency cap, non-blocking advisory lock, detection-failure-no-version-bump retry contract, per-run state reset.
-- `actions/images.ts` — upload-tracker TOCTOU (entry set before validation), cumulative byte cap, shared tag-split, statfs disk pre-check.
-- `serve-upload.ts` — double realpath (pre+post stat), settings-hash SWR cache, abort propagation, Content-Length from opened inode.
-- `gps-exif-strip.ts` — TIFF/IFD bounds + cycle-detection Set, JPEG post-EOI trailer, ExtendedXMP chunk reassembly, depth-bounded ISOBMFF walk.
-- `csv-escape.ts` / `validation.ts` — shared `UNICODE_FORMAT_CHARS`, control-char strip preserving LF/CR, formula-injection prefix guard, BigInt overflow guard, `countCodePoints` UTF-8 length.
-- `api/download/[imageId]` — validate-before-claim, atomic single-use UPDATE (`WHERE downloadedAt IS NULL`), POST-only claim, FileHandle cleanup in `finally`.
-
-## Gates (green at HEAD)
-
-- `npm run typecheck --workspace=apps/web` -> **exit 0** (app `tsconfig.typecheck.json` incl. `src/__tests__/` + scripts).
-- `clip-paths.test.ts` + `clip-model-contract.test.ts` -> **17/17 PASS** (path-doubling regression pinned, revision-subdir-not-flat pinned, never-reacquire-`server-only` pinned, shared-resolver greps pass).
-
-## Recommendation
-
-**APPROVE.** No blocking issues. The CLIP activation is correct and the guards hold. The two LOW notes (seed-script idempotency completeness; revision-must-be-SHA forward-guard) are robustness hardening for the operator path — recommend addressing LOW-1 since the seed script's stated purpose is to certify a loadable volume, but neither blocks this cycle.
+## Method / coverage statement
+Read in full: both search routes, clip-model.ts, clip-embeddings.ts, clip-inference.ts, clip-model-id.ts, clip-paths.ts, clip-model-manifest.ts, download-clip-models.ts, embeddings.ts action, gallery-config.ts, search.tsx, similar-photos.tsx, image-queue.ts embedding block, rate-limit.ts semantic helpers, schema.ts embeddings table, migrations 0012/0022, migrate.js diff, all CLIP test files. Verified the entire non-CLIP source surface unchanged vs the cycle-7 baseline and swept 7 high-risk untouched files via a read-only Explore agent. Cross-checked transformers v3.8.1 fatality claims against the upstream tagged source. Re-verified every cycle-8 finding against HEAD. Final pattern grep for floating promises / missing awaits / swallowed errors across the changed surface.

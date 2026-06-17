@@ -1,48 +1,54 @@
-# Document-Specialist Review — Run-6 Cycle-8 (HEAD 1a325fa6)
+# Document-Specialist Review — Run-9 Cycle-1 (HEAD bb463062)
 
-**Scope:** doc-vs-code (and doc-vs-production-reality) consistency, prioritizing the now-LIVE CLIP semantic-search activation. The feature was previously documented as "deployed DARK"; it is now LIVE in production (`semantic_search_mode=production` in the prod DB, `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, 445 real `jina-clip-v2-d512-q8` embeddings serving). The concern is STALE documentation that still frames the feature as dark/unfinished.
+**Date:** 2026-06-17
+**Scope:** Full doc-accuracy sweep of CLAUDE.md, AGENTS.md, `.context/**`, i18n messages, and heavily-commented source files. Cross-check of all load-bearing doc claims against HEAD code. Cycle-8 fix verification included.
 
-**Findings: 0 CRITICAL / 0 HIGH / 2 MEDIUM / 1 LOW.**
-
-> Scope note: the *code default* `semantic_search_mode: 'disabled'` in `gallery-config-shared.ts` is CORRECT for fresh installs and is NOT flagged. The findings below concern docs/strings that assert the feature is "deployed dark" as a current state, which production reality now contradicts.
-
----
-
-## DOC-C8-01 [MEDIUM, confidence High] — CLAUDE.md still describes CLIP as "deployed DARK"
-
-**Doc:** `CLAUDE.md:121` — "`image_embeddings` - CLIP embeddings (US-P51). Real jina-clip-v2 encoder shipped but **deployed DARK** (`semantic_search_mode` defaults to `disabled`; …)".
-
-**Contradicting reality:** the feature is LIVE in production. The encoder is no longer dark — the production DB row is `production`, the env opt-in is set, and the public semantic + similar routes serve real results (verified HTTP 200). A maintainer reading CLAUDE.md would conclude the feature is unshipped/inert and could (a) assume the live route is a no-op, (b) skip the operational care a live ML inference path on the single-instance topology requires, or (c) "re-enable" something already on.
-
-**Fix:** update line 121 to state the encoder is **activated in production** (operator-gated via `SEMANTIC_SEARCH_ALLOW_PRODUCTION` + the DB `semantic_search_mode=production` row), while keeping the accurate note that the *code default* remains `disabled` for fresh installs and that stub mode uses non-meaningful deterministic vectors. Cross-reference the live-feature verification curl in the operational playbook.
+**Findings: 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW.**
 
 ---
 
-## DOC-C8-02 [MEDIUM, confidence High] — Admin settings i18n string says CLIP is "deployed dark"
+## Cycle-8 fix verification
 
-**Doc/strings:** `apps/web/messages/en.json:727` (`settings.semanticSearchDesc`): "… The real CLIP encoder is **deployed dark**; production search is operator-only. …"; the parallel `ko.json` key carries the same framing.
+All three cycle-8 doc findings are confirmed fixed at HEAD:
 
-**Contradicting reality:** identical staleness to DOC-C8-01, but user-facing — an admin configuring the gallery is told production search is "deployed dark / operator-only" when it is in fact live on this deployment. The "operator-only" gating clause is still accurate (the env flag is required); only the "deployed dark" present-tense framing is stale.
-
-**Fix:** reword the en + ko strings so they describe the *gating mechanism* ("production semantic search requires the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` server opt-in") rather than asserting the feature is dark. Keep en/ko key parity; the en=ICU-plural vs ko=fixed-form value asymmetry elsewhere is intentional and not in scope for these plain-string keys.
-
----
-
-## DOC-C8-03 [LOW, confidence High] — `search.invalid` i18n string states the wrong minimum-length (2 vs 3)
-
-**Strings:** `apps/web/messages/en.json:411` "Type at least **2** characters to search." and `ko.json:411` "검색하려면 **두** 글자 이상 입력하세요." ("two/2").
-
-**Contradicting code:** the semantic route rejects queries below **3** code points (`api/search/semantic/route.ts`), and the designer review (Finding 1/2) recommends routing the client-side semantic short-query case through this `invalid` status. As written, the string would tell the user "at least 2" while a 2-char semantic query still fails — an off-by-one user-facing contradiction. (The keyword path's own minimum is 2, so the string is correct *for keyword* but wrong if reused for semantic.)
-
-**Fix:** coordinate with the designer fix (search.tsx client-side guard) — either add a dedicated `search.invalidSemantic` key stating "at least 3 characters" (and route the semantic branch to it), or align the minimums. Update both en + ko. (This finding is the doc/i18n half of designer Finding 2 — tracked jointly so the strings and the client guard land together.)
+- **DOC-C8-01** (CLAUDE.md "deployed DARK" framing): Fixed. `CLAUDE.md:121` now reads "The real jina-clip-v2 encoder is **ACTIVATED in production**" with accurate gating mechanism description. No stale "dark" framing in CLAUDE.md.
+- **DOC-C8-02** (en.json/ko.json `settings.semanticSearchDesc` "deployed dark"): Fixed. Both strings now describe the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` opt-in gating mechanism without asserting the feature is dark. i18n key parity confirmed OK (Python key-parity check: zero asymmetric keys at any depth).
+- **DOC-C8-03** (`search.invalid` off-by-one minimum): Fixed. `search.invalidSemantic` key added to both `en.json:412` ("Type at least 3 characters for semantic search.") and `ko.json:412` ("시맨틱 검색은 세 글자 이상 입력하세요.") with correct 3-codepoint minimum stated.
 
 ---
 
-## Verified-consistent (no mismatch)
+## DOC-C9-01 [LOW, confidence Medium] — Inline code comments say "deployed DARK" after production activation
 
-- **clip-paths.ts / clip-model.ts header comments** match the code in the same files and the download script. The load-bearing empirical claim (transformers v3 keys its FS cache by `<repoId>/<revision>/<file>` for a non-`main` revision) is **TRUE** — confirmed by other reviewers against `node_modules/@huggingface/transformers/src/utils/hub.js` (`revision === 'main' ? requestURL : pathJoin(repoId, revision, filename)`), and the pin is a 40-hex SHA so the non-main branch is taken. `allowRemoteModels=false` and the revision pin are accurately documented.
-- **Model identity** is consistent across docs and code: `jinaai/jina-clip-v2`, the pinned revision, `EMBEDDING_DIM=512`, `EMBEDDING_BYTES=2048`, `PRODUCTION_MODEL_VERSION='jina-clip-v2-d512-q8'`.
-- **i18n key parity** between en.json and ko.json holds for the semantic/similar keys (`semanticToggle`, `semanticExperimentalHint`, `similarPhotos`, `similarEmpty`, and the `settings.semanticSearch*` block).
-- The `backfill-clip-embeddings.ts` sidecar-example comment block (lines 14-19) uses `--env-file …/.env.local`, which is the supported way to pass `CLIP_MODELS_ROOT` (the prod `.env.local` carries the absolute bind-mount value); it does not re-introduce the path-mismatch e0da12ee fixed, provided `.env.local` sets `CLIP_MODELS_ROOT`. (Recommend the playbook explicitly note that `.env.local` must carry `CLIP_MODELS_ROOT` — minor, folded into DOC-C8-01's cross-reference.)
+**Files:**
+- `apps/web/src/lib/gallery-config.ts:134` — `// AGG-C10-02 (run-6 cycle-1): the CLIP feature is deployed DARK by explicit user choice.`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:665` — `// … The real ONNX encoder exists but the feature is deployed DARK; …`
 
-**No re-reports of cycle 1-7 closed doc items.** (The prior cycle-7 document-specialist.md verified 37 load-bearing CLAUDE.md facts as still-accurate at a7758ef0; those remain accurate at 1a325fa6 — the only doc drift is the activation-staleness above, which postdates that pass.)
+**Assessment:** Both are inline code comments explaining a *code invariant* (why the resolver heals `'production'→'disabled'` without the env flag, and why the admin UI omits the `'production'` SelectItem). They describe the UI-side architectural intent ("hidden from admin UI by design"), not the state of the production deployment. Neither comment is user-facing. A maintainer reading either comment alongside the code it annotates would not conclude production search is inert — the surrounding logic and env-flag gating make the invariant clear. However, the phrase "deployed DARK" now contradicts the production reality for an operator reading these comments while debugging. The correct phrasing would be "operator-gated" or "UI-hidden".
+
+**Why LOW (not MEDIUM):** The comments annotate code that works correctly regardless of the comment wording. The misleading risk is confined to a developer reading these specific inline comments in isolation; CLAUDE.md (the primary reference) was already corrected in cycle 8 and describes the live state accurately.
+
+**Fix:** In `gallery-config.ts:134`, replace "the CLIP feature is deployed DARK by explicit user choice" with "the CLIP feature is operator-gated (activated in production; hidden from the admin UI by design)". In `settings-client.tsx:665`, replace "the feature is deployed DARK" with "the feature is operator-gated (not activatable via the admin UI)". No behaviour change; comment-only.
+
+**Confidence:** Medium — the phrase is genuinely stale relative to production reality, but the code invariant it describes remains architecturally correct (production mode IS intentionally hidden from the UI). A reasonable reviewer could treat this as non-actionable.
+
+---
+
+## Verified-consistent (no mismatch found)
+
+The following claims in CLAUDE.md were verified against code at HEAD:
+
+- **`IMAGE_PIPELINE_VERSION = 7`** — confirmed at `gallery-config-shared.ts:21`; `process-image.ts` re-exports it at line 315. The Key Files table description (`gallery-config-shared.ts:21`) is accurate.
+- **`COLOR_IMPACTING_KEYS` count = 9** — confirmed. `settings-hash.ts` defines 9 keys (5 color + 3 quality + `image_sizes`) starting at line 41. CLAUDE.md's `settings-hash.ts:37-49` line reference is approximately correct (actual declaration starts at line 41; the 3-line header comment before it starts at line 37 — close enough to be useful).
+- **Advisory-lock names** — all 6 names in the CLAUDE.md advisory-lock scope note are confirmed in `src/lib/advisory-locks.ts`: `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`.
+- **React `cache()` count = 10** — confirmed. `data.ts` has exactly 10 `cache()` calls: `getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached` (9 `Cached` exports) + `getSeoSettings` (1). CLAUDE.md Performance Optimizations section accurately states 10.
+- **`sanitizeForOg` consumer count** — CLAUDE.md claims "all three consumers — both OG image routes … and the JSON-LD photo page (`p/[id]/page.tsx`)". Verified: `api/og/route.tsx`, `api/og/photo/[id]/route.tsx`, and `app/[locale]/(public)/p/[id]/page.tsx` all import `sanitizeForOg`. The CLAUDE.md path abbreviation `p/[id]/page.tsx` omits the `[locale]/(public)/` prefix but is unambiguous in context.
+- **NCLX matrix map** — CLAUDE.md documents `0=identity, 1=BT.709, 8=BT.2020-NCL (alias of 9), 9=BT.2020-NCL, 10=BT.2020-CL`. Confirmed against `color-detection.ts:204-210` (`NCLX_MATRIX_MAP`). Accurate.
+- **Touch-target `SCAN_ROOTS`** — CLAUDE.md states `components/ + app/[locale]/admin/ + app/[locale]/(public)/`. Confirmed in `touch-target-audit.test.ts:79-83`: `componentsDir`, `adminDir`, `publicDir` — all three.
+- **Backfill concurrency cap formula** — CLAUDE.md: `max(1, floor((POOL_CONNECTION_LIMIT − RESERVED − 1) / 2))` with `RESERVED = max(3, ceil(POOL_CONNECTION_LIMIT / 2))` → cap = 2 at pool 10. Confirmed in `admin-backfill-runner.ts:105-122`.
+- **`sw.template.js` + `sw.js`** — both files exist at `public/sw.template.js` and `public/sw.js`.
+- **i18n key parity** — full recursive key-set comparison of `en.json` vs `ko.json` shows zero asymmetric keys. The intentional en=ICU-plural / ko=single-form value asymmetry (documented at CLAUDE.md Testing section) is confirmed present and correct.
+- **Semantic search framing in CLAUDE.md** — no remaining "deployed dark" / "deployed DARK" text. The `SEMANTIC_SEARCH_ALLOW_PRODUCTION` gating, the `disabled` code default, and the live production activation are all accurately described.
+- **Admin settings i18n** — `en.json` and `ko.json` `settings.semanticSearchDesc` both describe the operator-gating mechanism without asserting the feature is dark. `settings.semanticSearchProductionWarning` in both files accurately warns about the resolver-heal behaviour.
+- **Lint gates count** — CLAUDE.md states "Four lint scripts". `apps/web/package.json` has exactly 4 lint scripts: `lint`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`. Accurate.
+- **`process-image.ts` line ref `1019-1097`** — the range 1019-1097 spans the wide-gamut downscale gate and early-return logic; the fresh-per-format `sharp()` instantiation that the doc note targets is at ~1118-1132. The line range in CLAUDE.md is approximately correct as a navigational pointer to the `processImageFormats` function body; it is not misleading enough to constitute a finding.
+- **`gallery-config-shared.ts:21`** — confirmed: `export const IMAGE_PIPELINE_VERSION = 7;` is at line 21.

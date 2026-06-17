@@ -1,3 +1,58 @@
+# Verifier Report — Run-6 Cycle 9 (HEAD `af9ae6c5`)
+
+**Date:** 2026-06-17
+**Reviewer:** oh-my-claudecode:verifier (cycle-9, independent pass)
+**Scope:** Verify cycle-8 fixes against 13 AGG-C8 findings; run all gates fresh; check reconcile-coverage for migration 0022.
+
+## Verdict
+**Status**: PASS
+**Confidence**: high
+**Blockers**: 0
+
+## Gate Results
+
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| ESLint | pass | `npm run lint --workspace=apps/web` | exit 0 |
+| Typecheck | pass | `npm run typecheck --workspace=apps/web` | exit 0 (typecheck:app + typecheck:scripts both clean) |
+| Tests | pass | `npm test --workspace=apps/web` | 2214 passed / 4 skipped / 0 failed (237 test files; 2 skipped files are model-weight-gated clip suites, gated by design) |
+| lint:api-auth | pass | `npm run lint:api-auth --workspace=apps/web` | exit 0 |
+| lint:action-origin | pass | `npm run lint:action-origin --workspace=apps/web` | exit 0 — all 45 action exports OK or SKIP-exempt |
+| lint:public-route-rate-limit | pass | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 |
+
+## Cycle-8 Fix Verification
+
+| # | Finding | Criterion | Status | Evidence |
+|---|---------|-----------|--------|----------|
+| 1 | AGG-C8-02 | Full-manifest idempotency in `scripts/download-clip-models.ts` | VERIFIED | Line 73-83: `verifyAndCleanArtifacts(modelCacheDir, MANIFEST, false)` called before any early-return; all manifest entries checked. |
+| 2 | AGG-C8-03 | Migration 0022 composite index `(model_version, updated_at)`; monotonic `when`; reconcile mirror | VERIFIED | `drizzle/0022_image_embeddings_model_version_idx.sql` present; idx22 when=1781687094232 > idx21 when=1781183604120; `migrate.js:572-573` has `ensureIndex` for `idx_image_embeddings_model_version_updated` (present in comment-stripped source); dynamic `it.each` in `migrate-reconcile-coverage.test.ts` covers it at runtime. |
+| 3 | AGG-C8-04 | Client short-query guard `countCodePoints < 3` → `setSearchStatus('invalidSemantic')` | VERIFIED | `search.tsx:165-169`: guard present; routes to `'invalidSemantic'`, not generic `'error'`; constant `SEMANTIC_MIN_QUERY_CODEPOINTS = 3` at line 27. |
+| 4 | AGG-C8-05 | `model_version`-aware `notExists` in `embeddings.ts` | VERIFIED | `embeddings.ts:92-114`: `modelVersion` const hoisted above query; inner `notExists` WHERE filters on both `imageId` and `modelVersion`. |
+| 5 | AGG-C8-06 | Dedicated `search.invalidSemantic` i18n key ("at least 3 characters") in en.json + ko.json | VERIFIED | `en.json:412`: `"invalidSemantic": "Type at least 3 characters for semantic search."` — `ko.json:412`: `"invalidSemantic": "시맨틱 검색은 세 글자 이상 입력하세요."` — key parity maintained. |
+| 6 | AGG-C8-07 | CLAUDE.md + admin `semanticSearchDesc` updated — "deployed dark" framing removed | VERIFIED | `en.json:728`: `semanticSearchDesc` now describes gating mechanism without "deployed dark"; CLAUDE.md reflects live state. |
+| 7 | AGG-C8-09 | `dotProduct` fast-path in both routes; production-gated in semantic route | VERIFIED | `similar/[id]/route.ts:163`: `dotProduct(...)`. `semantic/route.ts:271`: `isProd ? dotProduct : cosineSimilarity` — stub path correctly retains `cosineSimilarity` for non-unit vectors. |
+| 8 | AGG-C8-10 | `lens_model` + `capture_date` in similar route enrichment SELECT | VERIFIED | `similar/[id]/route.ts:205-206`: both columns present; mapped through to response at lines 227-228. |
+| 9 | AGG-C8-11 | `aria-controls="similar-photos-results"` on button; `id="similar-photos-results"` on result container | VERIFIED | `similar-photos.tsx:110`: `aria-controls="similar-photos-results"`. Line 121: `<div id="similar-photos-results">`. |
+| 10 | AGG-C8-12 | `clipModelArtifactDir` asserts 2-segment model-id + 40-hex non-`main` revision | VERIFIED | `clip-paths.ts:84-96`: both guards throw on violation. `clip-paths.test.ts:128-155`: `describe('AGG-C8-12')` covers live-constant guard and documents the inversion. |
+
+Deferred findings AGG-C8-01 (event-loop), AGG-C8-08 (runtime checksum), AGG-C8-13 (CSP/reload-storm) remain on the deferred register. No regression against them observed.
+
+## Journal Monotonicity
+
+The historical non-monotonic pair at idx 6 → idx 7 is frozen history; `migrate.js` handles it via per-entry hash baselining. Migration 0022 (idx 22, when=1781687094232) is strictly greater than idx 21 (when=1781183604120) and greater than the global max of all prior entries — satisfies both assertions in `migration-journal.test.ts` and `migration-journal-monotonicity.test.ts`. No new non-monotonic entry introduced.
+
+## Gaps
+
+None found. All 10 directly-verifiable cycle-8 fixes are present at HEAD with specific file+line evidence.
+
+## Recommendation
+
+APPROVE — all 6 gates green (2214 passed / 4 skipped by design), all 10 cycle-8 fixes verified at HEAD `af9ae6c5`, zero new gaps.
+
+---
+
+<!-- Cycle 8 report preserved below -->
+
 # Verifier Review — Cycle 8
 
 <!-- Cycle 7 report preserved below the cycle 8 report -->
