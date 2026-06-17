@@ -725,7 +725,7 @@
     "autoAltTextEnabled": "Enable Auto Alt-Text",
     "autoAltTextEnabledHint": "When enabled, generates an EXIF-derived alt text hint after each image is processed. Requires the Florence-2 ONNX model (stub active).",
     "semanticSearchTitle": "Semantic Search",
-    "semanticSearchDesc": "Enable CLIP-based semantic image search. Stub mode uses deterministic placeholder embeddings (not meaningful — for wiring/testing only). The real CLIP encoder is deployed dark; production search is operator-only. Run the backfill script after enabling.",
+    "semanticSearchDesc": "Enable CLIP-based semantic image search. Stub mode uses deterministic placeholder embeddings (not meaningful — for wiring/testing only). Production mode uses the real CLIP encoder and is operator-gated: it activates only when the server sets SEMANTIC_SEARCH_ALLOW_PRODUCTION (otherwise a stored 'production' value behaves as disabled). Run the backfill script after enabling.",
     "semanticSearchEnabled": "Enable Semantic Search",
     "semanticSearchEnabledHint": "When enabled, shows a semantic search toggle in the search box. Requires the embedding backfill to complete first. (Stub embeddings are deterministic but not semantically meaningful.)",
     "semanticSearchMode": "Semantic Search Mode",
