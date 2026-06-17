@@ -33,7 +33,7 @@ import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp, preIncrementSemanticAttempt, rollbackSemanticAttempt } from '@/lib/rate-limit';
 import {
-    cosineSimilarity,
+    dotProduct,
     decodeEmbeddingColumn,
     topK,
     SEMANTIC_TOP_K_DEFAULT,
@@ -150,12 +150,17 @@ export async function GET(
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
+    // AGG-C8-09 (run-6 cycle-8): this route is production-only (Gate 5 returns 503 for
+    // any non-production mode), so every scanned vector AND the target are L2-normalized
+    // (truncateAndNormalize). dotProduct === cosine for unit vectors but skips the two
+    // per-row norm recomputations + sqrts. No stub fallback needed here (unlike the
+    // semantic route) because stub mode can never reach this scan.
     const scored = rows
         .filter(row => row.imageId !== id)
         .map((row) => {
             const imgEmbedding = decodeEmbeddingColumn(row.embedding);
             if (imgEmbedding === null) return null;
-            const score = cosineSimilarity(targetEmbedding, imgEmbedding);
+            const score = dotProduct(targetEmbedding, imgEmbedding);
             return { imageId: row.imageId, score };
         })
         .filter((m): m is { imageId: number; score: number } => m !== null);
@@ -175,6 +180,8 @@ export async function GET(
         topic: string;
         topic_label: string | null;
         camera_model: string | null;
+        lens_model: string | null;
+        capture_date: string | null;
     }> = [];
 
     if (results.length > 0) {
@@ -192,6 +199,11 @@ export async function GET(
                     topic: images.topic,
                     topic_label: topics.label,
                     camera_model: images.camera_model,
+                    // AGG-C8-10 (run-6 cycle-8): parity with the semantic route's
+                    // enrichment (AGG-C10-11a) — without these, similar-result cards
+                    // rendered with the shared component show blank lens/date.
+                    lens_model: images.lens_model,
+                    capture_date: images.capture_date,
                 })
                 .from(images)
                 .leftJoin(topics, eq(images.topic, topics.slug))
@@ -212,6 +224,8 @@ export async function GET(
                     topic: row.topic,
                     topic_label: row.topic_label,
                     camera_model: row.camera_model,
+                    lens_model: row.lens_model,
+                    capture_date: row.capture_date,
                 }))
                 .sort((a, b) => b.score - a.score);
         } catch {

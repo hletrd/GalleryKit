@@ -39,6 +39,7 @@ import {
 } from '@/lib/rate-limit';
 import {
     cosineSimilarity,
+    dotProduct,
     decodeEmbeddingColumn,
     topK,
     COSINE_THRESHOLD,
@@ -258,15 +259,21 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
-    // Compute cosine similarity for all scanned embeddings.
+    // Compute similarity for all scanned embeddings.
     // AGG-C10-01: decodeEmbeddingColumn handles the raw-Buffer (current) and legacy
     // base64 (old rows) shapes mysql2 can return for the MEDIUMBLOB; malformed rows
     // decode to null and are skipped (previously every row was silently dropped).
+    // AGG-C8-09 (run-6 cycle-8, plan-349 DEF-6 exit): in production every stored
+    // vector AND the query are L2-normalized (truncateAndNormalize), so dotProduct
+    // === cosine but skips two per-row norm recomputations + sqrts. STUB embeddings
+    // are NOT normalized (deterministicEmbedding returns raw [-1,1]), so stub MUST
+    // keep cosineSimilarity or ranking would be corrupted. Gate on isProd.
+    const similarity = isProd ? dotProduct : cosineSimilarity;
     const scored = rows
         .map((row) => {
             const imgEmbedding = decodeEmbeddingColumn(row.embedding);
             if (imgEmbedding === null) return null;
-            const score = cosineSimilarity(queryEmbedding, imgEmbedding);
+            const score = similarity(queryEmbedding, imgEmbedding);
             return { imageId: row.imageId, score };
         })
         .filter((m): m is { imageId: number; score: number } => m !== null);
