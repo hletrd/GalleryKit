@@ -1,6 +1,6 @@
-# Security Review Report — Cycle 10 (run-6)
+# Security Review Report — Cycle 11 (run-6)
 
-**Scope:** Whole-repo security review of GalleryKit @ HEAD `0502ae86`. Next.js 16 self-hosted photo gallery, MySQL/Drizzle, Argon2 auth, HMAC-SHA256 sessions, Sharp processing, **LIVE** CLIP semantic search (jina-clip-v2). Focused on the CLIP activation surface (hardened in cycles 8–9) plus a full re-sweep of all API routes, server actions, auth, file upload, DB backup/restore, paid-download, privacy guards, validation, and SQL surfaces.
+**Scope:** Whole-repo security review of GalleryKit @ HEAD `a7de3ebd`. Next.js 16 self-hosted photo gallery, MySQL/Drizzle, Argon2 auth, HMAC-SHA256 sessions, Sharp processing, **LIVE** CLIP semantic search (jina-clip-v2). Independent re-examination of every attack surface: all API routes (admin + public, esp. search/semantic + search/similar + admin/lr/upload), all server actions + db-actions, auth core (password-hashing/session/proxy/auth-rate-limit), file-upload / path-traversal / serve-upload, the data.ts PII guard, CSV/Unicode escaping, GPS stripping, the paid Stripe flow, and the CLIP activation surface.
 
 **Risk Level: LOW** — strong convergence confirmed. **Zero real security defects found.**
 
@@ -10,65 +10,70 @@
 - Medium Issues: **0**
 - Low Issues: **0**
 
-This is the expected outcome after 9 prior review cycles. The CLIP surface that was the focus of recent cycles is correctly hardened, and the previously-reviewed paid-flow / auth / upload surfaces remain intact at current HEAD. No marginal/speculative findings are reported, per the cycle-10 mandate.
+HEAD `a7de3ebd` is one commit past the cycle-10 review baseline (`0502ae86`). The only intervening functional change was an nginx body-cap raise for the LR upload route (`71dcd09f`) plus a test addition and doc edits — **no application-logic changed**. I did NOT trust the prior report: I re-read every named surface against current HEAD and independently re-derived each verdict.
 
 ---
 
-## What was verified (evidence)
+## Lint gates — all pass, all reflect reality (re-run at HEAD)
+- `lint:api-auth` — both `/api/admin/**` routes (`db/download`, `lr/upload`) wrap `withAdminAuth(...)`. OK.
+- `lint:action-origin` — every mutating action stores `requireSameOriginAdmin()` and early-returns; read-only exports carry `@action-origin-exempt`. "All mutating server actions enforce same-origin provenance."
+- `lint:public-route-rate-limit` — every public mutating route uses a rate-limit helper (`checkout`, `semantic`) or carries a justified `@public-no-rate-limit-required` (`download`, `stripe/webhook`).
 
-### Lint gates (all pass)
-- `lint:api-auth` — every `/api/admin/**` HTTP-method export wraps `withAdminAuth(...)`. (download, lr/upload OK)
-- `lint:action-origin` — every mutating server action stores `requireSameOriginAdmin()` and early-returns; read-only exports carry `@action-origin-exempt`. "All mutating server actions enforce same-origin provenance."
-- `lint:public-route-rate-limit` — every public mutating route uses a rate-limit helper or carries a justified `@public-no-rate-limit-required` tag.
-- Security-critical fixtures: `privacy-fields`, `map-privacy`, `check-api-auth`, `check-action-origin`, `check-public-route-rate-limit` — **72/72 pass**.
+## Tests — green at HEAD
+- Security fixtures (`privacy-fields`, `map-privacy`, `check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`): **72/72 pass**.
+- Core security/crypto/path/PII suite (session, request-origin, admin-tokens, api-auth headers, serve-upload, strip-gps, stripe-webhook, semantic/similar routes, clip offline-load+paths, download method-contract, backup-download, og-sanitize, gallery-config-semantic-production): **180 passed, 2 skipped** (skips = network-dependent CLIP integration tests, expected in sandbox).
 
-### CLIP semantic / similar surface (cycle 8–9 focus) — HARD GUARDS confirmed intact
-- `api/search/semantic/route.ts` (POST): same-origin 403 guard (`hasTrustedSameOrigin`), restore-maintenance 503, content-type prefix+param validation, chunked-TE rejection, `Content-Length` + raw-body 8 KiB caps, JSON shape validation, codepoint-aware min-length, rate-limit **pre-increment with rollback** on every early-return before expensive work (`preIncrementSemanticAttempt`/`rollbackSemanticAttempt`), fail-closed config read. `semantic_search_mode` default `disabled` → 503. Enrichment SELECT lists explicit **public-only** columns (no GPS / `filename_original` / `user_filename`).
-- `api/search/similar/[id]/route.ts` (GET): same-origin, maintenance, positive-int id validation, rate-limit pre-increment+rollback, **production-only** gate, target-embedding 404/corrupt-404, `SEMANTIC_SCAN_LIMIT` (5000) hard cap, identical public-only enrichment SELECT.
-- `lib/clip-model.ts`: `env.allowRemoteModels = false` (no SSRF — runtime never hits network), revision pinned to immutable 40-hex SHA (`JINA_CLIP_REVISION`), native runtime imported lazily. Public routes call only `embedTextReal` (text), never the image encoder.
-- `lib/clip-paths.ts`: `clipModelArtifactDir` asserts 2-segment repo id + 40-hex revision (rejects branch/tag like `main`) — no path mis-nesting. `resolveClipModelsRoot` honors absolute bind-mount verbatim.
-- `scripts/download-clip-models.ts`: SHA-256 manifest verify + delete-on-mismatch (poisoned-weight defense); HTTPS + pinned revision; never runs at runtime.
-- `lib/clip-embeddings.ts` `decodeEmbeddingColumn`: strict `length === EMBEDDING_BYTES` check before any conversion → malformed BLOB returns `null` and is skipped. No buffer over-read / DoS.
-- `actions/embeddings.ts` `backfillClipEmbeddings`: `isAdmin()` + `requireSameOriginAdmin()` + per-admin hourly rate limit; mode-aware; unwired from UI (sidecar canonical).
-- **Intentional gates respected (NOT findings):** the same-origin 403 on `/api/search/semantic`; `SEMANTIC_SEARCH_ALLOW_PRODUCTION` operator gate; `allowRemoteModels=false`; revision pin; code default `semantic_search_mode='disabled'`. `gallery-config.ts` correctly HEALS a stored `production` → `disabled` unless the operator env is set (AGG-C10-02).
+---
 
-### Authentication & sessions
-- `lib/session.ts`: HMAC-SHA256 tokens, `timingSafeEqual` constant-time compare (length-checked first), structural regex checks placed AFTER crypto (no timing oracle), 24 h age + skew bound, hashed-token DB lookup, expired-session purge. Production refuses DB-stored secret fallback (`SESSION_SECRET` env required, min 32 chars).
-- `lib/password-hashing.ts`: Argon2id, memoryCost 64 MiB, timeCost 3, parallelism 4 — exceeds OWASP.
-- `lib/admin-tokens.ts` (PAT): well-formed pre-check, hashed-by-hash DB lookup (plaintext never in a query param), `timingSafeEqual` digest compare, expiry enforced, fail-closed if table missing.
-- `lib/api-auth.ts` `withAdminAuth`: centrally enforces same-origin for the cookie path AND token-scope for the PAT path; adds `no-store` + `nosniff` to all responses.
-- `lib/request-origin.ts`: fails closed by default (requires Origin/Referer match); `TRUST_PROXY`-gated forwarded-host/proto with right-most trusted-hop selection.
-- `proxy.ts`: protected-route matcher covers locale-prefixed + default-locale admin sub-routes, excludes login; cookie format pre-check (≥100 chars, 3 non-empty segments); full crypto validation deferred to actions; per-request CSP nonce; `x-gk-admin-render` header is self-reflective only.
+## Independent surface-by-surface verification
+
+### CLIP semantic / similar (the LIVE feature) — HARD GUARDS intact
+- `api/search/semantic/route.ts:98-341` (POST): same-origin 403, maintenance 503, content-type prefix+param validation, chunked-TE rejection, Content-Length + raw-body 8 KiB caps, strict JSON-shape validation, codepoint min-length, **rate-limit pre-increment with rollback on every early-return**, fail-closed config read. Enrichment SELECT (lines 291-313) is explicit **public-only** columns — no GPS, no `filename_original`/`user_filename`, gated `processed=true`.
+- `api/search/similar/[id]/route.ts:57-241` (GET): same-origin, maintenance, positive-int id, rate-limit pre-increment+rollback, **production-only** gate (503 else), target-embedding 404/corrupt-404, `SEMANTIC_SCAN_LIMIT` 5000 cap, self-exclusion, identical public-only enrichment.
+- `lib/clip-model.ts:88-89`: `env.allowRemoteModels = false` (no runtime network → no SSRF), revision pinned (`JINA_CLIP_REVISION`), native runtime lazy-imported inside `getModelBundle()`. The deliberate **absence** of `import 'server-only'` (lines 17-27) is the documented HARD GUARD — **not a finding; I did not recommend re-adding it.**
+- `actions/embeddings.ts:48-59`: `isAdmin()` + `requireSameOriginAdmin()` + per-admin hourly rate-limit + mode-aware, unwired from UI.
+- Intentional gates respected (NOT findings): same-origin 403, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, `allowRemoteModels=false`, revision pin, `disabled` default + production→disabled healing.
+
+### Auth & sessions
+- `lib/session.ts:94-151`: HMAC-SHA256, `timingSafeEqual` (length pre-checked), structural regex AFTER crypto (no timing oracle), 24 h age + negative-skew bound, hashed-token DB lookup, expired-session purge. Production REFUSES DB secret fallback (lines 30-36).
+- `lib/api-auth.ts:49-121`: token path verifies scope + bypasses same-origin (PAT); cookie path enforces same-origin BEFORE `isAdmin()`; both stamp `no-store`+`nosniff`.
+- `lib/request-origin.ts:79-107`: fails closed (no Origin/Referer → false); `TRUST_PROXY`-gated right-most forwarded selection; strict `URL.origin` equality.
+- `proxy.ts:54-141`: protected-route matcher covers locale + default-locale admin sub-routes, excludes login; cookie format pre-check (≥100 chars, 3 segments); crypto deferred to actions; `x-gk-admin-render` self-reflective only; `/api/*` excluded (self-enforced via `withAdminAuth`).
 
 ### File upload / paid download (GPS-leak-sensitive)
-- `api/admin/lr/upload/route.ts`: `withAdminAuth` (PAT scope `lr:upload`), filename sanitization (`getSafeUserFilename`), slug + Unicode-rejecting title/description validation, restore-maintenance + upload-contract lock, disk-space + cumulative quota with idempotent settle, `allow_hdr_ingest` gate, **GPS strip on disk** when `strip_gps_on_upload`, generic errors.
-- `api/download/[imageId]/route.ts`: token-shape regex pre-check, hashed lookup, constant-time `verifyTokenAgainstHash`, expiry/refund/single-use checks, path-traversal containment (`path.resolve` + `startsWith(dir+sep)`), symlink rejection (`lstat`) + `realpath` double-check, **open-before-claim** (missing file never burns token), atomic single-use UPDATE, FileHandle-leak protection on every branch, RFC-6266/5987 Content-Disposition sanitization, own restrictive CSP on interstitial HTML.
-- `data.ts` privacy: dual compile-time guards (`_privacyGuard`, `_mapPrivacyGuard`); `publicMapSelectFields` is used at exactly ONE call site (`getMapImages`) which enforces `map_visible=true` at the SQL layer (inner JOIN) AND a runtime row-level assertion. `searchImages` / semantic+similar enrichment use explicit public-only field sets.
+- `lib/serve-upload.ts:127-309`: `ALLOWED_UPLOAD_DIRS` + `SAFE_SEGMENT` + length cap + `.`/`..` rejection + ext↔dir match + `lstat` symlink rejection + `realpath` containment + streams from resolved path (TOCTOU closed) + no SVG + fd-leak protection.
+- `api/download/[imageId]/route.ts`: token-shape regex → hashed lookup → constant-time verify → expiry/refund/single-use → path containment → symlink rejection + dual realpath → **open-before-claim** → atomic single-use UPDATE → FileHandle-leak protection on every branch → RFC-6266/5987 Content-Disposition sanitization → own restrictive CSP. Claim-free GET; claim only on POST.
+- `api/admin/lr/upload/route.ts:57-485`: `withAdminAuth({allowTokenScope:'lr:upload'})`, `getSafeUserFilename`, slug + Unicode-rejecting validation, restore-maintenance entry+late, contract lock, disk + cumulative quota with idempotent settle, HDR gate, **GPS strip on the on-disk original** (line 326), generic errors.
+- `lib/gps-exif-strip.ts`: container-aware byte surgery (JPEG/TIFF/HEIF/WebP), never decodes pixels, bounds-checked, returns `null` on anomaly → re-encode fallback.
+
+### DB layer / PII guard
+- `lib/data.ts:204-432`: `adminSelectFields` → `publicSelectFields` (separate object via destructure-omission) → triple compile-time guards (`_privacyGuard`, `_mapPrivacyGuard`, `_largePayloadGuard`). `publicMapSelectFields` is the sole lat/lng-exposing select, used at one call site enforcing `map_visible=true`. `searchImages:1421` escapes LIKE wildcards; bounds length 2–200.
 
 ### Injection / dangerous sinks
-- SQL: **no** `sql.raw`, `sql.identifier`, string-concatenation-into-SQL, or template-literal-as-query-string anywhere in `src/`. All raw SQL uses `?` placeholders or Drizzle auto-parameterizing `sql\`\``. `searchImages` escapes LIKE wildcards (`/[%_\\]/g → \\$&`).
-- `dangerouslySetInnerHTML`: only JSON-LD, serialized via `safeJsonLd` (escapes `<` → `<`, U+2028/U+2029) under a CSP nonce; EXIF values pass `sanitizeForOg`. `</script>` breakout neutralized.
-- DB backup/restore (`db-actions.ts`): `isAdmin` + same-origin + maintenance gate + advisory lock on a dedicated pinned connection; credentials via `MYSQL_PWD`/`MYSQL_*` env (not `/proc/cmdline`); `HOME` excluded; header validation + dangerous-SQL scan + `--one-database`; stderr sanitized.
-- `admin-users.ts`: parameterized raw SQL, last-admin advisory lock, self-delete prevention, Argon2, rate-limit pre-increment, audit detach before delete.
-- Secret logging: scan found no plaintext password/secret/token logged (the `LOG_PLAINTEXT_DOWNLOAD_TOKENS` path is documented opt-in; other hits log error objects/IPs only).
-- `getClientIp`: `TRUST_PROXY`-gated XFF with hop-count validation + IP normalization; warns on misconfiguration; never fails open on rate limits.
+- **SQL:** no `sql.raw`/`sql.identifier` on user input, no concatenation-into-query. Every `db.execute(sql\`…\`)` interpolation is a Drizzle AST ref or bound value (`${presentedHash}`, `${row.id}`, `${normalizedSegment}`); every `conn.query` uses `?` placeholders with bound arrays. Parameterized end-to-end.
+- **XSS:** every `dangerouslySetInnerHTML` is JSON-LD via `safeJsonLd` (escapes `<`, U+2028/2029) under a CSP nonce — including the `galleryLdJson` sites in `year/[year]:92` and `timeline:102`. EXIF via `sanitizeForOg`.
+- **Command exec:** only `mysqldump`/`mysql` in `db-actions.ts:157,454` with ARRAY args (no shell), `MYSQL_PWD` via env, `HOME` excluded, stderr sanitized. Backup filename regex-validated before path use, so the Content-Disposition interpolation cannot carry quotes. No `eval`/`new Function`.
+- **Stripe webhook:** mandatory constant-time signature verify before DB work, `payment_status==='paid'` gate, tier allowlist, email shape + length validation, zero-amount rejection, `sessionId` idempotency with dup-key-loser disambiguation, deleted-image FK handled, PII-aware logging.
+- **Checkout:** per-IP rate-limit pre-increment+rollback, strict integer parse, tier allowlist, `priceCents<=0` rejection.
 
-### Validation
-- `lib/validation.ts`: Unicode bidi/invisible-char rejection (`UNICODE_FORMAT_CHARS`), slug/filename traversal guards, `safeInsertId` BigInt overflow guard. Applied across all admin-controlled persistent string surfaces.
+### Validation / Unicode
+- `lib/validation.ts:58`: `UNICODE_FORMAT_CHARS` rejects U+180E/200B-200F/202A-202E/2060/2066-2069/FEFF/FFF9-FFFB (Trojan-Source defense). `safeInsertId`, slug/filename guards present. Applied across admin string surfaces + LR upload.
+
+### Secrets
+- No hardcoded keys/passwords/tokens in `src/`. No secret logged.
 
 ## Security Checklist
-- [x] No hardcoded secrets (env-based; production refuses DB secret fallback)
-- [x] All public inputs validated (length/shape/codepoint), bounded, and rate-limited
-- [x] Injection prevention verified (SQL parameterized; LIKE escaped; JSON-LD `<`-escaped; no eval/raw-SQL)
-- [x] Authentication/authorization verified (Argon2id, constant-time HMAC sessions + PATs, central `withAdminAuth`, `requireSameOriginAdmin` on every mutating action)
-- [x] Path traversal / symlink defenses verified on every fs-serving route
-- [x] PII/GPS privacy guards verified (dual compile-time guards + single map call-site with SQL+runtime enforcement)
-- [x] CLIP surface SSRF/path/DoS verified (offline loader, pinned revision, scan caps, strict BLOB decode)
-- [x] Lint gates + 72 security fixtures pass
-- [ ] Dependency audit — see note below
-
-## Dependency audit note
-`npm audit` was not executed in this read-only pass (read-only constraints + network-restricted sandbox). This is a process gap, not a finding. Recommend the standard `npm audit --workspace=apps/web` continue to run in CI; no application-code vulnerability depends on it.
+- [x] No hardcoded secrets (env-based; production refuses DB fallback)
+- [x] All public inputs validated, bounded, rate-limited
+- [x] Injection prevention verified (SQL parameterized; LIKE escaped; JSON-LD escaped; no eval/raw-SQL; spawn array-args)
+- [x] Authentication/authorization verified (Argon2id, constant-time HMAC sessions+PATs, central `withAdminAuth`, `requireSameOriginAdmin`)
+- [x] Path traversal / symlink defenses verified (serve-upload, download, backup-download)
+- [x] PII/GPS privacy guards verified (triple compile-time guards; single map call-site with SQL gate; public-only enrichment; on-disk GPS strip on both ingest paths)
+- [x] CLIP SSRF/path/DoS verified (offline loader, pinned revision, scan caps, strict BLOB decode, lazy native import)
+- [x] Lint gates + 72 fixtures + 180 core security tests pass at HEAD
+- [ ] Dependency audit — `npm audit` not run (read-only/network-restricted sandbox); recommend CI continues to run it. Process gap, not a finding.
 
 ## Conclusion
-No auth bypass, injection, SSRF, secret leakage, privilege escalation, missing rate-limit on a mutating public route, path traversal, unsafe deserialization, missing same-origin guard, or PII disclosure was found at HEAD `0502ae86`. The repository is in a strongly-converged security state.
+No auth bypass, injection (SQL/command/XSS/Unicode/CSV), SSRF, secret leakage, privilege escalation, missing rate-limit on a mutating public route, missing same-origin guard, path traversal, unsafe deserialization, or PII/GPS disclosure was found at HEAD `a7de3ebd`. Honest convergence — **zero findings** — is the correct verdict.
+
+**Note:** The original cycle-11 security agent ran read-only and delivered this report in its final message (Write blocked); it has been persisted here by the orchestrator verbatim.

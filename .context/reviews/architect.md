@@ -1,59 +1,132 @@
-# Architecture Review — Run-6 Cycle-10 (HEAD `0502ae86`)
+# Architect Review — Cycle 11 (Run-6)
 
-**Reviewer:** architect (read-only)
-**Date:** 2026-06-17
-**Verdict:** **0 findings. Architecture is sound and strongly converged.**
+**HEAD:** a7de3ebd · **Scope:** system architecture at the documented single-writer scale
+**Verdict:** SOUND. Zero new architectural defects. Honest convergence.
 
-This is the 10th consecutive review pass. The system converged at cycle-7 (0 findings), absorbed the LIVE CLIP activation surface in cycle-8 (13 findings, all closed + archived in plan-360), and cycle-9 found 1 partial-fix HIGH + 4 minor items now also closed (commits `26609da8`…`e8d25c53`). I independently re-derived every layer the task scopes at HEAD `0502ae86` and reached the same conclusion as the cycle-9 architect: no real architectural defect exists. I did NOT inherit prior verdicts — each item below was recomputed from current source.
+## Summary
 
----
+Traced the full config → resolution → consumption chain, the CLIP double-gate,
+advisory-lock acquire/release pairing across all three lock-using subsystems, and
+the data.ts PII guard architecture. Every invariant the task asked me to verify
+holds. `npx tsc --noEmit -p tsconfig.typecheck.json` exits 0, so both compile-time
+privacy guards are satisfied. No fail-open where fail-closed is required; no leaked
+advisory-lock connection; no PII leak; no contract mismatch between layers that
+produces wrong behavior at the documented scale.
 
-## Layer inventory (each verified at HEAD, not inherited)
+I found ONE prose/comment inaccuracy (not a defect — produces no wrong behavior at
+any scale) and note it for honesty, plus confirmation that the 3 known-deferred CLIP
+items remain correctly deferred.
 
-### 1. Data-access privacy layer — SOUND
-- `apps/web/src/lib/data.ts:208` `adminSelectFields` is the full set; `publicSelectFields` (`:326`) is **derived by destructured omission** of `adminSelectFields` (same source object), so a new admin column does NOT auto-leak — the destructure forces a conscious decision.
-- Two compile-time guards: `_SensitiveKeysInPublic` (no sensitive key may appear in `publicSelectFields`) and `_PrivacySensitiveKeys` (union of admin-only keys). The privacy fixture `apps/web/src/__tests__/privacy-fields.test.ts:6` pins the `SENSITIVE_KEYS` contract and asserts admin-only keys form *exactly* that union (symmetric guard) — includes `uploaded_by`, `color_pipeline_decision`, `transfer_function`, all color/HDR + EXIF/GPS columns.
-- **Cross-cut verified:** the CLIP `image_embeddings` table adds zero PII (only `image_id` + opaque vector + `model_version` + `updated_at`). Both search routes' enrichment SELECTs (`api/search/semantic/route.ts:291-313`, `api/search/similar/[id]/route.ts:191-213`) select the **identical public column set** as keyword search and apply the **identical `eq(images.processed, true)` filter** — full parity with `searchImages` (`data.ts:1457`). A `grep` for `latitude|longitude|filename_original|user_filename` under `api/search` is empty.
-- **No private-photo concept exists in the schema.** The only visibility gates are `topics.map_visible` (GPS-on-map opt-in, `schema.ts:11`) and `smart_collections.is_public` (`schema.ts:321`). Every processed image is public by design, so the search-enrichment `processed=true` filter is the complete and correct visibility gate — there is no unlisted/draft/hidden-image leak vector to miss.
+## What I verified
 
-### 2. Server-action / API-route auth boundary — SOUND
-- `embeddings.ts:50-52` (`backfillClipEmbeddings`) gates on `isAdmin()` THEN `requireSameOriginAdmin()` early-return — matches the action-origin lint contract. Both search routes are intentionally anonymous public surfaces gated by `hasTrustedSameOrigin` + Pattern-2 rate limit (rollback on every early-return before expensive work), consistent with the documented public-action posture.
+### 1. Config double-gate is fail-closed end to end (CLIP `production`)
 
-### 3. Image pipeline + advisory locks — SOUND for single-writer topology
-- 6 advisory-lock names in `lib/advisory-locks.ts` match CLAUDE.md exactly. All acquired non-blocking (`GET_LOCK(?,0)`) or short-timeout on dedicated pool connections, released on connection close (crash-safe). The single-writer Docker topology with process-local coordination (queue dedup set, restore-maintenance flag, rate-limit Maps) is **by design** (HARD GUARD) and internally consistent: the embedding hook (`image-queue.ts:434`) is fire-and-forget AFTER `processed=true` commits and is gated on `semanticSearchMode`, so it cannot run during a restore window (the queue quiesces first).
+- **Validation layer** (`gallery-config-shared.ts:173`): `semantic_search_mode`
+  accepts `disabled|stub|production` as type-valid stored values. Correct — the
+  resolver, not the validator, owns the heal.
+- **Resolution layer** (`gallery-config.ts:129-148`): a stored `production` HEALS to
+  `disabled` unless `process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] === 'true'`.
+  Invalid/unknown raw → default (`disabled`). The DB-read failure path
+  (`gallery-config.ts:189-219` catch) returns an all-defaults object →
+  `semanticSearchMode: 'disabled'`. Fail-closed.
+- **Consumption layer** — three independent re-reads, each fail-closed:
+  - `api/search/semantic/route.ts:220-233`: defaults `semanticMode='disabled'`,
+    `getGalleryConfig()` in try/catch (`catch → stays disabled`), then
+    `if (semanticMode !== 'stub' && !== 'production') → 503` + rate-limit rollback.
+  - `api/search/similar/[id]/route.ts:94-107`: same pattern, stricter
+    (`!== 'production' → 503`).
+  - `app/actions/embeddings.ts:74-82` and `lib/image-queue.ts:435-442`: both default
+    to `disabled`, catch DB errors as `disabled`, and no-op on `disabled`.
 
-### 4. Config resolution chain — SOUND
-- `gallery-config.ts:129-148` resolves `semanticSearchMode` with a **double gate**: invalid values heal to `'disabled'`, AND a stored `'production'` heals to `'disabled'` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (operator env opt-in). The admin Settings UI offers only Disabled/Stub. All consumers (both routes + the backfill action + the queue hook) re-read this resolved mode and fail closed. Contract is consistent across the validation → resolution → consumer layers.
+  The double gate (env `SEMANTIC_SEARCH_ALLOW_PRODUCTION` + DB row) is enforced at
+  the SINGLE resolution chokepoint and every consumer reads the resolved value.
+  There is no path where a consumer reads the raw DB string directly. **Fail-closed
+  confirmed.**
 
-### 5. CLIP integration — SOUND (the recently-added surface, scrutinized hardest)
-- **Model-load singleton (`clip-model.ts:78-108`):** `loadPromise` is assigned synchronously before the first `await`, so N concurrent first-requests in the single-process runtime all receive the same in-flight promise — **no thundering herd**. The `.catch` nulls `loadPromise` so the next call retries. Correct lazy-singleton pattern for Node.
-- **`server-only` deliberately absent** (`clip-model.ts:17-27`) so tsx operator scripts can import it; client-safety enforced instead by the native-import scan + the client→server-only boundary test walking every `'use client'` transitive closure. HARD GUARD respected.
-- **model_version isolation enforced at the QUERY layer**, not just at write: every read (`semantic/route.ts:254`, `similar/[id]/route.ts:117,145`) and every write (queue hook, backfill action, sidecar) filters/tags on `model_version`. Stub (`stub-sha256-v1`) and production (`jina-clip-v2-d512-q8`) rows can never co-rank. The `notExists` selection in the backfill action (`embeddings.ts:103-111`) is correctly per-version so stub→production upgrades are selectable.
-- **Embedding table indexed for the query:** `idx_image_embeddings_model_version_updated (model_version, updated_at)` (`schema.ts:287`, migration 0022) exactly serves the `WHERE model_version=? ORDER BY updated_at DESC LIMIT 5000` scan in both routes.
-- **dotProduct/cosine gating is correct:** production vectors are L2-normalized (`truncateAndNormalize`) so `dotProduct === cosine` (cheaper); stub vectors are NOT normalized so the semantic route correctly falls back to `cosineSimilarity` for stub mode (`semantic/route.ts:271`). The similar route is production-only (Gate 5) so it unconditionally uses `dotProduct` — valid.
-- **MEDIUMBLOB read/write contract** is funneled through the single `decodeEmbeddingColumn` / `embeddingToBuffer` pair (`clip-embeddings.ts:62-126`), handling raw-Buffer (current) and legacy-base64 (old rows) shapes mysql2 can return. Upsert keys on PK `image_id` alone — one current embedding per image, which is the intended contract.
+### 2. model_version isolation at the query layer
 
-### 6. Migration / schema-drift machinery — SOUND
-- Verified by prior passes and unchanged at HEAD: hash-based post-conditions in `migrate.js` fail the deploy loud if drizzle silently skips any journal entry; the 0022 index `when` (1781687094232) is the strict global max so it applies rather than being skipped by the non-monotonic-cursor bug. No new migrations since cycle-9.
+Read routes filter `WHERE model_version = activeModelVersion`
+(`semantic/route.ts:254`, `similar/[id]/route.ts:117,145`). Write paths tag the row
+with the active model_version (`image-queue.ts:446-451`, `embeddings.ts:92`,
+sidecar). Stub mode uses `cosineSimilarity` (stub vectors are unnormalized);
+production uses `dotProduct` on unit vectors (`semantic/route.ts:271` gated on
+`isProd`). Stub rows are filtered out of production reads and vice-versa. Correct.
 
----
+### 3. Advisory-lock acquire/release pairing — no leak
 
-## Cross-cutting interactions challenged
+Audited all GET_LOCK/RELEASE_LOCK sites:
+- `image-queue.ts`: acquire (195-212) releases connection on not-acquired AND on
+  throw; consumption acquires at :261 and releases in `finally` at :544-545 covering
+  the whole processing window.
+- `admin-backfill-runner.ts`: backfill lock (303-333) and per-image claim (343-368)
+  both release connection on every path. The outer entry point
+  (`triggerAdminBackfill` :816-866) nulls `lockConn` after handoff (:846) so the
+  catch cannot double-release; the runner's `finally` (:805-808) is the single
+  release point. `reprocessOne` claim acquire and protected `try` are adjacent with
+  release in `finally` (:610-614) — documented LOCK-CRITICAL.
+- Pool-exhaustion on `getConnection()` is handled as a `locked` skip (no version
+  bump), not an escape that would tight-loop errors. Correct degradation.
 
-- **Search enrichment vs. embedding scan slot consumption (examined, NOT a defect):** the topK scan ranks over the embedding table without a `processed` join, then enrichment drops any non-`processed`/deleted row. At documented scale this can only *shrink* a result set slightly (never leak), and the embedding table has `onDelete: cascade` so deleted images lose their embedding row promptly. With no private-photo concept, there is no correctness or privacy failure here — only a benign, bounded under-fill that the cycle-9 perf pass already subsumed under the deferred main-thread-inference item (DEF-C8-1). Not a finding.
-- **Production-heal + operator gate vs. backfill action:** the action re-reads the resolved (possibly-healed) mode, so it cannot write production rows on a deploy that has not opted in. Consistent.
-- **Restore-maintenance (process-local) vs. embedding hook:** the hook runs only after `processed=true` commits inside the queue, which quiesces during restore; the routes independently gate on `isRestoreMaintenanceActive()`. No coordination gap at single-writer scale.
+No connection or lock is leaked on any path.
 
----
+### 4. data.ts PII guard architecture
 
-## HARD GUARDS — all respected (no temptation to "fix" intentional architecture)
-- Single web-instance / single-writer process-local coordination — left intact (by design).
-- Storage backend abstraction NOT wired (local FS only) — not touched; no false "supported" claim introduced.
-- HDR fields admin-only until WI-09 — privacy guard still classifies `transfer_function`/`is_hdr`/etc. admin-only.
-- CLIP `model_version` isolation + revision pin (`JINA_CLIP_REVISION`) + `allowRemoteModels=false` + `SEMANTIC_SEARCH_ALLOW_PRODUCTION` operator gate — all intact and enforced at the query layer.
+- `publicSelectFields` (data.ts:325-357) and `publicMapSelectFields` (:366-393) are
+  DERIVED from `adminSelectFields` by destructuring-OMIT, as separate `as const`
+  objects (not shared references). Adding a field to `adminSelectFields` does NOT
+  auto-leak it.
+- `PrivacySensitiveKeys` (:416) is the single source-of-truth union. Both
+  `_SensitiveKeysInPublic` (:418-420) and `_MapSensitiveKeysInPublicMap` (:429-432)
+  derive from it via `Extract`/`Exclude` → a new sensitive key auto-extends both
+  guards.
+- **`tsc --noEmit -p tsconfig.typecheck.json` exits 0** → no sensitive key is present
+  in either public select shape. Guard is live and passing.
 
----
+## Finding (non-defect, documentation honesty only)
 
-## Conclusion
+**A1 · `image-queue.ts:431-433` comment overstates row coexistence · LOW · confidence H**
 
-No layering violation leaks admin-only data to the public; no process-local coordination state is assumed shared in a way the single-writer topology violates; the CLIP feature's model load is correctly cached, its embedding table is correctly indexed for the served query, and its `model_version` isolation is enforced at the query layer (not merely at write); the three config layers agree; the advisory-lock strategy is sound for the documented topology. The architecture is converged. Recommend recording cycle-10 as a 0-finding architectural convergence.
+The `image_embeddings` table has `PRIMARY KEY (image_id)` only (schema.ts:274,
+migration 0012:10) — exactly ONE row per image. The comment at image-queue.ts:431-433
+("The `model_version` column on image_embeddings already distinguishes stub rows, so
+no schema migration is needed for that future encoder to tell stub vectors apart from
+production ones") reads as if stub and production rows coexist per image. They do not.
+
+- **Actual (correct) behavior:** the upsert (`onDuplicateKeyUpdate` on the `imageId`
+  PK, image-queue.ts:462-473 / embeddings.ts:142-153) OVERWRITES `(embedding,
+  modelVersion)`. During a stub→production transition the backfill `notExists`
+  candidate query selects images lacking a row *at the target version*
+  (embeddings.ts:103-112, sidecar "Re-embed on model_version mismatch"), so a stale
+  stub row is selected and overwritten with the production row. Reads filter on the
+  active version. Net effect: stub vectors are never co-ranked with production —
+  the documented invariant holds via overwrite-then-filter, NOT coexistence.
+- **Why it is not a defect:** there is no scale, including the documented
+  single-writer topology, at which this produces wrong output or data loss. Only one
+  mode is ever resolved-active per deploy; the single row always carries that mode's
+  version after backfill. The `backfill-clip-embeddings-reembed` test locks the
+  re-embed-on-mismatch semantics.
+- **Fix (optional, non-urgent):** reword the comment to say the single row is
+  *re-embedded/overwritten* to the active model_version (and reads filter on it),
+  rather than implying per-image stub+production coexistence. No code change.
+
+## Known-deferred items (NOT re-opened)
+
+DEF-C8-1/2/3 (plan-361): main-thread inference vs worker-pool, load-time integrity
+verification, reload-storm hardening. Confirmed these remain correctly deferred — the
+live feature operates within the documented bounded mitigations (lazy Promise-singleton
+load, offline `allowRemoteModels=false`, pinned HF revision, 0-timeout claim locks,
+30/min IP rate limit fail-closed even on the shared `unknown` bucket). Not new findings.
+
+## References
+
+- `apps/web/src/lib/gallery-config-shared.ts:173` — validator accepts production (type-valid)
+- `apps/web/src/lib/gallery-config.ts:129-148` — resolver heals production→disabled w/o env opt-in
+- `apps/web/src/lib/gallery-config.ts:189-219` — DB-read failure → all-defaults (disabled)
+- `apps/web/src/app/api/search/semantic/route.ts:220-233` — fail-closed 503 gate
+- `apps/web/src/app/api/search/similar/[id]/route.ts:94-107` — production-only fail-closed gate
+- `apps/web/src/lib/image-queue.ts:434-478` — write path mode-gated, default disabled
+- `apps/web/src/app/actions/embeddings.ts:74-92,103-112` — mode-aware backfill, version-filtered candidates
+- `apps/web/src/lib/admin-backfill-runner.ts:303-333,610-614,805-808,816-866` — lock lifecycle, single release point
+- `apps/web/src/lib/image-queue.ts:195-222,261,544-545` — claim acquire/release in finally
+- `apps/web/src/lib/data.ts:325-357,416-432` — PII guard derivation + compile-time guards
+- `apps/web/src/db/schema.ts:273-288` + `apps/web/drizzle/0012_image_embeddings.sql:10` — single-row PK (finding A1)

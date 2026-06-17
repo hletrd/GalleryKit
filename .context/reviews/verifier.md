@@ -1,301 +1,62 @@
-# Verifier — Run-6 Cycle-10 (HEAD `0502ae86`)
+# Verification Report — Cycle 11
 
+**Repo:** GalleryKit (`/Users/hletrd/flash-shared/gallery`)
+**HEAD:** `a7de3ebd86cd19b169763cea7bebdf7d9a595f1e`
+**Working tree:** CLEAN (no modifications, no untracked changes beyond review artifacts)
 **Date:** 2026-06-17
-**Verifier pass:** independent, post-cycle-9 fixes
 
----
+## Verdict
 
-## Verification Report
+**Status:** PASS
+**Confidence:** high
+**Blockers:** 0
 
-### Verdict
-**Status**: PASS
-**Confidence**: high
-**Blockers**: 0
+All six quality gates pass with exit code 0. Vitest counts match the cycle-10 baseline exactly (2227 passed / 4 design-gated skips / 0 failed). Both cycle-10 fixes are present and correctly implemented at HEAD. Honest convergence confirmed — zero new findings.
 
-### Evidence
+## Evidence
 
-| Check | Result | Command | Output |
-|-------|--------|---------|--------|
-| Tests (cycle-9 fix files) | pass | `npm test --workspace=apps/web -- clip-model-manifest search-short-query similar-route` | 27 passed, 0 failed (3 files) |
-| Tests (full suite) | pass | `npm test --workspace=apps/web -- --reporter=dot` | 2227 passed, 4 skipped, 0 failed (238 files; 4 skips are weight-gated by design) |
-| Typecheck | pass | `npm run typecheck --workspace=apps/web` | exit 0 |
-| ESLint | pass | `npm run lint --workspace=apps/web` | exit 0 |
-| lint:api-auth | pass | `npm run lint:api-auth --workspace=apps/web` | exit 0 |
-| lint:action-origin | pass | `npm run lint:action-origin --workspace=apps/web` | exit 0 |
-| lint:public-route-rate-limit | pass | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 |
+| Check | Result | Command | Exit | Output |
+|-------|--------|---------|------|--------|
+| ESLint | PASS | `npm run lint --workspace=apps/web` | 0 | clean, no warnings/errors |
+| Typecheck | PASS | `npm run typecheck --workspace=apps/web` | 0 | typegen ✓, tsc app clean, 7 JS scripts checked, tsc scripts clean |
+| Vitest (full) | PASS | `npm test --workspace=apps/web` | 0 | 236 files passed / 2 skipped; **2227 passed / 4 skipped / 0 failed** |
+| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | 0 | both admin routes wrap `withAdminAuth` (incl. `lr/upload/route.ts`) |
+| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | 0 | 35 mutating actions enforce same-origin; 7 read-only exempt |
+| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | 0 | 9 public routes covered |
 
-### Acceptance Criteria — Cycle-9 Fixes
+### Vitest exit-code confirmation
+
+Re-ran the suite a second time capturing the bare exit code (the first run's `tail` pipe masked `PIPESTATUS`): `===VITEST_EXIT=0===` with identical counts (2227 passed / 4 skipped, 24.19s). Exit 0 is authoritative.
+
+### The 4 skipped tests are design-gated (NOT failures)
+
+Verified via `--reporter=verbose` `↓` markers. All 4 are model-weight-gated CLIP suites that skip when `CLIP_MODELS_ROOT` weights aren't seeded — exactly the cycle-10 baseline:
+
+```
+↓ src/__tests__/clip-offline-load.test.ts > embedTextReal loads offline and returns a 512-dim unit vector
+↓ src/__tests__/clip-offline-load.test.ts > embedImageReal loads offline and returns a 512-dim unit vector
+↓ src/__tests__/clip-semantic-integration.test.ts > ranks the matching fixture as argmax ... English query
+↓ src/__tests__/clip-semantic-integration.test.ts > ranks the matching fixture as argmax ... KOREAN query
+```
+
+The 2 skipped test FILES are these same two suites (skipped at file level when weights absent). No unexpected skips.
+
+## Acceptance Criteria (cycle-10 fix line-level verification)
 
 | # | Criterion | Status | Evidence |
 |---|-----------|--------|----------|
-| 1 | AGG-C9-01: downloader idempotency verifies all 4 loader-fatal files | VERIFIED | `scripts/clip-model-manifest.ts:50-62` exports `LOADER_FATAL_FILES` with all 4 entries. `verifyLoaderFatalFiles()` at line 143 checks presence, SHA (for manifest-pinned files), and JSON-parseability (for config JSONs). `download-clip-models.ts:89` calls `verifyLoaderFatalFiles(modelCacheDir, MANIFEST)` before the early-return. Tests (`clip-model-manifest.test.ts` lines 125-176): three AGG-C9-01 cases pass — missing `config.json` passes the old manifest-only check but fails the new loader-fatal check; corrupt JSON fails; SHA mismatch fails. All 11 test cases pass. |
-| 2 | AGG-C9-02: short-semantic-query client guard has source-contract test coverage | VERIFIED | `search-short-query-guard.test.ts` — 4 cases, all pass. Reads `search.tsx` from disk and asserts: `SEMANTIC_MIN_QUERY_CODEPOINTS = 3` (line 26), `countCodePoints` comparison against that constant (line 32), `setSearchStatus('invalidSemantic')` BEFORE `fetch('/api/search/semantic'` with an intervening `return;` (lines 36-50), and `invalidSemantic` key parity in en.json/ko.json with 3-char wording (lines 53-61). |
-| 3 | AGG-C9-03: similar-route covers maintenance-503, 429, corrupt-embedding-404 | VERIFIED | `similar-route.test.ts:200-234` — three new cases under the `AGG-C9-03` comment block, all pass. Maintenance-503: `isRestoreMaintenanceActive` flipped to `true`, asserts no rate-limit charge (line 207). 429: `preIncrementSemanticAttempt` returns `true`, asserts `Retry-After` header and no rollback (lines 211-220). Corrupt-embedding-404: non-512-dim base64 payload decoded → `decodeEmbeddingColumn` returns null → 404 + rollback (lines 222-234). |
-| 4 | AGG-C9-04: SimilarResult interface includes lens_model + capture_date | VERIFIED | `similar-photos.tsx:29-30` — `lens_model: string \| null` and `capture_date: string \| null` are present in the interface. Typecheck passes. |
-| 5 | AGG-C9-05: stale "deployed DARK" comment reworded | VERIFIED | `grep -rn "deployed DARK"` across the entire repo returns 0 hits. Commits `82c264dc`/`e8d25c53` rewrote the comments to "operator-gated". |
-
-### Acceptance Criteria — Documented Invariants
-
-| # | Invariant | Status | Evidence |
-|---|-----------|--------|----------|
-| 6 | `_PrivacySensitiveKeys` guard covers all admin-only columns | VERIFIED | `data.ts:416` — `PrivacySensitiveKeys` union has 20 fields. Compile-time `_SensitiveKeysInPublic extends never` guard at line 418-419 passes (typecheck exit 0). `privacy-fields.test.ts` all 8 cases pass; `SENSITIVE_KEYS` list in test matches the union exactly. |
-| 7 | `publicSelectFields` omits all PII | VERIFIED | `data.ts:326-351` — all 20 sensitive keys destructured out before `...publicSelectFieldCore`. |
-| 8 | Advisory-lock names match docs (6 named) | VERIFIED | `advisory-locks.ts:19-44` exports all 6: `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`, `gallerykit_color_pipeline_backfill`. CLAUDE.md line 357 lists the same 6. |
-| 9 | `COLOR_IMPACTING_KEYS` count = 9; CLAUDE.md agrees | VERIFIED | `settings-hash.ts:41-52` — 9 entries: 5 color keys + 3 quality keys + `image_sizes`. CLAUDE.md line 264 says "9" and enumerates the same set. Consistent. |
-| 10 | Blur-data-url contract | VERIFIED | `blur-data-url.test.ts`, `process-image-blur-wiring.test.ts`, `images-action-blur-wiring.test.ts` — all pass in full suite. |
-| 11 | Migration post-condition assertion (loud-fail on silent-skip) | VERIFIED | `migration-journal-monotonicity.test.ts` — all 5 cases pass, including the `migrate.js` post-condition `throw` check. `migration-journal.test.ts` — all 5 pass. |
-| 12 | CLIP similar-route guard chain ordering: same-origin → maintenance → id-validate → rate-limit → mode-gate | VERIFIED | `similar/[id]/route.ts:64-107` — Gates 1-5 in exact order. `similar-route.test.ts` confirms `preIncrementSemanticAttempt` NOT called on maintenance path (line 207), 429 returns `Retry-After` (line 218), 503 mode-gate rolls back (line 165/173). |
-| 13 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env gate | VERIFIED | `gallery-config.ts:144` rejects `'production'` unless env var is `'true'`. `gallery-config-semantic-production.test.ts` passes. |
-| 14 | `model_version` isolation on embedding queries | VERIFIED | `similar-route.test.ts:283-298` — `where()` spy confirms `PRODUCTION_MODEL_VERSION` appears in at least one filter argument. Semantic route tested equivalently. |
-| 15 | Backfill column-set contract | VERIFIED | `backfill-color-pipeline.test.ts` all 5 cases pass, including the `avif_10bit` column-set assertion. `admin-backfill-runner-detection-failure.test.ts` passes (no version bump on detection failure). |
-
-### Gaps
-
-Two documentation-only discrepancies; no behavioral or security defect in either.
-
-1. **`avif_10bit` classified "admin-only" in CLAUDE.md but deliberately public in code.** Risk: low. CLAUDE.md line 139 says "admin-only (AGG-D6/DOC-06)". `data.ts:275-277` has a `R10-M4` comment classifying it "Public-safe — describes the encoded output, not source PII or internal pipeline state" and includes it in `publicSelectFields`. `color-details-section.tsx:472` uses it without `isAdmin` gating to render "10-bit P3" vs "8-bit P3 fallback" label text on the public photo viewer. The code, the `privacy-fields.test.ts` `SENSITIVE_KEYS` list (which does NOT include `avif_10bit`), and the component are mutually consistent. Only CLAUDE.md's column table carries the stale "admin-only" tag from before the R10-M4 decision. Suggestion: update CLAUDE.md line 139 to "public-safe (R10-M4)".
-
-2. **`settings-hash.ts` line reference in CLAUDE.md is stale.** Risk: low. CLAUDE.md line 264 cites `settings-hash.ts:37-49` for `COLOR_IMPACTING_KEYS`. The array starts at line 41 in the current file. The count (9) and the enumerated key names are correct; only the inline line number is off.
-
-### Recommendation
-
-APPROVE — all 5 cycle-9 fixes land correctly with dedicated passing tests. Full suite 2227/2227 (4 design-gated skips). All documented invariants hold. The two gaps are documentation-only with no security or behavioral consequence. Deferred items DEF-C8-1/2/3 remain correctly deferred.
-
----
-
-# Verifier Report — Run-6 Cycle 9 (HEAD `af9ae6c5`)
-
-**Date:** 2026-06-17
-**Reviewer:** oh-my-claudecode:verifier (cycle-9, independent pass)
-**Scope:** Verify cycle-8 fixes against 13 AGG-C8 findings; run all gates fresh; check reconcile-coverage for migration 0022.
-
-## Verdict
-**Status**: PASS
-**Confidence**: high
-**Blockers**: 0
-
-## Gate Results
-
-| Check | Result | Command | Output |
-|-------|--------|---------|--------|
-| ESLint | pass | `npm run lint --workspace=apps/web` | exit 0 |
-| Typecheck | pass | `npm run typecheck --workspace=apps/web` | exit 0 (typecheck:app + typecheck:scripts both clean) |
-| Tests | pass | `npm test --workspace=apps/web` | 2214 passed / 4 skipped / 0 failed (237 test files; 2 skipped files are model-weight-gated clip suites, gated by design) |
-| lint:api-auth | pass | `npm run lint:api-auth --workspace=apps/web` | exit 0 |
-| lint:action-origin | pass | `npm run lint:action-origin --workspace=apps/web` | exit 0 — all 45 action exports OK or SKIP-exempt |
-| lint:public-route-rate-limit | pass | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 |
-
-## Cycle-8 Fix Verification
-
-| # | Finding | Criterion | Status | Evidence |
-|---|---------|-----------|--------|----------|
-| 1 | AGG-C8-02 | Full-manifest idempotency in `scripts/download-clip-models.ts` | VERIFIED | Line 73-83: `verifyAndCleanArtifacts(modelCacheDir, MANIFEST, false)` called before any early-return; all manifest entries checked. |
-| 2 | AGG-C8-03 | Migration 0022 composite index `(model_version, updated_at)`; monotonic `when`; reconcile mirror | VERIFIED | `drizzle/0022_image_embeddings_model_version_idx.sql` present; idx22 when=1781687094232 > idx21 when=1781183604120; `migrate.js:572-573` has `ensureIndex` for `idx_image_embeddings_model_version_updated` (present in comment-stripped source); dynamic `it.each` in `migrate-reconcile-coverage.test.ts` covers it at runtime. |
-| 3 | AGG-C8-04 | Client short-query guard `countCodePoints < 3` → `setSearchStatus('invalidSemantic')` | VERIFIED | `search.tsx:165-169`: guard present; routes to `'invalidSemantic'`, not generic `'error'`; constant `SEMANTIC_MIN_QUERY_CODEPOINTS = 3` at line 27. |
-| 4 | AGG-C8-05 | `model_version`-aware `notExists` in `embeddings.ts` | VERIFIED | `embeddings.ts:92-114`: `modelVersion` const hoisted above query; inner `notExists` WHERE filters on both `imageId` and `modelVersion`. |
-| 5 | AGG-C8-06 | Dedicated `search.invalidSemantic` i18n key ("at least 3 characters") in en.json + ko.json | VERIFIED | `en.json:412`: `"invalidSemantic": "Type at least 3 characters for semantic search."` — `ko.json:412`: `"invalidSemantic": "시맨틱 검색은 세 글자 이상 입력하세요."` — key parity maintained. |
-| 6 | AGG-C8-07 | CLAUDE.md + admin `semanticSearchDesc` updated — "deployed dark" framing removed | VERIFIED | `en.json:728`: `semanticSearchDesc` now describes gating mechanism without "deployed dark"; CLAUDE.md reflects live state. |
-| 7 | AGG-C8-09 | `dotProduct` fast-path in both routes; production-gated in semantic route | VERIFIED | `similar/[id]/route.ts:163`: `dotProduct(...)`. `semantic/route.ts:271`: `isProd ? dotProduct : cosineSimilarity` — stub path correctly retains `cosineSimilarity` for non-unit vectors. |
-| 8 | AGG-C8-10 | `lens_model` + `capture_date` in similar route enrichment SELECT | VERIFIED | `similar/[id]/route.ts:205-206`: both columns present; mapped through to response at lines 227-228. |
-| 9 | AGG-C8-11 | `aria-controls="similar-photos-results"` on button; `id="similar-photos-results"` on result container | VERIFIED | `similar-photos.tsx:110`: `aria-controls="similar-photos-results"`. Line 121: `<div id="similar-photos-results">`. |
-| 10 | AGG-C8-12 | `clipModelArtifactDir` asserts 2-segment model-id + 40-hex non-`main` revision | VERIFIED | `clip-paths.ts:84-96`: both guards throw on violation. `clip-paths.test.ts:128-155`: `describe('AGG-C8-12')` covers live-constant guard and documents the inversion. |
-
-Deferred findings AGG-C8-01 (event-loop), AGG-C8-08 (runtime checksum), AGG-C8-13 (CSP/reload-storm) remain on the deferred register. No regression against them observed.
-
-## Journal Monotonicity
-
-The historical non-monotonic pair at idx 6 → idx 7 is frozen history; `migrate.js` handles it via per-entry hash baselining. Migration 0022 (idx 22, when=1781687094232) is strictly greater than idx 21 (when=1781183604120) and greater than the global max of all prior entries — satisfies both assertions in `migration-journal.test.ts` and `migration-journal-monotonicity.test.ts`. No new non-monotonic entry introduced.
+| 1 | nginx has a dedicated `/api/admin/lr/upload` location with raised body size | VERIFIED | `apps/web/nginx/default.conf:131-145` — `location ^~ /api/admin/lr/upload { client_max_body_size 216M; ... }`. Longest-prefix `^~` match wins over the generic `^~ /api/admin/` block (line 148, 2M) regardless of source order. Carries the `run-6 cycle-10 AGG-C10-01` lineage comment. Backing route `apps/web/src/app/api/admin/lr/upload/route.ts` exists (26k). |
+| 2 | `similar-route.test.ts` mocks + asserts `lens_model` and `capture_date` | VERIFIED | `apps/web/src/__tests__/similar-route.test.ts` — column select mock at L116-117 (`lens_model`, `capture_date`), neighbour row data at L270-271 (`'EF 50mm f/1.8'`, `'2026-01-02 03:04:05'`), and assertions at L286-293 (`AGG-C10-02` comment + `expect(neighbour).toHaveProperty('lens_model', 'EF 50mm f/1.8')` and `...('capture_date', '2026-01-02 03:04:05')`). This test is part of the 236 passing files. |
 
 ## Gaps
 
-None found. All 10 directly-verifiable cycle-8 fixes are present at HEAD with specific file+line evidence.
+None. Every gate produced fresh, post-HEAD evidence with exit 0. No regression risk identified — the full 2231-test suite (the regression surface) ran green.
+
+## Non-findings (not blockers)
+
+- The cycle-10 baseline noted "all 3 lint gates" — there are in fact 4 lint-family gates plus ESLint; all enumerated above pass. No discrepancy, just naming.
+- Doc-only drift (e.g. CLAUDE.md line refs into `node_modules/drizzle-orm/...`) is explicitly informational per the doc itself and is out of scope for a blocker.
 
 ## Recommendation
 
-APPROVE — all 6 gates green (2214 passed / 4 skipped by design), all 10 cycle-8 fixes verified at HEAD `af9ae6c5`, zero new gaps.
-
----
-
-<!-- Cycle 8 report preserved below -->
-
-# Verifier Review — Cycle 8
-
-<!-- Cycle 7 report preserved below the cycle 8 report -->
-
-## Cycle 8 — HEAD 1a325fa6 (CLIP activation-fix commits)
-
-**Agent:** oh-my-claudecode:verifier
-**Date:** 2026-06-17
-**Scope:** Activation-fix commits (e0da12ee, b1d6331c, 1a325fa6) — CLIP semantic-search feature
-
----
-
-### Verdict
-**Status:** PASS
-**Confidence:** high
-**Blockers:** 0
-
----
-
-### Evidence (all fresh, this run, HEAD 1a325fa6)
-
-| Check | Result | Command | Output |
-|-------|--------|---------|--------|
-| Unit tests | PASS | `npm test --workspace=apps/web` | 2207 passed, 4 skipped (2 model-weight-gated files), 0 failed; 237 files |
-| Typecheck | PASS | `npm run typecheck --workspace=apps/web` | exit 0 (tsc clean, next typegen OK, 7 JS scripts checked) |
-| ESLint | PASS | `npm run lint --workspace=apps/web` | exit 0, 0 diagnostics |
-| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | exit 0 — 2/2 admin routes OK |
-| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | exit 0 — all mutating actions enforce same-origin provenance |
-| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 — `/api/search/semantic` confirmed uses rate-limit helper |
-
-**Unit-count delta vs cycle 7 (2194 → 2207, +13):** consistent with the 3 activation-fix commits adding new clip-paths, clip-offline-load, and related test cases.
-
----
-
-### Acceptance Criteria
-
-| # | Criterion | Status | Evidence |
-|---|-----------|--------|----------|
-| 1 | All 6 gates pass with fresh output | VERIFIED | Every gate exited 0; output captured above |
-| 2 | 1a325fa6: boundary test catches clip-model.ts via native imports (claim is true) | VERIFIED | See detail below |
-| 3 | clip-paths.test.ts pins absolute-vs-relative resolution and revision-subdir-not-flat | VERIFIED | See detail below |
-| 4 | Semantic route has production branch and same-origin 403 guard | VERIFIED | `route.ts:99-101` hasTrustedSameOrigin → 403; `route.ts:233-244` isProd branch calls `embedTextReal` |
-| 5 | CLAUDE.md CLIP claims match code (model id, revision pin, EMBEDDING_DIM=512, model_version isolation) | VERIFIED | See detail below |
-| 6 | No test weakened/skipped to pass gates | VERIFIED | 2 skipped files are legitimately model-weight-gated — not suppressions |
-
----
-
-### Detail
-
-#### Criterion 2 — 1a325fa6 client→server-only boundary claim
-
-The commit removed `import 'server-only'` from `clip-model.ts` and claimed the boundary test enforces safety instead.
-
-**Claim is TRUE.** `src/__tests__/client-server-only-boundary.test.ts` (lines 387-410, AGG-C10-FIX block) contains a dedicated non-vacuous pinning test that:
-
-1. Reads `clip-model.ts` from disk and asserts `hasServerOnlyImport(source) === false` — confirming the marker is absent (required because tsx operator scripts import this module under the throwing `default` server-only condition).
-2. Asserts `hasNativeModuleImport(source) === true` — confirming `sharp` or `@huggingface/transformers` are present, so the boundary walk flags any future `'use client'` → `@/lib/clip-model` value import RED.
-3. Asserts `reachesServerOnly(source) === true` — combined detection confirms server-only-equivalent status.
-
-`clip-model.ts:29` imports `sharp` as a value import (not type-only), satisfying native-module detection. The `hasServerOnlyImport` function strips block and line comments before matching (lines 232-235), so the explanatory comment in `clip-model.ts` mentioning `import 'server-only'` does not false-positive. The main closure-walk test also covers native imports globally, so any new client component reaching `clip-model.ts` via a value import would fail that test RED.
-
-#### Criterion 3 — clip-paths.test.ts pinned defects
-
-**Both defects correctly pinned.** `src/__tests__/clip-paths.test.ts`:
-
-- **Absolute-vs-relative (path doubling bug):** `resolveClipModelsRoot('/app/apps/web', '/app/data/models/clip')` asserted to return `'/app/data/models/clip'` verbatim. The anti-pattern `'/app/apps/web/app/'` explicitly asserted absent (line 44). Four cases: absolute verbatim, relative-against-cwd, empty-string-as-default, always-returns-absolute.
-
-- **Revision-subdir-not-flat (MISSING artifact bug):** `clipModelArtifactDir(root)` asserted to equal `join(root, org, name, JINA_CLIP_REVISION)` — NOT the flat `join(root, org, name)`. Regression test (lines 102-109) explicitly asserts `dir !== flat`.
-
-- **No-drift pin:** download script must contain `resolveClipModelsRoot` + `clipModelArtifactDir` and must NOT contain the old `join(process.cwd(), clipModelsRoot)` doubling pattern (lines 116-126).
-
-All four describe blocks pass.
-
-#### Criterion 5 — CLAUDE.md CLIP claims vs code
-
-- **Model ID** (`jinaai/jina-clip-v2`): matches `JINA_CLIP_MODEL_ID` in `src/lib/clip-model-id.ts`.
-- **Revision pin** (`e10d47f5691d...`): matches `JINA_CLIP_REVISION` in `src/lib/clip-model-id.ts`.
-- **EMBEDDING_DIM = 512**: matches `export const EMBEDDING_DIM = 512` at `src/lib/clip-embeddings.ts:8`.
-- **EMBEDDING_BYTES = 2048**: `EMBEDDING_BYTES = EMBEDDING_DIM * 4 = 2048` at `clip-embeddings.ts:9`; `schema.ts:259` states "2048 bytes = 512 × 4-byte little-endian float32"; CLAUDE.md says "raw 2048-byte float32 vector" — all consistent.
-- **model_version isolation**: `STUB_MODEL_VERSION = 'stub-sha256-v1'` and `PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8'` are distinct; `route.ts:253-255` filters `imageEmbeddings.modelVersion` by active mode — stub rows never appear in production results and vice versa.
-
-One documentation note (not a defect): CLAUDE.md describes the stored vector by byte count (2048) rather than dimension count (512). Both are correct and consistent; no code change required.
-
-#### Criterion 6 — Skipped tests are legitimately gated
-
-The 4 skipped individual tests come from 2 files:
-
-- `src/__tests__/clip-offline-load.test.ts` — `describe.skip` when `process.env['CLIP_OFFLINE_LOAD'] !== '1'`. Tests `embedTextReal`/`embedImageReal` with actual model weights. Correct gating; model weights not present in standard test environment.
-- `src/__tests__/clip-semantic-integration.test.ts` — `describe.skip` when `process.env['CLIP_INTEGRATION'] !== '1'`. Tests real semantic ranking. Same rationale.
-
-No test was weakened, loosened, or suppressed to make any gate pass.
-
----
-
-### Gaps
-None.
-
----
-
-### Recommendation
-**APPROVE.** All 6 gates pass with fresh post-HEAD output (2207 passed / 4 skipped / 0 failed unit tests, all lint gates exit 0, typecheck clean). All 6 acceptance criteria VERIFIED with file-and-line citations. The client→server-only boundary claim for 1a325fa6 is true and non-vacuous. clip-paths.test.ts correctly pins both activation-fix defects. The 4 skipped tests are legitimately model-weight-gated — not suppressions. Convergence holds at cycle 8.
-
----
----
-
-# Verifier Review — Cycle 7 (archived)
-
-**HEAD:** `a7758ef0` (`docs(reviews): 📝 run-6 cycle-6 deep review + plan (11/11 agents, HEAD 4eb83aab)`)
-**Agent:** verifier
-**Date:** 2026-06-17
-**Angle:** evidence-based correctness check — ran every gate fresh at HEAD, verified load-bearing CLAUDE.md claims against actual code, empirically proved the privacy compile-guard, and confirmed the two cycle-6 fix commits did what they claim (incl. HARD GUARD #1).
-
----
-
-## Verification Report
-
-### Verdict
-**Status:** PASS
-**Confidence:** high
-**Blockers:** 0
-**Contradictions:** 0
-
-**20/20 load-bearing claims VERIFIED, 0 CONTRADICTED, 0 UNVERIFIABLE.** The system remains converged at cycle 7. All gates green with fresh post-HEAD output; the privacy compile-guard was empirically proven to fail on an injected synthetic `latitude` leak, then reverted with zero residue (`data.ts` git hash byte-identical before/after). Both cycle-6 fix commits verified at HEAD: HDR badge contrast now `text-amber-950` (worst-stop 6.62:1, passes WCAG 1.4.3 AA) at all 4 sites with a locking test; the client→server-only boundary classifier now follows dynamic `import()` + `import = require()` value forms AND `@/db` still carries NO `server-only` import (HARD GUARD #1 respected). An honest "all verified, 0 contradictions" is the correct, desirable outcome — and that is what this cycle found. No findings fabricated.
-
----
-
-### Evidence — gates (all fresh, this run, HEAD `a7758ef0`)
-
-| Check | Result | Command | Output |
-|-------|--------|---------|--------|
-| Unit tests | PASS | `npm test --workspace=apps/web` | **2194 passed \| 2 skipped \| 0 failed** (234 files passed, 1 file skipped); exit 0; 53.04s |
-| Typecheck | PASS | `npm run typecheck --workspace=apps/web` | exit 0 (`typecheck:app` tsc against `tsconfig.typecheck.json` clean + `next typegen` OK + `typecheck:scripts` 7 JS files checked clean) |
-| ESLint | PASS | `npm run lint --workspace=apps/web` | exit 0, no diagnostics |
-| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | exit 0 — `api/admin/db/download` + `api/admin/lr/upload` both OK |
-| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | exit 0 — "All mutating server actions enforce same-origin provenance." |
-| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 — all public routes OK (`search/semantic` via rate-limit helper, `stripe/webhook` via `@public-no-rate-limit-required`, rest no mutating handler) |
-| i18n key parity | PASS | recursive key-set diff `en.json` vs `ko.json` | **840 = 840**, identical key sets (`only in en: []`, `only in ko: []`). Value-shape asymmetry (ko has no `plural` block) intentional per DOC-R5C3-07 — not flagged |
-
-**Unit-count delta vs cycle 6 (2181 → 2194, +13):** expected and explained. The two cycle-6 fix commits added regression tests: `src/__tests__/hdr-badge-contrast.test.ts` (new, 6 tests) and 1 new `it` block in `client-server-only-boundary.test.ts` — plus the surrounding suite picked up additional cases. NOT a regression; the increase is paired-test coverage for the two cycle-6 findings.
-
-**The 2 skipped tests** are in `src/__tests__/clip-semantic-integration.test.ts`, `describe.skip`-gated by `process.env['CLIP_INTEGRATION'] === '1'` (file L8-9: "Default CI (no model weights) skips the whole suite via describe.skip"; L30-31: `const RUN = process.env['CLIP_INTEGRATION'] === '1'; const d = RUN ? describe : describe.skip;`). Intentional env-gating (HARD GUARD #2) — NOT a failure, NOT reopened, NOT activated.
-
----
-
-### Acceptance Criteria — load-bearing CLAUDE.md claims vs HEAD code
-
-| # | Claim | Status | Evidence (file:line) |
-|---|-------|--------|----------------------|
-| 1 | `IMAGE_PIPELINE_VERSION = 7` | VERIFIED | `src/lib/gallery-config-shared.ts:21` `export const IMAGE_PIPELINE_VERSION = 7;` |
-| 2 | 6 default image sizes `[640,1536,2048,4096,5120,7680]` | VERIFIED | `gallery-config-shared.ts:90` `DEFAULT_IMAGE_SIZE_VALUES = [640, 1536, 2048, 4096, 5120, 7680] as const` |
-| 3 | `COLOR_IMPACTING_KEYS` = **9** keys | VERIFIED | `settings-hash.ts:44-54` — 5 color (`wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`) + 3 quality (`image_quality_webp/avif/jpeg`) + `image_sizes` = 9. Inline doc comment at L4 says "the **9** settings" — code + comment + CLAUDE.md L264 all agree on 9. (The orchestrator brief's "5" hint is stale; the doc is correct at HEAD. No contradiction.) |
-| 4 | `force_srgb_derivatives=false` | VERIFIED | `gallery-config-shared.ts:116` `'false'` |
-| 5 | `allow_hdr_ingest=false` | VERIFIED | `:119` `'false'` |
-| 6 | `force_show_color_chips=false` | VERIFIED | `:122` `'false'` |
-| 7 | `wide_gamut_jpeg_chroma='4:4:4'` | VERIFIED | `:125` `'4:4:4'` |
-| 8 | `avif_effort=6` | VERIFIED | `:128` `'6'` |
-| 9 | `sdr_jpeg_chroma='4:2:0'` | VERIFIED | `:131` `'4:2:0'` |
-| 10 | `wide_gamut_max_source_pixels=50_000_000` | VERIFIED | `:134` `'50000000'` |
-| 11 | `image_quality_webp=90` / `avif=85` / `jpeg=90` | VERIFIED | `:97-99` `'90'` / `'85'` / `'90'` |
-| 12 | 6 advisory-lock names | VERIFIED | `src/lib/advisory-locks.ts`: `LOCK_DB_RESTORE='gallerykit_db_restore'` (:19), `LOCK_UPLOAD_PROCESSING_CONTRACT='gallerykit_upload_processing_contract'` (:22), `LOCK_TOPIC_ROUTE_SEGMENTS='gallerykit_topic_route_segments'` (:25), `LOCK_ADMIN_DELETE='gallerykit_admin_delete'` (:34), `gallerykit:image-processing:${jobId}` (:41), `LOCK_COLOR_PIPELINE_BACKFILL='gallerykit_color_pipeline_backfill'` (:44). |
-| 13 | Cache-Control trio `public, max-age=3600, must-revalidate` across 3 layers, NOT immutable | VERIFIED | `serve-upload.ts:230,252`; `next.config.ts:71`; `nginx/default.conf:157`. The 3 `immutable` string hits are ALL comments explaining why immutable is deliberately NOT used (`serve-upload.ts:193`, `next.config.ts:64-65`); zero active `Cache-Control` directive sets immutable. |
-| 14 | ETag `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` | VERIFIED | `serve-upload.ts:215` `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"` — exact. `HASH_LENGTH=8` (`settings-hash.ts:55`), `.slice(0, HASH_LENGTH)` applied at the hash producer (`:68`), not re-sliced at the ETag site. |
-| 15 | Privacy compile-guard fails on a leak | VERIFIED — empirically proven | `data.ts:418-419`. Injected synthetic leak `latitude: images.latitude` into `publicSelectFields` (`:355-357`), ran `tsc -p tsconfig.typecheck.json --noEmit` → **failed**: `src/lib/data.ts(420,7): error TS2322: Type 'boolean' is not assignable to type '["latitude", "ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above"]'`. **Reverted clean** — `git hash-object src/lib/data.ts` returned the identical pre-injection hash `5bc4767ea98d51bfa7c1146705db38a0acb344cb`; `git diff src/lib/data.ts` empty; no residual `latitude` in the `publicSelectFields` block. Guard behaves exactly as documented. |
-| 16 | `PrivacySensitiveKeys` union = **20** admin-only keys incl. `pipeline_version`, `color_space`, `icc_profile_name` | VERIFIED | `data.ts:416` — 20-key union: latitude, longitude, filename_original, user_filename, processed, original_format, original_file_size, color_pipeline_decision, is_hdr, has_gain_map, was_downscaled, transfer_function, matrix_coefficients, bit_depth, uploaded_by, processing_error, failed_at, color_space, icc_profile_name, pipeline_version. |
-| 17 | 6 load-bearing contract test files present + passing | VERIFIED | `privacy-fields.test.ts`, `data-tag-names-sql.test.ts`, `sw-template-contract.test.ts`, `touch-target-audit.test.ts`, `backfill-color-pipeline.test.ts`, `admin-backfill-runner-detection-failure.test.ts` — all exist (`src/__tests__/`), all green within the 2194-pass suite. |
-| 18 | i18n key counts equal | VERIFIED | 840 = 840 (see gates table) |
-| 19 | Cycle-6 commit `5af25dc7`: HDR badge contrast meets WCAG 1.4.3 AA | VERIFIED | All 4 badge sites changed `text-white` → `text-amber-950` on `bg-gradient-to-r from-amber-300 to-orange-400`: `color-details-section.tsx:526`, `lightbox-color-pip.tsx:151`, `info-bottom-sheet.tsx:278`, `image-manager.tsx:526`. Zero `text-white` remains paired with that gradient. amber-950/orange-400 (worst stop) = 6.62:1 ≥ 4.5:1 (orchestrator-verified math, restated in test header). New `hdr-badge-contrast.test.ts` (6 tests) asserts negative pin (`not.toMatch(/\btext-white\b/)`), positive pin (`toMatch(/\btext-amber-950\b/)`), and explicitly forbids `text-amber-900` (4.01:1 fail). Test file runs GREEN. |
-| 20 | Cycle-6 commit `204e8594`: boundary test follows dynamic import / import-equals, `@/db` still has NO `server-only` | VERIFIED | `client-server-only-boundary.test.ts` `extractAliasedImports` now adds a `ts.forEachChild(sf, visit)` descent capturing (a) `ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword` (dynamic `import('…')`) and (b) `ts.isImportEqualsDeclaration(node)` (`import x = require('…')`), with non-vacuous fixtures (`await import('@/lib/data')` → must contain `@/lib/data`; `import('@/db')` → `@/db`). **HARD GUARD #1: `grep -rn server-only src/db/` = 0 hits** — `@/db` (`src/db/index.ts`) imports `drizzle-orm/mysql2` + `mysql2/promise` but NO `server-only` marker. The boundary guard relies on mysql2-in-closure detection, not a `server-only` import. Both cycle-6 test files: 2 files / 18 tests / exit 0. |
-
----
-
-### Gaps
-None.
-
-### Hard-guard compliance
-- **#1 (no `import 'server-only'` on `@/db`):** confirmed NOT present (`grep -rn server-only src/db/` = 0). I did NOT add it; I did NOT test adding it (the brief warns it breaks tsx backfill — I left it alone entirely). The cycle-6 boundary-test commit `204e8594` correctly hardens the classifier without touching `@/db`'s import set.
-- **#2 (CLIP/semantic_search):** the 2 skips are the intentional `describe.skip` env-gate (`CLIP_INTEGRATION !== '1'`). Not reopened, not activated. `semantic_search_mode` default remains `'disabled'` (`gallery-config-shared.ts`).
-- **Working-tree hygiene:** my only probe edit was the synthetic `latitude` injection into `data.ts`, reverted to a byte-identical file (git hash match). `git diff --stat -- apps/web/` is EMPTY and there are no untracked files under `apps/web/`. The only working-tree deltas are sibling reviewers' own `.context/reviews/*.md` files (concurrent agents) plus this file.
-
-### Recommendation
-**APPROVE.** Every gate passes with fresh post-HEAD output (2194 passed / 2 skipped / 0 failed unit, typecheck exit 0, ESLint + 3 security lint gates exit 0, i18n 840=840); all 20 load-bearing claims VERIFIED against actual code at HEAD `a7758ef0`; the privacy guard empirically proven to compile-fail on an injected leak and reverted with zero residue; both cycle-6 fix commits verified (HDR contrast AA-compliant with locking test; boundary classifier widened to dynamic-import/import-equals with `@/db` still free of `server-only`). **0 contradictions — the convergence is real and holds at cycle 7.**
+**APPROVE** — All six gates pass at exit 0 with counts matching the cycle-10 baseline (2227/4/0), and both cycle-10 fixes are present and correct at HEAD `a7de3ebd`. The repo has converged; cycle 11 produced zero new blockers.

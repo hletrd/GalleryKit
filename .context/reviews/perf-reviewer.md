@@ -1,57 +1,96 @@
-# Performance Review — Run-6 Cycle-10 (PERF-REVIEWER)
+# Performance Review — Cycle 11 (perf-reviewer)
 
-**HEAD:** 0502ae86 · branch master · 2026-06-17
-**Scope:** Whole repo, performance-sensitive surface.
-**Prior perf baseline:** cycle-8 (PERF-C8-01 embeddings index, PERF-C8-02 dotProduct fast-path — both landed: bbd311c5, f29cbda7). Cycle-9 perf: 0 findings.
-
-**Verdict:** **ZERO real performance defects found.** Strong convergence after 9 prior cycles. No N+1, no missing index on a hot path, no unbounded memory growth, no render storm, no blocking sync op on a hot path, no resource leak, no user-controlled O(n²), no missing pagination cap. This cycle is a verification pass; below is what was inventoried and confirmed sound.
-
----
-
-## Inventory & verification
-
-### Data-access layer — `apps/web/src/lib/data.ts` (1663 lines)
-- **All listing queries bounded.** `getImagesLite`, `getImagesLitePage`, `getImages`, `getAdminImagesLite`, `getImagesForFeed`, `getImagesForSmartCollection`, `searchImages` clamp to `LISTING_QUERY_LIMIT` (100). `getMapImages` capped at `MAP_MAX_MARKERS` (10000). `getImageIdsForSitemap` clamped to 50000.
-- **`tagNamesAgg`** (line 605) — shared `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over `LEFT JOIN imageTags … tags … GROUP BY images.id`; locked by `data-tag-names-sql.test.ts`.
-- **No N+1.** `getImage` runs tags+prev+next in `Promise.all` (line 1048). `getSharedGroup` batches all image tags in ONE `inArray` query (line 1229) → `Map<imageId,tags[]>`. `getImageByShareKey` collapses image+tags into one LEFT JOIN + GROUP_CONCAT.
-- **Keyset pagination** (`buildCursorCondition`) order-compatible with `(capture_date DESC, created_at DESC, id DESC)`, rides `idx_images_processed_capture_date` / `idx_images_topic`.
-- **View-count buffer** (lines 17-202) bounded (`MAX_VIEW_COUNT_BUFFER_SIZE` 1000, `MAX_VIEW_COUNT_RETRY_SIZE` 500), chunked flush (`FLUSH_CHUNK_SIZE` 20 vs 10-conn pool), exponential backoff, FIFO eviction.
-- **React `cache()`** wraps 9 functions. `getLatestImageForOg` (line 873) is the minimal id+title OG accessor (no tag JOIN/aggregation).
-
-### Schema indexes vs. query patterns — `apps/web/src/db/schema.ts`
-Every hot path has a matching composite index: `images` `(processed,capture_date,created_at)`, `(processed,created_at)`, `(topic,processed,capture_date,created_at)`, `(user_filename)`, `(uploaded_by)`; `image_tags(tag_id)`; `image_views(bot,viewed_at,country_code)` + `(bot,viewed_at,referrer_host)`; **`image_embeddings(model_version,updated_at)`** (line 287) — exactly serves `WHERE model_version=? ORDER BY updated_at DESC LIMIT 5000`.
-
-### Semantic / similar search vector path — **CONFIRMED BOUNDED & INDEXED**
-- `app/api/search/semantic/route.ts` + `.../similar/[id]/route.ts`: cosine scan **hard-capped at `SEMANTIC_SCAN_LIMIT = 5000`** (`clip-embeddings.ts:18`), filtered by `model_version`, ordered by `updated_at DESC` — uses the composite index. Does NOT scan all embeddings unbounded; at 445 (≤5000) rows the in-memory O(n·512) dot product is sub-ms.
-- **Production uses `dotProduct`** (vectors L2-normalized via `truncateAndNormalize`), skipping per-row norm+sqrt (AGG-C8-09). Stub mode retains `cosineSimilarity` (un-normalized) — correct.
-- Both routes: 30/min/IP rate-limit (Pattern-2 rollback), same-origin gate, 8 KB body cap, production-only gate on similar. `topK` = filter→sort→slice over ≤5000, fine.
-
-### Sharp pipeline — `apps/web/src/lib/process-image.ts` (1650 lines)
-- Parallel AVIF/WebP/JPEG (`Promise.all`); per-format fresh `sharp(inputPath)` reads via mmap (no heap pin) — deliberate WI-14 contamination fix.
-- **Same-resize-width variant dedup hard-links** (zero-copy, line 1090-1099) instead of re-encoding.
-- Wide-gamut >50 MP downscale gate (`WIDE_GAMUT_MAX_SOURCE_PIXELS`, line 1004); fan-out capped at 8 sizes; `clone()` only for the 16px blur; `limitInputPixels` on every constructor. 10-bit AVIF on Promise-singleton libheif probe with per-image 8-bit fallback.
-
-### Image queue — `apps/web/src/lib/image-queue.ts` (786 lines)
-- `PQueue` concurrency 1 (tunable). **Cursor-paginated bootstrap** (`BOOTSTRAP_BATCH_SIZE` 500, `bootstrapCursorId`) — no unbounded backlog; continuation on `onIdle`.
-- All retry Maps bounded (`MAX_RETRY_MAP_SIZE` 10000, `MAX_PERMANENTLY_FAILED_IDS` 1000) FIFO + associated-map cleanup. GC timer armed **once** (`!state.gcInterval`, AGG-M12). Caption/embedding hooks fire-and-forget — never block the job.
-
-### Service worker LRU — `apps/web/src/lib/sw-cache.ts`
-- `recordAndEvict` = delete-then-set insertion-order recency + **head-walk eviction (O(n))** (AGG-H3, 7119345a) — eliminated prior per-write O(n log n) sort. 50 MB cap. Single O(n) total-sum is inherent to whole-blob metadata model (documented out-of-scope).
-
-### Front-end render behavior
-- **`home-client.tsx` masonry**: pure CSS columns, NO JS layout/reorder loop. RAF-debounced resize, passive scroll listener with redundant-setState guard, all derived values memoized, above-fold priority mirrored to breakpoints. *(Doc nit only: CLAUDE.md still says masonry uses "useMemo for reorder" — the reorder is gone, now CSS columns. Cosmetic, not a defect.)*
-- **`histogram.tsx`**: worker created **once** (`[]` deps, 526) + `terminate()` on unmount; decode effect AbortController + nulls handlers on cleanup; canvas 256×256.
-- **`photo-viewer.tsx`**: every effect returns listener/timer cleanup; srcset in `useMemo`.
-- **`similar-photos.tsx`**: lazy — fetch only on first toggle-open (`fetchedRef`), bounded results, renders null in non-production mode.
-- **`load-more.tsx`**: `IntersectionObserver` disconnected on unmount (129); `queryVersionRef` stale-response guard checked before+after await; `mountedRef`+`loadingRef` guards.
-
-### Analytics — `apps/web/src/lib/analytics-data.ts`
-All 5 queries admin-only, LIMIT-bounded (20/30), use `(bot,viewed_at,*)` composite indexes. Windowed = covering range scan; 'all' = covering-index temp-table aggregation **bounded by 395-day view-event retention** (`purgeOldViewEvents`). 'all'-case index-reorder explicitly deferred pending EXPLAIN evidence (plan-322 entry 3) — correct. `data-timeline.ts`: 3 queries all LIMIT-bounded. `embeddings.ts` backfill action: `notExists` on indexed `(imageId,modelVersion)`, capped at `SEMANTIC_SCAN_LIMIT`.
+**Reviewer:** perf-reviewer
+**HEAD:** bb463062 (master, as of 2026-06-13)
+**Scope:** Whole-repo performance audit — DB queries, image pipeline, CLIP scan, SW cache, React components
+**Verdict: APPROVE — ZERO real performance defects found. The codebase has converged.**
 
 ---
 
-## Items NOT re-reported (closed cycles 1-9, verified still in place)
-SW O(n log n)→head-walk (7119345a) · map markers 10k LIMIT (3b69c877) · dotProduct + embeddings index (f29cbda7, bbd311c5) · OG minimal id+title query (e9040d17) · WebP ICC first-1KB read (2784d244) · queue GC timer armed once (d979c4ca) · getImage dead `sql FALSE` branches removed (C6-AGG6R-01).
+## Summary
 
-## Conclusion
-No actionable performance findings. The perf surface is mature and over-reviewed; speculative micro-optimizations would add risk without measurable benefit. The single cosmetic doc drift (masonry "reorder" wording in CLAUDE.md) is noted for whoever next edits that doc but is not a perf defect and does not warrant a standalone fix task.
+After a full audit of all performance-sensitive surfaces, no real performance defects were found. All findings from cycles 1–10 have been resolved; there is nothing remaining that a senior engineer would commit to fixing.
+
+---
+
+## What Was Verified
+
+### 1. CLIP Semantic Scan (hard-cap + index — primary directive)
+
+- `SEMANTIC_SCAN_LIMIT = 5000` confirmed at `clip-embeddings.ts:18`.
+- Scan query in `api/search/semantic/route.ts` and `api/search/similar/[id]/route.ts`:
+  ```sql
+  SELECT ... FROM image_embeddings
+  WHERE modelVersion = ?
+  ORDER BY updatedAt DESC
+  LIMIT 5000
+  ```
+- Index `idx_image_embeddings_model_version_updated (model_version, updated_at)` confirmed in `schema.ts`. This composite index fully covers the `WHERE + ORDER BY` shape — MySQL uses the index range scan on `model_version = ?` and then traverses the `updated_at` B-tree in descending order with no filesort. Verified, not assumed from comments.
+- `dotProduct()` is O(512) per row. 5000 rows × 512 dimensions = 2.56 M FP multiplications — trivial (~1 ms in practice).
+- `topK()` runs filter → `Array.sort` → slice on ≤5000 scored elements; O(n log n) on ≤5000, no issue.
+- Enrichment query on top-K result IDs: bounded by `SEMANTIC_TOP_K_MAX = 50`, fetched via single `inArray` + `leftJoin(topics)`. Not a scan.
+
+### 2. `data.ts` — All Listing Queries
+
+- All listing queries bounded by `LISTING_QUERY_LIMIT = 100`.
+- All tag fetches use batched `inArray` or `tagNamesAgg` GROUP_CONCAT — no N+1 patterns.
+- `getImage()` uses `Promise.all` for tags + prev + next (3 parallel queries).
+- `getSharedGroup()` uses a single batch tag fetch.
+- `getMapImages()` bounded by `MAP_MAX_MARKERS = 10000` with index on `(map_visible, latitude, longitude)`.
+- `getImageIdsForSitemap()` capped at 50000.
+- `searchImages()` short-circuits when main query fills the limit (no over-fetch).
+- All hot paths wrapped in `cache()` for SSR deduplication.
+
+### 3. Image Processing Queue (`image-queue.ts`)
+
+- PQueue concurrency: 1 (env `QUEUE_CONCURRENCY` override available).
+- Bootstrap: keyset-paginated (BOOTSTRAP_BATCH_SIZE = 500), cursor-based. No table scans.
+- Retry Maps and permanently-failed IDs Maps are bounded (MAX_RETRY_MAP_SIZE = 10000; MAX_PERMANENTLY_FAILED_IDS = 1000).
+- Hourly GC interval: armed exactly once, guarded by `!state.gcInterval`.
+- `notInArray` exclude-list: at most 1000 IDs in the IN() clause — within MySQL optimizer limits.
+
+### 4. Admin Backfill Runner (`admin-backfill-runner.ts`)
+
+- Keyset-paginated batch fetch (BATCH_SIZE = 100) with `id > cursor ORDER BY id ASC`. No full-table re-scans.
+- Query shape: `WHERE processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < N) AND id > cursor`. No composite index on `(processed, pipeline_version, id)` — this is an infrequent admin-only operation; filesort at personal-gallery scale (< 100k rows) is not a defect.
+- Connection pool budget capping: at pool limit 10, workers capped at max 2. No pool exhaustion risk.
+- Per-image advisory lock with 0-second (non-blocking) timeout.
+
+### 5. Service Worker LRU Cache (`public/sw.js` + `sw-cache.ts`)
+
+- LRU: delete-then-set insertion-order recency. O(n) total-size recomputation per call is an accepted trade-off (whole-blob JSON storage; noted in code comments). Not a new defect.
+- O(n log n) sort removed in prior cycles — confirmed absent.
+- 50 MB cap enforced. HEAD ETag probe: 300 ms timeout.
+- HTML offline cache: 24 h TTL, 50-entry cap.
+
+### 6. View Count Buffer
+
+- Bounded Maps with FIFO eviction. Exponential backoff on DB flush failures. Null-timer fix confirmed.
+
+### 7. React Masonry Grid
+
+- Pure CSS columns layout (not `useMemo` for reorder). The CLAUDE.md reference to "useMemo for reorder" is a documentation artifact from before the CSS rewrite; it is not a live code issue. No React re-render storms found.
+
+### 8. Schema Indexes
+
+All query-critical indexes confirmed present:
+| Index | Columns |
+|-------|---------|
+| `idx_images_processed_capture_date` | (processed, capture_date, created_at) |
+| `idx_images_processed_created_at` | (processed, created_at) |
+| `idx_images_topic` | (topic, processed, capture_date, created_at) |
+| `idx_image_embeddings_model_version_updated` | (model_version, updated_at) |
+| `idx_image_tags_tag_id` | (tag_id) |
+| `idx_images_uploaded_by` | (uploaded_by) |
+
+---
+
+## Issues Found
+
+**None.**
+
+---
+
+## Recommendation
+
+**APPROVE.** No CRITICAL, HIGH, MEDIUM, or LOW performance issues detected. The codebase has genuinely converged on the performance axis as of cycle 11.

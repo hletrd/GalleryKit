@@ -1,4 +1,4 @@
-# Test-Engineer Review — Run-6 Cycle-10 (HEAD `0502ae86`)
+# Test-Engineer Review — Run-6 Cycle-11 (HEAD `a7de3ebd`)
 
 **Date:** 2026-06-17
 **Suite state (verified):** 2227 passed / 4 skipped (model-weight-gated by design) / 0 failed.
@@ -9,80 +9,104 @@
 ## Method
 
 Full inventory of all 236 test files under `apps/web/src/__tests__/` plus 5 Playwright e2e specs.
-For each area I traced: (1) the implementation location in source, (2) whether a test pins the invariant by importing the real implementation, (3) what failure scenario an absent or vacuous test would miss.
+For each area traced: (1) implementation location in source, (2) whether a test pins the invariant, (3) what failure scenario an absent or vacuous test would miss.
 Sources read directly for every finding — no sampling.
+
+---
+
+## Cycle-10 Finding Confirmed Closed
+
+**TE-C10-01** (`similar-route.test.ts` mock schema omitting `lens_model`/`capture_date`) is confirmed fixed at HEAD (commit `563d09d3`).
+
+- `lens_model` and `capture_date` are now declared in the `vi.mock('@/db')` `images` object at lines 116–118.
+- The `imageRows` fixture in the 200-path test populates both fields with real values.
+- Assertions `toHaveProperty('lens_model', 'EF 50mm f/1.8')` and `toHaveProperty('capture_date', '2026-01-02 03:04:05')` are present and load-bearing — a SELECT-drop of either field would blank the mock return and fail these checks.
+
+The fix genuinely guards the contract it claims to guard. No false-confidence issue.
 
 ---
 
 ## Findings
 
-### TE-C10-01 [MEDIUM] — `similar-route.test.ts` mock `images` schema silently omits `lens_model` and `capture_date`
+### TE-C11-01 [LOW] — semantic route `isProd ? dotProduct : cosineSimilarity` selector has no source-contract pin
 
-**Source:** `apps/web/src/app/api/search/similar/[id]/route.ts` lines 205–206, 227–228.  
-**Test file:** `apps/web/src/__tests__/similar-route.test.ts` — the `vi.mock('@/db', ...)` block and the `imageRows` fixture in the 200-path test.
+**Source:** `apps/web/src/app/api/search/semantic/route.ts`, line 271.
 
-The production route selects `images.lens_model` and `images.capture_date` and maps them into the enriched result. The `SimilarResult` interface in `similar-photos.tsx` (lines 14–31) lists both fields as required, with an explicit comment noting the interface must match the wire shape (AGG-C9-04). The mock `images` schema in the test exposes only `id, title, description, filename_jpeg, width, height, topic, processed, camera_model` — `lens_model` and `capture_date` are absent. The Drizzle ORM `.select({ ..., lens_model: images.lens_model, ... })` call against the mock receives `undefined` for both fields. The test still passes because the 200-path assertion only checks `res.status` and `body.results[0].imageId`, never `lens_model` or `capture_date`.
-
-**Regression scenario:** A future edit that drops either column from the route SELECT (or names it differently) will not be caught by any test. The client component's `SimilarResult` type guard is compile-time only and cannot detect runtime omissions.
-
-**Fix:** Add `lens_model: 'lens_model'` and `capture_date: 'capture_date'` to the `images` object in the `vi.mock('@/db', ...)` block. Populate both fields in the `imageRows` fixture. Add assertions on the returned result item:
-```typescript
-expect(body.results[0]).toHaveProperty('lens_model');
-expect(body.results[0]).toHaveProperty('capture_date');
+```ts
+const similarity = isProd ? dotProduct : cosineSimilarity;
 ```
 
-**Confidence:** M
+**Documented invariant (comment at lines 267–270 of the same file):**
+> "STUB embeddings are NOT normalized (deterministicEmbedding returns raw [-1,1]), so stub MUST keep cosineSimilarity or ranking would be corrupted. Gate on isProd."
+
+**Why this gap is real:** The invariant is explicitly documented as load-bearing. `dotProduct` is only a valid cosine-similarity shortcut when both operands are L2-normalized unit vectors. The production encoder path (`embedTextReal` / `embedImageReal` in `clip-model.ts`) always passes through `truncateAndNormalize`, so production vectors satisfy the unit-length precondition. The stub path (`embedImageStub` / `embedTextStub` in `clip-inference.ts`) returns raw hash-based `[-1, 1]` values that are NOT normalized — using `dotProduct` on unnormalized stub vectors would produce inflated or deflated scores depending on vector magnitude, silently corrupting stub search rankings.
+
+**The silent refactor scenario:** A contributor simplifying the selector — for example, removing the `isProd` ternary and always using `dotProduct` for performance — would corrupt stub-mode search results without failing any existing test. The `semantic-search-route.test.ts` 200-path test (`returns 200 with enriched results`) uses mock embedding values produced by `fill(0.5)` and `fill(0.1)`, which happen to have near-unit magnitude due to how `Float32Array.fill` interacts with 512 dimensions. The score difference between `dotProduct(fill(0.5), fill(0.5))` and `cosineSimilarity(fill(0.5), fill(0.5))` for those specific values is essentially zero, so the test passes regardless of which function is selected.
+
+**Verification that no test pins this:** Exhaustive grep for `dotProduct`, `isProd`, `const similarity`, and `similarity.*=.*isProd` across all 236 test files found zero matches outside of `clip-embedding-column-roundtrip.test.ts` (which tests `dotProduct` as a pure function in isolation, not the route's branch selector). The three test files that import the semantic route source (`semantic-search-params.test.ts`, `semantic-route-production.test.ts`, `semantic-search-route.test.ts`) contain no reference to `dotProduct`, `isProd`, or `const similarity`.
+
+**Assertion to add** — a source-contract test consistent with the existing pattern in `image-queue-embed-wiring.test.ts`, `search-short-query-guard.test.ts`, and the cycle source-contract files:
+
+```ts
+// In a new or existing source-contract test file:
+const SRC = readFileSync(
+    join(process.cwd(), 'src/app/api/search/semantic/route.ts'), 'utf8'
+);
+
+it('stub mode selects cosineSimilarity and production selects dotProduct (AGG-C8-09 invariant)', () => {
+    // Must contain the guarded ternary exactly.
+    expect(SRC).toMatch(
+        /const\s+similarity\s*=\s*isProd\s*\?\s*dotProduct\s*:\s*cosineSimilarity/
+    );
+    // Must NOT assign dotProduct unconditionally (would corrupt stub rankings
+    // because stub vectors are NOT L2-normalized).
+    expect(SRC).not.toMatch(/const\s+similarity\s*=\s*dotProduct\b/);
+});
+```
+
+**Confidence:** Low-to-Medium. The invariant is clearly documented in source and the refactor path (performance simplification) is plausible. The severity is LOW because: (a) stub mode is the demo/experimental posture and a ranking regression there is not a security or data-integrity issue; (b) the behavioral tests do not actively misreport — they just fail to catch the wrong branch. Raising to MEDIUM would require the stub path being used in production, which the `semanticSearchMode` double-gate prevents.
 
 ---
 
-## Verified clean — prior-cycle open items closed
+## Verified Clean — Full Surface Sweep
 
-The three cycle-9 findings (TE-C9-01 through TE-C9-04) were closed in the commits leading to HEAD:
-
-- **TE-C9-01 (MEDIUM):** `search-short-query-guard.test.ts` now pins the `SEMANTIC_MIN_QUERY_CODEPOINTS = 3` constant, the `countCodePoints` comparison against it, the `setSearchStatus('invalidSemantic')` branch outcome, the `return` before the fetch, and en/ko `invalidSemantic` key parity with a `3|three` wording check. Fully closed.
-- **TE-C9-02 (LOW):** `similar-route.test.ts` now has an `it('returns 503 when restore-maintenance is active (before rate-limit is charged)')` case that flips `isRestoreMaintenanceActive` to `true` and asserts `preIncrementSemanticAttempt` was not called. Closed.
-- **TE-C9-03 (LOW):** `similar-route.test.ts` now has an `it('returns 429 when the per-IP semantic rate limit is exceeded')` case that returns `true` from `preIncrementSemanticAttempt`, asserts `retry-after` is truthy, and verifies `rollbackSemanticAttempt` was not called. Closed.
-- **TE-C9-04 (LOW):** `similar-route.test.ts` now has an `it('returns 404 when the target embedding row is present but corrupt')` case that writes a non-EMBEDDING_BYTES buffer, asserts status 404, and verifies `rollbackSemanticAttempt` was called once. The non-vacuity guard (`Buffer.from(corruptB64, 'base64').length !== EMBEDDING_BYTES`) is also present. Closed.
-
----
-
-## Verified clean — full surface sweep
+**Cycle-10 finding:** TE-C10-01 confirmed closed (see above).
 
 **CLIP semantic search pipeline:**
-- Same-origin 403, maintenance 503, short-query 400, disabled 503: `semantic-search-route.test.ts` (12 cases), `similar-route.test.ts` (9 cases including the new cycle-9 additions).
-- Model-version isolation: `semantic-route-production.test.ts` (WHERE clause via whereSpy), `similar-route.test.ts` (`filters the embedding scan on PRODUCTION_MODEL_VERSION via where()`).
-- MEDIUMBLOB Buffer/base64 round-trip: `clip-embedding-column-roundtrip.test.ts` — imports the real `decodeEmbeddingColumn` and proves the old read path would have dropped the row (non-vacuity guard).
-- Downloader idempotency — full manifest + loader-fatal set: `download-clip-models.test.ts` pins `verifyAndCleanArtifacts(MANIFEST, false)` AND `verifyLoaderFatalFiles`; `preCheck.ok && fatalCheck.ok` guard is asserted present. `clip-model-manifest.test.ts` drives the real `verifyAndCleanArtifacts` against a temp dir (mismatch deletes the file; missing-file fails; deleteOnMismatch=false keeps the file).
-- Backfill model_version-aware selection: `backfill-clip-embeddings-reembed.test.ts` reads the action source and the sidecar script, asserts `eq(imageEmbeddings.modelVersion, modelVersion)` in both and that `const modelVersion =` is hoisted above `notExists(`.
-- Rate-limit pre-increment / rollback: `semantic-search-rate-limit.test.ts` — bucket fill, window expiry, IP independence, rollback from count 1 (entry deletion), multi-rollback, no-op on missing entry.
-- `clampSemanticTopK`: `semantic-search-params.test.ts` — 15 cases covering boolean/array/object/NaN/Infinity/numeric-string rejection.
-- CLIP path layout / revision-subdir: `clip-paths.test.ts` — path-doubling regression asserted absent, revision-subdir depth, 40-hex pin, model-id 2-segment guard.
+- Same-origin 403, maintenance 503, short-query 400, disabled 503: covered in `semantic-search-route.test.ts` (12 cases) and `similar-route.test.ts` (10 cases including AGG-C9-03/04 additions).
+- `lens_model` + `capture_date` in similar-route 200-path: confirmed fixed at HEAD.
+- Model-version WHERE filter: `similar-route.test.ts` `filters the embedding scan on PRODUCTION_MODEL_VERSION via where()`.
+- `semanticSearchMode` double-gate (heal to disabled / pass-through with env opt-in): `gallery-config.test.ts` — two explicit env-restore test cases.
+- `decodeEmbeddingColumn` MEDIUMBLOB round-trip: `clip-embedding-column-roundtrip.test.ts` — raw-Buffer, legacy-base64-in-Buffer, defensive-string, null/wrong-length paths, non-vacuity demonstration.
+- `dotProduct` equals `cosineSimilarity` for unit vectors: `clip-embedding-column-roundtrip.test.ts` lines 102–115 — correctness proven for the fast path itself. (The branch selector in the route is the gap above.)
+- `normalizeEmbedding` / `truncateAndNormalize`: `clip-embeddings-normalize.test.ts` — unit-length output, zero-vector safety, 1024→512 truncation.
+- `clampSemanticTopK`: `semantic-search-params.test.ts` — 15 cases.
+- Rate-limit rollback paths: `semantic-search-rate-limit.test.ts`.
+- `clip-model-contract.test.ts`: pins `truncateAndNormalize` use, `CLIP_MODELS_ROOT`, sRGB preprocessing, HF revision pin, `server-only` absence.
+- `image-queue-embed-wiring.test.ts`: pins `embedImageReal`, `PRODUCTION_MODEL_VERSION`, `embeddingToBuffer` (no base64 write), stub/production branching presence.
 
-**Lint-gate fixture tests:**
-- `check-api-auth.test.ts`: scanner imported directly, exercised against real source fixtures; would catch a new admin route missing `withAdminAuth`.
-- `check-action-origin.test.ts`: scanner walks the real `src/app/actions/` directory at test time — any new file is automatically picked up.
-- `check-public-route-rate-limit.test.ts`: covers function-declaration, variable-export, export-specifier, and exempt-tag forms; semantic POST covered by `preIncrementSemanticAttempt` call; similar GET is correctly excluded (GET is out of scope per the documented policy).
-- `privacy-fields.test.ts`: symmetric guard (`admin-only keys == SENSITIVE_KEYS exactly`) is in place and would catch a new admin-only schema column that is neither added to `SENSITIVE_KEYS` nor to `publicSelectFields`. Timeline mirror test included.
-- `sw-template-contract.test.ts`: reads both `public/sw.template.js` AND the committed `public/sw.js` — a build-step that stamps `sw.js` differently from the template will be caught.
-- `migration-journal-monotonicity.test.ts` + `migration-journal.test.ts`: two overlapping tests check the non-monotonic `when` allowlist and the `migrate.js` post-condition throw. Would catch a new migration with a stale `when`.
+**Lint-gate fixture tests:** All four lint gates (`check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`, ESLint) have fixture-based coverage and walk the live source tree at test time.
 
-**Backfill runner:**
-- Fatal-counter honesty: `admin-backfill-runner-fatal-counters.test.ts` — fatal-only run, mixed run (processed=1 + errors=1 simultaneously), corrupt-width skip.
-- Pool-budget cap: `admin-backfill-concurrency-cap.test.ts` — 8 arithmetic cases including small-pool degenerate and large-pool scaling.
+**Privacy / data-layer:** `privacy-fields.test.ts` — symmetric guard catches any new schema column that is neither added to `SENSITIVE_KEYS` nor to `publicSelectFields`. No drift detected.
 
-**Privacy / data-layer:**
-- `privacy-fields.test.ts`: enrichment SELECTs in both CLIP routes exclude GPS/filename_original/ICC/HDR per the compile-time guard; no drift detected.
+**OG sanitization global replace:** `og-sanitize.test.ts` and `sanitize-for-og-global.test.ts` — all three consuming files import `sanitizeForOg` from the shared module; non-global `.replace(UNICODE_FORMAT_CHARS` call form forbidden.
 
-**Model-weight-gated suites** (`clip-offline-load.test.ts` × 2, `clip-semantic-integration.test.ts` × 2): skip by design — correct, not a gap.
+**Blur-data-url wiring:** `process-image-blur-wiring.test.ts` and `images-action-blur-wiring.test.ts` — producer and consumer both pinned.
+
+**Backfill runner:** Fatal-counter honesty (fatal-only, mixed, corrupt-width) and pool-budget cap — all covered.
+
+**Touch-target audit:** `touch-target-audit.test.ts` — 44 px floor, multi-line normalization, `Badge asChild`, native `<select>`.
+
+**Model-weight-gated suites** (`clip-offline-load.test.ts` × 2, `clip-semantic-integration.test.ts` × 2): skip by design — not a gap.
 
 ---
 
 ## Summary
 
-**1 genuine finding (MEDIUM).** All 4 prior-cycle items (TE-C9-01 through TE-C9-04) are confirmed closed. The test surface is in strong shape for a cycle-10 convergence state.
+**1 genuine finding (LOW).** TE-C10-01 is confirmed closed. The test surface is in strong convergence shape.
 
-| ID | Severity | Description |
-|----|----------|-------------|
-| TE-C10-01 | MEDIUM | `similar-route.test.ts` mock `images` schema omits `lens_model`/`capture_date`; 200-path test cannot catch their removal from the route SELECT |
+| ID | Severity | Contract at risk | Refactor that breaks silently |
+|----|----------|------------------|-------------------------------|
+| TE-C11-01 | LOW | `const similarity = isProd ? dotProduct : cosineSimilarity` in `app/api/search/semantic/route.ts:271` — stub rankings would be corrupted if `dotProduct` is used on unnormalized stub vectors | Simplifying the ternary to always use `dotProduct` for performance |
 
 No CRITICAL or HIGH gaps found across all 236 test files.
