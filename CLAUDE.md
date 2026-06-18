@@ -132,7 +132,7 @@ git values must be treated as compromised and must not be reused.
 | `bit_depth` | Sharp `metadata.depth` mapped to bits | source bit depth, not delivered |
 | `color_pipeline_decision` | Resolver enum (`p3-from-displayp3`, `p3-from-adobergb`, etc.) | admin-only |
 | `color_primaries` | NCLX > ICC chromaticity > ICC name | public |
-| `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma24 / gamma26 / gamma18 / linear / unknown) | admin-only — `gamma24` (NCLX 14/15, BT.1886) and `gamma26` (NCLX 17, DCI-P3) are emitted for real files; `gamma18` comes only from ICC name heuristics (AGG-D3) |
+| `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma24 / gamma26 / gamma28 / gamma18 / linear / unknown) | admin-only — `gamma24` (NCLX 14/15, BT.1886) and `gamma26` (NCLX 17, DCI-P3) are emitted for real files; `gamma28` (NCLX 5 = BT.470BG, PAL·SECAM gamma 2.8 — AGG-R7C2-01) corrects the prior gamma22/"System M" mislabel (System M is code 4); `gamma18` comes only from ICC name heuristics (AGG-D3) |
 | `matrix_coefficients` | NCLX | admin-only |
 | `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — the public HDR badge is now gated on `isAdmin && isHdr` EXPLICITLY at the render point (AGG-M3), not on field-nullness coincidence; locked by `color-details-section-delivered` / `lightbox-color-pip-hdr` tests |
 | `has_gain_map` | Apple HDR gain map detection in HEIF `iinf`/`iref` (P4-A1) | admin-only |
@@ -230,7 +230,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 `detectColorSignals(filepath, sharpInstance, metadata)` in `lib/color-detection.ts` resolves color primaries in priority order:
 
-1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709 (labelled 'srgb' — practical SDR approximation; 13=sRGB IEC61966-2-1 is the canonical code; full mapping in color-detection.ts NCLX_TRANSFER_MAP)`, `14/15=BT.2020→gamma24 (BT.1886)`, `16=PQ`, `17=DCI-P3→gamma26`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `8=YCgCo`, `9=BT.2020-NCL`, `10=BT.2020-CL` (AGG-D5).
+1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709 (labelled 'srgb' — practical SDR approximation; 13=sRGB IEC61966-2-1 is the canonical code; full mapping in color-detection.ts NCLX_TRANSFER_MAP)`, `4=gamma22 (BT.470M)`, `5=gamma28 (BT.470BG / PAL·SECAM gamma 2.8 — AGG-R7C2-01, NOT "System M" which is code 4)`, `14/15=BT.2020→gamma24 (BT.1886)`, `16=PQ`, `17=DCI-P3→gamma26`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `8=YCgCo`, `9=BT.2020-NCL`, `10=BT.2020-CL` (AGG-D5).
 2. **ICC chromaticity** (`lib/icc-chromaticity.ts`, P4-A2) — parses `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` from the ICC tag table, converts XYZ→xy chromaticity, matches against the sRGB / Display P3 / Adobe RGB / ProPhoto / Rec.2020 presets within ΔE ≤ 0.005 (high-confidence) or ≤ 0.015 (medium). Catches custom monitor profiles (Eizo CG2700X, BenQ SW-series, X-Rite calibrations) whose name doesn't match the allowlist.
 3. **ICC name allowlist** — `resolveColorPipelineDecision` / `resolveAvifIccProfile` string-match against the description for "Display P3", "DCI-P3", "Adobe RGB", "ProPhoto", "Rec.2020" / "BT.2020", "sRGB". Both resolvers accept an optional `signals` parameter so NCLX-only sources (no ICC) still resolve correctly.
 

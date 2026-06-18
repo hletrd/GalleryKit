@@ -39,7 +39,7 @@ function makeT(messages: FlatMessages): (key: string) => string {
     return (key: string) => messages[key] ?? key;
 }
 
-const TRANSFER_VALUES = ['srgb', 'gamma22', 'gamma18', 'gamma24', 'gamma26', 'pq', 'hlg', 'linear'] as const;
+const TRANSFER_VALUES = ['srgb', 'gamma22', 'gamma18', 'gamma24', 'gamma26', 'gamma28', 'pq', 'hlg', 'linear'] as const;
 
 describe('humanizeTransferFunction — i18n contract', () => {
     describe('English locale', () => {
@@ -79,6 +79,8 @@ describe('humanizeTransferFunction — i18n contract', () => {
             expect(humanizeTransferFunction('gamma18', t)).toBe('감마 1.8');
             expect(humanizeTransferFunction('gamma24', t)).toBe('감마 2.4 (BT.1886)');
             expect(humanizeTransferFunction('gamma26', t)).toBe('감마 2.6');
+            // AGG-R7C2-01: BT.470BG (PAL/SECAM) gamma 2.8.
+            expect(humanizeTransferFunction('gamma28', t)).toBe('감마 2.8 (BT.470 BG / PAL·SECAM)');
             expect(humanizeTransferFunction('linear', t)).toBe('리니어');
         });
     });

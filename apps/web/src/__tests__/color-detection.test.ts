@@ -203,16 +203,21 @@ describe('detectColorSignals', () => {
         expect(signals.colorPrimaries).toBe('dci-p3');
     });
 
-    // R8-M1: NCLX transfer values 4, 5, 7 (gamma-2.2 family)
+    // R8-M1 / AGG-R7C2-01: NCLX transfer code 4 (BT.470M, NTSC) and code 7
+    // (SMPTE 240M) approximate the gamma-2.2 family. Code 5 is BT.470BG
+    // (PAL/SECAM) = gamma 2.8 — NOT gamma 2.2 (see the gamma28 test below).
     it('maps nclx transfer=4 to gamma22', async () => {
         const signals = await detectFromNclx(1, 4, 1);
         expect(signals.transferFunction).toBe('gamma22');
         expect(signals.isHdr).toBe(false);
     });
 
-    it('maps nclx transfer=5 to gamma22', async () => {
+    // AGG-R7C2-01: ITU-T H.273 Table 3 value 5 = BT.470BG (PAL/SECAM) is
+    // gamma 2.8, not gamma 2.2 / "System M" (System M is code 4). Verified
+    // against FFmpeg AVCOL_TRC_GAMMA28 = 5 ///< also ITU-R BT470BG.
+    it('maps nclx transfer=5 to gamma28 (BT.470BG)', async () => {
         const signals = await detectFromNclx(1, 5, 1);
-        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.transferFunction).toBe('gamma28');
         expect(signals.isHdr).toBe(false);
     });
 

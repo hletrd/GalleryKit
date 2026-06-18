@@ -362,6 +362,7 @@
     "transferLinear": "Linear",
     "transferGamma24": "Gamma 2.4 (BT.1886)",
     "transferGamma26": "Gamma 2.6",
+    "transferGamma28": "Gamma 2.8 (BT.470 BG / PAL·SECAM)",
     "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR-capable",
     "hdrBadgeAriaLabel": "HDR-capable display (SDR delivery)",

@@ -76,6 +76,7 @@ export function humanizeTransferFunction(
         case 'linear': return t('viewer.transferLinear');
         case 'gamma24': return t('viewer.transferGamma24');
         case 'gamma26': return t('viewer.transferGamma26');
+        case 'gamma28': return t('viewer.transferGamma28');
         default: return '';
     }
 }

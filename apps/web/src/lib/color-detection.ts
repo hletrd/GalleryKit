@@ -22,7 +22,7 @@ export interface ColorSignals {
     /** Color primaries inferred from ICC name or nclx box. */
     colorPrimaries: 'bt709' | 'p3-d65' | 'dci-p3' | 'adobergb' | 'prophoto' | 'bt2020' | 'unknown';
     /** Transfer function inferred from ICC description + bit depth. */
-    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma24' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
+    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma24' | 'gamma26' | 'gamma28' | 'pq' | 'hlg' | 'linear' | 'unknown';
     /** Matrix coefficients inferred from ICC / container metadata. */
     matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'bt2020-cl' | 'identity' | 'ycgco' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
@@ -177,10 +177,13 @@ const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
 const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     1: 'srgb',
     // R5-H1: ITU-T H.273 Table 3 says code 2 is "Unspecified" — no defined
-    // transfer function. Do NOT map to gamma22. Values 4, 5, 7 are the
-    // gamma-2.2 family (BT.470M, BT.470BG, SMPTE 240M respectively).
-    4: 'gamma22', // ITU-T H.273 Gamma 2.2 curve
-    5: 'gamma22', // BT.470 System M
+    // transfer function. Do NOT map to gamma22. AGG-R7C2-01: code 4 (BT.470M,
+    // NTSC) and code 7 (SMPTE 240M) approximate the gamma-2.2 family; code 5
+    // (BT.470BG, PAL/SECAM) is gamma 2.8 → 'gamma28' (NOT the gamma-2.2 family,
+    // and NOT "System M" — System M is code 4). Codes 6 (SMPTE 170M) and 7
+    // have no exact single-gamma label so they stay as gamma22 approximations.
+    4: 'gamma22', // ITU-T H.273 Gamma 2.2 curve (BT.470M, NTSC 525-line)
+    5: 'gamma28', // ITU-T H.273 Table 3 value 5 = BT.470BG (PAL/SECAM gamma 2.8) — NOT System M (that is code 4)
     6: 'gamma22',
     7: 'gamma22', // SMPTE 240M
     8: 'linear',   // ITU-T H.273 linear transfer characteristic
