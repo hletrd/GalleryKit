@@ -35,7 +35,6 @@
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- full metadata search across titles, descriptions, cameras, and tags
 - **Semantic Search (AI, self-hosted)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). Live on the [demo](https://gallery.atik.kr)
-- **Paid Downloads** -- optional per-image licensing via Stripe Checkout with single-use, scanner-safe download links
 - **Progressive Web App** -- installable PWA with a service worker (stale-while-revalidate image cache + offline HTML fallback)
 - **Sharing** -- per-photo and group share links with Base56 short keys
 - **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
@@ -196,7 +195,6 @@ If you serve `/uploads/*` directly from nginx, make the filesystem path match th
 | Auth | Argon2, HMAC-SHA256 sessions |
 | Images | Sharp (parallel AVIF/WebP/JPEG pipeline) |
 | Semantic search | jina-clip-v2 (int8 ONNX) via Transformers.js — in-process, CPU |
-| Payments | Stripe Checkout (optional paid downloads) |
 | i18n | next-intl (en, ko) |
 | Deploy | Docker (standalone output, self-pruning deploy) |
 

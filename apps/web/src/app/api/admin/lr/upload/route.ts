@@ -51,7 +51,7 @@ const NO_CACHE = {
 // the in-process upload queue — all Node-only. A future Next.js
 // default flip to Edge would break the Lightroom publish-plugin's
 // primary integration path with zero in-product diagnostic. Matches
-// the convention established in /api/checkout/[imageId] (R20-L2).
+// the Node-runtime pinning convention (R20-L2) used across Node-bound routes.
 export const runtime = 'nodejs';
 
 export const POST = withAdminAuth(
@@ -313,13 +313,11 @@ export const POST = withAdminAuth(
             exifDb.longitude = null;
             // Run-3 RPF cycle 2 / F1: also strip GPS EXIF from the on-disk
             // original, mirroring the browser upload path (app/actions/images.ts
-            // PP-BUG-3). Nulling the DB columns alone leaves GPS in the file that
-            // the paid-download endpoint (/api/download/[imageId]) streams
-            // verbatim, leaking the photographer's protected location to
-            // purchasers — and leaving GPS at rest on disk against the admin's
-            // explicit strip_gps_on_upload intent. The Lightroom publish-plugin
-            // is the primary non-browser ingest and its exports commonly retain
-            // GPS, so this divergence is the high-likelihood leak path.
+            // PP-BUG-3). Nulling the DB columns alone leaves GPS at rest in the
+            // retained original on disk, against the admin's explicit
+            // strip_gps_on_upload intent. The Lightroom publish-plugin is the
+            // primary non-browser ingest and its exports commonly retain GPS,
+            // so this divergence is the high-likelihood leak path.
             // Best-effort: stripGpsFromOriginal catches its own errors and never
             // throws, so a strip failure logs and keeps the image (parity with
             // the browser path) rather than aborting the upload.

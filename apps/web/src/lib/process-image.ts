@@ -1534,9 +1534,9 @@ export function isLosslessWebpByChunk(buf: Buffer): boolean {
  * original file.
  *
  * The admin `strip_gps_on_upload` toggle nulls the DB
- * latitude/longitude columns, but the original at
- * `data/uploads/original/` is what the paid-download endpoint streams
- * byte-for-byte — so the file itself must lose its GPS data too.
+ * latitude/longitude columns, but the original is retained at
+ * `data/uploads/original/` byte-for-byte — so the file itself must lose
+ * its GPS data too.
  *
  * HISTORY (R4C8 COR-R4C8-01): the previous implementation used Sharp's
  * `.withMetadata({ orientation, icc })`, believing it "keeps only the

@@ -50,43 +50,6 @@ After the dev server starts, log in at `/en/admin`, upload one photo, and confir
 - If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` and `E2E_ADMIN_ENABLED=true` for local Playwright admin login flows.
 - Remote admin Playwright runs are blocked by default; set both `E2E_ADMIN_ENABLED=true` and `E2E_ALLOW_REMOTE_ADMIN=true` only when you intentionally want to exercise a non-local target with a dedicated `E2E_ADMIN_PASSWORD`.
 
-## Paid downloads (Stripe — US-P54)
-
-The gallery supports per-image paid licensing via Stripe Checkout. Until the email pipeline (US-P54 phase 2) ships, the customer-to-photographer hand-off is operator-driven.
-
-### Required env vars
-
-- `STRIPE_SECRET_KEY` — Stripe secret API key. Required when any image has `license_tier != 'none'`.
-- `STRIPE_WEBHOOK_SECRET` — webhook signing secret from the Stripe dashboard for `checkout.session.completed` events.
-
-The Stripe SDK is initialised lazily, so the server boots without these in dev. Rotate `STRIPE_SECRET_KEY` → restart the web container; the SDK captures the value at first call.
-
-### Webhook URL
-
-Register `https://<your-host>/api/stripe/webhook` in the Stripe dashboard under Developers → Webhooks. The route runs in Node.js runtime (not edge) and verifies signatures with `stripe.webhooks.constructEvent` before any DB write.
-
-### Manual download distribution (current operational workflow)
-
-When a customer completes checkout, the webhook generates a single-use download token, stores only its SHA-256 hash in the `entitlements` table, and surfaces a "Purchase complete!" toast on the photo page. The plaintext token is the URL parameter the customer needs in `/api/download/<imageId>?token=<token>`, but it is not yet emailed automatically.
-
-**The emailed link is scanner-safe (R4C7).** Mail-security gateways (Microsoft SafeLinks/Defender, Mimecast, Proofpoint, webmail previewers) fetch links found in inbound email, and Next.js serves HEAD probes through the GET handler. The download URL therefore opens a localized confirmation page on GET — **no state changes** — and the single use is consumed only when the customer presses the "Download photo" button on that page (a POST back to the same URL). Automated scanners do not submit POST forms, so a prefetch or HEAD probe can no longer burn the token before the customer clicks.
-
-To close the loop until phase 2 ships, set `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true` in the environment. Each successful `checkout.session.completed` will then write a separate stdout line of the form:
-
-```
-[manual-distribution] download_token: imageId=42 tier=editorial session=cs_xxx email=customer@example.com token=dl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-Operators can `docker logs <web-container> | grep manual-distribution` to retrieve the token and email it to the customer. Tokens are valid for 24 hours after entitlement creation and are single-use (the route's atomic UPDATE invalidates the hash when the customer confirms the download on the interstitial page).
-
-The flag defaults to off so production deployments do not leak tokens into log shippers without explicit opt-in. The hashed token in the `entitlements` row is the durable record; the plaintext only ever lives in stdout under this flag.
-
-> **Retention warning (cycle 3 RPF):** stdout in containerized environments is typically forwarded to a log shipper (Loki, Datadog, CloudWatch, etc.) with retention windows of 30–90 days. Enabling `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true` means the customer email **and** the plaintext download token live in those retained records together. Confirm your log retention is short, your shippers redact the `[manual-distribution]` prefix, **or** treat this flag as a temporary scaffold and turn it off once the email pipeline (US-P54 phase 2) ships.
-
-### Refunds
-
-`/admin/sales` lists all entitlements with a Refund button. Refunds are confirmed via dialog (irreversible — Stripe refund + immediate token invalidation) and surface localized error messages for known Stripe error codes (`charge_already_refunded`, `resource_missing`, network errors).
-
 ## Semantic search (CLIP — US-P51)
 
 GalleryKit ships a fully self-hosted, multilingual **natural-language photo search** (English + Korean) and **"similar photos"** (image→image), powered by an in-process CLIP encoder. No per-query API cost; runs on CPU in the standalone container.

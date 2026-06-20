@@ -6,7 +6,7 @@
  *
  * The route is a multipart, token-authenticated handler that is heavy to
  * exercise end-to-end (FormData + Sharp + DB + queue). Per the repo convention
- * (stripe-webhook-source.test.ts, og-route-source-contracts.test.ts), a
+ * (og-route-source-contracts.test.ts), a
  * source-contract test is the practical guardrail against a future refactor
  * silently dropping the HDR gate and re-introducing the browser/Lightroom
  * ingest-path divergence the R8 plan warned about.

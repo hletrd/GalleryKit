@@ -7,7 +7,7 @@
  * options merely override orientation/ICC on top). The GPS IFD therefore
  * survived the "strip" byte-for-byte — and the rewrite additionally
  * re-encoded the original at default quality (JPEG q80 / HEIF q50),
- * silently degrading the paid-download deliverable.
+ * silently degrading the stored original.
  *
  * This module performs container-aware byte surgery instead: the pixel
  * stream is NEVER decoded, so the original stays bit-identical except

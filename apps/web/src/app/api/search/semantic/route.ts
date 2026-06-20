@@ -60,8 +60,8 @@ export const dynamic = 'force-dynamic';
 // R21-L1: pin to Node runtime explicitly. The route imports `db`
 // (mysql2 — Node-only), `Buffer.from`, and the in-process rate-limit
 // Map (relies on shared process state); none are Edge-compatible.
-// Matches the convention established in /api/checkout/[imageId]
-// (R20-L2) and every other paid-flow / public-API route in the repo.
+// Matches the Node-runtime pinning convention (R20-L2) used across
+// every public-API route in the repo.
 export const runtime = 'nodejs';
 
 const NO_STORE_HEADERS = {
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     // AGG-R5C3-10 (BUG-R5C3-05): when TRUST_PROXY is unset, getClientIp returns
     // 'unknown' for EVERY client, so all anonymous callers collapse into ONE
     // shared 30/min bucket (rate-limit.ts emits a one-time [SECURITY] warning to
-    // this effect). Unlike the checkout idempotency key — which can be safely
+    // this effect). Unlike a best-effort idempotency key — which can be safely
     // omitted on unknown IPs because its only cost is losing double-click dedup —
     // this rate limit is a SECURITY control and MUST stay applied even to the
     // shared 'unknown' bucket: a fail-open semantic endpoint would be a free DoS

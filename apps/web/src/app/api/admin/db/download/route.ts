@@ -16,8 +16,7 @@ import { getClientIp } from '@/lib/rate-limit';
 
 // R21-L1: pin to Node runtime explicitly. The route imports `fs`,
 // `fs/promises`, `path`, and `stream` — all Node-only modules that
-// are not Edge-compatible. Matches the convention established in
-// /api/checkout/[imageId] (R20-L2) and every other Node-bound route.
+// are not Edge-compatible. Matches every other Node-bound route.
 export const runtime = 'nodejs';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
