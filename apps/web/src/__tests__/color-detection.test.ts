@@ -315,6 +315,25 @@ describe('detectColorSignals', () => {
         expect(signals.matrixCoefficients).toBe('bt709');
     });
 
+    // AGG-R7C5-01: complete the NCLX matrix-path pin set started by AGG-R7C4-01.
+    // matrix codes 1/8/10 are pinned on the NCLX path; 0 and 9 were exercised
+    // only with matrix passed-but-not-asserted (detectFromNclx(12,13,0) above
+    // asserts primaries/transfer but NOT matrixCoefficients) or asserted via the
+    // ICC-name path ('identity' at the ICC tests; 'bt2020-ncl' at the "Rec.2020
+    // ICC name" test). So a 9->1 swap (the dual of the code-1<->9 swap
+    // AGG-R7C4-01 guarded) and a code-0 mislabel would go undetected on the NCLX
+    // path. After these two pins all 5 NCLX_MATRIX_MAP entries are value-locked
+    // on the NCLX path. Admin-audit-display-only field; anti-regression coverage.
+    it('maps nclx matrix=0 to identity', async () => {
+        const signals = await detectFromNclx(1, 1, 0);
+        expect(signals.matrixCoefficients).toBe('identity');
+    });
+
+    it('maps nclx matrix=9 to bt2020-ncl', async () => {
+        const signals = await detectFromNclx(9, 1, 9);
+        expect(signals.matrixCoefficients).toBe('bt2020-ncl');
+    });
+
     // R10-M9: ITU-T H.273 values 14 (BT.2020 10-bit) and 15 (BT.2020
     // 12-bit) carry the BT.2020-NCL transfer characteristic, which on
     // SDR/broadcast monitors is rendered as BT.1886 (display gamma 2.4),
