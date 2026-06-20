@@ -37,6 +37,7 @@ import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
 import { inArray } from 'drizzle-orm';
 import type { GalleryConfig } from './gallery-config';
+import type { GallerySettingKey } from './gallery-config-shared';
 
 const COLOR_IMPACTING_KEYS = [
     'wide_gamut_jpeg_chroma',
@@ -51,6 +52,18 @@ const COLOR_IMPACTING_KEYS = [
     // R8-R6: size config changes produce different derivative files
     'image_sizes',
 ] as const;
+
+// AGG-R7C3-02: compile-time guard — every COLOR_IMPACTING_KEY MUST be a real
+// gallery setting key. Mirrors the PrivacySensitiveKeys-derived guards in
+// data.ts: a typo or a key removed from GALLERY_SETTING_KEYS becomes a hard
+// `tsc` error here instead of a silent ETag-invalidation desync. NOTE: this
+// canNOT catch a *forgotten new* byte-impacting setting (a valid key is still a
+// valid key) — that gap is closed by the CLAUDE.md "Adding a new color-impacting
+// setting" checklist, not by the type system.
+type _ColorKeysAreSettingKeys =
+    (typeof COLOR_IMPACTING_KEYS)[number] extends GallerySettingKey ? true : never;
+const _colorKeysAreSettingKeys: _ColorKeysAreSettingKeys = true;
+void _colorKeysAreSettingKeys;
 
 const HASH_LENGTH = 8;
 const CACHE_TTL_MS = 5_000;
