@@ -207,6 +207,26 @@ async function ensureColumn(connection, dbName, tableName, columnName, addSql) {
     return false;
 }
 
+// Idempotent column drop. MySQL 8.0 has no DROP COLUMN IF EXISTS (MariaDB-only),
+// so guard on INFORMATION_SCHEMA. Used by reconcileLegacySchema to converge a DB
+// to the CURRENT schema even when a feature's column was removed — the migration
+// .sql DROP never runs on an existing DB (it is baselined, not executed), so the
+// drop MUST live here. Mirrors the ensureColumn ADD pattern in reverse.
+async function dropColumnIfPresent(connection, dbName, tableName, columnName) {
+    const existing = await columnInfo(connection, dbName, tableName, columnName);
+    if (existing) {
+        await connection.query(`ALTER TABLE \`${tableName}\` DROP COLUMN \`${columnName}\``);
+        return true;
+    }
+    return false;
+}
+
+// Idempotent table drop (DROP TABLE IF EXISTS is valid MySQL 8.0, but keep a
+// helper for symmetry + a single drop log site).
+async function dropTableIfPresent(connection, tableName) {
+    await connection.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+}
+
 async function ensureIndex(connection, dbName, tableName, indexName, createSql) {
     if (!(await indexExists(connection, dbName, tableName, indexName))) {
         await connection.query(createSql);
@@ -597,6 +617,15 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureForeignKey(connection, dbName, 'sessions', 'sessions_user_id_admin_users_id_fk', 'ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'audit_log', 'audit_log_user_id_admin_users_id_fk', 'ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id)');
     await ensureForeignKey(connection, dbName, 'images', 'images_uploaded_by_admin_users_id_fk', 'ALTER TABLE images ADD CONSTRAINT images_uploaded_by_admin_users_id_fk FOREIGN KEY (uploaded_by) REFERENCES admin_users(id) ON DELETE SET NULL');
+
+    // ── Removals (migration 0023: drop Stripe paid-downloads US-P54) ──────────
+    // These run LAST so reconcile converges to the CURRENT schema. The .sql
+    // migration's DROP statements never execute on an existing DB (they are
+    // baselined, not run), so the authoritative drop for already-provisioned
+    // databases lives here. Idempotent: no-ops once the objects are gone.
+    // DROP TABLE entitlements also removes its FK to images(id).
+    await dropTableIfPresent(connection, 'entitlements');
+    await dropColumnIfPresent(connection, dbName, 'images', 'license_tier');
 }
 
 async function getRecordedHashes(connection) {
