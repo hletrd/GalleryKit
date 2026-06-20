@@ -347,7 +347,8 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'original_format', 'ALTER TABLE images ADD COLUMN original_format varchar(10) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'original_file_size', 'ALTER TABLE images ADD COLUMN original_file_size bigint DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'blur_data_url', 'ALTER TABLE images ADD COLUMN blur_data_url text');
-    await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
+    // license_tier (paid-downloads US-P54) removed in migration 0023. Not
+    // reconciled here so a baselined legacy DB matches the post-0023 schema.
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
     await ensureColumn(connection, dbName, 'images', 'icc_profile_name', 'ALTER TABLE images ADD COLUMN icc_profile_name varchar(255) DEFAULT NULL');
     // R4C1 COR-R4C1-13: the color/HDR era columns (migrations 0015-0018)
@@ -572,26 +573,8 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'image_embeddings', 'idx_image_embeddings_model_version_updated',
         'CREATE INDEX idx_image_embeddings_model_version_updated ON image_embeddings (model_version, updated_at)');
 
-    await ensureTable(connection, `
-        CREATE TABLE IF NOT EXISTS entitlements (
-            id int NOT NULL AUTO_INCREMENT,
-            image_id int NOT NULL,
-            tier varchar(16) NOT NULL,
-            customer_email varchar(255) NOT NULL,
-            session_id varchar(255) NOT NULL,
-            amount_total_cents int NOT NULL,
-            download_token_hash varchar(64),
-            downloaded_at timestamp NULL,
-            expires_at timestamp NOT NULL,
-            refunded tinyint(1) NOT NULL DEFAULT 0,
-            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY entitlements_session_id_unique (session_id),
-            INDEX idx_entitlements_image_id (image_id),
-            INDEX idx_entitlements_token_hash (download_token_hash),
-            CONSTRAINT entitlements_image_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
+    // entitlements (paid-downloads US-P54) removed in migration 0023. Not
+    // reconciled here so a baselined legacy DB matches the post-0023 schema.
 
     await ensureIndex(connection, dbName, 'image_tags', 'idx_image_tags_tag_id', 'CREATE INDEX idx_image_tags_tag_id ON image_tags (tag_id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_capture_date', 'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at)');

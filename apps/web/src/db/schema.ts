@@ -77,8 +77,6 @@ export const images = mysqlTable("images", {
     pipeline_version: int('pipeline_version'),
     original_format: varchar('original_format', { length: 10 }),
     original_file_size: bigint('original_file_size', { mode: 'number' }),
-    // US-P41: license tier for bulk metadata editor. Validated as enum at action layer.
-    license_tier: varchar('license_tier', { length: 16 }).notNull().default('none'),
     blur_data_url: text('blur_data_url'),
 
     // US-P52: AI-generated alt text suggestion. NULL until caption hook runs.
@@ -285,27 +283,6 @@ export const imageEmbeddings = mysqlTable("image_embeddings", {
     // AGG-C8-03 (migration 0022): serves the live semantic + similar search scans
     // `WHERE model_version = ? ORDER BY updated_at DESC LIMIT 5000` (was PK-only).
     idxImageEmbeddingsModelVersionUpdated: index('idx_image_embeddings_model_version_updated').on(table.modelVersion, table.updatedAt),
-}));
-
-// US-P54 (Phase 5.4): Stripe paid-download entitlements.
-// sessionId is UNIQUE so concurrent webhook retries are idempotent.
-// downloadTokenHash holds sha256 hex of the single-use token; NULL after use.
-// refunded tracks Stripe refunds (refunded entitlements block downloads).
-export const entitlements = mysqlTable("entitlements", {
-    id: int("id").primaryKey().autoincrement(),
-    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
-    tier: varchar("tier", { length: 16 }).notNull(),
-    customerEmail: varchar("customer_email", { length: 255 }).notNull(),
-    sessionId: varchar("session_id", { length: 255 }).notNull().unique(),
-    amountTotalCents: int("amount_total_cents").notNull(),
-    downloadTokenHash: varchar("download_token_hash", { length: 64 }),
-    downloadedAt: timestamp("downloaded_at"),
-    expiresAt: timestamp("expires_at").notNull(),
-    refunded: boolean("refunded").notNull().default(false),
-    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-}, (table) => ({
-    idxEntitlementsImageId: index('idx_entitlements_image_id').on(table.imageId),
-    idxEntitlementsTokenHash: index('idx_entitlements_token_hash').on(table.downloadTokenHash),
 }));
 
 // US-P42 (Phase 4.2): Smart collections — admin-defined dynamic galleries

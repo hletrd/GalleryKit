@@ -162,6 +162,13 @@
       "when": 1781687094232,
       "tag": "0022_image_embeddings_model_version_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1782000000000,
+      "tag": "0023_remove_paid_downloads",
+      "breakpoints": true
     }
   ]
 }
