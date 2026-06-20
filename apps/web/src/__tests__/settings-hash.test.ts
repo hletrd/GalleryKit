@@ -131,7 +131,6 @@ describe('color settings hash (P4-E2)', () => {
             slideshowIntervalSeconds: 5,
             autoAltTextEnabled: false,
             semanticSearchMode: 'disabled',
-            licensePrices: { editorial: 0, commercial: 0, rm: 0 },
             allowHdrIngest: false,
             forceShowColorChips: false,
         });
@@ -166,7 +165,6 @@ describe('color settings hash (P4-E2)', () => {
             slideshowIntervalSeconds: 5,
             autoAltTextEnabled: false,
             semanticSearchMode: 'disabled',
-            licensePrices: { editorial: 0, commercial: 0, rm: 0 },
             allowHdrIngest: false,
             forceShowColorChips: false,
         });

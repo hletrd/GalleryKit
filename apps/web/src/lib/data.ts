@@ -262,8 +262,6 @@ const adminSelectFields = {
     // to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
     // US-P52: alt_text_suggested is PUBLIC (SEO + a11y fallback, not PII).
     alt_text_suggested: images.alt_text_suggested,
-    // US-P54: license_tier is PUBLIC (drives Buy/Download button on photo viewer).
-    license_tier: images.license_tier,
     // R17-L2: admin user that performed the upload. ADMIN-ONLY — the raw
     // numeric id is PII. Per-entry Atom <author> uses a JOIN-derived
     // display name on the feed side (see getImagesForFeed below); the raw

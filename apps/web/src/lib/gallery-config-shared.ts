@@ -41,11 +41,6 @@ export const GALLERY_SETTING_KEYS = [
     // US-P51: CLIP semantic search mode (disabled | stub | production)
     'semantic_search_mode',
 
-    // US-P54: Stripe license tier pricing (in cents; 0 = free/not for sale)
-    'license_price_editorial_cents',
-    'license_price_commercial_cents',
-    'license_price_rm_cents',
-
     // US-CM02: force sRGB derivatives for legacy embedder compatibility
     'force_srgb_derivatives',
 
@@ -107,11 +102,6 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     // US-P51: semantic search disabled by default until backfill completes
     semantic_search_mode: 'disabled',
 
-    // US-P54: license tier prices default to 0 (not for sale)
-    license_price_editorial_cents: '0',
-    license_price_commercial_cents: '0',
-    license_price_rm_cents: '0',
-
     // US-CM02: default off — P3-tagged WebP/JPEG for P3 sources
     force_srgb_derivatives: 'false',
 
@@ -171,11 +161,6 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     // route + hook gate reads/writes on the active model_version so stub rows are never
     // served as production.
     semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production',
-
-    // US-P54: license tier prices must be non-negative integers (cents)
-    license_price_editorial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
-    license_price_commercial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
-    license_price_rm_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
 
     // US-CM02: boolean toggle
     force_srgb_derivatives: (v) => v === 'true' || v === 'false',

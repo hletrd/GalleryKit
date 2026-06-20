@@ -489,7 +489,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                 </div>
 
                                 {/* Gamut-aware download */}
-                                {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
+                                {downloadHref && (
                                     <div className="mt-4 pt-4 border-t">
                                         {isWideGamutSource && avifDownloadHref ? (
                                             <DropdownMenu>

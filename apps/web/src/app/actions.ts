@@ -9,8 +9,7 @@ export { uploadImages, deleteImage, deleteImages, updateImageMetadata, bulkUpdat
 
 // US-P41: bulk edit shared types — exported from the non-server shared lib so
 // client components can import them without triggering 'use server' restrictions.
-export { LICENSE_TIERS } from '@/lib/bulk-edit-types';
-export type { BulkUpdateImagesInput, LicenseTier, TriState } from '@/lib/bulk-edit-types';
+export type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 
 // Topics
 export { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible } from './actions/topics';

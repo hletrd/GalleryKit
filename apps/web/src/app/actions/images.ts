@@ -28,7 +28,6 @@ import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-con
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { headers } from 'next/headers';
-import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
 import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 import { stripStubPrefix } from '@/lib/caption-constants';
 
@@ -312,7 +311,7 @@ export async function uploadImages(formData: FormData) {
                     exifDb.latitude = null;
                     exifDb.longitude = null;
                     // PP-BUG-3: also strip GPS EXIF from the on-disk original so
-                    // the paid-download endpoint doesn't leak protected locations.
+                    // the retained original doesn't leak protected locations.
                     await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
                 }
 
@@ -879,7 +878,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     if (originError) return { error: originError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    const { ids, topic, titlePrefix, description, licenseTier, addTagNames, removeTagNames, applyAltSuggested } = input;
+    const { ids, topic, titlePrefix, description, addTagNames, removeTagNames, applyAltSuggested } = input;
 
     if (!Array.isArray(ids) || ids.length === 0) {
         return { error: t('noImagesSelected') };
@@ -916,7 +915,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
         if (mode === 'set') return typeof (v as { value?: unknown }).value === 'string';
         return false;
     };
-    if (!isTriState(topic) || !isTriState(titlePrefix) || !isTriState(description) || !isTriState(licenseTier)) {
+    if (!isTriState(topic) || !isTriState(titlePrefix) || !isTriState(description)) {
         return { error: t('invalidInput') };
     }
 
@@ -946,13 +945,6 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
         sanitizedDescription = sv;
     }
 
-    // Validate licenseTier enum value.
-    if (licenseTier.mode === 'set') {
-        if (!(LICENSE_TIERS as readonly string[]).includes(licenseTier.value)) {
-            return { error: t('invalidInput') };
-        }
-    }
-
     // Validate applyAltSuggested — only 'title' | 'description' | null allowed.
     if (applyAltSuggested !== undefined && applyAltSuggested !== null
         && applyAltSuggested !== 'title' && applyAltSuggested !== 'description') {
@@ -969,7 +961,6 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             if (titlePrefix.mode === 'clear') setClause['title'] = null;
             if (description.mode === 'set') setClause['description'] = sanitizedDescription;
             if (description.mode === 'clear') setClause['description'] = null;
-            if (licenseTier.mode === 'set') setClause['license_tier'] = licenseTier.value;
 
             if (Object.keys(setClause).length > 0) {
                 await tx.update(images).set(setClause).where(inArray(images.id, ids));
@@ -1062,7 +1053,6 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             topicMode: topic.mode,
             titlePrefixMode: titlePrefix.mode,
             descriptionMode: description.mode,
-            licenseTierMode: licenseTier.mode,
             addTagNames,
             removeTagNames,
             applyAltSuggested: applyAltSuggested ?? null,

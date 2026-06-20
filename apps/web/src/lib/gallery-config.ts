@@ -68,9 +68,6 @@ export interface GalleryConfig {
     // resolved value an unprivileged deploy ever sees is 'disabled' | 'stub'.
     semanticSearchMode: 'disabled' | 'stub' | 'production';
 
-    // US-P54: license tier prices in cents (0 = not for sale)
-    licensePrices: Record<string, number>;
-
     // US-CM02: force sRGB derivatives for legacy embedder compatibility
     forceSrgbDerivatives: boolean;
 
@@ -146,11 +143,6 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 }
                 return value;
             })(),
-            licensePrices: {
-                editorial: validatedNumber(map, 'license_price_editorial_cents'),
-                commercial: validatedNumber(map, 'license_price_commercial_cents'),
-                rm: validatedNumber(map, 'license_price_rm_cents'),
-            },
             forceSrgbDerivatives: (() => {
                 const raw = getSetting(map, 'force_srgb_derivatives');
                 if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';
@@ -199,11 +191,6 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
             semanticSearchMode: DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production',
-            licensePrices: {
-                editorial: Number(DEFAULTS.license_price_editorial_cents),
-                commercial: Number(DEFAULTS.license_price_commercial_cents),
-                rm: Number(DEFAULTS.license_price_rm_cents),
-            },
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
             allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
             forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',

@@ -126,11 +126,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     };
 }
 
-export default async function PhotoPage({ params, searchParams }: {
+export default async function PhotoPage({ params }: {
     params: Promise<{ id: string }>;
-    // C1RPF-PHOTO-HIGH-02: read `?checkout=success|cancel` so the photo
-    // viewer can surface a toast on Stripe post-checkout redirect.
-    searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
     // Validate that id is a purely numeric positive integer
@@ -141,12 +138,6 @@ export default async function PhotoPage({ params, searchParams }: {
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
         return notFound();
     }
-
-    const sp = (await searchParams) ?? {};
-    const checkoutRaw = sp.checkout;
-    const checkoutValue = Array.isArray(checkoutRaw) ? checkoutRaw[0] : checkoutRaw;
-    const checkoutStatus: 'success' | 'cancel' | null =
-        checkoutValue === 'success' || checkoutValue === 'cancel' ? checkoutValue : null;
 
     const [locale, t, image, seo, config, isAdminUser] = await Promise.all([
         getLocale(),
@@ -295,11 +286,9 @@ export default async function PhotoPage({ params, searchParams }: {
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('titleWithId', { id: image.id })}
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
-                licensePrices={config.licensePrices}
                 forceShowColorChips={config.forceShowColorChips}
                 forceSrgbDerivatives={config.forceSrgbDerivatives}
                 semanticSearchMode={config.semanticSearchMode}
-                checkoutStatus={checkoutStatus}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

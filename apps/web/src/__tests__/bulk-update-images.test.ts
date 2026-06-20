@@ -117,7 +117,6 @@ function makeInput(overrides: Partial<BulkUpdateImagesInput> = {}): BulkUpdateIm
         topic: { mode: 'leave' },
         titlePrefix: { mode: 'leave' },
         description: { mode: 'leave' },
-        licenseTier: { mode: 'leave' },
         addTagNames: [],
         removeTagNames: [],
         ...overrides,
@@ -215,14 +214,6 @@ describe('bulkUpdateImages — input validation', () => {
         expect(res).toEqual({ error: 'descriptionTooLong' });
     });
 
-    it('rejects invalid license tier value', async () => {
-        const res = await bulkUpdateImages(makeInput({
-            // @ts-expect-error — intentionally passing invalid value
-            licenseTier: { mode: 'set', value: 'piracy' },
-        }));
-        expect(res).toEqual({ error: 'invalidInput' });
-    });
-
     it('rejects invalid topic slug format', async () => {
         const res = await bulkUpdateImages(makeInput({
             topic: { mode: 'set', value: 'INVALID SLUG!' },
@@ -297,11 +288,11 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
 
         const res = await bulkUpdateImages(makeInput({
             topic: { mode: 'set', value: 'travel' },
-            licenseTier: { mode: 'set', value: 'commercial' },
+            description: { mode: 'set', value: 'A scenic view' },
         }));
 
         expect(res).toEqual({ success: true, count: 3 });
-        expect(capturedSetClause).toMatchObject({ topic: 'travel', license_tier: 'commercial' });
+        expect(capturedSetClause).toMatchObject({ topic: 'travel', description: 'A scenic view' });
     });
 
     it('passes null for clear title and description', async () => {
@@ -385,7 +376,7 @@ describe('bulkUpdateImages — transactional rollback', () => {
     it('does not call logAuditEvent when transaction throws', async () => {
         transactionMock.mockRejectedValueOnce(new Error('FK violation'));
 
-        await bulkUpdateImages(makeInput({ licenseTier: { mode: 'set', value: 'editorial' } }));
+        await bulkUpdateImages(makeInput({ description: { mode: 'set', value: 'A scenic view' } }));
 
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });

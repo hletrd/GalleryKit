@@ -22,8 +22,7 @@ import {
 } from '@/components/ui/select';
 import { TagInput } from '@/components/tag-input';
 import { useTranslation } from '@/components/i18n-provider';
-import type { BulkUpdateImagesInput, LicenseTier, TriState } from '@/lib/bulk-edit-types';
-import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
+import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 type ApplyAltTarget = 'title' | 'description';
 import { countCodePoints } from '@/lib/utils';
 
@@ -82,12 +81,10 @@ export function BulkEditDialog({
     const [topicMode, setTopicMode] = useState<FieldMode>('leave');
     const [titleMode, setTitleMode] = useState<FieldMode>('leave');
     const [descMode, setDescMode] = useState<FieldMode>('leave');
-    const [licenseMode, setLicenseMode] = useState<FieldMode>('leave');
 
     const [topicValue, setTopicValue] = useState('');
     const [titleValue, setTitleValue] = useState('');
     const [descValue, setDescValue] = useState('');
-    const [licenseValue, setLicenseValue] = useState<LicenseTier>('none');
     const [addTagNames, setAddTagNames] = useState<string[]>([]);
     const [removeTagNames, setRemoveTagNames] = useState<string[]>([]);
     const [applyAltSuggested, setApplyAltSuggested] = useState<ApplyAltTarget | null>(null);
@@ -96,11 +93,9 @@ export function BulkEditDialog({
         setTopicMode('leave');
         setTitleMode('leave');
         setDescMode('leave');
-        setLicenseMode('leave');
         setTopicValue('');
         setTitleValue('');
         setDescValue('');
-        setLicenseValue('none');
         setAddTagNames([]);
         setRemoveTagNames([]);
         setApplyAltSuggested(null);
@@ -147,16 +142,11 @@ export function BulkEditDialog({
                 ? { mode: 'set', value: descValue }
                 : { mode: 'clear' };
 
-        const licenseField: TriState<LicenseTier> = licenseMode === 'leave'
-            ? { mode: 'leave' }
-            : { mode: 'set', value: licenseValue };
-
         const input: BulkUpdateImagesInput = {
             ids: selectedIds,
             topic: topicField,
             titlePrefix: titleField,
             description: descField,
-            licenseTier: licenseField,
             addTagNames,
             removeTagNames,
             applyAltSuggested: applyAltSuggested ?? null,
@@ -242,36 +232,6 @@ export function BulkEditDialog({
                                     placeholder={t('imageManager.descField')}
                                     rows={3}
                                 />
-                            )}
-                        </div>
-                    </div>
-
-                    {/* License tier */}
-                    <div className="space-y-2">
-                        <Label>{t('imageManager.bulkLicenseTier')}</Label>
-                        <div className="flex items-center gap-2">
-                            <ModeSelector
-                                mode={licenseMode}
-                                onChange={setLicenseMode}
-                                label={t('imageManager.bulkLicenseTier')}
-                                canClear={false}
-                            />
-                            {licenseMode === 'set' && (
-                                <Select
-                                    value={licenseValue}
-                                    onValueChange={(v) => setLicenseValue(v as LicenseTier)}
-                                >
-                                    <SelectTrigger className="h-11 flex-1">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {LICENSE_TIERS.map((tier) => (
-                                            <SelectItem key={tier} value={tier}>
-                                                {t(`imageManager.licenseTier_${tier}`)}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
                             )}
                         </div>
                     </div>

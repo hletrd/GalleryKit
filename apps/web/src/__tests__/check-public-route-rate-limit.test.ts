@@ -4,9 +4,9 @@ import { checkPublicRouteSource } from '../../scripts/check-public-route-rate-li
 describe('checkPublicRouteSource', () => {
     it('passes function declaration export with rate-limit helper', () => {
         const source = `
-            import { preIncrementCheckoutAttempt } from '@/lib/rate-limit';
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
             export async function POST(request) {
-                if (preIncrementCheckoutAttempt('1.2.3.4')) return { status: 429 };
+                if (preIncrementShareAttempt('1.2.3.4')) return { status: 429 };
                 return { status: 200 };
             }
         `;
@@ -43,9 +43,9 @@ describe('checkPublicRouteSource', () => {
 
     it('passes export specifier form with rate-limit helper', () => {
         const source = `
-            import { preIncrementCheckoutAttempt } from '@/lib/rate-limit';
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
             async function handler(request) {
-                if (preIncrementCheckoutAttempt('1.2.3.4')) return { status: 429 };
+                if (preIncrementShareAttempt('1.2.3.4')) return { status: 429 };
                 return { status: 200 };
             }
             export { handler as POST };
@@ -114,7 +114,7 @@ describe('checkPublicRouteSource', () => {
 
     it('fails when rate-limit helper is only in a block comment (C12-LOW-01)', () => {
         const source = `
-            /* preIncrementCheckoutAttempt(ip) */
+            /* preIncrementShareAttempt(ip) */
             export async function POST(request) {
                 return { status: 200 };
             }
