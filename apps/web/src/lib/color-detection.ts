@@ -187,12 +187,19 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     6: 'gamma22',
     7: 'gamma22', // SMPTE 240M
     8: 'linear',   // ITU-T H.273 linear transfer characteristic
-    11: 'srgb',    // R5-M1: IEC 61966-2-4 (xvYCC) — same transfer as sRGB, extended gamut
+    11: 'srgb',    // R5-M1 / AGG-R7C3-01: IEC 61966-2-4 (xvYCC) uses the BT.709 transfer
+                   // function (the SAME curve as code 1), extended to negative R'G'B' for a
+                   // wider gamut — NOT the sRGB transfer (xvYCC ≠ IEC 61966-2-1). We approximate
+                   // it as 'srgb' because that is the same enum label we use for code-1/BT.709
+                   // (we expose no distinct bt709-extended label). Value is correct; the prior
+                   // "same transfer as sRGB" comment was inaccurate about the curve.
     13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
-    // R10-M9: ITU-T H.273 values 14 and 15 (BT.2020 10/12-bit SDR) use the
-    // BT.2020-NCL transfer characteristic. In production this is rendered
-    // as BT.1886 (display gamma 2.4) on broadcast / SDR-mastering monitors,
-    // not gamma 2.2. The previous mapping to 'gamma22' under-represented
+    // R10-M9 / AGG-R7C3-01: ITU-T H.273 Table 3 values 14 and 15 (BT.2020 10/12-bit
+    // SDR) are the "Rec. ITU-R BT.2020" transfer characteristic. (BT.2020-NCL is the
+    // *matrix* coefficient name — Table 4 code 9 — distinct from this transfer; the
+    // prior comment conflated the two.) In production this is rendered as BT.1886
+    // (display gamma 2.4) on broadcast / SDR-mastering monitors, not gamma 2.2.
+    // The previous mapping to 'gamma22' under-represented
     // the actual mastering intent. Closest single-curve label we expose is
     // 'gamma24' (BT.1886 with default L_b=0). Photographers shipping
     // Rec.2020 SDR exports out of DaVinci Resolve / Final Cut will get the
