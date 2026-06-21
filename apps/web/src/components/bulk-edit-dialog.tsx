@@ -181,7 +181,7 @@ export function BulkEditDialog({
                             />
                             {topicMode === 'set' && (
                                 <Select value={topicValue} onValueChange={setTopicValue}>
-                                    <SelectTrigger className="h-11 flex-1">
+                                    <SelectTrigger className="h-11 flex-1" aria-label={t('imageManager.topic')}>
                                         <SelectValue placeholder={t('imageManager.bulkSelectTopic')} />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -211,6 +211,7 @@ export function BulkEditDialog({
                                     value={titleValue}
                                     onChange={(e) => setTitleValue(e.target.value)}
                                     placeholder={t('imageManager.bulkTitlePrefixPlaceholder')}
+                                    aria-label={t('imageManager.bulkTitlePrefix')}
                                 />
                             )}
                         </div>
@@ -231,6 +232,7 @@ export function BulkEditDialog({
                                     onChange={(e) => setDescValue(e.target.value)}
                                     placeholder={t('imageManager.descField')}
                                     rows={3}
+                                    aria-label={t('imageManager.descField')}
                                 />
                             )}
                         </div>
