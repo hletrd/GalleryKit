@@ -138,11 +138,17 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                             {results.map((item) => {
                                 const sizedSrc = sizedImageUrl('/uploads/jpeg', item.filename_jpeg, thumbnailSize, imageSizes);
                                 const baseSrc = imageUrl(`/uploads/jpeg/${item.filename_jpeg}`);
+                                // DES-R9C4-01: guarantee a non-empty accessible name on the
+                                // thumbnail <Link> even when both title and description are
+                                // null (the common case). Falls back to the localized "Photo"
+                                // string, matching the sibling search.tsx:83 pattern, so the
+                                // link never has an empty accname (WCAG 4.1.2 / 2.4.4 Level A).
+                                const label = item.title ?? item.description ?? tCommon('photo');
                                 return (
                                     <SimilarThumb
                                         key={item.imageId}
                                         imageId={item.imageId}
-                                        title={item.title ?? item.description ?? null}
+                                        label={label}
                                         sizedSrc={sizedSrc}
                                         baseSrc={baseSrc}
                                         locale={locale}
@@ -159,7 +165,8 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
 
 interface SimilarThumbProps {
     imageId: number;
-    title: string | null;
+    /** Guaranteed-non-empty accessible label (title ?? description ?? localized "Photo"). */
+    label: string;
     sizedSrc: string;
     baseSrc: string;
     locale: string;
@@ -170,8 +177,13 @@ interface SimilarThumbProps {
  * per-item, matching the pattern in SearchResultItem / lightbox photo list.
  * The Link wraps the image in a block that is min-h-11 to meet the 44 px
  * touch-target floor.
+ *
+ * DES-R9C4-01: `label` is always non-empty (parent falls back to the localized
+ * "Photo" string), so the <Link> always has an accessible name — used for the
+ * image alt, the title attribute, AND an explicit aria-label so AT users and
+ * keyboard users get a named link even when the photo has no title/description.
  */
-function SimilarThumb({ imageId, title, sizedSrc, baseSrc, locale }: SimilarThumbProps) {
+function SimilarThumb({ imageId, label, sizedSrc, baseSrc, locale }: SimilarThumbProps) {
     const [imgSrc, setImgSrc] = useState(sizedSrc);
     const fallbackTriedRef = useRef(false);
 
@@ -179,11 +191,12 @@ function SimilarThumb({ imageId, title, sizedSrc, baseSrc, locale }: SimilarThum
         <Link
             href={localizePath(locale, `/p/${imageId}`)}
             className="block rounded-md overflow-hidden bg-muted aspect-square min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            title={title ?? undefined}
+            title={label}
+            aria-label={label}
         >
             <Image
                 src={imgSrc}
-                alt={title ?? ''}
+                alt={label}
                 width={96}
                 height={96}
                 className="w-full h-full object-cover"
