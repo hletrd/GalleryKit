@@ -171,3 +171,38 @@ describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC
         },
     );
 });
+
+/**
+ * Run-8 cycle-1 / FIND-R8C1-05: reconcile DROP tripwire (migration 0023).
+ *
+ * The coverage tripwire above walks the CURRENT schema.ts and asserts every
+ * table/column/index is mirrored as a CREATE/ensure in reconcile. But a DROP
+ * is invisible to that scan: a dropped table/column no longer appears in
+ * schema.ts, so a regression that silently removes the drop calls would go
+ * undetected — leaving a stale `entitlements` table + `images.license_tier`
+ * column on any legacy DB forever (the .sql DROP statements never run on an
+ * existing DB; they are baselined, so reconcile is the sole applier).
+ *
+ * This explicitly pins the two removal-0023 drops in reconcileLegacySchema.
+ * Comment-stripped (MIGRATE_SRC_CODE) so a drop "documented" only in a comment
+ * cannot satisfy the requirement.
+ */
+describe('reconcileLegacySchema DROP tripwire — migration 0023 (FIND-R8C1-05)', () => {
+    it('drops the entitlements table in reconcile (executable code, not a comment)', () => {
+        expect(
+            /dropTableIfPresent\(\s*connection\s*,\s*['"]entitlements['"]\s*\)/.test(
+                MIGRATE_SRC_CODE,
+            ),
+            "reconcileLegacySchema must call dropTableIfPresent(connection, 'entitlements') so a legacy DB drops the removed paid-download table (migration 0023). The .sql DROP never runs on an existing DB.",
+        ).toBe(true);
+    });
+
+    it('drops the images.license_tier column in reconcile (executable code, not a comment)', () => {
+        expect(
+            /dropColumnIfPresent\(\s*connection\s*,\s*dbName\s*,\s*['"]images['"]\s*,\s*['"]license_tier['"]\s*\)/.test(
+                MIGRATE_SRC_CODE,
+            ),
+            "reconcileLegacySchema must call dropColumnIfPresent(connection, dbName, 'images', 'license_tier') so a legacy DB drops the removed paid-download column (migration 0023). The .sql DROP COLUMN never runs on an existing DB.",
+        ).toBe(true);
+    });
+});
