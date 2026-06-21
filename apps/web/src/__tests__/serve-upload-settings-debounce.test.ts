@@ -31,7 +31,6 @@ const FAKE_CONFIG = {
     slideshowIntervalSeconds: 5,
     autoAltTextEnabled: false,
     semanticSearchMode: 'disabled' as const,
-    licensePrices: { editorial: 0, commercial: 0, rm: 0 },
     forceSrgbDerivatives: false,
     allowHdrIngest: false,
     forceShowColorChips: false,
