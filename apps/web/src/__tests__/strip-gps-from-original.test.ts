@@ -260,7 +260,7 @@ describe('gps-exif-strip pure scrubbers', () => {
     // That branch is the symmetric twin of the EXIF-path field-order bug fixed
     // last cycle (AGG-C6-01): the SAME `buf.write('JUNK', offset, …)`
     // offset-arithmetic class. A wrong-offset regression in the JUNK write
-    // would leave a GPS-bearing XMP chunk readable in the paid-download
+    // would leave a GPS-bearing XMP chunk readable in the on-disk
     // ORIGINAL while still reporting stripped:true — a silent privacy leak with
     // no test to catch it. Sharp does not emit an `XMP ` RIFF chunk on encode,
     // so we inject one (a real, spec-shaped RIFF sub-chunk: [FourCC][LE size]

@@ -1544,8 +1544,8 @@ export function isLosslessWebpByChunk(buf: Buffer): boolean {
  * is the KEEP-metadata API — it retains ALL input EXIF (the options
  * merely override orientation/ICC on top), so the GPS IFD survived the
  * "strip" byte-for-byte. It also re-encoded the original at default
- * quality (JPEG q80 / HEIF q50), silently degrading the paid
- * deliverable.
+ * quality (JPEG q80 / HEIF q50), silently degrading the on-disk
+ * original.
  *
  * Current strategy (two tiers, privacy always wins):
  *  1. LOSSLESS byte-level scrub (`lib/gps-exif-strip.ts`) for JPEG,

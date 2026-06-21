@@ -3,13 +3,13 @@
  * BROWSER upload action's GPS-strip-on-upload guard (app/actions/images.ts).
  *
  * This is the privacy-critical guard that keeps a photographer's home GPS out
- * of the on-disk ORIGINAL that the paid-download route streams byte-for-byte
+ * of the on-disk ORIGINAL (the admin-downloadable source file)
  * (PP-BUG-3). `strip_gps_on_upload` defaults to false, so this conditional is
  * the SOLE gate. The PARALLEL Lightroom path has a source-contract pin
  * (lr-upload-hdr-gate.test.ts:101-104) but the PRIMARY browser path had ZERO
  * test coverage of `uploadConfig.stripGpsOnUpload` — this closes that
  * asymmetry so a future refactor of uploadImages() that drops or relocates the
- * guard turns a test RED instead of silently leaking GPS to paid downloads.
+ * guard turns a test RED instead of silently leaking GPS in the on-disk original.
  *
  * Source-contract tier (matching the LR sibling): a behavioral test would need
  * to mock getGalleryConfig + saveOriginalAndGetMetadata + extractExifForDb +

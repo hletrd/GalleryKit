@@ -70,8 +70,8 @@ describe('lr upload HDR-ingest source-contract', () => {
  * Run-3 RPF cycle 2 / F1: the LR PAT path must also strip GPS EXIF from the
  * on-disk original when `strip_gps_on_upload` is enabled, mirroring the browser
  * upload action (app/actions/images.ts PP-BUG-3). Nulling only the DB columns
- * left GPS in the file streamed verbatim by /api/download/[imageId], leaking
- * the photographer's protected location to paid-download purchasers. This
+ * left GPS in the on-disk original (the admin-downloadable source file), leaking
+ * the photographer's protected location to anyone who downloads it. This
  * source-contract locks the strip so a future refactor cannot silently re-drop
  * the second ingest-path divergence.
  */
