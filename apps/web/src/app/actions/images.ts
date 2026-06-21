@@ -451,6 +451,19 @@ export async function uploadImages(formData: FormData) {
                             jpeg: uploadConfig.imageQualityJpeg,
                         },
                         imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
+                        // CR-R9C6-01: carry the remaining 6 admin processing
+                        // settings on the job (upload-time snapshot) so a fresh
+                        // upload honors them. Without these, the queue handler's
+                        // config-load gate never enters (it only enters when
+                        // BOTH quality and imageSizes are absent, which never
+                        // happens on upload), so these settings were silently
+                        // ignored on every upload until a backfill re-encode.
+                        forceSrgbDerivatives: uploadConfig.forceSrgbDerivatives,
+                        wideGamutJpegChroma: uploadConfig.wideGamutJpegChroma,
+                        avifEffort: uploadConfig.avifEffort,
+                        sdrJpegChroma: uploadConfig.sdrJpegChroma,
+                        wideGamutMaxSourcePixels: uploadConfig.wideGamutMaxSourcePixels,
+                        autoAltTextEnabled: uploadConfig.autoAltTextEnabled,
                         camera_model: exifDb.camera_model,
                         capture_date: exifDb.capture_date,
                         iccProfileName: data.iccProfileName,

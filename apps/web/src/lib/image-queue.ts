@@ -121,6 +121,18 @@ export type ImageProcessingJob = {
     quality?: ImageQualitySettings;
     imageSizes?: number[];
     iccProfileName?: string | null;
+    // CR-R9C6-01: the upload path always supplies quality+imageSizes, so the
+    // `if (!quality && !imageSizes)` config-load gate below never enters on a
+    // real upload. Carry the remaining 6 admin-tunable processing settings on
+    // the job (snapshotted at upload time, same intent as quality/imageSizes)
+    // so a fresh upload honors them. The bootstrap path omits these (and
+    // quality/imageSizes), so the gate still loads them from config there.
+    forceSrgbDerivatives?: boolean;
+    wideGamutJpegChroma?: JpegChromaSubsampling;
+    avifEffort?: number;
+    sdrJpegChroma?: JpegChromaSubsampling;
+    wideGamutMaxSourcePixels?: number;
+    autoAltTextEnabled?: boolean;
     // R6-H1: full color signals for bootstrap NCLX preservation. ProcessImageFormats
     // consumes colorPrimaries; the remaining fields future-proof the bootstrap.
     colorSignals?: {
@@ -305,17 +317,25 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             // straddle later admin config changes while it waits in the queue.
             let quality: ImageQualitySettings | undefined = job.quality;
             let imageSizes: number[] | undefined = job.imageSizes;
-            let autoAltTextEnabled = false;
-            let forceSrgbDerivatives = false;
+            // CR-R9C6-01: seed all 6 processing settings from the upload-time
+            // job snapshot. The upload path now supplies these, so a fresh
+            // upload honors them WITHOUT entering the config-load gate below
+            // (which it never does because it always supplies quality).
+            // `?? false` / leaving undefined preserves the prior default
+            // behavior for jobs that don't carry the field.
+            let autoAltTextEnabled = job.autoAltTextEnabled ?? false;
+            let forceSrgbDerivatives = job.forceSrgbDerivatives ?? false;
             // C3-A6: chroma values flow as the narrow JpegChromaSubsampling
             // union end-to-end (gallery-config → here → process-image) so
             // process-image's encode site no longer needs the runtime cast.
-            let wideGamutJpegChroma: JpegChromaSubsampling | undefined;
-            let avifEffort: number | undefined;
+            let wideGamutJpegChroma: JpegChromaSubsampling | undefined = job.wideGamutJpegChroma;
+            let avifEffort: number | undefined = job.avifEffort;
             // C2-A5 / C2-A6: SDR JPEG chroma + wide-gamut max source pixels
-            let sdrJpegChroma: JpegChromaSubsampling | undefined;
-            let wideGamutMaxSourcePixels: number | undefined;
+            let sdrJpegChroma: JpegChromaSubsampling | undefined = job.sdrJpegChroma;
+            let wideGamutMaxSourcePixels: number | undefined = job.wideGamutMaxSourcePixels;
             if (!quality && !imageSizes) {
+                // Bootstrap / legacy re-enqueue path: the job carries none of the
+                // processing settings, so load them all from current config.
                 try {
                     const config = await getGalleryConfig();
                     quality = {
