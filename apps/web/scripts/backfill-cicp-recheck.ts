@@ -124,7 +124,16 @@ async function main() {
         });
     }
 
-    await queue.onEmpty();
+    // CR-R9C2-01: drain with onIdle() (not onEmpty()). Per the installed
+    // p-queue 9.1.2 contract, onEmpty() resolves when nothing is WAITING
+    // (queue.size === 0) but does NOT wait for in-flight tasks
+    // (queue.pending may be > 0); onIdle() guarantees size === 0 && pending === 0.
+    // The per-row counters (checked/flips/missing/errors) are mutated inside the
+    // queued task body, so onEmpty() let the final ≤concurrency tasks race the
+    // summary print — the diagnostic's whole purpose. Matches every sibling drain
+    // site (backfill-color-pipeline.ts:500, image-queue.ts:595/759,
+    // queue-shutdown.ts:33, admin-backfill-runner.ts:764).
+    await queue.onIdle();
 
     console.log('\n[backfill-cicp-recheck] Done.');
     console.log(`  Total rows checked: ${checked}`);
