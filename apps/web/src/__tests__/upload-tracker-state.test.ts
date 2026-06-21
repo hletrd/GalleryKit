@@ -14,9 +14,12 @@
  *
  * NOTE: getUploadTracker() memoizes the Map on globalThis via
  * Symbol.for('gallerykit.uploadTracker'), so each test clears it first to avoid
- * cross-test contamination.
+ * cross-test contamination. The beforeAll handles cross-file contamination that
+ * can occur under non-default Vitest pool configurations (vmThreads, singleFork)
+ * where globalThis is shared between files; the beforeEach handles within-file
+ * contamination under all pool models (TE-R9C3-01).
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
     getUploadTracker,
     hasActiveUploadClaims,
@@ -33,6 +36,10 @@ const NOW = 1_700_000_000_000;
 function entry(windowStart: number, count = 0, bytes = 0): UploadTrackerEntry {
     return { count, bytes, windowStart };
 }
+
+beforeAll(() => {
+    getUploadTracker().clear();
+});
 
 beforeEach(() => {
     getUploadTracker().clear();
