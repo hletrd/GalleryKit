@@ -1,16 +1,32 @@
 
-const APP_BACKUP_TABLES = [
+// Every table emitted by the app's own `mysqldump` (db-actions.ts uses the
+// default `--add-drop-table`, so each table is preceded by a
+// `DROP TABLE IF EXISTS \`<table>\`;` line). The restore scanner masks ONLY
+// these known-app drops before applying the destructive-SQL guard, so this
+// list MUST stay a SUPERSET of every table in src/db/schema.ts — otherwise a
+// restore of the app's own current-schema backup is erroneously blocked by the
+// `\bDROP\s+TABLE\b` pattern. Kept sorted for readability. The superset
+// invariant is locked by `__tests__/sql-restore-scan.test.ts` (a tripwire that
+// introspects the Drizzle schema), so a future table added without updating
+// this list fails the test rather than silently breaking restore.
+export const APP_BACKUP_TABLES = [
     'admin_settings',
+    'admin_tokens',
     'admin_users',
     'audit_log',
+    'image_embeddings',
     'image_tags',
+    'image_views',
     'images',
     'rate_limit_buckets',
     'sessions',
     'shared_group_images',
+    'shared_group_views',
     'shared_groups',
+    'smart_collections',
     'tags',
     'topic_aliases',
+    'topic_views',
     'topics',
 ] as const;
 
