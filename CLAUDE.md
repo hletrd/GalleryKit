@@ -506,6 +506,7 @@ The current state of the photographer surface is documented in `photographer-r4/
 
 ## Permanently Deferred
 - **2FA/WebAuthn**: Not planned. Multiple root admins with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
+- **Paid downloads / Stripe (US-P54): REMOVED, do not re-add.** GalleryKit is a free, open-source gallery with **no payment surface**. The Stripe paid-download feature was removed entirely (operator decision, run-8): the `entitlements` table + `images.license_tier` column were dropped (migration `0023_remove_paid_downloads`), and the checkout/webhook/paid-download routes, the `sales` admin page + action, the `stripe`/`license-tiers`/`download-tokens`/`download-interstitial` libs, the paid i18n keys, and the `stripe` dependency were all deleted. The **free** direct-download button (JPEG/AVIF derivatives) was KEPT and made unconditional. Do not reintroduce Stripe, entitlements, `license_tier`, or any checkout/payment flow without an explicit new product decision.
 
 ## Important Notes
 
