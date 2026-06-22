@@ -431,6 +431,22 @@ export const POST = withAdminAuth(
                 jpeg: config.imageQualityJpeg,
             },
             imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
+            // CR-R9C7-01: carry the remaining 6 admin processing settings on
+            // the job (upload-time snapshot from the already-loaded `config`),
+            // exactly mirroring the browser upload path (actions/images.ts).
+            // Without these, the queue handler's config-load gate never enters
+            // (it only enters when BOTH quality and imageSizes are absent, which
+            // never happens here because this path always supplies a truthy
+            // `quality` object), so these settings were silently ignored on
+            // every Lightroom publish until a backfill re-encode — the same
+            // defect class CR-R9C6-01 fixed for the browser path but which the
+            // c6 fix missed on this parallel enqueue site.
+            forceSrgbDerivatives: config.forceSrgbDerivatives,
+            wideGamutJpegChroma: config.wideGamutJpegChroma,
+            avifEffort: config.avifEffort,
+            sdrJpegChroma: config.sdrJpegChroma,
+            wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+            autoAltTextEnabled: config.autoAltTextEnabled,
             // R4C1 COR-R4C1-05: forward EXIF caption inputs, mirroring the
             // browser path. Without these the auto alt-text stub
             // (caption-generator.ts) emits the generic "[AUTO] Photo" for
