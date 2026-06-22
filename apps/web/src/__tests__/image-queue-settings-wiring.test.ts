@@ -84,7 +84,7 @@ vi.mock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));
 vi.mock('@/lib/audit', () => ({ purgeOldAuditLog: vi.fn() }));
 vi.mock('@/lib/process-topic-image', () => ({ cleanOrphanedTopicTempFiles: vi.fn() }));
 vi.mock('@/lib/restore-maintenance', () => ({ isRestoreMaintenanceActive: vi.fn(() => false) }));
-vi.mock('@/lib/caption', () => ({ generateCaption: vi.fn(async () => null) }));
+vi.mock('@/lib/caption-generator', () => ({ generateCaption: vi.fn(async () => null) }));
 
 // image-queue imports `fs from 'fs/promises'` (default import): access()
 // resolves (original exists); stat() reports non-zero size so the 3-format
