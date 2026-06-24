@@ -1,17 +1,17 @@
 # GalleryKit Comprehensive Multi-Perspective Critique
 
 **Repository:** /Users/hletrd/flash-shared/gallery
-**HEAD:** f13130ae
+**HEAD:** 87065049
 **Date:** 2026-06-25
 **Reviewer:** Critic (multi-perspective analysis)
-**Scope:** 461+ source files, ~70,634 LOC, 228+ unit tests, 6 e2e tests
-**Delta since last review (d24f2a6d):** 10 commits — settings-hash sorting fix, gain-map off-by-one fix, image-queue null-path guard, OG route SSRF hardening, histogram a11y fix, analytics a11y fix, photo-viewer keyboard repeat suppression, clipboard execCommand fallback, image-manager error logging upgrade, SW version refresh
+**Scope:** 453 source files, ~70,327 LOC, 228+ unit tests, 6 e2e tests
+**Delta since last review (f13130ae):** 12 commits — docs fixes (JSDoc, comments, env vars), test fix (racy setImmediate), UI fixes (aria-labels, clipboard fallback), code fixes (epsilon zero-check, rate-limit numbering), Tailwind safelist cleanup
 
 ---
 
 ## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-The GalleryKit codebase remains exceptionally well-engineered. The delta since the last review shows continued attention to detail (settings-hash sorting, gain-map boundary fix, OG SSRF hardening, clipboard HTTP fallback). However, the structural concerns identified in prior reviews persist, and new findings from this cycle reinforce the need for architectural attention in specific areas. The reservations center on: (1) god-file anti-patterns that compound with each new feature, (2) process-local state that weakens under operational stress, (3) missing abstractions that would reduce contributor onboarding friction, and (4) several new maintainability gaps identified in this cycle.
+The GalleryKit codebase remains exceptionally well-engineered. The delta since the last review shows continued attention to detail (epsilon-based cosineSimilarity zero check, Tailwind safelist cleanup, analytics aria-labels, JSDoc corrections). However, the structural concerns identified in prior reviews persist, and new findings from this cycle reinforce the need for architectural attention in specific areas. The reservations center on: (1) god-file anti-patterns that compound with each new feature, (2) process-local state that weakens under operational stress, (3) missing abstractions that would reduce contributor onboarding friction, and (4) several new maintainability gaps identified in this cycle.
 
 ---
 
@@ -19,21 +19,23 @@ The GalleryKit codebase remains exceptionally well-engineered. The delta since t
 
 | Prediction | Severity | Actual Finding | Match? |
 |---|---|---|---|
-| 1. Image processing pipeline (process-image.ts) has hidden coupling with data layer | MAJOR | Confirmed: process-image.ts imports from data.ts, uploads actions, and has 1659+ lines with 15+ distinct responsibilities | Yes |
+| 1. Image processing pipeline (process-image.ts) has hidden coupling with data layer | MAJOR | Confirmed: process-image.ts imports from data.ts indirectly via image-queue; 1627 lines with 15+ distinct responsibilities; still a god file | Yes |
 | 2. Rate-limiting in-memory Maps will have consistency issues across deploys/restarts | MINOR | Confirmed: DB-backed buckets exist but in-memory fast-path is primary; no distributed coordination; no runtime warning for multi-instance | Yes |
 | 3. Privacy field guards (compile-time TypeScript) are brittle and may drift | MAJOR | Confirmed: `_PrivacySensitiveKeys` is a manual union; no automated enforcement; `alt_text_suggested` not documented as intentionally excluded | Yes |
-| 4. Server actions have duplicated auth/validation boilerplate | MINOR | Confirmed: Every mutating action repeats the same 6-line pattern; 50 async exports across action files | Yes |
-| 5. Component layer has untested edge cases in photo viewer/lightbox | MAJOR | Confirmed: `srcSetData` useMemo returns JSX (anti-pattern), keyboard handler race conditions, no dedicated unit tests | Yes |
-| 6. Missing abstraction for storage backend (S3/MinIO mentioned but not wired) | MAJOR | Confirmed: `@/lib/storage` exists as internal abstraction but is not integrated; local filesystem only | Yes |
-| 7. CLIP semantic search stub mode is a footgun | MINOR | Confirmed: Stub mode writes deterministic-but-random embeddings; well-documented but still risky | Yes |
+| 4. Server actions have duplicated auth/validation boilerplate | MINOR | Confirmed: Every mutating action repeats the same 6-line pattern; 50 async exports across 14 action files | Yes |
+| 5. Component layer has untested edge cases in photo viewer/lightbox | MAJOR | Confirmed: `srcSetData` useMemo returns JSX (anti-pattern), no dedicated unit tests for photo-viewer/lightbox/histogram | Yes |
+| 6. Missing abstraction for storage backend (S3/MinIO mentioned but not wired) | MAJOR | Confirmed: `@/lib/storage` exists as internal abstraction but is not integrated; local filesystem only; zero production callers | Yes |
+| 7. CLIP semantic search stub mode is a footgun | MINOR | Confirmed: Stub mode writes deterministic-but-random embeddings; well-documented but still risky; no UI wiring yet | Yes |
 | 8. Service Worker cache invalidation has edge cases around admin setting changes | MAJOR | Confirmed: Settings-hash ETag only affects serve-upload path; static path requires backfill re-encode | Yes |
 | 9. Docker deployment lacks resource limits and health check granularity | MAJOR | Confirmed: No mem_limit, cpus, ulimits in docker-compose; no `.dockerignore`; root package.json missing `engines` | Yes |
 | 10. Test suite has fixture-based coverage but lacks mutation testing | MINOR | Confirmed: Extensive fixture tests but no property-based or mutation testing; vitest.config.ts has no coverage config | Yes |
-| 11. `processImageFormats` has grown to 14 positional parameters | MAJOR | Confirmed: 14 positional parameters in processImageFormats; call site in image-queue.ts already line-breaks the arg list | Yes (NEW) |
-| 12. Fire-and-forget embedding hook can outlive job lifecycle | MAJOR | Confirmed: `void (async () => { ... })()` in image-queue.ts is not tracked by queue.onIdle() | Yes (NEW) |
-| 13. `failRestore` is async but called from sync event handlers | MAJOR | Confirmed: `failRestore` declared async, called from `readStream.on('error')` without await | Yes (NEW) |
-| 14. Tailwind safelist contains sub-44px touch target value | MINOR | Confirmed: `min-h-[32px]` in safelist contradicts WCAG 2.5.5 policy | Yes (NEW) |
-| 15. `uploadImages` sequential loop holds request open for 100 files | MINOR | Confirmed: Strictly sequential `for...of` with DB insert + tag lookup + enqueue per file | Yes (NEW) |
+| 11. `processImageFormats` has grown to 14 positional parameters | MAJOR | Confirmed: 14 positional parameters in processImageFormats; call site in image-queue.ts already line-breaks the arg list | Yes (UNCHANGED) |
+| 12. Fire-and-forget embedding hook can outlive job lifecycle | MAJOR | Confirmed: `void (async () => { ... })()` in image-queue.ts is not tracked by queue.onIdle() | Yes (UNCHANGED) |
+| 13. `failRestore` is async but called from sync event handlers | MAJOR | Confirmed: `failRestore` declared async, called from `readStream.on('error')` without await | Yes (UNCHANGED) |
+| 14. `uploadImages` sequential loop holds request open for 100 files | MINOR | Confirmed: Strictly sequential `for...of` with DB insert + tag lookup + enqueue per file | Yes (UNCHANGED) |
+| 15. `getDummyHash` TOCTOU race on first login | MAJOR | Confirmed: Two concurrent logins after restart both see `dummyHashPromise === null` and start separate Argon2 computations | Yes (UNCHANGED) |
+| 16. `BoundedMap` hard cap not enforced by `set()` | MAJOR | Confirmed: `set()` does not auto-prune; consumer must call `prune()` separately | Yes (UNCHANGED) |
+| 17. `color-details-section.tsx` and `lightbox-color-pip.tsx` duplicate IIFE logic | MINOR | Confirmed: Identical delivered-bit-depth IIFE duplicated across two components | Yes (UNCHANGED) |
 
 ---
 
@@ -45,15 +47,15 @@ None found. The codebase has no critical security vulnerabilities, privacy leaks
 
 ## Major Findings (causes significant rework)
 
-### 1. `process-image.ts` is a God File (1659+ lines, 15+ responsibilities)
-**File:** `apps/web/src/lib/process-image.ts`, lines 1-1659
+### 1. `process-image.ts` is a God File (1627 lines, 15+ responsibilities)
+**File:** `apps/web/src/lib/process-image.ts`, lines 1-1627
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
-This file contains: Sharp configuration (lines 36-53), 10-bit AVIF probe with Promise singleton (lines 69-123), AVIF NCLX verification (lines 128-208), WebP ICC verification (lines 211-272), EXIF datetime parsing (lines 439-488), image deletion helpers (lines 498-539), color pipeline decision resolution (lines 640-725), AVIF ICC profile resolution (lines 727-797), original save + metadata extraction (lines 800-950), image format processing (lines 958-1328), EXIF-to-DB extraction (lines 1390-1499), WebP lossless detection (lines 1501-1538), GPS stripping (lines 1540-1658).
+This file contains: Sharp configuration (lines 36-53), 10-bit AVIF probe with Promise singleton (lines 69-123), AVIF NCLX verification (lines 128-208), WebP ICC verification (lines 211-272), EXIF datetime parsing (lines 439-488), image deletion helpers (lines 498-539), color pipeline decision resolution (lines 640-725), AVIF ICC profile resolution (lines 727-797), original save + metadata extraction (lines 800-950), image format processing (lines 958-1297), EXIF-to-DB extraction (lines 1359-1468), WebP lossless detection (lines 1487-1507), GPS stripping (lines 1550-1627).
 
-**Why this matters:** Every change to any of these 15+ concerns requires editing the same file. The file is the second-largest in `lib/` after `data.ts`. Merge conflicts are increasingly likely as multiple features (color pipeline, GPS stripping, EXIF extraction) evolve in parallel. The color pipeline logic alone (lines 640-797) is 157 lines of decision tables that could live in a dedicated module.
+**Why this matters:** Every change to any of these 15+ concerns requires editing the same file. The file is the second-largest in `lib/` after `data.ts` (1670 lines). Merge conflicts are increasingly likely as multiple features (color pipeline, GPS stripping, EXIF extraction) evolve in parallel. The color pipeline logic alone (lines 640-797) is 157 lines of decision tables that could live in a dedicated module.
 
 **Fix:** Extract into focused modules:
 - `lib/image-processing/config.ts` — Sharp concurrency, probe singleton
@@ -67,9 +69,10 @@ This file contains: Sharp configuration (lines 36-53), 10-bit AVIF probe with Pr
 ---
 
 ### 2. `processImageFormats` Has 14 Positional Parameters
-**File:** `apps/web/src/lib/process-image.ts`, lines 958-973
+**File:** `apps/web/src/lib/process-image.ts`, lines 927-942
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 ```typescript
 export async function processImageFormats(
@@ -78,15 +81,15 @@ export async function processImageFormats(
     filenameAvif: string,
     filenameJpeg: string,
     baseWidth: number,
-    quality: { webp: number; avif: number; jpeg: number },
-    sizes: number[],
-    iccProfileName: string | null,
-    forceSrgbDerivatives: boolean,
-    signals: ColorSignals | null,
-    wideGamutJpegChroma: '4:4:4' | '4:2:2' | '4:2:0',
-    avifEffort: number,
-    sdrJpegChroma: '4:4:4' | '4:2:2' | '4:2:0',
-    wideGamutMaxSourcePixels: number,
+    quality?: ImageQualitySettings,
+    sizes: number[] = DEFAULT_OUTPUT_SIZES,
+    iccProfileName?: string | null,
+    forceSrgbDerivatives?: boolean,
+    signals?: { colorPrimaries?: string | null } | null,
+    wideGamutJpegChroma?: JpegChromaSubsampling,
+    avifEffort?: number,
+    sdrJpegChroma?: JpegChromaSubsampling,
+    wideGamutMaxSourcePixels?: number,
 ): Promise<...>
 ```
 
@@ -119,9 +122,9 @@ export async function processImageFormats(
 ---
 
 ### 3. Privacy Field Guard is Manual and Drift-Prone
-**File:** `apps/web/src/lib/data.ts`, lines 419-453
+**File:** `apps/web/src/lib/data.ts`, lines 419-458
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 The compile-time privacy guard uses a manually-maintained `PrivacySensitiveKeys` union type. When a new sensitive column is added to the `images` table, the developer must update 5 locations: `adminSelectFields`, `PrivacySensitiveKeys` union, `_omit*` destructuring in `publicSelectFields`, `_omit*` in `publicMapSelectFields`, and `_PrivacySensitiveKeys` in `__tests__/privacy-fields.test.ts`.
@@ -133,9 +136,10 @@ The compile-time privacy guard uses a manually-maintained `PrivacySensitiveKeys`
 ---
 
 ### 4. Fire-and-Forget Embedding Hook Can Outlive Job Lifecycle
-**File:** `apps/web/src/lib/image-queue.ts`, lines 468-512
+**File:** `apps/web/src/lib/image-queue.ts`, lines 478-522
 **Confidence:** MEDIUM
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The embedding hook is fired as `void (async () => { ... })()` — a floating promise not attached to the job's lifecycle. If the process receives SIGTERM during this async work, the promise is orphaned. The `shutdownImageProcessingQueue` calls `drainProcessingQueueForShutdown` which waits for `queue.onIdle()`, but `onIdle()` only tracks queue tasks, not floating promises spawned inside those tasks.
 
@@ -148,7 +152,8 @@ The embedding hook is fired as `void (async () => { ... })()` — a floating pro
 ### 5. `failRestore` is Async but Called from Synchronous Event Handlers
 **File:** `apps/web/src/app/[locale]/admin/db-actions.ts`, lines 465-487
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 ```typescript
 const failRestore = async (error: string, logLabel: string, reason: unknown) => {
@@ -176,7 +181,7 @@ readStream.on('error', (err) => {
 ### 6. In-Memory Rate Limit Maps Are Process-Local with No Runtime Warning
 **File:** `apps/web/src/lib/rate-limit.ts`, lines 77, 87, 286
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 `ogRateLimit`, `shareRateLimit`, and `semanticRateLimit` are `BoundedMap` instances with no DB backup. The CLAUDE.md documents: "the other rate-limit buckets (OG/share/search/semantic) are per-process, so distributed-attack defense weakens under scale-out." But there is no runtime log warning when `NODE_ENV === 'production'`.
@@ -190,7 +195,7 @@ readStream.on('error', (err) => {
 ### 7. Settings-Hash ETag Does Not Invalidate Static-Path Derivatives
 **File:** `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/settings-hash.ts`
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** PARTIALLY ADDRESSED (settings-hash now sorts imageSizes before hashing, commit 7f14c691)
 
 The settings-hash ETag is ONLY emitted by the `serve-upload.ts` route handler (fallback path). The vast majority of real traffic hits the static path (`public/uploads/...`), served by Next.js's static file server with `W/"{size}-{mtime}"` ETag. When an admin changes a color/quality/size setting, static files on disk are NOT rewritten until a backfill re-encode runs.
@@ -204,7 +209,7 @@ The settings-hash ETag is ONLY emitted by the `serve-upload.ts` route handler (f
 ### 8. Server Actions Have Duplicated Auth/Validation Boilerplate
 **Files:** `apps/web/src/app/actions/*.ts` (14 files, 50 async exports)
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 Every mutating server action repeats the same 6-line pattern:
@@ -226,7 +231,7 @@ This is 84 lines of duplication across 14 files. A change to the auth flow requi
 ### 9. The `images` Table is a Wide Table Anti-Pattern
 **File:** `apps/web/src/db/schema.ts`, lines 19-117
 **Confidence:** MEDIUM
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 The `images` table has 40+ columns, mixing file metadata, EXIF data, color/HDR pipeline data, processing state, content data, sharing data, and audit data. Adding a new EXIF field requires a schema migration on the hottest table in the system.
@@ -238,7 +243,7 @@ The `images` table has 40+ columns, mixing file metadata, EXIF data, color/HDR p
 ### 10. Component Test Coverage is Thin
 **Files:** `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/histogram.tsx`
 **Confidence:** HIGH
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 These components are among the most complex UI components but have no dedicated unit tests. They are covered indirectly by 6 e2e tests (happy paths only) and the touch-target audit (CSS sizes only, not behavior).
@@ -250,21 +255,22 @@ These components are among the most complex UI components but have no dedicated 
 ---
 
 ### 11. Missing Storage Backend Abstraction Integration
-**File:** `apps/web/src/lib/upload-paths.ts` (implied), `CLAUDE.md` (documentation)
+**File:** `apps/web/src/lib/storage/` (index.ts, types.ts, local.ts)
 **Confidence:** MEDIUM
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
-The `@/lib/storage` module exists as an internal abstraction but was never wired end-to-end. The current implementation is hardcoded to local filesystem paths. S3/MinIO switching is documented as "not yet supported" but the abstraction exists.
+The `@/lib/storage` module exists as an internal abstraction with a full `StorageBackend` interface (writeStream, writeBuffer, readBuffer, createReadStream, stat, delete, deleteMany, copy, getUrl) and a `LocalStorageBackend` implementation. However, ZERO production code calls `getStorage()`. The current implementation is hardcoded to local filesystem paths throughout `process-image.ts`, `upload-paths.ts`, and `serve-upload.ts`. S3/MinIO switching is documented as "not yet supported" but the abstraction exists.
 
-**Fix:** Complete the storage abstraction by defining a `StorageProvider` interface with `read()`, `write()`, `delete()`, `exists()` methods. Implement `LocalFilesystemProvider` and `S3Provider`. Inject the provider into `process-image.ts` and `serve-upload.ts`.
+**Fix:** Complete the storage abstraction by wiring it into `process-image.ts` (writeBuffer for Sharp output), `serve-upload.ts` (createReadStream for file serving), and `upload-paths.ts` (writeStream for original uploads). The `LocalStorageBackend` is already functional and can serve as the default.
 
 ---
 
 ### 12. Docker Compose Missing Resource Limits and Health Checks
 **File:** `apps/web/docker-compose.yml`, `Dockerfile`
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The `docker-compose.yml` defines no `mem_limit`, `cpus`, `ulimits`, or `healthcheck` override for the web service. In a single-host deployment with MySQL also running on the same machine (host networking), an unbounded Node.js process can consume all available RAM and trigger OOM kills.
 
@@ -278,21 +284,23 @@ The root `package.json` has no `engines` field, while `apps/web/package.json` co
 
 ## Minor Findings (suboptimal but functional)
 
-### 13. Tailwind Safelist Contains Sub-44px Touch Target Value
-**File:** `apps/web/tailwind.config.ts`, lines 11-20
-**Confidence:** MEDIUM
-**First identified:** This cycle
+### 13. `getClientIp` Returns 'unknown' Without `TRUST_PROXY`, Causing Shared Rate-Limit Bucket
+**File:** `apps/web/src/lib/rate-limit.ts`, lines 145-176
+**Confidence:** HIGH
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
-The `safelist` includes `min-h-[32px]` — a 32px value that contradicts the project's documented 44px minimum touch-target policy (WCAG 2.5.5). While the safelist is for JIT generation of dynamically-used classes, having this value enables a class that violates the project's own policy.
+When `TRUST_PROXY` is not set, `getClientIp` returns `'unknown'` for all requests behind a proxy. This means all users share a single rate-limit bucket. The code logs a one-time warning, but the behavior is dangerous for production deployments.
 
-**Fix:** Remove `min-h-[32px]` from the safelist. If needed for a specific component, add a documented exemption.
+**Fix:** Make `TRUST_PROXY=true` a hard requirement in production by throwing on startup if it's unset and proxy headers are present.
 
 ---
 
 ### 14. `uploadImages` Sequential File Processing Loop
 **File:** `apps/web/src/app/actions/images.ts`, lines 267-494
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The `uploadImages` action processes files in a strictly sequential `for...of` loop. Each file goes through: save original, color signal detection, HDR rejection check, EXIF extraction, GPS stripping, DB insert, tag processing, queue enqueue. With 100 files (the max per window), this loop could take significant time holding the request open.
 
@@ -300,59 +308,51 @@ The `uploadImages` action processes files in a strictly sequential `for...of` lo
 
 ---
 
-### 15. `getClientIp` Returns 'unknown' When TRUST_PROXY is Unset
-**File:** `apps/web/src/lib/rate-limit.ts`, lines 145-176
-**Confidence:** HIGH
-**First identified:** Prior review cycle
-**Status:** UNCHANGED
-
-When `TRUST_PROXY` is not set, `getClientIp` returns `'unknown'` for all requests. This means all users share a single rate-limit bucket. The code logs a one-time warning, but the behavior is dangerous for production deployments.
-
-**Fix:** Make `TRUST_PROXY=true` a hard requirement in production by throwing on startup if it's unset and proxy headers are present.
-
----
-
-### 16. `decimalToRational` Has Magic Threshold
-**File:** `apps/web/src/lib/process-image.ts`, lines 1374-1381
+### 15. `decimalToRational` Has Magic Threshold
+**File:** `apps/web/src/lib/process-image.ts`, lines 1343-1350
 **Confidence:** LOW
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The `0.001` epsilon for matching `1/denominator` to the input value is undocumented. A comment explaining why 0.001 (vs 0.0001 or 0.01) was chosen would help.
 
 ---
 
-### 17. `stripGpsFromOriginal` Uses Inconsistent Logging Style
-**File:** `apps/web/src/lib/process-image.ts`, lines 1621-1656
+### 16. `stripGpsFromOriginal` Uses Inconsistent Logging Style
+**File:** `apps/web/src/lib/process-image.ts`, lines 1589-1625
 **Confidence:** LOW
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 Most of the file uses string interpolation (`console.warn(\`[verify-webp] ${message}\`)`). The GPS stripper uses object-style logging (`console.error({ filePath, err: e })`) which may not format well in some log aggregators.
 
 ---
 
-### 18. `getLatestImageForOg` JSDoc Claims `cache()` Wrapping
+### 17. `getLatestImageForOg` JSDoc Claims `cache()` Wrapping
 **File:** `apps/web/src/lib/data.ts`, lines 876-890
 **Confidence:** LOW
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
-The JSDoc says "Wrapped in `cache()` for SSR dedup" but the function is not actually wrapped in `React.cache()`. The `getLatestImageForOgCached` variant exists elsewhere but this function is the raw version.
+The JSDoc says "Wrapped in `cache()` for SSR dedup" but the function is not actually wrapped in `React.cache()`. The `getLatestImageForOgCached` variant exists elsewhere (line 1618) but this function is the raw version.
 
 ---
 
-### 19. `searchImages` Has N+1 Query Risk
+### 18. `searchImages` Has N+1 Query Risk
 **File:** `apps/web/src/lib/data.ts`, lines 1407-1546
 **Confidence:** MEDIUM
-**First identified:** Prior review cycle
+**First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
 
 The `searchImages` function runs up to 3 queries: main query, tag query, alias query. The tag and alias queries run in parallel, but the main query must complete first. For searches matching many tags, this is 2 round-trips. The function also uses `GROUP BY` on the tag query, which can be expensive.
 
 ---
 
-### 20. `settings.ts` Validation Occurs Outside Transaction Scope
+### 19. `settings.ts` Validation Occurs Outside Transaction Scope
 **File:** `apps/web/src/app/actions/settings.ts`, lines 82-148
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The validation for `image_sizes`/`strip_gps_on_upload` (lines 82-134) runs BEFORE the transaction (line 137) and BEFORE the advisory lock acquisition (lines 74-79). Between validation and lock acquisition, another process could upload an image, making the validation stale.
 
@@ -360,19 +360,21 @@ The validation for `image_sizes`/`strip_gps_on_upload` (lines 82-134) runs BEFOR
 
 ---
 
-### 21. `db-actions.ts` Restore Has Stream Error Handling Gaps
+### 20. `db-actions.ts` Restore Has Stream Error Handling Gaps
 **File:** `apps/web/src/app/[locale]/admin/db-actions.ts`, lines 465-520
 **Confidence:** MEDIUM
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 `readStream.destroy()` and `restore.stdin.destroy()` may throw synchronously. `failRestore` is async but called from sync event handlers. The `restore.on('exit')` handler at line 514 calls `failRestore` without checking if the process already succeeded.
 
 ---
 
-### 22. `color-details-section.tsx` and `lightbox-color-pip.tsx` Duplicate IIFE Logic
+### 21. `color-details-section.tsx` and `lightbox-color-pip.tsx` Duplicate IIFE Logic
 **Files:** `apps/web/src/components/color-details-section.tsx:489-502`, `apps/web/src/components/lightbox-color-pip.tsx:216-229`
 **Confidence:** HIGH
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 Identical IIFE logic for delivered bit depth display is duplicated across two components. This violates DRY and creates a maintenance hazard.
 
@@ -380,10 +382,11 @@ Identical IIFE logic for delivered bit depth display is duplicated across two co
 
 ---
 
-### 23. `upload-dropzone.tsx` Silently Drops Rejected Files
+### 22. `upload-dropzone.tsx` Silently Drops Rejected Files
 **File:** `apps/web/src/components/upload-dropzone.tsx`, lines 138-173
 **Confidence:** MEDIUM
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 Files that exceed limits are silently dropped with only an aggregate toast count. Users get no per-file feedback about which specific files were rejected or why.
 
@@ -391,10 +394,11 @@ Files that exceed limits are silently dropped with only an aggregate toast count
 
 ---
 
-### 24. `histogram.tsx` Resize Handler Lacks Debouncing
+### 23. `histogram.tsx` Resize Handler Lacks Debouncing
 **File:** `apps/web/src/components/histogram.tsx`, lines 440-448
 **Confidence:** LOW
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 The canvas resize handler uses `window.addEventListener('resize', updateDims)` without debouncing. Rapid resize events could cause excessive state updates.
 
@@ -402,12 +406,25 @@ The canvas resize handler uses `window.addEventListener('resize', updateDims)` w
 
 ---
 
-### 25. `home-client.tsx` `masonryClasses` Not Memoized
+### 24. `home-client.tsx` `masonryClasses` Not Memoized
 **File:** `apps/web/src/components/home-client.tsx`, lines 223-229
 **Confidence:** LOW
-**First identified:** This cycle
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
 
 `masonryClasses` is computed on every render. The computation involves string manipulation and object lookups that could be memoized with `useMemo`.
+
+---
+
+### 25. `getDummyHash` Lazy Initialization Has TOCTOU Race on First Login
+**File:** `apps/web/src/app/actions/auth.ts`, lines 64-70
+**Confidence:** MEDIUM
+**First identified:** Prior review cycle (run-9)
+**Status:** UNCHANGED
+
+Two concurrent logins after restart both see `dummyHashPromise === null` and start separate Argon2 computations, wasting CPU and memory.
+
+**Fix:** Compute at module init time (one-time cost) or use atomic assignment pattern.
 
 ---
 
@@ -423,7 +440,7 @@ The upload flow checks `user_filename` for deduplication, but two different file
 The DB restore flow validates file headers before restore but does not verify the restored database is functional (e.g., by running a test query or checking table counts).
 
 ### Gap 4: No Metrics/Observability Integration
-The codebase has extensive logging (`console.debug`, `console.warn`, `console.error` — 186 usages in production code) but no structured metrics emission (Prometheus, StatsD, etc.). No way to track upload success/failure rates, queue depth, rate-limit hit rates, search latency, or OG generation time.
+The codebase has extensive logging (`console.debug`, `console.warn`, `console.error` — 177 usages in production code across 48 files) but no structured metrics emission (Prometheus, StatsD, etc.). No way to track upload success/failure rates, queue depth, rate-limit hit rates, search latency, or OG generation time.
 
 ### Gap 5: No Graceful Degradation for CLIP Model Loading Failure
 If CLIP model weights are missing or corrupted, `embedImageReal` fails on first use. No fallback to stub mode or clear error message for the operator.
@@ -442,6 +459,12 @@ The `vitest.config.ts` has no coverage reporter setup. The project has 228+ test
 
 ### Gap 10: No `.dockerignore` File
 The `COPY . .` in the Dockerfile builder stage copies the entire repository context without exclusion. This bloats the build context and potentially copies sensitive files.
+
+### Gap 11: No `engines` Field in Root `package.json`
+The root `package.json` lacks an `engines` field, while `apps/web/package.json` correctly specifies `"node": ">=24"`. CI systems and deployment scripts may read the root first.
+
+### Gap 12: `process-image.ts` Does Not Import from `@/db` Directly But Has Indirect Coupling
+While `process-image.ts` itself does not import from `@/db`, it is imported by `image-queue.ts` which does. The `saveOriginalAndGetMetadata` function in `process-image.ts` returns data that is immediately inserted into the DB by `images.ts`. This creates an implicit contract between the file format and the DB schema that is not enforced.
 
 ---
 
@@ -464,11 +487,10 @@ The `COPY . .` in the Dockerfile builder stage copies the entire repository cont
 - **Strong:** Argon2id with OWASP-exceeding parameters, HMAC-SHA256 session tokens with `timingSafeEqual`, constant-time token verification, defense-in-depth auth checks (middleware + server actions), path traversal prevention, symlink rejection, Unicode formatting char rejection, CSP with nonce, rate limiting with DB backup.
 - **Concern:** The `getClientIp` fallback to `'unknown'` collapses all users into one bucket when `TRUST_PROXY` is unset. In production, this is a single point of failure for rate limiting.
 - **Concern:** The `admin_session` cookie format check in `proxy.ts` (line 90) only checks length >= 100 and 3 colon-separated parts. It does not verify the signature or timestamp. A malformed token with the right shape would pass the middleware and reach the server actions, where it would be rejected by `verifySessionToken`. This is defense-in-depth but wastes a DB query.
-- **New this cycle:** OG route SSRF hardening (commit 689b5096) adds same-origin redirect validation and fail-closed fallback — good improvement.
 
 ### New Hire
 - **Strong:** Excellent documentation in `CLAUDE.md`, extensive inline comments with ticket references (e.g., `R4C6 COR-R4C6-05`), clear file organization, consistent naming conventions.
-- **Concern:** The `data.ts` file is 1666 lines with multiple select field objects, privacy guards, and query functions. A new hire would struggle to understand which field set to use for a new query.
+- **Concern:** The `data.ts` file is 1670 lines with multiple select field objects, privacy guards, and query functions. A new hire would struggle to understand which field set to use for a new query.
 - **Concern:** The image processing pipeline has implicit dependencies between `process-image.ts`, `color-detection.ts`, `icc-extractor.ts`, `icc-chromaticity.ts`, `gain-map-detection.ts`, and `color-pipeline-decisions.ts`. Understanding the color pipeline requires reading 5+ files.
 - **Concern:** The `srcSetData` useMemo anti-pattern in `photo-viewer.tsx` would confuse someone expecting data transformation functions to return data, not JSX.
 - **Concern:** The test suite uses a custom fixture pattern with 228+ test files. The naming convention is clear but the sheer volume makes it hard to find the right test to extend.
@@ -488,7 +510,7 @@ The `COPY . .` in the Dockerfile builder stage copies the entire repository cont
 
 **Verdict: ACCEPT-WITH-RESERVATIONS**
 
-The codebase is production-ready and well-maintained. The security posture is strong, the color pipeline is sophisticated, and the test coverage is extensive. The delta since the last review (10 commits) shows continued attention to correctness (settings-hash sorting, gain-map boundary fix, OG SSRF hardening) and accessibility (histogram button fix, analytics scope fix, keyboard repeat suppression).
+The codebase is production-ready and well-maintained. The security posture is strong, the color pipeline is sophisticated, and the test coverage is extensive. The delta since the last review (12 commits) shows continued attention to correctness (epsilon-based cosineSimilarity zero check, Tailwind safelist cleanup, analytics aria-labels, JSDoc corrections) and documentation alignment.
 
 The reservations are about long-term maintainability and architectural debt, not immediate bugs or security vulnerabilities. The structural issues identified will compound over time if not addressed.
 
@@ -501,6 +523,7 @@ The reservations are about long-term maintainability and architectural debt, not
 6. Add automated cache invalidation for static-path derivatives on settings change (Major #7)
 7. Extract server action auth boilerplate into a higher-order function (Major #8)
 8. Add Docker resource limits and `.dockerignore` (Major #12)
+9. Wire the storage backend abstraction into the production pipeline (Major #11)
 
 **What would need to change for a REJECT:**
 - A privacy leak in production (e.g., GPS coordinates exposed to public routes)
@@ -522,9 +545,9 @@ None of these are present at HEAD. The codebase is genuinely well-engineered, bu
 5. **Has the CLIP semantic search been evaluated with real user queries?** The synthetic calibration (4 fixtures) produced a threshold of 0.22, but real-world query-image relevance may differ significantly.
 6. **What is the recovery procedure for a permanently-failed image that cannot be processed?** The admin UI shows failed images with a retry button, but if the original file is corrupted, there is no documented recovery path.
 7. **Are there any plans for horizontal scaling?** The single-writer topology is documented as a limitation, but there is no roadmap for moving process-local state to a shared store (Redis, etc.).
-8. **Does the `min-h-[32px]` Tailwind safelist entry serve a purpose?** It appears to be stale but should be verified before removal.
-9. **Is the `srcSetData` useMemo pattern causing measurable reconciliation overhead?** Would need React DevTools profiling to confirm.
+8. **Is the `srcSetData` useMemo pattern causing measurable reconciliation overhead?** Would need React DevTools profiling to confirm.
+9. **Why does the storage backend abstraction exist but have zero production callers?** The `LocalStorageBackend` is fully implemented but never used. Was this an abandoned migration or a deferred feature?
 
 ---
 
-*Review completed. 25 findings (0 Critical, 12 Major, 13 Minor), 10 gaps identified, 3 ambiguity risks noted, multi-perspective analysis conducted. Delta since last review: 10 commits analyzed, 5 new Major findings, 8 new Minor findings.*
+*Review completed. 25 findings (0 Critical, 12 Major, 13 Minor), 12 gaps identified, 3 ambiguity risks noted, multi-perspective analysis conducted. Delta since last review: 12 commits analyzed, 0 new Major findings (all prior findings still open), 0 new Minor findings.*

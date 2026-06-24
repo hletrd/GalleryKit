@@ -1,23 +1,31 @@
-# Test-Engineer Review — GalleryKit Test Suite (Cycle 9)
+# Test-Engineer Review — GalleryKit Test Suite (Cycle 8)
 
 > **Date:** 2026-06-25
-> **HEAD:** 1d5545cb
-> **Scope:** `apps/web/src/__tests__/` (178 test files), `apps/web/e2e/` (5 spec files), `apps/web/scripts/` (26 scripts)
+> **HEAD:** 87065049
+> **Scope:** `apps/web/src/__tests__/` (225 test files), `apps/web/e2e/` (5 spec files), `apps/web/scripts/` (26 scripts)
 > **Test Runner:** Vitest 4.1.9
-> **Current Status:** 225 test files passed, 2 skipped, 2064 tests, 81s duration
+> **Current Status:** 225 test files passed, 2 skipped, 2064 tests, 85s duration
 
 ---
 
 ## 1. Executive Summary
 
-The GalleryKit test suite is extensive and well-maintained, with **178 unit test files** and **5 E2E spec files** covering a broad surface. All tests pass (225 files, 2064 tests, 0 failures). The suite demonstrates mature patterns: fixture-style lint-gate tests, source-scan contract tests, integration tests with real Sharp/ONNX, and comprehensive backfill runner coverage.
+The GalleryKit test suite continues to be extensive and well-maintained, with **225 unit test files** and **5 E2E spec files** covering a broad surface. All tests pass (225 files, 2064 tests, 0 failures). Since the Cycle 7 review (HEAD 1d5545cb), several test improvements landed:
+
+- **TEST-01:** Fixed racy `setImmediate` drain in `admin-backfill-runner-leak.test.ts` (first test only — second test still uses `setImmediate`)
+- **TE-R9C1-01/02:** Added upload-tracker-state and upload-processing-contract-lock tests
+- **TE-R9C3-01:** Hardened upload-tracker-state isolation with `beforeAll`
+- **C4-A6:** Fixed db-pool test for Promise.race pattern
+- **DEF-R9C7-01:** Fixed dead caption mock target in settings-wiring test
+- **AGG-R7C4-01/AGG-R7C5-01:** Added NCLX matrix code coverage tests
+- **FIND-R8C1-04:** Added free-download contract test
 
 **Test Health:** HEALTHY with targeted gaps
 
 **Key Strengths:**
 - Excellent fixture-style lint gates (`check-action-origin`, `check-api-auth`, `check-public-route-rate-limit`, `touch-target-audit`) that prevent architectural regressions
-- Comprehensive color/HDR pipeline tests (15+ test files, real Sharp integration)
-- Thorough backfill runner coverage (8 dedicated test files with regression annotations)
+- Comprehensive color/HDR pipeline tests (17+ test files, real Sharp integration)
+- Thorough backfill runner coverage (9 dedicated test files with regression annotations)
 - Good security test coverage for rate limiting, origin validation, and input sanitization
 - Strong test documentation — each test file references the commit/defect it guards against
 
@@ -30,7 +38,7 @@ The GalleryKit test suite is extensive and well-maintained, with **178 unit test
 - `lib/audit.ts` — NO tests for `logAuditEvent()` write path
 - `lib/session.ts` — NO tests for `getSessionSecret()` (the 4-case env/DB fallback logic)
 - E2E: Only Chromium, single-worker, no offline/SW tests, no semantic search E2E, no cross-browser coverage
-- Flaky pattern: `admin-backfill-runner-leak.test.ts` uses racy `setImmediate` drain instead of `vi.waitFor`
+- Several recently fixed bugs have NO regression tests (see Section 5)
 
 ---
 
@@ -88,18 +96,16 @@ The GalleryKit test suite is extensive and well-maintained, with **178 unit test
 
 ## 3. Flaky Tests and Race Conditions
 
-### 3.1 CONFIRMED FLAKY — `admin-backfill-runner-leak.test.ts:132-133`
+### 3.1 PARTIALLY FIXED — `admin-backfill-runner-leak.test.ts`
 
-**File:** `src/__tests__/admin-backfill-runner-leak.test.ts:132-133`
+**File:** `src/__tests__/admin-backfill-runner-leak.test.ts`
 **Confidence:** HIGH
-**Code:**
-```typescript
-await new Promise((r) => setImmediate(r));
-await new Promise((r) => setImmediate(r));
-```
-**Issue:** Uses `setImmediate` x2 to wait for the fire-and-forget runner's catch+finally to run. This is a race condition — the runner may not have completed within 2 ticks, especially under CPU contention. The sibling tests (detection-failure, deleted-mid-reencode, fatal-counters, batching) all correctly use `vi.waitFor` polling `state.running === false`, which is the authoritative completion signal. This test uses the old racy pattern that the other tests already migrated away from.
-**Failure scenario:** Under CI load or parallel test execution, the runner's finally block may not execute before the assertions run, causing `state.running` to still be `true` and `releaseMock` to not have been called yet — intermittent false negatives.
-**Fix:** Replace the `setImmediate` chain with `vi.waitFor(() => !readAdminBackfillState().running, { timeout: 5000 })`, consistent with all other backfill runner tests.
+**Status:** First test fixed (TEST-01, commit 730208ff), second test still racy.
+
+**First test (lines 98-150):** FIXED — now uses `vi.waitFor(() => state.running === false && state.lastError !== null, { timeout: 5000, interval: 10 })` instead of `setImmediate` x2.
+
+**Second test (lines 153-194):** STILL FLAKY — uses `await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));` at lines 173-174. This is the same racy pattern that the first test had. Under CPU contention, the fire-and-forget runner's catch+finally may not complete within 2 ticks.
+**Fix:** Replace with `vi.waitFor(() => !readAdminBackfillState().running, { timeout: 5000 })`, consistent with the first test and all other backfill runner tests.
 
 ### 3.2 CONFIRMED FLAKY — `image-queue-bootstrap.test.ts` (NOT FIXED)
 
@@ -199,9 +205,106 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 5. Mock/Stub Abuse
+## 5. Missing Regression Tests for Recently Fixed Bugs
 
-### 5.1 [CRITICAL] `semantic-search-route.test.ts` — Complete DB Fake
+Since the last review, several bugs were fixed but have NO corresponding regression tests. This is a critical gap — each bug fix should be accompanied by a test that would have caught the bug.
+
+### 5.1 SEC3-01: `getRateLimitBucketStart` Division-by-Zero Guard
+
+**File:** `src/lib/rate-limit.ts:329-333`
+**Fix:** `const windowSec = Math.max(1, Math.floor(windowMs / 1000));` (commit 9a66a4ca)
+**Test Status:** NO regression test added. The `rate-limit.test.ts` tests `getRateLimitBucketStart` with `windowMs = 60_000` and `120_001` but does NOT test:
+- `windowMs = 0` (would have divided by zero before the fix)
+- `windowMs = 500` (tests the `Math.max(1, ...)` floor)
+- `windowMs = -1` (negative values)
+**Confidence:** HIGH
+**Recommendation:** Add edge case tests for `getRateLimitBucketStart(0, 0)`, `getRateLimitBucketStart(1000, 500)`, and `getRateLimitBucketStart(1000, -1)`.
+
+### 5.2 SEC3-02: `enqueueImageProcessing` Returns Boolean
+
+**File:** `src/lib/image-queue.ts:255-268`
+**Fix:** `enqueueImageProcessing` now returns `boolean` so callers know if the job was rejected (commit c5c91e1a)
+**Test Status:** NO regression test for the return value. The `image-queue.test.ts` tests path traversal rejection but does NOT assert the return value is `false` for rejected jobs or `true` for accepted jobs.
+**Confidence:** HIGH
+**Recommendation:** Add assertions: `expect(enqueueImageProcessing({...invalid})).toBe(false)` and `expect(enqueueImageProcessing({...valid})).toBe(true)`.
+
+### 5.3 BUG-1/BUG-2: Claim Retry Mechanism and `claimRetryScheduled` Cleanup
+
+**File:** `src/lib/image-queue.ts:283-316`
+**Fix:** Fixed claim retry mechanism and `claimRetryScheduled` cleanup (commit 735f9715)
+**Test Status:** NO regression test for the specific bug scenarios:
+- C4-A1: Removing from `enqueued` BEFORE scheduling retry so the retry actually re-adds the job
+- C4-A2: Resetting `claimRetryScheduled` on successful claim so `claimRetryCounts` is cleaned up
+**Confidence:** HIGH
+**Recommendation:** Add tests that mock `acquireImageProcessingClaim` to return `null` multiple times, then succeed, and verify:
+1. The job is re-enqueued after each retry (not stuck forever)
+2. `claimRetryCounts` is cleaned up after successful claim
+3. `claimRetryScheduled` is reset properly
+
+### 5.4 BUG-4: Wide-Gamut Temp File Cleanup on Downscale Throw
+
+**File:** `src/lib/process-image.ts`
+**Fix:** Clean up wide-gamut temp file on downscale throw (commit 70ea54d9)
+**Test Status:** NO regression test. The `process-image-color-roundtrip.test.ts` and other process-image tests do NOT test the temp file cleanup path when `toFile()` throws.
+**Confidence:** HIGH
+**Recommendation:** Mock `sharp().toFile()` to throw and verify `fs.unlink()` is called for the temp file.
+
+### 5.5 BUG-10: Topic Image Cleanup on Pre-Transaction Route-Segment Conflict
+
+**File:** `src/app/actions/topics.ts`
+**Fix:** Clean up topic image on pre-transaction route-segment conflict (commit 70ea54d9)
+**Test Status:** NO regression test. The `topics-actions.test.ts` tests topic creation but does NOT test the specific scenario where route-segment conflict occurs BEFORE the transaction and the temp file needs cleanup.
+**Confidence:** MEDIUM
+**Recommendation:** Add a test that mocks `createTopic` to hit the route-segment conflict path and verify the temp file is deleted.
+
+### 5.6 BUG-11: Bootstrap Timer Cleanup on Shutdown
+
+**File:** `src/lib/queue-shutdown.ts` and `src/lib/image-queue.ts`
+**Fix:** Clear bootstrap timer on shutdown (commit 98d09476)
+**Test Status:** NO regression test. The `queue-shutdown.test.ts` exists but does NOT test that the bootstrap timer is cleared.
+**Confidence:** HIGH
+**Recommendation:** Add a test that sets a bootstrap timer, calls shutdown, and verifies the timer is cleared.
+
+### 5.7 CODE-02: Epsilon-Based Zero Check in `cosineSimilarity`
+
+**File:** `src/lib/clip-embeddings.ts`
+**Fix:** Use epsilon-based zero check in `cosineSimilarity` (commit 0b86aec9)
+**Test Status:** NO regression test for the epsilon fix. The `clip-embeddings.test.ts` tests `cosineSimilarity` with zero vectors but does NOT test the specific case that triggered the bug (near-zero vectors where the old `=== 0` check would fail).
+**Confidence:** MEDIUM
+**Recommendation:** Add a test with a vector where `normA` or `normB` is very small but non-zero (e.g., `1e-10`) and verify the function returns 0 instead of throwing or returning NaN.
+
+### 5.8 AGG-08: `retryFailedImage` Restore Maintenance Guard
+
+**File:** `src/app/actions/images.ts`
+**Fix:** Guard `retryFailedImage` against restore maintenance (commit 24c8e483)
+**Test Status:** The `retry-failed-image-auth.test.ts` tests auth but does NOT test the restore maintenance guard. The mock sets `isRestoreMaintenanceActive: () => false` always.
+**Confidence:** HIGH
+**Recommendation:** Add a test that mocks `isRestoreMaintenanceActive` to return `true` and verifies `retryFailedImage` returns a maintenance message without making DB calls.
+
+### 5.9 AGG-12: Semantic Search Rate-Limit Rollback Removed
+
+**File:** `src/app/api/search/semantic/route.ts`
+**Fix:** Stop refunding rate-limit tokens after expensive semantic-search work (commit 4264d1d4)
+**Test Status:** The `semantic-search-route.test.ts` tests the disabled path rollback (line 187) but does NOT test that the production path does NOT rollback after embedding/DB failure.
+**Confidence:** HIGH
+**Recommendation:** Add a test that mocks `embedTextReal` to throw and verifies `rollbackSemanticAttempt` is NOT called.
+
+### 5.10 R5-H4/H5: OG Route SSRF Fallback + Same-Origin Redirect Validation
+
+**File:** `src/app/api/og/photo/[id]/route.tsx` and `src/app/api/og/route.tsx`
+**Fix:** Fail-closed SSRF fallback + same-origin redirect validation (commit 689b5096)
+**Test Status:** NO regression test for the SSRF guard or redirect validation.
+**Confidence:** HIGH
+**Recommendation:** Add tests for:
+1. Non-HTTP(S) URL rejection (e.g., `file://`, `ftp://`)
+2. Redirect to different host rejection
+3. Same-origin redirect acceptance
+
+---
+
+## 6. Mock/Stub Abuse
+
+### 6.1 [CRITICAL] `semantic-search-route.test.ts` — Complete DB Fake
 
 **File:** `src/__tests__/semantic-search-route.test.ts:65-114`
 **Confidence:** HIGH
@@ -209,7 +312,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 **Failure scenario:** If the route handler adds a new `.where()` condition that filters out the mock embedding rows, the test would still pass because the mock ignores the where clause and returns the pre-canned rows. A real DB would return different results.
 **Fix:** Use a real in-memory SQLite database or a Drizzle-to-SQLite proxy for integration testing. At minimum, verify the actual SQL generated by the query builder using `.toSQL()`.
 
-### 5.2 [HIGH] `image-queue.test.ts` — Mocks Entire Module Graph
+### 6.2 [HIGH] `image-queue.test.ts` — Mocks Entire Module Graph
 
 **File:** `src/__tests__/image-queue.test.ts:1-141`
 **Confidence:** HIGH
@@ -217,7 +320,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 **Failure scenario:** A real bug in the queue worker (e.g., `processImageFormats` throws but the error handler doesn't clean up files) would never be caught because `processImageFormats` is mocked to a no-op.
 **Fix:** Add integration tests that use a real (or minimally mocked) `processImageFormats` with synthetic images. The current test is fine as a unit test for `enqueueImageProcessing`'s validation logic, but it's insufficient as the only test for the image queue.
 
-### 5.3 [HIGH] `process-image-dimensions.test.ts` — Excessive Mocking
+### 6.3 [HIGH] `process-image-dimensions.test.ts` — Excessive Mocking
 
 **File:** `src/__tests__/process-image-dimensions.test.ts:12-72`
 **Confidence:** HIGH
@@ -225,14 +328,14 @@ These tests read source files and assert regex matches. They are valuable for ca
 **Failure scenario:** If Sharp's actual behavior changes (e.g., `metadata()` returns `null` instead of `{ width: 0 }` for corrupt files), this test would still pass because it tests the mocked behavior, not the real one.
 **Fix:** Add integration tests with actual corrupt/valid image files. Keep the unit test for the dimension validation logic but acknowledge its limited scope.
 
-### 5.4 [MEDIUM] `auth-rate-limit.test.ts` — Mocks Rate-Limit Module
+### 6.4 [MEDIUM] `auth-rate-limit.test.ts` — Mocks Rate-Limit Module
 
 **File:** `src/__tests__/auth-rate-limit.test.ts:10-17`
 **Confidence:** MEDIUM
 **Issue:** The test mocks `decrementRateLimit`, `incrementRateLimit`, and `resetRateLimit` from the rate-limit module. This means the test verifies that `auth-rate-limit.ts` calls these functions with the right arguments, but it doesn't test the actual rate-limiting behavior (e.g., whether `incrementRateLimit` actually increments a counter).
 **Fix:** This is acceptable as a unit test, but there should be integration tests that test the full rate-limiting stack with real (or in-memory) state.
 
-### 5.5 [MEDIUM] `admin-backfill-runner-detection-failure.test.ts` — Incomplete fs Mock
+### 6.5 [MEDIUM] `admin-backfill-runner-detection-failure.test.ts` — Incomplete fs Mock
 
 **File:** `src/__tests__/admin-backfill-runner-detection-failure.test.ts:86-103`
 **Confidence:** MEDIUM
@@ -241,9 +344,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 6. Missing Edge Case Tests
+## 7. Missing Edge Case Tests
 
-### 6.1 Session Security Edge Cases
+### 7.1 Session Security Edge Cases
 
 **File:** `src/__tests__/session.test.ts`
 **Confidence:** HIGH
@@ -256,7 +359,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - `getSessionSecret` with all 4 cases: env var set, production refusal, DB fetch, DB generation
 - `getSessionSecret` race condition (concurrent calls should share the same promise)
 
-### 6.2 Rate Limiting Edge Cases
+### 7.2 Rate Limiting Edge Cases
 
 **File:** `src/__tests__/rate-limit.test.ts`
 **Confidence:** MEDIUM
@@ -269,7 +372,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - `preIncrementShareAttempt` / `preIncrementOgAttempt` — OG and share rate limit pre-increment
 - `pruneSearchRateLimit` — search rate limit pruning
 
-### 6.3 Upload Edge Cases
+### 7.3 Upload Edge Cases
 
 **File:** `src/app/actions/images.ts`
 **Confidence:** HIGH
@@ -283,7 +386,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - Sharp metadata extraction throws
 - `saveOriginalAndGetMetadata` returns null
 
-### 6.4 Semantic Search Edge Cases
+### 7.4 Semantic Search Edge Cases
 
 **File:** `src/__tests__/semantic-search-route.test.ts`
 **Confidence:** HIGH
@@ -295,7 +398,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - Cosine similarity computation correctness
 - Rate-limit is NOT refunded after embedding/DB failure (AGG-12)
 
-### 6.5 Color/HDR Pipeline Edge Cases
+### 7.5 Color/HDR Pipeline Edge Cases
 
 **File:** `src/lib/process-image.ts`
 **Confidence:** MEDIUM
@@ -310,7 +413,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - AVIF encode fails at 10-bit, falls back to 8-bit (encode-time rejection, not probe-time)
 - Wide-gamut downscale throws, temp file cleanup (BUG-4)
 
-### 6.6 API Route Edge Cases
+### 7.6 API Route Edge Cases
 
 **File:** Various API routes
 **Confidence:** HIGH
@@ -323,9 +426,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 7. Missing Error Path Tests
+## 8. Missing Error Path Tests
 
-### 7.1 Server Action Error Paths
+### 8.1 Server Action Error Paths
 
 | Action | Error Path | Tested? |
 |--------|-----------|---------|
@@ -341,9 +444,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 | `login` | Session secret generation fails | NO |
 | `changePassword` | Old password verification fails (rate limit should still increment) | Partially |
 | `retryFailedImage` | Restore maintenance active → returns maintenance message | NO (AGG-08) |
-| `retryFailedImage` | Image not found → returns localized error | NO (AGG-08) |
+| `retryFailedImage` | Image not found → returns localized error | NO (AGG-39) |
 
-### 7.2 Image Processing Error Paths
+### 8.2 Image Processing Error Paths
 
 | Error Path | Tested? |
 |-----------|---------|
@@ -356,7 +459,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 | Color detection throws on unsupported format | NO |
 | Wide-gamut downscale throws, temp file cleanup (BUG-4) | NO |
 
-### 7.3 New Code Error Paths (Since Last Review)
+### 8.3 New Code Error Paths (Since Last Review)
 
 | Change | Missing Test | Confidence |
 |--------|-------------|------------|
@@ -374,36 +477,36 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 8. Missing Integration Tests
+## 9. Missing Integration Tests
 
-### 8.1 Component-Component Integration
+### 9.1 Component-Component Integration
 
 - **Photo viewer + Lightbox**: No tests for the interaction (click to open, keyboard navigation, prev/next)
 - **Upload dropzone + Image manager**: No tests for the upload-complete-to-grid-refresh flow
 - **Search + Load-more**: No tests for the search-results-pagination interaction
 - **Color details + Wide-gamut hint**: No tests for conditional rendering based on display capability
 
-### 8.2 Server-Client Integration
+### 9.2 Server-Client Integration
 
 - **Upload action + Image queue**: No integration test for the full upload-to-processing-to-visible flow
 - **Session creation + Middleware auth**: No integration test for the cookie-to-auth flow
 - **Shared link creation + Shared page render**: No integration test for the full sharing flow
 
-### 8.3 API-DB Integration
+### 9.3 API-DB Integration
 
 - **All API routes**: Most route tests mock the DB or use source-text inspection. No true integration tests that hit a test database.
 - **Data layer functions**: No integration tests for the complex Drizzle queries against a real database.
 
-### 8.4 Image Processing Pipeline Integration
+### 9.4 Image Processing Pipeline Integration
 
 - **Full upload pipeline**: No end-to-end test for: upload → save original → process formats → verify outputs → mark processed → serve
 - **Color pipeline**: The color roundtrip tests are the closest, but they don't test the full `saveOriginalAndGetMetadata` → `processImageFormats` → `enqueueImageProcessing` flow
 
 ---
 
-## 9. E2E Test Gaps
+## 10. E2E Test Gaps
 
-### 9.1 Playwright Configuration Issues
+### 10.1 Playwright Configuration Issues
 
 **File:** `playwright.config.ts`
 **Confidence:** HIGH
@@ -412,7 +515,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - **Single worker** (`workers: 1`) — All tests run serially to avoid login rate-limit collisions. This makes the suite slow and still shares state (DB, filesystem, rate limit counters).
 - **No separate projects** — Admin (serialized) and public (parallelizable) tests are not separated into different Playwright projects.
 
-### 9.2 Critical E2E Gaps
+### 10.2 Critical E2E Gaps
 
 | Feature | Priority | Why Missing |
 |---------|----------|-------------|
@@ -434,7 +537,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 | Shared single-photo link (`/s/[key]`) | Medium | Skips when `E2E_SHARE_KEY` is not set |
 | Similar photos | Medium | No E2E for the similar photos route |
 
-### 9.3 E2E Test Environment Issues
+### 10.3 E2E Test Environment Issues
 
 **File:** `e2e/helpers.ts`
 **Confidence:** HIGH
@@ -448,9 +551,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 10. Missing Security Tests
+## 11. Missing Security Tests
 
-### 10.1 CSRF Protection
+### 11.1 CSRF Protection
 
 **Confidence:** HIGH
 **Missing:**
@@ -458,7 +561,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for cookie-based CSRF (session cookie theft + cross-origin use)
 - No test for login CSRF (forcing login with attacker credentials)
 
-### 10.2 XSS Prevention
+### 11.2 XSS Prevention
 
 **Confidence:** HIGH
 **Missing:**
@@ -468,7 +571,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for XSS in topic labels (displayed in navigation)
 - No test for XSS in error messages (error page rendering)
 
-### 10.3 File Upload Security
+### 11.3 File Upload Security
 
 **Confidence:** HIGH
 **Missing:**
@@ -480,7 +583,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for null byte injection (`file.jpg\x00.php`)
 - No test for symlink attack (upload symlink pointing to sensitive file)
 
-### 10.4 Session Security
+### 11.4 Session Security
 
 **Confidence:** HIGH
 **Missing:**
@@ -489,7 +592,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for session expiration (wait 24h, verify re-auth required)
 - No test for session cookie attributes (httpOnly, secure, sameSite)
 
-### 10.5 Brute Force Protection
+### 11.5 Brute Force Protection
 
 **Confidence:** HIGH
 **Missing:**
@@ -499,7 +602,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for password change rate limiting
 - No test for admin user creation rate limiting
 
-### 10.6 Authorization Boundaries
+### 11.6 Authorization Boundaries
 
 **Confidence:** HIGH
 **Missing:**
@@ -509,7 +612,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 - No test for public access to admin-only fields (GPS, PII in API responses)
 - No test for accessing `/api/admin/db/download` without auth
 
-### 10.7 Additional Missing Security Tests
+### 11.7 Additional Missing Security Tests
 
 | Test | Status | Why It Matters |
 |------|--------|----------------|
@@ -526,9 +629,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 11. Missing Property-Based / Fuzz Tests
+## 12. Missing Property-Based / Fuzz Tests
 
-### 11.1 Areas That Would Benefit from Fuzzing
+### 12.1 Areas That Would Benefit from Fuzzing
 
 | Function | Property to Test | Fuzz Input |
 |----------|-----------------|------------|
@@ -550,9 +653,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 12. Missing Performance Tests
+## 13. Missing Performance Tests
 
-### 12.1 Areas That Would Benefit from Performance Testing
+### 13.1 Areas That Would Benefit from Performance Testing
 
 | Scenario | Why Test |
 |----------|----------|
@@ -571,23 +674,23 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 13. Test Environment Isolation Issues
+## 14. Test Environment Isolation Issues
 
-### 13.1 Process.env Mutation Without Proper Isolation
+### 14.1 Process.env Mutation Without Proper Isolation
 
 **File:** `src/__tests__/rate-limit.test.ts:19-37`
 **Confidence:** MEDIUM
 **Issue:** The `afterEach` restores `process.env` state, but if a test fails mid-way, the restoration may not run. `process.env` is a global mutable — parallel test execution can cause cross-test pollution.
 **Fix:** Use `vi.stubEnv` from vitest, which provides proper isolation and automatic cleanup. Or set `pool: 'forks'` in vitest.config.ts for this test file.
 
-### 13.2 Shared Mutable State in Process-Image Tests
+### 14.2 Shared Mutable State in Process-Image Tests
 
 **Files:** `process-image-color-roundtrip.test.ts`, `process-image-exif-strip.test.ts`, `process-image-orientation.test.ts`
 **Confidence:** LOW
 **Issue:** Module-level `generatedIds` array populated by `trackId()`. In watch mode, the module is not reloaded between runs, so `generatedIds` accumulates IDs from previous runs.
 **Fix:** Reset `generatedIds` in `beforeAll` or use a per-test cleanup strategy.
 
-### 13.3 E2E Database Pollution
+### 14.3 E2E Database Pollution
 
 **File:** `e2e/helpers.ts`
 **Confidence:** HIGH
@@ -596,9 +699,9 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 14. Commonly Missed Issues (Final Sweep)
+## 15. Commonly Missed Issues (Final Sweep)
 
-### 14.1 Tests That Verify Implementation Details Instead of Behavior
+### 15.1 Tests That Verify Implementation Details Instead of Behavior
 
 | Test | Issue | Recommendation |
 |------|-------|----------------|
@@ -607,7 +710,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 | `client-server-only-boundary.test.ts` | Tests AST structure | Keep but add a runtime test that builds the client bundle and verifies it doesn't throw |
 | `db-pool-connection-handler.test.ts` | Tests source patterns (Promise.race, Symbol.for) | Add a runtime test that mocks the pool connection and verifies the timeout fires |
 
-### 14.2 Tests With Weak Assertions
+### 15.2 Tests With Weak Assertions
 
 | Test | Weak Assertion | Stronger Alternative |
 |------|---------------|---------------------|
@@ -616,7 +719,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 | `data-pagination.test.ts:5-30` | Only tests happy path and empty input | Add boundary tests: `limit === rows.length`, `limit > rows.length`, `limit = 0`, inconsistent `total_count` |
 | `upload-tracker.test.ts` | Basic claim settlement | Add concurrent modification, negative claim values, claim larger than available |
 
-### 14.3 Missing "Happy Path" Variations
+### 15.3 Missing "Happy Path" Variations
 
 | Feature | Missing Variations |
 |---------|-------------------|
@@ -632,34 +735,37 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 15. Recommendations by Priority
+## 16. Recommendations by Priority
 
-### 15.1 Critical (Do Next)
+### 16.1 Critical (Do Next)
 
-1. **Fix `admin-backfill-runner-leak.test.ts` flakiness** — Replace `setImmediate` chain with `vi.waitFor(() => !readAdminBackfillState().running)`.
+1. **Fix `admin-backfill-runner-leak.test.ts` second test flakiness** — Replace remaining `setImmediate` chain (lines 173-174) with `vi.waitFor(() => !readAdminBackfillState().running, { timeout: 5000 })`.
 
 2. **Fix `image-queue-bootstrap.test.ts` flakiness** — Use `vi.useFakeTimers()` for all tests, isolate to serial execution, or reduce batch size from 500 to 50.
 
-3. **Add unit tests for `lib/gps-exif-strip.ts`** — The most critical untested file. Test with synthetic JPEG/TIFF/HEIF/WebP buffers containing GPS data. Test all five strip functions and the action-level wiring.
+3. **Add regression tests for recently fixed bugs** (Section 5):
+   - SEC3-01: `getRateLimitBucketStart` with `windowMs = 0`, `500`, `-1`
+   - SEC3-02: `enqueueImageProcessing` return values for all rejection paths
+   - BUG-1/BUG-2: Claim retry mechanism (re-enqueue after failed claim, cleanup after success)
+   - BUG-4: Temp file cleanup on downscale throw
+   - BUG-10: Topic image cleanup on route-segment conflict
+   - BUG-11: Bootstrap timer cleared on shutdown
+   - CODE-02: Epsilon-based zero check in `cosineSimilarity`
+   - AGG-08: `retryFailedImage` restore maintenance guard
+   - AGG-12: Semantic search NO rollback after embedding/DB failure
+   - R5-H4/H5: OG route SSRF fallback + same-origin redirect validation
 
-4. **Add behavioral tests for `lib/data.ts`** — Add DB-mocked tests for `getImage`, `getImagesLite`, `searchImages`, `getSharedGroup`, `getMapImages`, `flushGroupViewCounts`. These are the heart of the app.
+4. **Add unit tests for `lib/gps-exif-strip.ts`** — The most critical untested file. Test with synthetic JPEG/TIFF/HEIF/WebP buffers containing GPS data. Test all five strip functions and the action-level wiring.
 
-5. **Add unit tests for `app/actions/auth.ts`** — The most security-critical untested code. Test: password verification, session creation, cookie attributes, rate limit integration, error paths.
+5. **Add behavioral tests for `lib/data.ts`** — Add DB-mocked tests for `getImage`, `getImagesLite`, `searchImages`, `getSharedGroup`, `getMapImages`, `flushGroupViewCounts`. These are the heart of the app.
 
-6. **Add tests for `lib/session.ts` `getSessionSecret()`** — The 4-case env/DB fallback logic is the most critical security function and has no direct tests.
+6. **Add unit tests for `app/actions/auth.ts`** — The most security-critical untested code. Test: password verification, session creation, cookie attributes, rate limit integration, error paths.
 
-7. **Add tests for `lib/audit.ts` `logAuditEvent()`** — Test metadata serialization, truncation at 4096 bytes, surrogate-pair-safe slicing, JSON stringify failure fallback.
+7. **Add tests for `lib/session.ts` `getSessionSecret()`** — The 4-case env/DB fallback logic is the most critical security function and has no direct tests.
 
-8. **Add regression tests for new code since last review:**
-   - `rate-limit.ts`: `getRateLimitBucketStart` with `windowMs = 0` (SEC3-01)
-   - `semantic/route.ts`: Verify rate-limit is NOT refunded after embedding/DB failure (AGG-12)
-   - `similar/[id]/route.ts`: Non-numeric ID rejection (AGG-20)
-   - `image-queue.ts`: `enqueueImageProcessing` return values, claim retry stuck-job (BUG-1, BUG-2)
-   - `queue-shutdown.ts`: Bootstrap timer cleared on shutdown (C4-C3)
-   - `process-image.ts`: Temp file cleanup on downscale throw (BUG-4)
-   - `actions/images.ts`: `retryFailedImage` restore-maintenance guard (AGG-08)
+8. **Add tests for `lib/audit.ts` `logAuditEvent()`** — Test metadata serialization, truncation at 4096 bytes, surrogate-pair-safe slicing, JSON stringify failure fallback.
 
-### 15.2 High (Do Soon)
+### 16.2 High (Do Soon)
 
 9. **Add E2E for semantic search** — Seed semantic search data and add `E2E_SEMANTIC_KEY` to CI.
 
@@ -681,7 +787,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 18. **Add cross-browser E2E** — Add Firefox and WebKit to Playwright projects.
 
-### 15.3 Medium (Do When Convenient)
+### 16.3 Medium (Do When Convenient)
 
 19. **Add component-level tests for `search.tsx`, `lightbox.tsx`, `photo-viewer.tsx`, `image-manager.tsx`** — Use React Testing Library.
 
@@ -697,7 +803,7 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 25. **Add property-based tests for input validators** — Use `fast-check` to fuzz `sanitizeForOg`, `isValidTagName`, `normalizeImageListCursor`, `extractIccProfileName`, `parseCicpFromHeif`, `clampSemanticTopK`.
 
-### 15.4 Low (Nice to Have)
+### 16.4 Low (Nice to Have)
 
 26. **Add visual regression tests for key pages** — Homepage, photo page, admin dashboard.
 
@@ -713,22 +819,23 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-## 16. Final Assessment
+## 17. Final Assessment
 
 ### Test Suite Health Score
 
 | Category | Score | Notes |
 |----------|-------|-------|
-| Unit test coverage | 9/10 | 178 test files, excellent helper/lib coverage; major gaps in `data.ts`, `gps-exif-strip.ts`, `auth.ts` behavioral |
+| Unit test coverage | 9/10 | 225 test files, excellent helper/lib coverage; major gaps in `data.ts`, `gps-exif-strip.ts`, `auth.ts` behavioral |
 | Integration test coverage | 6/10 | Good for color pipeline, auth rate limiting; gaps in server actions, data layer, upload pipeline |
 | E2E test coverage | 4/10 | Basic homepage, search, lightbox, admin login; many features untested; only Chromium, single-worker |
 | Security test coverage | 7/10 | Excellent lint gates, rate limit tests, origin guard; gaps in server action CSRF, XSS, file upload security, session fixation |
 | Accessibility test coverage | 6/10 | Good source-contract tests, touch-target audit; missing runtime a11y tests (keyboard nav, screen reader, focus management) |
 | Performance test coverage | 2/10 | No performance tests at all |
 | Error path coverage | 4/10 | Many happy paths tested, but error paths are sparse |
-| Flakiness | 7/10 | Known flakes in `admin-backfill-runner-leak.test.ts` and `image-queue-bootstrap.test.ts`; `data-tag-names-sql.test.ts` has band-aid timeout |
+| Regression test coverage | 5/10 | Several recently fixed bugs have NO regression tests (Section 5) |
+| Flakiness | 7/10 | Known flakes in `admin-backfill-runner-leak.test.ts` (second test) and `image-queue-bootstrap.test.ts`; `data-tag-names-sql.test.ts` has band-aid timeout |
 | Test maintainability | 9/10 | Excellent documentation, clear naming, good use of mocks, regression annotations |
-| **Overall** | **6.5/10** | **Strong foundation with significant gaps in E2E, error paths, untested critical files, and flaky patterns** |
+| **Overall** | **6.5/10** | **Strong foundation with significant gaps in E2E, error paths, untested critical files, missing regression tests for recent bugs, and flaky patterns** |
 
 ### Risk Heat Map
 
@@ -740,10 +847,10 @@ These tests read source files and assert regex matches. They are valuable for ca
 | Session secret resolution | None | **HIGH** | Test `getSessionSecret()` 4-case logic |
 | Audit log write path | None | **HIGH** | Test `logAuditEvent()` |
 | Server action CSRF protection | Partial (API routes tested, actions not) | **HIGH** | E2E test cross-origin server action calls |
-| Semantic search rate-limit posture (AGG-12) | Partial (rollback removed, not tested) | **HIGH** | Add test verifying NO rollback after expensive work |
+| Semantic search rate-limit posture (AGG-12) | Partial (rollback removed, not fully tested) | **HIGH** | Add test verifying NO rollback after expensive work |
 | Similar-photo ID validation (AGG-20) | None | **HIGH** | Add test for non-numeric ID rejection |
 | `image-queue-bootstrap.test.ts` | Flaky under load | **HIGH** | Fix fake timers or isolate to serial execution |
-| `admin-backfill-runner-leak.test.ts` | Racy `setImmediate` drain | **HIGH** | Replace with `vi.waitFor` |
+| `admin-backfill-runner-leak.test.ts` | Second test still racy | **HIGH** | Replace remaining `setImmediate` with `vi.waitFor` |
 | Settings actions | None | **HIGH** | Add tests for `app/actions/settings.ts` |
 | Embeddings actions | None | **MEDIUM** | Add tests for `app/actions/embeddings.ts` |
 | E2E cross-browser | None | **HIGH** | Add Firefox and WebKit to Playwright |
@@ -754,7 +861,8 @@ These tests read source files and assert regex matches. They are valuable for ca
 | Service worker runtime | None | **MEDIUM** | Add E2E for SW behavior |
 | Performance | None | **MEDIUM** | Add benchmark tests |
 | Property-based testing | None | **MEDIUM** | Add `fast-check` for pure functions |
+| Regression tests for recent bugs | Many missing | **HIGH** | Add tests for SEC3-01, SEC3-02, BUG-1/2, BUG-4, BUG-10, BUG-11, CODE-02, AGG-08, AGG-12, R5-H4/H5 |
 
 ---
 
-*Review completed. Verification: `npm test` (225 passed, 2 skipped, 0 failed, 81s); all subagent analyses synthesized. 31+ specific findings identified across flaky tests, coverage gaps, mock abuse, missing edge cases, security tests, E2E gaps, and test environment issues.*
+*Review completed. Verification: `npm test` (225 passed, 2 skipped, 0 failed, 85s); all subagent analyses synthesized. 35+ specific findings identified across flaky tests, coverage gaps, mock abuse, missing regression tests, missing edge cases, security tests, E2E gaps, and test environment issues.*

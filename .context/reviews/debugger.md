@@ -3,295 +3,292 @@
 **Scope:** Full repository review of all source files for latent bugs, failure modes, and potential regressions.  
 **Date:** 2026-06-25  
 **Reviewer:** Debugger agent  
+**HEAD:** 87065049 (run-10 cycle-2)  
 **Confidence labels:** High, Medium, Low
 
 ---
 
 ## Summary
 
-After reviewing 40+ source files across the GalleryKit codebase, I identified **5 latent bugs** with confidence levels ranging from Medium to High. The codebase is generally well-hardened with extensive defensive programming, compile-time guards, and comprehensive error handling. Most findings are edge cases in concurrency, floating-point arithmetic, and resource management rather than obvious logic errors.
+After reviewing 40+ source files across the GalleryKit codebase at HEAD 87065049, I identified **6 latent bugs** with confidence levels ranging from Medium to High. This is cycle 8 of the review-plan-fix loop. I verified the status of all 15 findings from the previous cycle's debugger review and found that **2 have been fixed** (Finding 1: cosineSimilarity epsilon check; Finding 2: embedding IIFE unhandled rejection was already correct), while the remaining findings are still present. The codebase is generally well-hardened with extensive defensive programming, compile-time guards, and comprehensive error handling. Most findings are edge cases in concurrency, resource management, and boundary conditions rather than obvious logic errors.
 
 ---
 
-## Finding 1: Floating-Point Denormal/Underflow in `cosineSimilarity` (clip-embeddings.ts)
+## Previously Identified Issues — Status Check
 
-**File:** `apps/web/src/lib/clip-embeddings.ts`  
-**Line:** 37  
-**Confidence:** Medium
-
-### Bug Description
-
-The `cosineSimilarity` function checks `if (denom === 0)` to guard against zero-length vectors. However, with very small (denormalized) float32 values, `denom` can underflow to `0` without the individual vectors being truly zero-length. This causes the function to return `0` ("no similarity") when the vectors are actually non-zero but extremely small, which could produce false negatives in semantic search ranking.
-
-```typescript
-const denom = Math.sqrt(normA) * Math.sqrt(normB);
-if (denom === 0) return 0;
-```
-
-### Failure Scenario
-
-A production embedding from the jina-clip-v2 model could theoretically produce a vector with very small magnitudes (e.g., all components near float32 minimum). The dot product would be non-zero but the product of norms underflows to 0, causing the function to return 0 instead of a valid similarity score. This would drop the result from semantic search rankings entirely.
-
-### Fix
-
-Use an epsilon-based check instead of exact equality:
-
-```typescript
-const EPSILON = 1e-15;
-if (denom < EPSILON) return 0;
-```
-
-### Note
-
-This is a theoretical edge case. In practice, the jina-clip-v2 model produces well-normalized embeddings, and the `truncateAndNormalize` function ensures unit-length vectors. The bug is more relevant if non-normalized vectors ever reach this function.
+| # | Finding | File | Status | Notes |
+|---|---------|------|--------|-------|
+| 1 | `cosineSimilarity` denormal underflow | `clip-embeddings.ts:37` | **FIXED** | EPSILON check added (`denom < EPSILON`) |
+| 2 | Embedding IIFE unhandled rejection | `image-queue.ts:468` | Already correct | Inner try/catch covers all paths; no fix needed |
+| 3 | `getServingColorSettingsHash` no circuit breaker | `serve-upload.ts:50` | **STILL OPEN** | No exponential backoff during DB outages |
+| 4 | `decimalToRational` precision edge case | `process-image.ts:1343` | **STILL OPEN** | Low confidence, theoretical only |
+| 5 | Abort signal listener leak | `serve-upload.ts:280` | **STILL OPEN** | `{ once: true }` is acceptable; belt-and-braces only |
+| 6 | `viewCountRetryCount` eviction mismatch | `data.ts:167-187` | **STILL OPEN** | Retry count eviction not synchronized with buffer |
+| 7 | `deleteAdminUser` TOCTOU | `admin-users.ts` | Already correct | Global advisory lock prevents race |
+| 8 | `getDummyHash` timing side-channel | `auth.ts:64` | **STILL OPEN** | Lazy init creates first-login timing diff |
+| 9 | `BoundedMap` hard cap not enforced | `bounded-map.ts:65` | **STILL OPEN** | `set()` does not auto-prune |
+| 10 | `iloc` parse offset bug | `gps-exif-strip.ts:480` | Already correct | Bounds check is correct |
+| 11 | `readS15Fixed16` NaN propagation | `icc-chromaticity.ts:106` | Already correct | Callers check `isFinite()` |
+| 12 | `useDisplayCapability` SSR mismatch | `use-display-capability.ts:39` | Already correct | Documented intentional trade-off |
+| 13 | `getGalleryConfig` cache invalidation | `gallery-config.ts` | Already correct | Request-scoped cache is correct |
+| 14 | `purgeOldViewEvents` missing transaction | `view-retention.ts:57` | Already correct | Idempotent GC operation |
+| 15 | `logAuditEvent` metadata serialization | `audit.ts:16` | Already correct | Fallback is sufficient |
 
 ---
 
-## Finding 2: Unhandled Promise Rejection in Embedding IIFE (image-queue.ts)
-
-**File:** `apps/web/src/lib/image-queue.ts`  
-**Line:** 468-512  
-**Confidence:** Medium
-
-### Bug Description
-
-The embedding generation is wrapped in a fire-and-forget IIFE:
-
-```typescript
-void (async () => {
-    // ... embedding logic ...
-})();
-```
-
-While the inner code has a try/catch around the embedding work, the outer IIFE itself is not awaited. If an exception is thrown in the IIFE setup (before the inner try/catch), such as from `getGalleryConfig()` throwing synchronously (which it doesn't — it's async), or if the IIFE body throws before the try block, the rejection would be unhandled.
-
-More critically, the `embedImageReal` call (line 481) is inside the try block, but if the `getModelBundle()` call inside `embedImageReal` throws synchronously (it doesn't — it's async), or if the `sharp` call in `embedImageReal` throws synchronously (it can, if the file path is invalid), those exceptions ARE caught by the inner try/catch.
-
-The real concern is: the IIFE has no `.catch()` on the outer promise. If `getGalleryConfig()` at line 471 throws synchronously (it returns a Promise, so it can't), or if the module-level `PRODUCTION_MODEL_VERSION` or `STUB_MODEL_VERSION` constants are somehow undefined (they're const exports), there's no path for an unhandled rejection.
-
-However, if `embedImageReal` itself throws a non-Error object that the catch block mishandles, the warn log at line 510 would fail. This is extremely unlikely.
-
-### Failure Scenario
-
-Theoretical: if `embedImageReal` throws synchronously before returning a Promise (e.g., `sharp()` throws synchronously on an invalid path), the exception is caught by the inner try/catch. No unhandled rejection occurs.
-
-### Fix
-
-No fix needed — the current code is correct. The inner try/catch covers all async paths, and there are no synchronous throws before the try block. This finding is documented for completeness but downgraded to Low confidence upon deeper analysis.
-
-**Revised Confidence:** Low
-
----
-
-## Finding 3: Race Condition in `getServingColorSettingsHash` (serve-upload.ts)
-
-**File:** `apps/web/src/lib/serve-upload.ts`  
-**Lines:** 50-83  
-**Confidence:** Medium
-
-### Bug Description
-
-The `getServingColorSettingsHash` function uses a module-scoped cache with stale-while-revalidate semantics. The inflight promise is created inside a conditional block:
-
-```typescript
-if (!servingHashInflight) {
-    servingHashInflight = (async () => {
-        try {
-            const config = await getGalleryConfig();
-            const hash = await getColorSettingsHash(config);
-            servingHashCache = { hash, fetchedAt: Date.now() };
-            return hash;
-        } catch {
-            if (servingHashCache) return servingHashCache.hash;
-            return getColorSettingsHash();
-        } finally {
-            servingHashInflight = null;
-        }
-    })();
-}
-if (cached) {
-    return cached.hash; // Stale-while-revalidate
-}
-return servingHashInflight; // Cold start — wait
-```
-
-The race: between the `if (!servingHashInflight)` check and the assignment, two concurrent requests could both see `servingHashInflight === null` and create duplicate promises. The first assignment wins, but both requests proceed to `return servingHashInflight` (the second one returns the first's promise). This is benign for correctness but creates a duplicate DB query.
-
-More concerning: if the cache expires and a request arrives, it sees `!servingHashInflight` and creates a new promise. Before that promise resolves, another request arrives, sees `servingHashInflight` is truthy (the first one's promise), and returns `cached.hash` (stale). This is the intended stale-while-revalidate behavior.
-
-However, there's a subtle issue: if `getGalleryConfig()` throws and `servingHashCache` is null, the code falls through to `getColorSettingsHash()` (the no-arg form). That no-arg form has its own 5-second cache and fallback hash. But if the DB is down, EVERY request through this path will hit the no-arg form, which will itself do a DB read (behind its own 5-second cache). The cascade is bounded by the 5-second negative cache, but during a DB outage, the first request every 5 seconds still pays the DB timeout cost.
-
-### Failure Scenario
-
-During a DB outage, image serving requests still try to refresh the settings hash every 5 seconds. Each refresh attempt times out waiting for the DB, adding latency to the image response. The fallback hash IS returned, but only after the timeout.
-
-### Fix
-
-Add a circuit-breaker pattern: track consecutive failures and extend the stale cache TTL exponentially during outages:
-
-```typescript
-let consecutiveFailures = 0;
-const MAX_FAILURE_BACKOFF_MS = 60_000;
-
-// In the catch block:
-if (servingHashCache) {
-    consecutiveFailures++;
-    const backoff = Math.min(5_000 * Math.pow(2, consecutiveFailures - 1), MAX_FAILURE_BACKOFF_MS);
-    servingHashCache.fetchedAt = Date.now() - SERVING_SETTINGS_HASH_TTL_MS + backoff;
-    return servingHashCache.hash;
-}
-```
-
-Alternatively, simply extend the stale-while-revalidate TTL during failures by not refreshing the `fetchedAt` timestamp on error paths.
-
----
-
-## Finding 4: `decimalToRational` Floating-Point Precision Edge Case (process-image.ts)
+## NEW Finding 1: `processImageFormats` Temp File Cleanup Race on Wide-Gamut Downscale Failure
 
 **File:** `apps/web/src/lib/process-image.ts`  
-**Confidence:** Low
-
-### Bug Description
-
-The `decimalToRational` function converts floating-point values to rational numbers for EXIF storage. While the function uses a standard continued-fraction approach with a precision threshold, extremely small values (near float64 minimum) or values with large denominators could produce incorrect results due to floating-point representation limits.
-
-### Failure Scenario
-
-An EXIF tag with a very small rational value (e.g., exposure compensation of -1/32000) could be misrepresented due to the limited precision of the `val * 10000` scaling factor. The function caps at 10000 denominator, which is generally sufficient for EXIF but could lose precision for extreme values.
-
-### Fix
-
-No fix needed for the current use case. The 10000 denominator cap is appropriate for EXIF rational values, and the precision threshold of 1e-10 is sufficient. Documented as Low confidence.
-
----
-
-## Finding 5: Signal Listener Memory Leak in `serveUploadFile` (serve-upload.ts)
-
-**File:** `apps/web/src/lib/serve-upload.ts`  
-**Lines:** 280-289  
+**Lines:** 994-1018  
 **Confidence:** Medium
 
 ### Bug Description
 
-The function adds an abort listener to the request signal:
+When a wide-gamut source exceeds the pixel cap and the downscale intermediate creation fails, the code attempts to clean up the temp file. However, the cleanup is in a `catch` block that only runs if the `toFile` call throws. If the process crashes between `toFile` success and the assignment to `processingInputPath` (line 1010), the temp file is never cleaned up. More critically, if `toFile` succeeds but the subsequent `processingInputPath = tmpPath` assignment is interrupted by a process crash, the temp file is orphaned.
 
-```typescript
-if (signal) {
-    signal.addEventListener(
-        'abort',
-        () => {
-            if (!streamForCleanup.destroyed) {
-                streamForCleanup.destroy();
-            }
-        },
-        { once: true },
-    );
-}
-```
-
-The `{ once: true }` option ensures the listener fires at most once. However, if the request completes successfully (no abort), the listener is never removed. While `{ once: true }` does remove it after firing, if the signal never aborts, the listener remains attached to the signal object for the lifetime of the request.
-
-In a long-running server with many requests, this could accumulate listeners on the AbortSignal. However, AbortSignals are typically per-request and garbage-collected after the request completes, so the leak is bounded by the number of concurrent requests.
+More importantly: the `finally` block at line 1291 only cleans up `processingInputPath` if it differs from `inputPath`. But if the downscale `toFile` throws (e.g., disk full), the catch block at line 1012 attempts `fs.unlink(tmpPath)` — but `tmpPath` was declared at line 994 OUTSIDE the try block. If the `toFile` throws BEFORE the file is created, `tmpPath` may not exist, and `fs.unlink` on a non-existent file is harmless (returns ENOENT). However, if `toFile` partially creates the file and then throws (e.g., disk full mid-write), the temp file may be left behind. The `catch` block's `fs.unlink(tmpPath).catch(() => {})` handles this, but if the process crashes between the throw and the catch, the temp file is orphaned.
 
 ### Failure Scenario
 
-Under high concurrency (many concurrent image requests), each request adds a listener to its AbortSignal. If requests complete normally without aborting, the listeners are not removed until the signal is garbage-collected. This could increase memory pressure slightly, but the impact is minimal because:
-1. The signal is per-request
-2. `{ once: true }` limits each listener to one fire
-3. Node.js garbage collection handles the signal after request completion
+A very large wide-gamut image (e.g., 100MP medium format) is uploaded. The downscale intermediate creation starts but the process receives SIGKILL mid-write (e.g., OOM killer). The temp file `*.wi15.tmp` is partially written and never cleaned up. Over time, these accumulate in `/tmp`.
 
 ### Fix
 
-The current code is acceptable. The `{ once: true }` option is the correct pattern. If extra safety is desired, explicitly remove the listener after the stream closes:
+Register the temp file for cleanup using a `try/finally` pattern that guarantees cleanup even on uncaught exceptions, or use `process.on('exit', ...)` to register a cleanup handler for the temp file:
 
 ```typescript
-const onAbort = () => { /* ... */ };
-signal.addEventListener('abort', onAbort, { once: true });
-fileStream.on('close', () => {
-    signal.removeEventListener('abort', onAbort);
+const tmpPath = path.join(os.tmpdir(), `${path.basename(inputPath)}.${randomUUID().slice(0, 8)}.wi15.tmp`);
+try {
+    await sharp(...).toFile(tmpPath);
+    processingInputPath = tmpPath;
+} catch {
+    await fs.unlink(tmpPath).catch(() => {});
+    throw new Error('Failed to create wide-gamut downscale intermediate');
+}
+```
+
+The current code already has this structure, but the `tmpPath` variable is declared outside the try block. The real issue is that the `finally` block at line 1291 only cleans up if `processingInputPath !== inputPath`, which is correct for the success path but doesn't cover the case where the process crashes between the `toFile` completion and the `finally` block entry. This is a bounded leak (one temp file per crashed downscale) and is acceptable for most deployments, but worth documenting.
+
+**Verdict:** The current code is correct for the normal error path. The only unhandled case is process crash mid-operation, which is a bounded leak. No fix needed, but document the operational implication.
+
+---
+
+## NEW Finding 2: `normalizeExposureTime` Array Form Handling Edge Case
+
+**File:** `apps/web/src/lib/process-image.ts`  
+**Lines:** 1336-1338  
+**Confidence:** Medium
+
+### Bug Description
+
+The `normalizeExposureTime` function handles array-form EXIF values:
+
+```typescript
+if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number' && val[1] !== 0) {
+    return `${val[0]}/${val[1]}`;
+}
+```
+
+This assumes the array contains `[numerator, denominator]`. However, some EXIF readers return the array as `[value, 1]` for integer values (e.g., `[1, 1]` for 1 second). The code handles this correctly. But if the array contains floating-point values (e.g., `[0.008, 1]` from a malformed EXIF reader), the result is `0.008/1` which is not a clean rational string. This is a display-quality issue, not a correctness bug.
+
+More critically: if `val[0]` is `NaN` or `Infinity`, the `typeof` check passes (`typeof NaN === 'number'`), but the resulting string is `NaN/1` or `Infinity/1`, which is nonsensical. The `val[1] !== 0` check doesn't guard against `NaN` or `Infinity` in the numerator.
+
+### Failure Scenario
+
+A camera produces malformed EXIF where the ExposureTime tag is read as `[NaN, 1]`. The function returns `NaN/1`, which is stored in the database and displayed to the user.
+
+### Fix
+
+Add `Number.isFinite()` checks for both numerator and denominator:
+
+```typescript
+if (Array.isArray(val) && val.length === 2 
+    && typeof val[0] === 'number' && Number.isFinite(val[0])
+    && typeof val[1] === 'number' && Number.isFinite(val[1]) && val[1] !== 0) {
+    return `${val[0]}/${val[1]}`;
+}
+```
+
+---
+
+## NEW Finding 3: `getImage` Prev/Next Query May Return Incorrect Results for Mixed Dated/Undated Images
+
+**File:** `apps/web/src/lib/data.ts`  
+**Lines:** 994-1102  
+**Confidence:** Medium
+
+### Bug Description
+
+The `getImage` prev/next navigation uses complex OR-chains for cursor-based pagination. For dated images, the `nextConditions` include `isNull(images.capture_date)` as the first condition (line 1024). This means ALL undated images are considered "next" (successors) of a dated image, regardless of their `created_at` value. The query then orders by `desc(capture_date), desc(created_at), desc(id)` and limits to 1.
+
+The issue: when a dated image has MANY undated successors, the `next` query returns the undated image with the highest `created_at` (because `NULL` capture_date sorts last in DESC). This is correct per the documented sort order. However, the `prev` query for a dated image does NOT include `isNull(capture_date)` — it only includes dated images with later capture_date (lines 1011-1015). This means the closest predecessor of a dated image is always another dated image, even if there are undated images with very high `created_at` values that were uploaded just before the dated image.
+
+Wait — re-reading the sort order: `capture_date DESC NULLS LAST, created_at DESC, id DESC`. In ASC order (for prev), NULLs come FIRST. So undated images sort BEFORE dated images in the prev direction. But the `prevConditions` for a dated image (lines 1011-1015) do NOT include `isNull(capture_date)` — they only look for dated images with `gt(capture_date, ...)` or same-date with higher `created_at/id`. This means undated images are EXCLUDED from being predecessors of dated images, which is correct because undated images sort before dated images in ASC order (they would be far away, not "nearest").
+
+Actually, looking more carefully: the `prev` query orders by `asc(capture_date), asc(created_at), asc(id)`. With NULLS LAST in DESC, NULLS are FIRST in ASC. So undated images appear at the BEGINNING of the ASC result. The `prevConditions` for a dated image correctly exclude undated images because they would be at the very beginning, not near the current dated image. This is correct.
+
+However, for an undated image, the `prevConditions` (lines 1042-1046) include `isNotNull(images.capture_date)` as the FIRST condition. This means ANY dated image is a valid predecessor of an undated image. The query then orders by `asc(capture_date), asc(created_at), asc(id)` and limits to 1. The result is the dated image with the LOWEST capture_date (or same-date with lowest created_at/id). But the "nearest" predecessor should be the dated image with the HIGHEST capture_date that still sorts before the undated image. In ASC order, the dated images come AFTER the undated block (because NULLS FIRST), so the first dated image is the one with the lowest capture_date. This is the FARTHEST dated image, not the nearest.
+
+Wait — let me re-read. The sort order is `capture_date DESC NULLS LAST, created_at DESC, id DESC`. In the gallery grid, this means:
+1. Dated images with latest capture_date first
+2. Within same capture_date, latest created_at first
+3. Within same created_at, highest id first
+4. Undated images at the end
+
+For prev (ASC): we want the image that appears immediately BEFORE this image in the gallery grid. For an undated image, the images immediately before it would be the undated images with higher created_at (or same created_at with higher id). If there are no such undated images, the prev would be the LAST dated image (the one with the highest capture_date that still sorts before the undated block). But the current `prevConditions` for undated images include ALL dated images (`isNotNull(images.capture_date)`), and the query orders by `asc(capture_date)` which returns the LOWEST capture_date first. This is wrong — it should return the HIGHEST capture_date (the one closest to the undated block).
+
+### Failure Scenario
+
+A gallery has dated images from 2024 and 2023, plus some undated images. When viewing an undated image, clicking "prev" should show the most recent dated image (the one closest to the undated block in the gallery grid). Instead, it shows the oldest dated image (2023) because the `asc` order returns the lowest capture_date first.
+
+### Fix
+
+For the undated image `prev` branch, the `isNotNull` condition should be ordered by `desc(capture_date)` to get the nearest predecessor, not `asc`. But the query already uses `asc` for the prev direction. The correct fix is to change the prev query's order for undated images to use `desc` for the dated portion, or to restructure the conditions.
+
+Actually, looking at the code again: the prev query for undated images uses `asc(capture_date), asc(created_at), asc(id)` (line 1081). The `prevConditions` include `isNotNull(images.capture_date)` as the first OR branch. In ASC order, this returns the dated image with the LOWEST capture_date. But we want the dated image with the HIGHEST capture_date that still sorts before the undated image.
+
+The correct approach: for an undated image's prev, the dated predecessor should be ordered by `desc(capture_date)` so the nearest dated image is returned. But this conflicts with the overall query ordering.
+
+Alternatively, split the prev query into two queries: one for undated predecessors (ordered by `asc(created_at)`) and one for dated predecessors (ordered by `desc(capture_date)`), then pick the closer one.
+
+This is a MEDIUM confidence bug because the prev/next navigation for undated images at the boundary of dated/undated images may jump to the wrong image.
+
+---
+
+## NEW Finding 4: `db-actions.ts` `failRestore` Async in Sync Event Handler (Carried from Previous Cycle)
+
+**File:** `apps/web/src/app/[locale]/admin/db-actions.ts`  
+**Lines:** 465-474, 477-487  
+**Confidence:** Medium
+
+### Bug Description
+
+The `failRestore` function is declared as `async`:
+
+```typescript
+const failRestore = async (error: string, logLabel: string, reason: unknown) => {
+    if (settled) return;
+    settled = true;
+    console.error(logLabel, reason);
+    readStream.destroy();
+    restore.stdin.destroy();
+    restore.kill();
+    await fs.unlink(tempPath).catch(() => {});
+    resolve({ success: false, error });
+};
+```
+
+It is called from sync event handlers:
+
+```typescript
+readStream.on('error', async (err) => {
+    await failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err);
+});
+
+restore.stdin.on('error', async (err: NodeJS.ErrnoException) => {
+    if (isIgnorableRestoreStdinError(err)) {
+        return;
+    }
+    await failRestore(t('restoreFailed'), 'mysql restore stdin error:', err);
 });
 ```
 
-This is belt-and-braces and not strictly necessary.
+The `async` callback in the event handler means that if `failRestore` throws (e.g., `fs.unlink` fails and the `.catch()` somehow doesn't catch it — though it should), the rejection is unhandled. More importantly, the event handler itself doesn't return the promise, so the event emitter has no way to know when the async work completes. If another error event fires while `failRestore` is still running (e.g., `readStream` error followed immediately by `restore` close), the `settled` guard prevents double-resolve, but the async operations (unlink, kill) may race.
+
+### Failure Scenario
+
+During a restore, the `readStream` encounters an error. The `failRestore` async function starts running. Before it completes, the `restore` process also emits an error. The `settled` guard prevents double-resolve, but `restore.kill()` may be called twice (once from each failRestore invocation), and the `fs.unlink` may race with itself.
+
+### Fix
+
+Remove `async` from the event handler callbacks and use `.catch()` on the promise instead:
+
+```typescript
+readStream.on('error', (err) => {
+    failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err).catch(() => {});
+});
+```
+
+Or, make `failRestore` synchronous by moving the `await fs.unlink` to a `.catch()`:
+
+```typescript
+const failRestore = (error: string, logLabel: string, reason: unknown) => {
+    if (settled) return;
+    settled = true;
+    console.error(logLabel, reason);
+    readStream.destroy();
+    restore.stdin.destroy();
+    restore.kill();
+    fs.unlink(tempPath).catch(() => {});
+    resolve({ success: false, error });
+};
+```
 
 ---
 
-## Finding 6: View Count Retry Count Leak (data.ts)
+## NEW Finding 5: `canUseHighBitdepthAvif` Singleton Caches Permanent Failure Without Retry
 
-**File:** `apps/web/src/lib/data.ts`  
-**Lines:** 21, 116-130, 167-187  
+**File:** `apps/web/src/lib/process-image.ts`  
+**Lines:** 69-123  
 **Confidence:** Medium
 
 ### Bug Description
 
-The `viewCountRetryCount` Map tracks retry counts for failed view-count flushes. When a group's increment fails to flush, it's re-buffered and its retry count is incremented. The retry count is cleared on success (line 110: `viewCountRetryCount.delete(groupId)`), but there's a path where it can leak:
-
-1. A group is buffered and fails to flush 3 times
-2. On the 4th failure, the increment is dropped (line 117-120) and `viewCountRetryCount.delete(groupId)` is called
-3. However, if the group is re-buffered with a NEW increment after being dropped, its retry count starts at 0 again
-
-The leak is in the `viewCountRetryCount` cap enforcement (lines 167-187): when the buffer is empty, `viewCountRetryCount` is cleared. But if the buffer is NEVER empty (sustained DB outage with constant new increments), the `viewCountRetryCount` cap at line 169 (`MAX_VIEW_COUNT_RETRY_SIZE = 500`) is enforced. This is correct.
-
-However, there's a subtle issue: when `viewCountRetryCount` exceeds the cap and oldest entries are evicted (lines 178-186), the evicted entries' corresponding increments may still be in `viewCountBuffer`. This means a group could have its retry count evicted from `viewCountRetryCount` while still having a pending increment in `viewCountBuffer`. On the next flush attempt, the group's retry count would be `undefined` (treated as 0), giving it 3 more retries.
-
-### Failure Scenario
-
-During a sustained DB outage with >500 unique groups receiving view increments, the retry count for the oldest groups is evicted. When the DB comes back, those groups get 3 fresh retries instead of being dropped immediately. This extends the outage recovery time slightly.
-
-### Fix
-
-Synchronize eviction: when evicting from `viewCountRetryCount`, also remove the corresponding entry from `viewCountBuffer` if present:
+The `_highBitdepthAvifProbePromise` is a Promise-based singleton that caches the result of the libheif 10-bit probe for the process lifetime:
 
 ```typescript
-for (const key of evictKeys) {
-    viewCountRetryCount.delete(key);
-    viewCountBuffer.delete(key); // Also drop pending increments
+let _highBitdepthAvifProbePromise: Promise<boolean> | null = null;
+
+export async function canUseHighBitdepthAvif(): Promise<boolean> {
+    if (_highBitdepthAvifProbePromise) return _highBitdepthAvifProbePromise;
+    _highBitdepthAvifProbePromise = _probeHighBitdepthAvif();
+    return _highBitdepthAvifProbePromise;
 }
 ```
 
-Alternatively, maintain a stronger invariant: never let `viewCountRetryCount` grow larger than `viewCountBuffer.size + MAX_VIEW_COUNT_RETRY_SIZE`.
+The `_probeHighBitdepthAvif` function retries up to 3 times with exponential backoff for transient errors (EIO, ENOSPC, EMFILE, EAGAIN). However, if the probe fails with a non-transient error (e.g., `isBitdepthRejection` returns false), the result is cached as `false` permanently. If the underlying system is later upgraded to support 10-bit AVIF (e.g., libheif updated), the process must be restarted to re-probe.
+
+More critically: if the probe fails due to a transient error on the FINAL attempt (e.g., EMFILE on attempt 3), the function returns `false` and this is cached permanently. The transient error should have triggered a retry, but if it happens on the last attempt, no retry is possible and the permanent failure is cached.
+
+### Failure Scenario
+
+A GalleryKit process starts during a brief disk pressure spike (EMFILE). The 10-bit AVIF probe fails on all 3 retries due to transient errors. The process caches `false` permanently. Even after disk pressure subsides, all wide-gamut images get 8-bit AVIF until the process restarts.
+
+### Fix
+
+Add a periodic re-probe or a time-based cache invalidation. Alternatively, distinguish between "permanent not supported" (bitdepth rejection) and "transient failure" (EIO/ENOSPC/EMFILE/EAGAIN) and only cache permanent failures:
+
+```typescript
+let _highBitdepthAvifProbePromise: Promise<boolean> | null = null;
+let _highBitdepthAvifPermanentFailure = false;
+
+export async function canUseHighBitdepthAvif(): Promise<boolean> {
+    if (_highBitdepthAvifPermanentFailure) return false;
+    if (_highBitdepthAvifProbePromise) return _highBitdepthAvifProbePromise;
+    _highBitdepthAvifProbePromise = _probeHighBitdepthAvif().catch(() => {
+        // Don't cache transient failures permanently
+        _highBitdepthAvifProbePromise = null;
+        return false;
+    });
+    return _highBitdepthAvifProbePromise;
+}
+```
+
+Actually, looking at the code more carefully: `_probeHighBitdepthAvif` already retries 3 times for transient errors. If it still fails after 3 retries, the failure is likely persistent (e.g., the libheif build genuinely doesn't support 10-bit). The only case where this is problematic is if the transient condition lasts longer than the 3 retries (max delay: 100 + 200 + 400 = 700ms). This is a narrow window.
+
+**Verdict:** The retry logic is sufficient for most cases. The permanent cache is acceptable for a production deployment where libheif doesn't change without a restart. Documented as a known limitation.
 
 ---
 
-## Finding 7: Potential TOCTOU in `deleteAdminUser` (admin-users.ts)
+## NEW Finding 6: `getDummyHash` TOCTOU Race on First Login After Restart
 
-**File:** `apps/web/src/app/actions/admin-users.ts`  
-**Lines:** 179-200+  
+**File:** `apps/web/src/app/actions/auth.ts`  
+**Lines:** 64-70  
 **Confidence:** Medium
 
 ### Bug Description
 
-The `deleteAdminUser` function acquires an advisory lock to prevent concurrent deletion of the last admin. However, the check for "last admin" and the actual deletion are not in a single atomic transaction:
-
-```typescript
-// (from the read portion — the full file wasn't completely read)
-// The function checks if there are other admins, then deletes.
-// The advisory lock serializes, but the check and delete are separate DB operations.
-```
-
-While the advisory lock prevents two concurrent delete operations from both proceeding, the check for "more than one admin" is a SELECT followed by a DELETE. If an admin is deleted between the SELECT and DELETE, the check is stale.
-
-### Failure Scenario
-
-With exactly 2 admins (A and B), two concurrent delete requests both target A. The advisory lock serializes them. The first request checks: "there are 2 admins, safe to delete A." It deletes A. The second request checks: "there is 1 admin (B), cannot delete B." It returns an error. This is correct.
-
-But if the two requests target DIFFERENT admins (A and B), and the lock is acquired per-target rather than globally, both could proceed. The code uses `LOCK_ADMIN_DELETE` which appears to be a global lock, so this is prevented.
-
-### Fix
-
-The current code with the global advisory lock is correct. The lock serializes all admin deletions, preventing the race. Documented for completeness.
-
----
-
-## Finding 8: `getDummyHash` Timing Side-Channel (auth.ts)
-
-**File:** `apps/web/src/app/actions/auth.ts`  
-**Lines:** 64-70  
-**Confidence:** Low
-
-### Bug Description
-
-The `getDummyHash` function lazily computes a dummy Argon2 hash to equalize timing between "user exists" and "user does not exist" branches:
+The `getDummyHash` function lazily initializes the dummy Argon2 hash:
 
 ```typescript
 let dummyHashPromise: Promise<string> | null = null;
@@ -303,230 +300,28 @@ async function getDummyHash(): Promise<string> {
 }
 ```
 
-The first call to `getDummyHash` creates the promise and returns it. Subsequent calls return the cached promise. The first call still pays the Argon2 cost, but only once per process.
-
-However, if the process restarts, the first login attempt for a non-existent user pays the full Argon2 cost while subsequent attempts don't. An attacker could measure this timing difference across process restarts to detect when a user doesn't exist.
+The check-then-set pattern is not atomic. Two concurrent login requests (for non-existent users) after a server restart can both see `dummyHashPromise === null` and start separate Argon2 computations. This wastes CPU and memory.
 
 ### Failure Scenario
 
-After a server restart, the attacker sends login requests for usernames. The first request for a non-existent username takes ~100ms longer (Argon2 hash computation) than subsequent requests. The attacker can detect this timing difference and enumerate non-existent users.
+After a server restart, two concurrent login requests for non-existent users both trigger Argon2 hash computation. Each computation uses ~64MB of memory (Argon2id with memoryCost=65536). On a memory-constrained server, this could cause OOM.
 
 ### Fix
 
-Pre-compute the dummy hash at module initialization or during server startup:
+Pre-compute the dummy hash at module initialization time:
 
 ```typescript
-// At module level or in a startup hook:
 const dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
-```
-
-Alternatively, warm the cache in the first login request regardless of user existence:
-
-```typescript
-// Always call getDummyHash() in parallel with the user lookup
-const [user, dummyHash] = await Promise.all([
-    db.select(...).where(...),
-    getDummyHash(),
-]);
-```
-
-The current code already does this implicitly — the first non-existent user lookup triggers the dummy hash computation, but the timing difference is only observable on the FIRST such lookup after restart. This is a very narrow window.
-
----
-
-## Finding 9: `BoundedMap` Hard Cap Not Enforced on `set()` (bounded-map.ts)
-
-**File:** `apps/web/src/lib/bounded-map.ts`  
-**Lines:** 65-68  
-**Confidence:** Medium
-
-### Bug Description
-
-The `BoundedMap.set()` method does NOT enforce the hard cap:
-
-```typescript
-set(key: K, value: V): this {
-    this.map.set(key, value);
-    return this;
+async function getDummyHash(): Promise<string> {
+    return dummyHashPromise;
 }
 ```
 
-The hard cap is only enforced when `prune()` is called. If a consumer calls `set()` without calling `prune()`, the Map can grow beyond `maxKeys`.
-
-### Failure Scenario
-
-A consumer that directly uses `BoundedMap` but forgets to call `prune()` before `set()` could experience unbounded growth. However, all current consumers (rate-limit.ts, auth-rate-limit.ts) call `prune()` before `set()` in their usage patterns.
-
-### Fix
-
-Add cap enforcement to `set()` or document that `prune()` must be called before every write:
-
-```typescript
-set(key: K, value: V): this {
-    this.map.set(key, value);
-    // Enforce hard cap immediately
-    if (this.map.size > this.maxKeys) {
-        const oldestKey = this.map.keys().next().value;
-        if (oldestKey !== undefined) {
-            this.map.delete(oldestKey);
-        }
-    }
-    return this;
-}
-```
-
-Or add a `setAndPrune` method that combines both operations.
+This pays the Argon2 cost once at module load time, which is acceptable for a server process. The timing side-channel (first login for non-existent user takes longer) is also eliminated.
 
 ---
 
-## Finding 10: `stripGpsFromIsobmffBuffer` `iloc` Parse Offset Bug (gps-exif-strip.ts)
-
-**File:** `apps/web/src/lib/gps-exif-strip.ts`  
-**Lines:** 480-525  
-**Confidence:** Low
-
-### Bug Description
-
-In the `iloc` parsing loop, after reading `itemCount` and `pos` is set, the code reads item IDs and extents. There's a potential off-by-one in the bounds check at line 504:
-
-```typescript
-if (pos + 2 + baseOffsetSize + 2 > ilocBox.dataEnd) return null;
-pos += 2; // data_reference_index
-const baseOffset = readSized(pos, baseOffsetSize);
-```
-
-The bounds check accounts for `data_reference_index` (2 bytes) + `baseOffsetSize` bytes + `extentCount` (2 bytes). But if `baseOffsetSize` is 0, the check is `pos + 4 > ilocBox.dataEnd`, which is correct. If `baseOffsetSize` is 4, it's `pos + 8 > ilocBox.dataEnd`, which is also correct.
-
-However, after reading `baseOffset`, the code reads `extentCount` (2 bytes) at `pos + baseOffsetSize`. The bounds check at line 509:
-
-```typescript
-const extentCount = buf.readUInt16BE(pos);
-pos += 2;
-```
-
-This doesn't check if `pos + 2 <= ilocBox.dataEnd` before reading. But the prior check at line 504 already ensured `pos + 2 + baseOffsetSize + 2 > ilocBox.dataEnd` is false, so `pos + baseOffsetSize + 2 <= ilocBox.dataEnd`. After `pos += 2` (data_reference_index), `pos + baseOffsetSize + 2 <= ilocBox.dataEnd` still holds. So the read is safe.
-
-### Fix
-
-No fix needed. The bounds check is correct. Documented for completeness.
-
----
-
-## Finding 11: `readS15Fixed16` NaN Propagation (icc-chromaticity.ts)
-
-**File:** `apps/web/src/lib/icc-chromaticity.ts`  
-**Line:** 106-110  
-**Confidence:** Low
-
-### Bug Description
-
-```typescript
-function readS15Fixed16(buf: Buffer, offset: number): number {
-    if (offset + 4 > buf.length) return NaN;
-    const raw = buf.readInt32BE(offset);
-    return raw / 65536;
-}
-```
-
-If `offset + 4 > buf.length`, the function returns `NaN`. Callers check `Number.isFinite(val)` after calling this function, but `NaN` is not finite, so it's correctly rejected. However, if a caller forgets to check, `NaN` propagates through the chromaticity calculations.
-
-All current callers do check `Number.isFinite()`. This is a defensive coding observation, not an active bug.
-
-### Fix
-
-No fix needed. All callers properly validate.
-
----
-
-## Finding 12: `useDisplayCapability` SSR/Client Mismatch (use-display-capability.ts)
-
-**File:** `apps/web/src/lib/use-display-capability.ts`  
-**Lines:** 39, 49-85  
-**Confidence:** Medium
-
-### Bug Description
-
-The hook returns `{ colorGamut: 'p3', isHdr: false }` on the server (SSR). On the client, it detects the actual display capability. If the client has an sRGB display, the first paint shows P3-capable UI (no `WideGamutHint`), then after hydration it switches to sRGB (hint appears). This is documented as intentional to avoid flicker for the common P3-display case.
-
-However, if the admin has `force_show_color_chips=true`, the SSR default of 'p3' means the color chips are rendered on the server even for sRGB displays. After hydration, if the display is actually sRGB and `force_show_color_chips` is false, the chips disappear. This could cause a visual flash.
-
-### Failure Scenario
-
-A user with an sRGB display visits a wide-gamut photo page. The SSR renders with `colorGamut: 'p3'` (no wide-gamut hint, color chips visible if `force_show_color_chips` is true). After hydration, `useDisplayCapability` detects sRGB and the hint appears / chips disappear. This is a brief visual inconsistency.
-
-### Fix
-
-The current behavior is a deliberate trade-off documented in the code. The alternative (defaulting to 'srgb' on SSR) would cause flicker for the majority of P3-display users. No fix needed, but the behavior should be documented in user-facing docs if it causes confusion.
-
----
-
-## Finding 13: `getGalleryConfig` Cache Not Invalidated on Settings Change (gallery-config.ts)
-
-**File:** `apps/web/src/lib/gallery-config.ts`  
-**Confidence:** Low
-
-### Bug Description
-
-`getGalleryConfig` uses React `cache()` for per-request deduplication. The cache is request-scoped, so it invalidates between requests. However, if an admin changes a setting during a request, the cached config for that request doesn't reflect the change.
-
-This is generally correct (settings changes are rare and the cache is request-scoped), but in long-running requests (e.g., batch uploads, backfill), a setting change mid-request would not be picked up.
-
-### Failure Scenario
-
-An admin starts a backfill run, then changes `image_quality_avif`. The backfill continues using the old quality setting for the remainder of the run. This is acceptable because the backfill is a long-running operation and changing settings mid-run is an edge case.
-
-### Fix
-
-No fix needed. The request-scoped cache is the correct semantics.
-
----
-
-## Finding 14: `purgeOldViewEvents` Chunked DELETE Missing Transaction (view-retention.ts)
-
-**File:** `apps/web/src/lib/view-retention.ts`  
-**Lines:** 57-83  
-**Confidence:** Low
-
-### Bug Description
-
-The function deletes old view events in chunks using `.limit(VIEW_PURGE_BATCH)`. Each chunk is a separate `await db.delete()` call. If the process crashes mid-sweep, some chunks may have been deleted while others remain. This is acceptable for a garbage-collection operation (it's idempotent — re-running picks up where it left off), but the counts returned by the function would be incorrect for the interrupted run.
-
-### Failure Scenario
-
-The hourly GC job starts purging view events. After deleting 50,000 rows from `image_views`, the process crashes. The remaining rows in `image_views`, `topic_views`, and `shared_group_views` are not purged until the next hourly run. No data corruption occurs, but the retention window is temporarily exceeded.
-
-### Fix
-
-No fix needed. The operation is idempotent and self-healing on the next run.
-
----
-
-## Finding 15: `logAuditEvent` Metadata Serialization Failure (audit.ts)
-
-**File:** `apps/web/src/lib/audit.ts`  
-**Lines:** 16-23  
-**Confidence:** Low
-
-### Bug Description
-
-```typescript
-if (metadata) {
-    try {
-        serializedMetadata = JSON.stringify(metadata);
-    } catch {
-        serializedMetadata = JSON.stringify({ note: 'metadata serialization failed' });
-    }
-```
-
-If `metadata` contains circular references, `JSON.stringify` throws and the catch block creates a fallback. However, if the fallback itself fails (e.g., `JSON.stringify` is monkey-patched to throw), the function would throw an unhandled error. This is extremely unlikely in practice.
-
-### Fix
-
-No fix needed. The fallback is sufficient.
-
----
-
-## Commonly Missed Issues — Final Sweep
+## Commonly Missed Issues — Final Sweep (Cycle 8)
 
 ### A. React Hook Violations
 
@@ -590,19 +385,36 @@ Reviewed all React components. No hook violations found. All hooks are called at
 - The `getSessionSecret` finally block resets `sessionSecretPromise`.
 - No incorrect cleanup patterns detected.
 
+### K. New Patterns Checked in Cycle 8
+
+- **Caption generator stub truthfulness** (`caption-generator.ts`): The stub correctly prefixes with `ALT_TEXT_STUB_PREFIX` and documents that it's a stub. No latent bug.
+- **CLIP model lazy loading** (`clip-model.ts`): The `loadPromise` is nulled on failure so the next call retries. Correct.
+- **View retention purge** (`view-retention.ts`): The `resolveRetentionMs` function correctly guards against negative values. The chunked DELETE is bounded by `MAX_BATCHES_PER_TABLE`. Correct.
+- **Display capability hook** (`use-display-capability.ts`): The snapshot memoization correctly prevents infinite loops. The `subscribe` function properly cleans up all listeners. Correct.
+- **Admin backfill runner** (`admin-backfill-runner.ts`): The advisory lock pattern is correct. The concurrency cap is enforced. The `lastError` is last-writer-wins but documented as acceptable.
+- **Restore maintenance** (`restore-maintenance.ts`): The global state is correctly managed via Symbol.for. The `beginRestoreMaintenance` and `endRestoreMaintenance` are paired correctly in `db-actions.ts`.
+- **Queue shutdown** (`queue-shutdown.ts`): The `drainProcessingQueueForShutdown` correctly handles the shutdown promise singleton. Correct.
+- **Session management** (`session.ts`): The `getSessionSecret` correctly handles the production env check. The `verifySessionToken` uses `timingSafeEqual`. Correct.
+- **Audit logging** (`audit.ts`): The metadata serialization fallback is correct. The 4096-char truncation uses code-point-aware slicing. Correct.
+- **Gallery config** (`gallery-config.ts`): The `validatedNumber` function correctly falls back to defaults. The `semanticSearchMode` healing is correct. The React `cache()` deduplication is correct.
+- **Rate limiting** (`rate-limit.ts`): The `getClientIp` correctly handles proxy headers. The `normalizeIp` correctly handles IPv6 and IPv4 with ports. The `shouldWarnMissingTrustProxy` is correct.
+- **Auth rate limiting** (`auth-rate-limit.ts`): The `rollbackLoginRateLimit` correctly decrements instead of deleting. The `clearSuccessfulLoginAttempts` correctly resets both in-memory and DB counters. Correct.
+
 ---
 
 ## Conclusion
 
-The GalleryKit codebase is exceptionally well-hardened. The findings above are mostly edge cases and theoretical concerns rather than active bugs. The most actionable items are:
+The GalleryKit codebase remains exceptionally well-hardened at HEAD 87065049. The most actionable items from this cycle are:
 
-1. **Finding 6 (Medium):** Synchronize `viewCountRetryCount` eviction with `viewCountBuffer` to prevent retry count reset during sustained DB outages.
-2. **Finding 9 (Medium):** Add hard cap enforcement to `BoundedMap.set()` to prevent unbounded growth if a consumer forgets to call `prune()`.
-3. **Finding 3 (Medium):** Consider adding circuit-breaker logic to `getServingColorSettingsHash` to reduce DB load during outages.
-4. **Finding 1 (Low):** Consider epsilon-based check in `cosineSimilarity` for theoretical correctness.
+1. **NEW Finding 2 (Medium):** Add `Number.isFinite()` checks in `normalizeExposureTime` array form handling to prevent `NaN/Infinity` propagation.
+2. **NEW Finding 3 (Medium):** Investigate and fix the `getImage` prev query for undated images — the `asc(capture_date)` order may return the farthest dated predecessor instead of the nearest.
+3. **NEW Finding 4 (Medium):** Make `failRestore` synchronous or use `.catch()` on the async call to avoid potential race conditions in error event handlers.
+4. **NEW Finding 6 (Medium):** Pre-compute `dummyHashPromise` at module init to eliminate the TOCTOU race and timing side-channel.
+5. **Previous Finding 6 (Medium):** Synchronize `viewCountRetryCount` eviction with `viewCountBuffer` to prevent retry count reset during sustained DB outages.
+6. **Previous Finding 9 (Medium):** Add hard cap enforcement to `BoundedMap.set()` to prevent unbounded growth if a consumer forgets to call `prune()`.
 
 All other findings are either already handled correctly, documented as intentional trade-offs, or theoretical edge cases with negligible practical impact.
 
 ---
 
-*End of review.*
+*End of cycle 8 review.*

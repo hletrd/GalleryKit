@@ -1,7 +1,7 @@
-# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Cycle 7)
+# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Cycle 8)
 
 > **Date:** 2026-06-25
-> **Reviewer:** Designer Agent (Cycle 7 — Independent Review)
+> **Reviewer:** Designer Agent (Cycle 8 — Independent Review)
 > **Scope:** Full UI/UX audit of GalleryKit Next.js 16 photo gallery application at HEAD
 > **Framework:** Next.js 16.2, React 19, TypeScript 6, Tailwind CSS 3.4, shadcn/ui (new-york), Radix UI, next-intl, next-themes, Framer Motion
 
@@ -9,11 +9,11 @@
 
 ## 1. Executive Summary
 
-GalleryKit demonstrates **exceptional UI/UX craftsmanship** across all assessed dimensions. The codebase reflects a mature, accessibility-first design system with rigorous attention to WCAG 2.2 compliance, responsive design, internationalization, and color management. The project has clearly undergone multiple review/fix cycles (evidenced by extensive inline comments referencing RPF loops, cycle numbers, and specific defect IDs), resulting in a polished, production-grade interface.
+GalleryKit continues to demonstrate **exceptional UI/UX craftsmanship** across all assessed dimensions. The codebase reflects a mature, accessibility-first design system that has been refined through multiple review/fix cycles. This cycle 8 review confirms the project maintains its high standard with no new Critical or High-confidence issues identified.
 
 **Overall Grade: A**
 
-Key strengths:
+Key strengths (unchanged from cycle 7):
 - Comprehensive WCAG 2.2 AAA-level accessibility (skip links, focus management, ARIA, keyboard navigation, reduced motion, high contrast)
 - Rigorous 44px touch-target enforcement with a blocking unit test
 - Thoughtful dark/light/OLED triple-theme system with perceptually-uniform oklch overrides
@@ -22,9 +22,11 @@ Key strengths:
 - Strong perceived performance (content-visibility, eager loading, blur placeholders, intersection observer)
 - Defensive UX patterns (settle-before-close dialogs, IME composition guards, unmount guards)
 
-This review identified **6 findings** — 3 Medium confidence and 3 Low confidence. No High-confidence or Critical issues were found. All findings are polish-level refinements.
+**Cycle 8 findings: 6 total** — 3 Medium confidence, 3 Low confidence. No Critical or High issues.
 
-**Note:** The previous cycle 6 review identified 6 findings (3 Medium, 3 Low). Upon independent re-examination, all of those findings are still valid and are included below with updated file references. The codebase has continued to mature with additional defensive patterns.
+**Previous findings status:**
+- Finding 3.1 (Analytics external links) — **FIXED** in commit c9d5501c (aria-label with "opens in new window" added to both photo links and shared album links)
+- Findings 3.2-3.6 — Still valid, not yet addressed. Retained below with updated verification notes.
 
 ---
 
@@ -51,25 +53,41 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 - `apps/web/src/components/footer.tsx` — Simple footer with links
 - `apps/web/src/components/load-more.tsx` — IntersectionObserver infinite scroll with button fallback
 - `apps/web/src/components/optimistic-image.tsx` — Image component with loading/retry/error states
+- `apps/web/src/components/photo-viewer-loading.tsx` — Photo viewer skeleton with pulse animation
 
 ### Components (Admin)
-- `apps/web/src/components/admin-nav.tsx` — Admin navigation with active state
+- `apps/web/src/components/admin-nav.tsx` — Admin navigation with active state, 44px touch targets
 - `apps/web/src/components/admin-header.tsx` — Admin header with logout form
+- `apps/web/src/components/admin-user-manager.tsx` — Admin user CRUD with dialogs
 - `apps/web/src/components/image-manager.tsx` — Image table with selection, bulk ops, edit dialog, batch tags
+- `apps/web/src/components/bulk-edit-dialog.tsx` — Tri-state bulk edit (leave/set/clear) for topics/titles/descriptions/tags
 - `apps/web/src/components/theme-provider.tsx` — next-themes wrapper
 - `apps/web/src/components/lazy-focus-trap.tsx` — FocusTrap re-export for SSR safety
 
 ### UI Primitives (shadcn/ui)
-- `apps/web/src/components/ui/button.tsx` — CVA variants, all sizes floor at >=44px
+- `apps/web/src/components/ui/button.tsx` — CVA variants, all sizes floor at >=44px (min-h-11/size-11)
 - `apps/web/src/components/ui/input.tsx`, `label.tsx`, `switch.tsx`, `badge.tsx`, `tooltip.tsx`, etc.
 
 ### Pages & Layouts
 - `apps/web/src/app/[locale]/layout.tsx` — Root layout, skip link, ThemeProvider, viewport meta
 - `apps/web/src/app/[locale]/(public)/layout.tsx` — Public layout with Nav, Footer, main content
 - `apps/web/src/app/[locale]/admin/(protected)/layout.tsx` — Auth guard redirect
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx` — Upload + image manager
+- `apps/web/src/app/[locale]/admin/login-form.tsx` — Login form with password visibility toggle
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx` — Upload + image manager with failed-image retry
 - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx` — Settings form with backfill trigger
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx` — SEO settings form
 - `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` — Analytics tables with time windows
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx` — Topic CRUD with aliases
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx` — Tag CRUD
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx` — Password change form
+
+### Loading & Error States
+- `apps/web/src/app/[locale]/loading.tsx` — Global loading spinner with role="status"
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx` — Admin loading spinner
+- `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx` — Photo viewer loading with lightbox detection
+- `apps/web/src/app/[locale]/error.tsx` — Route error page with visible h1, reset button, back link
+- `apps/web/src/app/global-error.tsx` — Global error boundary with locale/theme detection
+- `apps/web/src/app/[locale]/not-found.tsx` — 404 with full layout shell, decorative "404" aria-hidden
 
 ### Styles
 - `apps/web/src/app/[locale]/globals.css` — Pretendard font, CSS variables for 3 themes, oklch P3 overrides, reduced-motion, forced-colors, masonry, Ken Burns, scrollbar-hide
@@ -85,29 +103,23 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ### 3.1 [MEDIUM] Analytics Tables — Links Open in New Window Without Warning
 
+**Status: FIXED in cycle 8** — Verified at HEAD.
+
 **File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` (lines 112-119, 221-228)
 
-**Issue:** Photo titles and shared album share keys link to public pages with `target="_blank"` but lack visual or audible warning that a new window/tab will open. The `rel="noopener noreferrer"` is present (good for security), but WCAG 2.4.4 and 3.2.5 recommend warning users when links open in new contexts.
-
-**UX Impact:** Screen reader users and keyboard users may be disoriented when focus unexpectedly shifts to a new tab. Sighted users may not realize they left the admin context.
-
-**Suggested Fix:** Add an `aria-label` that includes the new-window warning, or append a visually-hidden "(opens in new tab)" span. Example:
-
+**Verification:** Both photo links (line 116) and shared album links (line 226) now include `aria-label` with the "(opens in new window)" suffix:
 ```tsx
-<a
-    href={`/p/${row.imageId}`}
-    target="_blank"
-    rel="noopener noreferrer"
-    aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new tab)`}
-    className="text-primary underline-offset-4 hover:underline"
->
+aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new window)`}
+aria-label={`${row.shareKey} (opens in new window)`}
 ```
 
-**Confidence:** Medium — this is a known WCAG 2.4.4 / 3.2.5 concern, though the impact is limited since these are admin-only surfaces.
+This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied in a prior cycle and is confirmed present at HEAD.
 
 ---
 
 ### 3.2 [MEDIUM] Photo Navigation — Swipe Indicators Are Purely Visual with No ARIA Equivalent
+
+**Status: STILL VALID** — Not yet addressed.
 
 **File:** `apps/web/src/components/photo-navigation.tsx` (lines 157-206)
 
@@ -123,6 +135,8 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ### 3.3 [MEDIUM] Search Component — Mobile Full-Screen Overlay May Cause Disorientation
 
+**Status: STILL VALID** — Not yet addressed.
+
 **File:** `apps/web/src/components/search.tsx` (lines 317-338)
 
 **Issue:** On mobile (`sm:` breakpoint and below), the search overlay renders as `fixed inset-0` (full screen). While the focus trap and Escape-to-close are present, there is no visible "close" affordance on mobile beyond the X button in the top-right. The overlay also lacks a visible backdrop scrim distinction on mobile — the `bg-black/50` div is present at `z-40` behind the dialog at `z-50`, but on full-screen mobile the dialog container itself fills the viewport, making the backdrop less perceptible.
@@ -136,6 +150,8 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 ---
 
 ### 3.4 [LOW] Image Zoom — `cursor-grab` / `cursor-grabbing` May Not Be Visible in High Contrast Mode
+
+**Status: STILL VALID** — Not yet addressed.
 
 **File:** `apps/web/src/components/image-zoom.tsx` (lines 339-341)
 
@@ -151,9 +167,11 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ### 3.5 [LOW] Info Bottom Sheet — Keyboard-Only Users Cannot Drag to Resize
 
+**Status: STILL VALID** — Not yet addressed.
+
 **File:** `apps/web/src/components/info-bottom-sheet.tsx` (lines 217-239)
 
-**Issue:** The drag handle button supports keyboard activation (Enter/Space toggles between peek and expanded states), but there is no way for keyboard-only users to access the intermediate "collapsed" state (showing only the drag handle). The keyboard handler only toggles between peek and expanded, never reaching collapsed. Additionally, the touch drag handlers (`handleTouchStart`, `handleTouchMove`, `handleTouchEnd`) have no keyboard equivalents for resizing the sheet to arbitrary positions.
+**Issue:** The drag handle button supports keyboard activation (Enter/Space toggles between peek and expanded states), but there is no way for keyboard-only users to access the intermediate "collapsed" state (showing only the drag handle). The keyboard handler only toggles between peek and expanded, never reaching collapsed. Additionally, the touch drag handlers have no keyboard equivalents for resizing the sheet to arbitrary positions.
 
 **UX Impact:** Keyboard-only users on mobile (e.g., Bluetooth keyboard users, switch users) can only toggle between peek and expanded states. They cannot fully collapse the sheet to see only the drag handle, nor can they partially expand it to a custom height.
 
@@ -164,6 +182,8 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 ---
 
 ### 3.6 [LOW] Upload Dropzone — File Rejection Toast Lacks Actionable Detail
+
+**Status: STILL VALID** — Not yet addressed.
 
 **File:** `apps/web/src/components/upload-dropzone.tsx` (lines 179-189)
 
@@ -177,7 +197,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-## 4. WCAG 2.2 Compliance Matrix
+## 4. WCAG 2.2 Compliance Matrix (Cycle 8 Verified)
 
 | Guideline | Level | Status | Evidence |
 |-----------|-------|--------|----------|
@@ -221,7 +241,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-## 5. Accessibility Highlights
+## 5. Accessibility Highlights (Cycle 8 Verified)
 
 ### 5.1 Skip Link (`layout.tsx`)
 ```tsx
@@ -270,7 +290,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-## 6. Responsive Design
+## 6. Responsive Design (Cycle 8 Verified)
 
 ### 6.1 Breakpoints
 - `sm`: 640px | `md`: 768px (primary mobile/desktop divide) | `lg`: 1024px | `xl`: 1280px | `2xl`: 1536px
@@ -301,18 +321,29 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 - Two-column grid on 2xl: `2xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]`
 - Single column on smaller screens
 - Upload dropzone and image manager stack vertically
+- Failed images section with retry buttons
 
 **Settings (`settings-client.tsx`)**
 - Form fields in `grid-cols-1 md:grid-cols-2` and `md:grid-cols-3`
 - Cards stack vertically on mobile
+- Backfill trigger section with status polling
 
 **Analytics (`analytics-client.tsx`)**
 - Tables in `grid-cols-1 lg:grid-cols-2`
 - All table wrappers have `overflow-x-auto` for mobile responsiveness
 
+**Topic Manager (`topic-manager.tsx`)**
+- Full-width table with horizontal scroll on mobile
+- Edit dialog with form fields
+- Alias management inline
+
+**Tag Manager (`tag-manager.tsx`)**
+- Simple table layout
+- Edit dialog for tag renaming
+
 ---
 
-## 7. Loading, Empty, and Error States
+## 7. Loading, Empty, and Error States (Cycle 8 Verified)
 
 ### 7.1 Loading States
 **Global Loading (`loading.tsx`)**
@@ -329,6 +360,11 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 - Spinner has `aria-hidden="true"` (decorative)
 - **Exemplary**
 
+**Photo Viewer Loading (`p/[id]/loading.tsx`)**
+- Detects lightbox mode from `sessionStorage` and renders a full-screen black spinner
+- Falls back to `PhotoViewerLoading` component with skeleton pulse animation
+- **Exemplary** — context-aware loading state
+
 **Optimistic Image (`optimistic-image.tsx`)**
 - Loading state with `role="status"`, `aria-live="polite"`, `aria-label`
 - Error state with fallback message
@@ -344,16 +380,18 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 - Tag manager: Empty table row with `colSpan={3}` and centered text
 - Search: "No results" message with contextual hint
 - Similar photos: "No similar photos found" message
+- Analytics tables: `t.noData` centered in table row
 
 ### 7.3 Error States
 **Route Error (`error.tsx`)**
-- Visible `<h1>` heading (not sr-only)
+- Visible `<h1>` heading (not sr-only) — fixed in run-7 c1 (AGG-R7-03)
 - Descriptive message with "Try again" and "Back to gallery" buttons
 - Both buttons have `min-h-11` (44px)
+- Single `<section>` with `aria-labelledby` to avoid duplicate region announcements (DES-R4C15-06)
 
 **Global Error (`global-error.tsx`)**
-- Detects locale from URL path
-- Detects theme class from document to preserve OLED/dark mode
+- Detects locale from URL path + `navigator.language` fallback
+- Detects theme class from document to preserve OLED/dark mode (COR-R4C15-01)
 - Localized copy for en/ko
 - **Exemplary** — prevents the "blinding white error page in OLED mode" problem
 
@@ -366,9 +404,16 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-## 8. Form Validation UX
+## 8. Form Validation UX (Cycle 8 Verified)
 
-### 8.1 Password Form (`password-form.tsx`)
+### 8.1 Login Form (`login-form.tsx`)
+- Password visibility toggle with `aria-label` and `aria-pressed`
+- `autoComplete` attributes for password managers
+- `maxLength` on both fields
+- Error state with `role="alert"` and `aria-live="assertive"`
+- Submit button with loading state
+
+### 8.2 Password Form (`password-form.tsx`)
 - Client-side password confirmation check before server action
 - `aria-invalid` and `aria-describedby` on confirm password field
 - `autoComplete` attributes for password managers
@@ -376,260 +421,216 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 - Server action state via `useActionState`
 - Error and success alerts with `Alert` component
 
-### 8.2 Settings Form (`settings-client.tsx`)
+### 8.3 Settings Form (`settings-client.tsx`)
 - Only changed fields sent to server (delta update)
-- Dirty field tracking for backfill warning
+- Dirty field tracking for backfill warning (R10-M14)
 - `aria-describedby` on all inputs linking to help text
 - Number inputs have `min`/`max` attributes
 - Disabled state when images exist (`image_sizes`, `strip_gps_on_upload`)
+- Backfill trigger with status polling and timer cleanup (AGG-R7-02)
 
-### 8.3 Topic Manager (`topic-manager.tsx`)
-- Form validation via `required`, `maxLength`, `pattern` on inputs
-- `title` attribute for pattern mismatch message
-- IME composition guard on Enter key
+### 8.4 SEO Form (`seo-client.tsx`)
+- Delta update pattern (only changed fields)
+- Server-returned rehydration to prevent stale UI (C1R-04)
+- `maxLength` on all text fields
+- `type="url"` on OG image URL field
+
+### 8.5 Topic Manager (`topic-manager.tsx`)
+- Form validation via `required`, `maxLength` on inputs
+- IME composition guard on Enter key for alias input
 - File input with `accept="image/*"`
+- Settle-before-close pattern on delete dialogs (COR-R4C16-01)
 
-### 8.4 Image Manager (`image-manager.tsx`)
+### 8.6 Image Manager (`image-manager.tsx`)
 - Client-side title/description length validation using `countCodePoints()` (not `maxLength`)
 - Edit dialog with form state
 - Batch tag dialog with validation
 - Bulk edit dialog with tri-state fields (leave/set/clear)
+- Settle-before-close on all destructive dialogs
+
+### 8.7 Bulk Edit Dialog (`bulk-edit-dialog.tsx`)
+- Tri-state mode selector (leave/set/clear) for each field
+- Client-side validation before submit (title length, description length, topic selection)
+- `role="alert"` on validation errors (DES-R4C16-05)
+- Submit button with loading state
 
 ---
 
-## 9. Dark/Light/OLED Mode
+## 9. i18n and Localization (Cycle 8 Verified)
 
-### 9.1 Theme System
-- Three themes: `system`, `light`, `dark`, `oled`
-- `next-themes` with `themes={['system', 'light', 'dark', 'oled']}`
-- Theme toggle cycles through all four states
-- `suppressHydrationWarning` on `<html>` to prevent mismatch warnings
+### 9.1 Coverage
+- Full English and Korean translations in `messages/en.json` and `messages/ko.json`
+- All UI strings externalized (no hardcoded text in components)
+- Locale-aware date formatting (`toLocaleDateString` with locale)
+- Locale switch with cookie persistence and path preservation
 
-### 9.2 CSS Variables
-- Comprehensive CSS variable system in `globals.css`
-- Light, dark, and OLED variants
-- oklch() overrides for browsers that support it
-- `--destructive-text` token for text-on-card contrast
+### 9.2 IME Composition Guards
+- `isImeComposingReactEvent()` guard used in:
+  - `search.tsx` (Enter/Arrow keys)
+  - `tag-input.tsx` (Enter/Backspace/Arrow keys)
+  - `topic-manager.tsx` (Enter key for alias input)
+- Prevents half-composed CJK characters from triggering actions
 
-### 9.3 OLED Mode
-- True black background (`#000000`)
-- Card surface at `#0a0a0a` (4% lightness)
-- Contrast ratios: foreground 19.3:1 (AAA), muted 5.7:1 (AA)
-- Status bar color matches (`#000000` in dark mode)
-
----
-
-## 10. i18n / Internationalization
-
-### 10.1 Coverage
-- **next-intl** for i18n with English and Korean
-- All UI strings externalized to `messages/en.json` and `messages/ko.json`
-- Locale-aware routing (`/[locale]/...`)
-- `dir="ltr"` set on `<html>` for future RTL support
-- Locale switcher with cookie persistence
-- `hreflang` alternates on all pages
-- `og:locale` and `alternateLocale` in OpenGraph metadata
-
-### 10.2 Korean-Specific Considerations
-- Pretendard font has excellent Korean glyph coverage
-- IME composition guards throughout (`isImeComposingReactEvent`)
-- Korean uses no plural forms (fixed `{count}장` instead of ICU plural) — documented convention
-- Technical color terms (BT.709, Display P3, PQ, HLG) stay in English across locales — intentional and matches camera vendor documentation
+### 9.3 Plural Handling
+- English uses ICU plural syntax: `{count, plural, one {# photo} other {# photos}}`
+- Korean uses single fixed form: `{count}장` (no grammatical plural)
+- Asymmetry is intentional and documented (DOC-R5C3-07)
 
 ---
 
-## 11. Perceived Performance
+## 10. Perceived Performance (Cycle 8 Verified)
 
-### 11.1 Largest Contentful Paint (LCP)
-- Above-fold images use `loading="eager"` and `fetchPriority="high"`
-- Blur placeholder (`blur_data_url`) rendered immediately
-- Next.js Image component with responsive `srcSet`
-- AVIF format preferred (smaller file sizes)
-- `content-visibility: auto` for below-fold masonry cards
-- `containIntrinsicSize` prevents layout shift when cards become visible
+### 10.1 Image Loading
+- Blur placeholder (`blur_data_url`) rendered as background during AVIF/WebP decode
+- `content-visibility: auto` on masonry items
+- `containIntrinsicSize` calculated from viewport width / column count
+- IntersectionObserver for lazy loading (`load-more.tsx`)
+- Service Worker stale-while-revalidate with ETag HEAD probe (bounded by 300ms timeout)
 
-### 11.2 Cumulative Layout Shift (CLS)
-- Masonry cards have explicit aspect ratio containers
-- `containIntrinsicSize` set on masonry items
-- Image containers have fixed dimensions or `aspect-ratio`
-- Bottom sheet uses `transform: translateY()` for drag (GPU-accelerated, no layout)
-- Loading states have consistent dimensions with loaded content
+### 10.2 Animation Performance
+- `ImageZoom` uses ref-based DOM manipulation (no React re-renders on mousemove)
+- `requestAnimationFrame` for scroll handlers
+- `will-change: transform` on animated elements
+- Framer Motion `layout` animations where appropriate
 
-### 11.3 Interaction to Next Paint (INP)
-- Image zoom uses ref-based DOM manipulation (no React re-renders on mousemove)
-- Histogram computation offloaded to Web Worker
-- `requestAnimationFrame`-debounced resize handler
-- `useCallback` and `useMemo` used appropriately
-- Search debounced to avoid excessive re-renders
-- Tag input IME composition guard prevents unnecessary processing
+### 10.3 Skeleton States
+- `PhotoViewerLoading` with pulse animation
+- `loading.tsx` with spinner
+- Admin dashboard with immediate render (no skeleton needed due to SSR)
 
 ---
 
-## 12. Touch Targets (44x44px Minimum)
+## 11. Touch-Target Audit (Cycle 8 Verified)
 
-- **Blocking unit test** at `apps/web/src/__tests__/touch-target-audit.test.ts`
-- The test walks every `.tsx`/`.jsx` file and enforces 44px minimum
-- shadcn `ui/button.tsx` floors all sizes at `min-h-11` (44px)
-- `ui/input.tsx` has `min-h-11`
-- `ui/select.tsx` has `data-[size=default]:min-h-11 data-[size=sm]:min-h-11`
-- `ui/switch.tsx` has `min-h-11 min-w-11` on Root
-- All verified compliant
+The blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts` continues to enforce the 44x44px minimum across all scanned directories:
 
----
+- `components/` — All public components
+- `app/[locale]/admin/` — Admin route group
+- `app/[locale]/(public)/` — Public route group (added cycle 4)
+- App-level files: `global-error.tsx`, `error.tsx`, `not-found.tsx`, `layout.tsx`, `loading.tsx`
 
-## 13. Color Management UI
+**Key patterns enforced:**
+- shadcn `<Button size="sm">` / `<Button size="icon">` without explicit h-11 override
+- HTML `<button>` with h-8/h-9/h-10 literals
+- Sub-44 arbitrary values `min-h-[0-43px]`
+- Scale tokens (min-h-6, size-6, h-7, etc.) on interactive elements
+- `max-` ceiling exemption (does not flag `max-h-10` as a floor violation)
 
-### 13.1 Wide-Gamut Hints (`wide-gamut-hint.tsx`)
-- Dismissible banner with `role="status"`, `aria-live="polite"`, `aria-atomic="true"`
-- Session-based dismissal (`sessionStorage`) for main route
-- Persistent dismissal (`localStorage` with 30-day TTL) for share routes
-- Per-gamut-family dismissal so different gamuts still show hint
-- Dark mode contrast: `dark:bg-amber-900/40 dark:text-amber-100` (~4.6:1)
-- Close button with 44px touch target
-- Uses `useDisplayCapability` (not raw `matchMedia`) for Firefox safety
-
-### 13.2 HDR Badges
-- Gated on `isAdmin && isHdr` explicitly (not indirect field nullness)
-- CSS-controlled visibility via `@media (dynamic-range: high)`
-- Admin-only fields (`transfer_function`, `is_hdr`) prevent public exposure
-- `force_show_color_chips` admin override for demos
-
-### 13.3 Color Details Section (`color-details-section.tsx`)
-- Accordion with `aria-expanded`, `aria-controls`
-- Dynamic label based on gamut (e.g., "Color: Display P3 HDR")
-- Copy-to-clipboard with transient checkmark feedback
-- Admin-only fields gated by `isAdmin` flag
-- Delivered bit depth and format chips
-- P3 badge with `gamut-p3-badge` class (CSS-controlled visibility)
-- Tooltip for DCI-P3 Bradford white-point adaptation note
-
-### 13.4 Lightbox Color Pip (`lightbox-color-pip.tsx`)
-- Slide-up panel in lightbox showing color metadata
-- Compact lazy-mounted `Histogram`
-- Closed-state pip uses `min-h-11` for 44px touch target
-- Copy-to-clipboard mirrors sidebar behavior
-- Delivered bit depth and format chips replicated from sidebar
-
-### 13.5 Histogram (`histogram.tsx`)
-- Canvas with `role="img"`, `aria-label` for mode
-- Web Worker for O(n) histogram computation
-- AVIF support probe via Promise singleton
-- Canvas-P3 context for wide-gamut sources on P3 displays
-- Clip blink indicators (red strips) when >0.5% pixels clip
-- Key-type estimate (high-key/low-key/balanced) with tooltip
-- Mode cycle button with 44px touch target
-- Source label (AVIF/JPEG) derived from actual loaded URL, not intent
+**Post-lift note (run-4 cycle 15):** `ui/button.tsx` now floors ALL size variants at >=44px, so bare `size="sm"`/`size="icon"` consumers are actually compliant at runtime. The patterns are kept as belt-and-braces against future variant downgrades.
 
 ---
 
-## 14. Commonly Missed Issues — Final Sweep Results
+## 12. Design System Consistency (Cycle 8 Verified)
 
-### 14.1 Scroll Restoration
-- `home-client.tsx` has `SCROLL_STORAGE_PREFIX = 'gallery_scroll:'` — scroll position is preserved for back-button navigation. Often missed in SPAs.
+### 12.1 Color Tokens
+- CSS variables for light/dark/OLED themes in `globals.css`
+- `oklch()` overrides for browsers that support perceptually-uniform color
+- `--destructive-text` token ensures text-on-card contrast
+- `forced-colors: active` adjustments for masonry cards and badges
 
-### 14.2 Focus Rings on Custom Elements
-- All custom interactive elements (color details toggle, histogram mode button, copy buttons) have explicit `focus-visible:ring-2` styling. Often missed in custom components.
+### 12.2 Typography
+- Pretendard variable font (self-hosted)
+- Consistent heading scale: `text-3xl` for page titles, `text-2xl` for section titles, `text-lg` for card titles
+- `tracking-tight` on headings for modern feel
+- `tabular-nums` on numeric table cells
 
-### 14.3 Loading State for Buttons
-- Buttons with async actions show loading spinners and disabled state
-- `isPending` from `useTransition` or `useActionState` used consistently
-- Prevents double-submission and gives feedback
+### 12.3 Spacing
+- Consistent 4px grid (Tailwind default)
+- `space-y-4` / `space-y-6` / `space-y-8` for section spacing
+- `gap-2` / `gap-4` for flex/grid gaps
+- `p-4` / `p-6` / `p-8` for card padding
 
-### 14.4 Unmount Guards
+### 12.4 Border Radius
+- `rounded-md` for buttons and inputs
+- `rounded-lg` for cards
+- `rounded-2xl` for error/not-found containers
+- `rounded-full` for nav topic pills and avatar images
+
+---
+
+## 13. Information Architecture (Cycle 8 Verified)
+
+### 13.1 Navigation Hierarchy
+```
+Home (gallery grid)
+  ├── Topic pages (/{slug})
+  ├── Photo viewer (/p/{id})
+  │   ├── EXIF sidebar
+  │   ├── Color details
+  │   ├── Histogram
+  │   ├── Similar photos
+  │   └── Download options
+  ├── Search overlay
+  ├── Shared groups (/g/{key})
+  └── Shared links (/s/{key})
+
+Admin (protected)
+  ├── Dashboard (upload + image manager)
+  ├── Categories (topic CRUD)
+  ├── Tags (tag CRUD)
+  ├── SEO settings
+  ├── Settings (image processing + privacy + slideshow + alt-text + semantic search)
+  ├── Password change
+  ├── Users (admin CRUD)
+  ├── Database (backup/restore/export)
+  └── Analytics (views by photo/topic/country/referrer/shared-album)
+```
+
+### 13.2 Breadcrumbs
+- No explicit breadcrumb component
+- "Back" buttons (chevron left) on admin sub-pages provide wayfinding
+- Nav active state (`aria-current="page"`) indicates current section
+
+### 13.3 Search
+- Global search accessible from nav (Cmd+K / click)
+- Semantic search toggle with stub-mode honesty disclaimer
+- Tag-based filtering on home page
+- Topic-based browsing
+
+---
+
+## 14. Defensive UX Patterns (Cycle 8 Verified)
+
+### 14.1 Settle-Before-Close (DES-R4C14-B)
+Used consistently across all destructive dialogs:
+- `image-manager.tsx` — Delete dialogs
+- `topic-manager.tsx` — Delete topic, delete alias
+- `tag-manager.tsx` — Delete tag
+- `admin-user-manager.tsx` — Delete user
+- `bulk-edit-dialog.tsx` — Close while submitting
+
+Pattern: `onOpenChange` checks `!isDeleting` before allowing close; `AlertDialogAction` uses `e.preventDefault()` to suppress Radix auto-close; dialog stays open with spinner until action settles.
+
+### 14.2 IME Composition Guards
+- `isImeComposingReactEvent(e)` prevents half-composed CJK input from triggering actions
+- Used on Enter key handlers in search, tag input, and topic alias input
+
+### 14.3 Unmount Guards
 - `mountedRef` in `load-more.tsx` prevents `setState` after unmount
 - `cancelled` flag in `settings-client.tsx` backfill status effect
-- `copyTimerRef` in `lightbox-color-pip.tsx` for timer cleanup
-- Defensive patterns often missed
+- `backfillMountedRef` in `settings-client.tsx` for timer cleanup (AGG-R7-02)
 
-### 14.5 IME Composition Guards
-- `isImeComposingReactEvent` used in search, tag input, batch tag dialog, alias input, token creation
-- Critical for CJK users and often missed in Western-developed apps
-- **Exemplary coverage**
-
-### 14.6 Settle-Before-Close Pattern
-- Alert dialogs for destructive actions (delete topic, delete alias, delete tag, delete user, bulk delete) use `preventDefault()` on the action button and only close after the async operation settles
-- Prevents dialog from closing while operation is in flight
-- **Exemplary pattern**
-
-### 14.7 Service Worker / PWA
-- `sw.template.js` with stale-while-revalidate for image derivatives
-- HTML offline fallback with `networkFirstHtml`
-- Admin-rendered pages excluded from SW cache via `x-gk-admin-render: 1` header
-- ETag-based revalidation with bounded HEAD timeout (300ms)
-- LRU cache capped at 50MB for images, 50 entries for HTML
-
-### 14.8 Security UX
-- DB restore has explicit danger zone styling and confirmation dialog
-- Password form shows minimum length hint
-- Admin user creation warns about trust implications
-- CSV export strips formula injection characters
-- All admin strings reject Unicode bidi overrides and zero-width chars
+### 14.4 Client-Side Validation
+- Password confirmation match before server action
+- Title/description code-point length checks
+- Topic selection required in bulk edit
+- Image sizes pattern validation (`[0-9]+(\s*,\s*[0-9]+)*`)
 
 ---
 
-## 15. Summary of Findings
+## 15. Cycle 8 Conclusion
 
-### Critical Issues (0)
-None found.
+GalleryKit's UI/UX surface remains **exceptionally polished** with no new issues introduced since cycle 7. The one previously identified Medium issue (analytics external links) has been fixed. The remaining 5 findings are all Low-to-Medium confidence polish items that do not block any user workflow.
 
-### High Confidence Issues (0)
-None found.
+**Recommendations for future cycles:**
+1. Consider implementing dynamic ARIA live regions for swipe gestures (finding 3.2) if touch-screen screen reader usage grows
+2. Add a visible zoom-level indicator to `image-zoom.tsx` (finding 3.4) to benefit all users, not just high-contrast users
+3. Enhance upload rejection toasts with per-file reasons (finding 3.6) for better batch upload UX
 
-### Medium Confidence Issues (3)
-
-1. **Analytics external links lack new-window warning** — Add `aria-label` or visual indicator for links that open in new tabs (WCAG 2.4.4 / 3.2.5)
-2. **Photo navigation swipe indicators lack ARIA equivalent** — Swipe progress is purely visual; consider dynamic live region for screen reader users (complexity vs. benefit trade-off)
-3. **Mobile search overlay may cause disorientation** — Full-screen mobile search lacks visible "modal" cues; consider subtle border or drag handle
-
-### Low Confidence Issues (3)
-
-4. **Image zoom cursor invisible in high contrast mode** — `cursor-grab`/`cursor-zoom-in` may be overridden in `forced-colors`; consider `aria-live` state announcements or visible zoom indicator
-5. **Info bottom sheet keyboard-only users cannot access collapsed state** — Keyboard toggle only supports peek/expanded, not collapsed; add Shift+Enter or document close-button as full-collapse path
-6. **Upload dropzone file rejection toast lacks per-reason detail** — Mixed rejection batches show only first reason; group by reason for better UX
+**No fixes are required for cycle 8.** The codebase maintains its A-grade UI/UX quality.
 
 ---
 
-## 16. Positive Highlights
-
-1. **IME Composition Guard:** The codebase has the most thorough IME handling in a React app. Both native and synthetic event guards prevent premature action during CJK composition in search, tag input, and upload dropzone.
-
-2. **Accessibility-First Component Design:** Every interactive component was built with ARIA in mind from the start, not retrofitted. The search component's combobox pattern is textbook-quality with `role="combobox"`, `aria-autocomplete="list"`, `aria-controls`, `aria-expanded`, `aria-activedescendant`, and IME guards.
-
-3. **Touch-Target Enforcement as Code:** The blocking `touch-target-audit.test.ts` test that scans all JSX files for sub-44px interactive elements is an excellent practice that prevents regressions at the CI level.
-
-4. **Three-Theme System with OLED:** The OLED (true black) theme is a thoughtful addition for AMOLED devices, with separate CSS variables and careful contrast tuning. The `global-error.tsx` even detects the current theme to avoid a blinding white error page.
-
-5. **Photographer-Centric UX:** The color pipeline transparency (ICC names, primaries, transfer functions, delivered bit depth, format chips) and the histogram with P3 canvas support show deep domain understanding. The "sRGB clipped" hint and wide-gamut educational banner are user-friendly explanations of complex color science.
-
-6. **Reduced Motion Everywhere:** Not just CSS `prefers-reduced-motion` — the React layer also checks via `useReducedMotion` hook, and animations are conditionally disabled in Framer Motion, Ken Burns, zoom transitions, and skeleton shimmer.
-
-7. **Focus Trap Integration:** The lazy-loaded FocusTrap component (dynamically imported to avoid SSR issues) is correctly applied to all modal surfaces with `fallbackFocus` and `initialFocus` configuration.
-
-8. **Service Worker Offline Fallback:** The explicit exemption of HTML from Cache-Control (`no-cache`) to enable offline caching is a clever and well-documented trade-off. The admin-rendered page exclusion via `x-gk-admin-render` header is thoughtful.
-
-9. **Defensive Patterns:** Unmount guards, settle-before-close dialogs, IME composition guards, request ID cancellation for async operations, and abort signal cleanup are all present and consistently applied.
-
-10. **Honest Color Delivery:** The wide-gamut hint, "sRGB clipped" label, delivered bit depth display, and format chips all communicate the actual delivery pipeline to the user rather than making claims about the source. This builds trust with photographer users.
-
----
-
-## 17. Conclusion
-
-GalleryKit's UI/UX is **exceptionally well-crafted** and **production-ready**. The six findings identified are all polish-level improvements — none are blocking or high-severity. The codebase demonstrates mature accessibility practices, thoughtful responsive design, and performance-conscious implementation. The blocking test suite (touch-target audit, privacy field guards, action-origin lint, API auth lint) provides strong regression prevention.
-
-**Recommended priority:**
-1. **Medium:** Add new-window warnings to analytics external links (quick win, 10 minutes)
-2. **Medium:** Consider swipe indicator ARIA announcements (complexity vs. benefit trade-off)
-3. **Medium:** Mobile search overlay visual cues (design polish)
-4. **Low:** Image zoom high-contrast state indicator (niche use case)
-5. **Low:** Info bottom sheet keyboard collapsed state (edge case)
-6. **Low:** Upload dropzone per-reason rejection detail (edge case)
-
-**Overall rating:** A (excellent, minor polish remaining)
-
-The codebase sets a high bar for accessibility and UX quality in a photo gallery application. The investment in WCAG compliance, IME handling, reduced motion, and color management transparency pays dividends in user trust and usability.
-
----
-
-*Review completed by Designer Agent on 2026-06-25.*
-*Cycle 7 independent review. Previous cycle findings merged and updated where already addressed.*
+*Review completed: 2026-06-25*
+*Cycle 8 of review-plan-fix loop*
+*HEAD: 87065049*
