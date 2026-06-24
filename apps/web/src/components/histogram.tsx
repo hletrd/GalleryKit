@@ -686,12 +686,12 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         return (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <span
-                                        tabIndex={0}
+                                    <button
+                                        type="button"
                                         className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
                                     >
                                         {t(`viewer.keyType${keyType}`)}
-                                    </span>
+                                    </button>
                                 </TooltipTrigger>
                                 <TooltipContent>
                                     {t(`viewer.keyType${keyType}Tooltip`)}
