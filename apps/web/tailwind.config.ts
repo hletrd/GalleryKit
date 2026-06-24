@@ -16,7 +16,7 @@ const config: Config = {
         '2xl:columns-1', '2xl:columns-2', '2xl:columns-3', '2xl:columns-4', '2xl:columns-5',
         'py-0.5',
         'py-1',
-        'min-h-[32px]',
+        'min-h-11',
     ],
     theme: {
         extend: {
