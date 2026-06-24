@@ -71,6 +71,9 @@ export async function GET(
     // Gate 3: validate the id param as a positive integer.
     // Next.js 15/16 passes route params as a Promise.
     const { id: idStr } = await params;
+    if (!/^\d+$/.test(idStr)) {
+        return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
     const id = parseInt(idStr, 10);
     if (!Number.isFinite(id) || id <= 0) {
         return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE_HEADERS });
