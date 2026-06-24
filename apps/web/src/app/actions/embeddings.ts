@@ -19,6 +19,7 @@ import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANT
 import { resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
@@ -47,6 +48,8 @@ export type BackfillEmbeddingsResult =
 
 export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult> {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { status: 'error', message: maintenanceError };
     if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { status: 'unauthorized', message: originError };

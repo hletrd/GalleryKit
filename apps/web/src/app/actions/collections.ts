@@ -10,9 +10,12 @@ import { countCodePoints } from '@/lib/utils';
 import { parseSmartCollectionQuery } from '@/lib/smart-collections';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 export async function createSmartCollection(formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
@@ -60,6 +63,8 @@ export async function createSmartCollection(formData: FormData) {
 
 export async function updateSmartCollection(id: number, formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
@@ -106,6 +111,8 @@ export async function updateSmartCollection(id: number, formData: FormData) {
 
 export async function deleteSmartCollection(id: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
