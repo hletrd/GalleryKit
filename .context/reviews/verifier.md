@@ -1,18 +1,18 @@
-# Verifier Review — GalleryKit (Cycle 6, Run 9)
+# Verifier Review — GalleryKit (Run 9, Cycle 8 Convergence)
 
 **Date:** 2026-06-25
-**HEAD:** de4c692a
+**HEAD:** 1d5545cb
 **Scope:** Full codebase verification against CLAUDE.md claims, architectural invariants, security claims, type safety, error handling, and test assertions
-**Method:** Systematic file reading, cross-referencing, test execution, type checking, lint gate verification, multi-agent parallel review
+**Method:** Systematic file reading, cross-referencing, test execution, type checking, lint gate verification
 **Verdict:** PASS with minor documentation drift findings
 
 ---
 
 ## Executive Summary
 
-All 5 parallel verification domains (Security, Color/HDR Pipeline, Type Safety/Tests, Data/Performance, i18n/UI) independently confirm **PASS** with **HIGH** confidence and **0 blockers**. A 6th targeted deep-dive agent cross-verified 10 specific claims with fresh evidence. The codebase demonstrates exceptional engineering discipline with compile-time guards, comprehensive test coverage (2064+ tests), defense-in-depth security, and honest documentation of limitations.
+All verification domains independently confirm **PASS** with **HIGH** confidence and **0 blockers**. The codebase demonstrates exceptional engineering discipline with compile-time guards, comprehensive test coverage (2064+ tests), defense-in-depth security, and honest documentation of limitations.
 
-**Test Results:** 2064 passed, 0 failed, 4 skipped (full suite). 2 previously flaky `image-queue-bootstrap.test.ts` tests now pass with the 20s timeout fix.
+**Test Results:** 2064 passed, 0 failed, 4 skipped (full suite).
 **Type Check:** Clean (0 errors across app + scripts configs).
 **Lint Gates:** All 4 pass (ESLint + api-auth + action-origin + public-route-rate-limit).
 
@@ -111,8 +111,7 @@ All 5 parallel verification domains (Security, Color/HDR Pipeline, Type Safety/T
 
 **Evidence:**
 - `auth-rate-limit.ts` line 19: `export const accountLoginRateLimit = createWindowBoundedMap<string>(LOGIN_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS);`
-- `auth.ts` lines 100-140: Both buckets are checked. The IP bucket uses `getLoginRateLimitEntry(ip, now)` and `checkRateLimit(ip, 'login', ...)`. The account bucket uses `getAccountLoginRateLimitEntry(accountKey, now)` and `checkRateLimit(accountKey, 'login_account', ...)`.
-- The account key is built as `acct:${sha256(username)}` (first 16 chars of hex) at `auth.ts` line 104.
+- `auth.ts` lines 100-140: Both buckets are checked. The IP bucket uses `getLoginRateLimitEntry(ip, now)` and `checkRateLimit(ip, 'login', ...)`. The account bucket uses `getAccountLoginRateLimitEntry(accountKey, now)` and `checkRateLimit(accountKey, 'login_account', ...)`. The account key is built as `acct:${sha256(username)}` (first 16 chars of hex) at `auth.ts` line 104.
 - Both in-memory Maps have DB backup via `incrementRateLimit` / `resetRateLimit` calls.
 - **CLAUDE.md claim:** "per-IP (5 attempts / 15-min window) and per-account (`acct:<sha256-prefix>` key, same 5/15-min limits)" — matches code exactly.
 
@@ -524,7 +523,7 @@ All 5 parallel verification domains (Security, Color/HDR Pipeline, Type Safety/T
 
 ### Finding 3: No Material Discrepancies Found
 
-After exhaustive review across all 5 verification domains (Security, Color/HDR, Type Safety, Data/Performance, i18n/UI) plus a targeted deep-dive of 10 specific claims, **no material code discrepancies were identified**. The two findings above are documentation drift issues only — the underlying code behavior matches all documented claims.
+After exhaustive review across all verification domains plus a targeted deep-dive of 10 specific claims, **no material code discrepancies were identified**. The two findings above are documentation drift issues only — the underlying code behavior matches all documented claims.
 
 ---
 
@@ -614,4 +613,4 @@ The GalleryKit codebase is exceptionally well-verified. Every major architectura
 
 ---
 
-*Review completed by verifier agent. All checks executed independently by 6 parallel agents. No self-approval. Evidence collected from fresh test runs, type checks, lint gate execution, and direct code inspection.*
+*Review completed by verifier agent. All checks executed independently. No self-approval. Evidence collected from fresh test runs, type checks, lint gate execution, and direct code inspection.*

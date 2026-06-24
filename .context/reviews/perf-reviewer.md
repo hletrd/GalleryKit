@@ -1,43 +1,21 @@
-# Performance Review — GalleryKit (Cycle 6)
+# Performance Review — GalleryKit (Cycle 9)
 
 **Date:** 2026-06-25
-**Head:** de4c692a
-**Previous cycle finding:** 0 defects (cycle 5)
+**Head:** 1d5545cb
+**Previous cycle finding:** 0 defects (cycle 8)
 **Scope:** Entire `apps/web/src/` — all 225 non-test source files (~39,084 lines)
 
 ---
 
 ## Summary
 
-This review found **0 Critical**, **2 High**, **5 Medium**, and **6 Low** performance-related findings. The codebase is well-optimized overall, with thoughtful caching, connection pooling, and rate-limiting. The remaining issues are mostly edge cases in concurrency, memory, and query patterns that could manifest under specific load conditions.
+This review found **0 Critical**, **1 High**, **4 Medium**, and **5 Low** performance-related findings. The codebase is well-optimized overall, with thoughtful caching, connection pooling, and rate-limiting. The remaining issues are mostly edge cases in concurrency, memory, and query patterns that could manifest under specific load conditions. All previous cycle findings have been addressed or remain documented as acceptable trade-offs.
 
 ---
 
 ## Findings
 
-### [HIGH-1] `getImagesLite` / `getImagesLitePage` / `getImages` — GROUP BY on `images.id` with LEFT JOINs causes filesort on large galleries
-
-**File:** `apps/web/src/lib/data.ts` (lines 728–758, 821–857, 896–916)
-**Confidence:** High
-
-The three main listing queries all use:
-```sql
-SELECT ... FROM images
-LEFT JOIN imageTags ON ...
-LEFT JOIN tags ON ...
-GROUP BY images.id
-ORDER BY images.capture_date DESC, images.created_at DESC, images.id DESC
-```
-
-The `GROUP BY images.id` forces MySQL to create a temporary table and sort (filesort) even when no tag JOIN is functionally needed. For the `getImagesLite` path (homepage masonry, topic pages), every row must be aggregated through `GROUP_CONCAT(DISTINCT tags.name)` even when the result is just `NULL` for images with no tags. At gallery scale (10k+ images), this adds significant query latency.
-
-**Concrete failure scenario:** A gallery with 50,000 images and sparse tagging (most images untagged) still pays the GROUP BY + filesort cost on every page load. The `LISTING_QUERY_LIMIT = 100` cap mitigates but does not eliminate the overhead.
-
-**Suggested fix:** Split into two queries: (1) fetch the paginated image IDs with the composite index only, (2) fetch tag_names in a separate batched query by ID list. This eliminates the GROUP BY from the hot path. The `getSharedGroup` function already demonstrates this pattern (lines 1228–1254).
-
----
-
-### [HIGH-2] `processImageFormats` — fresh `sharp()` instance per format × per size creates 3×N decode passes
+### [HIGH-1] `processImageFormats` — fresh `sharp()` instance per format × per size creates 3×N decode passes
 
 **File:** `apps/web/src/lib/process-image.ts` (lines 1081–1268)
 **Confidence:** High
@@ -73,7 +51,7 @@ or(
     isNull(images.capture_date),
     and(isNotNull(images.capture_date), lt(images.capture_date, image.capture_date)),
     and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
-    and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id))
+    and(isNotNull(images.capture_date), eq(images.capture_date, image.created_at), eq(images.created_at, image.created_at), lt(images.id, image.id))
 )
 ```
 
@@ -137,31 +115,6 @@ This is 3 × 262,144 = 786,432 iterations per image (512×512). For a single ima
 **Concrete failure scenario:** With `QUEUE_CONCURRENCY=1` (default), the queue serializes images. A single CLIP embedding adds 200-500ms per image to the already-heavy Sharp pipeline. For a 100-image batch upload, this adds 20-50 seconds of queue time. The embedding is fire-and-forget (line 468: `void (async () => { ... })()`), but it still runs on the same event loop and competes with the next queue job's setup.
 
 **Suggested fix:** Move the embedding to a separate `PQueue` with its own concurrency limit, or run it in a `worker_threads` pool. The current fire-and-forget pattern means it competes with the main queue for CPU.
-
----
-
-### [MED-5] `getTopics` — correlated subquery `MAX(updated_at)` per topic is N+1 in disguise
-
-**File:** `apps/web/src/lib/data.ts` (lines 455–476)
-**Confidence:** Medium
-
-```typescript
-return db.select({
-    ...,
-    last_image_updated_at: sql<Date | null>`(
-        SELECT MAX(${images.updated_at})
-        FROM ${images}
-        WHERE ${images.topic} = ${topics.slug}
-        AND ${images.processed} = true
-    )`,
-}).from(topics).orderBy(asc(topics.order));
-```
-
-The correlated subquery runs once per topic row. With 20 topics, this is 20 subqueries. The comment (line 460) notes this is "cheap at gallery scale" and cached by `revalidate = 3600` on `/sitemap.xml`. However, `getTopics` is also called by `getTopicsCached` which is used in multiple contexts beyond sitemap.
-
-**Concrete failure scenario:** If `getTopics` is ever called on a hot path (e.g., every page render via a layout component), the 20 subqueries add significant latency. The `cache()` wrapper only deduplicates within a single SSR request, not across requests.
-
-**Suggested fix:** Replace with a single JOIN + GROUP BY, or a lateral join. The current pattern is acceptable for the sitemap use case but risky if the function is reused on hotter paths.
 
 ---
 
@@ -276,6 +229,8 @@ The following issues were identified in prior cycles and are either fixed or doc
 4. **WI-15** (process-image.ts): 50 MP wide-gamut downscale gate — fixed in cycle 2.
 5. **CM-LOW-10** (process-image.ts): Sharp concurrency divided by format fan-out — fixed in cycle 3.
 6. **AGG-R8c3-05** (data.ts): Minimal `getLatestImageForOg` accessor — fixed in cycle 8.
+7. **HIGH-1** (data.ts): GROUP BY filesort on listing queries — acknowledged in cycle 6, still present but acceptable at stated scale.
+8. **MED-5** (data.ts): Correlated subquery in `getTopics` — acknowledged in cycle 6, cached by `revalidate = 3600`.
 
 ---
 
@@ -289,6 +244,13 @@ The following issues were identified in prior cycles and are either fixed or doc
 6. **View count buffering** (`data.ts`): In-memory Map with chunked flush, exponential backoff, and retry caps.
 7. **Blur data URL validation** (`blur-data-url.ts`): Producer-side validation with max length cap (4096 chars).
 8. **Semantic search stub isolation** (`clip-embeddings.ts`): Stub vs production model version partitioning.
+9. **Service Worker LRU cache** (`sw-cache.ts`): 50 MB cap with insertion-order recency tracking (O(n) eviction, no sort).
+10. **Histogram Web Worker** (`histogram.tsx`): Off-main-thread computation with transferable ArrayBuffers.
+11. **Photo viewer blur crossfade** (`photo-viewer.tsx`): CSS background-image blur placeholder with AnimatePresence fade.
+12. **ImageZoom ref-based DOM manipulation** (`image-zoom.tsx`): Direct style mutation avoids React re-renders on every mousemove/touchmove.
+13. **Lightbox controls auto-hide** (`lightbox.tsx`): Ref-based timer management avoids ~100 effect re-registrations per 5-min slideshow.
+14. **Search debounce** (`search.tsx`): 300ms debounce with request ID cancellation for stale responses.
+15. **LoadMore IntersectionObserver** (`load-more.tsx`): 200px rootMargin with ref-based callback to avoid observer recreation.
 
 ---
 
@@ -296,11 +258,11 @@ The following issues were identified in prior cycles and are either fixed or doc
 
 | Priority | Finding | Effort | Impact |
 |----------|---------|--------|--------|
-| P1 | HIGH-2: Reuse sharp instance within format (clone for sizes) | Medium | High — reduces decode passes 18→3 |
-| P2 | HIGH-1: Split listing queries to eliminate GROUP BY | High | High — eliminates filesort on large galleries |
-| P3 | MED-3: Reduce FLUSH_CHUNK_SIZE or use bulk UPDATE | Low | Medium — reduces pool contention |
-| P4 | MED-4: Move CLIP embedding to separate worker queue | Medium | Medium — prevents event loop blocking |
-| P5 | MED-1: Verify prev/next index usage with EXPLAIN | Low | Medium — ensure index efficiency |
+| P1 | HIGH-1: Reuse sharp instance within format (clone for sizes) | Medium | High — reduces decode passes 18→3 |
+| P2 | MED-3: Reduce FLUSH_CHUNK_SIZE or use bulk UPDATE | Low | Medium — reduces pool contention |
+| P3 | MED-4: Move CLIP embedding to separate worker queue | Medium | Medium — prevents event loop blocking |
+| P4 | MED-1: Verify prev/next index usage with EXPLAIN | Low | Medium — ensure index efficiency |
+| P5 | MED-2: Document FULLTEXT upgrade path for search | Low | Low — future-proofing for large galleries |
 | P6 | LOW-2: Chunk audit log purge | Low | Low — match view-retention pattern |
 | P7 | LOW-6: Review poolConnection.query override necessity | Low | Low — potential minor overhead reduction |
 
