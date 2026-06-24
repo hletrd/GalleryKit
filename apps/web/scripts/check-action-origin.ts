@@ -89,7 +89,15 @@ function discoverActionFiles(): string[] {
     try {
         found = walkForActionFiles(actionsDir);
     } catch (err) {
-        console.error(`Failed to discover action files under ${actionsDir}:`, err);
+        const resolved = path.resolve(actionsDir);
+        const expected = path.join(REPO_SRC, 'app', 'actions');
+        console.error(
+            `Failed to discover action files under ${actionsDir}.\n` +
+            `Resolved absolute path: ${resolved}\n` +
+            `Expected path: ${expected}\n` +
+            `Hint: run this script from the apps/web/ directory (npx tsx scripts/check-action-origin.ts)`,
+            err,
+        );
         throw err;
     }
     // Also include the admin db-actions file which lives outside app/actions/.
