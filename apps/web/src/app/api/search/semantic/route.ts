@@ -240,7 +240,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     try {
         queryEmbedding = isProd ? await embedTextReal(query) : embedTextStub(query);
     } catch {
-        rollbackSemanticAttempt(ip);
+        // AGG-12: do NOT rollback after expensive work begins. The rate-limit
+        // budget was consumed fairly; refunding would amplify DoS cost.
         return NextResponse.json({ error: 'Server error' }, { status: 503, headers: NO_STORE_HEADERS });
     }
 
@@ -255,7 +256,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {
-        rollbackSemanticAttempt(ip);
+        // AGG-12: do NOT rollback after expensive work begins. The rate-limit
+        // budget was consumed fairly; refunding would amplify DoS cost.
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
