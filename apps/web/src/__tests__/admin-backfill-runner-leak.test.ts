@@ -127,10 +127,12 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         expect(result.status).toBe('queued');
 
         // Wait for the fire-and-forget rejection to propagate through the
-        // finally block. setImmediate × 2 is enough for the catch+finally to
-        // run (one tick for the await, one for the .catch() handler).
-        await new Promise((r) => setImmediate(r));
-        await new Promise((r) => setImmediate(r));
+        // finally block. Use vi.waitFor instead of setImmediate x2 so the
+        // drain detection is reliable under CPU contention (full-suite load).
+        await vi.waitFor(() => {
+            const state = readAdminBackfillState();
+            return state.running === false && state.lastError !== null;
+        }, { timeout: 5000, interval: 10 });
 
         const state = readAdminBackfillState();
         expect(state.running).toBe(false);
