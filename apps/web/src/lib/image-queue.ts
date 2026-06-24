@@ -576,6 +576,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             pruneRetryMaps(state);
         }
     });
+    return true;
 };
 
 export async function purgeExpiredSessions() {

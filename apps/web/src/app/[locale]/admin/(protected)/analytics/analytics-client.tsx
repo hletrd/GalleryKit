@@ -89,7 +89,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                 {/* Top Photos */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.topPhotosTitle}</h2>
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
@@ -131,7 +131,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                 {/* Top Topics */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.topTopicsTitle}</h2>
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
@@ -162,7 +162,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                 {/* Country Breakdown */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.countriesTitle}</h2>
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
@@ -199,7 +199,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                     not depend on the admin's current locale. */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.topSharedAlbumsTitle}</h2>
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
@@ -239,7 +239,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                 {/* Referrer Breakdown */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.referrersTitle}</h2>
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">

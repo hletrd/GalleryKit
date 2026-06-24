@@ -204,11 +204,30 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
 
     // Limit column count to actual item count so empty columns don't leave
     // unused whitespace on the right side of the masonry grid.
+    // DES-R5C3-04: static Tailwind class mapping — the JIT compiler cannot
+    // detect dynamically constructed class names like `columns-${n}`.
     const colBase = Math.min(itemCount, 1);
     const colSm = Math.min(itemCount, 2);
     const colMd = Math.min(itemCount, 3);
     const colXl = Math.min(itemCount, 4);
     const col2xl = Math.min(itemCount, 5);
+
+    const COLUMN_CLASS_MAP: Record<number, string> = {
+        1: 'columns-1',
+        2: 'columns-2',
+        3: 'columns-3',
+        4: 'columns-4',
+        5: 'columns-5',
+    };
+
+    const masonryClasses = cn(
+        COLUMN_CLASS_MAP[colBase] ?? 'columns-1',
+        colSm !== colBase && (COLUMN_CLASS_MAP[colSm] ? COLUMN_CLASS_MAP[colSm].replace('columns-', 'sm:columns-') : 'sm:columns-1'),
+        colMd !== colSm && (COLUMN_CLASS_MAP[colMd] ? COLUMN_CLASS_MAP[colMd].replace('columns-', 'md:columns-') : 'md:columns-1'),
+        colXl !== colMd && (COLUMN_CLASS_MAP[colXl] ? COLUMN_CLASS_MAP[colXl].replace('columns-', 'xl:columns-') : 'xl:columns-1'),
+        col2xl !== colXl && (COLUMN_CLASS_MAP[col2xl] ? COLUMN_CLASS_MAP[col2xl].replace('columns-', '2xl:columns-') : '2xl:columns-1'),
+        'gap-4 w-full',
+    );
     const topicsMap = useMemo(() => {
         const map: Record<string, string> = {};
         for (const t of topics || []) map[t.slug] = t.label;
@@ -257,7 +276,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                 (1536px+) to make better use of widescreen real estate.
                 When fewer items than the breakpoint's max columns exist,
                 clamp to the item count so the grid fills its width. */}
-            <div className={`columns-${colBase} sm:columns-${colSm} md:columns-${colMd} xl:columns-${colXl} 2xl:columns-${col2xl} gap-4 w-full`}>
+            <div className={masonryClasses}>
                 {orderedImages.map((image, index) => {
                     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
                     // now baked into `getPhotoDisplayTitleFromTagNames` and
