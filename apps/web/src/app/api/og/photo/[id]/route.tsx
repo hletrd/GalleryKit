@@ -112,7 +112,10 @@ export async function GET(
         try {
             fetchOrigin = new URL(siteConfig.url).origin;
         } catch {
-            fetchOrigin = new URL(req.url).origin;
+            // R5-H4: fail closed — when siteConfig.url is unset (dev), do NOT
+            // fall back to the attacker-controllable request origin. Return the
+            // fallback response instead of exposing a blind-SSRF primitive.
+            return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const fetched = await pickFirstAvailablePhotoBuffer(
             fetchOrigin,
@@ -251,13 +254,24 @@ function buildFallbackResponse(
     ogImageUrl?: string,
 ): Response {
     if (ogImageUrl) {
-        return new Response(null, {
-            status: 302,
-            headers: {
-                Location: ogImageUrl,
-                'Cache-Control': cacheControl,
-            },
-        });
+        // R5-H5: validate the admin-configured OG image URL is same-origin
+        // before redirecting. Prevents an open-redirect primitive if the
+        // admin SEO settings are ever compromised or poisoned.
+        try {
+            const url = new URL(ogImageUrl);
+            const reqOrigin = new URL(req.url).origin;
+            if (url.origin === reqOrigin) {
+                return new Response(null, {
+                    status: 302,
+                    headers: {
+                        Location: ogImageUrl,
+                        'Cache-Control': cacheControl,
+                    },
+                });
+            }
+        } catch {
+            // Invalid URL — fall through to the site-root redirect below.
+        }
     }
     // No configured fallback: redirect to the site root so crawlers get
     // the homepage's own OG metadata rather than a broken image URL.
