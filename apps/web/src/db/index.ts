@@ -77,7 +77,20 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
     const underlying = (connection as unknown as { connection?: Record<symbol, Promise<void> | undefined> }).connection;
     const initPromise = underlying?.[connectionInitSymbol];
     if (initPromise) {
-        await initPromise;
+        // C4-C1: Race the init query against a 10-second timeout. If MySQL
+        // accepts the TCP connection but never responds to the init query
+        // (e.g., server under extreme load), the connection would be held
+        // indefinitely, starving the pool. On timeout, release the connection
+        // and throw so the caller can retry or fail fast.
+        const initTimeout = new Promise<void>((_, reject) => {
+            setTimeout(() => reject(new Error('DB connection init query timed out after 10s')), 10_000);
+        });
+        try {
+            await Promise.race([initPromise, initTimeout]);
+        } catch (err) {
+            connection.release();
+            throw err;
+        }
     }
     return connection;
 }) as typeof poolConnection.getConnection;

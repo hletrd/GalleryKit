@@ -15,7 +15,7 @@ export const STUB_MODEL_VERSION = 'stub-sha256-v1';
 export const COSINE_THRESHOLD = 0.18;
 export const SEMANTIC_TOP_K_DEFAULT = 20;
 export const SEMANTIC_TOP_K_MAX = 50;
-export const SEMANTIC_SCAN_LIMIT = 5000;
+export const SEMANTIC_SCAN_LIMIT = 2000;
 
 /**
  * Compute cosine similarity between two 512-dim Float32Arrays.

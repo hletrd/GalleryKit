@@ -137,7 +137,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const triggerRef = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
-    const debounceRef = useRef<NodeJS.Timeout>(undefined);
+    const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const requestIdRef = useRef(0);
     const wasOpenRef = useRef(false);
 

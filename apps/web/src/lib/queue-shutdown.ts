@@ -9,6 +9,7 @@ export type QueueShutdownStateLike = {
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
     gcInterval?: ReturnType<typeof setInterval>;
+    bootstrapRetryTimer?: ReturnType<typeof setTimeout>;
 };
 
 export async function drainProcessingQueueForShutdown(
@@ -25,6 +26,13 @@ export async function drainProcessingQueueForShutdown(
         if (state.gcInterval) {
             clearInterval(state.gcInterval);
             state.gcInterval = undefined;
+        }
+        // C4-C3: Clear the bootstrap retry timer so it doesn't keep the event
+        // loop alive after shutdown. Without this, a retry timer armed before
+        // shutdown fires after drain, keeping the process alive unnecessarily.
+        if (state.bootstrapRetryTimer) {
+            clearTimeout(state.bootstrapRetryTimer);
+            state.bootstrapRetryTimer = undefined;
         }
 
         queue.pause();
