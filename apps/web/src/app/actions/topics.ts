@@ -152,10 +152,6 @@ export async function createTopic(formData: FormData) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
 
-            // C2-F06: revalidateAllAppData() already covers all locale variants
-            // and admin surfaces; the preceding revalidateLocalizedPaths() was
-            // redundant (revalidatePath('/', 'layout') invalidates the full tree).
-            revalidateAllAppData();
             return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
         });
     } catch (e: unknown) {
@@ -170,6 +166,12 @@ export async function createTopic(formData: FormData) {
         }
         console.error('Failed to create topic', e);
         return { error: t('failedToCreateTopic') };
+    } finally {
+        // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces;
+        // the preceding revalidateLocalizedPaths() was redundant. Run revalidation outside
+        // the try/catch so a revalidation error never triggers the image cleanup in the
+        // catch block (AGG-M1/M2).
+        revalidateAllAppData();
     }
 }
 
@@ -313,8 +315,6 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'topic_update', 'topic', slug).catch(console.debug);
 
-        // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
-        revalidateAllAppData();
         return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
     } catch (e: unknown) {
          if (imageFilename) {
@@ -334,6 +334,11 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
          }
          console.error('Failed to update topic', e);
          return { error: t('failedToUpdateTopic') };
+    } finally {
+        // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces.
+        // Run revalidation outside the try/catch so a revalidation error never
+        // triggers the image cleanup in the catch block (AGG-M1/M2).
+        revalidateAllAppData();
     }
 }
 
