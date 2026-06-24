@@ -84,7 +84,7 @@ export function hasGainMap(buffer: Buffer): boolean {
         const limit = Math.min(end, buffer.length);
         let p = start;
         while (p < limit && buffer[p] !== 0) p++;
-        if (p > limit) return '';
+        if (p >= limit) return '';
         return buffer.toString('ascii', start, p);
     }
 
