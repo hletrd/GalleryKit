@@ -96,7 +96,7 @@ function buildHashFromConfig(config: GalleryConfig): string {
         image_quality_webp: String(config.imageQualityWebp),
         image_quality_avif: String(config.imageQualityAvif),
         image_quality_jpeg: String(config.imageQualityJpeg),
-        image_sizes: config.imageSizes.join(','),
+        image_sizes: [...config.imageSizes].sort((a, b) => a - b).join(','),
     };
     return buildHash(values);
 }
