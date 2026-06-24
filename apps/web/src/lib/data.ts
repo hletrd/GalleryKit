@@ -402,8 +402,13 @@ export const publicMapSelectFieldKeys = Object.freeze(
     Object.keys(publicMapSelectFields).sort(),
 ) as readonly (keyof typeof publicMapSelectFields)[];
 
-// Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
-// are ever added to publicSelectFields, this assertion will produce a TypeScript error.
+// Compile-time privacy guard: if any admin-only field (the PrivacySensitiveKeys
+// union — latitude, longitude, filename_original, user_filename, processed,
+// original_format, original_file_size, color_pipeline_decision, is_hdr,
+// has_gain_map, was_downscaled, transfer_function, matrix_coefficients,
+// bit_depth, uploaded_by, processing_error, failed_at, color_space,
+// icc_profile_name, pipeline_version) is ever added to publicSelectFields,
+// this assertion will produce a TypeScript error.
 // This prevents accidental PII leakage in public-facing API responses.
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
