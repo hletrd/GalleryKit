@@ -534,9 +534,13 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
             } finally {
                 await dirHandle.close().catch(() => {});
             }
-        } catch {
-            // Best-effort cleanup — if the directory scan fails, fall back to the
-            // known configured-size candidates above.
+        } catch (err) {
+            // ENOENT means the directory doesn't exist yet — nothing to scan,
+            // the known filesToDelete set above is sufficient. Log non-ENOENT
+            // errors so disk/permission issues don't go silently unnoticed.
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                console.warn(`[deleteImageVariants] Directory scan failed for ${dir}:`, err);
+            }
         }
     }
 
