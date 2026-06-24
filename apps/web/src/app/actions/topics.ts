@@ -137,7 +137,6 @@ export async function createTopic(formData: FormData) {
             if (await topicRouteSegmentExists(slug)) {
                 if (imageFilename) {
                     await deleteTopicImage(imageFilename);
-                    imageFilename = null;
                 }
                 return { error: t('slugConflictsWithRoute') };
             }

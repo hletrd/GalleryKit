@@ -1032,13 +1032,21 @@ export async function processImageFormats(
         // preferred over withIccProfile('p3') because it preserves the exact
         // source profile (including DCI-P3's D63 white point) rather than
         // collapsing every wide-gamut source to Display-P3 D65.
-        await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
-            .resize({ width: targetWidth, withoutEnlargement: true })
-            .keepIccProfile()
-            .tiff({ compression: 'lzw' })
-            .toFile(tmpPath);
-        processingInputPath = tmpPath;
-        processingBaseWidth = targetWidth;
+        try {
+            await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
+                .resize({ width: targetWidth, withoutEnlargement: true })
+                .keepIccProfile()
+                .tiff({ compression: 'lzw' })
+                .toFile(tmpPath);
+            processingInputPath = tmpPath;
+            processingBaseWidth = targetWidth;
+        } catch {
+            // C4-D1: clean up the temp file if the downscale throws (e.g. disk
+            // full, permission error) so the tmp directory doesn't accumulate
+            // orphaned intermediates.
+            await fs.unlink(tmpPath).catch(() => {});
+            throw new Error('Failed to create wide-gamut downscale intermediate');
+        }
     }
 
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
