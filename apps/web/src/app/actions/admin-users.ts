@@ -180,6 +180,7 @@ export async function deleteAdminUser(id: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
     const currentUser = await getCurrentUser();
     if (!currentUser) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.

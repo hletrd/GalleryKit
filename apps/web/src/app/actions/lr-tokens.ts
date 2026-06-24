@@ -1,6 +1,6 @@
 'use server';
 
-import { getCurrentUser } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import {
     createToken,
@@ -33,6 +33,7 @@ export async function createLrToken(opts: {
     if (originError) return { error: originError };
 
     const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();
     if (!user) return { error: t('unauthorized') };
 
@@ -103,6 +104,7 @@ export async function revokeLrToken(tokenId: number): Promise<{ success: boolean
     if (originError) return { error: originError };
 
     const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();
     if (!user) return { error: t('unauthorized') };
 

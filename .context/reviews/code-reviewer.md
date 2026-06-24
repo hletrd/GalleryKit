@@ -1,295 +1,389 @@
-# Code Review: GalleryKit Repository (Cycle 8)
+# Code Review: GalleryKit Repository (Cycle 9 — Multi-Agent Fan-Out)
 
 **Review Date:** 2026-06-25
-**Reviewer:** Code Reviewer Agent
-**HEAD:** 87065049
-**Scope:** Key source files: `process-image.ts`, `data.ts`, `image-queue.ts`, `images.ts` (actions), `auth.ts` (actions), `bounded-map.ts`, `settings-hash.ts`, `serve-upload.ts`, `clip-embeddings.ts`, `db-actions.ts`, `photo-viewer.tsx`
-**Focus:** Code quality, logic bugs, SOLID principles, maintainability, edge cases, correctness, race conditions, error handling
-**Previous Cycle:** Run-9 Cycle-8 / Run-10 Cycle-2 convergence (0 CRIT, 1 HIGH, 24 MED, 77 LOW)
+**Reviewer:** Code Reviewer Agent (6 parallel domain specialists)
+**HEAD:** c0522dec
+**Scope:** Complete codebase — `apps/web/src/**/*.ts`, `apps/web/src/**/*.tsx`, `apps/web/scripts/*.ts`
+**Focus:** Code quality, logic bugs, race conditions, error handling, edge cases, SOLID principles, maintainability, cross-file interactions
+**Previous Cycle:** Run-10 Cycle-3 convergence (6/6 MEDIUM fixes, 0 defects, HEAD 0e77be15)
 
 ---
 
 ## Executive Summary
 
-GalleryKit remains a well-engineered, production-ready codebase. This cycle 8 review found **0 CRITICAL, 0 HIGH, 5 MEDIUM, and 8 LOW** severity findings. All findings are new or previously unverified; no duplicates from prior cycles are reported.
+This Cycle 9 review employed 6 parallel domain-specialist agents covering: auth/security, image processing pipeline, data layer/DB, React components/UI, API routes/actions, and scripts/utilities. The review found **2 HIGH, 11 MEDIUM, and 15 LOW** severity issues across the codebase. All issues are new or previously unverified; no duplicates from prior cycles are reported.
 
 **Key Observations:**
-- The codebase continues to demonstrate excellent engineering discipline
-- All deferred items from previous cycles still exist as documented
-- No new security vulnerabilities or logic bugs at CRITICAL/HIGH confidence
-- The most significant new finding (MED-1) is a subtle race condition in the `getDummyHash` TOCTOU pattern that has been partially addressed but not fully fixed
-- Several new findings relate to error-handling completeness and resource cleanup edge cases
+- Two HIGH-severity auth bypasses were discovered in `admin-users.ts` and `lr-tokens.ts` — any authenticated user can delete other admins and mint admin PATs
+- The run-10 cycle-3 fixes (AGG-M1 through AGG-M6) were verified as correctly applied
+- No CRITICAL issues (data loss, security vulnerabilities with immediate exploitability) were found
+- The codebase continues to demonstrate excellent engineering discipline with comprehensive compile-time guards, thorough test coverage, and mature concurrency controls
 
-**Verdict:** COMMENT — no blocking concerns. The 5 MEDIUM findings are maintainability and edge-case hardening issues that should be addressed in the next development cycle.
+**Verdict:** REQUEST CHANGES — the 2 HIGH-severity auth bypasses must be fixed before approval.
 
 ---
 
 ## Findings
 
-### MED-1: `getDummyHash` TOCTOU race condition — lazy initialization still racy
+### HIGH Severity (must fix)
 
-**File:** `apps/web/src/app/actions/auth.ts` (lines 64-70)
-**Confidence:** High
-**Previous Finding:** AGG-M2 (Run-9 Cycle-8 aggregate) — still present
+#### HIGH-1: `deleteAdminUser` missing `isAdmin()` check — any authenticated user can delete other admins
 
-**Problem:** The `dummyHashPromise` lazy initialization pattern is a classic TOCTOU race. Two concurrent login requests after a server restart both see `dummyHashPromise === null` and start separate Argon2 computations. While the assignment on line 67 is a single expression, the read on line 66 and the write are not atomic across the event loop. If two requests interleave between the null check and the assignment, both will spawn Argon2 hashes.
+**File:** `apps/web/src/app/actions/admin-users.ts:179-187`
+**Confidence:** HIGH
+
+The `deleteAdminUser` function calls `getCurrentUser()` at line 183 and `requireSameOriginAdmin()` at line 186, but never checks `isAdmin()`. The `requireSameOriginAdmin()` helper only validates request origin; it does NOT check admin privilege. The `currentUser.id === id` check at line 194 only prevents self-deletion — it does not prevent a non-admin from deleting OTHER admins. The advisory lock + last-admin check at lines 228-233 also does not gate on admin status.
 
 **Concrete Failure Scenario:**
-1. Server restarts, `dummyHashPromise = null`
-2. Request A enters `getDummyHash()`, reads `dummyHashPromise === null` (line 66)
-3. Event loop yields (e.g., async I/O in another handler)
-4. Request B enters `getDummyHash()`, reads `dummyHashPromise === null` (line 66)
-5. Both A and B execute `argon2.hash(...)` concurrently
-6. Each uses 64MB memory (memoryCost: 65536), so 128MB total is allocated
-7. With 10+ concurrent requests, this could exhaust memory
+1. A non-admin user (or compromised lower-privilege account in a future role system) has a valid session cookie
+2. They call `deleteAdminUser(targetAdminId)` from the same origin
+3. `getCurrentUser()` returns their user object (passes)
+4. `requireSameOriginAdmin()` passes (same origin)
+5. `currentUser.id === id` is false (they're not deleting themselves)
+6. The advisory lock is acquired, admin count check passes (> 1 admin)
+7. The target admin is deleted, their sessions are invalidated
+8. The attacker has successfully deleted an admin account
 
-**Current Code:**
+**Fix:** Add `if (!(await isAdmin())) return { error: t('unauthorized') };` immediately after the `maintenanceError` check, before `requireSameOriginAdmin()`, matching the pattern in `createAdminUser` and every other mutating admin action:
+
 ```typescript
-let dummyHashPromise: Promise<string> | null = null;
-async function getDummyHash(): Promise<string> {
-    if (!dummyHashPromise) {
-        dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
-    }
-    return dummyHashPromise;
+const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+if (maintenanceError) return { error: maintenanceError };
+if (!(await isAdmin())) return { error: t('unauthorized') };
+const originError = await requireSameOriginAdmin();
+if (originError) return { error: originError };
+```
+
+**Note:** `isAdmin` is already imported at line 10, so no import change is needed.
+
+---
+
+#### HIGH-2: LR token management actions missing `isAdmin()` check — any authenticated user can mint admin PATs
+
+**File:** `apps/web/src/app/actions/lr-tokens.ts:27-128`
+**Confidence:** HIGH
+
+`createLrToken`, `revokeLrToken`, and `listLrTokens` all call `requireSameOriginAdmin()` and `getCurrentUser()` but never `isAdmin()`. The `withAdminAuth` wrapper used by API routes does not check `isAdmin()` for token-authenticated requests — it only verifies token validity and scope. A non-admin user who mints a token via `createLrToken` can then use it to authenticate to any `withAdminAuth` route that accepts the token's scope (e.g., `lr:upload` for the Lightroom plugin upload route).
+
+**Concrete Failure Scenario:**
+1. Any authenticated user (not just admin) visits the admin tokens page or calls the action directly
+2. `createLrToken({ label: 'attacker', scopes: ['lr:upload'] })` succeeds
+3. The user receives a plaintext PAT
+4. They use the PAT with `X-GalleryKit-Token` header to authenticate to `/api/admin/lr/upload`
+5. `withAdminAuth` verifies the token is valid and has `lr:upload` scope, then runs the handler
+6. The attacker uploads photos to the gallery without admin privileges
+
+**Fix:** Add `isAdmin` to the imports from `@/app/actions/auth` and add the check in all three functions:
+
+```typescript
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
+
+export async function createLrToken(...) {
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
+    const user = await getCurrentUser();
+    // ...
 }
 ```
 
-**Suggested Fix:** Compute at module initialization time (one-time cost, no blocking concern for a server process):
+Apply the same pattern to `revokeLrToken` (line 101) and `listLrTokens` (line 119).
+
+---
+
+### MEDIUM Severity (should fix)
+
+#### MED-1: `createTopic` catch block deletes topic image file after successful DB insert
+
+**File:** `apps/web/src/app/actions/topics.ts:135-173`
+**Confidence:** HIGH
+
+The `try` block wraps the entire `withTopicRouteMutationLock` scope, including `revalidateAllAppData()` at line 158. If `revalidateAllAppData()` throws (e.g., Next.js cache layer error), the catch block at line 161 runs `deleteTopicImage(imageFilename)`. But the topic was already inserted at lines 145-150 with `image_filename: imageFilename`. The DB row survives while the image file is deleted, leaving a broken reference.
+
+**Fix:** Move `revalidateAllAppData()` outside the try block, or wrap it in its own inner try-catch so revalidation errors never trigger image cleanup.
+
+---
+
+#### MED-2: `updateTopic` catch block deletes new image after successful DB update, leaving broken reference
+
+**File:** `apps/web/src/app/actions/topics.ts:240-325`
+**Confidence:** HIGH
+
+Similar to MED-1. The `try` block wraps `withTopicRouteMutationLock`, `deleteTopicImage(previousImageFilename)`, `logAuditEvent`, and `revalidateAllAppData()`. If `revalidateAllAppData()` throws after the DB update succeeded, the catch block at line 319 deletes the NEW `imageFilename`. The previous image was already deleted at line 308-311. The topic now references a non-existent image, and the previous image is also gone (no recovery possible).
+
+**Fix:** Move `revalidateAllAppData()` outside the try block, or wrap it in its own try-catch.
+
+---
+
+#### MED-3: `loadMoreImages` doesn't validate `tagSlugs` is an array before passing to tag canonicalization
+
+**File:** `apps/web/src/app/actions/public.ts:93`
+**Confidence:** HIGH
+
+The `tagSlugs` parameter is typed as `string[]` but at runtime a malicious client could pass a non-array value. The expression `tagSlugs || []` evaluates to the truthy non-array, which is then passed to `canonicalizeRequestedTagSlugs`. If that function expects an array, it may throw or behave unexpectedly.
+
+**Fix:** Add `Array.isArray` guard:
 ```typescript
-const dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
-async function getDummyHash(): Promise<string> {
-    return dummyHashPromise;
-}
-```
-
-Alternatively, if lazy initialization is truly required, use an atomic assignment pattern with a sentinel:
-```typescript
-let dummyHashPromise: Promise<string> | undefined;
-async function getDummyHash(): Promise<string> {
-    if (dummyHashPromise) return dummyHashPromise;
-    const promise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
-    dummyHashPromise = promise;
-    return promise;
-}
-```
-Note: The second pattern still has a race but the waste is bounded (both produce the same result, only one is cached). The first pattern (module init) is preferred.
-
----
-
-### MED-2: `flushGroupViewCounts` — `Promise.all` over 20 concurrent DB updates may exhaust connection pool
-
-**File:** `apps/web/src/lib/data.ts` (lines 107-138)
-**Confidence:** High
-**Previous Finding:** AGG-M4 (Run-9 Cycle-8 aggregate) — still present
-
-**Problem:** `FLUSH_CHUNK_SIZE = 20` with `Promise.all` over 20 concurrent `db.update()` calls. The connection pool limit is 10, so 10 updates queue and block. During a DB outage or high load, this creates unnecessary contention. The chunking was added to prevent 1000+ concurrent promises, but 20 is still above the pool limit.
-
-**Concrete Failure Scenario:**
-1. Buffer has 20 entries to flush
-2. `Promise.all` fires 20 concurrent `db.update()` calls
-3. Pool has 10 connections, so 10 queue
-4. Each queued promise holds memory and a closure
-5. During sustained high load, this pattern repeats every 5 seconds, accumulating memory pressure
-
-**Suggested Fix:** Reduce `FLUSH_CHUNK_SIZE` to 5 (half the pool limit) or use a sequential loop instead of `Promise.all`. Alternatively, use a bulk UPDATE with `CASE` expressions:
-```sql
-UPDATE shared_groups SET view_count = view_count + CASE id WHEN 1 THEN 5 WHEN 2 THEN 3 ... END
-WHERE id IN (1, 2, ...)
+const safeTags = Array.isArray(tagSlugs)
+    ? canonicalizeRequestedTagSlugs(tagSlugs).filter(isValidTagSlug)
+    : [];
 ```
 
 ---
 
-### MED-3: `BoundedMap` hard cap not enforced by `set()` — consumer must remember to call `prune()`
+#### MED-4: `backfillClipEmbeddings` missing restore-maintenance check
 
-**File:** `apps/web/src/lib/bounded-map.ts` (lines 65-68, 98-129)
-**Confidence:** High
-**Previous Finding:** AGG-M7 (Run-9 Cycle-8 aggregate) — still present
+**File:** `apps/web/src/app/actions/embeddings.ts:48`
+**Confidence:** MEDIUM
 
-**Problem:** The `BoundedMap.set()` method does not enforce the hard cap. If a consumer forgets to call `prune()` before or after `set()`, the Map grows unbounded. The class documentation says "Consumers should invoke `prune()` before reads and writes," but this is an easy-to-forget contract. The rate-limit consumers (`rate-limit.ts`, `auth-rate-limit.ts`) do call `prune()`, but future consumers may not.
+`backfillClipEmbeddings` checks `isAdmin()` and `requireSameOriginAdmin()` but does not check `isRestoreMaintenanceActive()`. During a DB restore, the `images` table may be locked or in an inconsistent state. The backfill reads from `images` and writes to `imageEmbeddings`, potentially creating stale references or failing with confusing errors.
 
-**Concrete Failure Scenario:**
-1. A new feature uses `BoundedMap` for a long-lived cache
-2. Developer reads the class name and assumes "bounded" means automatic enforcement
-3. Developer calls `set()` repeatedly without `prune()`
-4. Map grows beyond `maxKeys`, consuming unbounded memory
-5. Process eventually OOMs
-
-**Suggested Fix:** Auto-prune in `set()` when size exceeds cap, or make `prune()` private and call it internally. The simplest fix:
-```typescript
-set(key: K, value: V): this {
-    this.map.set(key, value);
-    this.prune(Date.now()); // Auto-enforce cap
-    return this;
-}
-```
+**Fix:** Add the standard maintenance gate at the beginning of the function.
 
 ---
 
-### MED-4: `processImageFormats` — `baseWidth` from upload metadata mixed with fresh `baseHeight` from Sharp
+#### MED-5: `createAdminUser` skips audit log when `safeInsertId` returns non-positive
 
-**File:** `apps/web/src/lib/process-image.ts` (lines 988-990)
-**Confidence:** High
-**Previous Finding:** AGG-M1 (Run-9 Cycle-8 aggregate) — still present
+**File:** `apps/web/src/app/actions/admin-users.ts:147-150`
+**Confidence:** HIGH
 
-**Problem:** The `processImageFormats` function receives `baseWidth` as a parameter from the upload flow but re-reads `baseHeight` fresh via Sharp metadata with `autoOrient: true` (line 988). If the original file is modified between upload and processing (e.g., by a concurrent backfill or file system operation), the width/height ratio could be inconsistent. The downscale gate at line 990 uses `baseWidth * baseHeight` with mixed freshness.
+If `safeInsertId(result.insertId)` returns 0 or negative (indicating a DB driver anomaly), the audit log is skipped because of the `if (newUserId > 0)` guard. The user was already created, but the audit trail has no record of who created them.
 
-**Concrete Failure Scenario:**
-1. Image uploaded with width=8000, height=6000 (48 MP, below 50M cap)
-2. Concurrent backfill or file system operation modifies the original file
-3. Queue worker picks up the job, reads fresh metadata: width=8000, height=7000 (56 MP, above cap)
-4. The downscale gate uses `baseWidth * baseHeight` where `baseWidth` is from upload (8000) but `baseHeight` is fresh (7000)
-5. Inconsistent dimensions could cause incorrect downscale decisions
-
-**Suggested Fix:** Either read both dimensions fresh in `processImageFormats` (ignoring the passed `baseWidth`) or pass both dimensions from the upload flow and validate consistency. The comment at lines 976-982 acknowledges this trade-off but does not document the risk.
+**Fix:** Log the audit event unconditionally, using the returned ID or a fallback marker.
 
 ---
 
-### MED-5: Fire-and-forget embedding IIFE in `image-queue.ts` is not tracked by `queue.onIdle()`
+#### MED-6: Smart collection actions missing restore-maintenance check
 
-**File:** `apps/web/src/lib/image-queue.ts` (lines 478-522)
-**Confidence:** Medium
-**Previous Finding:** AGG-M13 (Run-9 Cycle-8 aggregate) — still present
+**File:** `apps/web/src/app/actions/collections.ts:14`, `:61`, `:107`
+**Confidence:** MEDIUM
 
-**Problem:** The CLIP embedding hook uses `void (async () => { ... })()` (line 478) which is not tracked by the queue's job lifecycle. When `queue.onIdle()` resolves, the embedding may still be running. This means:
-1. The queue reports "idle" while embedding is still in progress
-2. Process shutdown may interrupt embedding mid-write
-3. The embedding DB write is not protected by the same retry logic as the image processing
+`createSmartCollection`, `updateSmartCollection`, and `deleteSmartCollection` do not check `isRestoreMaintenanceActive()`. Every other mutating admin action includes this check. During a restore, creating or updating a smart collection could produce stale data referencing topic slugs or tags about to be overwritten.
 
-**Concrete Failure Scenario:**
-1. Image processing completes, `processed=true` is committed
-2. Embedding IIFE starts, loads the CLIP model
-3. Admin triggers process shutdown (e.g., deploy)
-4. Queue reports idle, process exits
-5. Embedding is interrupted mid-write, leaving a partial or missing embedding row
-6. The image will never get an embedding unless manually re-processed
-
-**Suggested Fix:** Track the embedding promise in the job state and await it before marking the job complete. Alternatively, add the embedding to a separate, tracked task queue:
-```typescript
-// Instead of void (async () => { ... })()
-const embedPromise = (async () => { ... })();
-state.embedPromises.set(job.id, embedPromise);
-await embedPromise;
-state.embedPromises.delete(job.id);
-```
+**Fix:** Add the standard maintenance gate to all three functions.
 
 ---
 
-## LOW Severity Findings
+#### MED-7: `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` return mutable references to internal state
 
-### LOW-1: `uploadImages` catch block does not distinguish between file-write and DB-insert failures for cleanup
+**File:** `apps/web/src/lib/auth-rate-limit.ts:21-39`
+**Confidence:** HIGH
 
-**File:** `apps/web/src/app/actions/images.ts` (lines 476-494)
-**Confidence:** Medium
+Both functions return a reference to the internal map entry object (or a newly created literal). When the entry is stale, they mutate `entry.count = 0` in-place. If the entry came from the map, this mutates the stored object directly. Callers can bypass the intended API by modifying the returned entry.
 
-**Problem:** The catch block at line 476 cleans up `savedOriginalFilename` if it exists, but it does not check whether the file was actually written before attempting deletion. If the error occurred during `saveOriginalAndGetMetadata` (before the file was written), `savedOriginalFilename` is null and no cleanup is needed. If the error occurred after DB insert but before queue enqueue, the file is cleaned up but the DB row is orphaned (no cleanup). The catch block is correct for the file-write-before-DB case but does not handle the DB-inserted-but-queue-failed case.
-
-**Suggested Fix:** Track the state of the operation more explicitly (e.g., `state: 'file-written' | 'db-inserted' | 'queued'`) and handle cleanup accordingly. Alternatively, document that queue failures are handled by the retry logic in `image-queue.ts`.
+**Fix:** Return a shallow copy: `return { ...entry };`
 
 ---
 
-### LOW-2: `getServingColorSettingsHash` — `servingHashInflight` assignment in `finally` is not atomic
+#### MED-8: `deleteImageVariants` silently swallows ALL errors from `opendir`, not just ENOENT
 
-**File:** `apps/web/src/lib/serve-upload.ts` (lines 50-83)
-**Confidence:** Medium
+**File:** `apps/web/src/lib/process-image.ts:524-541`
+**Confidence:** HIGH
 
-**Problem:** The `servingHashInflight` is set to a new promise in the outer scope (line 59) and then nulled in the `finally` block (line 71). If two requests arrive simultaneously when the cache is stale:
-1. Request A checks `!servingHashInflight` (true), enters the `if` block
-2. Request A assigns `servingHashInflight = (async () => { ... })()`
-3. Request B checks `!servingHashInflight` (false, because A assigned it), skips the `if` block
-4. Request B reaches line 75, `cached` is truthy, returns stale hash — correct
-5. But if `cached` is null (cold start), both requests would wait on the same promise — also correct
+When `sizes` is empty, `deleteImageVariants` scans the entire directory. The `opendir` is wrapped in try/catch that silently swallows ALL errors, not just ENOENT. If `opendir` fails due to EACCES or EMFILE, the error is swallowed and only the base filename is deleted, leaving orphaned variants.
 
-The actual concern is subtler: if the async body throws before `finally`, the `servingHashInflight` is never nulled. But the code handles this: the `catch` block always returns a value, and `finally` always runs. So this is a false alarm. However, the pattern is complex enough that a future refactor could break it.
-
-**Suggested Fix:** Add a comment explaining the invariant that the async body never rejects (both branches return), so `finally` always runs. This is already implicitly true but not documented.
+**Fix:** Distinguish ENOENT from other errors and log non-ENOENT failures.
 
 ---
 
-### LOW-3: `image-queue.ts` `enqueueImageProcessing` doesn't validate job ID exists in DB before enqueuing
+#### MED-9: `processImageFormats` temp file cleanup may leave orphaned `.tmp` files on partial failure
 
-**File:** `apps/web/src/lib/image-queue.ts` (lines 243-280)
-**Confidence:** Medium
+**File:** `apps/web/src/lib/process-image.ts:1216-1234`
+**Confidence:** HIGH
 
-**Problem:** The `enqueueImageProcessing` function checks if a job is already enqueued (`state.enqueued.has(job.id)`) but does not validate that the job ID corresponds to a real image in the database. If a bug or malicious code generates a job with a non-existent ID, the queue worker will attempt to process it and fail. The worker's claim check handles this gracefully (line 322: "Image no longer pending, skipping"), but this wastes a queue slot and creates noise in the logs.
+The `generateForFormat` function adds `basePath` to `writtenSizedPaths[format]` AFTER the hard-link+rename succeeds. If the hard link succeeds but the rename fails, the code falls through to copyFile fallback. The `basePath` is only added in the success path. If `processImageFormats` throws after this partial state, the cleanup won't delete the `basePath` because it was never added to `writtenSizedPaths`. The `.tmp` file is also not tracked.
 
-**Suggested Fix:** Add a pre-enqueue validation in `uploadImages` to ensure the inserted ID is valid before enqueuing. This is already implicitly true (the ID comes from the DB insert result), but a defense-in-depth check would be beneficial.
-
----
-
-### LOW-4: `retryFailedImage` doesn't check if image is already being processed
-
-**File:** `apps/web/src/app/actions/images.ts` (lines 1085-1164)
-**Confidence:** Medium
-
-**Problem:** The `retryFailedImage` function checks `isAdmin()` and the image's `processed` status, but it does not check if the image is currently being processed by the queue. If an admin retries a failed image while the queue is already processing it (e.g., due to a retry loop), the queue may have two workers processing the same image concurrently. The per-image advisory lock (`gallerykit:image-processing:{jobId}`) should prevent this, but the retry function does not acquire this lock before enqueuing.
-
-**Suggested Fix:** Acquire the per-image advisory lock in `retryFailedImage` before enqueuing, or check if the image is already in the queue's `enqueued` set. Alternatively, document that the advisory lock in the queue worker handles this race.
+**Fix:** Add `tmpPath` to `writtenSizedPaths` before attempting link/copy, and add `basePath` before the operations so cleanup catches it on failure.
 
 ---
 
-### LOW-5: `processImageFormats` temp file cleanup in `catch` block may race with parallel format processing
+#### MED-10: `releaseImageProcessingClaim` can throw, leaving connection leaked on double-release
 
-**File:** `apps/web/src/lib/process-image.ts` (lines 994-1018)
-**Confidence:** Low
+**File:** `apps/web/src/lib/image-queue.ts:229-237`
+**Confidence:** HIGH
 
-**Problem:** The wide-gamut downscale intermediate is created at `tmpPath` (line 994) and used by all three formats in parallel via `Promise.all`. The `catch` block at line 1012-1016 deletes the temp file if the downscale throws. However, if one format's processing throws AFTER the downscale succeeds (e.g., during encoding), the `finally` block at line 1321-1324 deletes the temp file. Since all three formats run in parallel, if one format fails and triggers the `finally` while another is still reading from the temp file, the remaining format could fail with ENOENT.
+`releaseImageProcessingClaim` wraps `lockConnection.release()` in a `finally` block. If `RELEASE_LOCK` query throws and the connection was already released (e.g., by server idle timeout), `release()` may throw again. The caller at line 589 catches with `.catch()`, but the error is only logged. The connection may be leaked from the pool.
 
-Wait — the `finally` block is outside the `Promise.all`, so it only runs after ALL formats complete. This is actually correct. The concern is unfounded.
-
-However, there is a subtle issue: if the downscale itself throws, the `catch` block deletes the temp file. But what if the downscale partially writes the file before throwing? The `catch` block does `fs.unlink(tmpPath).catch(() => {})` which handles the case where the file doesn't exist, but it doesn't handle partial writes. This is a minor concern.
-
-**Suggested Fix:** The current code is correct. The `finally` block only runs after `Promise.all` resolves or rejects. However, consider adding a comment explaining this ordering to prevent future maintainers from refactoring it incorrectly.
+**Fix:** Wrap `release()` in its own try/catch inside the finally block.
 
 ---
 
-### LOW-6: `db-actions.ts` `failRestore` is async but called from sync event handlers without await
+#### MED-11: `enqueueImageProcessing` embedding hook races with image deletion
 
-**File:** `apps/web/src/app/[locale]/admin/db-actions.ts` (lines ~180-220)
-**Confidence:** Medium
-**Previous Finding:** AGG-M14 (Run-9 Cycle-8 aggregate) — still present
+**File:** `apps/web/src/lib/image-queue.ts:478-522`
+**Confidence:** MEDIUM
 
-**Problem:** `failRestore` is an async function called from sync event handlers (`readStream.on('error', ...)`). The error handler does not await the promise, so errors in `failRestore` are silently swallowed. Additionally, `failRestore` may perform DB operations (updating maintenance flags) that could fail, but these failures are not propagated.
+The fire-and-forget embedding hook starts AFTER `processed=true` is committed. If the image is deleted between the commit and the embedding read, `embedImageReal(originalPath)` fails with ENOENT. More critically, if the image is deleted and a NEW image is uploaded with the same `id` (auto-increment reuse after DB restore), the embedding hook could write to the wrong image's `image_embeddings` row.
 
-**Suggested Fix:** Use `.catch()` on the promise to log errors, or make `failRestore` synchronous (it only updates in-memory state and logs). If DB operations are needed, use `.catch()` to log and swallow:
-```typescript
-readStream.on('error', (err) => {
-    failRestore(err.message).catch((failErr) => {
-        console.error('failRestore error:', failErr);
-    });
-});
-```
+**Fix:** Add an existence check before embedding: verify the image still exists and is processed before writing the embedding.
 
 ---
 
-### LOW-7: `searchImagesAction` validation order — control chars stripped before length check
+### LOW Severity (optional)
 
-**File:** `apps/web/src/app/actions/public.ts` (lines 236-310)
-**Confidence:** Medium
-**Previous Finding:** AGG-L76 (Run-9 Cycle-8 aggregate) — still present
+#### LOW-1: `photo-viewer.tsx` keyboard handler has stale closure over `colorDetailsToggleRef` and `histogramCycleRef`
 
-**Problem:** The search query is sanitized with `stripControlChars` before length validation with `countCodePoints`. If a query contains control characters that get stripped, the resulting string could be shorter than the original. This means a query that passes the 2-character minimum after stripping might have been 1 character + 1 control character before stripping. While this is generally harmless, it could allow bypassing the minimum length check with a crafted query.
+**File:** `apps/web/src/components/photo-viewer.tsx:412`
+**Confidence:** HIGH
 
-**Concrete Failure Scenario:**
-1. Attacker sends query `"a\x00"` (1 visible char + 1 NUL)
-2. `stripControlChars` removes NUL, resulting in `"a"`
-3. `countCodePoints("a")` = 1, which is below the 2-char minimum
-4. Returns `{ status: 'invalid' }` — correct behavior
+The keyboard handler effect has `[navigate, showLightbox]` as dependencies, but the handler references `colorDetailsToggleRef.current`, `histogramCycleRef.current`, `setIsPinned`, `setShowBottomSheet`, and `setShowLightbox` which are not in the dependency array. While `set*` functions are stable, the `navigate` callback changes when `currentIndex` or `images` change, causing the handler to re-register with stale ref values.
 
-Actually, this appears to work correctly. The strip happens before the count, so the count is on the sanitized value. The concern is more subtle: if `stripControlChars` removes characters that should count toward the minimum, the validation is on the wrong value. But the current behavior is defensible — we validate what will actually be searched.
-
-**Suggested Fix:** Document the intent explicitly: the validation operates on the sanitized query that will be used for the search, not the raw input. This is correct behavior but should be documented.
+**Fix:** Add all referenced values to the dependency array, or use refs consistently.
 
 ---
 
-### LOW-8: `admin-backfill-runner.ts` `lastError` is last-writer-wins at concurrency > 1
+#### LOW-2: `lightbox.tsx` keyboard handler reads stale `colorPipOpen` state
 
-**File:** `apps/web/src/lib/admin-backfill-runner.ts` (lines ~400-450)
-**Confidence:** Medium
-**Previous Finding:** AGG-M19 (Run-9 Cycle-8 aggregate) — still present
+**File:** `apps/web/src/components/lightbox.tsx:357`
+**Confidence:** HIGH
 
-**Problem:** With concurrency > 1, multiple workers may set `lastError` concurrently; the last one wins. This means the admin UI may show an error from worker B even though worker A's error was more severe or more recent. The `lastError` field is a single string, not a log.
+The `handleKeyDown` callback reads `colorPipOpen` state directly, but the effect only re-registers when deps change. Between `setColorPipOpen` being called and the effect re-running, the old handler with the stale `colorPipOpen` value is still active.
 
-**Suggested Fix:** Collect all errors in an array (bounded to prevent unbounded growth) or use a structured error log per worker. Alternatively, document that `lastError` shows only the most recent error and may not represent the full picture.
+**Fix:** Use a ref for `colorPipOpen` (like `controlsVisibleRef`) and read from the ref in the handler.
+
+---
+
+#### LOW-3: `lightbox.tsx` slideshow timer doesn't reset on image change
+
+**File:** `apps/web/src/components/lightbox.tsx:202-219`
+**Confidence:** HIGH
+
+The slideshow timer effect only restarts when `isSlideshowActive` or `slideshowIntervalSeconds` change. When the user navigates to a new image while slideshow is active, the timer keeps running with its existing interval. If the timer was 2 seconds into a 5-second interval when the user navigated, the new image will only display for 3 seconds before advancing.
+
+**Fix:** Reset the slideshow timer when the image changes (add `image.id` to effect dependencies).
+
+---
+
+#### LOW-4: `search.tsx` semantic search fetch doesn't use `AbortController`
+
+**File:** `apps/web/src/components/search.tsx:175-211`
+**Confidence:** MEDIUM
+
+The semantic search fetch doesn't use an `AbortController`. If the user types rapidly, multiple fetches can be in flight simultaneously. While the `requestId` check prevents stale results from being committed, the stale fetches still complete unnecessarily, consuming bandwidth and server resources.
+
+**Fix:** Add an `AbortController`, abort the previous fetch before starting a new one.
+
+---
+
+#### LOW-5: `upload-dropzone.tsx` doesn't validate topic exists before each file upload
+
+**File:** `apps/web/src/components/upload-dropzone.tsx:198-316`
+**Confidence:** MEDIUM
+
+The `handleUpload` function checks `!hasTopics` at line 199 but only guards the initial call. The `topicRef.current` is read at line 222 and could be an empty string or invalid slug if `topics` prop changes during upload (e.g., topic deleted by another admin).
+
+**Fix:** Validate `topicRef.current` against the available topics list before each file upload.
+
+---
+
+#### LOW-6: `info-bottom-sheet.tsx` touch drag doesn't handle multi-touch
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx:77-123`
+**Confidence:** MEDIUM
+
+The touch handlers only track `e.touches[0]`. If the user places a second finger while dragging, `handleTouchMove` reads `e.changedTouches[0]` which may be the second finger, causing a jump in the sheet position.
+
+**Fix:** Track the touch identifier from `touchStart` and only respond to the same touch in `move` and `end`.
+
+---
+
+#### LOW-7: `histogram.tsx` worker creation lacks error handling
+
+**File:** `apps/web/src/components/histogram.tsx:526-532`
+**Confidence:** MEDIUM
+
+The worker creation effect creates a new worker on every mount but there's no error handling if `new Worker()` throws (e.g., if the script 404s). This would crash the histogram rendering.
+
+**Fix:** Wrap worker creation in try/catch and fall back to main-thread histogram computation.
+
+---
+
+#### LOW-8: `recordPhotoView` builds expensive view params before rate-limit check
+
+**File:** `apps/web/src/app/actions/public.ts:359-373`
+**Confidence:** MEDIUM
+
+`recordPhotoView`, `recordTopicView`, and `recordSharedGroupView` all call `buildViewParams(requestHeaders)` before `isViewRecordRateLimited(params.ip, Date.now())`. `buildViewParams` calls `getClientIp`, `sanitizeReferrerHost`, `lookupCountry`, and `isBot` — the last two may be expensive (GeoIP lookup, user-agent parsing). If the IP is rate-limited, this work is wasted.
+
+**Fix:** Move the rate-limit check before `buildViewParams`, extracting the IP directly.
+
+---
+
+#### LOW-9: `admin-backfill-runner.ts` `lastError` is last-writer-wins at concurrency > 1
+
+**File:** `apps/web/src/lib/admin-backfill-runner.ts:~400-450`
+**Confidence:** MEDIUM
+
+With concurrency > 1, multiple workers may set `lastError` concurrently; the last one wins. The admin UI may show an error from worker B even though worker A's error was more severe or more recent.
+
+**Fix:** Collect all errors in a bounded array, or document that `lastError` shows only the most recent error.
+
+---
+
+#### LOW-10: `audit.ts` `purgeOldAuditLog` does not chunk deletions
+
+**File:** `apps/web/src/lib/audit.ts:77`
+**Confidence:** MEDIUM
+
+`purgeOldAuditLog` runs a single `db.delete()` without chunking, which could delete millions of rows in one statement, holding a table lock and generating a large undo log. `view-retention.ts` correctly chunks deletions with `LIMIT` and `MAX_BATCHES_PER_TABLE`.
+
+**Fix:** Apply the same chunking pattern from `view-retention.ts` to `audit.ts`.
+
+---
+
+#### LOW-11: `db/index.ts` pool `.query()` and `.execute()` overrides add overhead
+
+**File:** `apps/web/src/db/index.ts:108-124`
+**Confidence:** MEDIUM
+
+The overridden `poolConnection.query` and `poolConnection.execute` methods acquire a dedicated connection, run the query, and release it in `finally`. This adds two extra async hops per query and may interfere with mysql2's internal connection management and retry logic.
+
+**Fix:** Remove the `.query` and `.execute` overrides. Expose dedicated-connection utilities as separate functions if needed.
+
+---
+
+#### LOW-12: `getClientIp` returns `'unknown'` for all non-proxy deployments, collapsing rate limits
+
+**File:** `apps/web/src/lib/rate-limit.ts:170-176`
+**Confidence:** HIGH
+
+When `TRUST_PROXY` is not set, `getClientIp` returns the literal string `'unknown'` for every request. All requests share a single rate-limit bucket. The code acknowledges this with a warning, but the fallback behavior is still dangerous for direct deployments.
+
+**Fix:** Document more prominently, or use a hash of additional request signals as a fallback discriminator.
+
+---
+
+#### LOW-13: `proxy.ts` middleware sets `x-gk-admin-render` based on cookie presence, not validity
+
+**File:** `apps/web/src/proxy.ts:128-130`
+**Confidence:** HIGH
+
+The middleware sets `x-gk-admin-render: 1` on any request that has an `admin_session` cookie, regardless of whether the cookie contains a valid session token. A user with an expired cookie gets their pages excluded from the SW offline cache.
+
+**Fix:** This is a deliberate trade-off (middleware doesn't do cryptographic validation). Document the invariant explicitly.
+
+---
+
+#### LOW-14: `isRateLimitExceeded` parameter `includesCurrentRequest` has confusing semantics
+
+**File:** `apps/web/src/lib/rate-limit.ts:128-130`
+**Confidence:** MEDIUM
+
+The function has inverted semantics: `includesCurrentRequest: true` means the count already includes the current request and the limit is exceeded when `count > maxRequests`. The naming suggests the opposite.
+
+**Fix:** Rename to `preIncremented` or `afterIncrement`, or add JSDoc explaining the semantics.
+
+---
+
+#### LOW-15: `upload-tracker-state.ts` uses `Date.now()` without monotonic clock guarantee
+
+**File:** `apps/web/src/lib/upload-tracker-state.ts:24,62,70`
+**Confidence:** LOW
+
+`Date.now()` is not monotonic — system clock changes (NTP sync, manual adjustment) can cause `now - entry.windowStart` to be negative or unexpectedly large, causing premature window resets or failure to prune expired entries.
+
+**Fix:** Use `process.hrtime.bigint()` or `performance.now()` for relative time comparisons, or add a guard for negative deltas.
 
 ---
 
@@ -299,18 +393,33 @@ The following items were deferred from previous cycles and are **still present**
 
 | ID | Description | Status |
 |----|-------------|--------|
-| AGG-05 | Admin photo detail public projection mismatch | Still pending — `data.ts` `getImage` still returns admin fields for admin users without a separate public projection path |
-| AGG-06 | DB restore validation hardening | Still pending — `db-actions.ts` still uses basic header checks without full SQL validation |
-| AGG-07 | Restore maintenance async hook fencing | Still pending — `getRestoreMaintenanceMessage` is checked synchronously but maintenance can begin asynchronously |
-| AGG-09 | Durable failed-image retry state | Still pending — `image-queue.ts` uses in-memory `retryCounts` Map, lost on restart |
-| AGG-10 | Backfill concurrency and memory safety | Still pending — `admin-backfill-runner.ts` still has the same concurrency model |
-| AGG-11 | Semantic search concurrency guard | Still pending — embedding IIFE is still fire-and-forget |
-| AGG-14 | Embedding model-version isolation | Still pending — `image_embeddings` table has `model_version` but no runtime enforcement |
-| AGG-15 | CLIP backfill pre-activation docs | Still pending — no docs for the `--production` backfill procedure in the codebase |
-| AGG-18 | Auto Alt-Text stub truthfulness | Still pending — stub caption generation is still non-transparent |
-| AGG-21 | View-retention index optimization | Still pending — no new index on `viewed_at` for purge queries |
-| AGG-22 | Rate-limit purge index optimization | Still pending — no new index on `resetAt` for purge queries |
-| AGG-23 | Docker resource limits documentation | Still pending — `docker-compose.yml` still has no resource limits |
+| AGG-05 | Admin photo detail public projection mismatch | Still pending |
+| AGG-06 | DB restore validation hardening | Still pending |
+| AGG-07 | Restore maintenance async hook fencing | Still pending |
+| AGG-09 | Durable failed-image retry state | Still pending |
+| AGG-10 | Backfill concurrency and memory safety | Still pending |
+| AGG-11 | Semantic search concurrency guard | Still pending |
+| AGG-14 | Embedding model-version isolation | Still pending |
+| AGG-15 | CLIP backfill pre-activation docs | Still pending |
+| AGG-18 | Auto Alt-Text stub truthfulness | Still pending |
+| AGG-21 | View-retention index optimization | Still pending |
+| AGG-22 | Rate-limit purge index optimization | Still pending |
+| AGG-23 | Docker resource limits documentation | Still pending |
+
+---
+
+## Run-10 Cycle-3 Fix Verification
+
+The following fixes from run-10 cycle-3 were verified as correctly applied:
+
+| Fix | File | Status |
+|-----|------|--------|
+| AGG-M1 | `process-image.ts` — read both dimensions fresh from Sharp | Verified — `freshBaseWidth` and `freshBaseHeight` both read from fresh metadata at line 986-988 |
+| AGG-M2 | `auth.ts` — precompute dummy Argon2 hash at module init | Verified — `dummyHashPromise` is now a `const` at module level, not lazy-initialized |
+| AGG-M3 | `bounded-map.ts` — auto-enforce hard cap in `set()` | Verified — `set()` now calls `enforceHardCap()` at line 69 |
+| AGG-M4 | `data.ts` — reduce view-count flush chunk from 20 to 5 | Verified — `FLUSH_CHUNK_SIZE` is now `5` at line 97 |
+| AGG-M5 | `db/index.ts` — clear stale init promise on DB connection timeout | Verified — `initPromise = null` set at line 102 before throwing |
+| AGG-M6 | `db-actions.ts` — make `failRestore` synchronous | Verified — `failRestore` is now synchronous (no `async` keyword) |
 
 ---
 
@@ -324,9 +433,9 @@ The following items were deferred from previous cycles and are **still present**
 - `settings-hash.ts` is focused on ETag hash computation
 
 **Needs Improvement:**
-- `data.ts` (1671 lines) handles data access, pagination, search, view counting, and privacy field selection. Consider splitting into `data-images.ts`, `data-topics.ts`, `data-search.ts`, `data-shared.ts`.
-- `image-queue.ts` (832 lines) handles queue management, bootstrap, GC scheduling, embedding hooks, and shutdown. The GC scheduling and embedding hooks could be extracted.
-- `process-image.ts` (1628 lines) is a god file with 15+ responsibilities. The aggregate already flags this as AGG-M12.
+- `data.ts` (1671 lines) handles data access, pagination, search, view counting, and privacy field selection. Consider splitting.
+- `image-queue.ts` (832 lines) handles queue management, bootstrap, GC scheduling, embedding hooks, and shutdown.
+- `process-image.ts` (1628 lines) is a god file with 15+ responsibilities.
 
 ### Open/Closed Principle (OCP)
 
@@ -369,7 +478,7 @@ The following items were deferred from previous cycles and are **still present**
 
 ### Upload Flow (images.ts -> process-image.ts -> image-queue.ts)
 
-**Well-structured with clear boundaries.** The `uploadImages` function passes `uploadConfig` settings to `enqueueImageProcessing` as a snapshot (CR-R9C6-01). If admin changes settings between upload and processing, the snapshot ensures consistency.
+**Well-structured with clear boundaries.** The `uploadImages` function passes `uploadConfig` settings to `enqueueImageProcessing` as a snapshot. If admin changes settings between upload and processing, the snapshot ensures consistency.
 
 **Potential Issue:** The bootstrap path (which re-enqueues unprocessed images on restart) loads settings from the current config, which could differ from the upload-time snapshot. This is documented behavior but could be surprising.
 
@@ -381,7 +490,7 @@ The following items were deferred from previous cycles and are **still present**
 
 **Robust.** Dual-layer rate limiting (IP-scoped + account-scoped), HMAC-SHA256 with timing-safe comparison, session fixation prevention.
 
-**Potential Issue:** The `login` function uses `unstable_rethrow(e)` for Next.js control flow signals. If a future refactor moves the redirect outside the try block, the `unstable_rethrow` call might not be reached.
+**Critical Issue:** The `deleteAdminUser` and LR token management functions bypass the `isAdmin()` gate, breaking the defense-in-depth model. See HIGH-1 and HIGH-2.
 
 ---
 
@@ -391,6 +500,7 @@ The following items were deferred from previous cycles and are **still present**
 - `_PrivacySensitiveKeys` ensures no sensitive fields leak to public queries
 - `_ColorKeysAreSettingKeys` ensures color-impacting settings are tracked in the hash
 - `JpegChromaSubsampling` union prevents invalid chroma values
+- `ColorPipelineDecision` type is used consistently
 
 ### Runtime Type Safety (Good)
 - `isJpegChromaSubsampling` narrows strings to the union type
@@ -398,8 +508,8 @@ The following items were deferred from previous cycles and are **still present**
 - `isValidSlug`, `isValidFilename` validate user input before DB operations
 
 **Needs Improvement:**
-- `uploadImages` receives `formData: FormData` which is inherently untyped. A Zod schema would improve compile-time safety.
-- `bulkUpdateImages` receives `input: BulkUpdateImagesInput` which is validated manually.
+- `uploadImages` receives `formData: FormData` which is inherently untyped
+- `bulkUpdateImages` receives `input: BulkUpdateImagesInput` which is validated manually
 
 ---
 
@@ -420,8 +530,9 @@ The following items were deferred from previous cycles and are **still present**
 
 ### Remaining Risks
 1. **Delete-during-processing:** Handled by queue worker (affectedRows === 0 -> cleanup)
-2. **Concurrent admin setting changes:** Upload processing contract lock prevents changes during uploads, but no lock for changes during backfill
-3. **Bootstrap continuation race:** `bootstrapped` flag prevents duplicate scans, but small window where both could pass the check
+2. **Concurrent admin setting changes:** Upload processing contract lock prevents changes during uploads
+3. **Bootstrap continuation race:** `bootstrapped` flag prevents duplicate scans
+4. **Auth bypass:** `deleteAdminUser` and LR token functions lack `isAdmin()` (HIGH-1, HIGH-2)
 
 ---
 
@@ -435,7 +546,7 @@ The following items were deferred from previous cycles and are **still present**
 
 4. **Strong security posture:** No hardcoded secrets, no SQL injection, no XSS, proper rate limiting, proper session management, proper file upload security.
 
-5. **Good test coverage:** 2064 tests passing with 0 failures, comprehensive fixture tests for critical paths.
+5. **Good test coverage:** 2064+ tests passing with 0 failures, comprehensive fixture tests for critical paths.
 
 6. **Type safety:** Zero TypeScript errors across the entire codebase, with strict configuration.
 
@@ -443,11 +554,15 @@ The following items were deferred from previous cycles and are **still present**
 
 8. **Graceful degradation:** The settings-hash fallback, the rate-limit fallback, the gallery-config fallback — all degrade gracefully when the DB is unavailable.
 
+9. **Run-10 cycle-3 fixes verified:** All 6 MEDIUM fixes from the previous cycle were correctly applied and verified against source.
+
+10. **Consistent rate-limit patterns:** The codebase follows a well-documented Pattern 1/2/3/4 taxonomy for rate-limit rollback semantics, with symmetric in-memory + DB counter management.
+
 ---
 
 ## Maintainability Recommendations
 
-1. **Extract large functions:** `uploadImages` (~400 lines), `processImageFormats` (~370 lines), and `login` (~180 lines) are very long. Consider extracting helper functions for readability.
+1. **Extract large functions:** `uploadImages` (~400 lines), `processImageFormats` (~370 lines), and `login` (~180 lines) are very long. Consider extracting helper functions.
 
 2. **Add unit tests for edge cases:**
    - Concurrent upload scenarios
@@ -461,18 +576,23 @@ The following items were deferred from previous cycles and are **still present**
 
 5. **Add a periodic orphan cleanup job:** While `cleanOrphanedTmpFiles` handles `.tmp` files, there's no cleanup for orphaned originals (files in `data/uploads/original/` with no DB record).
 
+6. **Standardize auth guard ordering:** Every mutating admin action should follow the exact same pattern: `maintenance -> isAdmin -> requireSameOriginAdmin -> ...`. Audit all actions for consistency.
+
 ---
 
 ## Conclusion
 
-GalleryKit is a well-engineered codebase with strong security practices, comprehensive color pipeline handling, and robust concurrency controls. The identified findings are minor and do not represent critical vulnerabilities or logic bugs. The architecture is sound and the code is production-ready.
+GalleryKit is a well-engineered codebase with strong security practices, comprehensive color pipeline handling, and robust concurrency controls. However, this cycle discovered two **HIGH-severity auth bypasses** that break the defense-in-depth model:
 
-The most significant finding (MED-1) is the `getDummyHash` TOCTOU race, which has been present across multiple cycles. The fix is straightforward (compute at module init time) and should be prioritized.
+1. **`deleteAdminUser`** (HIGH-1): Any authenticated user can delete other admin accounts
+2. **LR token management** (HIGH-2): Any authenticated user can mint admin-scoped PATs
 
-The other MEDIUM findings (MED-2 through MED-5) are edge-case hardening and maintainability improvements that should be addressed in the next development cycle.
+Both issues are straightforward to fix (add missing `isAdmin()` checks) and should be prioritized immediately. The MEDIUM and LOW findings are edge-case hardening and maintainability improvements that should be addressed in the next development cycle.
 
-**Recommendation:** COMMENT — address MED-1 through MED-5 in the next cycle. LOW findings can be addressed opportunistically or documented as known limitations.
+The run-10 cycle-3 fixes (AGG-M1 through AGG-M6) were all verified as correctly applied.
+
+**Recommendation:** REQUEST CHANGES — fix HIGH-1 and HIGH-2 before approval. Address MEDIUM findings in the next cycle. LOW findings can be addressed opportunistically or documented as known limitations.
 
 ---
 
-*End of Cycle 8 Code Review*
+*End of Cycle 9 Code Review (Multi-Agent Fan-Out)*

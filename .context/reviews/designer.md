@@ -1,19 +1,19 @@
-# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Cycle 8)
+# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Cycle 9)
 
 > **Date:** 2026-06-25
-> **Reviewer:** Designer Agent (Cycle 8 — Independent Review)
-> **Scope:** Full UI/UX audit of GalleryKit Next.js 16 photo gallery application at HEAD
+> **Reviewer:** Designer Agent (Cycle 9 — Independent Review)
+> **Scope:** Full UI/UX audit of GalleryKit Next.js 16 photo gallery application at HEAD (c0522dec)
 > **Framework:** Next.js 16.2, React 19, TypeScript 6, Tailwind CSS 3.4, shadcn/ui (new-york), Radix UI, next-intl, next-themes, Framer Motion
 
 ---
 
 ## 1. Executive Summary
 
-GalleryKit continues to demonstrate **exceptional UI/UX craftsmanship** across all assessed dimensions. The codebase reflects a mature, accessibility-first design system that has been refined through multiple review/fix cycles. This cycle 8 review confirms the project maintains its high standard with no new Critical or High-confidence issues identified.
+GalleryKit's UI/UX surface remains **exceptionally polished** with no new issues introduced since cycle 8. This cycle 9 review confirms all prior findings and verifies that the codebase maintains its A-grade quality. No UI components were modified in the run-10 cycle-2/cycle-3 convergence — the changes since cycle 8 were confined to backend fixes (DB connection timeout, Argon2 TOCTOU, view-count flush chunking, backfill test flakiness, process-image dimension consistency) and documentation updates.
 
 **Overall Grade: A**
 
-Key strengths (unchanged from cycle 7):
+Key strengths (unchanged from cycle 8):
 - Comprehensive WCAG 2.2 AAA-level accessibility (skip links, focus management, ARIA, keyboard navigation, reduced motion, high contrast)
 - Rigorous 44px touch-target enforcement with a blocking unit test
 - Thoughtful dark/light/OLED triple-theme system with perceptually-uniform oklch overrides
@@ -22,11 +22,14 @@ Key strengths (unchanged from cycle 7):
 - Strong perceived performance (content-visibility, eager loading, blur placeholders, intersection observer)
 - Defensive UX patterns (settle-before-close dialogs, IME composition guards, unmount guards)
 
-**Cycle 8 findings: 6 total** — 3 Medium confidence, 3 Low confidence. No Critical or High issues.
+**Cycle 9 findings: 6 total** — same 6 findings from cycle 8, all unchanged. No new issues. 0 Critical, 0 High, 3 Medium, 3 Low.
 
 **Previous findings status:**
-- Finding 3.1 (Analytics external links) — **FIXED** in commit c9d5501c (aria-label with "opens in new window" added to both photo links and shared album links)
+- Finding 3.1 (Analytics external links) — **FIXED** in commit c9f5501c (aria-label with "opens in new window" added to both photo links and shared album links)
 - Findings 3.2-3.6 — Still valid, not yet addressed. Retained below with updated verification notes.
+
+**Additional cycle 9 note:**
+- Tailwind safelist sub-44px value removed in commit a233d33c (CSS-01) — the `h-9` (36px) safelist entry in `tailwind.config.ts` was removed, ensuring no accidental sub-44px touch targets can be generated via JIT safelist. This is a belt-and-braces improvement that aligns with the touch-target audit philosophy.
 
 ---
 
@@ -54,6 +57,7 @@ Key strengths (unchanged from cycle 7):
 - `apps/web/src/components/load-more.tsx` — IntersectionObserver infinite scroll with button fallback
 - `apps/web/src/components/optimistic-image.tsx` — Image component with loading/retry/error states
 - `apps/web/src/components/photo-viewer-loading.tsx` — Photo viewer skeleton with pulse animation
+- `apps/web/src/components/register-service-worker.tsx` — SW registration (production only)
 
 ### Components (Admin)
 - `apps/web/src/components/admin-nav.tsx` — Admin navigation with active state, 44px touch targets
@@ -63,14 +67,33 @@ Key strengths (unchanged from cycle 7):
 - `apps/web/src/components/bulk-edit-dialog.tsx` — Tri-state bulk edit (leave/set/clear) for topics/titles/descriptions/tags
 - `apps/web/src/components/theme-provider.tsx` — next-themes wrapper
 - `apps/web/src/components/lazy-focus-trap.tsx` — FocusTrap re-export for SSR safety
+- `apps/web/src/components/i18n-provider.tsx` — Convenience wrapper for next-intl hooks
 
 ### UI Primitives (shadcn/ui)
 - `apps/web/src/components/ui/button.tsx` — CVA variants, all sizes floor at >=44px (min-h-11/size-11)
-- `apps/web/src/components/ui/input.tsx`, `label.tsx`, `switch.tsx`, `badge.tsx`, `tooltip.tsx`, etc.
+- `apps/web/src/components/ui/input.tsx` — min-h-11 touch target floor, focus rings, aria-invalid styling
+- `apps/web/src/components/ui/label.tsx` — Radix LabelPrimitive wrapper with disabled state styling
+- `apps/web/src/components/ui/switch.tsx` — 44px touch target with nested visible track (AGG-C3-01 fix)
+- `apps/web/src/components/ui/select.tsx` — SelectTrigger with min-h-11, scroll buttons, item indicators
+- `apps/web/src/components/ui/dialog.tsx` — Dialog with localized close button (AGG-M5), focus management
+- `apps/web/src/components/ui/alert-dialog.tsx` — AlertDialog with action/cancel buttons
+- `apps/web/src/components/ui/tooltip.tsx` — Tooltip with zero delay, zoom animation
+- `apps/web/src/components/ui/badge.tsx` — Badge variants with focus rings
+- `apps/web/src/components/ui/card.tsx` — Card with header/title/description/action/content/footer
+- `apps/web/src/components/ui/table.tsx` — Table with overflow-x-auto wrapper, hover states
+- `apps/web/src/components/ui/progress.tsx` — Progress bar with transform animation
+- `apps/web/src/components/ui/textarea.tsx` — Textarea with min-h-16, field-sizing-content
+- `apps/web/src/components/ui/skeleton.tsx` — Skeleton with animate-pulse
 
 ### Pages & Layouts
 - `apps/web/src/app/[locale]/layout.tsx` — Root layout, skip link, ThemeProvider, viewport meta
 - `apps/web/src/app/[locale]/(public)/layout.tsx` — Public layout with Nav, Footer, main content
+- `apps/web/src/app/[locale]/(public)/page.tsx` — Home page with metadata, JSON-LD, hreflang
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx` — Photo page with metadata, JSON-LD, prefetch links
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx` — Shared group with grid or photo viewer
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx` — Single shared photo page
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx` — Timeline with year scrubber, monthly grouping
+- `apps/web/src/app/[locale]/(public)/map/page.tsx` — Map page with MapLoader
 - `apps/web/src/app/[locale]/admin/(protected)/layout.tsx` — Auth guard redirect
 - `apps/web/src/app/[locale]/admin/login-form.tsx` — Login form with password visibility toggle
 - `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx` — Upload + image manager with failed-image retry
@@ -80,6 +103,8 @@ Key strengths (unchanged from cycle 7):
 - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx` — Topic CRUD with aliases
 - `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx` — Tag CRUD
 - `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx` — Password change form
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx` — Token management with create/revoke/copy dialogs
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx` — DB backup/restore/CSV export with confirmation dialogs
 
 ### Loading & Error States
 - `apps/web/src/app/[locale]/loading.tsx` — Global loading spinner with role="status"
@@ -91,11 +116,16 @@ Key strengths (unchanged from cycle 7):
 
 ### Styles
 - `apps/web/src/app/[locale]/globals.css` — Pretendard font, CSS variables for 3 themes, oklch P3 overrides, reduced-motion, forced-colors, masonry, Ken Burns, scrollbar-hide
+- `apps/web/tailwind.config.ts` — Tailwind configuration (sub-44px safelist value removed in CSS-01)
 
 ### Public Assets
 - `apps/web/public/sw.js` — Service worker (stale-while-revalidate images, offline HTML fallback)
 - `apps/web/public/histogram-worker.js` — Web Worker for histogram computation
 - `apps/web/public/fonts/` — Self-hosted Pretendard variable font
+
+### i18n Messages
+- `apps/web/messages/en.json` — English translations (full coverage)
+- `apps/web/messages/ko.json` — Korean translations (full coverage, key parity enforced)
 
 ---
 
@@ -103,17 +133,17 @@ Key strengths (unchanged from cycle 7):
 
 ### 3.1 [MEDIUM] Analytics Tables — Links Open in New Window Without Warning
 
-**Status: FIXED in cycle 8** — Verified at HEAD.
+**Status: FIXED in cycle 8** — Verified at HEAD (c0522dec).
 
 **File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` (lines 112-119, 221-228)
 
-**Verification:** Both photo links (line 116) and shared album links (line 226) now include `aria-label` with the "(opens in new window)" suffix:
+**Verification:** Both photo links (line 116) and shared album links (line 226) include `aria-label` with the "(opens in new window)" suffix:
 ```tsx
 aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new window)`}
 aria-label={`${row.shareKey} (opens in new window)`}
 ```
 
-This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied in a prior cycle and is confirmed present at HEAD.
+This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied in commit c9f5501c and is confirmed present at HEAD.
 
 ---
 
@@ -197,7 +227,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 4. WCAG 2.2 Compliance Matrix (Cycle 8 Verified)
+## 4. WCAG 2.2 Compliance Matrix (Cycle 9 Verified)
 
 | Guideline | Level | Status | Evidence |
 |-----------|-------|--------|----------|
@@ -241,7 +271,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 5. Accessibility Highlights (Cycle 8 Verified)
+## 5. Accessibility Highlights (Cycle 9 Verified)
 
 ### 5.1 Skip Link (`layout.tsx`)
 ```tsx
@@ -290,7 +320,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 6. Responsive Design (Cycle 8 Verified)
+## 6. Responsive Design (Cycle 9 Verified)
 
 ### 6.1 Breakpoints
 - `sm`: 640px | `md`: 768px (primary mobile/desktop divide) | `lg`: 1024px | `xl`: 1280px | `2xl`: 1536px
@@ -343,7 +373,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 7. Loading, Empty, and Error States (Cycle 8 Verified)
+## 7. Loading, Empty, and Error States (Cycle 9 Verified)
 
 ### 7.1 Loading States
 **Global Loading (`loading.tsx`)**
@@ -404,7 +434,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 8. Form Validation UX (Cycle 8 Verified)
+## 8. Form Validation UX (Cycle 9 Verified)
 
 ### 8.1 Login Form (`login-form.tsx`)
 - Password visibility toggle with `aria-label` and `aria-pressed`
@@ -456,7 +486,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 9. i18n and Localization (Cycle 8 Verified)
+## 9. i18n and Localization (Cycle 9 Verified)
 
 ### 9.1 Coverage
 - Full English and Korean translations in `messages/en.json` and `messages/ko.json`
@@ -476,9 +506,14 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 - Korean uses single fixed form: `{count}장` (no grammatical plural)
 - Asymmetry is intentional and documented (DOC-R5C3-07)
 
+### 9.4 Key Parity
+- Both `en.json` and `ko.json` have identical key structures
+- The i18n key-parity check enforces same key set across locales
+- Value shapes may differ by language (e.g., Korean omits plural blocks)
+
 ---
 
-## 10. Perceived Performance (Cycle 8 Verified)
+## 10. Perceived Performance (Cycle 9 Verified)
 
 ### 10.1 Image Loading
 - Blur placeholder (`blur_data_url`) rendered as background during AVIF/WebP decode
@@ -500,7 +535,7 @@ This satisfies WCAG 2.4.4 / 3.2.5 for screen reader users. The fix was applied i
 
 ---
 
-## 11. Touch-Target Audit (Cycle 8 Verified)
+## 11. Touch-Target Audit (Cycle 9 Verified)
 
 The blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts` continues to enforce the 44x44px minimum across all scanned directories:
 
@@ -515,12 +550,16 @@ The blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts` co
 - Sub-44 arbitrary values `min-h-[0-43px]`
 - Scale tokens (min-h-6, size-6, h-7, etc.) on interactive elements
 - `max-` ceiling exemption (does not flag `max-h-10` as a floor violation)
+- Native `<select>` with sub-44 heights (R4C16 DES-R4C16-04)
+- Raw `<input type="checkbox|radio">` wrapping elements with sub-44 sizes (R4C16 AGG-R8-03)
 
 **Post-lift note (run-4 cycle 15):** `ui/button.tsx` now floors ALL size variants at >=44px, so bare `size="sm"`/`size="icon"` consumers are actually compliant at runtime. The patterns are kept as belt-and-braces against future variant downgrades.
 
+**Additional cycle 9 note:** Tailwind safelist sub-44px value removed in commit a233d33c (CSS-01) — the `h-9` (36px) entry in `tailwind.config.ts` safelist was removed, preventing JIT-generated sub-44px classes from being available. This is a compile-time belt-and-braces improvement that complements the runtime touch-target audit.
+
 ---
 
-## 12. Design System Consistency (Cycle 8 Verified)
+## 12. Design System Consistency (Cycle 9 Verified)
 
 ### 12.1 Color Tokens
 - CSS variables for light/dark/OLED themes in `globals.css`
@@ -548,7 +587,7 @@ The blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts` co
 
 ---
 
-## 13. Information Architecture (Cycle 8 Verified)
+## 13. Information Architecture (Cycle 9 Verified)
 
 ### 13.1 Navigation Hierarchy
 ```
@@ -573,7 +612,8 @@ Admin (protected)
   ├── Password change
   ├── Users (admin CRUD)
   ├── Database (backup/restore/export)
-  └── Analytics (views by photo/topic/country/referrer/shared-album)
+  ├── Analytics (views by photo/topic/country/referrer/shared-album)
+  └── Lightroom Tokens (PAT management)
 ```
 
 ### 13.2 Breadcrumbs
@@ -589,7 +629,7 @@ Admin (protected)
 
 ---
 
-## 14. Defensive UX Patterns (Cycle 8 Verified)
+## 14. Defensive UX Patterns (Cycle 9 Verified)
 
 ### 14.1 Settle-Before-Close (DES-R4C14-B)
 Used consistently across all destructive dialogs:
@@ -598,6 +638,7 @@ Used consistently across all destructive dialogs:
 - `tag-manager.tsx` — Delete tag
 - `admin-user-manager.tsx` — Delete user
 - `bulk-edit-dialog.tsx` — Close while submitting
+- `tokens-client.tsx` — Revoke token dialog
 
 Pattern: `onOpenChange` checks `!isDeleting` before allowing close; `AlertDialogAction` uses `e.preventDefault()` to suppress Radix auto-close; dialog stays open with spinner until action settles.
 
@@ -618,19 +659,74 @@ Pattern: `onOpenChange` checks `!isDeleting` before allowing close; `AlertDialog
 
 ---
 
-## 15. Cycle 8 Conclusion
+## 15. UI Primitive Quality (Cycle 9 Verified)
 
-GalleryKit's UI/UX surface remains **exceptionally polished** with no new issues introduced since cycle 7. The one previously identified Medium issue (analytics external links) has been fixed. The remaining 5 findings are all Low-to-Medium confidence polish items that do not block any user workflow.
+### 15.1 Button (`ui/button.tsx`)
+- All size variants floor at >=44px (`min-h-11`, `size-11`, `size-12`)
+- Focus-visible ring with 3px width
+- `aria-invalid` styling for validation states
+- `disabled:pointer-events-none` prevents interaction on disabled buttons
+- `asChild` pattern via Radix Slot for flexible composition
+
+### 15.2 Switch (`ui/switch.tsx`)
+- 44px touch target via `min-h-11 min-w-11` on Root (AGG-C3-01)
+- Visible track is a normally-proportioned pill nested inside the hit area
+- Thumb travels full width via `translate-x-full` (not fixed 20px)
+- `group-data-[state=checked]` for state-dependent styling
+
+### 15.3 Select (`ui/select.tsx`)
+- SelectTrigger with `min-h-11` for both `sm` and `default` sizes
+- Scroll up/down buttons for long lists
+- Item indicator with CheckIcon
+- `aria-invalid` styling consistent with Input
+
+### 15.4 Dialog (`ui/dialog.tsx`)
+- Localized close button label from i18n (AGG-M5)
+- `max-h-[calc(100dvh-2rem)]` for mobile safety
+- `overflow-y-auto` for long content
+- Focus management via Radix DialogPrimitive
+
+### 15.5 Alert Dialog (`ui/alert-dialog.tsx`)
+- Action button uses `buttonVariants()` (primary style)
+- Cancel button uses `buttonVariants({ variant: "outline" })`
+- Consistent header/footer layout with `flex-col-reverse` on mobile
+
+### 15.6 Tooltip (`ui/tooltip.tsx`)
+- `delayDuration={0}` for immediate feedback
+- `sideOffset={4}` for spacing from trigger
+- Zoom animation with fade
+- `bg-primary text-primary-foreground` for high contrast
+
+### 15.7 Input (`ui/input.tsx`)
+- `min-h-11` touch target floor
+- `focus-visible:ring-[3px]` for visible focus state
+- `aria-invalid` styling for validation errors
+- `selection:bg-primary` for text selection color
+- `file:` pseudo-class for file input styling
+
+### 15.8 Textarea (`ui/textarea.tsx`)
+- `min-h-16` for multi-line input (larger than single-line Input)
+- `field-sizing-content` for auto-expanding height
+- Same focus ring and aria-invalid styling as Input
+
+---
+
+## 16. Cycle 9 Conclusion
+
+GalleryKit's UI/UX surface remains **exceptionally polished** with no new issues introduced since cycle 8. The codebase has not changed in any UI/UX-relevant way since the cycle 8 review — the intervening commits focused on backend stability (DB connection timeout handling, Argon2 TOCTOU race closure, view-count flush chunking, backfill test flakiness, process-image dimension consistency) and documentation.
+
+The one CSS-related improvement (CSS-01: removing a sub-44px Tailwind safelist value) is a welcome belt-and-braces enhancement that aligns with the touch-target audit philosophy but does not change any runtime behavior.
 
 **Recommendations for future cycles:**
 1. Consider implementing dynamic ARIA live regions for swipe gestures (finding 3.2) if touch-screen screen reader usage grows
 2. Add a visible zoom-level indicator to `image-zoom.tsx` (finding 3.4) to benefit all users, not just high-contrast users
 3. Enhance upload rejection toasts with per-file reasons (finding 3.6) for better batch upload UX
+4. Consider adding a subtle drag handle or visual cue to the mobile search overlay (finding 3.3) to reinforce the modal metaphor
 
-**No fixes are required for cycle 8.** The codebase maintains its A-grade UI/UX quality.
+**No fixes are required for cycle 9.** The codebase maintains its A-grade UI/UX quality.
 
 ---
 
 *Review completed: 2026-06-25*
-*Cycle 8 of review-plan-fix loop*
-*HEAD: 87065049*
+*Cycle 9 of review-plan-fix loop*
+*HEAD: c0522dec*

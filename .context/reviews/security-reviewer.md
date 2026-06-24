@@ -1,6 +1,6 @@
 # Security Review Report — GalleryKit
 
-**Scope:** GalleryKit repository at HEAD f13130aeb
+**Scope:** GalleryKit repository at HEAD c0522dec
 **Reviewer:** Security Reviewer (OWASP Top 10, secrets, auth, input validation, data protection)
 **Date:** 2026-06-25
 **Risk Level:** LOW (no confirmed exploitable vulnerabilities; defense-in-depth gaps identified)
@@ -26,7 +26,7 @@
 **Severity:** MEDIUM (was) → CLOSED  
 **Category:** A10: Server-Side Request Forgery (SSRF) — Defense in Depth  
 **Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:115` (was)  
-**Status:** FIXED at HEAD f13130aeb
+**Status:** FIXED at HEAD c0522dec
 
 **Previous Issue:** The `fetchOrigin` variable fell back to `new URL(req.url).origin` when `siteConfig.url` was unparseable, creating a weak blind-SSRF primitive if an attacker controlled the Host header.
 
@@ -52,7 +52,7 @@ try {
 **Severity:** MEDIUM (was) → CLOSED  
 **Category:** A01: Broken Access Control — Open Redirect  
 **Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:253-260` (was)  
-**Status:** FIXED at HEAD f13130aeb
+**Status:** FIXED at HEAD c0522dec
 
 **Previous Issue:** The `buildFallbackResponse` function redirected to `ogImageUrl` without validating its origin, creating an open-redirect primitive if the admin-configured SEO OG image URL was compromised.
 
@@ -105,7 +105,7 @@ if (ogImageUrl) {
 **Location:** `apps/web/src/lib/safe-json-ld.ts`  
 **Status:** ACCEPTED — implementation is correct per OWASP guidance
 
-**Previous Issue:** Concern about `/` (forward slash) not being escaped, which could theoretically allow `</script>` injection.
+**Previous Issue:** Concern about `/` (forward slash) not being escaped, which could theoretically allow `</script>` termination.
 
 **Current State:** The `<` escape (`<`) prevents `</script>` termination. The current implementation is correct and follows OWASP guidance for JSON serialization in HTML contexts. All data flowing into `safeJsonLd` is either hardcoded (JSON-LD structure) or from validated database fields. Admin-controlled strings pass through `sanitizeAdminString` / `stripControlChars` before reaching JSON-LD.
 
@@ -117,7 +117,7 @@ if (ogImageUrl) {
 **Severity:** LOW (was) → CLOSED  
 **Category:** A05: Security Misconfiguration  
 **Location:** `apps/web/next.config.ts`  
-**Status:** FIXED at HEAD f13130aeb
+**Status:** FIXED at HEAD c0522dec
 
 **Previous Issue:** The application did not set the `Strict-Transport-Security` (HSTS) header in application code.
 
@@ -130,6 +130,38 @@ if (ogImageUrl) {
 This is applied in production (not development) alongside other security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` with camera/microphone/geolocation denial). The nginx configuration (`apps/web/nginx/default.conf`) also carries the same HSTS directive.
 
 **Status:** Fixed. Both application and proxy levels now enforce HSTS.
+
+---
+
+## New Security-Relevant Changes Since Prior Review (HEAD f13130aeb → c0522dec)
+
+### AGG-M2: Precomputed Dummy Argon2 Hash at Module Init
+**Location:** `apps/web/src/app/actions/auth.ts:65-68`  
+**Impact:** Positive — closes a TOCTOU race condition where concurrent logins after restart could race the lazy initialization of the dummy hash. The dummy hash is now computed once at module initialization (not lazily), ensuring consistent timing-equalization behavior from the first login attempt.
+
+```typescript
+const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
+```
+
+**Security Relevance:** Prevents timing-based user enumeration attacks that could exploit the window between module load and first dummy hash computation.
+
+### AGG-M3: BoundedMap Auto-Enforces Hard Cap on Write
+**Location:** `apps/web/src/lib/bounded-map.ts:67-88`  
+**Impact:** Positive — prevents unbounded growth in rate-limit Maps when consumers forget to call `prune()` explicitly. The class name implies bounded behavior; this change makes it truly bounded by auto-evicting oldest entries on every `set()` call.
+
+**Security Relevance:** Prevents memory exhaustion from forgotten prune calls in rate-limiting code paths.
+
+### AGG-M4: View-Count Flush Chunk Reduced from 20 to 5
+**Location:** `apps/web/src/lib/data.ts:66`  
+**Impact:** Positive — reduces connection pool exhaustion risk during view-count flush operations. The smaller chunk size (5 concurrent updates instead of 20) leaves more connections available for live request traffic.
+
+**Security Relevance:** Prevents denial-of-service via view-count buffer flooding that could starve the connection pool.
+
+### AGG-M1: Fresh Dimension Read from Sharp
+**Location:** `apps/web/src/lib/process-image.ts:983-997`  
+**Impact:** Positive — reads both dimensions fresh from Sharp at processing time instead of using the upload-time width. Prevents mixed-freshness inconsistency if the original file is modified between upload and processing.
+
+**Security Relevance:** Prevents potential bypass of the 50 MP wide-gamut downscale gate if a file is swapped after upload validation.
 
 ---
 
@@ -298,30 +330,6 @@ All three security lint gates passed:
 
 ---
 
-## New Security-Relevant Changes Since Prior Review (HEAD d24f2a6d → f13130aeb)
-
-### AGG9R-02: Centralized Origin Verification in `withAdminAuth`
-**Location:** `apps/web/src/lib/api-auth.ts`  
-**Impact:** Positive — closes a defense-in-depth gap where API routes previously relied on each caller adding its own `hasTrustedSameOrigin` check. The `withAdminAuth` wrapper now enforces origin verification centrally, so any future admin API route automatically gets CSRF defense matching the server action posture.
-
-### R5-H4 / R5-H5: OG Route Fail-Closed + Origin-Validated Redirect
-**Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx`  
-**Impact:** Positive — closes the two MEDIUM findings from the prior review. The SSRF fallback now fails closed, and the open redirect now validates origin parity.
-
-### HSTS in `next.config.ts`
-**Location:** `apps/web/next.config.ts:86`  
-**Impact:** Positive — closes the LOW finding about missing HSTS in application code. Production deployments now emit `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload`.
-
-### Content-Type Validation on Semantic Search
-**Location:** `apps/web/src/app/api/search/semantic/route.ts:115-125`  
-**Impact:** Positive — tightens from `.includes('application/json')` to a prefix check that rejects JSON sub-types (e.g., `application/json-patch+json`, `application/ld+json`) that do not belong on this endpoint. Also rejects chunked transfer encoding.
-
-### Semantic Search Body Size Guard
-**Location:** `apps/web/src/app/api/search/semantic/route.ts:96, 133-163`  
-**Impact:** Positive — rejects oversized payloads (`MAX_SEMANTIC_BODY_BYTES = 8192`) before parsing, and double-checks after `request.text()`.
-
----
-
 ## Conclusion
 
 GalleryKit's security posture is **strong and has improved since the prior review**. The codebase demonstrates mature security engineering with:
@@ -335,7 +343,11 @@ GalleryKit's security posture is **strong and has improved since the prior revie
 7. **Audit and monitoring**: Fire-and-forget audit logging, structured error responses, stderr sanitization
 8. **Security headers**: CSP with nonce, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, X-Content-Type-Options
 
-**All findings from the prior review have been remediated.** No new CRITICAL, HIGH, or MEDIUM findings were identified in this review.
+**All findings from the prior review have been remediated.** No new CRITICAL, HIGH, or MEDIUM findings were identified in this review. The changes since the last review (f13130aeb → c0522dec) are all positive security improvements:
+- AGG-M2: Precomputed dummy Argon2 hash closes TOCTOU race
+- AGG-M3: BoundedMap auto-enforces hard cap preventing memory exhaustion
+- AGG-M4: Smaller view-count flush chunks prevent pool exhaustion
+- AGG-M1: Fresh dimension reads prevent potential gate bypass
 
 **Recommended ongoing maintenance:**
 1. Continue maintaining the three security lint gates as blocking CI checks
@@ -344,4 +356,4 @@ GalleryKit's security posture is **strong and has improved since the prior revie
 
 ---
 
-*Report generated by Security Reviewer agent. All findings verified against source code at HEAD f13130aeb.*
+*Report generated by Security Reviewer agent. All findings verified against source code at HEAD c0522dec.*

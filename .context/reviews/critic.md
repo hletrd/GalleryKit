@@ -1,17 +1,19 @@
 # GalleryKit Comprehensive Multi-Perspective Critique
 
 **Repository:** /Users/hletrd/flash-shared/gallery
-**HEAD:** 87065049
+**HEAD:** c0522dec
 **Date:** 2026-06-25
 **Reviewer:** Critic (multi-perspective analysis)
 **Scope:** 453 source files, ~70,327 LOC, 228+ unit tests, 6 e2e tests
-**Delta since last review (f13130ae):** 12 commits — docs fixes (JSDoc, comments, env vars), test fix (racy setImmediate), UI fixes (aria-labels, clipboard fallback), code fixes (epsilon zero-check, rate-limit numbering), Tailwind safelist cleanup
+**Delta since last review (87065049):** 8 commits — 6 MEDIUM fixes (auth TOCTOU, BoundedMap hard cap, failRestore async, view-count flush chunk, DB connection timeout, process-image dimension freshness), 1 test fix (racy setImmediate), 1 SW version stamp
 
 ---
 
 ## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-The GalleryKit codebase remains exceptionally well-engineered. The delta since the last review shows continued attention to detail (epsilon-based cosineSimilarity zero check, Tailwind safelist cleanup, analytics aria-labels, JSDoc corrections). However, the structural concerns identified in prior reviews persist, and new findings from this cycle reinforce the need for architectural attention in specific areas. The reservations center on: (1) god-file anti-patterns that compound with each new feature, (2) process-local state that weakens under operational stress, (3) missing abstractions that would reduce contributor onboarding friction, and (4) several new maintainability gaps identified in this cycle.
+The GalleryKit codebase remains exceptionally well-engineered. The delta since the last review demonstrates continued disciplined attention to correctness: 6 MEDIUM-severity findings from the prior cycle were all fixed with clean, minimal changes. The fixes show good judgment — each addresses the root cause without over-engineering. However, the structural concerns identified in prior reviews persist, and the remaining UNCHANGED findings still warrant architectural attention.
+
+The reservations center on: (1) god-file anti-patterns that compound with each new feature, (2) process-local state that weakens under operational stress, (3) missing abstractions that would reduce contributor onboarding friction, and (4) several long-standing maintainability gaps that remain open after multiple review cycles.
 
 ---
 
@@ -31,11 +33,15 @@ The GalleryKit codebase remains exceptionally well-engineered. The delta since t
 | 10. Test suite has fixture-based coverage but lacks mutation testing | MINOR | Confirmed: Extensive fixture tests but no property-based or mutation testing; vitest.config.ts has no coverage config | Yes |
 | 11. `processImageFormats` has grown to 14 positional parameters | MAJOR | Confirmed: 14 positional parameters in processImageFormats; call site in image-queue.ts already line-breaks the arg list | Yes (UNCHANGED) |
 | 12. Fire-and-forget embedding hook can outlive job lifecycle | MAJOR | Confirmed: `void (async () => { ... })()` in image-queue.ts is not tracked by queue.onIdle() | Yes (UNCHANGED) |
-| 13. `failRestore` is async but called from sync event handlers | MAJOR | Confirmed: `failRestore` declared async, called from `readStream.on('error')` without await | Yes (UNCHANGED) |
+| 13. `failRestore` is async but called from sync event handlers | MAJOR | **FIXED in commit 3966ef0e** — now synchronous with `.catch()` on fs.unlink | Yes (FIXED) |
 | 14. `uploadImages` sequential loop holds request open for 100 files | MINOR | Confirmed: Strictly sequential `for...of` with DB insert + tag lookup + enqueue per file | Yes (UNCHANGED) |
-| 15. `getDummyHash` TOCTOU race on first login | MAJOR | Confirmed: Two concurrent logins after restart both see `dummyHashPromise === null` and start separate Argon2 computations | Yes (UNCHANGED) |
-| 16. `BoundedMap` hard cap not enforced by `set()` | MAJOR | Confirmed: `set()` does not auto-prune; consumer must call `prune()` separately | Yes (UNCHANGED) |
+| 15. `getDummyHash` TOCTOU race on first login | MAJOR | **FIXED in commit d8b20600** — precomputed at module init as `const dummyHashPromise` | Yes (FIXED) |
+| 16. `BoundedMap` hard cap not enforced by `set()` | MAJOR | **FIXED in commit beba3a8d** — `set()` now auto-calls `enforceHardCap()` | Yes (FIXED) |
 | 17. `color-details-section.tsx` and `lightbox-color-pip.tsx` duplicate IIFE logic | MINOR | Confirmed: Identical delivered-bit-depth IIFE duplicated across two components | Yes (UNCHANGED) |
+| 18. `normalizeExposureTime` NaN/Infinity guard missing | MINOR | **FIXED in commit fdf44376** — added `Number.isFinite(val[0]) && Number.isFinite(val[1])` guard (C8R-C8-02) | Yes (FIXED) |
+| 19. View-count flush chunk too large | MAJOR | **FIXED in commit cc1b8ec6** — reduced from 20 to 5 (FLUSH_CHUNK_SIZE) | Yes (FIXED) |
+| 20. DB connection timeout stale init promise | MAJOR | **FIXED in commit 6da830d0** — clears `connectionInitSymbol` on timeout so next attempt retries | Yes (FIXED) |
+| 21. `processImageFormats` mixed dimension freshness | MAJOR | **FIXED in commit fdf44376** — reads both dimensions fresh from Sharp, ignores upload-time baseWidth | Yes (FIXED) |
 
 ---
 
@@ -93,7 +99,7 @@ export async function processImageFormats(
 ): Promise<...>
 ```
 
-The call site in `image-queue.ts` (lines 371-386) already line-breaks the argument list across 15 lines. Every new admin tunable adds another parameter. The parameter order is not intuitive (why is `wideGamutMaxSourcePixels` last but `wideGamutJpegChroma` 11th?).
+The call site in `image-queue.ts` (lines 381-396) already line-breaks the argument list across 15 lines. Every new admin tunable adds another parameter. The parameter order is not intuitive (why is `wideGamutMaxSourcePixels` last but `wideGamutJpegChroma` 11th?).
 
 **Why this matters:** Positional parameters with 14 args are error-prone. Swapping `avifEffort` and `sdrJpegChroma` (both numbers) would compile but produce wrong output. The function signature is unreadable at call sites.
 
@@ -149,36 +155,7 @@ The embedding hook is fired as `void (async () => { ... })()` — a floating pro
 
 ---
 
-### 5. `failRestore` is Async but Called from Synchronous Event Handlers
-**File:** `apps/web/src/app/[locale]/admin/db-actions.ts`, lines 465-487
-**Confidence:** HIGH
-**First identified:** Prior review cycle (run-9)
-**Status:** UNCHANGED
-
-```typescript
-const failRestore = async (error: string, logLabel: string, reason: unknown) => {
-    // ... uses await internally ...
-};
-
-readStream.on('error', async (err) => {
-    await failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err);
-});
-```
-
-The `async` keyword on the event handler callback does NOT make the event emitter wait for the promise. If `failRestore` throws (e.g., `fs.unlink` fails), the rejection becomes an unhandled promise rejection.
-
-**Why this matters:** Unhandled promise rejections from `failRestore` could crash the Node process on newer Node versions. The `settled` guard provides some protection, but the pattern is fundamentally wrong for event handlers.
-
-**Fix:** Make `failRestore` synchronous (remove `async`), use `.catch()` on the `fs.unlink` promise, or make the event handlers fire-and-forget with explicit `.catch()`:
-```typescript
-readStream.on('error', (err) => {
-    failRestore(...).catch(e => console.error('failRestore error:', e));
-});
-```
-
----
-
-### 6. In-Memory Rate Limit Maps Are Process-Local with No Runtime Warning
+### 5. In-Memory Rate Limit Maps Are Process-Local with No Runtime Warning
 **File:** `apps/web/src/lib/rate-limit.ts`, lines 77, 87, 286
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -192,7 +169,7 @@ readStream.on('error', (err) => {
 
 ---
 
-### 7. Settings-Hash ETag Does Not Invalidate Static-Path Derivatives
+### 6. Settings-Hash ETag Does Not Invalidate Static-Path Derivatives
 **File:** `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/settings-hash.ts`
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -206,7 +183,7 @@ The settings-hash ETag is ONLY emitted by the `serve-upload.ts` route handler (f
 
 ---
 
-### 8. Server Actions Have Duplicated Auth/Validation Boilerplate
+### 7. Server Actions Have Duplicated Auth/Validation Boilerplate
 **Files:** `apps/web/src/app/actions/*.ts` (14 files, 50 async exports)
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -228,7 +205,7 @@ This is 84 lines of duplication across 14 files. A change to the auth flow requi
 
 ---
 
-### 9. The `images` Table is a Wide Table Anti-Pattern
+### 8. The `images` Table is a Wide Table Anti-Pattern
 **File:** `apps/web/src/db/schema.ts`, lines 19-117
 **Confidence:** MEDIUM
 **First identified:** Prior review cycle (run-9)
@@ -240,7 +217,7 @@ The `images` table has 40+ columns, mixing file metadata, EXIF data, color/HDR p
 
 ---
 
-### 10. Component Test Coverage is Thin
+### 9. Component Test Coverage is Thin
 **Files:** `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/histogram.tsx`
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -254,7 +231,7 @@ These components are among the most complex UI components but have no dedicated 
 
 ---
 
-### 11. Missing Storage Backend Abstraction Integration
+### 10. Missing Storage Backend Abstraction Integration
 **File:** `apps/web/src/lib/storage/` (index.ts, types.ts, local.ts)
 **Confidence:** MEDIUM
 **First identified:** Prior review cycle (run-9)
@@ -266,7 +243,7 @@ The `@/lib/storage` module exists as an internal abstraction with a full `Storag
 
 ---
 
-### 12. Docker Compose Missing Resource Limits and Health Checks
+### 11. Docker Compose Missing Resource Limits and Health Checks
 **File:** `apps/web/docker-compose.yml`, `Dockerfile`
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -284,7 +261,7 @@ The root `package.json` has no `engines` field, while `apps/web/package.json` co
 
 ## Minor Findings (suboptimal but functional)
 
-### 13. `getClientIp` Returns 'unknown' Without `TRUST_PROXY`, Causing Shared Rate-Limit Bucket
+### 12. `getClientIp` Returns 'unknown' Without `TRUST_PROXY`, Causing Shared Rate-Limit Bucket
 **File:** `apps/web/src/lib/rate-limit.ts`, lines 145-176
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -296,7 +273,7 @@ When `TRUST_PROXY` is not set, `getClientIp` returns `'unknown'` for all request
 
 ---
 
-### 14. `uploadImages` Sequential File Processing Loop
+### 13. `uploadImages` Sequential File Processing Loop
 **File:** `apps/web/src/app/actions/images.ts`, lines 267-494
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -308,8 +285,8 @@ The `uploadImages` action processes files in a strictly sequential `for...of` lo
 
 ---
 
-### 15. `decimalToRational` Has Magic Threshold
-**File:** `apps/web/src/lib/process-image.ts`, lines 1343-1350
+### 14. `decimalToRational` Has Magic Threshold
+**File:** `apps/web/src/lib/process-image.ts`, lines 1344-1350
 **Confidence:** LOW
 **First identified:** Prior review cycle (run-9)
 **Status:** UNCHANGED
@@ -318,7 +295,7 @@ The `0.001` epsilon for matching `1/denominator` to the input value is undocumen
 
 ---
 
-### 16. `stripGpsFromOriginal` Uses Inconsistent Logging Style
+### 15. `stripGpsFromOriginal` Uses Inconsistent Logging Style
 **File:** `apps/web/src/lib/process-image.ts`, lines 1589-1625
 **Confidence:** LOW
 **First identified:** Prior review cycle (run-9)
@@ -328,7 +305,7 @@ Most of the file uses string interpolation (`console.warn(\`[verify-webp] ${mess
 
 ---
 
-### 17. `getLatestImageForOg` JSDoc Claims `cache()` Wrapping
+### 16. `getLatestImageForOg` JSDoc Claims `cache()` Wrapping
 **File:** `apps/web/src/lib/data.ts`, lines 876-890
 **Confidence:** LOW
 **First identified:** Prior review cycle (run-9)
@@ -338,7 +315,7 @@ The JSDoc says "Wrapped in `cache()` for SSR dedup" but the function is not actu
 
 ---
 
-### 18. `searchImages` Has N+1 Query Risk
+### 17. `searchImages` Has N+1 Query Risk
 **File:** `apps/web/src/lib/data.ts`, lines 1407-1546
 **Confidence:** MEDIUM
 **First identified:** Prior review cycle (run-9)
@@ -348,7 +325,7 @@ The `searchImages` function runs up to 3 queries: main query, tag query, alias q
 
 ---
 
-### 19. `settings.ts` Validation Occurs Outside Transaction Scope
+### 18. `settings.ts` Validation Occurs Outside Transaction Scope
 **File:** `apps/web/src/app/actions/settings.ts`, lines 82-148
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -360,17 +337,19 @@ The validation for `image_sizes`/`strip_gps_on_upload` (lines 82-134) runs BEFOR
 
 ---
 
-### 20. `db-actions.ts` Restore Has Stream Error Handling Gaps
+### 19. `db-actions.ts` Restore Has Stream Error Handling Gaps
 **File:** `apps/web/src/app/[locale]/admin/db-actions.ts`, lines 465-520
 **Confidence:** MEDIUM
 **First identified:** Prior review cycle (run-9)
-**Status:** UNCHANGED
+**Status:** FIXED (commit 3966ef0e) — `failRestore` is now synchronous
 
-`readStream.destroy()` and `restore.stdin.destroy()` may throw synchronously. `failRestore` is async but called from sync event handlers. The `restore.on('exit')` handler at line 514 calls `failRestore` without checking if the process already succeeded.
+The `failRestore` function was previously `async` but called from synchronous event handlers. This has been fixed in commit 3966ef0e — `failRestore` is now synchronous and uses `.catch()` on `fs.unlink`. The `restore.on('exit')` handler at line 493 still calls `fs.unlink` with `await`, but this is inside an async callback (the `close` event handler), which is correct.
+
+**Remaining concern:** The `restore.on('close')` handler at line 493 uses `async` and `await fs.unlink(tempPath).catch(() => {})`. This is fine because `close` is a one-shot event and the handler's async nature doesn't affect event emission. However, if `logAuditEvent` throws, the `resolve({ success: true })` at line 507 still fires because the audit log is wrapped in try-catch. Good.
 
 ---
 
-### 21. `color-details-section.tsx` and `lightbox-color-pip.tsx` Duplicate IIFE Logic
+### 20. `color-details-section.tsx` and `lightbox-color-pip.tsx` Duplicate IIFE Logic
 **Files:** `apps/web/src/components/color-details-section.tsx:489-502`, `apps/web/src/components/lightbox-color-pip.tsx:216-229`
 **Confidence:** HIGH
 **First identified:** Prior review cycle (run-9)
@@ -382,7 +361,7 @@ Identical IIFE logic for delivered bit depth display is duplicated across two co
 
 ---
 
-### 22. `upload-dropzone.tsx` Silently Drops Rejected Files
+### 21. `upload-dropzone.tsx` Silently Drops Rejected Files
 **File:** `apps/web/src/components/upload-dropzone.tsx`, lines 138-173
 **Confidence:** MEDIUM
 **First identified:** Prior review cycle (run-9)
@@ -394,7 +373,7 @@ Files that exceed limits are silently dropped with only an aggregate toast count
 
 ---
 
-### 23. `histogram.tsx` Resize Handler Lacks Debouncing
+### 22. `histogram.tsx` Resize Handler Lacks Debouncing
 **File:** `apps/web/src/components/histogram.tsx`, lines 440-448
 **Confidence:** LOW
 **First identified:** Prior review cycle (run-9)
@@ -406,7 +385,7 @@ The canvas resize handler uses `window.addEventListener('resize', updateDims)` w
 
 ---
 
-### 24. `home-client.tsx` `masonryClasses` Not Memoized
+### 23. `home-client.tsx` `masonryClasses` Not Memoized
 **File:** `apps/web/src/components/home-client.tsx`, lines 223-229
 **Confidence:** LOW
 **First identified:** Prior review cycle (run-9)
@@ -416,15 +395,42 @@ The canvas resize handler uses `window.addEventListener('resize', updateDims)` w
 
 ---
 
-### 25. `getDummyHash` Lazy Initialization Has TOCTOU Race on First Login
-**File:** `apps/web/src/app/actions/auth.ts`, lines 64-70
-**Confidence:** MEDIUM
-**First identified:** Prior review cycle (run-9)
-**Status:** UNCHANGED
+## Fixed Findings (from prior cycle, verified at HEAD)
 
-Two concurrent logins after restart both see `dummyHashPromise === null` and start separate Argon2 computations, wasting CPU and memory.
+### F1. `getDummyHash` TOCTOU Race — FIXED
+**File:** `apps/web/src/app/actions/auth.ts`, lines 57-68
+**Commit:** d8b20600
+**Verification:** The `dummyHashPromise` is now a `const` precomputed at module init (`argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS)`). The `getDummyHash` function simply returns the precomputed promise. No lazy initialization, no race.
 
-**Fix:** Compute at module init time (one-time cost) or use atomic assignment pattern.
+### F2. `BoundedMap` Hard Cap Not Auto-Enforced — FIXED
+**File:** `apps/web/src/lib/bounded-map.ts`, lines 65-89
+**Commit:** beba3a8d
+**Verification:** `set()` now calls `this.enforceHardCap()` after inserting. The `enforceHardCap()` private method evicts oldest entries (FIFO) when size exceeds `maxKeys`. The existing `prune()` method still handles expiry-based eviction; the hard cap is now enforced on every write.
+
+### F3. `failRestore` Async in Sync Event Handlers — FIXED
+**File:** `apps/web/src/app/[locale]/admin/db-actions.ts`, lines 465-515
+**Commit:** 3966ef0e
+**Verification:** `failRestore` is now declared as a regular function (not `async`). It uses `fs.unlink(tempPath).catch(() => {})` instead of `await fs.unlink(tempPath)`. All event handler callbacks (`readStream.on('error')`, `restore.stdin.on('error')`, `restore.on('error')`) are now synchronous. The `settled` guard prevents duplicate invocation.
+
+### F4. View-Count Flush Chunk Too Large — FIXED
+**File:** `apps/web/src/lib/data.ts`, line 66
+**Commit:** cc1b8ec6
+**Verification:** `FLUSH_CHUNK_SIZE` reduced from 20 to 5. The flush function processes view-count updates in chunks of 5 concurrent DB promises instead of 20, reducing pool exhaustion risk under high concurrent view load.
+
+### F5. DB Connection Init Timeout Stale Promise — FIXED
+**File:** `apps/web/src/db/index.ts`, lines 88-103
+**Commit:** 6da830d0
+**Verification:** On init query timeout, the catch block now sets `underlying[connectionInitSymbol] = undefined` before re-throwing. This clears the stale promise so the next `getConnection()` attempt on the same underlying connection re-runs the `SET group_concat_max_len = 65535` init query instead of racing against the already-lost race.
+
+### F6. Process-Image Dimension Mixed Freshness — FIXED
+**File:** `apps/web/src/lib/process-image.ts`, lines 983-991
+**Commit:** fdf44376
+**Verification:** `processImageFormats` now reads BOTH dimensions fresh from Sharp (`inputMeta.width` and `inputMeta.height`) instead of using the upload-time `baseWidth` parameter. The `freshBaseWidth` variable replaces the parameter. This eliminates the mixed-freshness inconsistency if the original file is modified between upload and processing.
+
+### F7. `normalizeExposureTime` NaN/Infinity Guard — FIXED
+**File:** `apps/web/src/lib/process-image.ts`, line 1337
+**Commit:** fdf44376
+**Verification:** The array-form `[numerator, denominator]` branch now guards with `Number.isFinite(val[0]) && Number.isFinite(val[1])` before constructing the `\`${val[0]}/${val[1]}\`` string. Prevents nonsensical "NaN/1" or "Infinity/0" strings from being stored in the DB.
 
 ---
 
@@ -510,20 +516,26 @@ While `process-image.ts` itself does not import from `@/db`, it is imported by `
 
 **Verdict: ACCEPT-WITH-RESERVATIONS**
 
-The codebase is production-ready and well-maintained. The security posture is strong, the color pipeline is sophisticated, and the test coverage is extensive. The delta since the last review (12 commits) shows continued attention to correctness (epsilon-based cosineSimilarity zero check, Tailwind safelist cleanup, analytics aria-labels, JSDoc corrections) and documentation alignment.
+The codebase is production-ready and well-maintained. The security posture is strong, the color pipeline is sophisticated, and the test coverage is extensive. The delta since the last review (8 commits) shows continued attention to correctness with 6 MEDIUM fixes all landed cleanly:
 
-The reservations are about long-term maintainability and architectural debt, not immediate bugs or security vulnerabilities. The structural issues identified will compound over time if not addressed.
+1. **Auth TOCTOU race** (d8b20600) — precomputed dummy hash at module init
+2. **BoundedMap hard cap** (beba3a8d) — auto-enforce in `set()`
+3. **failRestore async pattern** (3966ef0e) — made synchronous with `.catch()`
+4. **View-count flush chunk** (cc1b8ec6) — reduced from 20 to 5
+5. **DB connection timeout** (6da830d0) — clear stale init promise on timeout
+6. **Process-image dimension freshness** (fdf44376) — read both dimensions fresh from Sharp + NaN/Infinity guard
+
+These fixes demonstrate the team's ability to act on review findings with minimal, correct changes. The reservations are about long-term maintainability and architectural debt, not immediate bugs or security vulnerabilities. The structural issues identified will compound over time if not addressed.
 
 **What would need to change for an ACCEPT:**
 1. Decompose `process-image.ts` into focused modules (Major #1, #2)
 2. Add runtime privacy validation for public API responses (Major #3)
 3. Fix fire-and-forget embedding hook lifecycle (Major #4)
-4. Fix async `failRestore` pattern in event handlers (Major #5)
-5. Implement eager hydration of rate-limit Maps from DB on startup (Major #6)
-6. Add automated cache invalidation for static-path derivatives on settings change (Major #7)
-7. Extract server action auth boilerplate into a higher-order function (Major #8)
-8. Add Docker resource limits and `.dockerignore` (Major #12)
-9. Wire the storage backend abstraction into the production pipeline (Major #11)
+4. Implement eager hydration of rate-limit Maps from DB on startup (Major #5)
+5. Add automated cache invalidation for static-path derivatives on settings change (Major #6)
+6. Extract server action auth boilerplate into a higher-order function (Major #7)
+7. Add Docker resource limits and `.dockerignore` (Major #11)
+8. Wire the storage backend abstraction into the production pipeline (Major #10)
 
 **What would need to change for a REJECT:**
 - A privacy leak in production (e.g., GPS coordinates exposed to public routes)
@@ -532,7 +544,7 @@ The reservations are about long-term maintainability and architectural debt, not
 
 None of these are present at HEAD. The codebase is genuinely well-engineered, but the structural issues identified above will compound over time if not addressed.
 
-**Review Mode:** THOROUGH throughout. No escalation to ADVERSARIAL was warranted because the codebase showed consistent quality and no pattern of systemic issues. The findings are architectural and maintainability concerns, not security breaches or correctness failures.
+**Review Mode:** THOROUGH throughout. No escalation to ADVERSARIAL was warranted because the codebase showed consistent quality, the 6 prior findings were all fixed correctly, and no pattern of systemic issues emerged. The findings are architectural and maintainability concerns, not security breaches or correctness failures.
 
 ---
 
@@ -547,7 +559,8 @@ None of these are present at HEAD. The codebase is genuinely well-engineered, bu
 7. **Are there any plans for horizontal scaling?** The single-writer topology is documented as a limitation, but there is no roadmap for moving process-local state to a shared store (Redis, etc.).
 8. **Is the `srcSetData` useMemo pattern causing measurable reconciliation overhead?** Would need React DevTools profiling to confirm.
 9. **Why does the storage backend abstraction exist but have zero production callers?** The `LocalStorageBackend` is fully implemented but never used. Was this an abandoned migration or a deferred feature?
+10. **What is the operational impact of the `FLUSH_CHUNK_SIZE=5` change?** With 5 concurrent DB promises instead of 20, does the view-count flush now take proportionally longer under high load? Is there a risk of the in-memory buffer growing unbounded if flush is slower than incoming views?
 
 ---
 
-*Review completed. 25 findings (0 Critical, 12 Major, 13 Minor), 12 gaps identified, 3 ambiguity risks noted, multi-perspective analysis conducted. Delta since last review: 12 commits analyzed, 0 new Major findings (all prior findings still open), 0 new Minor findings.*
+*Review completed. 23 findings (0 Critical, 11 Major, 12 Minor), 7 fixed from prior cycle, 12 gaps identified, 3 ambiguity risks noted, multi-perspective analysis conducted. Delta since last review: 8 commits analyzed, 6 MEDIUM fixes verified, 0 new Major findings, 0 new Minor findings.*
