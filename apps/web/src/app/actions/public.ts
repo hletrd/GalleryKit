@@ -363,7 +363,7 @@ export async function recordPhotoView(imageId: number): Promise<void> {
         country_code: params.country_code,
         bot: params.bot,
     }).catch((err: unknown) => {
-        console.debug('[analytics] recordPhotoView failed:', err);
+        console.warn('[analytics] recordPhotoView failed:', err);
     });
 }
 
@@ -384,7 +384,7 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
         country_code: params.country_code,
         bot: params.bot,
     }).catch((err: unknown) => {
-        console.debug('[analytics] recordTopicView failed:', err);
+        console.warn('[analytics] recordTopicView failed:', err);
     });
 }
 
@@ -400,6 +400,6 @@ export async function recordSharedGroupView(groupId: number): Promise<void> {
         country_code: params.country_code,
         bot: params.bot,
     }).catch((err: unknown) => {
-        console.debug('[analytics] recordSharedGroupView failed:', err);
+        console.warn('[analytics] recordSharedGroupView failed:', err);
     });
 }

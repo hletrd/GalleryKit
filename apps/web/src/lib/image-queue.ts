@@ -240,23 +240,23 @@ export async function shutdownImageProcessingQueue(
     await drainProcessingQueueForShutdown(state, queue);
 }
 
-export const enqueueImageProcessing = (job: ImageProcessingJob) => {
+export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
     const state = getProcessingQueueState();
     if (state.shuttingDown || isRestoreMaintenanceActive()) {
         console.debug(`[Queue] Ignoring job ${job.id} while processing is unavailable`);
-        return;
+        return false;
     }
     if (!hasValidJobFilenames(job)) {
         console.error(`[Queue] Rejecting job ${job.id} with invalid filename metadata`);
-        return;
+        return false;
     }
     // C11-MED-02: skip permanently-failed images so claim-retry timers
     // don't re-enqueue a job that already exceeded MAX_RETRIES.
     if (state.permanentlyFailedIds.has(job.id)) {
         console.debug(`[Queue] Skipping job ${job.id} — permanently failed`);
-        return;
+        return false;
     }
-    if (state.enqueued.has(job.id)) return;
+    if (state.enqueued.has(job.id)) return true;
 
     console.debug(`[Queue] Enqueuing job ${job.id}`);
     state.enqueued.add(job.id);

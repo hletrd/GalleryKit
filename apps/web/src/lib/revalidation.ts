@@ -36,7 +36,11 @@ export function revalidateLocalizedPaths(...paths: string[]) {
         for (const variant of getLocalizedPathVariants(path)) {
             if (seen.has(variant)) continue;
             seen.add(variant);
-            revalidatePath(variant);
+            try {
+                revalidatePath(variant);
+            } catch (err) {
+                console.warn(`[revalidation] revalidatePath failed for "${variant}":`, err);
+            }
         }
     }
 }
