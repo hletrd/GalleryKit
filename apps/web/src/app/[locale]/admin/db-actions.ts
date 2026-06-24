@@ -462,28 +462,28 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         const readStream = createReadStream(tempPath);
         let settled = false;
 
-        const failRestore = async (error: string, logLabel: string, reason: unknown) => {
+        const failRestore = (error: string, logLabel: string, reason: unknown) => {
             if (settled) return;
             settled = true;
             console.error(logLabel, reason);
             readStream.destroy();
             restore.stdin.destroy();
             restore.kill();
-            await fs.unlink(tempPath).catch(() => {});
+            fs.unlink(tempPath).catch(() => {});
             resolve({ success: false, error });
         };
 
         // Register all event handlers BEFORE piping to prevent missed events
-        readStream.on('error', async (err) => {
-            await failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err);
+        readStream.on('error', (err) => {
+            failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err);
         });
 
-        restore.stdin.on('error', async (err: NodeJS.ErrnoException) => {
+        restore.stdin.on('error', (err: NodeJS.ErrnoException) => {
             if (isIgnorableRestoreStdinError(err)) {
                 return;
             }
 
-            await failRestore(t('restoreFailed'), 'mysql restore stdin error:', err);
+            failRestore(t('restoreFailed'), 'mysql restore stdin error:', err);
         });
 
         restore.stderr.on('data', (data: Buffer) => {
@@ -510,8 +510,8 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             }
         });
 
-        restore.on('error', async (err: Error) => {
-            await failRestore(t('restoreFailed'), 'mysql restore spawn error:', err);
+        restore.on('error', (err: Error) => {
+            failRestore(t('restoreFailed'), 'mysql restore spawn error:', err);
         });
 
         // Start piping after all handlers are registered
