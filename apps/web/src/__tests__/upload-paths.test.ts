@@ -75,9 +75,9 @@ describe('resolveOriginalUploadPath', () => {
         expect(resolved).toBe(path.join(primaryDir, 'dup.jpg'));
     });
 
-    it('returns the PRIMARY candidate (default) when the file exists in NEITHER', async () => {
+    it('returns null when the file exists in NEITHER', async () => {
         const resolved = await mod.resolveOriginalUploadPath('missing.jpg');
-        expect(resolved).toBe(path.join(primaryDir, 'missing.jpg'));
+        expect(resolved).toBeNull();
     });
 });
 

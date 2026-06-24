@@ -130,6 +130,7 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                         if (semanticMode === 'production') {
                             if (!filenameOriginal) { skipped++; return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
+                            if (!originalPath) { skipped++; return; }
                             embedding = await embedImageReal(originalPath);
                         } else {
                             embedding = embedImageStub(id);

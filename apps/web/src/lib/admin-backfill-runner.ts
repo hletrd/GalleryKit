@@ -441,6 +441,9 @@ async function cleanupDeletedMidReencodeVariants(row: CandidateRow): Promise<voi
 
 async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
+    if (!originalPath) {
+        return { ok: false, reason: 'missing-original' };
+    }
     try {
         await fs.access(originalPath);
     } catch {

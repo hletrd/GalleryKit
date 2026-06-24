@@ -314,6 +314,9 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             }
 
             const originalPath = await resolveOriginalUploadPath(job.filenameOriginal);
+            if (!originalPath) {
+                throw new Error(`[Queue] Original file not found for job ${job.id}: no candidate path exists`);
+            }
 
             try {
                 await fs.access(originalPath);

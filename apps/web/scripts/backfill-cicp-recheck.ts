@@ -88,6 +88,10 @@ async function main() {
     for (const row of rows) {
         queue.add(async () => {
             const originalPath = await resolveOriginalUploadPath(row.filename_original);
+            if (!originalPath) {
+                missing++;
+                return;
+            }
             try {
                 await fs.access(originalPath);
             } catch {

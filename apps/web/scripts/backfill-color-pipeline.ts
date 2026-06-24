@@ -191,6 +191,9 @@ interface BackfillSettings {
 
 export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
+    if (!originalPath) {
+        return { outcome: 'skipped' };
+    }
     try {
         await fs.access(originalPath);
     } catch {

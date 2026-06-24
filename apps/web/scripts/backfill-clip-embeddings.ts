@@ -151,7 +151,9 @@ async function main() {
                 try {
                     let embedding: Float32Array;
                     if (PRODUCTION_FLAG) {
+                        if (!filenameOriginal) { failed++; return; }
                         const originalPath = await resolveOriginalUploadPath(filenameOriginal);
+                        if (!originalPath) { failed++; return; }
                         embedding = await embedImageReal(originalPath);
                     } else {
                         embedding = embedImageStub(id);

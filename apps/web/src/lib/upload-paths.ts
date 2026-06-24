@@ -54,7 +54,7 @@ export async function ensureUploadDirectories() {
     ].map((dir) => fs.mkdir(dir, { recursive: true })));
 }
 
-export async function resolveOriginalUploadPath(filename: string) {
+export async function resolveOriginalUploadPath(filename: string): Promise<string | null> {
     const candidates = [
         path.join(UPLOAD_DIR_ORIGINAL, filename),
         path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename),
@@ -69,7 +69,7 @@ export async function resolveOriginalUploadPath(filename: string) {
         }
     }
 
-    return candidates[0];
+    return null; // Both missing — caller must handle
 }
 
 export async function deleteOriginalUploadFile(filename: string) {
