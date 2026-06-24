@@ -980,17 +980,16 @@ export async function processImageFormats(
     // and plumbing height through saveOriginalAndGetMetadata; the overhead
     // (~10-30 ms for large files) is acceptable for the personal-gallery
     // scale and not worth the cross-caller refactor risk.
-    // R4C8 COR-R4C8-07: read metadata with autoOrient so the height matches
-    // the post-orientation `baseWidth` parameter (which comes from the
-    // upload flow's autoOrient metadata). Without it, a rotated portrait
-    // source mixed oriented-width × unoriented-height and the 50 MP gate
-    // mis-evaluated (e.g. 8000×6000 orientation-6 computed 36 MP, not 48).
+    // R10-C3: read BOTH dimensions fresh from Sharp to avoid mixed-freshness
+    // inconsistency if the original file is modified between upload and
+    // processing (AGG-M1). The upload flow's baseWidth is ignored here.
     const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true }).metadata();
+    const freshBaseWidth = (inputMeta.width && inputMeta.width > 0) ? inputMeta.width : 0;
     const baseHeight = (inputMeta.height && inputMeta.height > 0) ? inputMeta.height : 0;
-    const basePixels = baseWidth * baseHeight;
+    const basePixels = freshBaseWidth * baseHeight;
     if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
         const scale = Math.sqrt(WIDE_GAMUT_MAX_SOURCE_PIXELS / basePixels);
-        const targetWidth = Math.max(1, Math.round(baseWidth * scale));
+        const targetWidth = Math.max(1, Math.round(freshBaseWidth * scale));
         const tmpPath = path.join(os.tmpdir(), `${path.basename(inputPath)}.${randomUUID().slice(0, 8)}.wi15.tmp`);
         // R10-H1: write the downscaled intermediate as a TIFF (lossless) and
         // preserve the source ICC profile via keepIccProfile() so the downstream
@@ -1333,7 +1332,9 @@ function normalizeExposureTime(val: unknown): string | null {
     }
 
     // Array form [numerator, denominator] from some EXIF readers
-    if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number' && val[1] !== 0) {
+    // C8R-C8-02: guard against NaN/Infinity in numerator/denominator to prevent
+    // nonsensical strings like "NaN/1" from being stored (DBG-NEW-1).
+    if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number' && val[1] !== 0 && Number.isFinite(val[0]) && Number.isFinite(val[1])) {
         return `${val[0]}/${val[1]}`;
     }
 
