@@ -82,6 +82,9 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
         // (e.g., server under extreme load), the connection would be held
         // indefinitely, starving the pool. On timeout, release the connection
         // and throw so the caller can retry or fail fast.
+        // R10-C3-TRC-H6: On timeout, ALSO clear the stored init promise so the
+        // next getConnection() attempt on this underlying connection re-runs
+        // the init query instead of racing against an already-lost race.
         const initTimeout = new Promise<void>((_, reject) => {
             setTimeout(() => reject(new Error('DB connection init query timed out after 10s')), 10_000);
         });
@@ -89,6 +92,12 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
             await Promise.race([initPromise, initTimeout]);
         } catch (err) {
             connection.release();
+            // Clear the stale init promise so a future getConnection() on this
+            // same underlying connection retries the SET command instead of
+            // re-racing the lost race.
+            if (underlying) {
+                underlying[connectionInitSymbol] = undefined;
+            }
             throw err;
         }
     }
