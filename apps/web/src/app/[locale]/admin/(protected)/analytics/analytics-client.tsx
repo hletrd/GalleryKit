@@ -93,9 +93,9 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="px-4 py-3 text-left font-medium">{t.colPhoto}</th>
-                                    <th className="px-4 py-3 text-left font-medium">{t.colTopic}</th>
-                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colPhoto}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colTopic}</th>
+                                    <th scope="col" className="px-4 py-3 text-right font-medium">{t.colViews}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -135,8 +135,8 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="px-4 py-3 text-left font-medium">{t.colTopic}</th>
-                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colTopic}</th>
+                                    <th scope="col" className="px-4 py-3 text-right font-medium">{t.colViews}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -166,8 +166,8 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="px-4 py-3 text-left font-medium">{t.colCountry}</th>
-                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colCountry}</th>
+                                    <th scope="col" className="px-4 py-3 text-right font-medium">{t.colViews}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -203,8 +203,8 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="px-4 py-3 text-left font-medium">{t.colSharedAlbum}</th>
-                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colSharedAlbum}</th>
+                                    <th scope="col" className="px-4 py-3 text-right font-medium">{t.colViews}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -243,8 +243,8 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="px-4 py-3 text-left font-medium">{t.colReferrer}</th>
-                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                    <th scope="col" className="px-4 py-3 text-left font-medium">{t.colReferrer}</th>
+                                    <th scope="col" className="px-4 py-3 text-right font-medium">{t.colViews}</th>
                                 </tr>
                             </thead>
                             <tbody>
