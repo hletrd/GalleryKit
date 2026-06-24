@@ -492,8 +492,15 @@ const DEFAULT_OUTPUT_SIZES = DEFAULT_IMAGE_SIZES;
 
 /**
  * Delete all sized variants for a given base filename deterministically.
- * Avoids expensive readdir on directories with thousands of files.
+ *
+ * When `sizes` is provided, deletes the base file plus `{name}_{size}{ext}`
+ * for each configured size. When `sizes` is empty, performs a full directory
+ * scan to catch orphaned variants from prior size configurations.
+ *
+ * @param dir The directory containing the derivatives (e.g. UPLOAD_DIR_WEBP)
+ * @param baseFilename The base filename (e.g. "photo_abc123.webp")
  * @param sizes Optional array of configured sizes. Defaults to DEFAULT_OUTPUT_SIZES.
+ *   Pass an empty array to trigger a full directory scan for orphaned variants.
  */
 export async function deleteImageVariants(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
     const ext = path.extname(baseFilename);
@@ -592,45 +599,6 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
     return clampUtf8Bytes(s, maxBytes) || null;
 }
 
-/**
- * Resolve which ICC profile name to embed in AVIF derivatives given the source
- * ICC profile name (from extractIccProfileName).
- *
- * STRICT P3 DETECTION (CM-CRIT-1 fix). Only sources whose ICC actually IS
- * Display-P3 / P3-D65 / DCI-P3 are tagged 'p3'. Wider-gamut sources
- * (Adobe RGB, ProPhoto, Rec.2020) used to be falsely mapped to 'p3' here,
- * which made the AVIF encoder embed Apple's Display-P3 ICC over the
- * wider-gamut pixel values without any actual gamut conversion. The result
- * was visibly wrong color (washed-out greens, hue shifts) on every
- * ICC-aware browser.
- *
- * The encode chain in processImageFormats() now performs an explicit
- * .toColorspace('srgb') for non-P3 sources, so the right downstream tag
- * is 'srgb' too. Wider-than-P3 gamuts (Adobe RGB / ProPhoto / Rec.2020)
- * are gamut-clipped to sRGB at encode time. This is a knowing trade-off:
- * accurate-but-narrower colors today, in exchange for the option to add
- * a true wide-gamut path later (10-bit AVIF + actual ProPhoto-aware
- * conversion) without breaking existing assets.
- *
- * Decision matrix
- * ───────────────────────────────────────────────────────────────────────────
- * Source ICC name                 │ AVIF ICC output │ Rationale
- * ────────────────────────────────┼─────────────────┼──────────────────────
- * 'Display P3'                    │ p3              │ exact match
- * 'DCI-P3'                        │ p3              │ same primaries, D65 WP
- * 'P3-D65'                        │ p3              │ alias for Display P3
- * 'Display P3 - ACES'             │ p3              │ P3 gamut variant
- * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb            │ stays sRGB
- * 'Adobe RGB (1998)' / 'AdobeRGB' │ srgb            │ pixels converted to sRGB
- * 'ProPhoto RGB' / 'ProPhoto'     │ srgb            │ pixels converted to sRGB
- * 'ITU-R BT.2020' / 'Rec.2020'    │ srgb            │ pixels converted to sRGB
- * null / unknown                  │ srgb            │ safe default
- * ───────────────────────────────────────────────────────────────────────────
- *
- * WebP and JPEG derivatives are always sRGB for universal compatibility.
- *
- * @returns 'p3' | 'srgb'
- */
 // C5-A3 / C5-COL-MED-2: canonical enum + type imports live near the top of
 // this module alongside the other `@/lib/*` imports. The `ColorPipelineDecision`
 // type is referenced earlier in the file (line ~317 in the upload result type),
@@ -729,10 +697,11 @@ export type AvifIccDecision = 'p3' | 'p3-from-wide' | 'srgb';
 /**
  * Resolve the OUTPUT ICC profile for AVIF derivatives.
  *
- * STRICT P3 DETECTION (CM-CRIT-1): only true Display-P3 sources get 'p3'.
- * Wider-than-P3 gamuts (Adobe RGB / ProPhoto / Rec.2020) now return
- * 'p3-from-wide' — the encoder converts pixels to P3 gamut with an
- * explicit pipelineColorspace('rgb16') resize before tagging as P3.
+ * Returns 'p3' for true Display-P3 / DCI-P3 sources (exact gamut match, no
+ * conversion needed). Returns 'p3-from-wide' for wider-than-P3 gamuts
+ * (Adobe RGB / ProPhoto / Rec.2020) — the encoder converts pixels to P3
+ * gamut with an explicit pipelineColorspace('rgb16') resize before tagging
+ * as P3. Returns 'srgb' for sRGB sources and as the safe default.
  *
  * This is a quality improvement over the previous sRGB clip: P3 preserves
  * more saturated colors than sRGB while still being deliverable to modern
