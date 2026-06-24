@@ -286,6 +286,11 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 state.claimRetryCounts.set(job.id, claimRetries);
                 const delay = CLAIM_RETRY_DELAY_MS * Math.min(claimRetries, 5); // escalating up to 25s
                 console.debug(`[Queue] Job ${job.id} already claimed by another worker, retrying later (attempt ${claimRetries}/${MAX_CLAIM_RETRIES})`);
+                // C4-A1: Remove from enqueued BEFORE scheduling retry so the retry
+                // actually re-adds the job to the queue. Without this, enqueueImageProcessing
+                // hits the `state.enqueued.has(job.id)` guard at line 259 and returns
+                // immediately, leaving the job stuck forever.
+                state.enqueued.delete(job.id);
                 const retryTimer = setTimeout(() => {
                     enqueueImageProcessing(job);
                 }, delay);
@@ -293,6 +298,12 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 claimRetryScheduled = true;
                 return;
             }
+
+            // C4-A2: Reset claimRetryScheduled on successful claim so the finally
+            // block cleans up claimRetryCounts. Without this, a job that retries
+            // claim once then succeeds leaves claimRetryScheduled=true, so
+            // claimRetryCounts is never deleted.
+            claimRetryScheduled = false;
 
             // US-009: Claim check — verify the row still exists and is unprocessed
             const [check] = await db.select({ id: images.id, topic: images.topic }).from(images)
