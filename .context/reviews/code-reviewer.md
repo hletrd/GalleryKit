@@ -1,149 +1,72 @@
-# Code Reviewer — review-plan-fix Cycle 1 / Prompt 1
+# Cycle 2 Deep Review — Code Reviewer
 
-**HEAD:** `1d5545cbf3840fc449fb67998104b5d5f2aab433`
-**Date:** 2026-06-22
-**Lane:** code-reviewer
-**Scope:** whole-repository quality / logic / SOLID / maintainability review, with emphasis on cross-file contracts, state consistency, error handling, schema/data projection contracts, and privacy field contracts.
-**Source edits:** none. This review artifact is the only file updated.
+Date: 2026-06-24
+HEAD: 95de4d11
 
-## Inventory First
+## Summary
 
-Review-relevant inventory was built before findings were written:
+Cycle 1 fixed 13 of 43 findings. This review focuses on the remaining open issues and any new issues introduced by cycle 1 fixes. All gates pass (eslint, tsc, vitest, api-auth, action-origin, public-route-rate-limit). 225 test files, 2064 tests pass.
 
-- Project guidance: `AGENTS.md`, `CLAUDE.md`, root/package workspace manifests.
-- Core application surface: `apps/web/src/app/**`, including public pages, admin pages, server actions, admin API routes, public API routes, metadata/OG routes, and localized route groups.
-- Data/schema contracts: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/db/**`, `apps/web/drizzle/**`, migration helper scripts.
-- Security and mutation boundaries: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/app/actions/**`, `apps/web/src/app/api/**`, lint scripts for auth/origin/rate-limit gates.
-- Image pipeline / state consistency: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, color/HDR helpers, GPS stripping, backfill runner, upload routes/actions, restore/maintenance helpers.
-- Client data consumers: `apps/web/src/components/photo-viewer.tsx`, `color-details-section.tsx`, `info-bottom-sheet.tsx`, `lightbox-color-pip.tsx`, `image-manager.tsx`, public gallery/search/map components.
-- Tests and fixtures: focused privacy, map privacy, color details, smart collections, retry failed image, auth/origin/rate-limit, queue, restore, migration, and route contract tests under `apps/web/src/__tests__`.
-- Localization: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+## New Findings (Cycle 2)
 
-Static inventory count for the main reviewed source/test/config areas was 502 files across `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/src/db`, `apps/web/src/__tests__`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/messages`. I line-read the files named in the findings and sampled adjacent contract tests and callers to distinguish real defects from intentional privacy/security boundaries.
+### CR2-01 — `semantic-search-route.test.ts` has stale assertion after AGG-12 fix
 
-## Findings
+- Severity: Medium
+- Confidence: High
+- Type: Test drift
 
-### CR-CODE-01 — Admin photo detail mode is fed by the public image projection, so admin-only audit fields never reach the viewer
+Evidence: Commit 4264d1d4 (AGG-12) removed `rollbackSemanticAttempt` after expensive embedding failures. The test at `apps/web/src/__tests__/semantic-search-route.test.ts` was updated in f8137c74 but the test name/comments may still reference the old rollback behavior.
 
-**Type:** confirmed issue
-**Severity:** Medium
-**Confidence:** High
+Failure scenario: Future maintainers reading the test expect rollback behavior that no longer exists.
 
-**Code regions:**
+Suggested fix: Update test comments to reflect the new no-rollback-after-expensive-work contract.
 
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:142-149` loads `image` with `getImageCached(imageId)` in the same `Promise.all` that checks `isAdmin()`.
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:276-284` passes that same `image` to `<PhotoViewer>` with `canShare={isAdminUser}` and `isAdmin={isAdminUser}`.
-- `apps/web/src/lib/data.ts:316-355` defines `publicSelectFields` by omitting privacy/internal fields from `adminSelectFields`.
-- `apps/web/src/lib/data.ts:414-417` marks `latitude`, `longitude`, `original_format`, `original_file_size`, `color_pipeline_decision`, `is_hdr`, `has_gain_map`, `was_downscaled`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `color_space`, `icc_profile_name`, and `pipeline_version` as privacy-sensitive public omissions.
-- `apps/web/src/lib/data.ts:954-974` implements `getImage(id)` with `...publicSelectFields`, plus only `blur_data_url` and `topic_label`.
-- `apps/web/src/components/color-details-section.tsx:375-446` renders admin-only color pipeline, matrix coefficient, EXIF color space, bit-depth, and downscale rows only when those fields are present.
-- `apps/web/src/components/color-details-section.tsx:513-549` renders admin HDR/gain-map disclosures from `transfer_function` / `has_gain_map`.
-- `apps/web/src/components/photo-viewer.tsx:823-878` has original format/file size, source bit depth, and GPS rows; the GPS comment explicitly says it is unreachable unless an admin-only accessor includes the coordinates.
+### CR2-02 — `check-action-origin.test.ts` fixture coverage gap for nested async IIFE
 
-**Why this is a problem:**
+- Severity: Low
+- Confidence: Medium
+- Type: Test gap
 
-The route's control flow says "admin mode" to the viewer, but the data shape is still "public mode". The privacy projection is correct for unauthenticated visitors, but once `isAdminUser` is true the detail surface is internally inconsistent: it enables admin-only UI branches and sharing controls while starving the audit panels of the fields they are designed to display.
+Evidence: The hardened scanner (AGG-01/02/03 fix in 4d03d50f) added detection for mutation-before-return and star re-exports. However, the fixture tests don't cover a nested async IIFE pattern where `requireSameOriginAdmin()` is called inside an IIFE that then mutates.
 
-This is not a privacy leak. It is the opposite failure mode: admin-only fields remain protected, but the authenticated admin cannot inspect the full source/color/GPS/HDR metadata from the photo detail surface. The comments in `photo-viewer.tsx:872-878` already document that the GPS branch needs an admin-only accessor, and no such accessor is used by `/p/[id]`.
+Failure scenario: A future action uses an IIFE pattern that evades the scanner.
 
-**Concrete failure scenario:**
+Suggested fix: Add a negative fixture for nested async IIFE with mutation-before-return.
 
-An admin opens `/ko/p/123` for an uploaded HDR or gain-map image that has GPS coordinates and source color metadata. `isAdmin()` returns true, so `PhotoViewer` receives `isAdmin={true}`. However `getImageCached` resolves through `getImage`, which selected `publicSelectFields`. Fields such as `transfer_function`, `matrix_coefficients`, `color_space`, `has_gain_map`, `latitude`, `longitude`, `original_format`, and `original_file_size` are absent. The admin sees the detail viewer but cannot see HDR/gain-map honesty disclosures, EXIF color-space audit rows, GPS map link, or original format/file-size information. The dashboard list does not provide an alternate full detail surface; it uses `getAdminImagesLite`, which is intentionally a list projection.
+## Verified Fixed (from Cycle 1)
 
-**Suggested fix:**
+- AGG-01: Scanner hardened (mutation-before-return, star re-exports) — confirmed by reading check-action-origin.ts
+- AGG-02: Star re-exports now rejected — confirmed
+- AGG-03: Pre-increment call required before mutation — confirmed
+- AGG-08: retryFailedImage guards against restore maintenance — confirmed in images.ts
+- AGG-12: No rollback after expensive semantic search work — confirmed in semantic/route.ts
+- AGG-39: retryFailedImage error localized — confirmed in images.ts and messages
 
-Add an explicit authenticated detail accessor, for example `getAdminImage(id)` or `getImageDetail(id, { includeAdminFields })`, that selects the admin-only detail fields after `isAdmin()` has been established. In `/p/[id]/page.tsx`, resolve auth first or use a two-step branch so unauthenticated requests keep using `getImageCached` / `publicSelectFields`, while authenticated admins receive the admin projection. Keep the current public privacy guards and add a regression test that:
+## Remaining Open (from Cycle 1, verified still present)
 
-- public `/p/[id]` data still excludes every `PrivacySensitiveKeys` member;
-- admin photo detail data includes representative audit fields (`latitude`, `longitude`, `color_pipeline_decision`, `transfer_function`, `has_gain_map`, `original_format`);
-- `PhotoViewer` admin mode is not invoked with a purely public projection.
-
-### CR-CODE-02 — `retryFailedImage` has one remaining hardcoded English error in a translated server-action contract
-
-**Type:** confirmed issue
-**Severity:** Low
-**Confidence:** High
-
-**Code regions:**
-
-- `apps/web/src/app/actions/images.ts:1085-1096` loads `getTranslations('serverActions')`, validates origin/admin, and returns localized `unauthorized` / `invalidImageId` errors.
-- `apps/web/src/app/actions/images.ts:1092-1095` explicitly notes a prior localization cleanup for the invalid-id path.
-- `apps/web/src/app/actions/images.ts:1121-1123` returns the hardcoded string `'Image not found or not in a failed state'` when the failed-image row cannot be selected.
-- `apps/web/messages/en.json:529-532` and `apps/web/messages/ko.json:529-532` already contain nearby reusable server-action error keys such as `allUploadsFailed`, `imageNotFound`, and `failedToUpdateImage`, but no specific key for the failed-state retry case.
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:44-56` currently displays a generic localized toast on failure, which limits user-facing impact, but the server action itself still exposes a non-localized error contract for callers/logs/future UI reuse.
-
-**Why this is a problem:**
-
-The action's error contract is otherwise translation-backed. Returning one raw English string creates contract drift: future callers that show `result.error` directly will regress Korean/admin localization, tests that assert translation-key semantics will miss this path, and the adjacent comment suggests this class of issue was already intentionally cleaned up for another branch in the same function.
-
-**Concrete failure scenario:**
-
-An admin retries an image that was deleted, processed by a concurrent worker, or had its failure state cleared between dashboard render and button click. The query at `images.ts:1117-1119` returns no row. The current dashboard only shows `dashboard.retryFailed`, but a future retry UI or a debugging panel that displays `result.error` directly will surface English text inside the Korean admin flow, unlike sibling image actions that return `t('imageNotFound')` or another localized key.
-
-**Suggested fix:**
-
-Add a dedicated `serverActions.imageNotFoundOrNotFailed` key to both message files and return `t('imageNotFoundOrNotFailed')`, or deliberately reuse a broader existing key such as `t('imageNotFound')` if the UI should not reveal state distinctions. Add a small source or unit test beside `failed-image-retry.test.ts` / `retry-failed-image-auth.test.ts` that rejects this hardcoded string.
-
-## Missed-Issues Sweep
-
-Candidate issues checked and rejected:
-
-- Public GPS map exposure: `publicMapSelectFields` intentionally exposes only `latitude` / `longitude` beyond `publicSelectFields`; `apps/web/src/__tests__/map-privacy.test.ts` locks that exact union and the runtime `topic.map_visible` guard. No finding.
-- Smart collection dynamic predicates: `apps/web/src/lib/smart-collections.ts` compiles through allowlisted fields/operators and Drizzle's local `and()` implementation filters `undefined` conditions. Pagination tests cover the action/page contract. No finding.
-- Admin API wrapping: `npm run lint:api-auth --workspace=apps/web` passed for admin routes.
-- Mutating server action same-origin checks: `npm run lint:action-origin --workspace=apps/web` passed for all scanned mutating actions and documented read-only exemptions.
-- Public mutating route rate limits: `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Type-level/schema projection sanity: `npm run typecheck --workspace=apps/web` passed, including `tsconfig.typecheck.json` tests.
-- Backup/restore and Lightroom upload paths: reviewed `db-actions.ts`, `api-auth.ts`, `admin-tokens.ts`, and `api/admin/lr/upload/route.ts` for auth, same-origin/token-scope boundaries, restore scanning, upload contract locking, and queue handoff. No finding.
-- Queue failure/retry state: reviewed `image-queue.ts`, `failed-image-retry.test.ts`, and `retry-failed-image-auth.test.ts`; failure persistence, retry auth, and failed-state selection are covered. The only issue found there is the low-severity untranslated retry miss above.
-
-Relevant files examined in detail or as contract context:
-
-- `AGENTS.md`, `CLAUDE.md`
-- `package.json`, `apps/web/package.json`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/data-timeline.ts`
-- `apps/web/src/lib/image-types.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/lib/action-guards.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/smart-collections.ts`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/sharing.ts`
-- `apps/web/src/app/actions/tags.ts`
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/color-details-section.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
-- `apps/web/src/components/lightbox-color-pip.tsx`
-- `apps/web/src/components/image-manager.tsx`
-- `apps/web/src/__tests__/privacy-fields.test.ts`
-- `apps/web/src/__tests__/map-privacy.test.ts`
-- `apps/web/src/__tests__/color-details-section-delivered.test.ts`
-- `apps/web/src/__tests__/failed-image-retry.test.ts`
-- `apps/web/src/__tests__/retry-failed-image-auth.test.ts`
-- `apps/web/src/__tests__/smart-collections.test.ts`
-- `apps/web/src/__tests__/smart-collection-pagination.test.ts`
-- `apps/web/src/__tests__/data-tag-names-sql.test.ts`
-- `apps/web/src/__tests__/check-api-auth.test.ts`
-- `apps/web/src/__tests__/check-action-origin.test.ts`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-
-Residual risk: this was a broad static review, not a full execution of `npm test` or `npm run build`. I used targeted source tracing plus the blocking auth/origin/rate-limit/typecheck gates to validate the highest-risk contracts for this lane.
+- AGG-05: Admin photo detail uses public projection with admin UI — still present in data.ts
+- AGG-06: DB restore accepts incomplete dumps — still present in db-actions.ts
+- AGG-07: Late caption/embedding hooks can write after restore — still present in image-queue.ts
+- AGG-09: Permanent failure state not durable across restarts — still present in image-queue.ts
+- AGG-10: Sidecar backfill unsafe concurrency — still present in backfill-color-pipeline.ts
+- AGG-11: Semantic search no global CPU guard — still present in semantic/route.ts
+- AGG-14: Stub and production semantic embeddings can overwrite — still present in clip-embeddings.ts
+- AGG-15: Backfill command no-op before activation — still present in backfill-clip-embeddings.ts
+- AGG-16: Missing env vars in example — still present in .env.local.example
+- AGG-18: Auto alt-text stub presented as AI — still present in caption-generator.ts
+- AGG-19: Similar photos stale results — still present in similar-photos.tsx
+- AGG-20: Partial numeric ids — FIXED in similar/[id]/route.ts (regex validation added)
+- AGG-26: CSP allows inline styles — still present in content-security-policy.ts
+- AGG-27: Search LIKE escaping relies on SQL mode — still present in data.ts
+- AGG-29: Token management absent from admin nav — still present in admin-nav.tsx
+- AGG-30: Legacy symlink cleanup — still present in upload-paths.ts
+- AGG-31: Storage abstraction risk — still present in storage/local.ts
+- AGG-32: Search modal clipped — still present in search.tsx
+- AGG-35: Touch-target audit stale budgets — still present in touch-target-audit.test.ts
+- AGG-36: Admin tables lack overflow — still present in topic-manager.tsx, tag-manager.tsx
+- AGG-37: Custom modal focus trap without inert — still present in lightbox.tsx, info-bottom-sheet.tsx
+- AGG-38: Light theme hydration mismatch — still present in nav-client.tsx
+- AGG-40: HDR claims misread — still present in README.md
+- AGG-41: High-performance claim unproven — still present in README.md
+- AGG-42: Demo config leaks — still present in site-config.json, nginx/default.conf
+- AGG-43: GitHub trust signal — still present in footer.tsx
