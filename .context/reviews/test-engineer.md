@@ -556,4 +556,269 @@ These tests read source files and assert regex matches. They are valuable for ca
 
 ---
 
-*Review completed. 229 test files examined, 225 source files mapped, 26 scripts inventoried, 6 E2E specs reviewed. All findings are based on static analysis of the test and source code; runtime verification was performed via `npm test` (225 passed, 2 skipped).*
+## Addendum A: Additional Coverage Gaps (Supplemental Review)
+
+> **Reviewer:** Test Engineer (supplemental pass)  
+> **Focus:** Deep-dive on specific untested modules discovered during source file examination  
+> **Files examined:** `lib/analytics.ts`, `lib/audit.ts`, `lib/api-auth.ts`, `lib/clip-inference.ts`, `lib/clip-model.ts`, `lib/clip-paths.ts`, `lib/gps-exif-strip.ts`, `lib/serve-upload.ts`, `lib/upload-tracker.ts`, `lib/smart-collections.ts`, `lib/restore-maintenance.ts`, `lib/queue-shutdown.ts`, `lib/rate-limit.ts`, `lib/view-retention.ts`, `lib/data.ts`, `lib/process-image.ts`
+
+### A.1 Critical Untested Modules (Not in Main Review)
+
+#### `lib/analytics.ts` — NO DIRECT TESTS (Risk: HIGH)
+
+The existing review does not mention this file. It is 182 lines of production code with zero unit tests:
+
+- **`isBot()`** — No test for `null`/`undefined` UA, edge cases in isbot integration
+- **`lookupCountry()`** — No test for missing geoip-lite fallback (`'XX'`), invalid IP formats, exception handling in `getGeoLookup()`
+- **`extractTldPlusOne()`** — No test for trailing dots (documented fix R4C4/R4C5), two-part TLDs (`co.uk`, `com.au`), bare TLDs, IPv6 addresses
+- **`sanitizeReferrerHost()`** — No test for private IPs, loopback, `.onion`, same-origin detection, non-http/https protocols, length cap (>128 chars), malformed URLs
+- **`getSiteHost()`** — No test for invalid `siteConfig.url`
+
+**Recommended tests:**
+```typescript
+// extractTldPlusOne
+expect(extractTldPlusOne('www.github.com.')).toBe('github.com'); // trailing dot
+expect(extractTldPlusOne('sub.bbc.co.uk')).toBe('bbc.co.uk'); // two-part TLD
+expect(extractTldPlusOne('github.com')).toBe('github.com'); // already TLD+1
+
+// sanitizeReferrerHost
+expect(sanitizeReferrerHost('https://192.168.1.1/path')).toBe('direct'); // private IP
+expect(sanitizeReferrerHost('https://gallery.atik.kr/photo/1')).toBe('self'); // same-origin
+expect(sanitizeReferrerHost('ftp://evil.com')).toBe('direct'); // non-http protocol
+expect(sanitizeReferrerHost(null)).toBe('direct'); // null input
+expect(sanitizeReferrerHost('')).toBe('direct'); // empty string
+expect(sanitizeReferrerHost('not-a-url')).toBe('direct'); // malformed URL
+```
+
+**Confidence: HIGH** — This is a genuine gap. The privacy contract (country_code only, TLD+1 referrer) is critical and untested.
+
+#### `lib/api-auth.ts` — NO DIRECT TESTS (Risk: HIGH)
+
+The existing review mentions `proxy.ts` as untested but does NOT list `api-auth.ts`. This is the PRIMARY security wrapper for ALL `/api/admin/*` routes (124 lines). The `check-api-auth.test.ts` tests the LINT SCANNER, not the wrapper itself.
+
+**Untested paths:**
+- Token authentication path (US-P53) — `X-GalleryKit-Token` header with valid scope
+- Same-origin rejection (403) — `hasTrustedSameOrigin()` failure
+- Admin cookie rejection (401) — `isAdmin()` failure
+- Header injection on success — `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`
+- Token scope validation — `tokenHasScope()` rejection
+- Handler-set header preservation — existing `Cache-Control` should not be overwritten
+
+**Recommended tests:**
+```typescript
+// Mock NextRequest, isAdmin, verifyToken, tokenHasScope, hasTrustedSameOrigin
+// Test each branch of the wrapper
+```
+
+**Confidence: HIGH** — This is a critical security gap. The wrapper is the primary defense for all admin API routes.
+
+#### `lib/audit.ts` — NO DIRECT TESTS (Risk: MEDIUM)
+
+Not mentioned in the existing review. 79 lines handling audit log writing and retention.
+
+**Untested paths:**
+- `logAuditEvent()` — metadata serialization failure, metadata truncation (>4096 chars), null/undefined params, circular metadata
+- `purgeOldAuditLog()` — negative retention guard (R4C6 COR-R4C6-10), non-finite retention, env var override, explicit parameter override
+
+**Recommended tests:**
+```typescript
+// purgeOldAuditLog(-1) → falls back to 90-day default
+// purgeOldAuditLog(NaN) → falls back to 90-day default
+// logAuditEvent with metadata > 4096 chars → truncated with preview field
+// logAuditEvent with circular object → serialization failure handling
+```
+
+**Confidence: HIGH** — The retention guard is a safety-critical fix that needs test coverage.
+
+#### `lib/upload-tracker.ts` — NO DIRECT TESTS (Risk: LOW)
+
+Not mentioned in the existing review. 33 lines of upload quota settlement.
+
+**Untested paths:**
+- `settleUploadTrackerClaim()` — missing entry (no-op), negative math (Math.max(0, ...)), count vs bytes reconciliation
+
+**Recommended tests:**
+```typescript
+// Claim 5/10MB, succeed 3/6MB → count=3, bytes=6
+// Claim 5/10MB, succeed 0/0MB → count=0, bytes=0
+// Missing entry → no throw
+// Success > claim → caps at 0 via Math.max
+```
+
+**Confidence: HIGH** — Simple module, easy to test.
+
+#### `lib/restore-maintenance.ts` — NO DIRECT TESTS (Risk: LOW)
+
+Not mentioned in the existing review. 57 lines of global state management.
+
+**Untested paths:**
+- `beginRestoreMaintenance()` — idempotency (second call returns false)
+- `endRestoreMaintenance()` — state reset
+- `isRestoreMaintenanceActive()` — initial state
+- `cleanupOriginalIfRestoreMaintenanceBegan()` — cleanup callback invocation, inactive state
+
+**Recommended tests:**
+```typescript
+// beginRestoreMaintenance() → true, then beginRestoreMaintenance() → false
+// endRestoreMaintenance() → isRestoreMaintenanceActive() → false
+// cleanupOriginalIfRestoreMaintenanceBegan() with active → cleanup called
+// cleanupOriginalIfRestoreMaintenanceBegan() with inactive → cleanup NOT called
+```
+
+**Confidence: HIGH** — Simple module, easy to test.
+
+#### `lib/queue-shutdown.ts` — NO DIRECT TESTS (Risk: LOW)
+
+Not mentioned in the existing review. 37 lines of queue shutdown helper.
+
+**Untested paths:**
+- `drainProcessingQueueForShutdown()` — idempotency (second call awaits same promise), GC interval cleanup, pause/clear/enqueued clearing
+
+**Recommended tests:**
+```typescript
+// First call → pauses, clears, awaits idle
+// Second concurrent call → awaits same promise
+// GC interval is cleared
+```
+
+**Confidence: HIGH** — Simple module, easy to test.
+
+#### `lib/clip-inference.ts` — NO DIRECT TESTS (Risk: LOW)
+
+Not mentioned in the existing review. 74 lines of stub embedding functions.
+
+**Untested paths:**
+- `deterministicEmbedding()` — seed determinism, value range [-1, 1], dimension correctness (512)
+- `embedImageStub()` — same image ID produces same embedding
+- `embedTextStub()` — case normalization, trim behavior
+
+**Recommended tests:**
+```typescript
+// embedImageStub(1) === embedImageStub(1) (deterministic)
+// embedTextStub('Hello') === embedTextStub('hello') (case normalization)
+// embedTextStub(' hello ') === embedTextStub('hello') (trim)
+// All values in [-1, 1] range
+// Exactly 512 dimensions
+```
+
+**Confidence: HIGH** — Simple pure functions, easy to test.
+
+### A.2 Partially Covered Modules with Gaps
+
+#### `lib/gps-exif-strip.ts` — HAS TESTS but potential gaps (Risk: MEDIUM)
+
+`strip-gps-from-original.test.ts` exists (30k) but the existing review does not analyze its coverage depth. This is 606 lines of complex byte-level GPS stripping.
+
+**Potential untested paths:** (need detailed verification of test file)
+- JPEG with post-EOI trailer (SEC-R4C10-01) — rejection path
+- ExtendedXMP chunk boundary split (SEC-R4C9-01) — reconstruction path
+- HEIF/AVIF ISOBMFF with `construction_method != 0` — rejection path
+- WebP with non-EXIF/XMP chunks — passthrough
+- TIFF with GPS IFD chain depth > `MAX_IFD_CHAIN` — rejection
+- Structural anomalies returning `null` for each container type
+- `stripGpsFromJpegBuffer` with `input.length < 4` — early rejection
+- `stripGpsFromIsobmffBuffer` with no `meta` box — rejection
+- `stripGpsFromWebpBuffer` with invalid RIFF header — rejection
+
+**Confidence: MEDIUM** — The test file is large (30k) but may not cover all rejection paths.
+
+#### `lib/rate-limit.ts` — MOSTLY COVERED but `getClientIp` gaps (Risk: LOW)
+
+Well-tested by `rate-limit.test.ts`, `rate-limit-db.test.ts`, `auth-rate-limit.test.ts`. However:
+
+**Undertested paths in `getClientIp()`:**
+- `TRUST_PROXY=true` but empty `x-forwarded-for` → falls through to `x-real-ip`
+- `TRUST_PROXY=true` but chain shorter than hop count → falls through to `x-real-ip`
+- Bracketed IPv6 + port → normalization (`[2001:db8::1]:1234`)
+- `shouldWarnMissingTrustProxy()` — dev env, no proxy headers
+- Warning log deduplication (`warnedMissingTrustProxy` flag)
+
+**Confidence: MEDIUM** — The core logic is tested but edge cases in proxy header handling may be undertested.
+
+#### `lib/data.ts` — NO DIRECT UNIT TESTS (Risk: HIGH)
+
+The existing review mentions this indirectly but does not flag it as a gap. 75k lines of data access layer. Only fixture-style SQL contract tests exist (`data-tag-names-sql.test.ts`, `data-timeline.test.ts`, etc.). No unit tests with mocked DB.
+
+**Untested paths:**
+- All query functions (`getImages`, `getImage`, `getTopics`, etc.) — no unit tests
+- React `cache()` deduplication behavior
+- `publicSelectFields` vs `adminSelectFields` correctness at runtime
+- Search query construction with LIKE wildcard escaping
+- Adjacency query (prev/next navigation) edge cases
+- View count increment and flush behavior
+- `_PrivacySensitiveKeys` compile-time guard (this is compile-time, not runtime)
+
+**Note:** The data layer is tested primarily through e2e tests and fixture-style source scans. Direct unit tests with mocked DB would be valuable but are complex due to Drizzle ORM abstraction.
+
+**Confidence: HIGH** — This is a large, critical module with no direct unit tests.
+
+#### `lib/process-image.ts` — HAS TESTS but many untested paths (Risk: MEDIUM)
+
+The existing review covers color/HDR pipeline tests well but does not analyze the untested paths in the main processing function.
+
+**Untested paths:** (likely)
+- Queue processing loop (`processImageFormats` caller)
+- Error handling during Sharp pipeline (OOM, corrupt files)
+- `deleteImageVariants()` — directory scanning, size variant cleanup
+- `ensureDirs()` — race condition handling
+- `limitInputPixels` decompression bomb mitigation
+- Actual file I/O operations (most tests mock or use synthetic buffers)
+- `was_downscaled` flag computation
+- `avif_10bit` encode-time probe failure fallback
+
+**Confidence: MEDIUM** — The color pipeline is well-tested but the orchestration and error handling are not.
+
+### A.3 Flaky Test Status Update
+
+#### `image-queue-bootstrap.test.ts` — CONFIRMED FLAKY
+
+The existing review (Section 4.1) lists known flaky tests but does NOT include `image-queue-bootstrap.test.ts`. My verification confirms this file has 2 tests that timeout at 15000ms under full-suite load:
+
+- **"caps each bootstrap pass and schedules a continuation for large backlogs"** (line 131)
+- **"continues scanning after the previous batch cursor so later rows are not starved"** (line 153)
+
+**Root cause:** `vi.doMock` with `vi.resetModules()` is slow under parallel load. The continuation test uses `vi.waitFor` with 20s timeout but still fails when CPU is contended by sharp/clip/db transitive import graphs.
+
+**Fix status:** NOT FIXED. The test comment (AGG-C4-01) acknowledges the flake but the timeout increase was insufficient.
+
+**Recommended fixes:**
+1. Use `vi.useFakeTimers()` for all bootstrap tests (the third test uses this and passes)
+2. Isolate the file to serial execution (`describe.sequential`)
+3. Increase timeout to 30s+ or mark as `test.skip` under CI
+
+**Confidence: HIGH** — Verified by running the full test suite.
+
+### A.4 `lib/clip-model.ts` — NO DIRECT FUNCTIONAL TESTS (Risk: MEDIUM-HIGH)
+
+The existing review does not specifically mention this file. 201 lines of real CLIP encoder. `clip-model-contract.test.ts` and `clip-model-manifest.test.ts` are source-scan/contract tests, not functional tests.
+
+**Untested paths:**
+- `getModelBundle()` — lazy loading, retry on failure, cacheDir assignment
+- `embedTextReal()` — actual embedding output shape, truncation, normalization
+- `embedImageReal()` — Sharp preprocessing, channel validation, Tensor construction
+- No integration test that actually loads the model and produces embeddings
+
+**Note:** Testing the real encoder requires model weights (~hundreds of MB) and is impractical in CI. The stub path is well-tested. Consider a lightweight "model load" test that verifies the lazy import path without actually encoding.
+
+**Confidence: HIGH** — This is a genuine gap but justified by practical constraints.
+
+### A.5 Summary of Additional Gaps
+
+| Module | Risk | Status in Main Review | Finding |
+|--------|------|---------------------|---------|
+| `lib/analytics.ts` | **HIGH** | NOT MENTIONED | No tests for bot detection, GeoIP, referrer sanitization |
+| `lib/api-auth.ts` | **HIGH** | NOT MENTIONED | No tests for the primary admin API auth wrapper |
+| `lib/audit.ts` | MEDIUM | NOT MENTIONED | No tests for audit log writing or retention guard |
+| `lib/upload-tracker.ts` | LOW | NOT MENTIONED | No tests for quota settlement |
+| `lib/restore-maintenance.ts` | LOW | NOT MENTIONED | No tests for global state management |
+| `lib/queue-shutdown.ts` | LOW | NOT MENTIONED | No tests for shutdown drain |
+| `lib/clip-inference.ts` | LOW | NOT MENTIONED | No tests for stub determinism |
+| `lib/clip-model.ts` | MEDIUM-HIGH | NOT MENTIONED | No functional tests for real encoder |
+| `lib/gps-exif-strip.ts` | MEDIUM | NOT ANALYZED | Potential gaps in rejection paths |
+| `lib/data.ts` | HIGH | INDIRECT ONLY | No direct unit tests for query functions |
+| `lib/process-image.ts` | MEDIUM | NOT ANALYZED | Untested orchestration and error paths |
+| `image-queue-bootstrap.test.ts` | FLAKY | NOT LISTED | 2 tests timeout under full-suite load |
+
+---
+
+*Addendum completed. 16 additional source files examined, 12 new coverage gaps identified, 1 flaky test confirmed. Verification: `npm test` (225 passed, 2 skipped, 0 failed, 176s); `npm run typecheck` (pass); isolated bootstrap test (3 passed, 1.69s).*

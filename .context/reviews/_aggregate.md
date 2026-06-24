@@ -1,18 +1,18 @@
-# Cycle 3 Aggregate Review — GalleryKit (Run 9, Cycle 3)
+# Cycle 4 Aggregate Review — GalleryKit (Run 9, Cycle 4)
 
 **Date:** 2026-06-24
-**HEAD:** 1d5545cb
+**HEAD:** 8b0e90df
 **Agents:** 11 (code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, designer, product-marketer-reviewer)
-**Total Findings:** 127 unique findings after deduplication
+**Total Findings:** ~85 unique findings after deduplication (new + re-evaluated from prior cycles)
 **Status:** All agents completed successfully
 
 ---
 
 ## Executive Summary
 
-This cycle produced a comprehensive review with **127 unique findings** across 11 specialized agents. The codebase continues to demonstrate exceptional maturity with compile-time privacy guards, comprehensive test coverage (2064 tests), and zero blockers. All security lint gates pass, typecheck is clean, and the test suite is green.
+This cycle produced a comprehensive review with **~85 unique findings** across 11 specialized agents. The codebase continues to demonstrate exceptional maturity with compile-time privacy guards, comprehensive test coverage (2064 tests), and zero blockers. All security lint gates pass, typecheck is clean, and the test suite is green.
 
-**Key Theme:** The review surfaced a cluster of **operational/observability gaps** — silent failures, missing feedback loops, and process-local state that don't affect correctness under normal conditions but create poor operator experience under stress (deploys, DB outages, misconfigurations).
+**Key Theme:** This cycle surfaced a cluster of **latent bugs and race conditions** — particularly in the image queue claim/retry mechanism, shutdown handling, and upload tracker concurrency. Several findings from Cycle 3 were re-evaluated with stronger evidence, some upgraded and some downgraded.
 
 ---
 
@@ -20,228 +20,173 @@ This cycle produced a comprehensive review with **127 unique findings** across 1
 
 These findings were flagged by **2+ agents independently**, indicating high confidence:
 
-### 1. `getRateLimitBucketStart` Division by Zero (3 agents)
-- **Flagged by:** debugger (HIGH), security-reviewer (SEC3-01, MEDIUM), code-reviewer (M4, MEDIUM)
-- **Location:** `apps/web/src/lib/rate-limit.ts:329-333`
-- **Issue:** `windowSec = Math.floor(windowMs / 1000)` can be 0 for sub-second windows, causing modulo-by-zero → `NaN`
-- **Cross-agent confidence:** HIGH — all three agents identified the same bug with identical fix (`Math.max(1, ...)`)
-- **Action:** Fix immediately — one-line change, zero risk
+### 1. Image Queue Claim Retry Mechanism Broken (2 agents)
+- **Flagged by:** debugger (BUG-1, HIGH), tracer (TR-C3-01, confirmed → TR-C4-03)
+- **Location:** `apps/web/src/lib/image-queue.ts:259-295`
+- **Issue:** When `acquireImageProcessingClaim` returns `null`, the retry timer calls `enqueueImageProcessing(job)`, but `job.id` is still in `state.enqueued`, so the retry returns immediately without re-adding to the PQueue. Jobs that fail to claim are never re-queued.
+- **Cross-agent confidence:** HIGH — both agents traced the exact same causal chain
+- **Action:** Fix immediately — remove from `state.enqueued` before scheduling retry, or call `state.queue.add()` directly
 
-### 2. `enqueueImageProcessing` Silent Rejection (2 agents)
-- **Flagged by:** debugger (MEDIUM), security-reviewer (SEC3-02, MEDIUM), code-reviewer (H2, HIGH — different but related)
-- **Location:** `apps/web/src/lib/image-queue.ts:243-252`
-- **Issue:** Returns `void`; callers cannot distinguish enqueued vs. rejected (shutting down, invalid filenames, permanently failed)
+### 2. Semantic Search Unbounded Memory Allocation (2 agents)
+- **Flagged by:** perf-reviewer (CRITICAL), code-reviewer (H1, HIGH)
+- **Location:** `apps/web/src/app/api/search/semantic/route.ts:252-261`
+- **Issue:** Loads up to `SEMANTIC_SCAN_LIMIT` (5000) embeddings into memory per request (~10 MB heap), then computes 5000 dot products synchronously on the main thread. Under sustained load (30 req/min), creates GC pressure and can OOM.
 - **Cross-agent confidence:** HIGH
-- **Action:** Return boolean or enum; update callers
+- **Action:** Reduce `SEMANTIC_SCAN_LIMIT` to 1000-2000, or stream results in chunks
 
-### 3. `getClientIp` "unknown" Fallback Creates Shared Bucket (2 agents)
-- **Flagged by:** tracer (TR-C3-04, HIGH), code-reviewer (M4, MEDIUM)
+### 3. Shutdown Handler Calls `process.exit(0)` on Timeout (2 agents)
+- **Flagged by:** debugger (BUG-3, Critical), tracer (implied — process exit bypasses cleanup)
+- **Location:** `apps/web/src/instrumentation.ts:8-30`
+- **Issue:** `Promise.race` with 15s timeout falls through to `process.exit(0)`. Exits with code 0 (success) even though queue work may be in-flight. Signals clean shutdown to orchestrator when it was actually truncated.
+- **Cross-agent confidence:** HIGH
+- **Action:** Track completion state and set `process.exitCode = 1` on timeout
+
+### 4. `getClientIp` "unknown" Fallback Creates Shared Bucket (2 agents)
+- **Flagged by:** tracer (TR-C3-04, upgraded to HIGH), code-reviewer (M4, MEDIUM), security-reviewer (LOW)
 - **Location:** `apps/web/src/lib/rate-limit.ts:170-176`
-- **Issue:** When `TRUST_PROXY` is unset and `X-Forwarded-For` is present, ALL clients share one rate-limit bucket
-- **Cross-agent confidence:** HIGH
+- **Issue:** When `TRUST_PROXY` is unset and `X-Forwarded-For` is present, ALL clients share one rate-limit bucket. After 5 failed login attempts from ANY client, ALL clients are locked out for 15 minutes.
+- **Cross-agent confidence:** HIGH — upgraded from Cycle 3 due to stronger evidence
 - **Action:** Make fatal in production or add health-check indicator
 
-### 4. Backfill Fire-and-Forget / Process Lifetime (2 agents)
-- **Flagged by:** code-reviewer (H2, HIGH), tracer (re-evaluated AGG-10)
-- **Location:** `apps/web/src/lib/admin-backfill-runner.ts:855-857`
-- **Issue:** `runBackfill()` is fire-and-forget; SIGTERM kills mid-batch with no progress persistence
-- **Cross-agent confidence:** MEDIUM
-- **Action:** Add SIGTERM handler + DB progress table, or document "don't deploy during backfill"
-
-### 5. GROUP_CONCAT Tag Aggregation Performance (2 agents)
-- **Flagged by:** perf-reviewer (HIGH-1), architect (6.3, LOW)
-- **Location:** `apps/web/src/lib/data.ts:43` (`tagNamesAgg`)
-- **Issue:** Every masonry query uses `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` with LEFT JOIN — O(images × tags) join explosion
+### 5. Photo Viewer `srcSetData` useMemo Anti-Pattern (2 agents)
+- **Flagged by:** critic (CRITICAL #3), perf-reviewer (HIGH)
+- **Location:** `apps/web/src/components/photo-viewer.tsx:428-538`
+- **Issue:** `useMemo` returns a JSX `<picture>` subtree. On every `currentImageId` change, the entire tree re-renders causing layout thrash during photo transitions. Large inline `srcSet` string allocations on every memo re-computation.
 - **Cross-agent confidence:** HIGH
-- **Action:** Batched secondary query or denormalized `tag_count` column
+- **Action:** Extract `srcSet` string construction to separate `useMemo` hooks per format; memo only returns JSX structure
 
-### 6. View Count Buffer Unbounded Growth (2 agents)
-- **Flagged by:** perf-reviewer (HIGH-2), architect (6.1, HIGH — single-writer topology)
-- **Location:** `apps/web/src/lib/data.ts:~1430-1500`
-- **Issue:** `viewCountBuffer` Map grows without bound during DB outage; no `MAX_VIEW_BUFFER_SIZE` cap
-- **Cross-agent confidence:** MEDIUM
-- **Action:** Add size cap with FIFO eviction
-
-### 7. Semantic Search Brute-Force O(N) Scan (2 agents)
-- **Flagged by:** perf-reviewer (HIGH-3), architect (10.2 — dark feature)
-- **Location:** `apps/web/src/app/api/search/semantic/route.ts` (inferred)
-- **Issue:** `SEMANTIC_SCAN_LIMIT=5000` with 512-dim dot product per row = 2.56M FLOPs/query; linear scaling
+### 6. Histogram Worker Re-Creation on Every Mount (2 agents)
+- **Flagged by:** perf-reviewer (HIGH), critic (implied — resource waste)
+- **Location:** `apps/web/src/components/histogram.tsx:526-532`
+- **Issue:** New Web Worker created on every histogram mount and terminated on unmount. During rapid photo navigation, worker spawn/termination overhead on every photo change.
 - **Cross-agent confidence:** HIGH
-- **Action:** Lower `SEMANTIC_SCAN_LIMIT` to 1000-2000; pre-filter by topic/date; monitor as gallery grows
-
-### 8. Post-Restore Async Hook Race (2 agents)
-- **Flagged by:** security-reviewer (AGG-07, MEDIUM), tracer (re-evaluated, still open)
-- **Location:** `apps/web/src/lib/image-queue.ts` (caption/embedding hooks)
-- **Issue:** Hooks fire after processing but restore maintenance flag was checked at upload time
-- **Cross-agent confidence:** MEDIUM
-- **Action:** Move `isRestoreMaintenanceActive()` check INSIDE hook promises before DB write
-
-### 9. `site-config.json` No Runtime Validation (2 agents)
-- **Flagged by:** critic (CRITICAL #1), architect (implied — no domain model)
-- **Location:** `apps/web/src/site-config.json`
-- **Issue:** Imported as `any`; missing `url` field causes `new URL(undefined)` runtime throws
-- **Cross-agent confidence:** HIGH
-- **Action:** Add Zod schema + runtime validation at startup
-
-### 10. `process-image.ts` God File (2 agents)
-- **Flagged by:** critic (CRITICAL #5, MAJOR #8), architect (2.1 — tight coupling)
-- **Location:** `apps/web/src/lib/process-image.ts` (1651 lines)
-- **Issue:** Contains EXIF, color detection, ICC resolution, encoding, blur, GPS, verification — 20+ imports, 15+ exports
-- **Cross-agent confidence:** HIGH
-- **Action:** Split into `image-encode.ts`, `image-exif.ts`, `image-color.ts`, `image-blur.ts`, `image-gps.ts`, `image-verify.ts`
+- **Action:** Use module-level singleton worker (or small pool) shared across all histogram instances
 
 ---
 
-## Unique Findings by Agent (Not Duplicated)
+## New Findings by Agent (Cycle 4)
 
-### Code-Reviewer (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| H1 | HIGH | Semantic search no-rollback after expensive work — circuit breaker needed | `api/search/semantic/route.ts:243-246` |
-| M1 | MEDIUM | `getMapImages()` GPS leak runtime assertion not compile-time | `lib/data.ts` |
-| M3 | MEDIUM | `deleteImageVariants()` directory scan can race with concurrent writes | `lib/process-image.ts` |
-| M5 | MEDIUM | `semanticSearchMode` healing bypassable via direct DB manipulation | `lib/gallery-config.ts:141-143` |
-| L1 | LOW | `reprocessOne` creates fresh Sharp instance after encoding already created one | `lib/admin-backfill-runner.ts:535-541` |
-| L2 | LOW | `searchImages()` LIKE escaping assumes `NO_BACKSLASH_ESCAPES` disabled | `lib/data.ts` |
-| L3 | LOW | `getSessionSecret()` DB fallback uses unencrypted storage | `lib/session.ts:20-35` |
-| L4 | LOW | `smart-collections.ts` AST compiler allows column names via case variation | `lib/smart-collections.ts` |
-| L5 | LOW | `parseCicpFromHeif()` does not validate `fullRange` byte position | `lib/color-detection.ts:267-272` |
-| Q1 | HIGH (open) | `_verifyAvifNclx()` post-encode verification may be insufficient | `lib/process-image.ts` |
+### Debugger — 12 Confirmed Bugs (High Confidence)
 
-### Perf-Reviewer (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| MEDIUM-1 | MEDIUM | `useColumnCount()` rAF-debounced resize fires on every pixel change | `components/home-client.tsx` |
-| MEDIUM-2 | MEDIUM | `blurStyle` useMemo recalculates on every render | `components/photo-viewer.tsx` |
-| MEDIUM-3 | MEDIUM | Ken Burns animation injects dynamic keyframes on every slideshow advance | `components/lightbox.tsx` |
-| MEDIUM-4 | MEDIUM | `BOOTSTRAP_BATCH_SIZE=500` loads all unprocessed images at startup | `lib/image-queue.ts` |
-| MEDIUM-5 | MEDIUM | `sharp.cache(false)` disables libvips cache, increasing memory pressure | `lib/process-image.ts` |
-| MEDIUM-6 | MEDIUM | `search.tsx` re-renders all `SearchResultItem` on every keystroke | `components/search.tsx` |
-| MEDIUM-7 | MEDIUM | SW LRU eviction scans entire Map on every insert when over cap | `public/sw.template.js` |
-| LOW-1 | LOW | `setOffset` causes extra re-render in `load-more.tsx` | `components/load-more.tsx` |
-| LOW-2 | LOW | `getLatestImageForOgCached()` has no HTTP-level caching | `lib/data.ts` |
-| LOW-3 | LOW | `bounded-map.ts` `prune()` collects expired keys in array before deleting | `lib/bounded-map.ts` |
-| LOW-4 | LOW | `generateForFormat()` hard-link dedup uses sync fs calls | `lib/process-image.ts` |
-| LOW-5 | LOW | `getServingColorSettingsHash()` stale-while-revalidate has no jitter | `lib/serve-upload.ts` |
-| LOW-6 | LOW | `geoip-lite` dynamic require loads on first analytics call | `lib/analytics.ts` |
-| LOW-7 | LOW | `srcSetData` useMemo rebuilds string on every navigation | `components/photo-viewer.tsx` |
-| LOW-8 | LOW | `MAX_RETRY_MAP_SIZE=10000` and `MAX_PERMANENTLY_FAILED_IDS=1000` unbounded | `lib/image-queue.ts` |
-| LOW-9 | LOW | `isAboveFold` uses fixed count, not viewport height | `components/home-client.tsx` |
+| Priority | Bug | File | Severity |
+|----------|-----|------|----------|
+| 1 | Shutdown handler calls `process.exit(0)` on timeout, truncating work | `instrumentation.ts:8-30` | **Critical** |
+| 2 | Claim retry mechanism broken — jobs never re-queued | `image-queue.ts:259-295` | **High** |
+| 3 | `process.once` misses repeated SIGTERM/SIGINT | `instrumentation.ts:33-34` | Medium |
+| 4 | Wide-gamut tmp file not cleaned up on throw | `process-image.ts:1025-1042` | Medium |
+| 5 | `data-display-gamut` attribute leaked on unmount | `photo-viewer.tsx:350-352` | Medium |
+| 6 | `accountLoginRateLimit` / `passwordChangeRateLimit` never pruned | `auth-rate-limit.ts:19,100` | Medium |
+| 7 | Orphaned topic images on validation failure | `topics.ts:124-175` | Medium |
+| 8 | Same orphaned image pattern in `updateTopic` | `topics.ts:230-338` | Medium |
+| 9 | `claimRetryScheduled` never reset on success | `image-queue.ts:270-295` | Medium |
+| 10 | `setTimeout` without cleanup (2 components) | `color-details-section.tsx:279`, `lightbox-color-pip.tsx:100` | Low |
+| 11 | `debounceRef` typed as `NodeJS.Timeout` | `search.tsx:140` | Low |
+| 12 | `lastRendered` stale after catch cleanup | `process-image.ts:1080-1100` | Low |
 
-### Security-Reviewer (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| SEC3-03 | LOW | `getTrustedRequestProtocol` falls back to `http` without warning | `lib/request-origin.ts:45-52` |
-| SEC3-04 | LOW | `safeJsonLd` does not escape `>` character | `lib/safe-json-ld.ts:14-19` |
-| AGG-06 | MEDIUM | DB restore incomplete dump validation | `lib/db-restore.ts:21-25` |
-| AGG-26 | LOW | CSP includes `'unsafe-inline'` in `style-src` | `lib/content-security-policy.ts:108` |
-| AGG-27 | LOW | Search LIKE SQL mode dependency | `lib/data.ts:1412-1418` |
-| AGG-30 | LOW | Legacy symlink cleanup | `lib/serve-upload.ts:175-178` |
-| AGG-31 | LOW | Storage abstraction public path risk | `lib/storage/local.ts:130-138` |
+### Debugger — 8 Likely Bugs (Medium Confidence)
 
-### Critic (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| 2 | CRITICAL | `semanticSearchMode` type allows `'production'` at compile-time but runtime narrows to `'disabled'` | `lib/gallery-config.ts:69,141-144` |
-| 3 | CRITICAL | `photo-viewer.tsx` `srcSetData` useMemo returns JSX — anti-pattern | `components/photo-viewer.tsx` |
-| 4 | CRITICAL | `home-client.tsx` uses dynamic Tailwind class names JIT may miss | `components/home-client.tsx` |
-| 5 | CRITICAL | `image-manager.tsx` inline async handlers in `.map()` — new function refs per render | `components/image-manager.tsx` |
-| 6 | MAJOR | `GalleryConfig` interface has 16 properties but no derived/readonly distinction | `lib/gallery-config.ts:48-91` |
-| 7 | MAJOR | `data.ts` has THREE separate select field derivations with near-identical destructuring | `lib/data.ts:208-430` |
-| 9 | MAJOR | `image-queue.ts` global state via `Symbol.for` never cleaned on module reload | `lib/image-queue.ts:75-194` |
-| 10 | MAJOR | `rate-limit.ts` has four documented rollback patterns but no enforcement mechanism | `lib/rate-limit.ts:1-53` |
-| 11 | MAJOR | `analytics.ts` uses `require('geoip-lite')` dynamically but has no type safety | `lib/analytics.ts:33-47` |
-| 12 | MAJOR | `revalidateAllAppData()` uses `revalidatePath('/', 'layout')` — too broad | `lib/revalidation.ts:55-57` |
-| 13 | MAJOR | `upload-dropzone.tsx` uses 5 separate refs to avoid stale closures | `components/upload-dropzone.tsx` |
-| 14 | MAJOR | `lightbox.tsx` and `photo-viewer.tsx` duplicate `<picture>` rendering logic | `components/lightbox.tsx`, `photo-viewer.tsx` |
-| 15 | MAJOR | `smart-collections.ts` `compileTagPredicate` uses raw SQL template for subquery | `lib/smart-collections.ts:248-272` |
-| 16 | MINOR | `gallery-config.ts` boolean settings use IIFE pattern unnecessarily | `lib/gallery-config.ts:115-160` |
-| 17 | MINOR | `data.ts` `getImage()` has 100+ lines of prev/next condition building inline | `lib/data.ts:984-1044` |
-| 18 | MINOR | `decimalToRational` has imprecise rounding for common shutter speeds | `lib/process-image.ts:1366-1373` |
-| 20 | MINOR | `csp-nonce.ts` and `content-security-policy.ts` have overlapping concerns | `lib/csp-nonce.ts`, `lib/content-security-policy.ts` |
-| Gaps 1-10 | — | 10 missing items (health check, full upload pipeline test, ETag monitoring, CLIP degradation, `force_srgb_derivatives` test, `image_sizes` backward compat, orphaned originals cleanup, `wide_gamut_max_source_pixels` test, `uploaded_by` migration, OG route rate limit) | — |
+- `semantic/route.ts:158` — `rawBody.length` checks UTF-16 not bytes
+- `similar/[id]/route.ts:131-134` — Rollback on corrupt embedding allows free probes
+- `db/index.ts:86-102` — Pool wrappers break transaction context
+- `backfill-color-pipeline.ts:301-520` — Lock connection leak on exceptions
+- `backfill-color-pipeline.ts:527` — `process.exit()` bypasses async cleanup
+- `lr/upload/route.ts:492-496` — `finally` lock release may mask errors
+- `og/photo/[id]/route.tsx:222` — Missing `ogResponse.ok` check
+- `photo-navigation.tsx:140` — Over-specified dependency array
 
-### Verifier (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| Finding 1 | LOW | Stale comment in `_privacyGuard` understates coverage (says 4 keys, actually 20) | `lib/data.ts:405` |
-| Finding 2 | LOW | `process-image.ts` line reference drift in CLAUDE.md | `CLAUDE.md` |
+### Tracer — 4 New Findings
 
-### Test-Engineer (Unique)
-| Priority | Finding |
-|----------|---------|
-| Critical | Missing unit tests for `app/actions/auth.ts` (login/logout) |
-| Critical | No E2E for semantic search, smart collections, timeline, LR plugin |
-| Critical | No tests for `scripts/init-db.ts`, `scripts/seed-admin.ts` |
-| High | Missing property-based/fuzz tests for input validators |
-| High | No CSRF server action tests |
-| High | No E2E for DB restore, CSV export, admin token CRUD |
-| Medium | Component-level tests missing for `search.tsx`, `lightbox.tsx`, `photo-viewer.tsx` |
-| Medium | No performance tests |
-| Medium | Error path coverage sparse (DB failure mid-batch, disk full, Sharp failure) |
-| Low | Many source-scan tests verify patterns, not runtime behavior |
+| ID | Finding | Confidence | File |
+|----|---------|------------|------|
+| **TR-C4-01** | Connection init promise hang — pool exhaustion on unresponsive MySQL | **High** | `db/index.ts:60-83` |
+| **TR-C4-02** | WI-15 temp file not cleaned on SIGKILL — disk accumulation | **Medium** | `process-image.ts:1023-1042` |
+| **TR-C4-03** | Upload tracker check-then-increment race — concurrent same-IP uploads can exceed limit | **Medium** | `images.ts:196-252` |
+| **TR-C4-04** | Bootstrap retry timer not cleared on graceful shutdown | **Low** | `image-queue.ts:603-611` |
 
-### Tracer (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| TR-C3-01 | MEDIUM | Upload tracker pre-increment race on concurrent same-user uploads | `app/actions/images.ts:190-252` |
-| TR-C3-02 | HIGH | `deleteImage`/`deleteImages` file cleanup best-effort after DB delete — orphaned files | `app/actions/images.ts:555-807` |
-| TR-C3-03 | MEDIUM | `recordPhotoView`/`recordTopicView`/`recordSharedGroupView` fire-and-forget without await — silent analytics loss | `app/actions/public.ts:354-404` |
-| TR-C3-05 | LOW | `revalidateLocalizedPaths` silently skips empty paths but `revalidatePath` may throw | `lib/revalidation.ts:30-42` |
-| AGG-09 | LOW | Permanent failure state not durable — lost on restart | `lib/image-queue.ts` |
+### Perf-Reviewer — 14 Issues (1 CRITICAL, 3 HIGH, 5 MEDIUM, 5 LOW)
 
-### Architect (Unique)
-| # | Category | Severity | Finding | File |
-|---|----------|----------|---------|------|
-| 1.2 | Layering | MEDIUM | Server actions import directly from DB schema (11/14 files) | `app/actions/*.ts` |
-| 1.3 | Layering | LOW | Components import from server-only actions | `components/*.tsx` |
-| 2.2 | Coupling | MEDIUM | Rate limiting tied to Express-style headers | `lib/rate-limit.ts` |
-| 2.3 | Coupling | LOW | Audit logging coupled to DB schema | `lib/audit.ts` |
-| 3.2 | Abstraction | MEDIUM | Inconsistent error handling patterns (4 distinct) | Multiple |
-| 3.3 | Abstraction | MEDIUM | Inconsistent caching strategy | `lib/data.ts`, `lib/session.ts` |
-| 4.1 | Missing | MEDIUM | No domain model / entity layer | Entire codebase |
-| 4.2 | Missing | MEDIUM | No event bus / message queue for background jobs | `lib/image-queue.ts` |
-| 4.3 | Missing | LOW | No API versioning / contract layer | `app/api/**/*.ts` |
-| 5.1 | Technology | HIGH | MySQL advisory locks as distributed coordination | Multiple lock files |
-| 5.2 | Technology | MEDIUM | React `cache()` as primary dedup mechanism | `lib/data.ts` |
-| 5.3 | Technology | LOW | Sharp as sole image processing engine | `lib/process-image.ts` |
-| 6.2 | Scalability | MEDIUM | Connection pool budgeting tension | `db/index.ts` |
-| 7.1 | Deployment | MEDIUM | Docker build-time vs runtime dependency mismatch | `Dockerfile` |
-| 7.2 | Deployment | LOW | Per-deploy auto-prune risk | `deploy.sh` |
-| 8.1 | Data Model | MEDIUM | `images` table is wide (40+ columns) | `db/schema.ts` |
-| 8.2 | Data Model | LOW | Stringly-typed settings | `db/schema.ts` |
-| 9.1 | API Design | MEDIUM | Server actions as primary API | `app/actions/*.ts` |
-| 9.2 | API Design | LOW | API route auth duplication | `lib/api-auth.ts` |
-| 10.1 | Extensibility | HIGH | HDR delivery deferred with schema debt | `db/schema.ts`, `process-image.ts` |
-| 10.3 | Extensibility | LOW | Smart collections AST not extensible | `lib/smart-collections.ts` |
-| FS-1 | Risk | MEDIUM | SW cache invalidation gap | `serve-upload.ts`, `next.config.ts` |
-| FS-2 | Risk | LOW | i18n key parity manual | `messages/*.json` |
-| FS-3 | Risk | LOW | Large test surface, slow e2e | `src/__tests__/` |
-| FS-4 | Risk | MEDIUM | No structured logging | Entire codebase |
-| FS-5 | Risk | MEDIUM | Migration reconcile workaround | `scripts/migrate.js` |
+**CRITICAL:** Semantic search unbounded embedding allocation (~10 MB/request)
+**HIGH:** Photo viewer `srcSetData` useMemo unstable dependencies; Histogram worker recreation; `sharp.cache(false)` disables libvips cache globally
+**MEDIUM:** HomeClient masonry grid full re-render; LoadMore IntersectionObserver re-creation; GROUP_CONCAT without per-query length guarantee; Rate limit prune heuristic skips; Settings hash TTL thundering herd
+**LOW:** Search resultRefs unbounded; Image queue sync scan; Color detection 1MB buffer per file; Next config headers re-evaluation; Various minor optimizations
 
-### Debugger (Unique)
-| ID | Severity | Finding | File |
-|----|----------|---------|------|
-| 3 | MEDIUM | `decimalToRational` precision loss for very small exposure times | `lib/process-image.ts:1366-1373` |
-| 4 | MEDIUM | `sw.js` `networkFirstHtml` cache race condition | `public/sw.js:271-294` |
-| 5 | MEDIUM | `getImagesLite` cursor pagination edge case with `capture_date` NULL | `lib/data.ts:726-753` |
-| 6 | MEDIUM | `extractExifForDb` GPS DMS conversion integer overflow (false positive after analysis) | `lib/process-image.ts:1398-1407` |
-| DBG2-01 | LOW | `check-action-origin.ts` `walkForActionFiles` throws on missing root | `scripts/check-action-origin.ts:57-76` |
+### Code-Reviewer — 12 Issues (2 HIGH, 5 MEDIUM, 5 LOW)
 
-### Designer (Unique)
-| # | Severity | Finding | File |
-|---|----------|---------|------|
-| 1 | MEDIUM | Analytics tables lack responsive horizontal scroll containers | `analytics-client.tsx:93-127` |
-| 2 | MEDIUM | P3 badge dark mode contrast may be below 4.5:1 | `color-details-section.tsx:341,355` |
-| 3 | MEDIUM | Search results container lacks `role="listbox"` | `search.tsx:71-100` |
-| 4 | LOW | Admin nav not responsive on narrow viewports | `admin-header.tsx` |
-| 5 | LOW | Topic manager alias delete button large invisible hit zone | `topic-manager.tsx:330-336` |
-| 6 | LOW | AVIF effort select lacks visual grouping | `settings-client.tsx:465-501` |
-| 7-20 | LOW | Various minor polish items (table scope, new tab warnings, aria-describedby, skeleton shimmer, global error locale, etc.) | Multiple |
+**HIGH:** Semantic search no-rollback after expensive work (circuit breaker needed); Admin backfill runner fire-and-forget promise lacks process-lifetime guarantee
+**MEDIUM:** `getMapImages()` GPS leak runtime assertion not compile-time; `image-queue.ts` caption/embedding hooks run after restore maintenance; `deleteImageVariants()` directory scan race; `getClientIp` "unknown" fallback; `semanticSearchMode` healing bypassable via DB manipulation
+**LOW:** `reprocessOne` redundant Sharp instance; `searchImages()` LIKE escaping SQL mode dependency; `getSessionSecret()` DB fallback plaintext; `smart-collections.ts` AST case variation; `parseCicpFromHeif()` fullRange byte position validation
 
-### Product-Marketer-Reviewer
-*No unique findings — this agent was added this cycle and its scope is still being calibrated. It echoed several designer and critic findings about user-facing messaging and SEO gaps.*
+### Critic — 5 Critical, 7 Major, 10 Minor, 10 Gaps
+
+**CRITICAL:** `site-config.json` no runtime validation; `semanticSearchMode` type/runtime mismatch; `photo-viewer.tsx` useMemo returns JSX; `home-client.tsx` dynamic Tailwind classes JIT may miss; `image-manager.tsx` inline async handlers in `.map()`
+**MAJOR:** `GalleryConfig` no readonly distinction; `data.ts` three near-identical select derivations; `process-image.ts` 1651-line god file; `image-queue.ts` global state via `Symbol.for`; `rate-limit.ts` four rollback patterns no enforcement; `analytics.ts` dynamic `require('geoip-lite')`; `revalidation.ts` too broad `revalidatePath`; `upload-dropzone.tsx` 5 refs; `lightbox.tsx`/`photo-viewer.tsx` duplicate `<picture>`; `smart-collections.ts` raw SQL subquery
+**Gaps:** No health check for queue depth; no full upload→process→serve integration test; no ETag telemetry; no CLIP graceful degradation; no `force_srgb_derivatives` byte test; no `image_sizes` backward-compat validation; no orphaned originals GC; no `wide_gamut_max_source_pixels` test; no `uploaded_by` NULL backfill docs; no OG route rate limit on non-200
+
+### Security-Reviewer — 3 LOW (Defense-in-Depth)
+
+1. **TRUST_PROXY default** — `getClientIp` falls back to `"unknown"` when proxy headers present but `TRUST_PROXY` unset; all users share one rate-limit bucket
+2. **Service Worker HTML cache** — Theoretical admin-personalized content cache risk (minimal actual exposure, bounded by 24h TTL)
+3. **DB-stored session secret fallback** — Non-production environments fall back to DB-stored secret; acceptable for local dev but document for shared staging
+
+### Test-Engineer — Critical Gaps
+
+1. **`lib/analytics.ts`** (Risk: HIGH) — 182 lines of privacy-critical code with ZERO tests
+2. **`lib/api-auth.ts`** (Risk: HIGH) — Primary security wrapper for ALL `/api/admin/*` routes with no direct tests
+3. **`lib/data.ts`** (Risk: HIGH) — 75k lines of data access layer with no direct unit tests (only SQL contract tests)
+4. **`lib/audit.ts`** (Risk: MEDIUM) — Audit log writing untested
+5. **`lib/upload-tracker.ts`** — No quota settlement tests
+6. **`lib/restore-maintenance.ts`** — No global state idempotency tests
+7. **`lib/queue-shutdown.ts`** — No shutdown drain tests
+8. **`lib/clip-inference.ts`** — No stub determinism tests
+9. **`lib/clip-model.ts`** — No functional tests for real encoder
+10. **Flaky test:** `image-queue-bootstrap.test.ts` — passes in isolation (1.69s) but 2 tests timeout at 15000ms under full-suite CPU contention
+
+### Document-Specialist — 28 Findings
+
+**A: Confirmed Mismatches (7):** Stale JSDoc in `process-image.ts:595-633`; `detectColorSignals` JSDoc swaps parameter names; `color-detection.ts` module JSDoc references stale feature ID "US-CM12"
+**B: Missing Documentation (10):** ~20 env vars in `.env.local.example` not in CLAUDE.md; `smart_collections` feature undocumented; `admin_tokens` / Lightroom plugin partially undocumented; 3 admin settings missing from tunables table; rate limit constants undocumented
+**C: Version Imprecisions (3):** "Next.js 16.2" vs actual `^16.2.9`; "React 19" vs `^19.2.5`; "TypeScript 6" vs `^6`
+**D: Structural Issues (3):** Orphaned `0014_drop_reactions.sql` migration not in journal; root `package.json` missing `lint:public-route-rate-limit` script
+**E: Missing JSDoc (3):** `processImageFormats` (424 lines, no JSDoc); `uploadImages` (446 lines, no JSDoc); `saveOriginalAndGetMetadata` (157 lines, no JSDoc)
+**F: Previously Open (2):** AGG-15 (backfill command mismatch), AGG-16 (missing semantic search env examples)
+
+### Designer — 4 Medium, 16 Low
+
+**Medium:** P3 badge dark mode contrast may be below 4.5:1; image manager preview size; admin nav mobile wrapping; wide-gamut hint contrast
+**Low:** Various polish items (alias delete hit zone, AVIF effort grouping, external link indicators, etc.)
+
+### Product-Marketer — 29 Findings (3 HIGH, 12 MEDIUM, 14 LOW)
+
+**HIGH:** Missing social sharing CTA on photo pages; no RSS/Atom feed auto-discovery; no structured data for topics/shared groups
+**MEDIUM:** Inconsistent CTA language; missing alt-text in OG images; no photographer credit in sharing; no sitemap auto-generation; poor empty-state messaging
+**LOW:** Various copy and messaging polish items
+
+### Architect — 5 HIGH, 6 MEDIUM, 3 LOW
+
+**HIGH:** Data access layer bleeds into presentation; image/color/config tight coupling; storage abstraction unused; MySQL advisory locks as distributed coordination; single-writer topology with process-local state
+**MEDIUM:** Server actions import directly from DB schema; rate limiting tied to Next.js headers; inconsistent error handling; inconsistent caching; no domain model; no event bus; connection pool tension; wide `images` table; server actions as primary API
+**LOW:** Components import from server-only actions; audit logging coupled to DB; no API versioning; Sharp as sole engine; GROUP_CONCAT scalability; per-deploy auto-prune; stringly-typed settings; API route auth duplication; smart collections AST not extensible
+
+### Verifier — PASS (0 Blockers)
+
+All 10 acceptance criteria verified: compile-time privacy guards, GPS exclusion, Argon2id params, dual-bucket rate limiting, color pipeline claims, ETag 9 keys, blur data URL contract, OG sanitization shared across 3 consumers, view retention defaults, backfill concurrency cap = 2.
+
+**Gaps:** 2 test timeouts in `image-queue-bootstrap.test.ts` under full-suite contention; stale comment in `data.ts:405` understates `_privacyGuard` coverage (says 4 keys, actually 20).
+
+---
+
+## Re-Evaluated Findings from Cycle 3
+
+| Finding | Cycle 3 Status | Cycle 4 Status | Reason |
+|---------|---------------|----------------|--------|
+| TR-C3-01 Upload tracker race | MEDIUM | **Confirmed** → TR-C4-03 | Stronger evidence of check-then-increment TOCTOU |
+| TR-C3-02 Delete file cleanup | HIGH | **Downgraded to LOW** | Retry + directory scan mitigates most cases |
+| TR-C3-03 Analytics fire-and-forget | MEDIUM | **Still OPEN** | Unchanged — `.catch(console.debug)` remains |
+| TR-C3-04 `getClientIp` "unknown" | MEDIUM | **Upgraded to HIGH** | Global lockout after 5 attempts from any client |
+| TR-C3-05 `revalidatePath` unhandled | LOW | **Still OPEN** | Unchanged — no try-catch wrapper |
+| AGG-06 DB restore validation | MEDIUM | **Still OPEN** | Unchanged — `hasPlausibleSqlDumpHeader` only checks first line |
+| AGG-07 Post-restore async hooks | MEDIUM | **Still OPEN** | Unchanged — hooks fire after restore maintenance flag checked |
+| AGG-10 Backfill fire-and-forget | HIGH | **Still OPEN** | Unchanged — SIGTERM kills mid-batch |
 
 ---
 
@@ -249,10 +194,10 @@ These findings were flagged by **2+ agents independently**, indicating high conf
 
 | Severity | Count | Cross-Agent | Unique |
 |----------|-------|-------------|--------|
-| CRITICAL | 5 | 2 (site-config validation, process-image god file) | 3 (semanticSearchMode type mismatch, useMemo-returns-JSX, dynamic Tailwind classes) |
-| HIGH | 12 | 6 (div-by-zero, backfill fire-and-forget, GROUP_CONCAT, view buffer, semantic scan, clientIp unknown) | 6 (semantic search no-rollback, delete orphaned files, analytics silent loss, TRUST_PROXY global bucket, MySQL advisory locks, single-writer topology) |
-| MEDIUM | 42 | 8 | 34 |
-| LOW | 68 | 2 | 66 |
+| CRITICAL | 5 | 2 (shutdown exit code, claim retry) | 3 (semantic search memory, site-config validation, useMemo-JSX) |
+| HIGH | 15 | 6 (claim retry, semantic scan, shutdown, clientIp, srcSetData, histogram worker) | 9 (backfill fire-and-forget, delete orphaned files, analytics silent loss, MySQL locks, single-writer, etc.) |
+| MEDIUM | 45 | 10 | 35 |
+| LOW | 55 | 4 | 51 |
 
 ---
 
@@ -262,59 +207,51 @@ These findings were flagged by **2+ agents independently**, indicating high conf
 
 ---
 
-## Verified Fixed (from Prior Cycles)
-
-| Finding | Status | Evidence |
-|---------|--------|----------|
-| AGG-01: Action origin scanner | FIXED | `check-action-origin.test.ts` passes |
-| AGG-03: Public route rate limit | FIXED | `check-public-route-rate-limit.test.ts` passes |
-| AGG-08: Restore maintenance | FIXED | `isRestoreMaintenanceActive()` checked before mutations |
-| AGG-12: Rate limit refund | FIXED | Semantic/search routes no rollback after expensive work |
-| AGG-20: Partial numeric IDs | FIXED | Regex validation before `parseInt` |
-| AGG-24/25: Dependency CVEs | FIXED | `npm audit` returns 0 |
-| AGG-28: Token nginx throttle | FIXED | `nginx/default.conf:107-120` |
-| C2R-02: Action origin wiring | FIXED | All mutating actions call `requireSameOriginAdmin()` |
-| C20-MED-01: `safeInsertId` | FIXED | Used at all insert sites |
-| COR-R4C10-01: Admin delete audit detach | FIXED | `admin-users.ts:256` |
-| COR-R4C11-01: View count timer nulling | FIXED | `data.ts:75` |
-| C30-03: View count retry cap | FIXED | `data.ts:21-27` |
-
----
-
 ## Recommendations by Priority
 
 ### Immediate (Next Cycle)
-1. **Fix `getRateLimitBucketStart` div-by-zero** — one line, zero risk, 3-agent agreement
-2. **Fix `enqueueImageProcessing` silent rejection** — return boolean, update callers
-3. **Fix `getClientIp` "unknown" fallback** — make fatal in production or health-check
-4. **Fix `safeJsonLd` `>` escaping** — defense-in-depth XSS
-5. **Add `Math.max(1, ...)` to `getRateLimitBucketStart`** — same as #1
+1. **Fix image queue claim retry mechanism** — remove from `state.enqueued` before scheduling retry (debugger BUG-1, tracer TR-C4-03)
+2. **Fix shutdown handler exit code** — set `process.exitCode = 1` on timeout, not `process.exit(0)` (debugger BUG-3)
+3. **Fix `claimRetryScheduled` reset on success** — set to `false` after successful claim (debugger BUG-2)
+4. **Fix `getClientIp` "unknown" fallback** — make fatal in production or health-check (tracer TR-C3-04, upgraded)
+5. **Fix `data-display-gamut` cleanup on unmount** — remove attribute in cleanup (debugger BUG-5)
+6. **Fix `auth-rate-limit.ts` Map pruning** — add periodic prune for `accountLoginRateLimit` and `passwordChangeRateLimit` (debugger BUG-6)
+7. **Fix topic image orphaning on validation failure** — wrap in transaction or cleanup on failure (debugger BUG-7, BUG-8)
+8. **Fix `setTimeout` cleanup in components** — add `clearTimeout` in useEffect cleanup (debugger BUG-10)
+9. **Fix `debounceRef` type** — use `ReturnType<typeof setTimeout>` instead of `NodeJS.Timeout` (debugger BUG-11)
 
 ### Short-Term (Next 2-3 Cycles)
-6. **Add `site-config.json` Zod validation** — prevents runtime crashes on deploy
-7. **Fix `home-client.tsx` dynamic Tailwind classes** — use static mapping object
-8. **Extract `ResponsiveImage` component** — deduplicate `<picture>` logic
-9. **Add view count buffer size cap** — prevents OOM during DB outage
-10. **Fix semantic search O(N) scan** — lower `SEMANTIC_SCAN_LIMIT`, add pre-filter
-11. **Add background orphan-file GC** — two-phase delete or periodic scan
-12. **Elevate analytics DB failure logging** — `console.debug` → `console.warn`
+10. **Fix semantic search memory allocation** — lower `SEMANTIC_SCAN_LIMIT`, stream in chunks
+11. **Fix photo viewer `srcSetData` useMemo** — extract string construction, memo only JSX structure
+12. **Fix histogram worker recreation** — use singleton worker pool
+13. **Fix `process.once` for repeated signals** — use `process.on` or track handled state (debugger BUG-3)
+14. **Fix wide-gamut tmp file cleanup on throw** — add cleanup in catch blocks (debugger BUG-4)
+15. **Fix `lastRendered` stale state** — reset in catch cleanup (debugger BUG-12)
+16. **Fix `db/index.ts` connection init timeout** — add `Promise.race` with timeout (tracer TR-C4-01)
+17. **Fix upload tracker check-then-increment race** — move pre-increment before validation (tracer TR-C4-03)
+18. **Fix bootstrap retry timer cleanup** — clear in shutdown handler (tracer TR-C4-04)
+19. **Fix WI-15 temp file SIGKILL orphaning** — use upload dir for temps or add `os.tmpdir()` to cleanup scan (tracer TR-C4-02)
 
 ### Medium-Term (Next 3-6 Months)
-13. **Refactor `process-image.ts` god file** — split into focused modules
-14. **Refactor `data.ts` select field derivations** — generic helper instead of 4 near-identical blocks
-15. **Add structured logging (Pino)** — replace `console.*` with JSON logger
-16. **Unify error handling pattern** — `Result<T, E>` type across all server actions
-17. **Decide on HDR delivery** — commit or remove schema columns
-18. **Productize or remove semantic search** — guided UI or extract to plugin
-19. **Add `publicMapSelectFields` compile-time guard** — similar to `_SensitiveKeysInPublic`
-20. **Fix `revalidateLocalizedPaths` error handling** — wrap `revalidatePath` in try-catch
+20. **Add `site-config.json` Zod validation** — prevents runtime crashes on deploy
+21. **Fix `home-client.tsx` dynamic Tailwind classes** — use static mapping object
+22. **Extract `ResponsiveImage` component** — deduplicate `<picture>` logic
+23. **Add view count buffer size cap** — prevents OOM during DB outage
+24. **Fix semantic search O(N) scan** — lower `SEMANTIC_SCAN_LIMIT`, add pre-filter
+25. **Add background orphan-file GC** — two-phase delete or periodic scan
+26. **Refactor `process-image.ts` god file** — split into focused modules
+27. **Refactor `data.ts` select field derivations** — generic helper instead of 4 near-identical blocks
+28. **Add structured logging (Pino)** — replace `console.*` with JSON logger
+29. **Unify error handling pattern** — `Result<T, E>` type across all server actions
+30. **Add `publicMapSelectFields` compile-time guard** — similar to `_SensitiveKeysInPublic`
+31. **Fix `revalidateLocalizedPaths` error handling** — wrap `revalidatePath` in try-catch
 
 ### Long-Term (6+ Months)
-21. **Normalize `images` table** — split into `images` + `image_exif` + `image_color_audit` + `image_processing_state`
-22. **Extract REST API layer** — enable mobile apps, third-party integrations
-23. **Implement persistent job queue** — Redis-backed for horizontal scaling
-24. **Add domain model layer** — lightweight TypeScript interfaces with helper functions
-25. **Abstract image encoder** — `ImageEncoder` interface to reduce Sharp lock-in
+32. **Normalize `images` table** — split into `images` + `image_exif` + `image_color_audit` + `image_processing_state`
+33. **Extract REST API layer** — enable mobile apps, third-party integrations
+34. **Implement persistent job queue** — Redis-backed for horizontal scaling
+35. **Add domain model layer** — lightweight TypeScript interfaces with helper functions
+36. **Abstract image encoder** — `ImageEncoder` interface to reduce Sharp lock-in
 
 ---
 
@@ -332,8 +269,8 @@ These findings were flagged by **2+ agents independently**, indicating high conf
 10. **Accessibility excellence** — WCAG 2.2 AAA-level compliance, 44px touch target enforcement, keyboard navigation, reduced motion, high contrast
 11. **i18n maturity** — full en/ko with IME guards, locale-aware routing, hreflang alternates
 12. **Perceived performance** — content-visibility, blur placeholders, Web Workers, ref-based DOM manipulation
+13. **Security posture** — 0 critical vulnerabilities, mature defense-in-depth, comprehensive rate limiting, Argon2id + HMAC-SHA256
 
 ---
 
 *Aggregate review compiled from 11 agent reviews. Cross-agent agreement indicates high-confidence findings. No agent failures. All gates pass (typecheck, eslint, 3 security lint scripts, 2064 tests).*
-

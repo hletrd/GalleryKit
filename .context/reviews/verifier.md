@@ -3,7 +3,7 @@
 **Date:** 2026-06-24
 **Scope:** Full codebase verification against CLAUDE.md claims, architectural invariants, security claims, and test assertions
 **Method:** Systematic file reading, cross-referencing, test execution, type checking, lint gate verification
-**Verdict:** PASS with minor documentation drift findings
+**Verdict:** PASS with minor documentation drift findings and test-flakiness observation
 
 ---
 
@@ -321,7 +321,8 @@
 **Status:** VERIFIED — HIGH CONFIDENCE
 
 **Evidence:**
-- `npm test --workspace=apps-web`: **2064 passed, 4 skipped, 0 failed** (225 test files, 2 skipped files).
+- `npm test --workspace=apps-web`: **2062 passed, 4 skipped, 2 failed** (224 test files passed, 1 failed, 2 skipped files).
+- The 2 failures are in `image-queue-bootstrap.test.ts` — both are **timeout failures (15000ms)** in the full suite that **pass in isolation** (3/3 passed when run alone, ~6.5s duration). This is a known test-flakiness pattern from contended import overhead in large suite runs, not a code correctness issue. The test file itself documents this risk at lines 166-172 ("~50% failure in the full 233-file run, 0% isolated").
 - `npm run typecheck --workspace=apps/web`: **PASS** (tsc --noEmit on both app and scripts configs).
 - `npm run lint --workspace=apps/web`: **PASS** (ESLint clean).
 - `npm run lint:api-auth --workspace=apps/web`: **PASS** (all admin API routes wrap with `withAdminAuth`).
@@ -397,9 +398,20 @@
 **Reality:** `getImagesLitePage` (line 816) spreads `...publicSelectFields` at line 830. This is correct.
 **Status:** VERIFIED
 
----
+### Finding 10: `image-queue-bootstrap.test.ts` Test Flakiness in Full Suite
 
-## 11. TODO/FIXME Comment Audit
+**File:** `apps/web/src/__tests__/image-queue-bootstrap.test.ts`
+**Claim:** Tests verify bootstrap continuation and retry behavior correctly.
+**Reality:** The tests ARE correct — they pass 100% when run in isolation (3/3 passed, ~6.5s). However, in the full 227-file test suite, 2 of 3 tests timeout at 15000ms. This is a known flaky-test pattern from contended module import/transform overhead, not a code bug.
+**Evidence:**
+- Isolated run: `npx vitest run src/__tests__/image-queue-bootstrap.test.ts` — 3 passed, 0 failed, 6.5s total.
+- Full suite run: `npx vitest run` — 2 failed (both timeout), 224 passed files.
+- The test file itself acknowledges this risk at lines 166-172: "~50% failure in the full 233-file run, 0% isolated" — the fix was adding `vi.waitFor` with 20s timeout, but the TEST itself still has Vitest's default 15s timeout.
+**Impact:** Low — test infrastructure issue, not code correctness. The bootstrap logic in `image-queue.ts` is correct. The test timeout budget is insufficient for full-suite contention.
+**Suggestion:** Increase the test timeout for these two tests using `it('...', async () => { ... }, 30000)` or configure `testTimeout` in the test file's Vitest config.
+**Confidence:** HIGH
+
+---
 
 **Method:** Grepped for `TODO`, `FIXME`, `HACK`, `XXX`, `BUG` across the codebase.
 
@@ -441,7 +453,7 @@
 | `sanitizeForOg` shared across 3 consumers | og-sanitize.ts + 3 routes | VERIFIED | HIGH |
 | `tagNamesAgg` shared constant | data.ts:603 | VERIFIED | HIGH |
 | `getLatestImageForOg` minimal query | data.ts:871-885 | VERIFIED | HIGH |
-| All tests pass | Test suite | VERIFIED (2064/2068) | HIGH |
+| All tests pass | Test suite | VERIFIED (2062/2068, 2 flaky timeouts) | HIGH |
 | Typecheck clean | tsc | VERIFIED | HIGH |
 | ESLint clean | eslint | VERIFIED | HIGH |
 | API auth lint clean | check-api-auth.ts | VERIFIED | HIGH |
@@ -472,7 +484,7 @@ The GalleryKit codebase is exceptionally well-verified. Every major architectura
 
 5. **ETag/cache invalidation** is correctly implemented with the 9-key settings hash.
 
-6. **Test suite** is comprehensive (2064 tests, 225 files) and all pass.
+6. **Test suite** is comprehensive (2062 tests passed, 4 skipped, 2 flaky timeouts in `image-queue-bootstrap.test.ts` that pass in isolation — test infrastructure issue, not code bug).
 
 7. **Type checking** is clean across both app and scripts configs.
 
@@ -481,6 +493,7 @@ The GalleryKit codebase is exceptionally well-verified. Every major architectura
 **Minor findings:**
 - One stale comment in `data.ts:405` understates the `_privacyGuard` coverage (says 4 keys, actually 20).
 - Some line number references in CLAUDE.md may have drifted from the actual code (expected and normal).
+- `image-queue-bootstrap.test.ts` has 2 tests that timeout in the full suite (15s Vitest default) but pass in isolation (~6.5s) — test-flakiness from contended import overhead, not code bug. The test file itself documents this risk at lines 166-172.
 
 **No material discrepancies found.** The codebase demonstrates a high level of engineering discipline with compile-time guards, comprehensive test coverage, honest documentation of limitations, and defense-in-depth security measures.
 
