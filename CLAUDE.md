@@ -83,6 +83,31 @@ If you ever seeded an environment from older checked-in examples, rotate both
 `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
 git values must be treated as compromised and must not be reused.
 
+### Optional Operational Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DB_SSL` | auto | TLS is auto-enabled for non-localhost `DB_HOST`; set to `false` to disable (e.g., VPC-internal) |
+| `BASE_URL` | — | Public URL for sitemap, OpenGraph, and RSS feeds (e.g., `https://gallery.example.com`) |
+| `IMAGE_BASE_URL` | — | Optional CDN origin/prefix for uploaded assets; must be absolute HTTPS without credentials |
+| `TRUST_PROXY` | — | Set to `true` behind nginx/reverse proxy so per-IP rate limiting sees the real client IP |
+| `TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops from the right of `X-Forwarded-For`; keep `1` for nginx-only |
+| `HEALTH_CHECK_DB` | — | Set to `true` to make `/api/health` probe DB readiness (default is liveness-only) |
+| `QUEUE_CONCURRENCY` | `1` | Background image-processing jobs concurrency in this web process |
+| `SHARP_CONCURRENCY` | — | Upper bound for Sharp/libvips threads (runtime caps at CPU parallelism - 1) |
+| `IMAGE_MAX_INPUT_PIXELS` | `268435456` | Decompression bomb protection cap (default 256M pixels) |
+| `IMAGE_MAX_INPUT_PIXELS_TOPIC` | `67108864` | Separate cap for topic images (default 64M; smaller because topic images are 512x512) |
+| `UPLOAD_MAX_TOTAL_BYTES` | `2147483648` | Cumulative batch upload size cap (default 2 GiB) |
+| `UPLOAD_MAX_FILES_PER_WINDOW` | `100` | Max files accepted per upload tracking window |
+| `AUDIT_LOG_RETENTION_DAYS` | `90` | How many days of audit log entries to keep |
+| `VIEW_RETENTION_DAYS` | `395` | Analytics view-event retention (default 13 months / 395 days) |
+| `ADMIN_BACKFILL_CONCURRENCY` | `1` | In-app color-pipeline backfill concurrency (capped by pool budget; see Operational Playbook) |
+| `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (uncapped; separate MySQL pool) |
+| `UPLOAD_ORIGINAL_ROOT` | — | Override path for private original uploads (used by sidecar scripts) |
+| `SEMANTIC_SEARCH_ALLOW_PRODUCTION` | — | Operator-only opt-in for production CLIP semantic search (requires model weights) |
+| `CLIP_MODELS_ROOT` | `/app/data/models/clip` | Bind-mount path for CLIP model weights (production) |
+| `NEXT_UPLOAD_BODY_MAX_BYTES` | `279620608` | Next.js server action body size limit (default ~266 MiB) |
+
 ## Key Files & Patterns
 
 | File | Purpose |
