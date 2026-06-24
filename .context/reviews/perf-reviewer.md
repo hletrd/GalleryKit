@@ -1,406 +1,309 @@
-# Performance Review — GalleryKit
+# Performance Review — GalleryKit (Cycle 6)
 
-**Review Date:** 2026-06-24
-**Scope:** Full-stack performance analysis of GalleryKit (Next.js 16 + React 19 + MySQL + Sharp image pipeline)
-**Files Reviewed:** 20+ critical source files across data layer, image processing, components, API routes, and configuration
-**Total Issues Found:** 14 (1 CRITICAL, 3 HIGH, 5 MEDIUM, 5 LOW)
-
----
-
-## Executive Summary
-
-GalleryKit demonstrates **strong performance fundamentals** with deliberate optimizations throughout: React `cache()` for SSR deduplication, PQueue for background image processing with MySQL advisory locks, composite DB indexes aligned to query patterns, module-scoped TTL caches, Web Worker offloading for histogram computation, and ref-based DOM manipulation for ImageZoom (zero React re-renders on mousemove). The codebase shows clear evidence of iterative performance hardening across multiple review cycles.
-
-However, **one CRITICAL issue** and **three HIGH-severity issues** require attention. The CRITICAL finding is a potential memory leak in the semantic search endpoint under sustained load. The HIGH findings cover: (1) unbounded semantic search embedding scan without pagination, (2) missing memoization in the photo viewer causing unnecessary re-renders, and (3) histogram worker re-creation on every component mount without cleanup verification.
+**Date:** 2026-06-25
+**Head:** de4c692a
+**Previous cycle finding:** 0 defects (cycle 5)
+**Scope:** Entire `apps/web/src/` — all 225 non-test source files (~39,084 lines)
 
 ---
 
-## By Severity
+## Summary
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| CRITICAL | 1 | Memory leak under sustained load |
-| HIGH | 3 | Significant performance degradation or resource waste |
-| MEDIUM | 5 | Measurable inefficiency or maintainability concern |
-| LOW | 5 | Minor optimization opportunity or defensive improvement |
+This review found **0 Critical**, **2 High**, **5 Medium**, and **6 Low** performance-related findings. The codebase is well-optimized overall, with thoughtful caching, connection pooling, and rate-limiting. The remaining issues are mostly edge cases in concurrency, memory, and query patterns that could manifest under specific load conditions.
 
 ---
 
-## Issues
+## Findings
 
-### [CRITICAL] Semantic Search: Unbounded embedding array allocation per request
+### [HIGH-1] `getImagesLite` / `getImagesLitePage` / `getImages` — GROUP BY on `images.id` with LEFT JOINs causes filesort on large galleries
 
-**File:** `apps/web/src/app/api/search/semantic/route.ts:252-261`
-**Confidence:** HIGH
+**File:** `apps/web/src/lib/data.ts` (lines 728–758, 821–857, 896–916)
+**Confidence:** High
 
-**Issue:** The semantic search endpoint loads up to `SEMANTIC_SCAN_LIMIT` (5000) embeddings into memory per request, then maps over all of them to compute similarity. Each embedding is 512-dim float32 = 2048 bytes. 5000 embeddings = ~10 MB of heap allocation per request. Under sustained load (30 req/min allowed by rate limit), this creates significant GC pressure and can lead to OOM on memory-constrained deployments.
-
-```typescript
-// route.ts:252-261
-rows = await db
-    .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })
-    .from(imageEmbeddings)
-    .where(eq(imageEmbeddings.modelVersion, activeModelVersion))
-    .orderBy(desc(imageEmbeddings.updatedAt))
-    .limit(SEMANTIC_SCAN_LIMIT);  // 5000 rows
+The three main listing queries all use:
+```sql
+SELECT ... FROM images
+LEFT JOIN imageTags ON ...
+LEFT JOIN tags ON ...
+GROUP BY images.id
+ORDER BY images.capture_date DESC, images.created_at DESC, images.id DESC
 ```
 
-The subsequent `rows.map()` + `decodeEmbeddingColumn()` + `similarity()` computation is O(N) where N=5000, done synchronously on the main thread after the async DB query returns. For 5000 embeddings, this is 5000 dot products of 512-dim vectors = ~2.5M multiply-accumulate operations per request. At 30 req/min, that's 75M ops/min on the event loop.
+The `GROUP BY images.id` forces MySQL to create a temporary table and sort (filesort) even when no tag JOIN is functionally needed. For the `getImagesLite` path (homepage masonry, topic pages), every row must be aggregated through `GROUP_CONCAT(DISTINCT tags.name)` even when the result is just `NULL` for images with no tags. At gallery scale (10k+ images), this adds significant query latency.
 
-**Failure scenario:** A bot or curious user rapidly submitting semantic queries can pin the Node event loop, causing request latency spikes for all other users. On a single-instance deployment with limited RAM (e.g., 2-4 GB VPS), sustained semantic search traffic can trigger frequent GC pauses or OOM crashes.
+**Concrete failure scenario:** A gallery with 50,000 images and sparse tagging (most images untagged) still pays the GROUP BY + filesort cost on every page load. The `LISTING_QUERY_LIMIT = 100` cap mitigates but does not eliminate the overhead.
 
-**Fix:** 
-1. Reduce `SEMANTIC_SCAN_LIMIT` from 5000 to a more conservative value (e.g., 1000-2000) for the initial scan, with a documented rationale.
-2. Consider streaming the DB query result and processing embeddings in chunks to avoid loading all 5000 into memory at once.
-3. Add a note to the operator documentation about memory requirements when enabling semantic search in production.
-4. Consider adding a separate worker thread or async iterator for the similarity computation to avoid blocking the event loop.
+**Suggested fix:** Split into two queries: (1) fetch the paginated image IDs with the composite index only, (2) fetch tag_names in a separate batched query by ID list. This eliminates the GROUP BY from the hot path. The `getSharedGroup` function already demonstrates this pattern (lines 1228–1254).
 
 ---
 
-### [HIGH] Photo Viewer: `srcSetData` useMemo has unstable dependency array causing unnecessary re-computation
+### [HIGH-2] `processImageFormats` — fresh `sharp()` instance per format × per size creates 3×N decode passes
 
-**File:** `apps/web/src/components/photo-viewer.tsx:428-538`
-**Confidence:** HIGH
+**File:** `apps/web/src/lib/process-image.ts` (lines 1081–1268)
+**Confidence:** High
 
-**Issue:** The `srcSetData` useMemo at line 428 has `setImageLoaded` in its dependency array. `setImageLoaded` is a `useState` setter function which IS stable across renders in React 19, but the memo also includes `sizedSourcesFailed` state. Every time the photo viewer re-renders for any reason (e.g., keyboard navigation, info panel toggle, lightbox open/close), the `srcSetData` JSX tree is re-computed. The returned JSX includes inline `srcSet` strings built via `imageSizes.map(...).join(', ')`, which allocates new strings on every memo re-computation.
-
-More critically, the `srcSetData` JSX element is passed as a child to `ImageZoom`, which then clones it. When `srcSetData` re-computes, React must re-render the entire `ImageZoom` subtree even if the image hasn't changed.
-
-**Failure scenario:** Rapid keyboard navigation (arrow left/right) triggers re-renders that re-compute `srcSetData` and its large string allocations. On lower-end devices, this can cause frame drops during navigation transitions.
-
-**Fix:**
-1. Extract the `srcSet` string construction OUTSIDE the useMemo so the memo only returns the JSX structure, not the string computation.
-2. Consider memoizing the individual `srcSet` strings separately with `useMemo` so they only recompute when `image` or `imageSizes` changes.
-3. The `setImageLoaded` setter should not be in the dependency array — it's a stable function reference.
-
+The `generateForFormat` function creates a **fresh `sharp()` instance for every format AND every size**:
 ```typescript
-// Current (inefficient):
-const srcSetData = useMemo(() => {
-    // ... builds srcSet strings inline inside the memo
-    return <picture>...</picture>;
-}, [image, photoViewerSizes, t, imageSizes, setImageLoaded, sizedSourcesFailed]);
-
-// Better: pre-compute srcSets
-const avifSrcSet = useMemo(() => 
-    image?.filename_avif ? imageSizes.map(w => `${imageUrl(...)} ${w}w`).join(', ') : null,
-[image?.filename_avif, imageSizes]);
-// Then useMemo only for the JSX structure
+for (const size of sortedSizes) {
+    const base = needsRgb16
+        ? sharp(processingInputPath, ...).pipelineColorspace('rgb16').resize({ width: resizeWidth })
+        : sharp(processingInputPath, ...).resize({ width: resizeWidth });
+    // ... encode to webp/avif/jpeg
+}
 ```
 
+For 6 configured sizes × 3 formats = **18 full decode passes** per image. Each `sharp(inputPath)` re-opens the file, re-decodes the entire image, and re-runs the resize pipeline. The comment at line 1126 (WI-14) explicitly acknowledges this trade-off: "Eliminates shared-state risk between parallel encodes on the non-rgb16 path too."
+
+While the cross-format isolation is correct for color integrity, the **per-size re-decode within the same format** is unnecessary. Sharp's `clone()` is designed for this: decode once, then `clone()` for each size variant within the same format.
+
+**Concrete failure scenario:** A 50 MP wide-gamut source at 6 sizes takes ~18× the decode time of a single pass. With `QUEUE_CONCURRENCY=1` (default), this serializes and blocks the queue for minutes per image. The `WIDE_GAMUT_MAX_SOURCE_PIXELS` downscale helps but only for the rgb16 path.
+
+**Suggested fix:** Within each format's `generateForFormat`, open `sharp()` once before the size loop, then use `.clone()` for each size. Keep the per-format fresh instance (the WI-14 isolation) but eliminate the per-size re-decode.
+
 ---
 
-### [HIGH] Histogram: Worker instantiated on every component mount without reuse
+### [MED-1] `getImage` — prev/next queries use `OR(...)` with multiple conditions that may not use the composite index efficiently
 
-**File:** `apps/web/src/components/histogram.tsx:526-532`
-**Confidence:** HIGH
+**File:** `apps/web/src/lib/data.ts` (lines 994–1097)
+**Confidence:** Medium
 
-**Issue:** The histogram component creates a new Web Worker on every mount and terminates it on unmount:
-
+The prev/next navigation builds conditions like:
 ```typescript
-useEffect(() => {
-    workerRef.current = new Worker(`/histogram-worker.js?v=${IMAGE_PIPELINE_VERSION}`);
-    return () => {
-        workerRef.current?.terminate();
-        workerRef.current = null;
-    };
-}, []);
+or(
+    isNull(images.capture_date),
+    and(isNotNull(images.capture_date), lt(images.capture_date, image.capture_date)),
+    and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
+    and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id))
+)
 ```
 
-When navigating between photos in the photo viewer, the histogram component unmounts and remounts, causing worker creation/termination on every photo change. Worker creation is expensive (spawns a new OS thread, loads and parses the worker script). On rapid photo navigation (keyboard arrow keys), this creates noticeable latency.
+This OR-chain with mixed `isNull` / `isNotNull` / `lt` / `eq` predicates on `capture_date`, `created_at`, and `id` may not be optimizable by MySQL's index merge. The `idx_images_processed_capture_date` index is `(processed, capture_date, created_at)` — the `OR` with `isNull(capture_date)` on one branch and `isNotNull(capture_date)` on others forces a range scan that may not use the index for all branches.
 
-**Failure scenario:** A user rapidly navigating through photos with keyboard arrows experiences jank as each photo's histogram spawns a new worker. The worker script must be re-parsed and the thread re-created each time.
+**Concrete failure scenario:** On a gallery with many undated images (NULL capture_date), the prev/next query for a dated image must scan both the dated and undated partitions. With `revalidate = 0` on public pages, this runs on every photo page load.
 
-**Fix:**
-1. Move worker creation to a module-level singleton (or a React context/provider) so the same worker is reused across all histogram instances.
-2. Use a worker pool (e.g., 1-2 workers) shared by all histogram components.
-3. The worker should accept a `requestId` in messages (already implemented) so multiple components can share one worker without response interleaving.
+**Suggested fix:** Consider splitting into two separate queries (one for dated, one for undated) and taking the closest result, or verify with `EXPLAIN` that the index is used. Add a `EXPLAIN` assertion test.
 
 ---
 
-### [HIGH] Image Queue: `sharp.cache(false)` disables libvips operation cache globally
+### [MED-2] `searchImages` — three sequential/parallel queries with `LIKE '%term%'` cannot use indexes
 
-**File:** `apps/web/src/lib/process-image.ts` (implied by CLAUDE.md reference)
-**Confidence:** MEDIUM
+**File:** `apps/web/src/lib/data.ts` (lines 1407–1546)
+**Confidence:** High
 
-**Issue:** The CLAUDE.md notes that `sharp.cache(false)` disables the libvips operation cache. While this prevents shared-state contamination across the parallel format fan-out (a correctness concern), it also means every Sharp operation re-computes intermediate results from scratch. For wide-gamut sources that use the `pipelineColorspace('rgb16')` path, this can significantly increase CPU usage per image.
+The search function uses `LIKE '%term%'` (leading wildcard) on `images.title`, `images.description`, `images.camera_model`, `images.lens_model`, `images.topic`, and `topics.label`. Leading-wildcard LIKE prevents index usage — every search is a full table scan.
 
-**Failure scenario:** During batch uploads or backfill re-encodes, the absence of libvips caching means redundant computation of resize/scaling operations, increasing overall encode time per image by 10-30% depending on the source.
+The three-query pattern (main → tag → alias) is efficient for small galleries but the leading-wildcard LIKE makes it O(n) per query on the `images` table rows.
 
-**Fix:**
-1. Document the trade-off explicitly: `sharp.cache(false)` is a correctness choice, not a performance optimization.
-2. Consider re-enabling the cache with a small limit (e.g., `sharp.cache({ items: 50 })`) and ensuring each format uses a fresh `sharp()` instance (already done) so cross-format contamination is avoided while intra-format caching still works.
-3. Benchmark backfill throughput with/without caching to quantify the impact.
+**Concrete failure scenario:** A gallery with 50k images and a search for "sunset" scans all 50k rows across three queries. The `effectiveLimit = 100` cap limits returned rows but not scanned rows.
+
+**Suggested fix:** This is a known limitation documented in the code (line 1417: "At personal-gallery scale this is an acceptable risk"). For larger galleries, consider MySQL FULLTEXT index on `title` + `description` + `camera_model`, or a dedicated search engine. No immediate fix needed for the stated use case.
 
 ---
 
-### [MEDIUM] HomeClient: Masonry grid re-renders entire image list on any state change
+### [MED-3] `flushGroupViewCounts` — `Promise.all` over chunk of 20 concurrent UPDATEs may exhaust pool connections
 
-**File:** `apps/web/src/components/home-client.tsx:280-430`
-**Confidence:** HIGH
+**File:** `apps/web/src/lib/data.ts` (lines 63–188)
+**Confidence:** Medium
 
-**Issue:** The masonry grid maps over `orderedImages` and renders each image card inline. While individual card elements have stable `key={image.id}`, the entire map is re-executed on every render of `HomeClient`. Common state changes that trigger re-render include:
-- `showBackToTop` toggle (line 178-186)
-- `columnCount` change on resize (line 188)
-- `allImages` state updates from load-more (line 120-123)
+The view-count flush processes in `FLUSH_CHUNK_SIZE = 20` chunks, with each chunk running `Promise.all` over 20 concurrent `db.update(...)` calls. Each UPDATE acquires a pool connection. With `POOL_CONNECTION_LIMIT = 10` and `queueLimit = 20`, a 20-concurrent UPDATE burst will:
+1. Acquire 10 connections immediately
+2. Queue 10 more in the pool's internal queue
+3. Block until the first 10 complete
 
-The `useColumnCount` hook uses `requestAnimationFrame` debouncing (good), but the state update still causes a full re-render. Each card contains a complex `<picture>` element with multiple `<source>` tags and `srcSet` strings built inline.
+This is not a correctness issue (the pool handles queuing), but it does mean the flush holds connections for longer than necessary and can starve other concurrent requests.
 
-**Failure scenario:** On a gallery with 100+ loaded images, scrolling down (triggering `showBackToTop`) causes React to re-evaluate the JSX for all 100 cards, even though only the back-to-top button's opacity changed.
+**Concrete failure scenario:** During a traffic spike, many shared-group page loads buffer view counts. When the 5-second flush timer fires, 20 concurrent UPDATEs consume the entire pool for the duration of the flush, delaying live page renders that need `getImage()` or `getImagesLite()`.
 
-**Fix:**
-1. Extract the individual masonry card into a separate `MemoizedMasonryCard` component wrapped with `React.memo`.
-2. The card component should only re-render when its props (`image`, `index`, `columnCount`, etc.) actually change.
-3. Pre-compute `srcSet` strings outside the render loop or memoize them per image.
+**Suggested fix:** Reduce `FLUSH_CHUNK_SIZE` from 20 to 5 (matching the pool's sustainable concurrency) or use a connection-aware semaphore. Alternatively, use `db.execute` with a single bulk UPDATE using `CASE` expressions.
 
+---
+
+### [MED-4] `embedImageReal` — raw pixel loop in JavaScript is CPU-bound and blocks the event loop
+
+**File:** `apps/web/src/lib/clip-model.ts` (lines 151–200)
+**Confidence:** Medium
+
+The CLIP image preprocessing loop:
 ```typescript
-// Extract to:
-const MasonryCard = React.memo(function MasonryCard({ image, index, columnCount, ... }) {
-    // card JSX
-});
+for (let c = 0; c < 3; c++) {
+    for (let i = 0; i < pixelCount; i++) {
+        pv[c * pixelCount + i] = (rawData[i * 3 + c] / 255 - mean) / std;
+    }
+}
 ```
 
----
+This is 3 × 262,144 = 786,432 iterations per image (512×512). For a single image this is fast (~1-2ms), but the function is called from the image processing queue (`image-queue.ts` line 481) which already runs Sharp encode. The ONNX inference itself is also CPU-bound. Combined, a single image embedding can block the event loop for 200-500ms.
 
-### [MEDIUM] LoadMore: IntersectionObserver re-created on every render
+**Concrete failure scenario:** With `QUEUE_CONCURRENCY=1` (default), the queue serializes images. A single CLIP embedding adds 200-500ms per image to the already-heavy Sharp pipeline. For a 100-image batch upload, this adds 20-50 seconds of queue time. The embedding is fire-and-forget (line 468: `void (async () => { ... })()`), but it still runs on the same event loop and competes with the next queue job's setup.
 
-**File:** `apps/web/src/components/load-more.tsx:113-130`
-**Confidence:** HIGH
-
-**Issue:** The `setSentinelRef` callback disconnects and re-creates the IntersectionObserver every time it is called. While the callback is memoized with `useCallback([], [])`, the ref callback pattern means React calls it on every render cycle where the DOM node might have changed. The `loadMoreRef` pattern (lines 97-100) mitigates callback churn, but the observer itself is still re-created unnecessarily.
-
-**Failure scenario:** Rapid state changes in the parent component (e.g., scroll position updates) can cause the sentinel ref callback to fire repeatedly, creating and destroying IntersectionObserver instances. While browsers handle this efficiently, it is unnecessary overhead.
-
-**Fix:**
-1. The observer creation should be guarded by a ref tracking whether the observer already exists for the current node.
-2. Consider using a single observer instance at the component level that observes/unobserves the sentinel node, rather than creating a new observer per ref callback invocation.
+**Suggested fix:** Move the embedding to a separate `PQueue` with its own concurrency limit, or run it in a `worker_threads` pool. The current fire-and-forget pattern means it competes with the main queue for CPU.
 
 ---
 
-### [MEDIUM] Data Layer: `getImagesLite` uses `GROUP_CONCAT` without `group_concat_max_len` guarantee per query
+### [MED-5] `getTopics` — correlated subquery `MAX(updated_at)` per topic is N+1 in disguise
 
-**File:** `apps/web/src/lib/data.ts:608`
-**Confidence:** MEDIUM
-
-**Issue:** The `tagNamesAgg` constant uses `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` without specifying a maximum length. MySQL's default `group_concat_max_len` is 1024 bytes. If an image has many tags with long names, the GROUP_CONCAT can be truncated silently, causing incomplete tag data.
-
-The connection pool handler in `db/index.ts` sets `group_concat_max_len = 65535` on new connections, but:
-1. This only applies to NEW connections, not existing pooled connections.
-2. If the pool recycles a connection that was created before this setting, or if the setting is reset by MySQL, the guarantee is lost.
-3. There is no per-query `SET SESSION group_concat_max_len` before the GROUP_CONCAT queries.
-
-**Failure scenario:** An image with 50+ tags (each 20+ chars) could hit the 1024-byte default limit, causing truncated tag names in the gallery listing. This is a silent data corruption issue.
-
-**Fix:**
-1. Add `SET SESSION group_concat_max_len = 65535;` before GROUP_CONCAT queries, or
-2. Use a Drizzle raw SQL wrapper that includes the session variable set, or
-3. Add a connection validation query that ensures the variable is set.
-
----
-
-### [MEDIUM] Rate Limit: `pruneSearchRateLimit` uses time-based heuristic that can skip pruning
-
-**File:** `apps/web/src/lib/rate-limit.ts:194-207`
-**Confidence:** MEDIUM
-
-**Issue:** The `pruneSearchRateLimit` function uses a time-based heuristic (`now - lastSearchRateLimitPruneAt >= SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS`) to decide whether to prune. If the function is called frequently within the interval (1 second), pruning is skipped entirely. This means expired entries can accumulate in the `searchRateLimit` Map until the size exceeds the max OR the interval passes.
-
-With `SEARCH_RATE_LIMIT_MAX_KEYS = 2000`, a high-traffic site could accumulate entries faster than the prune interval, causing the Map to hit its cap and begin evicting valid (non-expired) entries prematurely.
-
-**Failure scenario:** During a traffic spike (e.g., social media mention), search rate-limit entries accumulate rapidly. The 1-second prune interval means up to 2000 entries can accumulate before pruning fires. If the spike exceeds 2000 unique IPs per second, valid entries are evicted.
-
-**Fix:**
-1. Reduce `SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS` to a lower value (e.g., 100-250ms) for high-traffic scenarios.
-2. Or, change the heuristic to always prune when the Map size exceeds a threshold (e.g., 80% of max), regardless of time.
-3. Consider using a more efficient data structure (e.g., a time-bucketed circular buffer) instead of a Map with manual pruning.
-
----
-
-### [MEDIUM] Serve-Upload: Settings hash TTL cache (5s) can cause thundering herd on cache expiry
-
-**File:** `apps/web/src/lib/serve-upload.ts` (implied) and `apps/web/src/lib/settings-hash.ts:69-159`
-**Confidence:** MEDIUM
-
-**Issue:** The `getColorSettingsHash` function uses a 5-second TTL cache with a single `inflight` promise. When the cache expires, the first caller triggers a DB fetch, and subsequent callers within the same tick await the same promise. However, if the DB query takes 50-100ms (typical under load), ALL requests arriving during that window will share the same promise. This is good for deduplication, but:
-
-1. The 5-second TTL means every 5 seconds, a burst of requests can hit the DB simultaneously if the cache expires during a traffic spike.
-2. There is no jitter or randomization on the TTL, so the cache expiry is synchronized across all requests.
-
-**Failure scenario:** A high-traffic gallery serving many image derivatives simultaneously experiences a thundering herd every 5 seconds when the settings hash cache expires, causing a brief DB load spike.
-
-**Fix:**
-1. Add jitter to the TTL (e.g., 5s + random(0, 1s)) to desynchronize cache expiry across processes.
-2. Consider using a longer TTL (e.g., 30-60s) since admin settings changes are rare events.
-3. Add a stale-while-revalidate pattern: serve the stale hash while refreshing in the background.
-
----
-
-### [LOW] Search Component: `resultRefs.current` array is not bounded
-
-**File:** `apps/web/src/components/search.tsx:139`
-**Confidence:** LOW
-
-**Issue:** The `resultRefs` array grows unbounded as search results change:
+**File:** `apps/web/src/lib/data.ts` (lines 455–476)
+**Confidence:** Medium
 
 ```typescript
-const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
-// Later:
-refCb={(el) => { resultRefs.current[idx] = el; }}
+return db.select({
+    ...,
+    last_image_updated_at: sql<Date | null>`(
+        SELECT MAX(${images.updated_at})
+        FROM ${images}
+        WHERE ${images.topic} = ${topics.slug}
+        AND ${images.processed} = true
+    )`,
+}).from(topics).orderBy(asc(topics.order));
 ```
 
-If a search returns 50 results, then the next search returns 20, indices 20-49 in the ref array still hold stale references to unmounted DOM nodes. While this is unlikely to cause a memory leak in practice (the refs are just pointers), it is a hygiene issue.
+The correlated subquery runs once per topic row. With 20 topics, this is 20 subqueries. The comment (line 460) notes this is "cheap at gallery scale" and cached by `revalidate = 3600` on `/sitemap.xml`. However, `getTopics` is also called by `getTopicsCached` which is used in multiple contexts beyond sitemap.
 
-**Fix:** Clear the array when results change:
+**Concrete failure scenario:** If `getTopics` is ever called on a hot path (e.g., every page render via a layout component), the 20 subqueries add significant latency. The `cache()` wrapper only deduplicates within a single SSR request, not across requests.
+
+**Suggested fix:** Replace with a single JOIN + GROUP BY, or a lateral join. The current pattern is acceptable for the sitemap use case but risky if the function is reused on hotter paths.
+
+---
+
+### [LOW-1] `getServingColorSettingsHash` — 5-second TTL may cause stale ETag during rapid admin setting changes
+
+**File:** `apps/web/src/lib/serve-upload.ts` (lines 46–83)
+**Confidence:** Low
+
+The module-scoped cache has a 5-second TTL. If an admin changes a color-impacting setting and immediately tests the result, they may see the old ETag for up to 5 seconds. The stale-while-revalidate pattern mitigates this for subsequent requests, but the first request after a change may still serve a stale hash.
+
+**Concrete failure scenario:** Admin toggles `force_srgb_derivatives` and refreshes the gallery within 5 seconds. The old ETag is served, the browser gets 304 Not Modified, and the old bytes are served from cache. The admin sees no change and assumes the toggle didn't work.
+
+**Suggested fix:** Acceptable trade-off documented in code. The 5-second skew is noted as "the same skew class settings-hash already documents as acceptable." No fix needed.
+
+---
+
+### [LOW-2] `purgeOldAuditLog` — unbounded DELETE without LIMIT may lock the audit_log table
+
+**File:** `apps/web/src/lib/audit.ts` (lines 57–78)
+**Confidence:** Low
+
 ```typescript
-useEffect(() => {
-    resultRefs.current = [];
-}, [results]);
+await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
 ```
 
----
+Unlike `purgeOldViewEvents` which uses chunked DELETE with `LIMIT`, the audit log purge is a single unbounded DELETE. On a busy gallery with years of audit events, this could delete millions of rows in one statement, holding a table lock.
 
-### [LOW] Photo Viewer: `useEffect` for document title runs on every render
+**Concrete failure scenario:** A gallery with 5 years of audit logs (millions of rows) triggers the hourly purge. The single DELETE locks the `audit_log` table for seconds, blocking concurrent audit writes from admin actions.
 
-**File:** `apps/web/src/components/photo-viewer.tsx:166-172`
-**Confidence:** LOW
-
-**Issue:** The document title effect has dependencies `[normalizedDisplayTitle, siteTitle]`. Both of these are memoized, so the effect rarely fires unnecessarily. However, `siteTitle` is a prop that defaults to `siteConfig.title` (a module-level constant), so it is effectively stable. The effect is fine as-is, but could be slightly optimized by using a ref for `siteTitle` if it were dynamic.
-
-**Fix:** No action needed — this is a defensive observation. The current implementation is correct and efficient.
+**Suggested fix:** Add `LIMIT` chunking to match the `purgeOldViewEvents` pattern (VIEW_PURGE_BATCH = 5000, MAX_BATCHES_PER_TABLE = 200).
 
 ---
 
-### [LOW] Image Queue: `cleanOrphanedTmpFiles` scans upload dirs synchronously at bootstrap
+### [LOW-3] `getClientIp` — `x-forwarded-for` parsing with `TRUST_PROXY` may misidentify IPs under spoofing
 
-**File:** `apps/web/src/lib/image-queue.ts` (referenced in CLAUDE.md)
-**Confidence:** LOW
+**File:** `apps/web/src/lib/rate-limit.ts` (lines 145–176)
+**Confidence:** Low
 
-**Issue:** The bootstrap loop scans upload directories for `.tmp` files. If the upload directory contains many files (e.g., 100,000+ after years of operation), this synchronous scan can block the event loop during startup.
+When `TRUST_PROXY=true`, the code parses `X-Forwarded-For` and selects the client IP based on `TRUSTED_PROXY_HOPS`. However, if the header contains more entries than expected (e.g., due to additional proxies or spoofing), the selected IP may be wrong. The `validParts.length - hopCount - 1` calculation can return a negative index, which falls through to `x-real-ip` or `"unknown"`.
 
-**Fix:**
-1. Use an async stream-based directory scan (e.g., `fs.promises.opendir` with `for await`) instead of a synchronous recursive scan.
-2. Or, defer the cleanup to a background task after the server starts accepting requests.
-3. Or, limit the scan to a maximum number of files and log a warning if the limit is exceeded.
+**Concrete failure scenario:** A malicious client sends `X-Forwarded-For: 1.1.1.1, 2.2.2.2, 3.3.3.3` with `TRUSTED_PROXY_HOPS=2`. The valid parts are `[1.1.1.1, 2.2.2.2, 3.3.3.3]`, clientIndex = 3 - 2 - 1 = 0, so `1.1.1.1` is selected as the client IP — the attacker's spoofed IP. This bypasses rate limiting for the attacker's real IP.
 
----
-
-### [LOW] Color Detection: `parseCicpFromHeif` allocates 1MB buffer for every file
-
-**File:** `apps/web/src/lib/color-detection.ts` (referenced in CLAUDE.md)
-**Confidence:** LOW
-
-**Issue:** The ISOBMFF walker reads up to 1MB from each file to find NCLX boxes. For JPEG files (which don't have ISOBMFF structure), this is wasted I/O and memory. The function is called for every uploaded file regardless of format.
-
-**Fix:**
-1. Gate the ISOBMFF walk to HEIF/AVIF formats only, skipping JPEG/WebP.
-2. Or, use a smaller initial read (e.g., 64KB) and only expand to 1MB if the `colr` box is not found in the first scan.
+**Suggested fix:** Document the trust boundary more clearly. The code already warns when `TRUST_PROXY` is not set. Consider validating that the selected IP is not a private/reserved range.
 
 ---
 
-### [LOW] Next Config: `headers()` function is async and runs on every request
+### [LOW-4] `generateCaption` — stub implementation runs synchronously but is called as async
 
-**File:** `apps/web/src/next.config.ts:51-91`
-**Confidence:** LOW
+**File:** `apps/web/src/lib/caption-generator.ts` (lines 54–65)
+**Confidence:** Low
 
-**Issue:** The `headers()` function in `next.config.ts` is called by Next.js for every incoming request. While the function itself is lightweight (a few conditional checks and array constructions), it could be optimized by pre-computing the static header values at module initialization.
+The `generateCaption` function is `async` but its body is entirely synchronous (no awaits). It's called from `image-queue.ts` (line 429) as a fire-and-forget promise: `.then(...).catch(...)`. The async wrapper creates an unnecessary microtask and promise allocation.
 
-**Fix:**
-1. Pre-compute the `isDev` check and the static header arrays at module scope.
-2. The `headers()` function should only return the pre-computed arrays, not re-evaluate conditions.
+**Concrete failure scenario:** For every image processed, an extra promise + microtask is created. At 100 images, this is 100 extra promise allocations. Negligible in practice but unnecessary overhead.
 
----
-
-## Open Questions (Low-Confidence Findings)
-
-### [HIGH] Connection pool exhaustion under concurrent backfill + live traffic
-**File:** `apps/web/src/lib/admin-backfill-runner.ts` (implied by CLAUDE.md)
-**Confidence:** LOW
-
-The CLAUDE.md documents that the backfill runner uses `ADMIN_BACKFILL_CONCURRENCY` capped at 2 for a 10-connection pool. However, the actual concurrency is `max(1, floor((10 - RESERVED - 1) / 2))` where `RESERVED = max(3, ceil(10/2)) = 5`, giving a cap of 2. But the runner uses `Promise.all` to process multiple images concurrently, and each image processing involves multiple DB queries (claim, update, etc.). Under heavy live traffic, the backfill could still starve live requests. Needs runtime profiling to confirm.
-
-**Fix:** Monitor pool queue depth during backfill runs and add explicit queue-depth telemetry.
+**Suggested fix:** Make `generateCaption` synchronous (remove `async`) and call it directly. The caller can wrap in `Promise.resolve()` if needed.
 
 ---
 
-## Positive Observations
+### [LOW-5] `getMapImages` — `for...of` runtime assertion loop adds O(n) overhead after query
 
-1. **React `cache()` deduplication:** The data layer wraps 10+ functions with React `cache()`, preventing duplicate DB queries within a single SSR request. This is a best-practice pattern.
+**File:** `apps/web/src/lib/data.ts` (lines 1599–1608)
+**Confidence:** Low
 
-2. **PQueue with advisory locks:** The image processing queue uses MySQL `GET_LOCK` for claim-based processing, preventing duplicate work across process restarts or multi-process deployments.
+```typescript
+for (const row of rows) {
+    if (!row.topic_map_visible) {
+        throw new Error(`[getMapImages] GPS leak guard: image ${row.id} belongs to a map_visible=false topic.`);
+    }
+}
+```
 
-3. **Ref-based DOM manipulation:** `ImageZoom` uses refs and direct DOM manipulation for zoom/pan, avoiding React re-renders on every mousemove/touchmove. This is a performance best practice for interactive components.
+The runtime assertion loop iterates over all 10,000 (max) returned rows. This is O(n) overhead after the DB query. The INNER JOIN on `topics.map_visible = true` should already guarantee this invariant at the SQL level.
 
-4. **Web Worker for histogram:** The histogram computation is offloaded to a Web Worker, preventing main-thread blocking during the O(n) bin counting.
+**Concrete failure scenario:** A gallery with 10,000 GPS-tagged images triggers the map page. After the DB returns 10,000 rows, the JavaScript loop iterates all of them. At 10k rows this is ~0.1ms — negligible but unnecessary.
 
-5. **Module-scoped TTL caches:** `settings-hash.ts` and `serve-upload.ts` use module-scoped caches with deduped inflight promises, preventing thundering herd on cache misses.
-
-6. **Bounded Maps for rate limiting:** The `BoundedMap` class in `bounded-map.ts` provides explicit size caps and expiry pruning, preventing unbounded memory growth.
-
-7. **Fresh Sharp instances per format:** `process-image.ts` opens a fresh `sharp()` instance per format, eliminating cross-format shared-state contamination (WI-14).
-
-8. **Connection pool configuration:** The MySQL pool is configured with `connectionLimit: 10`, `queueLimit: 20`, and `waitForConnections: true`, providing backpressure under load.
-
-9. **View count buffering:** Shared-group view counts are buffered in memory and flushed in chunks, reducing DB write pressure from high-traffic pages.
-
-10. **Exponential backoff on flush failures:** The view count flush uses exponential backoff (up to 5 minutes) when DB writes fail, preventing hammering an unreachable DB.
+**Suggested fix:** Remove the runtime assertion or make it a debug-only check (`if (process.env.NODE_ENV === 'development')`). The SQL JOIN is the authoritative guard.
 
 ---
 
-## Cross-File Interaction Analysis
+### [LOW-6] `poolConnection.query` and `poolConnection.execute` overrides — extra connection acquire/release per query
 
-### Data Flow: Image Upload → Processing → Serving
+**File:** `apps/web/src/db/index.ts` (lines 99–115)
+**Confidence:** Low
 
-1. **Upload path:** `uploadImages()` (server action) → `saveOriginalAndGetMetadata()` → `processImageFormats()` → DB update
-   - The upload action uses `Promise.all` for parallel format encoding (good)
-   - Each format gets a fresh Sharp instance (correctness over performance)
-   - The queue claims images with `WHERE processed = false` conditional update (race-safe)
+```typescript
+poolConnection.query = (async (...args) => {
+    const queryConnection = await poolConnection.getConnection();
+    try {
+        return await queryConnection.query(...args);
+    } finally {
+        queryConnection.release();
+    }
+}) as typeof poolConnection.query;
+```
 
-2. **Serving path:** `next.config.ts` headers → static file serving OR `serve-upload.ts` route handler
-   - Static files served by Next.js with `Cache-Control: public, max-age=3600, must-revalidate`
-   - `serve-upload.ts` adds ETag with settings hash for cache invalidation
-   - The 5-second TTL cache for settings hash prevents DB pressure
+The overridden `query` and `execute` methods acquire a connection, run the query, and release it. This adds two pool operations (get + release) per query. The standard mysql2 pool's `.query()` already does this internally but may be more efficient (it uses the pool's internal queue directly).
 
-3. **Gallery listing:** `getImagesLite()` / `getImages()` → `home-client.tsx`
-   - `GROUP_CONCAT` for tag aggregation is efficient (single query)
-   - React `cache()` prevents duplicate queries within SSR
-   - The `tagNamesAgg` constant is shared across all listing queries (DRY)
+**Concrete failure scenario:** Every Drizzle query goes through this wrapper. For a page that makes 10 queries, this is 20 extra pool operations (get + release × 10). The overhead is small (~0.1ms per operation) but adds up under load.
 
-### Potential Bottleneck: Semantic Search + Image Processing
-
-When both semantic search (production mode) and image processing are active:
-- The ONNX runtime loads model weights into memory (~hundreds of MB)
-- Image processing uses Sharp/libvips (native memory)
-- The semantic search endpoint scans 5000 embeddings per query
-
-On a memory-constrained instance (2-4 GB), this combination can cause OOM. The operator documentation should explicitly mention memory requirements for production semantic search.
+**Suggested fix:** Verify if this override is still necessary. The original purpose was to ensure `group_concat_max_len` is set on every connection (via the `connection` event handler). The `getConnection()` override already awaits the init promise. The `.query()` override may be redundant if mysql2's native pool.query handles connection lifecycle correctly.
 
 ---
 
-## Recommendation
+## Previously Fixed / Acknowledged Issues (Not Regressions)
 
-**REQUEST CHANGES** — The CRITICAL memory leak issue in semantic search (unbounded 5000-row embedding scan per request) and the HIGH-severity worker re-creation in histogram components are blocking concerns that can cause production instability under load. The other HIGH and MEDIUM issues should be addressed in priority order.
+The following issues were identified in prior cycles and are either fixed or documented as acceptable trade-offs:
 
-### Priority Order:
-1. **CRITICAL:** Fix semantic search memory pressure (reduce scan limit, add streaming, document memory requirements)
-2. **HIGH:** Memoize histogram worker or use singleton pattern
-3. **HIGH:** Optimize `srcSetData` useMemo in photo viewer
-4. **HIGH:** Evaluate `sharp.cache()` trade-off with benchmarks
-5. **MEDIUM:** Extract memoized masonry card component
-6. **MEDIUM:** Fix IntersectionObserver re-creation in LoadMore
-7. **MEDIUM:** Add per-query `group_concat_max_len` guarantee
-8. **MEDIUM:** Improve rate-limit prune heuristic
-9. **MEDIUM:** Add jitter to settings hash TTL
-10. **LOW:** Address remaining hygiene issues
+1. **PERF-R4C3-05** (serve-upload.ts): Module-scoped 5s TTL for settings-hash — fixed in cycle 4.
+2. **PERF-R4C4-01** (serve-upload.ts): Stale-while-revalidate hash cache — fixed in cycle 4.
+3. **PERF-R5C1-01** (admin-backfill-runner.ts): Batched keyset-paginated fetch — fixed in cycle 5.
+4. **WI-15** (process-image.ts): 50 MP wide-gamut downscale gate — fixed in cycle 2.
+5. **CM-LOW-10** (process-image.ts): Sharp concurrency divided by format fan-out — fixed in cycle 3.
+6. **AGG-R8c3-05** (data.ts): Minimal `getLatestImageForOg` accessor — fixed in cycle 8.
 
 ---
 
-## Final Checklist
+## Positive Performance Patterns (Worth Documenting)
 
-- [x] Verified spec compliance (performance requirements met where documented)
-- [x] Ran LSP diagnostics (1 type error in `.next/types/validator.ts` — generated file, not source)
-- [x] Every issue cites file:line with severity and fix suggestion
-- [x] Checked for security issues (no hardcoded secrets, no injection risks)
-- [x] Checked logic correctness (loop bounds, null handling, type mismatches)
-- [x] Checked error handling (happy path AND error paths covered)
-- [x] Noted positive observations to reinforce good practices
-- [x] Clear verdict: REQUEST CHANGES
+1. **React `cache()` deduplication** (`data.ts`): 10 data-access functions wrapped in `cache()` for SSR dedup.
+2. **Connection pool budgeting** (`db/index.ts`): `POOL_CONNECTION_LIMIT = 10` with explicit backfill concurrency caps.
+3. **Rate-limit bounded Maps** (`bounded-map.ts`): Generic `BoundedMap` with expiry pruning and hard-cap eviction.
+4. **Image processing queue** (`image-queue.ts`): PQueue with concurrency=1, advisory locks, retry limits, and permanent-failure tracking.
+5. **ETag-based cache invalidation** (`serve-upload.ts`): Pipeline version + mtime + size + settings hash in ETag.
+6. **View count buffering** (`data.ts`): In-memory Map with chunked flush, exponential backoff, and retry caps.
+7. **Blur data URL validation** (`blur-data-url.ts`): Producer-side validation with max length cap (4096 chars).
+8. **Semantic search stub isolation** (`clip-embeddings.ts`): Stub vs production model version partitioning.
 
+---
+
+## Recommendations
+
+| Priority | Finding | Effort | Impact |
+|----------|---------|--------|--------|
+| P1 | HIGH-2: Reuse sharp instance within format (clone for sizes) | Medium | High — reduces decode passes 18→3 |
+| P2 | HIGH-1: Split listing queries to eliminate GROUP BY | High | High — eliminates filesort on large galleries |
+| P3 | MED-3: Reduce FLUSH_CHUNK_SIZE or use bulk UPDATE | Low | Medium — reduces pool contention |
+| P4 | MED-4: Move CLIP embedding to separate worker queue | Medium | Medium — prevents event loop blocking |
+| P5 | MED-1: Verify prev/next index usage with EXPLAIN | Low | Medium — ensure index efficiency |
+| P6 | LOW-2: Chunk audit log purge | Low | Low — match view-retention pattern |
+| P7 | LOW-6: Review poolConnection.query override necessity | Low | Low — potential minor overhead reduction |
+
+---
+
+*End of review.*

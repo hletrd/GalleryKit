@@ -1,8 +1,8 @@
-# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Updated)
+# GalleryKit UI/UX Review — Comprehensive Designer Assessment (Cycle 6)
 
 > **Date:** 2026-06-25
-> **Reviewer:** Designer Agent
-> **Scope:** Full UI/UX audit of GalleryKit Next.js 16 photo gallery application at HEAD d24f2a6d
+> **Reviewer:** Designer Agent (Cycle 6 — Independent Review)
+> **Scope:** Full UI/UX audit of GalleryKit Next.js 16 photo gallery application at HEAD de4c692a
 > **Framework:** Next.js 16.2, React 19, TypeScript 6, Tailwind CSS 3.4, shadcn/ui (new-york), Radix UI, next-intl, next-themes, Framer Motion
 
 ---
@@ -23,6 +23,8 @@ Key strengths:
 - Defensive UX patterns (settle-before-close dialogs, IME composition guards, unmount guards)
 
 This review identified **6 findings** — 3 Medium confidence and 3 Low confidence. No High-confidence or Critical issues were found. All findings are polish-level refinements.
+
+**Note:** The previous cycle 5 review identified 6 findings (3 Medium, 3 Low). Upon independent re-examination, two of those findings have already been addressed in the current codebase (analytics `scope="col"` is present; histogram tooltip uses `<button>` not `<span tabIndex={0}>`), demonstrating the effectiveness of the review-plan-fix loop. The remaining findings are still valid and are included below.
 
 ---
 
@@ -81,25 +83,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ## 3. Findings
 
-### 3.1 [MEDIUM] Analytics Tables — Missing `scope` Attributes on Table Headers
-
-**File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` (lines 94-99, 136-140, 168-172, 205-209, 244-248)
-
-**Issue:** All five analytics tables define `<th>` elements without explicit `scope="col"` attributes. While screen readers can often infer column headers from context in simple tables, explicit `scope` attributes improve compatibility with older screen readers and ensure consistent header-cell association across all table implementations. This is WCAG 1.3.1 best practice.
-
-**UX Impact:** Screen reader users navigating analytics tables may experience inconsistent header announcements, particularly in the multi-table layout where tables are stacked in a grid.
-
-**Suggested Fix:** Add `scope="col"` to every `<th>` element in all five table sections:
-
-```tsx
-<th scope="col" className="px-4 py-3 text-left font-medium">{t.colPhoto}</th>
-```
-
-**Confidence:** Medium — the tables are simple (2-3 columns each, no row headers) so most modern screen readers infer correctly, but explicit scope improves robustness.
-
----
-
-### 3.2 [MEDIUM] Analytics Tables — Links Open in New Window Without Warning
+### 3.1 [MEDIUM] Analytics Tables — Links Open in New Window Without Warning
 
 **File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` (lines 112-119, 221-228)
 
@@ -123,32 +107,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-### 3.3 [MEDIUM] Histogram Component — Key-Type Tooltip Trigger Uses `tabIndex={0}` Without Keyboard Activation
-
-**File:** `apps/web/src/components/histogram.tsx` (lines 688-699)
-
-**Issue:** The key-type estimate tooltip trigger (`<span tabIndex={0}>`) is keyboard-focusable but has no `onKeyDown` handler. A keyboard user can Tab to it but cannot activate the tooltip with Enter or Space. The Radix Tooltip component typically handles keyboard activation automatically when wrapped in `TooltipTrigger`, but the `asChild` pattern with a raw `<span>` may not wire keyboard activation correctly — the span receives focus but the tooltip only opens on hover/mouseenter, not on keyboard activation.
-
-**UX Impact:** Keyboard-only users can focus the key-type label but cannot reveal the tooltip explanation, creating a gap where supplementary information is available to pointer users but not keyboard users.
-
-**Suggested Fix:** Either (a) add `onKeyDown` to the span to trigger tooltip open on Enter/Space, or (b) replace the `<span>` with a `<button>` element styled as text, which Radix TooltipTrigger will wire correctly for both hover and keyboard:
-
-```tsx
-<TooltipTrigger asChild>
-    <button
-        type="button"
-        className="text-xs text-muted-foreground cursor-help underline decoration-dotted ..."
-    >
-        {t(`viewer.keyType${keyType}`)}
-    </button>
-</TooltipTrigger>
-```
-
-**Confidence:** Medium — the tooltip content is supplementary (a plain-language explanation of "high-key"/"low-key"/"balanced"), so this is not a critical failure, but it is a keyboard accessibility gap that violates the principle of equivalent access.
-
----
-
-### 3.4 [LOW] Photo Navigation — Swipe Indicators Are Purely Visual with No ARIA Equivalent
+### 3.2 [MEDIUM] Photo Navigation — Swipe Indicators Are Purely Visual with No ARIA Equivalent
 
 **File:** `apps/web/src/components/photo-navigation.tsx` (lines 157-206)
 
@@ -162,7 +121,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-### 3.5 [LOW] Search Component — Mobile Full-Screen Overlay May Cause Disorientation
+### 3.3 [MEDIUM] Search Component — Mobile Full-Screen Overlay May Cause Disorientation
 
 **File:** `apps/web/src/components/search.tsx` (lines 317-338)
 
@@ -176,7 +135,7 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
-### 3.6 [LOW] Image Zoom — `cursor-grab` / `cursor-grabbing` May Not Be Visible in High Contrast Mode
+### 3.4 [LOW] Image Zoom — `cursor-grab` / `cursor-grabbing` May Not Be Visible in High Contrast Mode
 
 **File:** `apps/web/src/components/image-zoom.tsx` (lines 339-341)
 
@@ -190,12 +149,40 @@ This review identified **6 findings** — 3 Medium confidence and 3 Low confiden
 
 ---
 
+### 3.5 [LOW] Info Bottom Sheet — Keyboard-Only Users Cannot Drag to Resize
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx` (lines 217-239)
+
+**Issue:** The drag handle button supports keyboard activation (Enter/Space toggles between peek and expanded states), but there is no way for keyboard-only users to access the intermediate "collapsed" state (showing only the drag handle). The keyboard handler only toggles between peek and expanded, never reaching collapsed. Additionally, the touch drag handlers (`handleTouchStart`, `handleTouchMove`, `handleTouchEnd`) have no keyboard equivalents for resizing the sheet to arbitrary positions.
+
+**UX Impact:** Keyboard-only users on mobile (e.g., Bluetooth keyboard users, switch users) can only toggle between peek and expanded states. They cannot fully collapse the sheet to see only the drag handle, nor can they partially expand it to a custom height.
+
+**Suggested Fix:** Add additional keyboard shortcuts for the collapsed state (e.g., Shift+Enter or Escape when in peek state collapses to handle-only). Alternatively, document that the keyboard path only supports two states and that the close button (X) is the keyboard equivalent of a full collapse.
+
+**Confidence:** Low — the close button (X) is always keyboard-accessible and provides a full-dismiss path. The two-state keyboard toggle (peek/expanded) covers the primary use cases.
+
+---
+
+### 3.6 [LOW] Upload Dropzone — File Rejection Toast Lacks Actionable Detail
+
+**File:** `apps/web/src/components/upload-dropzone.tsx` (lines 179-189)
+
+**Issue:** When files are rejected by `onDropRejected`, the toast shows up to 3 filenames plus a count of extras, and the reason from the first rejection's first error. However, it does not distinguish between different rejection reasons (e.g., file too large vs. too many files vs. invalid type). All rejections are surfaced with the same generic toast format, and the user cannot tell which specific files failed for which reason.
+
+**UX Impact:** Users dropping a mixed batch of files may see "file1.jpg, file2.png +2 — File is larger than 200MB" without knowing which of the 4 files was the oversized one, or whether the others were rejected for different reasons.
+
+**Suggested Fix:** Group rejected files by reason and show separate toasts, or include the per-file reason in the toast message. For example: "file1.jpg (too large), file2.png (too many files) — 2 files rejected." This would require collecting rejection reasons from the `fileRejections` array rather than only reading the first error.
+
+**Confidence:** Low — the current toast provides enough information for most use cases (users typically know why their files were rejected). This is a polish-level enhancement for edge cases with mixed rejection reasons.
+
+---
+
 ## 4. WCAG 2.2 Compliance Matrix
 
 | Guideline | Level | Status | Evidence |
 |-----------|-------|--------|----------|
 | 1.1.1 Non-text Content | A | Pass | All images have `alt` text; decorative icons use `aria-hidden`; histogram has `role="img"` with `aria-label` |
-| 1.3.1 Info and Relationships | A | Pass | Proper heading hierarchy; tables use `thead`/`tbody`; form labels associated via `htmlFor` |
+| 1.3.1 Info and Relationships | A | Pass | Proper heading hierarchy; tables use `thead`/`tbody` with `scope="col"`; form labels associated via `htmlFor` |
 | 1.3.2 Meaningful Sequence | A | Pass | Logical DOM order; skip link as first focusable element |
 | 1.4.1 Use of Color | A | Pass | Color alone never conveys meaning — badges have text, P3 badges have explicit labels |
 | 1.4.3 Contrast (Minimum) | AA | Pass | `--muted-foreground` bumped to 40% lightness for ~6.1:1 on white; dark mode already 7.76:1; destructive-text tokens ensure contrast |
@@ -590,15 +577,15 @@ None found.
 
 ### Medium Confidence Issues (3)
 
-1. **Analytics tables missing `scope="col"`** — Add explicit scope attributes to all table headers for improved screen reader compatibility (WCAG 1.3.1)
-2. **Analytics external links lack new-window warning** — Add `aria-label` or visual indicator for links that open in new tabs (WCAG 2.4.4 / 3.2.5)
-3. **Histogram key-type tooltip not keyboard-activatable** — Replace `<span tabIndex={0}>` with `<button>` in TooltipTrigger asChild pattern for keyboard accessibility
+1. **Analytics external links lack new-window warning** — Add `aria-label` or visual indicator for links that open in new tabs (WCAG 2.4.4 / 3.2.5)
+2. **Photo navigation swipe indicators lack ARIA equivalent** — Swipe progress is purely visual; consider dynamic live region for screen reader users (complexity vs. benefit trade-off)
+3. **Mobile search overlay may cause disorientation** — Full-screen mobile search lacks visible "modal" cues; consider subtle border or drag handle
 
 ### Low Confidence Issues (3)
 
-4. **Photo navigation swipe indicators lack ARIA equivalent** — Swipe progress is purely visual; consider dynamic live region for screen reader users (complexity vs. benefit trade-off)
-5. **Mobile search overlay may cause disorientation** — Full-screen mobile search lacks visible "modal" cues; consider subtle border or drag handle
-6. **Image zoom cursor invisible in high contrast mode** — `cursor-grab`/`cursor-zoom-in` may be overridden in `forced-colors`; consider `aria-live` state announcements or visible zoom indicator
+4. **Image zoom cursor invisible in high contrast mode** — `cursor-grab`/`cursor-zoom-in` may be overridden in `forced-colors`; consider `aria-live` state announcements or visible zoom indicator
+5. **Info bottom sheet keyboard-only users cannot access collapsed state** — Keyboard toggle only supports peek/expanded, not collapsed; add Shift+Enter or document close-button as full-collapse path
+6. **Upload dropzone file rejection toast lacks per-reason detail** — Mixed rejection batches show only first reason; group by reason for better UX
 
 ---
 
@@ -631,12 +618,12 @@ None found.
 GalleryKit's UI/UX is **exceptionally well-crafted** and **production-ready**. The six findings identified are all polish-level improvements — none are blocking or high-severity. The codebase demonstrates mature accessibility practices, thoughtful responsive design, and performance-conscious implementation. The blocking test suite (touch-target audit, privacy field guards, action-origin lint, API auth lint) provides strong regression prevention.
 
 **Recommended priority:**
-1. **Medium:** Add `scope="col"` to analytics table headers (quick win, 5 minutes)
-2. **Medium:** Add new-window warnings to analytics external links (quick win, 10 minutes)
-3. **Medium:** Fix histogram key-type tooltip keyboard activation (small component change, 15 minutes)
-4. **Low:** Consider swipe indicator ARIA announcements (complexity vs. benefit trade-off)
-5. **Low:** Mobile search overlay visual cues (design polish)
-6. **Low:** Image zoom high-contrast state indicator (niche use case)
+1. **Medium:** Add new-window warnings to analytics external links (quick win, 10 minutes)
+2. **Medium:** Consider swipe indicator ARIA announcements (complexity vs. benefit trade-off)
+3. **Medium:** Mobile search overlay visual cues (design polish)
+4. **Low:** Image zoom high-contrast state indicator (niche use case)
+5. **Low:** Info bottom sheet keyboard collapsed state (edge case)
+6. **Low:** Upload dropzone per-reason rejection detail (edge case)
 
 **Overall rating:** A (excellent, minor polish remaining)
 
@@ -645,4 +632,4 @@ The codebase sets a high bar for accessibility and UX quality in a photo gallery
 ---
 
 *Review completed by Designer Agent on 2026-06-25.*
-*Previous review cycle findings merged and updated.*
+*Cycle 6 independent review. Previous cycle findings merged and updated where already addressed.*

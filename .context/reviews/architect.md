@@ -1,6 +1,6 @@
 # GalleryKit — Architectural Review
 
-**Date:** 2026-06-24
+**Date:** 2026-06-25
 **Scope:** Full codebase, `/Users/hletrd/flash-shared/gallery/apps/web/`
 **Reviewer:** Architect Agent
 **Confidence:** High (extensive file reading, cross-reference analysis, pattern tracing)
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-GalleryKit is a mature, well-architected Next.js 16 photo gallery with strong security, privacy, and color-science foundations. The codebase demonstrates excellent defense-in-depth patterns (compile-time privacy guards, rate-limiting, advisory locks), a sophisticated image processing pipeline with HDR/wide-gamut support, and comprehensive test coverage. However, there are 14 architectural findings across 10 categories — mostly around monorepo structure, horizontal scalability barriers, tight coupling between data access and presentation, and several long-term extensibility risks. No findings are CRITICAL; 5 are HIGH, 6 are MEDIUM, and 3 are LOW.
+GalleryKit is a mature, well-architected Next.js 16 photo gallery with strong security, privacy, and color-science foundations. The codebase demonstrates excellent defense-in-depth patterns (compile-time privacy guards, rate-limiting, advisory locks), a sophisticated image processing pipeline with HDR/wide-gamut support, and comprehensive test coverage. However, there are 15 architectural findings across 10 categories — mostly around monorepo structure, horizontal scalability barriers, tight coupling between data access and presentation, and several long-term extensibility risks. No findings are CRITICAL; 5 are HIGH, 6 are MEDIUM, and 4 are LOW.
 
 ---
 
@@ -17,13 +17,14 @@ GalleryKit is a mature, well-architected Next.js 16 photo gallery with strong se
 
 ### 1.1 Data Access Layer Bleeds into Presentation (HIGH)
 
-**File:** `apps/web/src/lib/data.ts` (entire file, ~800 lines)
-**Concern:** The `data.ts` module functions as both a Data Access Layer (DAL) and a presentation-aware query builder. It contains React `cache()` wrappers, GROUP_CONCAT aggregation for UI tag display, privacy field filtering (`publicSelectFields`), and pagination cursors — all in one module.
+**File:** `apps/web/src/lib/data.ts` (entire file, ~1666 lines)
+**Concern:** The `data.ts` module functions as both a Data Access Layer (DAL) and a presentation-aware query builder. It contains React `cache()` wrappers, GROUP_CONCAT aggregation for UI tag display, privacy field filtering (`publicSelectFields`), pagination cursors, and view-count buffering — all in one module.
 
 **Why it matters:** This conflation means:
 - UI concerns (what fields are "public") are hardcoded in the DAL, making it impossible to have different public surfaces (e.g., a JSON API vs. HTML rendering) with different field visibility rules.
-- The `tagNamesAgg` GROUP_CONCAT expression (`apps/web/src/lib/data.ts:43`) is a presentation-level string aggregation embedded in data queries. If a future API needs tags as an array, the DAL must be forked or refactored.
-- `getMapImages` (`data.ts:~500`) includes an INNER JOIN on `map_visible` — a business rule (GPS privacy) embedded in a data query, not in a domain layer.
+- The `tagNamesAgg` GROUP_CONCAT expression (`data.ts:608`) is a presentation-level string aggregation embedded in data queries. If a future API needs tags as an array, the DAL must be forked or refactored.
+- `getMapImages` (`data.ts:1579`) includes an INNER JOIN on `map_visible` — a business rule (GPS privacy) embedded in a data query, not in a domain layer.
+- The view-count buffer (`viewCountBuffer`, `data.ts:17`) is a side-effecting presentation concern (analytics) embedded in the DAL module.
 
 **Suggested improvement:** Split into three layers:
 1. **Raw DAL** (`db/queries/`): Pure Drizzle queries, no `cache()`, no privacy filtering, no presentation logic.
@@ -283,7 +284,7 @@ function getPrivacySafeFields(image: Image, isAdmin: boolean): Partial<Image>;
 
 ### 6.3 GROUP_CONCAT for Tag Aggregation (LOW)
 
-**File:** `apps/web/src/lib/data.ts:43` — `tagNamesAgg`
+**File:** `apps/web/src/lib/data.ts:608` — `tagNamesAgg`
 **Concern:** Every masonry-list query uses `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` with a `LEFT JOIN` across `imageTags` and `tags`. For galleries with thousands of tags per image, this could approach the `group_concat_max_len = 65535` limit.
 
 **Why it matters:** While the current limit is generous (65K chars), a gallery with heavy tagging could silently truncate tag lists. The GROUP_CONCAT also forces a filesort and temporary table in MySQL for large result sets.
@@ -463,7 +464,7 @@ This is a 4-step activation process with no UI guidance. The feature is essentia
 **Confidence:** Low
 
 ### FS-3: Test File Location Mirrors Source (Good), but Test Count is High
-**Concern:** 183 test files with 1748 tests (per notepad) is a large test surface. The test files are co-located with source (`src/__tests__/`) rather than in a separate `tests/` directory. This is fine for unit tests but may become unwieldy as the codebase grows. The e2e tests take 25-30 minutes, which is a significant CI bottleneck.
+**Concern:** 183+ test files with 1700+ tests is a large test surface. The test files are co-located with source (`src/__tests__/`) rather than in a separate `tests/` directory. This is fine for unit tests but may become unwieldy as the codebase grows. The e2e tests take 25-30 minutes, which is a significant CI bottleneck.
 **Confidence:** Low
 
 ### FS-4: No Structured Logging
@@ -556,7 +557,7 @@ This is a 4-step activation process with no UI guidance. The feature is essentia
 
 ## Conclusion
 
-GalleryKit is a well-crafted application with strong security, privacy, and color-science foundations. The 14 architectural findings are mostly about long-term maintainability and scalability, not immediate bugs or security risks. The most impactful improvements are:
+GalleryKit is a well-crafted application with strong security, privacy, and color-science foundations. The 15 architectural findings are mostly about long-term maintainability and scalability, not immediate bugs or security risks. The most impactful improvements are:
 1. **Layer separation** (DAL/Service/Adapter)
 2. **Deciding on deferred features** (HDR, semantic search)
 3. **Documenting operational constraints** (single-instance, advisory lock scope)

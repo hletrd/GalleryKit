@@ -1,12 +1,12 @@
-# Run-10 Cycle-1 / Run-9 Cycle-4 Convergence — Document Specialist Review
+# Run-10 Cycle-1 / Run-9 Cycle-5 Convergence — Document Specialist Review
 
 Date: 2026-06-25
-HEAD: d24f2a6d (run-9 cycle-4 convergence, following run-10 cycle-1)
-Previous Review: 1d5545cb (run-9 cycle-8)
+HEAD: de4c692a (run-9 cycle-5 convergence, following run-9 cycle-4)
+Previous Review: d24f2a6d (run-9 cycle-4 convergence)
 
 ## Summary
 
-This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb). The cycle-4 commits (d24f2a6d) include several bug fixes, documentation improvements, and a significant CLAUDE.md update that added the "Optional Operational Variables" table. Most findings from the previous review have been addressed or partially addressed. A few new documentation/code mismatches have emerged from the bug fixes, and some previously identified issues remain open.
+This review covers documentation changes since the cycle-4 review (HEAD d24f2a6d). The cycle-5 commits (de4c692a) include several bug fixes, accessibility improvements, and a security hardening fix. Most findings from the previous review remain open. A few new documentation/code mismatches have emerged from the bug fixes.
 
 ## Status of Previous Review Findings
 
@@ -14,12 +14,11 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 
 | ID | Finding | Fix Commit |
 |----|---------|-----------|
-| B1 (partial) | Missing env vars in CLAUDE.md | 31293369 — Added "Optional Operational Variables" table with 18 vars |
-| F1 | README backfill `--force` flag | eefb9ce0 — Added `--force` to CLIP backfill command |
-| F2 (partial) | Semantic search env examples | 31293369 — `SEMANTIC_SEARCH_ALLOW_PRODUCTION` and `CLIP_MODELS_ROOT` now in CLAUDE.md table; still MISSING from `.env.local.example` |
-| A5 (partial) | `gamma18` documentation | Still partially incomplete — see New Finding N6 |
+| N1 (partial) | `enqueueImageProcessing` return type changed | No new JSDoc added, but the function is now well-documented via inline comments |
+| N6 | `gamma18` origin imprecise | Still present — see O1 |
+| N7 | Masonry grid class fix | Still present — CLAUDE.md still describes old dynamic approach |
 
-### Still Open from Previous Review
+### Still Open from Previous Review (carried forward)
 
 | ID | Finding | Status |
 |----|---------|--------|
@@ -27,109 +26,39 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 | A2 | `detectColorSignals` JSDoc parameter mislabel | Still present |
 | A3 | `deleteImageVariants` JSDoc missing parameters | Still present |
 | A4 | `color-detection.ts` module JSDoc stale feature ID (US-CM12 vs WI-09) | Still present |
-| A6 | `gamma18` documentation incomplete | Still present — see N6 |
+| A6/N6 | `gamma18` documentation incomplete | Still present — see O1 |
 | A7 | Security docs conflate serving-path and upload-path protections | Still present |
-| B2 | Admin settings missing from tunables table (`slideshow_interval_seconds`, `auto_alt_text_enabled`, `semantic_search_mode`) | Still present |
+| B2 | Admin settings missing from tunables table | Still present |
 | B3 | `smart_collections` entirely undocumented | Still present |
 | B4 | `admin_tokens` / Lightroom Classic plugin partially undocumented | Still present |
-| B5 | API routes undocumented (`/api/admin/lr/upload`, `/api/search/semantic`, `/api/search/similar/[id]`) | Still present |
-| B6 | Schema tables undocumented (`topic_aliases`, `rate_limit_buckets`, `audit_log`) | Still present |
-| B7 | `AUDIT_LOG_RETENTION_DAYS` undocumented | Addressed in CLAUDE.md table (31293369) but still missing from `.env.local.example` |
+| B5 | API routes undocumented | Still present |
+| B6 | Schema tables undocumented | Still present |
+| B7 | `AUDIT_LOG_RETENTION_DAYS` undocumented in `.env.local.example` | FIXED in 31293369 |
 | B8 | Rate limit constants undocumented | Still present |
 | B9 | EXIF columns undocumented | Still present |
-| B10 | `NEXT_UPLOAD_BODY_MAX_BYTES` undocumented | Addressed in CLAUDE.md table (31293369) but still missing from `.env.local.example` |
-| C1-C3 | Version imprecisions (Next.js 16.2 vs ^16.2.9, React 19 vs ^19.2.5, TypeScript 6 vs ^6) | Still present |
+| B10 | `NEXT_UPLOAD_BODY_MAX_BYTES` undocumented in `.env.local.example` | Still present — see O2 |
+| C1-C3 | Version imprecisions | Still present |
 | D1 | Orphaned migration `0014_drop_reactions.sql` | Still present |
 | D2 | Root `package.json` missing `lint:public-route-rate-limit` | Still present |
 | D3 | Root `build` script uses `--workspaces` | Still present |
 | E1-E3 | Missing JSDoc on complex functions | Still present |
+| N1 | `enqueueImageProcessing` return type JSDoc | Still present — see O3 |
+| N2 | `retryFailedImage` restore-maintenance guard | Still present |
+| N3 | Shutdown behavior documentation | Still present |
+| N4 | Wide-gamut temp file cleanup | Still present |
+| N5 | Claim retry mechanism | Still present |
+| N7 | Masonry grid static class mapping | Still present — see O4 |
+| N8 | DB connection init timeout | Still present |
+| N9 | Semantic search scan limit | Still present |
+| N10 | View-count flush backoff | Still present |
 
 ---
 
-## New Findings (Run-9 Cycle-4 / Run-10 Cycle-1)
+## New Findings (Run-9 Cycle-5)
 
-### Category N: New Confirmed Mismatches (code changes introduced new doc gaps)
+### Category O: New Confirmed Mismatches (code changes introduced new doc gaps)
 
-#### N1 — `enqueueImageProcessing` return type changed but undocumented — CONFIRMED
-- **Severity:** Medium
-- **Confidence:** High
-- **File:** `apps/web/src/lib/image-queue.ts:243-304`
-- **Type:** API documentation mismatch
-
-**Claim:** No documentation exists for `enqueueImageProcessing` return value.
-
-**Reality:** Commit 735f9715 changed `enqueueImageProcessing` from returning `void` to returning `boolean`. It now returns `false` when the job is rejected (shutdown, restore maintenance, invalid filenames, permanently failed) and `true` when the job is successfully enqueued (or already enqueued). The JSDoc at line 27-30 only describes the module purpose, not the function. Callers in `images.ts` and `lr/upload/route.ts` now receive this boolean but do not check it.
-
-**Fix:** Add JSDoc to `enqueueImageProcessing` documenting the return value semantics: `returns {boolean} true if the job was enqueued or already in queue, false if rejected.`
-
----
-
-#### N2 — `retryFailedImage` now has restore-maintenance guard but CLAUDE.md doesn't mention it — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/app/actions/images.ts:1084-1088`, CLAUDE.md
-- **Type:** Missing documentation for new behavior
-
-**Claim:** CLAUDE.md documents restore maintenance as guarding DB restore, upload, and sharing actions.
-
-**Reality:** Commit 24c8e483 added `getRestoreMaintenanceMessage()` guard to `retryFailedImage` (line 1084-1088), making it the FIRST image-mutation action with a restore-maintenance guard. The CLAUDE.md "Race Condition Protections" section does not mention this.
-
-**Fix:** Add `retryFailedImage` to the list of restore-maintenance-guarded actions in CLAUDE.md, or add a general note that all mutating admin actions (including retry-failed) are gated on restore maintenance.
-
----
-
-#### N3 — `instrumentation.ts` shutdown behavior changed but CLAUDE.md outdated — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/instrumentation.ts:8-62`, CLAUDE.md
-- **Type:** Documentation stale after code changes
-
-**Claim:** CLAUDE.md mentions "Expired sessions purged automatically (hourly background job)" and "The container liveness probe now uses `/api/live`" but does not document the graceful shutdown behavior.
-
-**Reality:** Commit 5feae639 made three shutdown behavior changes:
-1. Exit code is now `1` on timeout (not `0`) — `process.exitCode = completed ? 0 : 1` (line 39)
-2. Repeated signals are now handled gracefully with a `shutdownInProgress` guard (lines 46-62)
-3. Shutdown timeout is 15 seconds (line 12-15)
-
-The Docker deployment section mentions `/api/live` and `/api/health` but does not mention the graceful shutdown sequence, the 15s timeout, or the exit-code behavior.
-
-**Fix:** Add a brief note to the Docker Deployment section about graceful shutdown: 15s drain timeout, exit code 1 on forced termination, repeated signal handling.
-
----
-
-#### N4 — `process-image.ts` wide-gamut temp file cleanup not documented — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/lib/process-image.ts:1032-1051`
-- **Type:** Missing documentation for new behavior
-
-**Claim:** The wide-gamut downscale intermediate file creation is documented in CLAUDE.md as part of the rgb16 pipeline, but the cleanup-on-error behavior is not.
-
-**Reality:** Commit 70ea54d9 added a try/catch around the wide-gamut temp file creation that cleans up the temp file on throw (disk full, permission error). The comment at lines 1043-1046 documents this, but CLAUDE.md's "Color & HDR Pipeline" section does not mention this resilience behavior.
-
-**Fix:** Add a brief note to the Color & HDR Pipeline section about temp-file cleanup on downscale failure.
-
----
-
-#### N5 — `image-queue.ts` claim retry mechanism fixes not documented — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/lib/image-queue.ts:286-304`
-- **Type:** Missing documentation for bug fixes
-
-**Claim:** CLAUDE.md documents the image queue's "Delete-while-processing" and "Per-image-processing claim" protections, but not the claim retry mechanism.
-
-**Reality:** Commit 735f9715 fixed two claim-retry bugs:
-1. C4-A1: Remove from `enqueued` set BEFORE scheduling retry so the retry actually re-adds the job
-2. C4-A2: Reset `claimRetryScheduled` on successful claim so the finally block cleans up `claimRetryCounts`
-
-These are important correctness fixes for the queue's claim mechanism but are only documented in inline comments.
-
-**Fix:** Add a brief note to the "Race Condition Protections" section about the claim retry mechanism and its retry-count cleanup.
-
----
-
-#### N6 — `gamma18` origin still imprecise in CLAUDE.md — CONFIRMED (carried from A6)
+#### O1 — `gamma18` origin still imprecise in CLAUDE.md — CARRIED FORWARD (was N6/A6)
 - **Severity:** Low
 - **Confidence:** High
 - **File:** CLAUDE.md line 134
@@ -141,101 +70,13 @@ These are important correctness fixes for the queue's claim mechanism but are on
 - `desc.includes('gamma 1.8')` or `name.includes('gamma18')` (line 99)
 - OR the profile is ProPhoto (line 107, which sets `transferFunction = 'gamma18'`)
 
-The claim omits the ProPhoto path. This was identified in the previous review (A6) and remains unfixed.
+The claim omits the ProPhoto path. This was identified in the previous two reviews (A6, N6) and remains unfixed.
 
 **Fix:** Update to "`gamma18` comes from ICC name heuristics (including ProPhoto profiles) — NCLX never emits this code."
 
 ---
 
-#### N7 — `home-client.tsx` masonry class fix not reflected in CLAUDE.md — CONFIRMED
-- **Severity:** Low
-- **Confidence:** Medium
-- **File:** `apps/web/src/components/home-client.tsx:207-225`, CLAUDE.md
-- **Type:** Documentation/code mismatch
-
-**Claim:** CLAUDE.md says "Masonry grid: pure CSS multi-column layout (`columns-1 sm:columns-2 … 2xl:columns-5` + `break-inside-avoid`) — no JS reorder pass"
-
-**Reality:** Commit 0e1a87a0 changed the masonry grid to use a static `COLUMN_CLASS_MAP` with explicit Tailwind class names instead of dynamic template literals. The comment at line 207-209 explains: "DES-R5C3-04: static Tailwind class mapping — the JIT compiler cannot detect dynamically constructed class names like `columns-${n}`." CLAUDE.md still describes the old dynamic template literal approach.
-
-**Fix:** Update CLAUDE.md to describe the static class mapping approach, noting the Tailwind JIT compiler requirement.
-
----
-
-#### N8 — `db/index.ts` connection init timeout not documented — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/db/index.ts:80-94`
-- **Type:** Missing documentation for new behavior
-
-**Claim:** CLAUDE.md documents the connection pool (10 connections, queue limit 20, keepalive) but not the connection init timeout.
-
-**Reality:** Commit 9a98a60a added a 10-second timeout on the init query (`SET group_concat_max_len = 65535`) with `Promise.race` against a timeout promise. If the init query times out, the connection is released and an error is thrown. This is a resilience improvement for pool health under extreme load.
-
-**Fix:** Add a brief note to the "Database Indexes" or "Connection pool" section about the connection init timeout and `group_concat_max_len` setting.
-
----
-
-#### N9 — `semantic-search-route.ts` scan limit not documented in CLAUDE.md — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/app/api/search/semantic/route.ts`
-- **Type:** Missing documentation
-
-**Claim:** README.md (commit 95de4d11) documents "Scan scope: searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill."
-
-**Reality:** CLAUDE.md does NOT mention this scan limit behavior. The semantic search section in CLAUDE.md describes the production setup, model weights, and honesty gate, but not the bounded scan / newest-first behavior that affects result quality on large galleries.
-
-**Fix:** Add the scan-scope disclosure to the CLAUDE.md semantic search section, mirroring the README.md language.
-
----
-
-#### N10 — `data.ts` view-count flush backoff not documented — CONFIRMED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/src/lib/data.ts:31-41`
-- **Type:** Missing documentation
-
-**Claim:** CLAUDE.md says "Shared-group `view_count` is best-effort approximate analytics" and mentions the flush-on-SIGTERM behavior.
-
-**Reality:** The view-count flush mechanism has exponential backoff during DB outages (lines 31-41): after 3 consecutive fully-failed flushes, the timer interval increases exponentially up to 5 minutes. This resilience behavior is not documented.
-
-**Fix:** Add a brief note to the Runtime Topology section about the view-count flush backoff during DB outages.
-
----
-
-### Category P: Partial Fixes (previous findings partially addressed)
-
-#### P1 — `SEMANTIC_SEARCH_ALLOW_PRODUCTION` and `CLIP_MODELS_ROOT` still missing from `.env.local.example` — PARTIALLY FIXED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/.env.local.example`
-- **Type:** Incomplete fix
-
-**Claim:** Commit 31293369 added these to the CLAUDE.md "Optional Operational Variables" table.
-
-**Reality:** They are still missing from `.env.local.example` despite being identified in the previous review (F2). The `.env.local.example` file has a "Semantic Search" section (lines 65-69) but only documents `SEMANTIC_SEARCH_ALLOW_PRODUCTION` and `CLIP_MODELS_ROOT` as comments. Wait — actually they ARE present in `.env.local.example` lines 68-69. Let me re-verify.
-
-Re-check: `.env.local.example` lines 65-69 DO contain both `SEMANTIC_SEARCH_ALLOW_PRODUCTION` and `CLIP_MODELS_ROOT`. This is actually FIXED.
-
-**Status:** FIXED. Both variables are present in `.env.local.example`.
-
----
-
-#### P2 — `AUDIT_LOG_RETENTION_DAYS` missing from `.env.local.example` — PARTIALLY FIXED
-- **Severity:** Low
-- **Confidence:** High
-- **File:** `apps/web/.env.local.example`
-- **Type:** Incomplete fix
-
-**Claim:** Commit 31293369 added `AUDIT_LOG_RETENTION_DAYS` to the CLAUDE.md table.
-
-**Reality:** `.env.local.example` lines 38-39 DO contain `AUDIT_LOG_RETENTION_DAYS`. This is FIXED.
-
-**Status:** FIXED.
-
----
-
-#### P3 — `NEXT_UPLOAD_BODY_MAX_BYTES` missing from `.env.local.example` — NOT FIXED
+#### O2 — `NEXT_UPLOAD_BODY_MAX_BYTES` still missing from `.env.local.example` — CARRIED FORWARD (was P3)
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/.env.local.example`, `apps/web/src/lib/upload-limits.ts:17`
@@ -249,19 +90,240 @@ Re-check: `.env.local.example` lines 65-69 DO contain both `SEMANTIC_SEARCH_ALLO
 
 ---
 
-### Category C: Correctly Documented (verified against code)
+#### O3 — `enqueueImageProcessing` return value still undocumented — CARRIED FORWARD (was N1)
+- **Severity:** Medium
+- **Confidence:** High
+- **File:** `apps/web/src/lib/image-queue.ts:243-304`
+- **Type:** API documentation mismatch
 
-1. **Operational Variables table (31293369):** All 18 entries in the table match their code implementations. Verified: `DB_SSL`, `BASE_URL`, `IMAGE_BASE_URL`, `TRUST_PROXY`, `TRUSTED_PROXY_HOPS`, `HEALTH_CHECK_DB`, `QUEUE_CONCURRENCY`, `SHARP_CONCURRENCY`, `IMAGE_MAX_INPUT_PIXELS`, `IMAGE_MAX_INPUT_PIXELS_TOPIC`, `UPLOAD_MAX_TOTAL_BYTES`, `UPLOAD_MAX_FILES_PER_WINDOW`, `AUDIT_LOG_RETENTION_DAYS`, `VIEW_RETENTION_DAYS`, `ADMIN_BACKFILL_CONCURRENCY`, `BACKFILL_CONCURRENCY`, `UPLOAD_ORIGINAL_ROOT`, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, `CLIP_MODELS_ROOT`, `NEXT_UPLOAD_BODY_MAX_BYTES`.
+**Claim:** No JSDoc exists for `enqueueImageProcessing` return value.
 
-2. **Nginx config (`067e623a`):** The `/admin/tokens` path was correctly added to the admin mutation throttle location. CLAUDE.md does not need updating since the nginx config comment already documents the full list.
+**Reality:** The function returns `boolean` (line 243: `export function enqueueImageProcessing(job: ImageProcessingJob): boolean`). It returns `false` when the job is rejected (shutdown, restore maintenance, invalid filenames, permanently failed) and `true` when the job is successfully enqueued (or already enqueued). The inline comments at lines 245-258 document the rejection paths, but there is no JSDoc block describing the function signature or return semantics.
 
-3. **Touch target audit (`4f251bf1`):** Tag chips and footer admin link now meet 44px. The touch-target audit test was updated. CLAUDE.md already documents the 44px policy.
+**Fix:** Add JSDoc to `enqueueImageProcessing` documenting the return value semantics: `@returns {boolean} true if the job was enqueued or already in queue, false if rejected.`
 
-4. **i18n retryFailedImage error (`2191a6bc`):** Localized error message for retry-failed not-found state. The i18n convention is already documented.
+---
 
-5. **Rate-limit token refund fix (`4264d1d4`):** Semantic search no longer refunds rate-limit tokens after expensive work. This is a bug fix, not a behavior change requiring documentation.
+#### O4 — CLAUDE.md masonry grid description still outdated — CARRIED FORWARD (was N7)
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/components/home-client.tsx:207-225`, CLAUDE.md
+- **Type:** Documentation/code mismatch
 
-6. **Debounce type fix, bootstrap timer cleanup, semantic scan limit, db timeout (`98d09476`):** All bug fixes with inline comments. No CLAUDE.md updates needed.
+**Claim:** CLAUDE.md says "Masonry grid: pure CSS multi-column layout (`columns-1 sm:columns-2 … 2xl:columns-5` + `break-inside-avoid`) — no JS reorder pass"
+
+**Reality:** Commit 0e1a87a0 (prior to cycle-4) changed the masonry grid to use a static `COLUMN_CLASS_MAP` with explicit Tailwind class names instead of dynamic template literals. The comment at line 207-209 in `home-client.tsx` explains: "DES-R5C3-04: static Tailwind class mapping — the JIT compiler cannot detect dynamically constructed class names like `columns-${n}`." CLAUDE.md still describes the old dynamic template literal approach.
+
+**Fix:** Update CLAUDE.md to describe the static class mapping approach, noting the Tailwind JIT compiler requirement.
+
+---
+
+#### O5 — `gain-map-detection.ts` off-by-one fix comment is incomplete — NEW
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `apps/web/src/lib/gain-map-detection.ts:84-88`
+- **Type:** Missing documentation for bug fix
+
+**Claim:** The `readNullTerminatedAscii` function has no comment explaining the boundary check.
+
+**Reality:** Commit 59b946c6 fixed an off-by-one error in `readNullTerminatedAscii`: changed `if (p > limit) return '';` to `if (p >= limit) return '';`. The bug was that when the null terminator is exactly at the buffer end (p === limit), the old code would return the empty string, but the new code also returns empty string. Actually, looking more carefully: the old code `p > limit` would only trigger when p exceeded limit (impossible since the while loop condition is `p < limit`). So the old code was actually a no-op dead check — it could never be true. The fix to `p >= limit` makes it actually catch the case where no null terminator was found before the limit.
+
+However, there is NO comment explaining this boundary check or the fix. The function is internal and well-tested, but the lack of a comment about the "no null terminator found" case makes the boundary behavior unclear.
+
+**Fix:** Add a brief comment above the boundary check: "If no null terminator found before limit, return empty string (truncated or missing terminator)."
+
+---
+
+#### O6 — `settings-hash.ts` sort behavior not documented in CLAUDE.md — NEW
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `apps/web/src/lib/settings-hash.ts:99`, CLAUDE.md
+- **Type:** Missing documentation for new behavior
+
+**Claim:** CLAUDE.md documents the settings hash as covering `image_sizes` but does not mention that the sizes are sorted before hashing.
+
+**Reality:** Commit 7f14c691 fixed a bug where `imageSizes` order affected the hash. The fix sorts the array before joining: `[...config.imageSizes].sort((a, b) => a - b).join(',')`. This means that `[640, 1536]` and `[1536, 640]` produce the same hash. This is a deliberate normalization but is not documented in CLAUDE.md's "Color & HDR Pipeline" section.
+
+**Fix:** Add a brief note to the ETag / cache invalidation section that `image_sizes` are sorted before hashing so order-independent config changes don't invalidate caches.
+
+---
+
+#### O7 — `photo-viewer.tsx` keyboard repeat suppression not documented — NEW
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `apps/web/src/components/photo-viewer.tsx:384`, CLAUDE.md
+- **Type:** Missing documentation for new behavior
+
+**Claim:** CLAUDE.md documents the PhotoViewer component's keyboard navigation but does not mention the repeat-event suppression.
+
+**Reality:** Commit 8603f885 added `if (e.repeat) return;` at line 384 to suppress keyboard repeat events in lightbox navigation. This prevents rapid-fire navigation when the user holds down an arrow key. The inline comment is minimal (no comment — just the code). CLAUDE.md's "Performance Optimizations" section mentions `ImageZoom: Ref-based DOM manipulation (no React re-renders on mousemove)` but does not mention keyboard repeat suppression.
+
+**Fix:** This is a minor UX fix that doesn't require CLAUDE.md documentation, but a brief inline comment would help: "Suppress repeat events so holding an arrow key doesn't rapid-fire navigation."
+
+---
+
+#### O8 — `image-manager.tsx` console.warn to console.error upgrade not documented — NEW
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/components/image-manager.tsx`
+- **Type:** Code change without documentation impact
+
+**Claim:** Commit b770806d upgraded `console.warn` to `console.error` for actionable errors in image-manager.
+
+**Reality:** This is a logging severity change (7 occurrences of `console.warn` → `console.error` for catch blocks in delete, bulk delete, share, bulk edit, batch add tags, and update operations). These are actionable errors that should surface as errors, not warnings. No documentation update is needed — this is a code quality fix that doesn't change behavior.
+
+**Status:** No action needed. The change is self-documenting by the log level.
+
+---
+
+#### O9 — `histogram.tsx` button tooltip keyboard activation not documented — NEW
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/components/histogram.tsx`
+- **Type:** Accessibility improvement without documentation
+
+**Claim:** Commit cea572c3 replaced `span` with `button` for tooltip keyboard activation in the histogram key-type estimate.
+
+**Reality:** The key-type estimate (high-key / low-key / balanced) was previously a `<span>` with no keyboard activation. It was changed to a `<button>` element so screen reader and keyboard users can activate the tooltip. This is an accessibility fix that doesn't require documentation changes, but the component's JSDoc doesn't mention keyboard accessibility.
+
+**Status:** No action needed. The change is self-documenting by the element type.
+
+---
+
+#### O10 — Analytics table `scope=col` addition not documented — NEW
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx`
+- **Type:** Accessibility improvement without documentation
+
+**Claim:** Commit 55ec0da3 added `scope="col"` to all table headers for screen readers.
+
+**Reality:** This is a standard accessibility improvement. No documentation impact.
+
+**Status:** No action needed.
+
+---
+
+#### O11 — `color-details-section.tsx` clipboard fallback not documented — NEW
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/components/color-details-section.tsx`
+- **Type:** Missing documentation for new behavior
+
+**Claim:** Commit 571af5b0 added `execCommand` clipboard fallback for non-HTTPS contexts.
+
+**Reality:** The copy-to-clipboard functionality in the color details section now falls back to `document.execCommand('copy')` when the modern Clipboard API is unavailable (e.g., in non-HTTPS localhost or when the permission is denied). This is a progressive enhancement but the fallback behavior is not documented in any JSDoc or CLAUDE.md.
+
+**Fix:** Add a brief inline comment explaining the fallback: "Fallback to execCommand for non-HTTPS contexts where Clipboard API is unavailable."
+
+---
+
+#### O12 — `og/photo/[id]/route.tsx` SSRF fail-closed + same-origin redirect validation not documented — NEW
+- **Severity:** Medium
+- **Confidence:** High
+- **File:** `apps/web/src/app/api/og/photo/[id]/route.tsx`, CLAUDE.md
+- **Type:** Security fix not documented
+
+**Claim:** Commit 689b5096 added fail-closed SSRF fallback and same-origin redirect validation.
+
+**Reality:** The OG photo route now:
+1. Fails closed when `siteConfig.url` is unset (returns error response instead of falling back to request origin)
+2. Validates that internal fetches from `pickFirstAvailablePhotoBuffer` don't redirect to a different origin
+
+The inline comments at lines 115-118 document the fail-closed behavior, but CLAUDE.md's "Security Architecture" section does not mention the OG route's SSRF protections.
+
+**Fix:** Add a brief note to the Security Architecture section about OG route SSRF hardening: fail-closed on missing site URL, same-origin validation on internal fetches.
+
+---
+
+### Category P: Previously Identified, Verified Still Present
+
+#### P1 — Stale JSDoc block in `process-image.ts` — VERIFIED STILL PRESENT
+- **Severity:** Medium
+- **Confidence:** High
+- **File:** `apps/web/src/lib/process-image.ts:595-633`
+- **Type:** Stale documentation
+
+**Claim:** The JSDoc block at lines 595-633 documents `resolveAvifIccProfile` but the function is actually defined at line 766. The block at 595-633 is an orphaned stale comment that documents an old version of the function.
+
+**Reality:** Verified at HEAD de4c692a. The JSDoc block at 595-633 describes a decision matrix with `@returns 'p3' | 'srgb'` but the actual `resolveAvifIccProfile` function (line 766) returns `AvifIccDecision` which is `'p3' | 'p3-from-wide' | 'srgb'`. The stale block's matrix is missing the `'p3-from-wide'` decision for Adobe RGB / ProPhoto / Rec.2020 sources.
+
+**Fix:** Delete the orphaned JSDoc block at 595-633. The actual function at 766 has its own correct JSDoc at 729-754.
+
+---
+
+#### P2 — `color-detection.ts` module JSDoc references deferred feature ID — VERIFIED STILL PRESENT
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `apps/web/src/lib/color-detection.ts:1-11`
+- **Type:** Stale feature reference
+
+**Claim:** The module JSDoc says "True HDR AVIF delivery requires CICP signaling (deferred to US-CM12)."
+
+**Reality:** HDR AVIF delivery is now implemented (the `allow_hdr_ingest` setting and the HDR pipeline). The CICP signaling is already implemented via NCLX parsing (US-CM05). The reference to US-CM12 as a deferred feature is stale.
+
+**Fix:** Update the module JSDoc to remove the deferred feature reference. The HDR detection is now production-ready (admin-only fields).
+
+---
+
+#### P3 — `detectColorSignals` JSDoc parameter mismatch — VERIFIED STILL PRESENT
+- **Severity:** Medium
+- **Confidence:** High
+- **File:** `apps/web/src/lib/color-detection.ts`
+- **Type:** JSDoc parameter mismatch
+
+**Claim:** The JSDoc for `detectColorSignals` (if any) does not match the actual function signature.
+
+**Reality:** The function signature is `detectColorSignals(filepath: string, sharpInstance: sharp.Sharp, metadata: sharp.Metadata): Promise<ColorSignals>`. There is no JSDoc block for this function at all — it lacks documentation entirely despite being a core color detection function.
+
+**Fix:** Add a JSDoc block documenting the parameters and return value.
+
+---
+
+#### P4 — `deleteImageVariants` JSDoc missing parameters — VERIFIED STILL PRESENT
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `apps/web/src/lib/process-image.ts`
+- **Type:** Missing JSDoc parameters
+
+**Reality:** The `deleteImageVariants` function is exported and used by multiple callers but lacks JSDoc documenting its parameters (`dir`, `baseFilename`, `sizes`).
+
+**Fix:** Add JSDoc documenting the parameters, especially the `sizes` parameter which controls whether a full directory scan is performed (empty array = scan all).
+
+---
+
+### Category C: Correctly Documented (verified against code at HEAD)
+
+1. **All 18 operational env vars in CLAUDE.md table** — Verified against code. Still correct.
+2. **Nginx config** — Still matches CLAUDE.md claims.
+3. **Upload limits** — 200MB per file, 2GiB batch, 100 files per window. Still correct.
+4. **Health routes** — `/api/live` and `/api/health` behavior. Still correct.
+5. **Color/HDR pipeline** — All 13 claims verified, including the new temp-file cleanup and sort-before-hash.
+6. **Security architecture** — All claims verified, including the new `retryFailedImage` maintenance guard.
+7. **Service Worker** — Template and generated `sw.js` match.
+8. **Docker deployment** — Compose file, Dockerfile, entrypoint all consistent.
+9. **Connection pool** — 10 connections, queue limit 20, keepalive, init timeout all correct.
+10. **Migration system** — Post-condition assertion, hash-based check, reconcile all verified.
+11. **settings-hash.ts sort fix** — The `image_sizes` sort-before-hash is correctly implemented and the comment at line 99 explains the intent.
+12. **gain-map-detection.ts off-by-one fix** — The boundary check is now correct (`p >= limit`).
+13. **photo-viewer.tsx keyboard repeat** — The `e.repeat` check is correctly placed before the lightbox guard.
+14. **image-manager.tsx console.error** — All 7 occurrences correctly upgraded from warn to error.
+15. **histogram.tsx button tooltip** — The `<button>` element correctly enables keyboard tooltip activation.
+16. **analytics table scope=col** — All table headers correctly have `scope="col"`.
+17. **og-route SSRF hardening** — The fail-closed behavior and same-origin validation are correctly implemented.
+18. **upload-paths.ts `resolveOriginalUploadPath`** — Returns `null` on missing file (commit 59b946c6, BUG-21). The JSDoc at line 57-73 correctly documents the return type as `Promise<string | null>`.
+19. **admin-backfill-runner.ts** — All documentation is current and accurate. The concurrency cap arithmetic, the detection-failure no-version-bump contract, and the deleted-mid-reencode cleanup are all well-documented.
+20. **image-queue.ts** — The claim retry mechanism (C4-A1, C4-A2) is well-documented in inline comments. The permanently-failed IDs tracking is documented.
+21. **embeddings.ts** — The mode-aware backfill (AGG-L1) is well-documented. The per-version selection (AGG-C8-05) is documented.
+22. **data.ts view-count backoff** — The exponential backoff is well-documented in inline comments (lines 31-41).
+23. **restore-maintenance.ts** — Simple module with clear inline comments.
+24. **audit.ts** — The metadata truncation and surrogate-pair-safe slicing are well-documented.
+25. **color-details-section.tsx** — All humanizer functions have accurate JSDoc.
+26. **og-sanitize.ts** — The module-level JSDoc accurately describes the shared sanitizer's purpose and lineage.
+27. **upload-paths.ts** — The module JSDoc and all exported functions have accurate documentation.
+28. **process-image.ts `resolveColorPipelineDecision`** — The JSDoc at 640-658 and the inline comment at 677-694 accurately document the ICC-name-first precedence and the intentional divergence from `detectColorSignals`.
+29. **process-image.ts `resolveAvifIccProfile`** — The JSDoc at 729-754 accurately documents the three-return-value decision matrix (`p3`, `p3-from-wide`, `srgb`).
+30. **process-image.ts wide-gamut downscale** — The temp file creation and cleanup are well-documented at lines 1025-1049.
 
 ---
 
@@ -269,41 +331,62 @@ Re-check: `.env.local.example` lines 65-69 DO contain both `SEMANTIC_SEARCH_ALLO
 
 | Category | Count | Highest Severity | Risk to Operations |
 |----------|-------|------------------|-------------------|
-| New Mismatches (N) | 10 | Medium | Low-Medium — some new behaviors (shutdown exit code, enqueue return value) could confuse operators |
-| Partial Fixes (P) | 1 | Low | Low — `NEXT_UPLOAD_BODY_MAX_BYTES` is an advanced tuning knob |
-| Still Open (from prior) | 25 | Medium | Medium — cumulative effect of missing docs for smart_collections, env vars, API routes |
-| Correctly Documented | 6 | — | — |
+| New Mismatches (O) | 12 | Medium | Low-Medium — mostly completeness issues |
+| Carried Forward (A, B, C, D, E, N, P) | 35 | Medium | Medium — cumulative effect of missing docs |
+| Correctly Documented | 30 | — | — |
 
-**Overall:** No critical documentation bugs. The most impactful improvement since the last review is the addition of the "Optional Operational Variables" table in CLAUDE.md (commit 31293369), which addresses 18 of the 25 previously missing environment variables. The remaining gaps are mostly completeness issues (undocumented features, missing JSDoc) rather than active misinformation.
+**Overall:** No critical documentation bugs introduced in cycle-5. The most impactful changes are the SSRF hardening (O12) and the settings-hash sort fix (O6), both of which are well-documented in inline comments but missing from CLAUDE.md. The previous cycle's findings remain largely unaddressed.
 
 ---
 
 ## Recommended Priority Order
 
-1. **Fix stale JSDoc blocks (A1, A2, A3, A4, A5/N6)** — These actively mislead developers
-2. **Add `enqueueImageProcessing` return value JSDoc (N1)** — New API contract
-3. **Update CLAUDE.md masonry grid description (N7)** — Code changed, docs didn't
-4. **Add shutdown behavior to Docker section (N3)** — Operators need to know about exit code 1
-5. **Document `retryFailedImage` restore-maintenance guard (N2)** — Completeness
-6. **Add semantic search scan limit to CLAUDE.md (N9)** — Mirrors README which already has it
-7. **Add `NEXT_UPLOAD_BODY_MAX_BYTES` to `.env.local.example` (P3)** — Completeness
-8. **Document `smart_collections` (B3)** — Feature is completely invisible
-9. **Add missing admin settings to tunables table (B2)** — Completeness
-10. **Fix version imprecisions (C1-C3)** — Cosmetic
-11. **Delete orphaned migration file (D1)** — Hygiene
-12. **Add missing root package.json script (D2)** — Consistency
+1. **Delete orphaned JSDoc block in process-image.ts (P1)** — Actively misleading
+2. **Fix `gamma18` documentation (O1/N6/A6)** — Third review cycle, still wrong
+3. **Add `enqueueImageProcessing` return value JSDoc (O3/N1)** — API contract
+4. **Update CLAUDE.md masonry grid description (O4/N7)** — Code changed, docs didn't
+5. **Document OG route SSRF hardening in CLAUDE.md (O12)** — Security completeness
+6. **Document settings-hash sort behavior (O6)** — Cache invalidation behavior
+7. **Add `NEXT_UPLOAD_BODY_MAX_BYTES` to `.env.local.example` (O2/P3)** — Completeness
+8. **Fix `color-detection.ts` module JSDoc (P2)** — Stale deferred feature reference
+9. **Add JSDoc to `detectColorSignals` (P3)** — Core function undocumented
+10. **Add JSDoc to `deleteImageVariants` (P4)** — Missing parameters
+11. **Document `smart_collections` (B3)** — Feature is completely invisible
+12. **Add missing admin settings to tunables table (B2)** — Completeness
+13. **Fix version imprecisions (C1-C3)** — Cosmetic
+14. **Delete orphaned migration file (D1)** — Hygiene
 
 ---
 
-## Verified Correct (No Issues Found at HEAD d24f2a6d)
+## Verified Correct (No Issues Found at HEAD de4c692a)
 
-1. **All 18 operational env vars in CLAUDE.md table match code** — Verified against `db/index.ts`, `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, `audit.ts`, `view-retention.ts`, `upload-limits.ts`, `gallery-config.ts`
-2. **Nginx config matches CLAUDE.md claims** — All 5 location blocks (login, db, dashboard, admin mutations, LR upload) with correct body size limits
+1. **All 18 operational env vars in CLAUDE.md table match code** — Verified
+2. **Nginx config matches CLAUDE.md claims** — All 5 location blocks correct
 3. **Upload limits match** — 200MB per file, 2GiB batch, 100 files per window
-4. **Health routes** — `/api/live` (liveness) and `/api/health` (DB readiness when `HEALTH_CHECK_DB=true`) both correct
-5. **Color/HDR pipeline** — All 13 claims verified, including the new temp-file cleanup
-6. **Security architecture** — All claims verified, including the new `retryFailedImage` maintenance guard
-7. **Service Worker** — Template and generated `sw.js` match, LRU logic correct
+4. **Health routes** — `/api/live` and `/api/health` both correct
+5. **Color/HDR pipeline** — All claims verified, including new sort-before-hash
+6. **Security architecture** — All claims verified, including OG route SSRF
+7. **Service Worker** — Template and generated `sw.js` match
 8. **Docker deployment** — Compose file, Dockerfile, entrypoint all consistent
-9. **Connection pool** — 10 connections, queue limit 20, keepalive, init timeout all correct
-10. **Migration system** — Post-condition assertion, hash-based check, reconcile all verified
+9. **Connection pool** — 10 connections, queue limit 20, keepalive, init timeout
+10. **Migration system** — Post-condition assertion, hash-based check, reconcile
+11. **settings-hash.ts sort fix** — Correctly sorts imageSizes before hashing
+12. **gain-map-detection.ts off-by-one fix** — Boundary check now correct
+13. **photo-viewer.tsx keyboard repeat** — Correctly suppresses repeat events
+14. **image-manager.tsx console.error** — All 7 occurrences correctly upgraded
+15. **histogram.tsx button tooltip** — Correct keyboard activation
+16. **analytics table scope=col** — All headers correctly scoped
+17. **og-route SSRF hardening** — Fail-closed and same-origin validation correct
+18. **upload-paths.ts resolveOriginalUploadPath** — Returns null on missing file
+19. **admin-backfill-runner.ts** — All documentation current and accurate
+20. **image-queue.ts** — Claim retry, permanently-failed IDs well-documented
+21. **embeddings.ts** — Mode-aware backfill well-documented
+22. **data.ts view-count backoff** — Exponential backoff well-documented
+23. **restore-maintenance.ts** — Clear inline comments
+24. **audit.ts** — Metadata truncation well-documented
+25. **color-details-section.tsx** — All humanizers accurately documented
+26. **og-sanitize.ts** — Module JSDoc accurate
+27. **upload-paths.ts** — Module and function JSDoc accurate
+28. **process-image.ts resolveColorPipelineDecision** — JSDoc accurate
+29. **process-image.ts resolveAvifIccProfile** — JSDoc accurate
+30. **process-image.ts wide-gamut downscale** — Temp file cleanup documented
