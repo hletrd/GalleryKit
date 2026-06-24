@@ -381,6 +381,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     // Handle keyboard navigation (skip when lightbox is active — it handles its own keys)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.repeat) return;
             if (showLightbox) return;
             if (isEditableTarget(e)) return;
             if (e.key === "ArrowLeft") {
