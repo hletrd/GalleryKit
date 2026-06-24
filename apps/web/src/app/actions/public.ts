@@ -90,8 +90,9 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     // calls are preferred because they stay stable when new photos arrive.
     if (!usesCursor && typeof safeOffset === 'number' && safeOffset > 10000) return { status: 'invalid', images: [], hasMore: false };
     // Cap tag array and validate format to prevent complex query DoS
-    const safeTags = canonicalizeRequestedTagSlugs(tagSlugs || [])
-        .filter(isValidTagSlug);
+    const safeTags = Array.isArray(tagSlugs)
+        ? canonicalizeRequestedTagSlugs(tagSlugs).filter(isValidTagSlug)
+        : [];
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
