@@ -83,18 +83,22 @@ describe('BoundedMap prune return value', () => {
         expect(changed).toBe(false);
     });
 
-    it('returns true when hard-cap eviction fires', () => {
+    it('returns true when hard-cap eviction fires (via set() auto-enforcement)', () => {
         const now = 5_000_000;
         const map = new BoundedMap<string, { resetAt: number }>(
             2,
             (entry, t) => entry.resetAt <= t
         );
-        // Insert 3 fresh entries — none expired, but cap is 2
+        // Insert 3 fresh entries — none expired, but cap is 2.
+        // C8R-C8-01: set() auto-enforces the hard cap, so the 3rd set evicts
+        // the oldest entry. prune() then has no eviction work to do.
         map.set('a', { resetAt: now + 1000 });
         map.set('b', { resetAt: now + 1000 });
+        expect(map.size).toBe(2);
         map.set('c', { resetAt: now + 1000 });
+        expect(map.size).toBe(2); // hard cap enforced by set()
         const changed = map.prune(now);
-        expect(changed).toBe(true);
+        expect(changed).toBe(false); // no expired entries, cap already enforced
     });
 });
 

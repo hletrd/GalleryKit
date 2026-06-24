@@ -64,7 +64,28 @@ export class BoundedMap<K, V> {
 
     set(key: K, value: V): this {
         this.map.set(key, value);
+        // C8R-C8-01: auto-enforce the hard cap on write so consumers that forget
+        // to call prune() explicitly still get bounded growth. The class name
+        // implies bounded behavior, not opt-in bounded behavior. We do NOT
+        // auto-prune expired entries here because the caller's `now` context may
+        // differ from Date.now() (e.g. tests use artificial timestamps).
+        this.enforceHardCap();
         return this;
+    }
+
+    /** Enforce the hard cap by evicting oldest entries (FIFO). */
+    private enforceHardCap(): void {
+        if (this.map.size > this.maxKeys) {
+            const excess = this.map.size - this.maxKeys;
+            const evictKeys: K[] = [];
+            for (const key of this.map.keys()) {
+                if (evictKeys.length >= excess) break;
+                evictKeys.push(key);
+            }
+            for (const key of evictKeys) {
+                this.map.delete(key);
+            }
+        }
     }
 
     delete(key: K): boolean {
