@@ -18,6 +18,11 @@ let viewCountBuffer = new Map<number, number>();
 // C30-03: track how many times each group's increment has been re-buffered
 // after a failed flush. If the retry count exceeds the cap, the increment
 // is dropped and a warning is logged instead of re-buffering indefinitely.
+// NOTE: This Map has NO automatic eviction. Entries are only cleared when
+// the buffer empties (line ~167) or when a flush succeeds (line ~110).
+// At personal-gallery scale the number of shared groups is small (< 100),
+// so unbounded growth is not a concern. The MAX_VIEW_COUNT_RETRY_SIZE
+// cap below is a safety valve for the sustained-DB-outage case.
 const viewCountRetryCount = new Map<number, number>();
 const VIEW_COUNT_MAX_RETRIES = 3;
 // C5-AGG-02: explicit size cap for viewCountRetryCount. Entries are bounded
