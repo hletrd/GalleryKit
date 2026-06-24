@@ -1,9 +1,10 @@
 /**
  * Color signal detection for uploaded images.
  *
- * Derives CICP-equivalent values from ICC profile metadata and Sharp-reported
- * bit depth. The output is consumed at upload time and stored in the images
- * table so future HDR delivery can query without re-parsing originals.
+ * Derives CICP-equivalent values from ICC profile metadata, NCLX `colr` box
+ * (HEIF/AVIF), and Sharp-reported bit depth. The output is consumed at upload
+ * time and stored in the `images` table so future HDR delivery can query
+ * without re-parsing originals.
  *
  * HDR detection is heuristic: PQ (SMPTE ST 2084) and HLG (ARIB STD-B67 /
  * ITU-R BT.2100) transfer functions in the ICC description are treated as HDR.
