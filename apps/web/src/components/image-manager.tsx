@@ -154,7 +154,7 @@ export function ImageManager({
                 toast.error(t('imageManager.deleteFailed'));
             }
         } catch (err) {
-            console.warn('Failed to delete image:', err);
+            console.error('Failed to delete image:', err);
             toast.error(t('imageManager.deleteFailed'));
         } finally {
             setDeletingId(null);
@@ -183,7 +183,7 @@ export function ImageManager({
                 toast.error(res?.error || t('imageManager.deleteFailed'));
             }
         } catch (err) {
-            console.warn('Failed to bulk delete images:', err);
+            console.error('Failed to bulk delete images:', err);
             toast.error(t('imageManager.bulkDeleteFailed'));
         } finally {
             setIsBulkDeleting(false);
@@ -208,7 +208,7 @@ export function ImageManager({
                  toast.error(result.error || t('imageManager.shareFailed'));
             }
         } catch (err) {
-            console.warn('Failed to share image:', err);
+            console.error('Failed to share image:', err);
             toast.error(t('imageManager.shareFailed'));
         } finally {
             setIsSharing(false);
@@ -233,7 +233,7 @@ export function ImageManager({
                 toast.error(res?.error || t('imageManager.bulkEditFailed'));
             }
         } catch (err) {
-            console.warn('Failed to bulk edit images:', err);
+            console.error('Failed to bulk edit images:', err);
             toast.error(t('imageManager.bulkEditFailed'));
         }
     };
@@ -253,7 +253,7 @@ export function ImageManager({
                  toast.error(res?.error || t('imageManager.batchAddFailed'));
              }
          } catch (err) {
-             console.warn('Failed to batch add tags:', err);
+             console.error('Failed to batch add tags:', err);
              toast.error(t('imageManager.batchAddFailed'));
          } finally {
              setIsBatchAddingTag(false);
@@ -299,7 +299,7 @@ export function ImageManager({
                 toast.error(res.error || t('imageManager.updateFailed'));
             }
         } catch (err) {
-            console.warn('Failed to update image:', err);
+            console.error('Failed to update image:', err);
             toast.error(t('imageManager.updateFailed'));
         } finally {
             setIsSavingEdit(false);
@@ -507,7 +507,7 @@ export function ImageManager({
                                                         toast.error(t('imageManager.batchAddFailed'));
                                                     }
                                                 } catch (err) {
-                                                    console.warn('Failed to batch add tags:', err);
+                                                    console.error('Failed to batch add tags:', err);
                                                     toast.error(t('imageManager.batchAddFailed'));
                                                 }
                                             }}
