@@ -233,10 +233,15 @@ describe('pruneSearchRateLimit', () => {
             searchRateLimit.set(`key-${i}`, { count: 1, resetAt: 10_000 });
         }
 
-        expect(pruneSearchRateLimit(1_000, { force: true })).toBe(true);
-        searchRateLimit.set('overflow', { count: 1, resetAt: 10_000 });
+        // C8R-C8-01: set() now auto-enforces the hard cap, so the size should
+        // already be at the limit before pruneSearchRateLimit runs.
+        expect(searchRateLimit.size).toBeLessThanOrEqual(2_000);
 
-        expect(pruneSearchRateLimit(1_001)).toBe(true);
+        // pruneSearchRateLimit should still return true when forced
+        expect(pruneSearchRateLimit(1_000, { force: true })).toBe(true);
+
+        // Adding another entry should still stay within the cap
+        searchRateLimit.set('overflow', { count: 1, resetAt: 10_000 });
         expect(searchRateLimit.size).toBeLessThanOrEqual(2_000);
     });
 });

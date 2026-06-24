@@ -63,7 +63,7 @@ function bufferGroupViewCount(groupId: number) {
 
 let isFlushing = false;
 
-const FLUSH_CHUNK_SIZE = 20; // Process view-count updates in chunks to limit concurrent DB promises
+const FLUSH_CHUNK_SIZE = 5; // Process view-count updates in chunks to limit concurrent DB promises
 
 async function flushGroupViewCounts() {
     // COR-R4C11-01: this invocation has consumed the scheduled timer, so null

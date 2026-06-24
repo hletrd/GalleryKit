@@ -38,9 +38,9 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         expect(dataSource).toMatch(/let\s+viewCountBuffer\s*=\s*new\s+Map<number,\s*number>\(\)/);
     });
 
-    it('declares MAX_VIEW_COUNT_BUFFER_SIZE = 1000 and FLUSH_CHUNK_SIZE = 20', () => {
+    it('declares MAX_VIEW_COUNT_BUFFER_SIZE = 1000 and FLUSH_CHUNK_SIZE = 5', () => {
         expect(dataSource).toMatch(/const\s+MAX_VIEW_COUNT_BUFFER_SIZE\s*=\s*1000\b/);
-        expect(dataSource).toMatch(/const\s+FLUSH_CHUNK_SIZE\s*=\s*20\b/);
+        expect(dataSource).toMatch(/const\s+FLUSH_CHUNK_SIZE\s*=\s*5\b/);
     });
 
     it('flushGroupViewCounts swaps the buffer reference before any DB write', () => {
