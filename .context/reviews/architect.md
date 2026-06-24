@@ -1,132 +1,142 @@
-# Architect Review — Cycle 11 (Run-6)
+# Architect Review - review-plan-fix cycle 1 / prompt 1
 
-**HEAD:** a7de3ebd · **Scope:** system architecture at the documented single-writer scale
-**Verdict:** SOUND. Zero new architectural defects. Honest convergence.
+HEAD reviewed: `1d5545cb`
 
-## Summary
+Scope: architectural/design risk review only. I did not modify source code, run deploys, commit, or push. The only write is this review artifact.
 
-Traced the full config → resolution → consumption chain, the CLIP double-gate,
-advisory-lock acquire/release pairing across all three lock-using subsystems, and
-the data.ts PII guard architecture. Every invariant the task asked me to verify
-holds. `npx tsc --noEmit -p tsconfig.typecheck.json` exits 0, so both compile-time
-privacy guards are satisfied. No fail-open where fail-closed is required; no leaked
-advisory-lock connection; no PII leak; no contract mismatch between layers that
-produces wrong behavior at the documented scale.
+## Inventory
 
-I found ONE prose/comment inaccuracy (not a defect — produces no wrong behavior at
-any scale) and note it for honesty, plus confirmation that the 3 known-deferred CLIP
-items remain correctly deferred.
+Primary documents read:
+- `AGENTS.md` from the prompt, including the no-commit/no-deploy override for this review task.
+- `CLAUDE.md`, especially architecture, storage, runtime topology, migration, color/HDR pipeline, privacy projection, deployment, and operational sections.
 
-## What I verified
+Source areas examined:
+- Data/schema/projections: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`.
+- Migrations/deploy coupling: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, recent migrations `0020` through `0023`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`.
+- Upload/storage/serving: `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/storage/{index,types,local}.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/next.config.ts`, upload route handlers.
+- Image processing/color pipeline: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/gallery-config*.ts`, `apps/web/src/lib/settings-hash.ts`, color UI components.
+- Admin/public boundary and server/client boundary: public photo page, `PhotoViewer`, `ColorDetailsSection`, admin LR upload route, admin image actions, privacy tests, client/server boundary tests.
 
-### 1. Config double-gate is fail-closed end to end (CLIP `production`)
+## Findings
 
-- **Validation layer** (`gallery-config-shared.ts:173`): `semantic_search_mode`
-  accepts `disabled|stub|production` as type-valid stored values. Correct — the
-  resolver, not the validator, owns the heal.
-- **Resolution layer** (`gallery-config.ts:129-148`): a stored `production` HEALS to
-  `disabled` unless `process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] === 'true'`.
-  Invalid/unknown raw → default (`disabled`). The DB-read failure path
-  (`gallery-config.ts:189-219` catch) returns an all-defaults object →
-  `semanticSearchMode: 'disabled'`. Fail-closed.
-- **Consumption layer** — three independent re-reads, each fail-closed:
-  - `api/search/semantic/route.ts:220-233`: defaults `semanticMode='disabled'`,
-    `getGalleryConfig()` in try/catch (`catch → stays disabled`), then
-    `if (semanticMode !== 'stub' && !== 'production') → 503` + rate-limit rollback.
-  - `api/search/similar/[id]/route.ts:94-107`: same pattern, stricter
-    (`!== 'production' → 503`).
-  - `app/actions/embeddings.ts:74-82` and `lib/image-queue.ts:435-442`: both default
-    to `disabled`, catch DB errors as `disabled`, and no-op on `disabled`.
+### ARCH-01 - Permanent image-processing failures are not durable across process restarts
 
-  The double gate (env `SEMANTIC_SEARCH_ALLOW_PRODUCTION` + DB row) is enforced at
-  the SINGLE resolution chokepoint and every consumer reads the resolved value.
-  There is no path where a consumer reads the raw DB string directly. **Fail-closed
-  confirmed.**
+Severity: High
+Confidence: High
+Type: Confirmed issue
 
-### 2. model_version isolation at the query layer
+Evidence:
+- `apps/web/src/lib/image-queue.ts:157-160` defines `permanentlyFailedIds` as an in-memory `Set`.
+- `apps/web/src/lib/image-queue.ts:174-186` initializes that set empty on process/global state creation.
+- `apps/web/src/lib/image-queue.ts:517-550` adds a permanently failed job to the in-memory set and persists `processing_error` / `failed_at` to the database.
+- `apps/web/src/lib/image-queue.ts:640-648` excludes only the in-memory `permanentlyFailedIds` from bootstrap scans.
+- `apps/web/src/lib/image-queue.ts:652-672` bootstraps every `processed = false` row matching those process-local conditions.
+- `apps/web/src/app/actions/images.ts:1118-1128` treats `processed = false AND processing_error IS NOT NULL` as the explicit admin retry surface and clears the error before enqueueing.
+- `apps/web/src/__tests__/image-queue-permanent-failure.test.ts:44-53` locks the in-memory `notInArray` behavior but does not lock a durable `processing_error IS NULL` bootstrap predicate.
 
-Read routes filter `WHERE model_version = activeModelVersion`
-(`semantic/route.ts:254`, `similar/[id]/route.ts:117,145`). Write paths tag the row
-with the active model_version (`image-queue.ts:446-451`, `embeddings.ts:92`,
-sidecar). Stub mode uses `cosineSimilarity` (stub vectors are unnormalized);
-production uses `dotProduct` on unit vectors (`semantic/route.ts:271` gated on
-`isProd`). Stub rows are filtered out of production reads and vice-versa. Correct.
+Why this is a problem:
+The database records a terminal failed state, but queue bootstrap does not use it as the source of truth. After a container restart, `permanentlyFailedIds` is empty, so rows already marked with `processing_error` become bootstrap candidates again. The admin retry action is no longer the only path that retries failed rows.
 
-### 3. Advisory-lock acquire/release pairing — no leak
+Concrete failure scenario:
+A corrupt original or missing source file exceeds `MAX_RETRIES`. The row is shown in the failed-image admin panel with `processing_error`. The host restarts during a deploy or crash recovery. On boot, bootstrap re-enqueues that same row because `processed = false` still matches and the process-local permanent-failure set is empty. A batch of failed rows can repeatedly consume Sharp/libvips workers on every restart, generate noisy logs, and update failure timestamps without an admin choosing retry.
 
-Audited all GET_LOCK/RELEASE_LOCK sites:
-- `image-queue.ts`: acquire (195-212) releases connection on not-acquired AND on
-  throw; consumption acquires at :261 and releases in `finally` at :544-545 covering
-  the whole processing window.
-- `admin-backfill-runner.ts`: backfill lock (303-333) and per-image claim (343-368)
-  both release connection on every path. The outer entry point
-  (`triggerAdminBackfill` :816-866) nulls `lockConn` after handoff (:846) so the
-  catch cannot double-release; the runner's `finally` (:805-808) is the single
-  release point. `reprocessOne` claim acquire and protected `try` are adjacent with
-  release in `finally` (:610-614) — documented LOCK-CRITICAL.
-- Pool-exhaustion on `getConnection()` is handled as a `locked` skip (no version
-  bump), not an escape that would tight-loop errors. Correct degradation.
+Suggested fix:
+Make the database failure state authoritative for bootstrap:
+- Add `isNull(images.processing_error)` to the bootstrap pending conditions in `bootstrapImageProcessingQueue`.
+- Keep `retryFailedImage` as the only path that clears `processing_error` / `failed_at` and re-enqueues.
+- Add a test in `image-queue-bootstrap.test.ts` that asserts the bootstrap query includes the durable failed-state exclusion, not just `notInArray(state.permanentlyFailedIds)`.
 
-No connection or lock is leaked on any path.
+### ARCH-02 - Storage backend can place private originals under the public upload root
 
-### 4. data.ts PII guard architecture
+Severity: High when the storage abstraction is adopted; latent in the current app because the main upload path is not wired through it
+Confidence: High
+Type: Risk needing manual validation before storage abstraction use
 
-- `publicSelectFields` (data.ts:325-357) and `publicMapSelectFields` (:366-393) are
-  DERIVED from `adminSelectFields` by destructuring-OMIT, as separate `as const`
-  objects (not shared references). Adding a field to `adminSelectFields` does NOT
-  auto-leak it.
-- `PrivacySensitiveKeys` (:416) is the single source-of-truth union. Both
-  `_SensitiveKeysInPublic` (:418-420) and `_MapSensitiveKeysInPublicMap` (:429-432)
-  derive from it via `Extract`/`Exclude` → a new sensitive key auto-extends both
-  guards.
-- **`tsc --noEmit -p tsconfig.typecheck.json` exits 0** → no sensitive key is present
-  in either public select shape. Guard is live and passing.
+Evidence:
+- `apps/web/src/lib/upload-paths.ts:11-22` defines `UPLOAD_ROOT` under `apps/web/public/uploads` by default.
+- `apps/web/src/lib/upload-paths.ts:24-40` separately defines legacy public originals under `UPLOAD_ROOT/original` and the intended private original root under `UPLOAD_ORIGINAL_ROOT`.
+- `apps/web/src/lib/storage/local.ts:20` creates an `original` directory as a required public-storage subdirectory.
+- `apps/web/src/lib/storage/local.ts:40-47` resolves every storage key under `UPLOAD_ROOT`.
+- `apps/web/src/lib/storage/local.ts:62-84` writes any normalized key, including `original/...`, under that public root.
+- `apps/web/src/lib/storage/local.ts:130-135` only prevents `getUrl('original/...')`; it does not prevent the file write.
+- `apps/web/src/lib/serve-upload.ts:137-140` refuses non-`jpeg|webp|avif` directories in the route handler, but `apps/web/next.config.ts:56-67` documents that files under `public/uploads` are served by Next static handling before the route handler for existing files.
 
-## Finding (non-defect, documentation honesty only)
+Why this is a problem:
+The repository has a strong contract that originals are private and may contain sensitive EXIF/GPS data. The live upload path uses `UPLOAD_ORIGINAL_ROOT`, but the local storage abstraction's keyspace contradicts that contract by treating `original/` as a public-root directory. The URL helper refuses to produce an original URL, but URL generation is not the security boundary when the file is already under `public/uploads`.
 
-**A1 · `image-queue.ts:431-433` comment overstates row coexistence · LOW · confidence H**
+Concrete failure scenario:
+A future refactor or alternate upload path starts using `getStorage().writeStream('original/<file>')` for original retention. The file lands at `apps/web/public/uploads/original/<file>`. A direct request to `/uploads/original/<file>` can be handled by Next's static public-file serving path before the route handler's allowlist gets a chance to return 404. Private originals become web-addressable even though `getUrl()` throws.
 
-The `image_embeddings` table has `PRIMARY KEY (image_id)` only (schema.ts:274,
-migration 0012:10) — exactly ONE row per image. The comment at image-queue.ts:431-433
-("The `model_version` column on image_embeddings already distinguishes stub rows, so
-no schema migration is needed for that future encoder to tell stub vectors apart from
-production ones") reads as if stub and production rows coexist per image. They do not.
+Suggested fix:
+- Either reject `original/*` writes in `LocalStorageBackend` until original storage is explicitly designed, or map `original/*` to `UPLOAD_ORIGINAL_ROOT` rather than `UPLOAD_ROOT`.
+- Stop creating `UPLOAD_ROOT/original` as a required local storage directory.
+- Add a route/static-serving regression test that proves `/uploads/original/*` is not served even when a file exists there, or remove that possible on-disk location entirely.
 
-- **Actual (correct) behavior:** the upsert (`onDuplicateKeyUpdate` on the `imageId`
-  PK, image-queue.ts:462-473 / embeddings.ts:142-153) OVERWRITES `(embedding,
-  modelVersion)`. During a stub→production transition the backfill `notExists`
-  candidate query selects images lacking a row *at the target version*
-  (embeddings.ts:103-112, sidecar "Re-embed on model_version mismatch"), so a stale
-  stub row is selected and overwritten with the production row. Reads filter on the
-  active version. Net effect: stub vectors are never co-ranked with production —
-  the documented invariant holds via overwrite-then-filter, NOT coexistence.
-- **Why it is not a defect:** there is no scale, including the documented
-  single-writer topology, at which this produces wrong output or data loss. Only one
-  mode is ever resolved-active per deploy; the single row always carries that mode's
-  version after backfill. The `backfill-clip-embeddings-reembed` test locks the
-  re-embed-on-mismatch semantics.
-- **Fix (optional, non-urgent):** reword the comment to say the single row is
-  *re-embedded/overwritten* to the active model_version (and reads filter on it),
-  rather than implying per-image stub+production coexistence. No code change.
+### ARCH-03 - The public photo page enables admin color UI while fetching only the public projection
 
-## Known-deferred items (NOT re-opened)
+Severity: Medium
+Confidence: High
+Type: Confirmed issue
 
-DEF-C8-1/2/3 (plan-361): main-thread inference vs worker-pool, load-time integrity
-verification, reload-storm hardening. Confirmed these remain correctly deferred — the
-live feature operates within the documented bounded mitigations (lazy Promise-singleton
-load, offline `allowRemoteModels=false`, pinned HF revision, 0-timeout claim locks,
-30/min IP rate limit fail-closed even on the shared `unknown` bucket). Not new findings.
+Evidence:
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:142-149` fetches `getImageCached(imageId)` and `isAdmin()` in parallel.
+- `apps/web/src/lib/data.ts:954-965` implements `getImage()` with `publicSelectFields` plus `blur_data_url` and `topic_label`.
+- `apps/web/src/lib/data.ts:323-355` omits admin-only color/audit fields from `publicSelectFields`, including `color_pipeline_decision`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `bit_depth`, `color_space`, and `icc_profile_name`.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:276-291` passes `isAdmin={isAdminUser}` into `PhotoViewer`.
+- `apps/web/src/components/photo-viewer.tsx:767` passes that flag into `ColorDetailsSection`.
+- `apps/web/src/components/color-details-section.tsx:170-212` uses admin-only fields to decide HDR/non-trivial color behavior.
+- `apps/web/src/components/color-details-section.tsx:244-266` offers copyable audit metadata from admin-only fields.
+- `apps/web/src/components/color-details-section.tsx:375-430` conditionally renders admin-only pipeline, matrix, and EXIF color-space rows.
+- `apps/web/src/lib/image-types.ts:23-35` explicitly marks these fields optional because public page consumers may not have them.
 
-## References
+Why this is a problem:
+The UI receives an admin authorization flag without the admin data it needs to honor that mode. This is not a privacy leak, because the public projection is doing its job. It is a server/data boundary mismatch: admin-only UI branches render against a public-shaped image record.
 
-- `apps/web/src/lib/gallery-config-shared.ts:173` — validator accepts production (type-valid)
-- `apps/web/src/lib/gallery-config.ts:129-148` — resolver heals production→disabled w/o env opt-in
-- `apps/web/src/lib/gallery-config.ts:189-219` — DB-read failure → all-defaults (disabled)
-- `apps/web/src/app/api/search/semantic/route.ts:220-233` — fail-closed 503 gate
-- `apps/web/src/app/api/search/similar/[id]/route.ts:94-107` — production-only fail-closed gate
-- `apps/web/src/lib/image-queue.ts:434-478` — write path mode-gated, default disabled
-- `apps/web/src/app/actions/embeddings.ts:74-92,103-112` — mode-aware backfill, version-filtered candidates
-- `apps/web/src/lib/admin-backfill-runner.ts:303-333,610-614,805-808,816-866` — lock lifecycle, single release point
-- `apps/web/src/lib/image-queue.ts:195-222,261,544-545` — claim acquire/release in finally
-- `apps/web/src/lib/data.ts:325-357,416-432` — PII guard derivation + compile-time guards
-- `apps/web/src/db/schema.ts:273-288` + `apps/web/drizzle/0012_image_embeddings.sql:10` — single-row PK (finding A1)
+Concrete failure scenario:
+An authenticated photographer opens `/p/123` after uploading a Display P3 or HDR image to audit the color pipeline. `isAdmin` is true, but `transfer_function`, `icc_profile_name`, `color_pipeline_decision`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, and `bit_depth` are absent. The Color Details accordion can fail to auto-open for HDR, the audit rows disappear, and "copy color metadata" emits mostly `null` values even though the database contains the data. That undermines the documented photographer-facing color/HDR contract.
+
+Suggested fix:
+- Split the accessor: keep `getImageCached` public, and add an authenticated viewer accessor or admin-only side fragment that includes the audit fields after `isAdmin()` is known.
+- Keep SEO/JSON-LD generation on an explicit public-safe shape so adding admin fields for the viewer cannot accidentally flow into public metadata.
+- Add a focused test that renders or inspects the authenticated `/p/[id]` data path and proves admin color fields are present only for admins.
+
+### ARCH-04 - Sidecar color backfill does not share the per-image processing lock
+
+Severity: Medium
+Confidence: High
+Type: Risk needing manual validation
+
+Evidence:
+- `apps/web/scripts/backfill-color-pipeline.ts:36-43` documents the known gap: the sidecar script does not claim the per-image `gallerykit:image-processing:{id}` lock and operators must not trigger admin retry while it runs.
+- `apps/web/scripts/backfill-color-pipeline.ts:192-265` re-encodes and re-detects a row without acquiring the per-image lock.
+- `apps/web/scripts/backfill-color-pipeline.ts:397-460` batches database updates after encode/detect work, so the DB update window is decoupled from the row processing window.
+- `apps/web/src/lib/admin-backfill-runner.ts:335-343` explains the exact race this lock is meant to prevent.
+- `apps/web/src/lib/admin-backfill-runner.ts:469-613` holds the per-image claim across re-encode, detection, and DB update in the in-app runner.
+
+Why this is a problem:
+The sidecar and in-app runner serialize with the global color-backfill lock, but the live failed-image retry path uses the image-processing queue, not the global backfill lock. The in-app runner has a per-image claim to avoid racing that path; the sidecar does not. This leaves a manual operational rule as the only protection for a cross-process write race on derivative filenames and color metadata.
+
+Concrete failure scenario:
+The sidecar starts re-encoding row 123 with one settings snapshot and writes derivative files. While its DB update is still queued in `flushBatch`, an admin clicks retry for that image, causing the live queue worker to acquire the per-image processing lock and re-encode the same filenames. Depending on timing, the final files can come from one process while `pipeline_version`, `color_pipeline_decision`, `was_downscaled`, or `avif_10bit` come from the other. A deleted-mid-reencode path is handled, but live retry interleaving is still manual.
+
+Suggested fix:
+- Restructure the sidecar to reuse the same per-image advisory lock window as `admin-backfill-runner.ts`, holding it through encode, detection, and the row update.
+- If batching must remain, batch only work that does not affect the per-image correctness contract, or flush each row while its per-image lock is held.
+- As a shorter-term guard, block/disable failed-image retry while the sidecar global backfill lock is held, and expose that state in the admin UI or retry action.
+
+## Missed-issues sweep
+
+I re-scanned these risk areas after the findings above:
+- Migration/journal coupling: `apps/web/scripts/migrate.js:145-151`, `267-401`, `582-594`, `637-710`, and `719-730` cover journal loading, legacy reconciliation, `image_embeddings`, non-monotonic journal baselining, and post-condition assertions. I did not find a new migration coupling defect.
+- Privacy projections: `apps/web/src/lib/data.ts:316-430`, `apps/web/src/lib/data-timeline.ts:14-72`, and `apps/web/src/__tests__/privacy-fields.test.ts:3-108` maintain compile-time and fixture guards for public/admin field boundaries. I did not find a public data leak.
+- Client/server boundaries: `apps/web/src/__tests__/client-server-only-boundary.test.ts:5-20`, `257-331`, and `371-474` scan `'use client'` import graphs for native/server-only imports. I did not find a confirmed client bundle boundary defect in the reviewed paths.
+- Single-instance assumptions: process-local state exists in `apps/web/src/lib/data.ts:17-197`, `apps/web/src/lib/image-queue.ts:150-190`, and `apps/web/src/lib/admin-backfill-runner.ts:144-250`; the deployed topology is a single web service in `apps/web/docker-compose.yml:1-26`. This matches the documented single-instance contract, so I am not filing it as a defect, but scale-out would require redesigning these process-local queues, buffers, and status maps.
+- Image/color pipeline contracts: I traced upload processing, queue processing, in-app backfill, sidecar backfill, serving cache headers, settings hash, and color UI consumers. The two reportable issues from that pass are ARCH-03 and ARCH-04.
+
+## Residual risks
+
+- The app remains intentionally single-instance. Before adding a second web process, move queue ownership, view-count flushing, admin backfill status, rate-limit/quota maps, and restore/upload maintenance state out of per-process memory or protect them with durable coordination.
+- The storage abstraction is local-only and not wired through the main upload path. Treat it as unsafe for original-object retention until ARCH-02 is fixed.
+- The sidecar color backfill has a documented manual concurrency rule. Treat it as an operational hazard until ARCH-04 is fixed.
+
+No tests were run; this was a read-only architecture review plus this review artifact.

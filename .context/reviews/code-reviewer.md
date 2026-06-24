@@ -1,83 +1,149 @@
-# Code Reviewer — Run-6 Cycle-11 Deep Review
+# Code Reviewer — review-plan-fix Cycle 1 / Prompt 1
 
-**HEAD:** a7de3ebd86cd19b169763cea7bebdf7d9a595f1e
-**Working tree:** clean (verified; the session-start `git status` snapshot was stale — `git diff HEAD` is empty)
-**Date:** 2026-06-17
-**Verdict:** APPROVE — **0 real defects found**
+**HEAD:** `1d5545cbf3840fc449fb67998104b5d5f2aab433`
+**Date:** 2026-06-22
+**Lane:** code-reviewer
+**Scope:** whole-repository quality / logic / SOLID / maintainability review, with emphasis on cross-file contracts, state consistency, error handling, schema/data projection contracts, and privacy field contracts.
+**Source edits:** none. This review artifact is the only file updated.
 
-## Bottom line
+## Inventory First
 
-Honest convergence. After examining the LIVE CLIP semantic-search surface exhaustively
-and sweeping the rest of `apps/web/src` (actions, lib, routes, components, db) — both
-directly and via three guard-tracing sub-audits — I found **zero** new defects that a
-senior engineer would commit to fixing. Four candidate findings surfaced from
-exploratory passes; **all four were verified false positives** (the "missing" guards are
-present at HEAD). This matches the orchestrator's expectation: cycles 1–10 closed the
-real issues; the feature is solid.
+Review-relevant inventory was built before findings were written:
 
-All three task-specified HARD GUARDS are intact at HEAD:
-- ✅ No real `import 'server-only'` in `clip-model.ts` (line 17 is a comment explaining its deliberate absence) or in `@/db/index.ts`.
-- ✅ `semantic_search_mode: 'disabled'` code default preserved (`gallery-config-shared.ts:108`).
-- ✅ `SEMANTIC_SEARCH_ALLOW_PRODUCTION` operator gate (`gallery-config.ts:144`), 40-hex revision pin (`clip-model-id.ts:25`), `env.allowRemoteModels = false` (`clip-model.ts:88`), and `model_version` partition (stub vs production) all intact.
+- Project guidance: `AGENTS.md`, `CLAUDE.md`, root/package workspace manifests.
+- Core application surface: `apps/web/src/app/**`, including public pages, admin pages, server actions, admin API routes, public API routes, metadata/OG routes, and localized route groups.
+- Data/schema contracts: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/db/**`, `apps/web/drizzle/**`, migration helper scripts.
+- Security and mutation boundaries: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/app/actions/**`, `apps/web/src/app/api/**`, lint scripts for auth/origin/rate-limit gates.
+- Image pipeline / state consistency: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, color/HDR helpers, GPS stripping, backfill runner, upload routes/actions, restore/maintenance helpers.
+- Client data consumers: `apps/web/src/components/photo-viewer.tsx`, `color-details-section.tsx`, `info-bottom-sheet.tsx`, `lightbox-color-pip.tsx`, `image-manager.tsx`, public gallery/search/map components.
+- Tests and fixtures: focused privacy, map privacy, color details, smart collections, retry failed image, auth/origin/rate-limit, queue, restore, migration, and route contract tests under `apps/web/src/__tests__`.
+- Localization: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+
+Static inventory count for the main reviewed source/test/config areas was 502 files across `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/src/db`, `apps/web/src/__tests__`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/messages`. I line-read the files named in the findings and sampled adjacent contract tests and callers to distinguish real defects from intentional privacy/security boundaries.
 
 ## Findings
 
-**None.** No CRITICAL / HIGH / MEDIUM / LOW defects.
+### CR-CODE-01 — Admin photo detail mode is fed by the public image projection, so admin-only audit fields never reach the viewer
 
-## Rejected candidate findings (false positives — documented so they are not re-raised)
+**Type:** confirmed issue
+**Severity:** Medium
+**Confidence:** High
 
-These were raised by exploratory sub-audits and **disproven** by tracing the actual
-control flow at HEAD. Recording them so a future cycle does not re-flag them.
+**Code regions:**
 
-### RF-1 — auth.ts `stripControlChars('') ?? ''` "unreachable coalesce" — NOT A BUG
-- `apps/web/src/app/actions/auth.ts:78,81`
-- Claim: the `?? ''` is unreachable because `stripControlChars('')` returns `''`, not `null`.
-- Reality: `stripControlChars('')` returns `''` (the `if (!s) return s` path), and `'' ?? ''` === `''`. The result is `''` either way — **no behavioral discrepancy**. The explicit `if (!username) / if (!password)` checks (lines 86–91) correctly reject empty credentials. The sub-agent itself admitted "the current checks prevent the bug from manifesting." Confidence it is a non-bug: HIGH.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:142-149` loads `image` with `getImageCached(imageId)` in the same `Promise.all` that checks `isAdmin()`.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:276-284` passes that same `image` to `<PhotoViewer>` with `canShare={isAdminUser}` and `isAdmin={isAdminUser}`.
+- `apps/web/src/lib/data.ts:316-355` defines `publicSelectFields` by omitting privacy/internal fields from `adminSelectFields`.
+- `apps/web/src/lib/data.ts:414-417` marks `latitude`, `longitude`, `original_format`, `original_file_size`, `color_pipeline_decision`, `is_hdr`, `has_gain_map`, `was_downscaled`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `color_space`, `icc_profile_name`, and `pipeline_version` as privacy-sensitive public omissions.
+- `apps/web/src/lib/data.ts:954-974` implements `getImage(id)` with `...publicSelectFields`, plus only `blur_data_url` and `topic_label`.
+- `apps/web/src/components/color-details-section.tsx:375-446` renders admin-only color pipeline, matrix coefficient, EXIF color space, bit-depth, and downscale rows only when those fields are present.
+- `apps/web/src/components/color-details-section.tsx:513-549` renders admin HDR/gain-map disclosures from `transfer_function` / `has_gain_map`.
+- `apps/web/src/components/photo-viewer.tsx:823-878` has original format/file size, source bit depth, and GPS rows; the GPS comment explicitly says it is unreachable unless an admin-only accessor includes the coordinates.
 
-### RF-2 — icc-extractor.ts `strLen - 1` "string truncation / data loss" — NOT A BUG
-- `apps/web/src/lib/icc-extractor.ts:76-80`
-- Claim: `subarray(strStart, strStart + strLen - 1)` drops the last character of the ICC profile name.
-- Reality: this is the ICC v2 `textDescriptionType` (`desc`) convention — the stored ASCII `count` (`declaredLength`) **includes the trailing NUL terminator**. Reading `count - 1` bytes correctly excludes the NUL and yields the full visible name (e.g. count=5 "sRGB\0" → 4 bytes "sRGB"). The behavior is locked by `color-detection.test.ts` / `process-image-icc-options-lockin.test.ts`. Confidence it is a non-bug: HIGH.
+**Why this is a problem:**
 
-### RF-3 — gps-exif-strip.ts `readSized()` "missing offset bounds check / buffer over-read" — NOT A BUG
-- `apps/web/src/lib/gps-exif-strip.ts:467-475,506,516,518`
-- Claim: `readSized(pos, size)` reads past EOF.
-- Reality: every call site is bounds-guarded by the caller before the read:
-  - baseOffset read (506) is guarded by `if (pos + 2 + baseOffsetSize + 2 > ilocBox.dataEnd) return null` (504);
-  - extent offset/length reads (516/518) are guarded by `if (pos + extentEntrySize > ilocBox.dataEnd) return null` where `extentEntrySize = indexSize + offsetSize + lengthSize` (514);
-  - `ilocBox.dataEnd ≤ buf.length` is established at box-parse time.
-  Therefore every `readSized` read stays within `[…, ilocBox.dataEnd] ⊆ buf`. Confidence it is a non-bug: HIGH.
+The route's control flow says "admin mode" to the viewer, but the data shape is still "public mode". The privacy projection is correct for unauthenticated visitors, but once `isAdminUser` is true the detail surface is internally inconsistent: it enables admin-only UI branches and sharing controls while starving the audit panels of the fields they are designed to display.
 
-### RF-4 — gps-exif-strip.ts `tiffStart` "integer overflow / bounds bypass" — NOT A BUG
-- `apps/web/src/lib/gps-exif-strip.ts:531,536-543`
-- Claim: `tiffStart = start + 4 + headerOffset` is unchecked and can exceed `buf.length`.
-- Reality: `headerOffset` is clamped by `if (headerOffset > length - 8) return null` (537), and the extent itself is validated by `if (start < 0 || length < 0 || start + length > buf.length) return null` (531). So `tiffStart ≤ start + 4 + (length - 8) = start + length - 4 < start + length ≤ buf.length`. The subsequent `EXIF_APP1_SIGNATURE` probe is additionally guarded by `if (buf.length - tiffStart >= 6 …)` (539, which the sub-agent incorrectly claimed was absent — it is present at HEAD), and `stripGpsFromTiffRegion` is itself a bounds-checked walker. Confidence it is a non-bug: HIGH.
+This is not a privacy leak. It is the opposite failure mode: admin-only fields remain protected, but the authenticated admin cannot inspect the full source/color/GPS/HDR metadata from the photo detail surface. The comments in `photo-viewer.tsx:872-878` already document that the GPS branch needs an admin-only accessor, and no such accessor is used by `/p/[id]`.
 
-## What was verified (coverage)
+**Concrete failure scenario:**
 
-**LIVE CLIP / semantic search (deepest scrutiny):**
-- `app/api/search/semantic/route.ts` & `app/api/search/similar/[id]/route.ts` — gate ordering (same-origin → maintenance → validation → rate-limit pre-increment → mode gate → embedding → scan → enrich), Pattern-2 rollback on every early return, content-type/size/chunked-encoding guards, `clampSemanticTopK` typeof-number contract, prod-only `dotProduct` vs stub `cosineSimilarity` selection. Correct.
-- `lib/clip-embeddings.ts` — `decodeEmbeddingColumn` raw-Buffer + legacy-base64 + string handling; **dimension invariant is airtight**: decode returns `null` unless exactly 2048 bytes, so `bufferToEmbedding` always yields 512-dim and the scan loop can never hit the `cosineSimilarity`/`dotProduct` dimension-mismatch throw. NaN scores (not reachable with finite floats) would be filtered by `score >= threshold`. `topK` does not mutate input.
-- `lib/clip-model.ts` — lazy Promise-singleton, retry-on-failure (nulls `loadPromise`), `env.cacheDir`/`allowRemoteModels=false` set before `from_pretrained`, Matryoshka 1024→512 truncate+renormalize, CHW conversion + `toColourspace('srgb')`+`removeAlpha` channel guards. onnxruntime-node `InferenceSession.run()` supports concurrent calls, so `BACKFILL_CONCURRENCY=2` and a concurrent text query against the shared session are safe.
-- `lib/clip-paths.ts` / `clip-model-id.ts` — absolute-vs-relative root resolution, revision-subdir layout, 2-segment-id + 40-hex-SHA assertions.
-- `lib/image-queue.ts` embedding hook + `app/actions/embeddings.ts` + sidecar `scripts/backfill-clip-embeddings.ts` — mode-aware writer, RAW-buffer write matching the read contract, `notExists(… model_version)` per-version selection, keyset pagination. `embedImageReal(originalPath)` correctly uses the original (not a derivative).
-- `lib/admin-backfill-runner.ts` — advisory-lock lifecycle, per-image claim, no-version-bump-on-detection-failure resume contract, deleted-mid-reencode cleanup, pool-budget concurrency cap, fire-and-forget rejection swallow.
-- `components/search.tsx` & `components/similar-photos.tsx` — request-id staleness guards on both awaits, production-only gating, per-item fallback state.
+An admin opens `/ko/p/123` for an uploaded HDR or gain-map image that has GPS coordinates and source color metadata. `isAdmin()` returns true, so `PhotoViewer` receives `isAdmin={true}`. However `getImageCached` resolves through `getImage`, which selected `publicSelectFields`. Fields such as `transfer_function`, `matrix_coefficients`, `color_space`, `has_gain_map`, `latitude`, `longitude`, `original_format`, and `original_file_size` are absent. The admin sees the detail viewer but cannot see HDR/gain-map honesty disclosures, EXIF color-space audit rows, GPS map link, or original format/file-size information. The dashboard list does not provide an alternate full detail surface; it uses `getAdminImagesLite`, which is intentionally a list projection.
 
-**Payment / download:** `api/checkout/[imageId]`, `api/stripe/webhook`, `api/download/[imageId]` — signature verification, paid-status gate, idempotency (SELECT + dup-key insertId disambiguation), single-use atomic claim, open-before-claim ordering, FK-deleted-image handling. Extensively hardened.
+**Suggested fix:**
 
-**Auth / middleware:** `lib/session.ts`, `password-hashing.ts`, `auth-rate-limit.ts`, `rate-limit.ts`, `proxy.ts`, `lib/validation.ts`, `lib/sanitize.ts`, `action-guards.ts`, `request-origin.ts`, `api-auth.ts`, `bounded-map.ts` — correct.
+Add an explicit authenticated detail accessor, for example `getAdminImage(id)` or `getImageDetail(id, { includeAdminFields })`, that selects the admin-only detail fields after `isAdmin()` has been established. In `/p/[id]/page.tsx`, resolve auth first or use a two-step branch so unauthenticated requests keep using `getImageCached` / `publicSelectFields`, while authenticated admins receive the admin projection. Keep the current public privacy guards and add a regression test that:
 
-**Data / privacy:** `lib/data.ts` (admin→public derivation + `_PrivacySensitiveKeys` compile-time guard), `smart-collections.ts`, `analytics-data.ts`, `data-timeline.ts`, `actions/images.ts`, `actions/sharing.ts`, `actions/collections.ts` — zero defects.
+- public `/p/[id]` data still excludes every `PrivacySensitiveKeys` member;
+- admin photo detail data includes representative audit fields (`latitude`, `longitude`, `color_pipeline_decision`, `transfer_function`, `has_gain_map`, `original_format`);
+- `PhotoViewer` admin mode is not invoked with a purely public projection.
 
-**Image binary parsing:** `process-image.ts`, `color-detection.ts`, `icc-chromaticity.ts`, `icc-extractor.ts`, `gain-map-detection.ts`, `gps-exif-strip.ts`, `settings-hash.ts`, `serve-upload.ts` — bounded walkers, return-null-on-anomaly contract verified.
+### CR-CODE-02 — `retryFailedImage` has one remaining hardcoded English error in a translated server-action contract
 
-**Restore / maintenance / SW:** `db-actions.ts` (advisory-lock release on all 5 paths), `db-restore.ts`, `sql-restore-scan.ts`, `csv-escape.ts`, `download-tokens.ts`, `sw-cache.ts`, `advisory-locks.ts`, `restore-maintenance.ts`, `upload-tracker*.ts` — zero defects.
+**Type:** confirmed issue
+**Severity:** Low
+**Confidence:** High
 
-## Open Questions
-None.
+**Code regions:**
 
-## Positive observations
-- The CLIP read/write contract (`decodeEmbeddingColumn` ↔ raw-Buffer write) is the kind of subtle MEDIUMBLOB-vs-`text()` mismatch that historically broke prod; it is now single-sourced, fixture-locked, and dimension-invariant.
-- Rate-limit posture is documented as four explicit patterns and applied consistently; the semantic route correctly keeps the limiter charged even on the shared `unknown` IP bucket (fail-closed for a DoS-amplifier surface).
-- Resource-lifecycle discipline (advisory locks, file handles, pool connections) is uniformly release-on-every-path with `.catch(() => undefined)` swallows only where a double-release/close is harmless.
+- `apps/web/src/app/actions/images.ts:1085-1096` loads `getTranslations('serverActions')`, validates origin/admin, and returns localized `unauthorized` / `invalidImageId` errors.
+- `apps/web/src/app/actions/images.ts:1092-1095` explicitly notes a prior localization cleanup for the invalid-id path.
+- `apps/web/src/app/actions/images.ts:1121-1123` returns the hardcoded string `'Image not found or not in a failed state'` when the failed-image row cannot be selected.
+- `apps/web/messages/en.json:529-532` and `apps/web/messages/ko.json:529-532` already contain nearby reusable server-action error keys such as `allUploadsFailed`, `imageNotFound`, and `failedToUpdateImage`, but no specific key for the failed-state retry case.
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:44-56` currently displays a generic localized toast on failure, which limits user-facing impact, but the server action itself still exposes a non-localized error contract for callers/logs/future UI reuse.
+
+**Why this is a problem:**
+
+The action's error contract is otherwise translation-backed. Returning one raw English string creates contract drift: future callers that show `result.error` directly will regress Korean/admin localization, tests that assert translation-key semantics will miss this path, and the adjacent comment suggests this class of issue was already intentionally cleaned up for another branch in the same function.
+
+**Concrete failure scenario:**
+
+An admin retries an image that was deleted, processed by a concurrent worker, or had its failure state cleared between dashboard render and button click. The query at `images.ts:1117-1119` returns no row. The current dashboard only shows `dashboard.retryFailed`, but a future retry UI or a debugging panel that displays `result.error` directly will surface English text inside the Korean admin flow, unlike sibling image actions that return `t('imageNotFound')` or another localized key.
+
+**Suggested fix:**
+
+Add a dedicated `serverActions.imageNotFoundOrNotFailed` key to both message files and return `t('imageNotFoundOrNotFailed')`, or deliberately reuse a broader existing key such as `t('imageNotFound')` if the UI should not reveal state distinctions. Add a small source or unit test beside `failed-image-retry.test.ts` / `retry-failed-image-auth.test.ts` that rejects this hardcoded string.
+
+## Missed-Issues Sweep
+
+Candidate issues checked and rejected:
+
+- Public GPS map exposure: `publicMapSelectFields` intentionally exposes only `latitude` / `longitude` beyond `publicSelectFields`; `apps/web/src/__tests__/map-privacy.test.ts` locks that exact union and the runtime `topic.map_visible` guard. No finding.
+- Smart collection dynamic predicates: `apps/web/src/lib/smart-collections.ts` compiles through allowlisted fields/operators and Drizzle's local `and()` implementation filters `undefined` conditions. Pagination tests cover the action/page contract. No finding.
+- Admin API wrapping: `npm run lint:api-auth --workspace=apps/web` passed for admin routes.
+- Mutating server action same-origin checks: `npm run lint:action-origin --workspace=apps/web` passed for all scanned mutating actions and documented read-only exemptions.
+- Public mutating route rate limits: `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Type-level/schema projection sanity: `npm run typecheck --workspace=apps/web` passed, including `tsconfig.typecheck.json` tests.
+- Backup/restore and Lightroom upload paths: reviewed `db-actions.ts`, `api-auth.ts`, `admin-tokens.ts`, and `api/admin/lr/upload/route.ts` for auth, same-origin/token-scope boundaries, restore scanning, upload contract locking, and queue handoff. No finding.
+- Queue failure/retry state: reviewed `image-queue.ts`, `failed-image-retry.test.ts`, and `retry-failed-image-auth.test.ts`; failure persistence, retry auth, and failed-state selection are covered. The only issue found there is the low-severity untranslated retry miss above.
+
+Relevant files examined in detail or as contract context:
+
+- `AGENTS.md`, `CLAUDE.md`
+- `package.json`, `apps/web/package.json`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/data-timeline.ts`
+- `apps/web/src/lib/image-types.ts`
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/lib/admin-tokens.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/smart-collections.ts`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/actions/lr-tokens.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/color-details-section.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/lightbox-color-pip.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/map-privacy.test.ts`
+- `apps/web/src/__tests__/color-details-section-delivered.test.ts`
+- `apps/web/src/__tests__/failed-image-retry.test.ts`
+- `apps/web/src/__tests__/retry-failed-image-auth.test.ts`
+- `apps/web/src/__tests__/smart-collections.test.ts`
+- `apps/web/src/__tests__/smart-collection-pagination.test.ts`
+- `apps/web/src/__tests__/data-tag-names-sql.test.ts`
+- `apps/web/src/__tests__/check-api-auth.test.ts`
+- `apps/web/src/__tests__/check-action-origin.test.ts`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+
+Residual risk: this was a broad static review, not a full execution of `npm test` or `npm run build`. I used targeted source tracing plus the blocking auth/origin/rate-limit/typecheck gates to validate the highest-risk contracts for this lane.
