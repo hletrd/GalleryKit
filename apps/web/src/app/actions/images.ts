@@ -1123,7 +1123,7 @@ export async function retryFailedImage(id: number) {
         .limit(1);
 
     if (!image) {
-        return { error: 'Image not found or not in a failed state' };
+        return { error: t('imageNotInFailedState') };
     }
 
     // Clear the failure columns so the image is discoverable again.

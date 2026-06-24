@@ -493,6 +493,7 @@
     "passwordUpdated": "Password updated.",
     "invalidInput": "Invalid input",
     "invalidImageId": "Invalid image ID",
+    "imageNotInFailedState": "Image not found or not in a failed state",
     "invalidTagId": "Invalid tag ID",
     "tagNameRequired": "Tag name required",
     "invalidTagName": "Tag names must be 1-100 characters and cannot contain commas",

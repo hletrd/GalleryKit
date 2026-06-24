@@ -493,6 +493,7 @@
     "passwordUpdated": "비밀번호를 변경했습니다.",
     "invalidInput": "잘못된 입력입니다",
     "invalidImageId": "잘못된 이미지 ID입니다",
+    "imageNotInFailedState": "이미지를 찾을 수 없거나 실패 상태가 아닙니다.",
     "invalidTagId": "잘못된 태그 ID입니다",
     "tagNameRequired": "태그명을 입력해 주세요",
     "invalidTagName": "태그명은 1~100자 사이여야 하며 쉼표를 포함할 수 없습니다",
