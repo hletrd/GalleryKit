@@ -84,6 +84,20 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when a DB mutation happens between the same-origin guard and early return', () => {
+        const src = `
+            export async function deleteFoo(id) {
+                const originError = await requireSameOriginAdmin();
+                await db.delete(foo).where(eq(foo.id, id));
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('allows non-mutating localization/auth work before the same-origin guard', () => {
         const src = `
             export async function deleteFoo(id) {
@@ -391,6 +405,15 @@ describe('checkActionSource — aliased exports', () => {
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('UNSUPPORTED aliased export');
         expect(report.failed[0]).toContain('deleteFoo');
+    });
+
+    it('fails closed for star re-exports that can hide mutating actions', () => {
+        const src = `
+            export * from './mutating-actions';
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('STAR RE-EXPORT');
     });
 });
 

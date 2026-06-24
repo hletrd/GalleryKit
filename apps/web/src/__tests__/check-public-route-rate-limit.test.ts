@@ -138,6 +138,46 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when a route only imports a rate-limit helper without calling it', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when the rate-limit helper is called only after a mutation', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                await db.insert(rows).values({ ok: true });
+                if (preIncrementSemanticAttempt('1.2.3.4', Date.now())) return { status: 429 };
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when only a rollback helper is called before mutation', () => {
+        const source = `
+            import { rollbackSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                rollbackSemanticAttempt('1.2.3.4');
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('passes when rate-limit helper is actually called (not commented)', () => {
         const source = `
             import { preIncrementSemanticAttempt } from '@/lib/rate-limit';

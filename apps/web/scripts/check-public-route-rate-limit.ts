@@ -41,9 +41,17 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // Future routes are expected to use the `preIncrement` shape, but we don't
 // force a refactor on the existing code for this lint gate.
 const RATE_LIMIT_NAME_PREFIXES = ['preIncrement', 'checkAndIncrement'];
-const RATE_LIMIT_MODULE_HINTS = ['auth-rate-limit', 'rate-limit'];
 
 const EXEMPT_TAG = '@public-no-rate-limit-required';
+
+const MUTATING_CALL_METHOD_NAMES = new Set([
+    'insert',
+    'update',
+    'delete',
+    'transaction',
+    'query',
+    'execute',
+]);
 
 function findRouteFiles(dir: string): string[] {
     const results: string[] = [];
@@ -64,6 +72,60 @@ type CheckReport = {
     failed: string[];
 };
 
+type HandlerBody = {
+    method: string;
+    body: ts.Node | undefined;
+};
+
+function isFunctionLikeInitializer(node: ts.Expression | undefined): node is ts.ArrowFunction | ts.FunctionExpression | ts.CallExpression {
+    return Boolean(node && (
+        ts.isArrowFunction(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isCallExpression(node)
+    ));
+}
+
+function expressionBody(node: ts.Expression | undefined): ts.Node | undefined {
+    if (!node) return undefined;
+    if (ts.isArrowFunction(node)) return node.body;
+    if (ts.isFunctionExpression(node)) return node.body;
+    if (ts.isCallExpression(node)) return node;
+    return undefined;
+}
+
+function isRateLimitHelperCall(node: ts.CallExpression): boolean {
+    const callee = node.expression;
+    if (!ts.isIdentifier(callee)) return false;
+    return RATE_LIMIT_NAME_PREFIXES.some((prefix) => callee.text.startsWith(prefix));
+}
+
+function isKnownMutationCall(node: ts.CallExpression): boolean {
+    const callee = node.expression;
+    return ts.isPropertyAccessExpression(callee) && MUTATING_CALL_METHOD_NAMES.has(callee.name.text);
+}
+
+function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
+    if (!body) return false;
+
+    let sawRateLimit = false;
+    let sawMutationBeforeRateLimit = false;
+
+    const visit = (node: ts.Node) => {
+        if (ts.isCallExpression(node)) {
+            if (isKnownMutationCall(node) && !sawRateLimit) {
+                sawMutationBeforeRateLimit = true;
+            }
+            if (isRateLimitHelperCall(node)) {
+                sawRateLimit = true;
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+
+    visit(body);
+    return sawRateLimit && !sawMutationBeforeRateLimit;
+}
+
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {
     const report: CheckReport = { passed: [], failed: [] };
 
@@ -76,7 +138,20 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
 
     // Find any exported mutating handler in the file
-    const mutatingHandlers: string[] = [];
+    const localBodies = new Map<string, ts.Node | undefined>();
+    for (const statement of sourceFile.statements) {
+        if (ts.isFunctionDeclaration(statement) && statement.name) {
+            localBodies.set(statement.name.text, statement.body);
+            continue;
+        }
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const decl of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(decl.name) || !isFunctionLikeInitializer(decl.initializer)) continue;
+            localBodies.set(decl.name.text, expressionBody(decl.initializer));
+        }
+    }
+
+    const mutatingHandlers: HandlerBody[] = [];
     for (const statement of sourceFile.statements) {
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
         const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -95,7 +170,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             return report;
         }
         if (ts.isFunctionDeclaration(statement) && statement.name && MUTATING_METHODS.has(statement.name.text)) {
-            mutatingHandlers.push(statement.name.text);
+            mutatingHandlers.push({ method: statement.name.text, body: statement.body });
         }
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
@@ -103,13 +178,8 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                     // C1-BUG-04: only flag variable exports whose initializer is
                     // function-like (arrow, function expression, or call wrapper).
                     const init = decl.initializer;
-                    const isFunctionLike = init && (
-                        ts.isArrowFunction(init) ||
-                        ts.isFunctionExpression(init) ||
-                        ts.isCallExpression(init)
-                    );
-                    if (isFunctionLike) {
-                        mutatingHandlers.push(decl.name.text);
+                    if (isFunctionLikeInitializer(init)) {
+                        mutatingHandlers.push({ method: decl.name.text, body: expressionBody(init) });
                     }
                 }
             }
@@ -118,7 +188,8 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
             for (const element of statement.exportClause.elements) {
                 if (ts.isIdentifier(element.name) && MUTATING_METHODS.has(element.name.text)) {
-                    mutatingHandlers.push(element.name.text);
+                    const localName = element.propertyName?.text ?? element.name.text;
+                    mutatingHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
                 }
             }
         }
@@ -141,37 +212,11 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    // C12-LOW-01: strip comments for the prefix check so commented-out helper
-    // calls do not falsely satisfy the gate. The exempt-tag check above
-    // intentionally does NOT strip comments because the tag lives in comments.
-    const withoutStringsAndComments = withoutStrings
-        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments /* ... */
-        .replace(/\/\/.*$/gm, '');           // line comments // ...
-
-    // Check for any rate-limit helper invocation by name prefix.
-    // C3-F02: scan the string-stripped content so a literal containing the
-    // helper name does not falsely satisfy the gate.
-    // C12-LOW-01: also scans comment-stripped content so a commented-out
-    // helper call cannot bypass the gate.
-    const usesPrefixHelper = RATE_LIMIT_NAME_PREFIXES.some((prefix) => {
-        const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]*\\s*\\(`);
-        return re.test(withoutStringsAndComments);
-    });
-    // C8-F03: ignore commented-out imports so a developer cannot accidentally
-    // pass the lint by leaving a disabled import in the file.
-    const importsRateLimitModule = RATE_LIMIT_MODULE_HINTS.some((mod) => {
-        const re = new RegExp(`from\\s+['\"]@/lib/${mod}['\"]`);
-        return content.split('\n').some((line) => {
-            if (line.trimStart().startsWith('//')) return false;
-            return re.test(line);
-        });
-    });
-
-    if (usesPrefixHelper || importsRateLimitModule) {
+    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else {
         report.failed.push(
-            `MISSING RATE LIMIT: ${relative} exports mutating handler(s) ${mutatingHandlers.join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit helper (preIncrement* / checkAndIncrement* / @/lib/auth-rate-limit).`
+            `MISSING RATE LIMIT: ${relative} exports mutating handler(s) ${mutatingHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before mutation (preIncrement* / checkAndIncrement*).`
         );
     }
 

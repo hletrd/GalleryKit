@@ -243,6 +243,9 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
             if (statementReturnsOnGuard(followingStatement, guardName)) {
                 return true;
             }
+            if (statementContainsPreGuardMutation(followingStatement)) {
+                return false;
+            }
         }
 
         return false;
@@ -312,9 +315,20 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     };
 
     for (const statement of sourceFile.statements) {
+        if (ts.isExportDeclaration(statement) && statement.isTypeOnly) {
+            continue;
+        }
+
+        if (ts.isExportDeclaration(statement) && !statement.exportClause && statement.moduleSpecifier) {
+            report.failed.push(
+                `STAR RE-EXPORT: ${relative}:${lineOf(statement)} uses 'export * from …', which hides action exports from this scanner. Re-export actions directly so requireSameOriginAdmin() can be verified`,
+            );
+            continue;
+        }
+
         if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
             for (const element of statement.exportClause.elements) {
-                if (statement.isTypeOnly || element.isTypeOnly) continue;
+                if (element.isTypeOnly) continue;
                 const name = element.name.text;
                 report.failed.push(
                     `UNSUPPORTED aliased export: ${relative}:${lineOf(statement)} ${name} must use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
