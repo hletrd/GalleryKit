@@ -58,6 +58,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 - **Modes** (`semantic_search_mode` admin setting): `disabled` (default — routes return 503) · `stub` (deterministic non-meaningful vectors, experimental demo, disclaimer shown) · `production` (real encoder).
 - **Weights are NOT baked into the image.** They load **offline** (`allowRemoteModels=false`) from the `CLIP_MODELS_ROOT` bind-mount (under `./data/models/clip`), so seed them once on the host before going live. The `onnxruntime-node` CPU binding ships inside the npm tarball — no extra Dockerfile step.
 - **Honesty gate:** `production` serves results only from rows matching the active `model_version`; if no real embeddings exist yet it returns 503 rather than serving stub or empty results under the production label.
+- **Scan scope:** searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill.
 - **Same posture as other public routes:** same-origin guard on the query endpoints + bounded per-IP rate limiting.
 
 ### Going live (operator-only, deliberate)
