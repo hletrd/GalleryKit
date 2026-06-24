@@ -1,268 +1,403 @@
-# GalleryKit Comprehensive Code Review — Critic
+# GalleryKit Comprehensive Multi-Perspective Critique
 
-Date: 2026-06-24
-HEAD: 1d5545cb
-
-## Pre-commitment Predictions
-
-Before reading the codebase in detail, I predicted the following problem areas:
-1. **Auth pattern inconsistency** — middleware vs server actions vs API routes may have divergent enforcement
-2. **Color pipeline complexity** — the NCLX/ICC/precedence chain may have subtle bugs or undocumented edge cases
-3. **Configuration drift** — site-config.json vs DB settings vs env vars may have inconsistent resolution
-4. **Component re-render churn** — large client components with many useEffect hooks may have performance issues
-5. **Test coverage gaps** — complex color/HDR logic may lack integration-level testing
-
-**Actual findings:** All five predictions were validated. The auth architecture is mature but has subtle pattern inconsistencies. The color pipeline is well-designed but has operational gaps. Configuration has a type safety hole. Component architecture has memoization issues. Test coverage is strong at unit level but has integration gaps.
+**Repository:** /Users/hletrd/flash-shared/gallery
+**HEAD:** d24f2a6d
+**Date:** 2026-06-25
+**Reviewer:** Critic (multi-perspective analysis)
+**Scope:** 461 source files, ~70,634 LOC, 228 unit tests, 6 e2e tests
 
 ---
 
-## Critical Findings (blocks execution if exploited)
+## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-### 1. `site-config.json` has NO runtime validation — missing fields cause `undefined` at runtime
-- **File:** `apps/web/src/site-config.json` (imported by 15+ files)
-- **Evidence:** `apps/web/src/lib/seo-og-url.ts` imports `siteConfig` directly. If `siteConfig.url` is missing, `new URL(undefined)` throws at runtime. `apps/web/src/lib/analytics.ts:142` does `new URL(siteConfig.url as string)` with a `catch {}` fallback to empty string, but other consumers like `apps/web/src/lib/data.ts:1655` do `process.env.BASE_URL || siteConfig.url` which yields `undefined` if both are missing.
-- **Confidence:** HIGH
-- **Why this matters:** A malformed `site-config.json` (e.g., missing `url` field) causes runtime failures in SEO, OG image generation, analytics, and sitemap. The file is imported as `any` with no TypeScript interface or Zod schema.
-- **Fix:** Add a `SiteConfig` interface and a runtime validation function that throws on startup if required fields are missing. Gate the build step with the validation.
+The GalleryKit codebase is exceptionally well-engineered for a personal photo gallery application. The security posture is strong, the color/HDR pipeline is photographer-intent-aware, and the test coverage is extensive. However, there are structural concerns around monolithic files, tight coupling between the image pipeline and business logic, and several maintainability gaps that will compound as the codebase grows. The reservations center on architectural debt in the data layer, over-reliance on process-local state, and missing abstractions that would make the codebase more approachable for new contributors.
 
-### 2. `semanticSearchMode` type allows `'production'` at compile-time but runtime narrows to `'disabled'`
-- **File:** `apps/web/src/lib/gallery-config.ts:69`, `apps/web/src/lib/gallery-config.ts:141-144`
-- **Evidence:** The `GalleryConfig` interface declares `semanticSearchMode: 'disabled' | 'stub' | 'production'`, but `_getGalleryConfig()` resolves stored `'production'` to `'disabled'` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. This is a type/runtime mismatch: code that compiles against `'production'` may never actually see it at runtime.
-- **Confidence:** HIGH
-- **Why this matters:** Type-level code (e.g., switch statements) may have a `'production'` branch that is dead code in practice. This creates a false sense of coverage and may lead to untested code paths being deployed.
-- **Fix:** Split into two types: `GalleryConfig` (runtime-resolved, `'disabled' | 'stub'`) and `GalleryConfigWithProduction` (operator-gated). Or use a branded type to distinguish.
+---
 
-### 3. `photo-viewer.tsx` `srcSetData` useMemo returns JSX — anti-pattern that defeats memoization
-- **File:** `apps/web/src/components/photo-viewer.tsx` (around line 400-500 based on exploration)
-- **Evidence:** The `srcSetData` useMemo returns a `<picture>` element subtree. When any dependency changes, React re-renders the entire `<picture>` tree even though the props to child elements may be identical. This is a well-known anti-pattern: `useMemo` should return data, not JSX.
-- **Confidence:** HIGH
-- **Why this matters:** On every `currentImageId` change (navigation), the entire `<picture>` subtree re-renders, causing layout thrash and dropped frames during photo transitions. The `blurStyle` memo (correctly returning a style object) and the `srcSetData` memo (incorrectly returning JSX) are side-by-side in the same component.
-- **Fix:** Extract the `<picture>` rendering into a dedicated `ResponsiveImage` component that receives primitive props (`srcAvif`, `srcWebp`, `srcJpeg`, `sizes`, `alt`). Memoize the component itself with `React.memo`, not the JSX creation.
+## Pre-commitment Predictions vs Actual Findings
 
-### 4. `home-client.tsx` uses dynamic Tailwind class names that JIT may miss
-- **File:** `apps/web/src/components/home-client.tsx`
-- **Evidence:** The component uses `` `columns-${colBase}` `` for dynamic column count classes. Tailwind's JIT compiler scans source files for complete class names and does NOT evaluate template literals. If `columns-1` through `columns-5` do not appear as literal strings elsewhere, the classes are not generated.
-- **Confidence:** HIGH
-- **Why this matters:** This is a silent failure mode. The masonry grid may render without column styling on a fresh build if the literal classes were removed from other files. The current code works by accident because the full range appears elsewhere.
-- **Fix:** Use a static mapping object: `const columnClasses = { 1: 'columns-1', 2: 'columns-2', ... }` and index into it. This ensures Tailwind sees the literal class names.
+| Prediction | Severity | Actual Finding | Match? |
+|---|---|---|---|
+| 1. Image processing pipeline (process-image.ts) has hidden coupling with data layer | MAJOR | Confirmed: process-image.ts imports from data.ts, uploads actions, and has 1659+ lines with mixed concerns | Yes |
+| 2. Rate-limiting in-memory Maps will have consistency issues across deploys/restarts | MINOR | Confirmed: DB-backed buckets exist but in-memory fast-path is primary; no distributed coordination | Yes |
+| 3. Privacy field guards (compile-time TypeScript) are brittle and may drift | MAJOR | Confirmed: `_PrivacySensitiveKeys` is a manual union that must be kept in sync with `adminSelectFields` omissions; no automated enforcement | Yes |
+| 4. Server actions have duplicated auth/validation boilerplate | MINOR | Confirmed: Every mutating action repeats `isAdmin()`, `requireSameOriginAdmin()`, `getRestoreMaintenanceMessage()` pattern | Yes |
+| 5. Component layer has untested edge cases in photo viewer/lightbox | MAJOR | Confirmed: Photo viewer, lightbox, and histogram components are complex but have minimal direct test coverage (rely on e2e) | Yes |
+| 6. Missing abstraction for storage backend (S3/MinIO mentioned but not wired) | MAJOR | Confirmed: `@/lib/storage` exists as internal abstraction but is not integrated; local filesystem only | Yes |
+| 7. CLIP semantic search stub mode is a footgun | MINOR | Confirmed: Stub mode writes deterministic-but-random embeddings that could confuse operators; well-documented but still risky | Yes |
+| 8. Service Worker cache invalidation has edge cases around admin setting changes | MAJOR | Confirmed: Settings-hash ETag only affects serve-upload path; static path (majority of traffic) requires backfill re-encode for invalidation | Yes |
+| 9. Docker deployment lacks health check granularity | MINOR | Confirmed: `/api/health` only probes DB when `HEALTH_CHECK_DB=true`; no deep health checks for image processing, queue state, or disk space | Yes |
+| 10. Test suite has fixture-based coverage but lacks mutation testing | MINOR | Confirmed: Extensive fixture tests but no property-based or mutation testing; some paths rely on e2e for coverage | Yes |
 
-### 5. `image-manager.tsx` defines inline async handlers inside `.map()` — new function refs per render
-- **File:** `apps/web/src/components/image-manager.tsx` (per-row tag update handlers)
-- **Evidence:** Each table row defines an inline `onTagsChange` async handler inside the `.map()` callback. This creates a new function reference on every render, causing every row's `TagInput` to re-render even when unrelated state changes (e.g., selection checkbox toggles on a different row).
-- **Confidence:** HIGH
-- **Why this matters:** On a gallery with 100+ images, every selection toggle causes 100+ `TagInput` re-renders. This is O(n^2) render complexity for what should be O(1) (only the toggled row).
-- **Fix:** Extract a memoized `ImageManagerRow` component with `React.memo`. Use `useCallback` for the tag change handler at the table level, passing stable references to each row.
+---
+
+## Critical Findings (blocks execution / causes significant harm)
+
+### 1. Privacy Field Guard is Manual and Drift-Prone
+**File:** `apps/web/src/lib/data.ts:419-453`
+**Confidence:** HIGH
+
+The compile-time privacy guard uses a manually-maintained `PrivacySensitiveKeys` union type. When a new sensitive column is added to the `images` table, the developer must:
+1. Add it to `adminSelectFields`
+2. Add it to the `PrivacySensitiveKeys` union
+3. Add it to the `_omit*` destructuring in `publicSelectFields`
+4. Add it to the `_omit*` destructuring in `publicMapSelectFields`
+5. Add it to the `_PrivacySensitiveKeys` type guard in `__tests__/privacy-fields.test.ts`
+
+This is a 5-step manual process with no automated enforcement. A single missed step leaks PII. The `_privacyGuard` and `_mapPrivacyGuard` TypeScript assertions only catch issues at compile time if the developer remembers to add the key to the union. There is no runtime validation of public API responses.
+
+**Why this matters:** A future developer adding an `exif_gps_altitude` or `location_name` column could easily miss one of the omission steps, exposing sensitive data to public routes.
+
+**Fix:** Add a runtime assertion in the data layer that validates every public query result against a schema-derived allowlist. Use a code generation step or a custom ESLint rule that verifies `publicSelectFields` keys against `adminSelectFields` minus `PrivacySensitiveKeys`.
+
+---
+
+### 2. process-image.ts is a God File (1659+ lines, mixed concerns)
+**File:** `apps/web/src/lib/process-image.ts`
+**Confidence:** HIGH
+
+This file contains:
+- Sharp concurrency configuration (lines 36-53)
+- 10-bit AVIF probe with Promise singleton (lines 69-123)
+- AVIF NCLX verification (lines 129-193)
+- GPS EXIF stripping (lines 195+)
+- Color signal detection orchestration
+- Image format processing (AVIF/WebP/JPEG parallel pipeline)
+- EXIF extraction
+- Blur data URL generation
+- File I/O operations (atomic rename, temp file cleanup)
+
+**Why this matters:** This file is the most critical and most complex in the entire codebase. A bug here affects every uploaded image. The tight coupling between color detection, format encoding, file I/O, and metadata extraction makes it impossible to test individual concerns in isolation. The file imports from `data.ts` (upload paths), creating a circular dependency risk.
+
+**Fix:** Decompose into focused modules:
+- `lib/image-processing/config.ts` — Sharp concurrency, probe singleton
+- `lib/image-processing/encode.ts` — Format encoding (AVIF/WebP/JPEG)
+- `lib/image-processing/color-verify.ts` — NCLX/ICC verification
+- `lib/image-processing/gps-strip.ts` — GPS metadata stripping
+- `lib/image-processing/exif-extract.ts` — EXIF extraction and normalization
+- `lib/image-processing/blur.ts` — Blur placeholder generation
+
+---
+
+### 3. In-Memory Rate Limit Maps are Process-Local and Reset on Deploy
+**File:** `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`
+**Confidence:** HIGH
+
+The rate-limiting system uses in-memory `BoundedMap` instances as a fast path, with DB-backed persistence as the source of truth. However:
+- On every deploy, all in-memory Maps are cleared
+- A deploy during an active brute-force attack resets the attacker's budget to zero
+- The DB buckets are only consulted AFTER the in-memory check passes, so a fresh process never sees the DB state until the first DB query completes
+- The `loginRateLimit` Map has a 5000-key cap with FIFO eviction, which means a distributed attack from 5000+ IPs evicts legitimate users
+
+**Why this matters:** The defense against brute-force attacks is weakened immediately after every deploy. An attacker who knows the deploy schedule (or triggers a deploy via a separate vulnerability) gets a fresh rate-limit budget.
+
+**Fix:** On process startup, eagerly hydrate the in-memory Maps from the DB for the current time window. Add a startup log entry showing how many active buckets were loaded. Alternatively, invert the priority: check DB first, then fall back to in-memory only when DB is unavailable.
+
+---
+
+### 4. Settings-Hash ETag Does Not Invalidate Static-Path Derivatives
+**File:** `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/settings-hash.ts`
+**Confidence:** HIGH
+
+The ETag for image derivatives includes a hash of color-impacting admin settings. However:
+- The settings-hash ETag is ONLY emitted by the `serve-upload.ts` route handler (fallback path)
+- The VAST MAJORITY of real traffic hits the static path (`public/uploads/...`), which is served by Next.js's static file server with `W/"{size}-{mtime}"` ETag
+- When an admin changes a color/quality/size setting, the static files on disk are NOT rewritten until a backfill re-encode runs
+- The documentation at `apps/web/src/lib/serve-upload.ts:191-206` acknowledges this as an "operational gotcha" but provides no automated mitigation
+
+**Why this matters:** An admin who changes `image_quality_avif` from 85 to 90 expects all visitors to get the new quality. In reality, only visitors on the serve-upload fallback path (missing files, or explicit route handler hits) get the new ETag. The static path serves stale bytes for up to 1 hour (`max-age=3600`).
+
+**Fix:** Add a `last_settings_change` timestamp to the admin settings. Include this timestamp in the static path's Cache-Control header via a middleware or nginx config rewrite. Alternatively, implement a lightweight cache-busting query parameter that changes when settings change.
+
+---
+
+### 5. Server Actions Have Duplicated Auth/Validation Boilerplate
+**Files:** `apps/web/src/app/actions/*.ts` (all 14 files)
+**Confidence:** HIGH
+
+Every mutating server action repeats the same pattern:
+```typescript
+const t = await getTranslations('serverActions');
+const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+if (maintenanceError) return { error: maintenanceError };
+if (!(await isAdmin())) return { error: t('unauthorized') };
+const originError = await requireSameOriginAdmin();
+if (originError) return { error: originError };
+```
+
+This is 6 lines of boilerplate in every action. With 14 action files, that's 84 lines of duplication. A change to the auth flow (e.g., adding a new check) requires editing 14 files.
+
+**Why this matters:** This is a classic DRY violation that increases maintenance burden and risk of inconsistency. The `lint:action-origin` scanner already enforces the pattern, but it doesn't prevent the duplication.
+
+**Fix:** Create a higher-order function `withAdminAction()` that wraps the auth/validation logic and passes the validated context to the action handler. The scanner can be updated to recognize the wrapper pattern.
 
 ---
 
 ## Major Findings (causes significant rework)
 
-### 6. `GalleryConfig` interface has 16 properties but no derived/readonly distinction
-- **File:** `apps/web/src/lib/gallery-config.ts:48-91`
-- **Evidence:** All 16 properties are mutable on the interface. Some (like `imageSizes`) are arrays that could be mutated by consumers, causing subtle bugs. The `getGalleryConfig()` returns the same object reference within a request (cached), so a mutating consumer would poison the cache for the rest of the request.
-- **Confidence:** MEDIUM
-- **Why this matters:** A component that sorts `imageSizes` in-place (e.g., for display) would mutate the cached config, affecting all subsequent consumers in the same request. This is a latent bug waiting for the wrong consumer.
-- **Fix:** Return `Readonly<GalleryConfig>` with `ReadonlyArray<number>` for `imageSizes`. Or deep-freeze the returned object.
+### 6. Missing Storage Backend Abstraction Integration
+**File:** `apps/web/src/lib/upload-paths.ts` (implied), `CLAUDE.md` (documentation)
+**Confidence:** MEDIUM
 
-### 7. `data.ts` has THREE separate select field derivations with near-identical destructuring
-- **File:** `apps/web/src/lib/data.ts:208-430`
-- **Evidence:** `adminSelectFields`, `adminListSelectFields`, `publicSelectFields`, and `publicMapSelectFields` each destructure from `adminSelectFields` with slightly different omissions. The pattern is repeated 4 times with 50+ lines of `_omitX` variables each. Adding a new admin-only field requires updating 4 separate destructuring blocks.
-- **Confidence:** HIGH
-- **Why this matters:** This is a maintenance hazard. The compile-time guards (`_PrivacySensitiveKeys`, `_MapSensitiveKeys`) catch some errors but not all. A developer adding a new field to `adminSelectFields` must manually mirror it across 4 derivations. The `_omit` variable names are themselves a form of documentation drift.
-- **Fix:** Build a generic `deriveSelectFields(base, omitKeys)` helper that uses the `PrivacySensitiveKeys` union to compute omissions dynamically. This reduces 4 near-identical blocks to 1 parameterized call.
+The codebase mentions an internal `@/lib/storage` abstraction that was never wired end-to-end. The current implementation is hardcoded to local filesystem paths. This means:
+- S3/MinIO switching is documented as "not yet supported" but the abstraction exists
+- The upload/processing/serving pipeline has no injectable storage provider
+- Testing the image pipeline requires real filesystem I/O (no in-memory mock)
 
-### 8. `process-image.ts` has 1651 lines — single-file complexity exceeds maintainability threshold
-- **File:** `apps/web/src/lib/process-image.ts`
-- **Evidence:** The file contains: EXIF parsing, color detection integration, ICC resolution, AVIF/WebP/JPEG encoding, blur generation, GPS stripping, file I/O, metadata cleaning, and post-encode verification. It imports 20+ modules and exports 15+ functions. The `processImageFormats` function alone is 360+ lines.
-- **Confidence:** HIGH
-- **Why this matters:** This is a textbook "god file." Any change to color pipeline, encoding, or EXIF handling requires editing the same file, increasing conflict risk and review burden. The file is too large for effective code review — reviewers miss issues because the context window is exhausted.
-- **Fix:** Split into: `image-encode.ts` (format encoding), `image-exif.ts` (EXIF extraction), `image-color.ts` (color pipeline decisions), `image-blur.ts` (blur generation), `image-gps.ts` (GPS stripping), `image-verify.ts` (post-encode verification). Keep `process-image.ts` as a thin orchestrator.
+**Fix:** Complete the storage abstraction by defining a `StorageProvider` interface with `read()`, `write()`, `delete()`, `exists()` methods. Implement `LocalFilesystemProvider` and `S3Provider`. Inject the provider into `process-image.ts` and `serve-upload.ts`.
 
-### 9. `image-queue.ts` global state is accessed via `Symbol.for` but never cleaned on module reload
-- **File:** `apps/web/src/lib/image-queue.ts:75-194`
-- **Evidence:** `getProcessingQueueState()` uses `Symbol.for('gallerykit.imageProcessingQueue')` to store queue state on `globalThis`. In a Next.js dev environment with Fast Refresh, the module may reload but the global state persists. The `bootstrapCleanupRun` flag (line 77) is module-level, not global, so a reload would re-run bootstrap on the existing global state.
-- **Confidence:** MEDIUM
-- **Why this matters:** In development, Fast Refresh can cause duplicate bootstrap runs, double-enqueuing images, or orphaned timers. The `Symbol.for` pattern is designed for cross-module sharing, but in a dev reload scenario it causes state leakage.
-- **Fix:** Use a module-level WeakRef or check a version marker in the global state. Or use `Symbol()` (not `Symbol.for`) for module-scoped state.
+---
 
-### 10. `rate-limit.ts` has FOUR documented rollback patterns but no enforcement mechanism
-- **File:** `apps/web/src/lib/rate-limit.ts:1-53`
-- **Evidence:** The file documents four rollback patterns with detailed rationale, but there is no lint gate, type system, or runtime enforcement that ensures new rate-limited actions use the correct pattern. The `check-public-route-rate-limit.ts` scanner only checks for the presence of `preIncrement`/`checkAndIncrement` calls, not the rollback semantics.
-- **Confidence:** MEDIUM
-- **Why this matters:** A developer adding a new public API route could choose the wrong rollback pattern, creating either a rate-limit bypass (Pattern 2 used for auth) or user-friction (Pattern 1 used for public reads). The documentation is excellent but not enforceable.
-- **Fix:** Add a lint gate that inspects the rollback pattern in each public route file, or use a typed wrapper that encodes the pattern in the type system (e.g., `rateLimitWithPattern<'no-rollback' | 'rollback-on-error'>`).
+### 7. Component Test Coverage is Thin
+**Files:** `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/histogram.tsx`
+**Confidence:** HIGH
 
-### 11. `analytics.ts` uses `require('geoip-lite')` dynamically but has no type safety
-- **File:** `apps/web/src/lib/analytics.ts:33-47`
-- **Evidence:** The geoip-lite module is loaded via `require()` with a type cast `as { lookup: ... }`. If the module's API changes (e.g., `lookup` renamed), the type cast hides the error. The `require` is wrapped in try/catch, but a successful require with a wrong API shape would silently fail at runtime.
-- **Confidence:** MEDIUM
-- **Why this matters:** geoip-lite is a third-party dependency. A minor version bump could change the API. The dynamic require pattern means TypeScript never checks the interface. The fallback (`geoLookup = () => null`) masks the failure silently.
-- **Fix:** Add a runtime shape check: `typeof geoip.lookup === 'function'`. Or use a proper `@types/geoip-lite` import with static type checking.
+The photo viewer, lightbox, and histogram components are among the most complex UI components but have no dedicated unit tests. They are covered indirectly by:
+- 6 e2e tests (`apps/web/e2e/`) which exercise happy paths only
+- The touch-target audit (`__tests__/touch-target-audit.test.ts`) which checks CSS sizes but not behavior
 
-### 12. `revalidation.ts` `revalidateAllAppData()` uses `revalidatePath('/', 'layout')` which may be too broad
-- **File:** `apps/web/src/lib/revalidation.ts:55-57`
-- **Evidence:** `revalidatePath('/', 'layout')` revalidates the entire app layout, which includes ALL pages that use the root layout. In a gallery with thousands of photos and topics, this causes a cascade of ISR revalidations. The function is called after EVERY settings update, SEO update, and bulk edit.
-- **Confidence:** MEDIUM
-- **Why this matters:** With `revalidate = 0` (dynamic rendering) on public pages, this is mostly a no-op. But if ISR is reintroduced (per CLAUDE.md: "Reintroduce ISR only with an explicit invalidation/freshness plan"), this would become a thundering herd problem.
-- **Fix:** Document the ISR reintroduction risk. Consider granular revalidation paths per affected surface (e.g., only `/` and `/[topic]` for image updates, not the entire layout).
+The histogram component uses a Web Worker for computation, the photo viewer uses `motion.div` for animations, and the lightbox has keyboard navigation and focus trapping. None of these behaviors are unit-tested.
 
-### 13. `upload-dropzone.tsx` uses 5 separate refs to avoid stale closures in async upload loop
-- **File:** `apps/web/src/components/upload-dropzone.tsx`
-- **Evidence:** The component maintains `filesRef`, `selectedTagsRef`, `perFileTagsRef`, `topicRef`, and `filesRef` to read latest state during the sequential async upload loop. This is a code smell indicating the state model is not well-suited to the async pattern.
-- **Confidence:** HIGH
-- **Why this matters:** The ref pattern is error-prone — a developer might accidentally read from state instead of ref, getting stale data. The 5 refs are not documented as a pattern, so future changes may break the invariant.
-- **Fix:** Restructure the upload loop to accept the current state as parameters, or use a reducer pattern where the upload loop dispatches actions rather than reading state directly.
+**Fix:** Add component-level tests using React Testing Library for:
+- Photo viewer: image loading states, error handling, prev/next navigation
+- Lightbox: keyboard navigation (Escape, arrow keys), focus trap, color pip panel
+- Histogram: Web Worker message passing, canvas rendering
 
-### 14. `lightbox.tsx` and `photo-viewer.tsx` duplicate `<picture>` rendering logic
-- **Files:** `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/photo-viewer.tsx`
-- **Evidence:** Both components implement nearly identical `<picture>` element construction with AVIF/WebP/JPEG source selection, srcset generation, sizes attribute computation, and fallback handling. The duplication includes the `sizedSourcesFailed` state pattern and `jpegFallbackTriedRef` ref pattern.
-- **Confidence:** HIGH
-- **Why this matters:** Any change to responsive image strategy (e.g., adding a new format, changing sizes logic) must be made in two places. The duplication has already diverged slightly — `lightbox.tsx` has Ken Burns CSS injection that `photo-viewer.tsx` does not.
-- **Fix:** Extract a shared `ResponsiveImage` component that handles format fallback, srcset, sizes, and error recovery. Both `photo-viewer` and `lightbox` would compose it.
+---
 
-### 15. `smart-collections.ts` `compileTagPredicate` uses raw SQL template for subquery
-- **File:** `apps/web/src/lib/smart-collections.ts:248-272`
-- **Evidence:** The `compileTagPredicate` function uses `` sql`${images.id} IN (SELECT ...)` `` with raw SQL template literals. While the values are parameterized, the subquery structure itself is not type-checked by Drizzle. A schema change to `imageTags` or `tags` table would not be caught at compile time.
-- **Confidence:** MEDIUM
-- **Why this matters:** The module's design goal is "Drizzle parameter binding for all values — no raw string concatenation." The `sql` template literal violates the spirit of this goal. A schema refactor (e.g., renaming `imageTags.imageId` to `imageTags.image_id`) would silently break the subquery at runtime.
-- **Fix:** Use Drizzle's query builder for the subquery, or add a compile-time test that validates the generated SQL against the schema.
+### 8. The `images` Table is a Wide Table Anti-Pattern
+**File:** `apps/web/src/db/schema.ts:19-117`
+**Confidence:** MEDIUM
+
+The `images` table has 40+ columns, mixing:
+- File metadata (filename, width, height, format, size)
+- EXIF data (camera, lens, ISO, exposure, GPS, etc.)
+- Color/HDR pipeline data (color_space, icc_profile_name, color_pipeline_decision, etc.)
+- Processing state (processed, pipeline_version, processing_error, failed_at)
+- Content data (title, description, alt_text_suggested)
+- Sharing data (share_key)
+- Audit data (uploaded_by, created_at, updated_at)
+
+This violates the single responsibility principle for database tables. Adding a new EXIF field requires a schema migration on the entire images table, which is the hottest table in the system.
+
+**Fix:** Normalize into related tables:
+- `image_exif` (image_id FK, all EXIF columns)
+- `image_color` (image_id FK, all color/HDR columns)
+- `image_processing` (image_id FK, processing state)
+- Keep `images` lean: id, filename_*, width, height, topic, title, description, share_key, created_at, updated_at
+
+---
+
+### 9. CLIP Semantic Search Stub Mode is a Production Footgun
+**File:** `apps/web/src/lib/image-queue.ts:465-509`, `apps/web/src/app/api/search/semantic/route.ts`
+**Confidence:** MEDIUM
+
+The stub mode for semantic search writes deterministic-but-random embeddings to the database. The documentation is explicit that these are "NOT semantically meaningful" and that similarity scores are "essentially random." However:
+- The admin UI offers a "Stub" mode toggle
+- The stub mode is fully functional and serves public requests
+- An operator could accidentally enable stub mode in production, confusing users
+- The stub embeddings pollute the `image_embeddings` table and require re-backfill to replace
+
+**Fix:** Remove the stub mode from the admin UI entirely. Keep the stub encoder for testing/development only, gated by `NODE_ENV !== 'production'`. In production, only offer "Disabled" and "Production" modes.
+
+---
+
+### 10. View Count Buffer is Best-Effort and Loses Data on Crash
+**File:** `apps/web/src/lib/data.ts:13-202`
+**Confidence:** MEDIUM
+
+The shared-group view count uses an in-memory Map with debounced flushing. The buffer is swapped atomically during flush, but:
+- If the process crashes between `bufferGroupViewCount()` and `flushGroupViewCounts()`, all buffered increments are lost
+- The buffer is capped at 1000 entries; beyond that, increments are dropped silently
+- There is no durable queue (Redis, RabbitMQ, etc.) for view count events
+- The documentation acknowledges this as "best-effort approximate analytics"
+
+**Fix:** For a personal gallery, this is acceptable. But if analytics accuracy matters, consider:
+- Writing view events to a local SQLite database or append-only log file
+- Or using a lightweight message queue (BullMQ with Redis) for durable buffering
 
 ---
 
 ## Minor Findings (suboptimal but functional)
 
-### 16. `gallery-config.ts` boolean settings use IIFE pattern unnecessarily
-- **File:** `apps/web/src/lib/gallery-config.ts:115-160`
-- **Evidence:** Each boolean setting is parsed with an IIFE: `(() => { const raw = ...; return raw === 'true'; })()`. This adds 5 lines per boolean where a simple ternary would suffice: `getSetting(map, 'strip_gps_on_upload') === 'true'`.
-- **Confidence:** HIGH
-- **Why this matters:** Readability. The IIFE pattern adds no value over inline expressions for simple boolean parsing. The validation is already handled by `isValidSettingValue`.
-- **Fix:** Replace IIFEs with inline expressions. Extract a `parseBooleanSetting(map, key)` helper if repetition is a concern.
+### 11. `getClientIp` Returns 'unknown' When TRUST_PROXY is Unset
+**File:** `apps/web/src/lib/rate-limit.ts:145-176`
+**Confidence:** HIGH
 
-### 17. `data.ts` `getImage()` has 100+ lines of prev/next condition building inline
-- **File:** `apps/web/src/lib/data.ts:984-1044`
-- **Evidence:** The prev/next navigation logic is 60 lines of inline `if/else` with complex SQL condition building. This logic is duplicated conceptually with `buildCursorCondition` (lines 685-707) but uses a different structure.
-- **Confidence:** MEDIUM
-- **Why this matters:** The prev/next logic and cursor pagination logic share the same sorting semantics but are implemented separately. A change to sort order (e.g., adding a secondary sort key) requires updating both.
-- **Fix:** Extract a shared `buildNavigationConditions(cursor, direction)` function that both `getImage` and `getImagesLite` can use.
+When `TRUST_PROXY` is not set, `getClientIp` returns `'unknown'` for all requests. This means all users share a single rate-limit bucket. The code logs a one-time warning, but the behavior is dangerous for production deployments where the operator might miss the warning.
 
-### 18. `process-image.ts` `decimalToRational` has imprecise rounding for common shutter speeds
-- **File:** `apps/web/src/lib/process-image.ts:1366-1373`
-- **Evidence:** `decimalToRational(0.008)` returns `"1/125"` (correct). But `decimalToRational(0.004)` returns `"1/250"` (correct). However, `decimalToRational(0.003)` returns `"0.003"` (falls through to decimal) because `Math.round(1/0.003) = 333` and `Math.abs(1/333 - 0.003) = 0.000003` which is > 0.001 threshold. A 1/333s shutter speed is real (some cameras use it).
-- **Confidence:** MEDIUM
-- **Why this matters:** Uncommon shutter speeds are displayed as decimals instead of fractions, which is less photographer-friendly. The 0.001 threshold is arbitrary.
-- **Fix:** Lower the threshold to 0.0001 or use a lookup table for common shutter speeds.
+**Fix:** Make `TRUST_PROXY=true` a hard requirement in production by throwing on startup if it's unset and proxy headers are present. Or default to trusting `X-Forwarded-For` when `NODE_ENV === 'production'` and the header is present.
 
-### 19. `bounded-map.ts` (imported by rate-limit) is not examined but likely has similar complexity
-- **File:** `apps/web/src/lib/bounded-map.ts` (not fully read)
-- **Evidence:** The rate-limit module imports `createWindowBoundedMap` and `createResetAtBoundedMap`. These are custom data structures with eviction logic. Without reading the implementation, I cannot verify correctness.
-- **Confidence:** LOW
-- **Why this matters:** The rate-limit system is security-critical. Any bug in the bounded map (e.g., incorrect eviction, memory leak, race condition) could lead to rate-limit bypass or memory exhaustion.
-- **Fix:** Add the bounded-map implementation to the review scope in the next cycle.
+---
 
-### 20. `csp-nonce.ts` and `content-security-policy.ts` have overlapping concerns
-- **Files:** `apps/web/src/lib/csp-nonce.ts`, `apps/web/src/lib/content-security-policy.ts`
-- **Evidence:** CSP nonce generation lives in `csp-nonce.ts` but CSP policy construction lives in `content-security-policy.ts`. The nonce is generated in `proxy.ts` (line 41) and passed as a header, then read back in `proxy.ts` (line 27) to apply to the response. The separation is logical but the two files are tightly coupled.
-- **Confidence:** LOW
-- **Why this matters:** Minor architectural concern. The nonce generation and policy construction should be colocated or the nonce file should be merged into the CSP file.
-- **Fix:** Merge `csp-nonce.ts` into `content-security-policy.ts` or rename to clarify the relationship.
+### 12. The `normalizeStringRecord` Function Has Weak Type Safety
+**File:** `apps/web/src/lib/sanitize.ts` (implied from settings.ts usage)
+**Confidence:** MEDIUM
+
+The `normalizeStringRecord` function used in `updateGallerySettings` takes a `Record<string, string>` but the actual input comes from `formData` or JSON parsing. The function guards against non-string values, but the TypeScript type doesn't reflect this. The return type is `{ ok: boolean; record?: Record<string, string>; error?: string }`, which is a poor man's Result type.
+
+**Fix:** Use a proper Result type (e.g., from `neverthrow` or a custom discriminated union) for validation functions. This makes error handling at call sites exhaustive and type-safe.
+
+---
+
+### 13. `uploadImages` Has a Long, Sequential File Processing Loop
+**File:** `apps/web/src/app/actions/images.ts:267-494`
+**Confidence:** MEDIUM
+
+The `uploadImages` action processes files in a sequential `for...of` loop. Each file goes through:
+1. Save original
+2. Color signal detection
+3. HDR rejection check
+4. EXIF extraction
+5. GPS stripping (if enabled)
+6. DB insert
+7. Tag processing
+8. Queue enqueue
+
+With 100 files (the max per window), this loop could take significant time, holding the request open. While the heavy processing is queued, the upload action itself is blocked on I/O and DB operations.
+
+**Fix:** Process files with bounded concurrency (e.g., `p-limit` with concurrency 3-5) to reduce upload latency for batch uploads. The DB inserts and tag processing can be parallelized per file.
+
+---
+
+### 14. The `searchImages` Function Has N+1 Query Risk
+**File:** `apps/web/src/lib/data.ts:1407-1546`
+**Confidence:** MEDIUM
+
+The `searchImages` function runs up to 3 queries in sequence/parallel:
+1. Main query (title, description, camera, lens, topic, label)
+2. Tag query (if main results are insufficient)
+3. Alias query (if main results are insufficient)
+
+The tag and alias queries run in parallel, but the main query must complete first. For searches that match many tags, this is 2 round-trips. The function also uses `GROUP BY` on the tag query, which can be expensive.
+
+**Fix:** Consider using MySQL FULLTEXT search or a dedicated search index (Elasticsearch, Meilisearch) for better performance and relevance. For the current scale, the current approach is acceptable but document the performance ceiling.
+
+---
+
+### 15. Docker Health Checks Are Minimal
+**File:** `apps/web/docker-compose.yml` (implied), `apps/web/src/app/api/health/route.ts`
+**Confidence:** LOW
+
+The health check endpoint (`/api/health`) only probes the DB when `HEALTH_CHECK_DB=true`. It does not check:
+- Disk space availability
+- Image processing queue state
+- MySQL connection pool health
+- Sharp/libvips availability
+- CLIP model weights availability (if semantic search is enabled)
+
+**Fix:** Add a comprehensive health check that verifies all critical dependencies. Return a structured JSON response with per-dependency status (e.g., `{ "db": "ok", "disk": "ok", "queue": "ok", "sharp": "ok" }`).
 
 ---
 
 ## What's Missing (gaps, unhandled edge cases, unstated assumptions)
 
-1. **No health check for the image processing queue** — There is no endpoint or metric that reports queue depth, processing rate, or failure rate. Operators must infer queue health from logs.
+### Gap 1: No Automated Schema-Code Sync Check
+The `images` table schema in `schema.ts` and the select field objects in `data.ts` are manually kept in sync. There is no automated check that every schema column is accounted for in the select fields. A new column added to the schema could be forgotten in `adminSelectFields`, silently excluding it from all queries.
 
-2. **No automated test for the full upload → process → serve pipeline** — The unit tests cover individual functions, but there is no integration test that uploads a file, waits for processing, and verifies the served derivatives.
+### Gap 2: No Image Deduplication Beyond `user_filename`
+The upload flow checks `user_filename` for deduplication, but two different files with the same name (e.g., `IMG_0001.jpg` from different cameras) would overwrite or conflict. There is no content-based deduplication (hash comparison).
 
-3. **No monitoring for ETag cache hit rate** — The settings-hash ETag is a key performance optimization, but there is no telemetry on how often it results in 304 responses vs full serves.
+### Gap 3: No Backup Verification After Restore
+The DB restore flow (`apps/web/src/app/[locale]/admin/db-actions.ts`) validates file headers before restore but does not verify the restored database is functional (e.g., by running a test query or checking table counts).
 
-4. **No graceful degradation for CLIP model load failures** — If `CLIP_MODELS_ROOT` is misconfigured, the semantic search route 503s but does not log a clear actionable message.
+### Gap 4: No Metrics/Observability Integration
+The codebase has extensive logging (`console.debug`, `console.warn`, `console.error`) but no structured metrics emission (Prometheus, StatsD, etc.). There is no way to track:
+- Upload success/failure rates
+- Image processing queue depth and latency
+- Rate-limit bucket hit rates
+- Search query latency
+- OG image generation time
 
-5. **No test for the `force_srgb_derivatives` setting actually changing output bytes** — The setting is wired through the config system, but there is no test that verifies the encoded derivatives are actually sRGB-tagged when the setting is on.
+### Gap 5: No graceful degradation for CLIP model loading failure
+If the CLIP model weights are missing or corrupted, the `embedImageReal` function will fail on first use. There is no fallback to stub mode or a clear error message for the operator.
 
-6. **No validation that `image_sizes` changes are backward-compatible** — If an admin removes a size from the ladder, existing `<img srcset>` references to that size will 404. The upload-contract lock prevents changes after photos exist, but there is no warning about the impact on existing HTML.
+### Gap 6: No Content Delivery Network (CDN) integration
+All image serving is origin-based. For a gallery with global visitors, there is no CDN integration documented or implemented. The `IMAGE_BASE_URL` env var is used for CSP but not for image URLs.
 
-7. **No automated cleanup for orphaned original files** — When an image is deleted, the original file in `data/uploads/original/` is removed, but there is no periodic scan for originals whose DB row was deleted by a manual DB operation or failed transaction.
+### Gap 7: No image integrity verification after processing
+The queue verifies that output files exist and are non-zero, but it does not verify that the files are valid images (e.g., by attempting a Sharp decode or checking magic bytes). A truncated or corrupted file would pass the size check.
 
-8. **No test for the `wide_gamut_max_source_pixels` downscale gate** — The WI-15 feature is complex (TIFF intermediate, ICC preservation, resize, then encode) but has no dedicated test verifying the downscale actually happens and produces correct colors.
-
-9. **No documentation for the `uploaded_by` column migration path** — Legacy rows have `uploaded_by = NULL`. There is no guidance for operators who want to backfill this column from logs or other sources.
-
-10. **No rate limit on the `/api/og/photo/[id]` route for non-200 responses** — The OG route rate limit is charged post-validation (Pattern 4), but a flood of requests for non-existent photo IDs still consumes DB resources (lookup before the limiter charges).
+### Gap 8: No automated cleanup of orphaned original files
+If an image is deleted from the DB but the file cleanup fails, the original file remains on disk forever. There is no periodic scan for orphaned originals (DB row missing but file exists).
 
 ---
 
 ## Ambiguity Risks
 
-1. **`revalidateAllAppData()` with `'layout'` scope** — "Reintroduce ISR only with an explicit invalidation/freshness plan" (CLAUDE.md) suggests ISR is off today, but `revalidateAllAppData()` is called frequently. If ISR is accidentally enabled (e.g., a developer sets `revalidate = 60` on a page), the broad revalidation could cause unexpected cache invalidation storms.
+### Ambiguity 1: `getServingColorSettingsHash` Cache Behavior
+`apps/web/src/lib/serve-upload.ts:50-83` — The settings hash cache has a 5-second TTL with stale-while-revalidate. If the DB is unavailable during a refresh, the stale hash is served indefinitely. This is documented as a feature, but the "indefinitely" part is ambiguous: does it mean until the process restarts, or until the DB recovers? The code shows `servingHashCache` is never cleared on DB recovery.
 
-2. **`publicMapSelectFields` derivation** — The comment says "DO NOT use this field set without the map_visible topic filter." But there is no runtime enforcement — a future developer could use `publicMapSelectFields` in a query without the filter, leaking GPS data.
+### Ambiguity 2: `enqueueImageProcessing` Return Value
+`apps/web/src/lib/image-queue.ts:243-591` — The function returns `boolean` but the return value is never checked by callers. It returns `false` for various rejection reasons (shutting down, invalid filenames, permanently failed). Callers in `uploadImages` and `retryFailedImage` ignore the return value, so a rejected enqueue is silently lost.
 
-3. **`stripGpsFromOriginal` best-effort semantics** — The function logs and continues on failure, meaning the original may retain GPS data. The comment says "Only the download-original path leaks," but there is no UI indication that the original still has GPS.
-
-4. **`processImageFormats` `sizes` parameter default** — The default `sizes = DEFAULT_OUTPUT_SIZES` means the function silently uses the default ladder if the caller passes an empty array. A backfill script that passes `[]` to mean "no sizes" would actually get the full ladder.
+### Ambiguity 3: `updateGallerySettings` Transaction Scope
+`apps/web/src/app/actions/settings.ts:137-148` — The transaction wraps the upsert loop, but the `image_sizes` and `strip_gps_on_upload` validation (lines 82-134) happens OUTSIDE the transaction. If the validation passes but the transaction fails, the settings are partially applied. The validation checks for existing images, but the lock is released in `finally` regardless of transaction outcome.
 
 ---
 
 ## Multi-Perspective Notes
 
 ### Security Engineer
-- The auth architecture is mature: dual-bucket rate limiting, HMAC-SHA256 sessions, Argon2 passwords, timing-safe comparison, constant-time user enumeration defense. The lint gates (`check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`) provide CI-level enforcement.
-- The `PAT` token path bypasses same-origin by design. If a PAT is leaked, an attacker can use it from any origin. Scope-based authorization is the only gate. Consider adding IP allowlist or expiry notification for PATs.
-- The `site-config.json` import pattern (no validation) is a latent vulnerability. A compromised build environment could inject malicious config values.
-- The `smart-collections.ts` subquery uses raw SQL. While parameterized, it bypasses Drizzle's type safety. A schema change could introduce a SQL injection vector if the template is not updated.
+- **Strong:** Argon2id with OWASP-exceeding parameters, HMAC-SHA256 session tokens with `timingSafeEqual`, constant-time token verification, defense-in-depth auth checks (middleware + server actions), path traversal prevention, symlink rejection, Unicode formatting char rejection, CSP with nonce, rate limiting with DB backup.
+- **Concern:** The `getClientIp` fallback to `'unknown'` collapses all users into one bucket when `TRUST_PROXY` is unset. In production, this is a single point of failure for rate limiting. The `hasTrustedSameOrigin` check relies on `X-Forwarded-Proto` and `X-Forwarded-Host` which could be spoofed if the proxy doesn't sanitize them.
+- **Concern:** The `admin_session` cookie format check in `proxy.ts` (line 90) only checks length >= 100 and 3 colon-separated parts. It does not verify the signature or timestamp. A malformed token with the right shape would pass the middleware and reach the server actions, where it would be rejected by `verifySessionToken`. This is defense-in-depth but wastes a DB query.
 
 ### New Hire
-- The codebase is well-documented with extensive inline comments and CLAUDE.md. However, the sheer volume of comments (some files have more comment lines than code) can be overwhelming. The "lineage" comments (e.g., "C7R-RPL-09 / AGG7R-13") are cryptic without context.
-- The `data.ts` select field derivation pattern is clever but non-obvious. A new hire adding a field would need to understand the destructuring-omission pattern, the compile-time guards, and the `_omit` naming convention.
-- The color pipeline precedence (NCLX > ICC chromaticity > ICC name) is documented in multiple places but the divergence between `detectColorSignals` (NCLX-first) and `resolveColorPipelineDecision` (ICC-name-first) is subtle and easy to miss.
-- The `process-image.ts` god file is intimidating. A new hire trying to fix an encoding bug would need to navigate 1651 lines of mixed concerns.
+- **Strong:** Excellent documentation in `CLAUDE.md`, extensive inline comments with ticket references (e.g., `R4C6 COR-R4C6-05`), clear file organization, consistent naming conventions.
+- **Concern:** The `data.ts` file is 1666 lines with multiple select field objects, privacy guards, and query functions. A new hire would struggle to understand which field set to use for a new query. The compile-time guards help but are intimidating.
+- **Concern:** The image processing pipeline has implicit dependencies between `process-image.ts`, `color-detection.ts`, `icc-extractor.ts`, `icc-chromaticity.ts`, `gain-map-detection.ts`, and `color-pipeline-decisions.ts`. Understanding the color pipeline requires reading 5+ files.
+- **Concern:** The test suite uses a custom fixture pattern with many `__tests__/*.test.ts` files. The naming convention (e.g., `data-tag-names-sql.test.ts`) is clear but the sheer volume (228 tests) makes it hard to find the right test to extend.
 
 ### Ops Engineer
-- The single-writer topology is well-documented but limits horizontal scaling. The in-memory rate limit buckets, view count buffer, and backfill runner status are all process-local.
-- The Docker auto-prune is a good safety measure but the `docker volume prune -f` (without `-a`) could still remove named volumes if they are unused. The comment says "bind-mounted data is never deleted" but this depends on the compose file being correct.
-- The backfill concurrency cap (2 at pool=10) is conservative. On a dedicated backfill machine, this underutilizes resources. The sidecar script has uncapped concurrency but requires manual invocation.
-- The `getGeoLookup()` dynamic require means geoip-lite is loaded on first analytics call, not at startup. A cold start after a deploy may have a latency spike on the first analytics write.
+- **Strong:** Docker deployment with multi-stage build, auto-prune in deploy script, bind mounts for data persistence, health check endpoint, MySQL advisory locks for concurrency, hourly GC for session/rate-limit/audit cleanup.
+- **Concern:** The single-writer topology is explicitly documented but not enforced. If an operator scales to multiple containers, the in-memory state (rate limits, view count buffer, upload tracker, queue state) diverges. There is no runtime warning or hard failure for multi-instance deployment.
+- **Concern:** The `image-queue.ts` bootstrap scan runs on every process startup. With 10k+ unprocessed images, this could cause a thundering herd of queue jobs across multiple process restarts.
+- **Concern:** The backfill script (`scripts/backfill-color-pipeline.ts`) runs with `BACKFILL_CONCURRENCY` default 2, but there is no monitoring of backfill progress beyond console logs. An operator cannot tell if a backfill is running, how many images remain, or if it failed.
+- **Concern:** Disk space is checked before upload (1GB minimum), but there is no proactive alert when disk space is low. The deploy host auto-prune helps but is not a substitute for monitoring.
 
 ---
 
 ## Verdict Justification
 
-**VERDICT: ACCEPT-WITH-RESERVATIONS**
+**Verdict: ACCEPT-WITH-RESERVATIONS**
 
-The codebase is architecturally sound with mature security practices, comprehensive test coverage, and excellent documentation. The color/HDR pipeline is a genuinely sophisticated feature implemented with care. The auth system has defense-in-depth with lint gates enforcing patterns at CI time.
+The codebase is production-ready and well-maintained. The security posture is strong, the color pipeline is sophisticated, and the test coverage is extensive. The reservations are about long-term maintainability and architectural debt, not immediate bugs or security vulnerabilities.
 
-However, there are structural issues that accumulate technical debt:
-1. The `process-image.ts` god file is a maintainability hazard
-2. The `data.ts` select field derivation is a maintenance trap
-3. Component-level performance issues (useMemo-returns-JSX, inline handlers, dynamic Tailwind classes) will degrade UX as the gallery grows
-4. The `site-config.json` lack of validation is a runtime reliability risk
-5. The `semanticSearchMode` type/runtime mismatch is a latent bug
+**What would need to change for an ACCEPT:**
+1. Decompose `process-image.ts` into focused modules (Critical Finding #2)
+2. Add runtime privacy validation for public API responses (Critical Finding #1)
+3. Implement eager hydration of rate-limit Maps from DB on startup (Critical Finding #3)
+4. Add automated cache invalidation for static-path derivatives on settings change (Critical Finding #4)
+5. Extract server action auth boilerplate into a higher-order function (Critical Finding #5)
 
-These are not security-critical but they are architectural debt that will compound. The review operated in **THOROUGH mode** throughout — no escalation to ADVERSARIAL was warranted because the security posture is strong and no systemic pattern of failures was found.
+**What would need to change for a REJECT:**
+- A privacy leak in production (e.g., GPS coordinates exposed to public routes)
+- A critical security vulnerability (e.g., session forgery, SQL injection)
+- Data loss in the image processing pipeline (e.g., original files deleted without backup)
 
-**Realist Check recalibrations:** None. All CRITICAL and MAJOR findings were pressure-tested and retained their severity. The `site-config.json` issue is CRITICAL because it can cause runtime failures on deploy. The `useMemo-returns-JSX` is CRITICAL for performance at scale. The `process-image.ts` complexity is MAJOR because it affects maintainability, not correctness.
+None of these are present at HEAD. The codebase is genuinely well-engineered, but the structural issues identified above will compound over time if not addressed.
+
+**Review Mode:** THOROUGH throughout. No escalation to ADVERSARIAL was warranted because the codebase showed consistent quality and no pattern of systemic issues. The findings are architectural and maintainability concerns, not security breaches or correctness failures.
 
 ---
 
 ## Open Questions (unscored)
 
-1. Has the `bounded-map.ts` implementation been audited for correctness? The rate-limit system depends on it.
-2. What is the performance impact of `revalidatePath('/', 'layout')` if ISR is reintroduced? Should this be benchmarked?
-3. Is there a plan to add integration tests for the full upload → process → serve pipeline?
-4. Should the `uploaded_by` column be backfilled for legacy rows, or is NULL acceptable indefinitely?
-5. What is the long-term plan for the `storage` abstraction (`@/lib/storage`) — is S3/MinIO integration still on the roadmap?
-6. The `product-marketer-reviewer` was added recently — has its scope been clarified to avoid overlap with `document-specialist`?
+1. **Has the `process-image.ts` file ever been profiled for CPU/memory usage?** The parallel AVIF/WebP/JPEG encoding with per-format fresh Sharp instances is correct but expensive. A flame graph would reveal if the rgb16 pipeline is the bottleneck.
+
+2. **What is the production MySQL connection pool utilization?** The pool is capped at 10 connections with a queue limit of 20. Under heavy upload load (batch uploads + queue processing + concurrent gallery views), does the pool ever saturate?
+
+3. **Has the Satori OG image generation been load-tested?** The OG endpoint generates 1200x630 images on-the-fly. With 30 requests/minute rate limiting, what's the CPU impact under sustained load?
+
+4. **What is the actual false positive rate of the `isbot` detection?** The analytics tables record bot-flagged views, but there is no analysis of how many legitimate visitors are misclassified as bots.
+
+5. **Has the CLIP semantic search been evaluated with real user queries?** The synthetic calibration (4 fixtures) produced a threshold of 0.22, but real-world query-image relevance may differ significantly.
+
+6. **What is the recovery procedure for a permanently-failed image that cannot be processed?** The admin UI shows failed images with a retry button, but if the original file is corrupted, there is no documented recovery path (re-upload? manual intervention?).
+
+7. **Are there any plans for horizontal scaling?** The single-writer topology is documented as a limitation, but there is no roadmap for moving process-local state to a shared store (Redis, etc.).
 
 ---
 
-## Ralplan Summary Row
-
-- Principle/Option Consistency: N/A (this is a review, not a plan)
-- Alternatives Depth: N/A
-- Risk/Verification Rigor: N/A
-- Deliberate Additions: N/A
-
----
-
-*Review conducted with 600+ files read across 4 parallel exploration agents plus targeted deep reads of 15+ core files. All file references verified against actual source code at HEAD 1d5545cb.*
+*Review completed. 15 findings (4 Critical, 6 Major, 5 Minor), 8 gaps identified, 3 ambiguity risks noted, multi-perspective analysis conducted.*
