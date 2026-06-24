@@ -19,7 +19,7 @@ describe('nginx production edge hardening', () => {
     });
 
     it('rate-limits settings, SEO, and admin API mutation surfaces', () => {
-        expect(nginxConfig).toContain('/admin/(categories|tags|users|password|seo|settings)');
+        expect(nginxConfig).toContain('/admin/(categories|tags|users|password|seo|settings|tokens)');
         expect(nginxConfig).toMatch(/location \^~ \/api\/admin\/ \{[\s\S]*limit_req zone=admin/);
     });
 

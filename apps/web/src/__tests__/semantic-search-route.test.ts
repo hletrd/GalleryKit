@@ -278,7 +278,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(json.results[0].filename_jpeg).toBe('mountain.jpg');
     });
 
-    it('returns 500 and rolls back rate limit when embedding scan fails', async () => {
+    it('returns 500 and keeps rate-limit budget when embedding scan fails (AGG-12)', async () => {
         dbSelectMock.mockReturnValue({
             from: vi.fn().mockReturnValue({
                 where: vi.fn().mockReturnValue({
@@ -293,6 +293,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
         expect(response.status).toBe(500);
         await expect(response.json()).resolves.toEqual({ error: 'Server error' });
-        expect(rollbackSemanticAttemptMock).toHaveBeenCalledWith('203.0.113.50');
+        // AGG-12: rate-limit budget is NOT refunded after expensive work begins
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 });
