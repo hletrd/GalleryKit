@@ -62,7 +62,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                 // DES-R4C15-03: min-h-11 (44 px) per the blocking touch-target
                 // policy — these chips are real <button>s on the mobile-priority
                 // home surface. Matches the nav topic pills' min-h-[44px].
-                className={cn("cursor-pointer hover:bg-primary/90 min-h-11 px-3 py-1", currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                className={cn("cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1", currentTags.length === 0 && "bg-primary text-primary-foreground")}
             >
                 <button
                     type="button"
@@ -80,7 +80,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                     variant={currentTags.includes(tag.slug) ? "default" : "outline"}
                     className={cn(
                         // DES-R4C15-03: 44 px floor (see "All" chip above).
-                        "cursor-pointer hover:bg-primary/90 min-h-11 px-3 py-1",
+                        "cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1",
                         "flex gap-1",
                         currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                     )}
