@@ -238,6 +238,11 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     if (isRestoreMaintenanceActive()) return { status: 'maintenance', results: [] };
     // Sanitize before validation so length checks operate on the same value
     // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
+    // This ordering is correct: control characters are stripped FIRST so they
+    // cannot inflate the code-point count (e.g., a 200-char string with 1 control
+    // char would pass a 200-code-point limit if counted before stripping, but
+    // the stored value would be 199 code points — under the limit). Stripping
+    // before counting ensures the limit reflects the actual stored value length.
     const sanitizedQuery = stripControlChars(query.trim()) ?? '';
     // C9RPF-MED-02: use countCodePoints for both min and max length checks
     // so supplementary characters (emoji, rare CJK) are counted consistently.

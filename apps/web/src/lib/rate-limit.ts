@@ -23,7 +23,7 @@
  *    paths; and where the limiter exists to protect a specific expensive
  *    resource (semantic guards embedding CPU), branches that never
  *    consume that resource are fairly refunded. SEC-R4C18-04
- *    adjudicated this as deliberate, NOT a Pattern-4 violation: there is
+ *    adjudicated this as deliberate, NOT a Pattern-3 violation: there is
  *    no enumeration value and no amplification analogue on these paths.
  *    Use for: public read paths, and routes whose guarded resource is a
  *    downstream API/CPU stage the refunded branches never reach.
