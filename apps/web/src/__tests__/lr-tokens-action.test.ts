@@ -18,6 +18,7 @@ const { createTokenMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/app/actions/auth', () => ({
+    isAdmin: vi.fn(async () => true),
     getCurrentUser: vi.fn(async () => ({ id: 1, username: 'admin' })),
 }));
 

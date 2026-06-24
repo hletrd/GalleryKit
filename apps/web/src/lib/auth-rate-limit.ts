@@ -25,7 +25,7 @@ export function getLoginRateLimitEntry(ip: string, now: number): WindowEntry {
         entry.count = 0;
     }
 
-    return entry;
+    return { ...entry };
 }
 
 export function getAccountLoginRateLimitEntry(accountKey: string, now: number): WindowEntry {
@@ -35,7 +35,7 @@ export function getAccountLoginRateLimitEntry(accountKey: string, now: number): 
         entry.count = 0;
     }
 
-    return entry;
+    return { ...entry };
 }
 
 export async function recordFailedLoginAttempt(ip: string, now: number, bucketStart?: number) {
