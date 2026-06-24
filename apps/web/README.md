@@ -66,7 +66,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 The resolver heals a stored `semantic_search_mode='production'` back to `disabled` **unless** the env opt-in is set — there is intentionally no one-click production toggle in the admin UI (it offers only Disabled/Stub). To activate:
 
 1. **Seed weights** (sidecar `--rm`): `scripts/download-clip-models.ts` with `CLIP_MODELS_ROOT` set to the bind-mount path.
-2. **Backfill embeddings** for existing photos: `scripts/backfill-clip-embeddings.ts --production`.
+2. **Backfill embeddings** for existing photos: `scripts/backfill-clip-embeddings.ts --production --force` (the `--force` flag skips the mode gate so you can pre-populate embeddings before flipping the admin setting).
 3. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
 4. Set the DB row `admin_settings.semantic_search_mode='production'`.
 
