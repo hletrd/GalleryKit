@@ -57,15 +57,13 @@ export async function isAdmin() {
 
 /**
  * Precomputed Argon2id hash used to equalize login timing between "user does
- * not exist" and "user exists, wrong password" branches. Lazily initialized
- * once per process so the first call doesn't pay the hash cost and we don't
- * block import. The parameters must match whatever we use in argon2.hash().
+ * not exist" and "user exists, wrong password" branches. Computed once at
+ * module initialization so concurrent logins after restart cannot race the
+ * lazy initialization (AGG-M2 / TRC-M7). The parameters match whatever we
+ * use in argon2.hash().
  */
-let dummyHashPromise: Promise<string> | null = null;
+const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
 async function getDummyHash(): Promise<string> {
-    if (!dummyHashPromise) {
-        dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
-    }
     return dummyHashPromise;
 }
 
