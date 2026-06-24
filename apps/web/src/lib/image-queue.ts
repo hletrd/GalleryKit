@@ -155,7 +155,10 @@ export type ProcessingQueueState = {
     /** C7-DEBUG-01: last error message per job ID for permanent-failure diagnostics. */
     lastErrors: Map<number, string>;
     /** C1F-DB-02: IDs of images that have permanently failed processing (MAX_RETRIES exceeded).
-     *  These are excluded from bootstrap re-scans to prevent infinite re-enqueue loops. */
+     *  These are excluded from bootstrap re-scans to prevent infinite re-enqueue loops.
+     *  A Set with no eviction — at personal-gallery scale the number of permanently-
+     *  failed images is negligible. If it grows large, the bootstrap scan itself is
+     *  the problem (not the Set size). */
     permanentlyFailedIds: Set<number>;
     bootstrapped: boolean;
     shuttingDown: boolean;
@@ -240,6 +243,13 @@ export async function shutdownImageProcessingQueue(
     await drainProcessingQueueForShutdown(state, queue);
 }
 
+/**
+ * Enqueue an image processing job.
+ *
+ * @returns `true` if the job was already enqueued or is now enqueued;
+ *          `false` if the job was rejected (shutting down, restore maintenance
+ *          active, invalid filenames, or permanently failed).
+ */
 export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
     const state = getProcessingQueueState();
     if (state.shuttingDown || isRestoreMaintenanceActive()) {
