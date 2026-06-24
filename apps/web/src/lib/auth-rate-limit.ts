@@ -29,6 +29,8 @@ export function getLoginRateLimitEntry(ip: string, now: number): WindowEntry {
 }
 
 export function getAccountLoginRateLimitEntry(accountKey: string, now: number): WindowEntry {
+    // C4-A6: Prune expired entries before reading to prevent unbounded growth.
+    accountLoginRateLimit.prune(now);
     const entry = accountLoginRateLimit.get(accountKey) ?? { count: 0, lastAttempt: 0 };
 
     if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
@@ -100,6 +102,8 @@ export function pruneAccountLoginRateLimit(now: number) {
 export const passwordChangeRateLimit = createWindowBoundedMap<string>(PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS);
 
 export function getPasswordChangeRateLimitEntry(ip: string, now: number): WindowEntry {
+    // C4-A6: Prune expired entries before reading to prevent unbounded growth.
+    passwordChangeRateLimit.prune(now);
     const entry = passwordChangeRateLimit.get(ip) ?? { count: 0, lastAttempt: 0 };
 
     if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {

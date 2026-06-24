@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useImperativeHandle, useEffect } from 'react';
+import { useState, useImperativeHandle, useEffect, useRef } from 'react';
 import { Info, ChevronDown, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -187,6 +187,15 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     // pointer-locked visual cue at the button itself; the checkmark below
     // flips for ~1.2 s on a successful clipboard write.
     const [copied, setCopied] = useState(false);
+    // C4-B1: Track the copy-feedback timer so we can clear it on unmount,
+    // preventing a setState-on-unmounted warning if the component is removed
+    // before the 1.2 s flip-back fires.
+    const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => {
+        if (copyTimerRef.current) {
+            clearTimeout(copyTimerRef.current);
+        }
+    }, []);
 
     // R27-UX-MED-1: reset accordion open-state when the photo changes. Without
     // this, a user who opens a sRGB photo's accordion (deliberately) and then
@@ -276,7 +285,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             // pointer-locked photographer sees the success even if the toast
             // is dismissed early or rendered outside their gaze.
             setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
+            copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
         } catch {
             toast.error(t('viewer.copyFailed'));
         }

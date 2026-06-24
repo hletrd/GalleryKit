@@ -349,6 +349,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const { colorGamut: displayGamut } = useDisplayCapability();
     useEffect(() => {
         document.documentElement.setAttribute('data-display-gamut', displayGamut);
+        // C4-A5: Clean up the attribute on unmount so it doesn't leak to other
+        // pages after navigating away from the photo viewer.
+        return () => {
+            document.documentElement.removeAttribute('data-display-gamut');
+        };
     }, [displayGamut]);
 
     // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar

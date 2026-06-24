@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
@@ -46,6 +46,13 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // ColorDetailsSection so both copy buttons feel identical to the
     // photographer regardless of which surface they used.
     const [copied, setCopied] = useState(false);
+    // C4-B1: Track the copy-feedback timer so we can clear it on unmount.
+    const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => {
+        if (copyTimerRef.current) {
+            clearTimeout(copyTimerRef.current);
+        }
+    }, []);
     if (!hasData) return null;
 
     const primaries = humanizeColorPrimaries(image.color_primaries);
@@ -97,7 +104,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
             // R28-UX-LOW-2: 1.2 s checkmark flip mirrors color-details-section
             // so both copy entry points behave identically.
             setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
+            copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
         } catch {
             toast.error(t('viewer.copyFailed'));
         }
