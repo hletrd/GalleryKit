@@ -34,7 +34,8 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
         normB += b[i] * b[i];
     }
     const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    if (denom === 0) return 0;
+    const EPSILON = 1e-15;
+    if (denom < EPSILON) return 0;
     return dot / denom;
 }
 
