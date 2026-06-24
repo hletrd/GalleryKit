@@ -113,6 +113,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                                     href={`/p/${row.imageId}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
+                                                    aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new window)`}
                                                     className="text-primary underline-offset-4 hover:underline"
                                                 >
                                                     {row.title || `${t.untitled} #${row.imageId}`}
@@ -222,6 +223,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                                     href={`/g/${row.shareKey}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
+                                                    aria-label={`${row.shareKey} (opens in new window)`}
                                                     className="font-mono text-primary underline-offset-4 hover:underline"
                                                 >
                                                     {row.shareKey}
