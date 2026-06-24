@@ -170,8 +170,12 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
 
         const first = await triggerAdminBackfill();
         expect(first.status).toBe('queued');
-        await new Promise((r) => setImmediate(r));
-        await new Promise((r) => setImmediate(r));
+        // C8R-TEST-01: use vi.waitFor instead of racy setImmediate x2 for
+        // reliable drain detection under CPU contention (full-suite load).
+        await vi.waitFor(() => {
+            const state = readAdminBackfillState();
+            return state.running === false && state.lastError !== null;
+        }, { timeout: 5000, interval: 10 });
 
         // Second trigger: state.running should be back to false so the trigger
         // does NOT short-circuit on the in-process `running` flag. Mock a
