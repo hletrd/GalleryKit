@@ -171,6 +171,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
         // Intentional prop-driven state sync: resetting gallery state when
         // the images prop changes (topic/filter change) is a valid React
         // pattern (react.dev/learn/you-might-not-need-an-effect).
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- state also accumulates load-more results, so it must reset when the base image list changes
         setAllImages(images);
     }, [images]);
 

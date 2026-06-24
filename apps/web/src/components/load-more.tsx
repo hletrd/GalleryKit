@@ -95,12 +95,15 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
     // Use a ref for the loadMore callback to avoid re-creating the observer
     // on every state change (loading/offset updates cause callback churn).
     const loadMoreRef = useRef(loadMore);
-    loadMoreRef.current = loadMore;
+    useEffect(() => {
+        loadMoreRef.current = loadMore;
+    }, [loadMore]);
     const queryKey = `${topicSlug ?? ''}::${smartCollectionSlug ?? ''}::${(tagSlugs ?? []).join(',')}`;
 
     useEffect(() => {
         queryVersionRef.current++;
         loadingRef.current = false;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional pagination reset when the query key or initial cursor changes
         setLoading(false);
         setOffset(initialOffset);
         setCursor(initialCursor);

@@ -197,6 +197,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     // The effect runs only on `image.id` change, not on every re-render, so
     // manual toggles between navigations still work as expected.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional per-photo reset: the accordion default follows each image while preserving manual toggles within the same image
         setShowColorDetails(isNonTrivialColor);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [image.id]);

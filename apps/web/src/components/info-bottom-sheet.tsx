@@ -58,7 +58,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     // The ref guard prevents unnecessary re-renders when isOpen is already true.
     useEffect(() => {
         if (isOpen && !prevIsOpenRef.current) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-driven state sync: resetting internal state when the dialog opens is a valid React pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
             setSheetState('peek');
         }
         prevIsOpenRef.current = isOpen;

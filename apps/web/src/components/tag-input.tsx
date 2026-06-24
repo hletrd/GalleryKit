@@ -159,6 +159,7 @@ export function TagInput({
 
     // Reset highlight when list changes
     React.useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- highlighted option is scoped to the current filtered suggestion list
         setHighlightedIndex(0);
     }, [filteredTags.length, showCreateOption]);
 

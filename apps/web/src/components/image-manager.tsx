@@ -112,6 +112,7 @@ export function ImageManager({
     }, [selectedIds, images.length]);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-driven reset: the editable admin list follows fresh server data
         setImages(initialImages);
         setSelectedIds(new Set());
     }, [initialImages]);

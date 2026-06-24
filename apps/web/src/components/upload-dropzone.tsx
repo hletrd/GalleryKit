@@ -95,7 +95,7 @@ export function UploadDropzone({
     // Incremental object URL management — only creates/revoke URLs for
     // added/removed files instead of recreating all URLs on every change.
     const previewUrlsRef = useRef<Map<string, string>>(new Map());
-    const [previewVersion, setPreviewVersion] = useState(0);
+    const [previewUrls, setPreviewUrls] = useState<Map<string, string>>(() => new Map());
 
     useEffect(() => {
         const currentIds = new Set(files.map(({ id }) => id));
@@ -119,7 +119,9 @@ export function UploadDropzone({
         }
 
         // Force re-render if URLs changed
-        if (changed) setPreviewVersion(v => v + 1);
+        if (changed) {
+            setPreviewUrls(new Map(previewUrlsRef.current));
+        }
     }, [files]);
 
     // Cleanup all URLs on unmount
@@ -132,11 +134,6 @@ export function UploadDropzone({
             urls.clear();
         };
     }, []);
-
-    // Access the URL map in render. previewVersion read ensures this
-    // expression is re-evaluated after setPreviewVersion triggers a re-render.
-    void previewVersion;
-    const previewUrls = previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const currentFiles = filesRef.current;

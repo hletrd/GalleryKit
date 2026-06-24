@@ -128,7 +128,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const [loading, setLoading] = useState(false);
     const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | null>(null);
     const [useSemanticSearch, setUseSemanticSearch] = useState(false);
-    const [isMac, setIsMac] = useState(true);
+    const [isMac] = useState(() => {
+        if (typeof navigator === 'undefined') return true;
+        const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
+        return /Mac|iPhone|iPad/.test(platform);
+    });
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -137,19 +141,18 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const requestIdRef = useRef(0);
     const wasOpenRef = useRef(false);
 
-    // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
-    useEffect(() => {
-        setIsMac(/Mac|iPhone|iPad/.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform));
+    const clearSearchState = useCallback(() => {
+        requestIdRef.current++;
+        setLoading(false);
+        setResults([]);
+        setSearchStatus(null);
     }, []);
 
     const performSearch = useCallback(async (searchQuery: string, semantic: boolean) => {
         // Clear stale refs from previous result sets
         resultRefs.current = [];
         if (!searchQuery.trim()) {
-            requestIdRef.current++;
-            setLoading(false);
-            setResults([]);
-            setSearchStatus(null);
+            clearSearchState();
             return;
         }
         const requestId = ++requestIdRef.current;
@@ -229,15 +232,13 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 setLoading(false);
             }
         }
-    }, []);
+    }, [clearSearchState]);
 
     useEffect(() => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         if (!query.trim()) {
-            requestIdRef.current++;
-            setLoading(false);
-            setResults([]);
-            setSearchStatus(null);
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional debounce reset when the query is cleared
+            clearSearchState();
             return;
         }
         debounceRef.current = setTimeout(() => {
@@ -246,7 +247,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         return () => {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
-    }, [query, useSemanticSearch, performSearch]);
+    }, [query, useSemanticSearch, performSearch, clearSearchState]);
 
     const handleClose = useCallback(() => {
         setIsOpen(false);

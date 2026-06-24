@@ -116,6 +116,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const image = images[currentIndex];
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- currentImageId is user-navigable state that must re-anchor when the route id changes
         setCurrentImageId(initialImageId);
     }, [initialImageId]);
 
@@ -125,6 +126,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     // A 3-second fallback ensures cached images (where onLoad may fire
     // before the listener is attached) still dismiss the blur.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional per-photo loading reset so the new image shows its blur placeholder
         setImageLoaded(false);
         const fallbackTimer = setTimeout(() => setImageLoaded(true), 3000);
         return () => clearTimeout(fallbackTimer);
@@ -419,6 +421,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         // Intentional per-photo reset: the fallback decision belongs to ONE
         // image; navigating to the next photo must re-arm the
         // sized-derivative attempt (same pattern as the guard ref above).
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional per-photo fallback reset
         setSizedSourcesFailed(false);
     }, [image?.id]);
 
