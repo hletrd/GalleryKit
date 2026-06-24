@@ -170,7 +170,7 @@ export function getClientIp(headerStore: HeaderLike): string {
     const ip = 'unknown';
     if (shouldWarnMissingTrustProxy(process.env.NODE_ENV, process.env.TRUST_PROXY, headerStore) && !warnedMissingTrustProxy) {
         warnedMissingTrustProxy = true;
-        console.warn('[rate-limit] [SECURITY] Proxy headers are present but TRUST_PROXY is not set — rate limiting uses "unknown" IP, meaning ALL users share a single rate-limit bucket. After 5 failed login attempts from ANY IP, ALL users are locked out for 15 minutes. Set TRUST_PROXY=true if behind a reverse proxy (e.g., nginx).');
+        console.error('[rate-limit] [SECURITY] Proxy headers are present but TRUST_PROXY is not set — rate limiting uses "unknown" IP, meaning ALL users share a single rate-limit bucket. After 5 failed login attempts from ANY IP, ALL users are locked out for 15 minutes. Set TRUST_PROXY=true if behind a reverse proxy (e.g., nginx).');
     }
     return ip;
 }
@@ -327,7 +327,7 @@ export function resetSemanticRateLimitForTests(): void {
  * Returns unix seconds (not ms) aligned to the window boundary.
  */
 export function getRateLimitBucketStart(nowMs: number, windowMs: number): number {
-    const windowSec = Math.floor(windowMs / 1000);
+    const windowSec = Math.max(1, Math.floor(windowMs / 1000));
     const nowSec = Math.floor(nowMs / 1000);
     return nowSec - (nowSec % windowSec);
 }
