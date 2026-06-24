@@ -37,7 +37,9 @@ describe('db/index.ts — pool-connection listener', () => {
         // C8-F01: Verify the symbol is accessed via the wrapper's .connection
         // property, not directly on the PromisePoolConnection wrapper.
         expect(source).toMatch(/\}\)\.connection/);
-        expect(source).toMatch(/await initPromise/);
+        // C4-C1: The init promise is raced against a 10-second timeout to prevent
+        // indefinite pool exhaustion on unresponsive MySQL.
+        expect(source).toMatch(/await Promise\.race\(\[initPromise, initTimeout\]\)/);
     });
 
 
