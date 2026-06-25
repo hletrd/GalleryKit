@@ -326,7 +326,7 @@ export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()
     if (!entry || entry.resetAt <= now) {
         semanticRateLimit.set(ip, { count: 1, resetAt: now + SEMANTIC_RATE_LIMIT_WINDOW_MS });
     } else {
-        entry.count++;
+        semanticRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     }
     return (semanticRateLimit.get(ip)?.count ?? 0) > SEMANTIC_RATE_LIMIT_MAX;
 }
