@@ -722,24 +722,34 @@ export const bootstrapImageProcessingQueue = async () => {
         if (lastPending) {
             state.bootstrapCursorId = lastPending.id;
         }
-        // R10-M14: When pending.length === 0, we cannot distinguish "no pending
-        // images at all" from "all pending images in this batch are permanently
-        // failed". Only set bootstrapped = true when we got a non-empty batch
-        // that is smaller than the batch size (meaning we've reached the end).
-        // An empty batch keeps bootstrapped = false so the retry timer will
-        // re-run bootstrap; if there are truly no pending images, the retry
-        // will also return empty and bootstrapped stays false — but the retry
-        // delay (30s) is acceptable for this edge case. If there ARE valid
-        // pending images after the failed batch, they will be discovered on
-        // the retry because the cursor is null (no cursor when pending is empty).
-        state.bootstrapped = pending.length > 0 && pending.length < BOOTSTRAP_BATCH_SIZE;
-        if (state.bootstrapped) {
+        // R10-M14: When pending.length === 0 during a CONTINUATION scan
+        // (bootstrapCursorId !== null), we cannot distinguish "no more pending
+        // images" from "all pending images in this batch are permanently failed".
+        // Only set bootstrapped = true when we got a non-empty batch that is
+        // smaller than the batch size (meaning we've reached the end), OR when
+        // the cursor is null (first scan) and the batch is empty (truly no
+        // pending images). An empty continuation batch keeps bootstrapped = false
+        // so the retry timer will re-run bootstrap from the beginning (cursor
+        // is reset to null), discovering valid pending images after any failed
+        // batch.
+        if (pending.length === 0 && state.bootstrapCursorId === null) {
+            // First scan returned empty — truly no pending images
+            state.bootstrapped = true;
             state.bootstrapCursorId = null;
         } else if (pending.length === 0) {
-            // Empty batch — reset cursor so retry scans from the beginning
+            // Empty continuation batch — might have missed valid images after
+            // permanently failed ones. Reset cursor and retry from beginning.
+            state.bootstrapped = false;
             state.bootstrapCursorId = null;
-            scheduleBootstrapRetry(state, '[Queue] Bootstrap returned zero pending images.');
+            scheduleBootstrapRetry(state, '[Queue] Bootstrap continuation returned zero pending images.');
+        } else if (pending.length < BOOTSTRAP_BATCH_SIZE) {
+            // Non-empty batch smaller than limit — reached the end
+            state.bootstrapped = true;
+            state.bootstrapCursorId = null;
         } else {
+            // Full batch — schedule continuation to scan after the cursor
+            state.bootstrapped = false;
+            state.bootstrapCursorId = lastPending ? lastPending.id : null;
             scheduleBootstrapContinuation(state);
         }
 
