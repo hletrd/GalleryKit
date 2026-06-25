@@ -40,7 +40,7 @@ async function getSettingsMap(): Promise<Map<string, string>> {
 }
 
 function getSetting(map: Map<string, string>, key: GallerySettingKey): string {
-    return map.get(key) || DEFAULTS[key];
+    return map.get(key) ?? DEFAULTS[key];
 }
 
 // ── Cached Config Interface ───────────────────────────────────────────────────
