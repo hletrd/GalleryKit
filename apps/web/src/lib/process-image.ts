@@ -81,6 +81,38 @@ function isBitdepthRejection(err: unknown): boolean {
     return err instanceof Error && /bitdepth/i.test(err.message);
 }
 
+/** Safely unlink a file, distinguishing ENOENT (expected — file already gone)
+ *  from other errors that indicate a real problem (EMFILE, ENOSPC, EACCES, etc.).
+ *  Non-ENOENT errors are logged at debug level so operators can diagnose
+ *  sustained cleanup failures without spamming the logs for every expected race.
+ */
+async function safeUnlink(filePath: string): Promise<void> {
+    try {
+        await fs.unlink(filePath);
+    } catch (err) {
+        const code = err && typeof err === 'object' && 'code' in err
+            ? (err as { code?: string }).code
+            : null;
+        if (code === 'ENOENT') {
+            return; // Expected — file was already deleted
+        }
+        console.debug(`[safeUnlink] Failed to remove ${filePath}:`, err);
+    }
+}
+
+/** Safely close a directory handle, ignoring only ENOENT (already closed). */
+async function safeCloseDirHandle(handle: Awaited<ReturnType<typeof fs.opendir>>): Promise<void> {
+    try {
+        await handle.close();
+    } catch (err) {
+        const code = err && typeof err === 'object' && 'code' in err
+            ? (err as { code?: string }).code
+            : null;
+        if (code === 'ENOENT') return;
+        console.debug('[safeCloseDirHandle] Failed to close directory handle:', err);
+    }
+}
+
 // R8-R5: retry probe up to 3 times with exponential backoff.
 // Distinguish Sharp-rejected-bitdepth (permanent, no retry) from
 // transient errors (EIO, ENOSPC, etc.).
@@ -535,7 +567,7 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
                     }
                 }
             } finally {
-                await dirHandle.close().catch(() => {});
+                await safeCloseDirHandle(dirHandle);
             }
         } catch (err) {
             // ENOENT means the directory doesn't exist yet — nothing to scan,
@@ -548,7 +580,7 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
     }
 
     await Promise.all(
-        [...filesToDelete].map(f => fs.unlink(path.join(dir, f)).catch(() => {})),
+        [...filesToDelete].map(f => safeUnlink(path.join(dir, f))),
     );
 }
 
@@ -798,7 +830,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
         await pipeline(nodeStream, createWriteStream(originalPath, { mode: 0o600 }));
     } catch {
-        await fs.unlink(originalPath).catch(() => {});
+        await safeUnlink(originalPath);
         throw new Error('Failed to save uploaded file');
     }
 
@@ -815,7 +847,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         metadata = await image.metadata();
     } catch (e) {
         console.error('Sharp metadata validation failed:', e);
-        await fs.unlink(originalPath).catch(() => {});
+        await safeUnlink(originalPath);
         throw new Error('Invalid image file. Could not process the file as an image.');
     }
 
@@ -831,7 +863,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     const width = (metadata.width && metadata.width > 0) ? metadata.width : undefined;
     const height = (metadata.height && metadata.height > 0) ? metadata.height : undefined;
     if (!width || !height) {
-        await fs.unlink(originalPath).catch(() => {});
+        await safeUnlink(originalPath);
         throw new Error('Image dimensions could not be determined — the file may be corrupt or in an unsupported format');
     }
 
@@ -920,7 +952,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
             colorSignals,
         };
     } catch (e) {
-        await fs.unlink(originalPath).catch(() => {});
+        await safeUnlink(originalPath);
         throw e;
     }
 }
@@ -1019,7 +1051,7 @@ export async function processImageFormats(
             // C4-D1: clean up the temp file if the downscale throws (e.g. disk
             // full, permission error) so the tmp directory doesn't accumulate
             // orphaned intermediates.
-            await fs.unlink(tmpPath).catch(() => {});
+            await safeUnlink(tmpPath);
             throw new Error('Failed to create wide-gamut downscale intermediate');
         }
     }
@@ -1224,7 +1256,14 @@ export async function processImageFormats(
                     await fs.rename(tmpPath, basePath);
                 } catch {
                     // Fallback: copy to tmp then rename (covers cross-device or link failure)
-                    await fs.copyFile(outputPath, tmpPath).catch(() => {});
+                    await fs.copyFile(outputPath, tmpPath).catch((err) => {
+                        const code = err && typeof err === 'object' && 'code' in err
+                            ? (err as { code?: string }).code
+                            : null;
+                        if (code !== 'ENOENT') {
+                            console.debug('[process-image] copyFile fallback failed:', err);
+                        }
+                    });
                     try {
                         await fs.rename(tmpPath, basePath);
                     } catch {
@@ -1236,7 +1275,7 @@ export async function processImageFormats(
                         await fs.copyFile(outputPath, basePath);
                     }
                 } finally {
-                    await fs.unlink(tmpPath).catch(() => {});
+                    await safeUnlink(tmpPath);
                 }
                 writtenSizedPaths[format].add(basePath);
             }
@@ -1287,15 +1326,15 @@ export async function processImageFormats(
         // prior successful run, which we intentionally do not touch —
         // we only delete paths WE wrote in this invocation).
         await Promise.all([
-            ...Array.from(writtenSizedPaths.webp).map((p) => fs.unlink(p).catch(() => {})),
-            ...Array.from(writtenSizedPaths.avif).map((p) => fs.unlink(p).catch(() => {})),
-            ...Array.from(writtenSizedPaths.jpeg).map((p) => fs.unlink(p).catch(() => {})),
+            ...Array.from(writtenSizedPaths.webp).map((p) => safeUnlink(p)),
+            ...Array.from(writtenSizedPaths.avif).map((p) => safeUnlink(p)),
+            ...Array.from(writtenSizedPaths.jpeg).map((p) => safeUnlink(p)),
         ]);
         throw err;
     } finally {
         // WI-15: clean up downscaled intermediate if one was created.
         if (processingInputPath !== inputPath) {
-            await fs.unlink(processingInputPath).catch(() => {});
+            await safeUnlink(processingInputPath);
         }
     }
 
@@ -1621,11 +1660,18 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
             console.error('stripGpsFromOriginal: no GPS-strip strategy for extension; original retains GPS', { filePath, ext });
             return;
         }
-        await fs.chmod(tmpPath, 0o600).catch(() => {});
+        await fs.chmod(tmpPath, 0o600).catch((err) => {
+            const code = err && typeof err === 'object' && 'code' in err
+                ? (err as { code?: string }).code
+                : null;
+            if (code !== 'ENOENT') {
+                console.debug('[process-image] chmod failed:', err);
+            }
+        });
         await fs.rename(tmpPath, filePath);
     } catch (e) {
         // Best-effort cleanup of temp file
-        await fs.unlink(tmpPath).catch(() => {});
+        await safeUnlink(tmpPath);
         // Non-fatal: log and continue. The DB columns are already nulled,
         // and the derivatives (which are what the public gallery serves)
         // already have no GPS. Only the download-original path leaks, and
