@@ -26,8 +26,9 @@ export type RateLimitEntry = ResetAtEntry | WindowEntry;
 
 /**
  * A bounded Map that prunes expired entries and evicts oldest entries
- * when `prune()` is called. Consumers should invoke `prune()` before
- * reads and writes to enforce the hard cap and expiry policy.
+ * (FIFO — First In, First Out) when `prune()` is called. Consumers should
+ * invoke `prune()` before reads and writes to enforce the hard cap and
+ * expiry policy.
  */
 export class BoundedMap<K, V> {
     private readonly map = new Map<K, V>();
@@ -55,7 +56,13 @@ export class BoundedMap<K, V> {
     }
 
     get(key: K): V | undefined {
-        return this.map.get(key);
+        const value = this.map.get(key);
+        // Return a shallow copy for object values to prevent external mutation
+        // of the internal Map state (same pattern as auth-rate-limit.ts).
+        if (value !== undefined && typeof value === 'object' && value !== null) {
+            return { ...value } as V;
+        }
+        return value;
     }
 
     has(key: K): boolean {

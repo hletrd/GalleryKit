@@ -155,8 +155,8 @@ export async function login(prevState: { error?: string } | null, formData: Form
     } catch {
         // DB unavailable — rely on in-memory Maps (both IP and account)
         if (limitData.count > LOGIN_MAX_ATTEMPTS || accountLimitData.count > LOGIN_MAX_ATTEMPTS) {
-            rollbackLoginRateLimit(ip, loginBucketStart).catch(() => {});
-            rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart).catch(() => {});
+            rollbackLoginRateLimit(ip, loginBucketStart).catch((err) => console.debug('Login rollback failed:', err));
+            rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart).catch((err) => console.debug('Account login rollback failed:', err));
             return { error: t('tooManyAttempts') };
         }
     }

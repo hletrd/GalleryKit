@@ -190,7 +190,14 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
-            semanticSearchMode: DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production',
+            semanticSearchMode: (() => {
+                const raw = DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
+                // Apply the same operator-gate check as the happy path (line 141).
+                if (raw === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
+                    return 'disabled';
+                }
+                return raw;
+            })(),
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
             allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
             forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',

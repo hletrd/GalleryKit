@@ -686,7 +686,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
 
         for (;;) {
             if (isRestoreMaintenanceActive()) {
-                console.log('[admin-backfill] Restore maintenance detected — aborting batch loop.');
+                console.info('[admin-backfill] Restore maintenance detected — aborting batch loop.');
                 break;
             }
             const batch = await fetchCandidateBatch(cursor);
@@ -754,7 +754,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
                     const handled =
                         processed + skippedMissingOriginal + skippedLocked + encodeFailures + detectionFailures + deletedMidReencode + errors;
                     if (handled % 25 === 0) {
-                        console.log(
+                        console.info(
                             `[admin-backfill] progress: processed=${processed} errors=${errors} ` +
                                 `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
                                 `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures} ` +
@@ -793,7 +793,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         // the WITH-FAILURES banner.
         const hadFailures = encodeFailures > 0 || detectionFailures > 0 || errors > 0;
         state.lastRunHadFailures = hadFailures;
-        console.log(
+        console.info(
             `[admin-backfill] Run complete ${hadFailures ? 'WITH FAILURES' : '(clean)'}: ` +
                 `processed=${processed} errors=${errors} ` +
                 `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
