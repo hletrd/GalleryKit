@@ -75,6 +75,41 @@ function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
     }
 }
 
+/** M6: Shared load-more rate-limit check. Returns 'rateLimited' when the bucket
+ *  is over limit, 'ok' when under limit, or 'dbError' when the DB check fails
+ *  but the in-memory check passed (caller should proceed with caution).
+ *  Handles pre-increment, DB increment, combined check, and rollback uniformly. */
+async function checkLoadMoreRateLimit(
+    ip: string,
+    now: number,
+): Promise<{ status: 'ok' | 'rateLimited' | 'dbError' }> {
+    const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
+    const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
+
+    try {
+        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
+    } catch {
+        // DB unavailable — keep the in-memory pre-increment
+    }
+
+    try {
+        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
+        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited' };
+        }
+    } catch {
+        if (overLimitInMemory) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited' };
+        }
+        // DB check failed but in-memory passed — proceed with caution
+        return { status: 'dbError' };
+    }
+
+    return { status: 'ok' };
+}
+
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offsetOrCursor: number | ImageListCursorInput = 0, limit: number = 30): Promise<LoadMoreImagesResult> {
     if (isRestoreMaintenanceActive()) return { status: 'maintenance', images: [], hasMore: true };
     // Validate slug format before passing to data layer (defense in depth)
@@ -97,41 +132,11 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
-    const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
 
-    // C17-MED-01: in-memory pre-increment happens first (TOCTOU prevention),
-    // then DB increment, THEN combined check. This order matches searchImagesAction
-    // and ensures the DB counter stays in sync even when the in-memory map
-    // catches an over-limit. Previously, the DB increment was skipped when
-    // the in-memory pre-check caught an over-limit, causing the DB counter to
-    // undercount after a process restart.
-    const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
-
-    // C16-MED-01: DB-backed increment and check for accuracy across restarts.
-    // Matches the searchImagesAction pattern. The DB round-trip is ~1ms and
-    // does not materially impact scroll responsiveness at 120 req/min.
-    try {
-        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
-    } catch {
-        // DB unavailable — keep the in-memory pre-increment so the in-memory
-        // rate limit remains effective during DB outages.
-    }
-
-    // Combined check: if either in-memory or DB-backed check shows over-limit,
-    // roll back both counters and return rate-limited. The rollback on the
-    // over-limit branch is symmetric with searchImagesAction.
-    try {
-        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
-        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited', images: [], hasMore: true };
-        }
-    } catch {
-        // DB unavailable — rely on in-memory BoundedMap
-        if (overLimitInMemory) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited', images: [], hasMore: true };
-        }
+    // M6: DRY rate-limit check via shared helper
+    const rateLimitResult = await checkLoadMoreRateLimit(ip, now);
+    if (rateLimitResult.status === 'rateLimited') {
+        return { status: 'rateLimited', images: [], hasMore: true };
     }
 
     try {
@@ -142,7 +147,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
             hasMore: rows.length > safeLimit,
         };
     } catch (err) {
-        rollbackLoadMoreAttempt(ip, bucketStart);
+        rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
         // C2-MED-02: return a structured error response instead of throwing.
         // Throwing from a server action sends a generic error to the client
         // and can leave the Load More button in a broken state. Returning a
@@ -183,32 +188,17 @@ export async function loadMoreSmartCollectionImages(
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
-    const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
 
-    const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
-    try {
-        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
-    } catch {
-        // DB unavailable — keep the in-memory pre-increment
-    }
-
-    try {
-        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
-        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited', images: [], hasMore: true };
-        }
-    } catch {
-        if (overLimitInMemory) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited', images: [], hasMore: true };
-        }
+    // M6: DRY rate-limit check via shared helper
+    const rateLimitResult = await checkLoadMoreRateLimit(ip, now);
+    if (rateLimitResult.status === 'rateLimited') {
+        return { status: 'rateLimited', images: [], hasMore: true };
     }
 
     try {
         const collection = await getSmartCollectionBySlugCached(slug);
         if (!collection || !collection.is_public) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
+            rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
             return { status: 'invalid', images: [], hasMore: false };
         }
 
@@ -228,7 +218,7 @@ export async function loadMoreSmartCollectionImages(
             hasMore,
         };
     } catch (err) {
-        rollbackLoadMoreAttempt(ip, bucketStart);
+        rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
         console.error('loadMoreSmartCollectionImages failed:', err);
         return { status: 'error', images: [], hasMore: true };
     }
