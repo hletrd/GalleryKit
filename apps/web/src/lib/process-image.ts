@@ -186,8 +186,18 @@ export function verifyAvifNclxInBuffer(
         return { ok: false, message: 'buffer too small' };
     }
 
-    for (let i = 4; i < buffer.length - 12; i++) {
-        if (buffer.toString('ascii', i, i + 4) !== 'colr') continue;
+    // L2: Use Buffer.indexOf for efficient 'colr' box search instead of
+    // scanning byte-by-byte. The 'colr' signature is 4 bytes; we search for
+    // it directly, then validate the surrounding box structure.
+    let searchStart = 4;
+    while (searchStart < buffer.length - 12) {
+        const colrIndex = buffer.indexOf('colr', searchStart, 'ascii');
+        if (colrIndex === -1 || colrIndex > buffer.length - 12) {
+            return { ok: false, message: 'no NCLX colr box found' };
+        }
+
+        const i = colrIndex;
+        searchStart = i + 1; // Advance for next iteration if this match fails
 
         // Validate that the preceding 4 bytes look like a reasonable box size.
         // NCLX boxes are tiny (always 19 bytes total), but `prof` (ICC) boxes
