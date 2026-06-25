@@ -18,6 +18,11 @@ const PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS = 5000;
 // rate-limit table is unavailable (matches the IP map pattern).
 export const accountLoginRateLimit = createWindowBoundedMap<string>(LOGIN_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS);
 
+/**
+ * Get the current login rate-limit entry for an IP.
+ * Returns a shallow copy so callers can mutate the returned object without
+ * corrupting the internal Map state (matches the BoundedMap.get() contract).
+ */
 export function getLoginRateLimitEntry(ip: string, now: number): WindowEntry {
     const entry = loginRateLimit.get(ip) ?? { count: 0, lastAttempt: 0 };
 

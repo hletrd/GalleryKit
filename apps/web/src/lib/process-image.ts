@@ -47,6 +47,9 @@ const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     ? Math.min(envConcurrency, Math.max(1, cpuCount - 1))
     : maxConcurrency;
 // Limit libvips worker threads to keep the server responsive during conversions.
+// NOTE: sharp.concurrency() mutates the GLOBAL module state. This call affects
+// ALL sharp instances in the process, not just the current import. The value
+// is set once at module load time and persists for the process lifetime.
 sharp.concurrency(sharpConcurrency);
 // CM-LOW-9: server processes never see cache hits (every UUID is fresh) and
 // the libvips operation cache pins buffers in heap. Disable for steady RSS.

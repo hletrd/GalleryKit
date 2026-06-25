@@ -271,7 +271,7 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     if (!entry || entry.resetAt <= now) {
         searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
     } else {
-        entry.count++;
+        searchRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     }
 
     // DB-backed increment BEFORE the check (matches sharing.ts and admin-users.ts pattern).
@@ -340,8 +340,8 @@ function isViewRecordRateLimited(ip: string, now: number): boolean {
         viewRecordRateLimit.set(ip, { count: 1, resetAt: now + VIEW_RECORD_WINDOW_MS });
         return false;
     }
-    entry.count++;
-    return entry.count > VIEW_RECORD_MAX_REQUESTS;
+    viewRecordRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
+    return entry.count + 1 > VIEW_RECORD_MAX_REQUESTS;
 }
 
 async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers>>) {
@@ -356,7 +356,14 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
     };
 }
 
-// @action-origin-exempt: public analytics endpoint — no admin auth needed
+/**
+ * Record a photo view event. Intentionally fire-and-forget: the INSERT
+ * is NOT awaited so analytics never blocks the page render. Errors are
+ * swallowed via `.catch()` — a failed view recording is acceptable
+ * compared to a broken user experience.
+ *
+ * @action-origin-exempt: public analytics endpoint — no admin auth needed
+ */
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     const requestHeaders = await headers();
