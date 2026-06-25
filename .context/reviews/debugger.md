@@ -416,8 +416,264 @@ The new findings in cycle 10 are:
 2. **Finding 17 (Medium):** `basePixels` multiplication could overflow for malicious metadata. Fix: use BigInt for the multiplication.
 3. **Finding 18 (Low):** `stripGpsFromOriginal` temp path in same directory as original. Fix: use `os.tmpdir()`.
 4. **Finding 19 (Medium):** `getServingColorSettingsHash` no circuit breaker during DB outages. Still open from cycle 9.
+5. **Finding 21 (Medium):** `photo-viewer.tsx` `imageLoaded` state not reset on `image` reference change without `id` change. Fix: use `image` object identity as dependency.
+6. **Finding 22 (Medium):** `photo-viewer.tsx` `prevImage`/`nextImage` preload may be stale after navigation. Fix: add `image?.id` to dependency array.
+7. **Finding 23 (Medium):** `photo-viewer.tsx` `showLightboxRef` updated asynchronously — race condition. Fix: use `useLayoutEffect` or callback ref pattern.
+8. **Finding 24 (Medium):** `photo-viewer.tsx` `requestIdleCallback` fallback timer may leak on unmount. Fix: add `mountedRef` guard in callback.
+9. **Finding 25 (Medium):** `histogram.tsx` worker leak on rapid photo changes. Fix: use module-scope worker singleton or pool.
+10. **Finding 26 (Medium):** `info-bottom-sheet.tsx` `preventDefault()` may be no-op on passive touch listeners. Fix: attach natively with `{ passive: false }` or use `touch-action: none` CSS.
+11. **Finding 27 (Low):** `lightbox.tsx` focus trap may trap focus on unmount if `closeButtonRef` is null. Fix: ensure ref is always populated before activation.
+12. **Finding 28 (Low):** `sw.template.js` `recordAndEvict` may evict just-added entry if single image exceeds cache cap. Fix: document as intentional or add guard.
+13. **Finding 29 (Low):** `search.tsx` debounce timer not cleared on unmount for in-flight searches. Fix: add `mountedRef` check before committing results.
+14. **Finding 30 (Low):** `tag-input.tsx` `highlightedIndex` may go out of bounds after filter change. Fix: clamp `maxIndex` to at least 0.
 
 The codebase demonstrates mature defensive programming with extensive compile-time guards, bounded data structures, proper resource cleanup, and comprehensive error handling.
+
+---
+
+## Client-Side Findings (from UI/components agent)
+
+### HIGH Severity
+
+#### Finding 21: Missing `imageLoaded` reset when `image` reference changes without `id` change
+
+**File:** `apps/web/src/components/photo-viewer.tsx:128`  
+**Confidence:** Medium
+
+**Buggy Code:**
+```tsx
+useEffect(() => {
+    setImageLoaded(false);
+    const fallbackTimer = setTimeout(() => setImageLoaded(true), 3000);
+    return () => clearTimeout(fallbackTimer);
+}, [image?.id]);
+```
+
+**Trigger:** If the `images` prop is mutated in-place (e.g., a parent re-renders with the same array reference but mutated objects), `image?.id` stays the same but `image` metadata changes. The `imageLoaded` state does not reset, so the blur placeholder stays hidden while the new image decodes, showing a blank or stale image.
+
+**Fix:** Use `image` object identity as the dependency:
+```tsx
+}, [image]);
+```
+
+**Lines changed:** 1
+
+---
+
+#### Finding 22: `prevImage` / `nextImage` preload may be stale after navigation
+
+**File:** `apps/web/src/components/photo-viewer.tsx:283`  
+**Confidence:** Medium
+
+**Buggy Code:**
+```tsx
+const imgs = [image?.prevImage, image?.nextImage].filter(Boolean) as Array<NonNullable<typeof image.prevImage>>;
+```
+
+**Trigger:** The `image` object is derived from `images[currentIndex]`. When the user navigates to a new photo, `currentImageId` updates, `currentIndex` recalculates, and `image` points to the new photo. However, the `useEffect` at line 282 depends on `[image, imageSizes, photoViewerSizes]`. If `image` is the same reference object (e.g., from a cached data layer), the effect may not re-run, and preloads for the wrong neighbors are emitted.
+
+**Fix:** Add `image?.id` to the dependency array:
+```tsx
+}, [image?.id, imageSizes, photoViewerSizes]);
+```
+
+**Lines changed:** 1
+
+---
+
+### MEDIUM Severity
+
+#### Finding 23: Race condition — `showLightboxRef` updated asynchronously
+
+**File:** `apps/web/src/components/photo-viewer.tsx:97-98`  
+**Confidence:** High
+
+**Buggy Code:**
+```tsx
+const showLightboxRef = useRef(showLightbox);
+useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
+```
+
+**Trigger:** In `navigate()` (line 219), `showLightboxRef.current` is read to decide whether to set `gallery_auto_lightbox` in sessionStorage. If `setShowLightbox(true)` is called and `navigate()` runs before the effect at line 98 fires, `showLightboxRef.current` will be stale (`false`), and the auto-lightbox flag won't be set. This is a classic React state-ref synchronization race.
+
+**Fix:** Use `useLayoutEffect` for the ref sync (narrows the window, though doesn't close it completely), or use a callback ref pattern that is set synchronously in the state setter.
+
+**Lines changed:** 1 (change `useEffect` to `useLayoutEffect`)
+
+---
+
+#### Finding 24: `requestIdleCallback` fallback timer may leak on unmount
+
+**File:** `apps/web/src/components/photo-viewer.tsx:244-263`  
+**Confidence:** High
+
+**Buggy Code:**
+```tsx
+const scheduleIdle = (fn: () => void): (() => void) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        const id = window.requestIdleCallback(fn, { timeout: 3000 });
+        return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(fn, 1500);
+    return () => clearTimeout(id);
+};
+```
+
+**Trigger:** The cleanup function returned by `scheduleIdle` is stored in `cancelFns` and called in the effect cleanup. However, if the component unmounts between `scheduleIdle` being called and the idle callback firing, the callback may still execute (the cancel function is not called until cleanup). If the component remounts quickly, the old callback may fire after the new mount, causing a stale `router.prefetch()`.
+
+**Fix:** Track a `mountedRef` and guard the callback body:
+```tsx
+const scheduleIdle = (fn: () => void): (() => void) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        const id = window.requestIdleCallback(() => { if (mountedRef.current) fn(); }, { timeout: 3000 });
+        return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(() => { if (mountedRef.current) fn(); }, 1500);
+    return () => clearTimeout(id);
+};
+```
+
+**Lines changed:** 2
+
+---
+
+#### Finding 25: `histogram.tsx` worker leak on rapid photo changes
+
+**File:** `apps/web/src/components/histogram.tsx:526-532`  
+**Confidence:** High
+
+**Buggy Code:**
+```tsx
+useEffect(() => {
+    workerRef.current = new Worker(`/histogram-worker.js?v=${IMAGE_PIPELINE_VERSION}`);
+    return () => {
+        workerRef.current?.terminate();
+        workerRef.current = null;
+    };
+}, []);
+```
+
+**Trigger:** The worker is created once per component mount and terminated on unmount. However, if the component is remounted frequently (e.g., navigating between photos rapidly in the photo viewer, where each photo change may remount the histogram), workers are created and terminated repeatedly. This is expensive and can exhaust browser worker limits in extreme cases.
+
+**Fix:** Consider using a module-scope worker singleton or a worker pool, since the worker is stateless and can be reused across component instances.
+
+**Lines changed:** ~10 (refactor to module-scope singleton)
+
+---
+
+#### Finding 26: `info-bottom-sheet.tsx` touch handler does not prevent default on `touchmove`
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx:82-87`  
+**Confidence:** High
+
+**Buggy Code:**
+```tsx
+const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (touchStartY.current === null) return;
+    e.preventDefault(); // prevent background scroll while dragging the sheet
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+    setLiveTranslateY(deltaY);
+}, []);
+```
+
+**Trigger:** The `handleTouchMove` is attached to the drag handle button's `onTouchMove`. However, React's synthetic event system does not call `preventDefault()` on passive touch listeners by default in modern browsers. The `e.preventDefault()` here may be a no-op if the browser has made the listener passive (which React does by default for touch events). Background scroll may still occur while dragging the sheet.
+
+**Fix:** Attach the touch move handler natively with `{ passive: false }` on the drag handle ref, or use `touch-action: none` CSS on the drag handle element.
+
+**Lines changed:** 2-3 (add CSS or native handler)
+
+---
+
+### LOW Severity
+
+#### Finding 27: `lightbox.tsx` focus trap may trap focus on unmount if `closeButtonRef` is null
+
+**File:** `apps/web/src/components/lightbox.tsx:447`  
+**Confidence:** Medium
+
+**Buggy Code:**
+```tsx
+<FocusTrap focusTrapOptions={{ allowOutsideClick: true, fallbackFocus: () => closeButtonRef.current || document.body }}>
+```
+
+**Trigger:** If `closeButtonRef.current` is null at mount time (e.g., the close button is conditionally rendered, though it is not in this case), the fallback focus lands on `document.body`. On unmount, `previouslyFocusedRef.current` is restored. If the previously focused element was inside a modal or another focus trap, restoring focus there may break the focus trap of the new active modal.
+
+**Fix:** Ensure `closeButtonRef` is always populated before the focus trap activates, or use a more robust focus restoration strategy that checks if the previously focused element is still focusable and visible.
+
+**Lines changed:** 3-5
+
+---
+
+#### Finding 28: `sw.template.js` `recordAndEvict` may evict the just-added entry if it is the only entry and exceeds cap
+
+**File:** `apps/web/public/sw.template.js:95-126`  
+**Confidence:** Medium
+
+**Trigger:** If a single image is larger than `MAX_IMAGE_BYTES` (50 MB), the loop will evict the entry that was just added (since it is the only entry). The `deleted` check on `cache.delete` will be `true`, `total` drops to 0, and the entry is removed from metadata. However, the image may still be in the cache (the `cache.delete` succeeded, but if it was the only entry, the cache is now empty). The metadata and cache are consistent, but the behavior is surprising: a single large image cannot be cached even if it is the only thing being viewed.
+
+**Fix:** Add a guard to skip eviction of the just-added entry unless absolutely necessary, or document this behavior as intentional (preventing a single image from blowing the cache).
+
+**Lines changed:** 2-3
+
+---
+
+#### Finding 29: `search.tsx` debounce timer not cleared on unmount for in-flight searches
+
+**File:** `apps/web/src/components/search.tsx:237-250`  
+**Confidence:** High
+
+**Trigger:** The cleanup function clears the debounce timer. However, if the component unmounts while a `performSearch` is in-flight (after the debounce timer has fired but before the async operation completes), the `requestIdRef.current` check in `performSearch` will not catch this because `requestIdRef` is only incremented at the start of a new search, not on unmount. The stale search may still commit its results after unmount.
+
+**Fix:** Add a `mountedRef` and check it before committing results in `performSearch`:
+```tsx
+const mountedRef = useRef(true);
+useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+// In performSearch:
+if (requestId !== requestIdRef.current || !mountedRef.current) return;
+```
+
+**Lines changed:** 4-5
+
+---
+
+#### Finding 30: `tag-input.tsx` `highlightedIndex` may go out of bounds after filter change
+
+**File:** `apps/web/src/components/tag-input.tsx:136-143`  
+**Confidence:** High
+
+**Buggy Code:**
+```tsx
+} else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    setIsOpen(true);
+    const maxIndex = filteredTags.length + (showCreateOption ? 0 : -1);
+    setHighlightedIndex(prev => (prev < maxIndex ? prev + 1 : 0));
+} else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    setIsOpen(true);
+    const maxIndex = filteredTags.length + (showCreateOption ? 0 : -1);
+    setHighlightedIndex(prev => (prev > 0 ? prev - 1 : maxIndex));
+}
+```
+
+**Trigger:** If `filteredTags.length` is 0 and `showCreateOption` is false, `maxIndex` becomes `-1`. The `ArrowDown` path sets `highlightedIndex` to `0` (since `prev < -1` is false for any non-negative `prev`), which is out of bounds. The `ArrowUp` path sets `highlightedIndex` to `-1`, also out of bounds. This can cause `aria-activedescendant` to point to a non-existent ID.
+
+**Fix:** Clamp `maxIndex` to at least 0:
+```tsx
+const maxIndex = Math.max(0, filteredTags.length + (showCreateOption ? 0 : -1));
+```
+
+**Lines changed:** 1
+
+---
+
+## Positive Observations (Client-Side)
+
+- **Excellent SSR/hydration boundary handling:** `useDisplayCapability` correctly uses `useSyncExternalStore` with a stable snapshot reference to avoid React #185 infinite loops, and `WideGamutHint` defers rendering until after mount to prevent CLS.
+- **Robust image fallback patterns:** The `jpegFallbackTriedRef` + `sizedSourcesFailed` state machine in `photo-viewer.tsx` and `lightbox.tsx` correctly handles legacy photos missing sized derivatives, with the atomic-rename contract guaranteeing base filename availability.
+- **Comprehensive IME composition handling:** `isImeComposingReactEvent` and `isImeComposingNativeEvent` guards are consistently applied across search, tag input, and lightbox keyboard handlers, preventing half-composed input submission.
+- **Strong accessibility:** ARIA live regions, `aria-activedescendant`, `role="dialog"`, `aria-modal`, and focus trap management are consistently implemented across modals and overlays.
+- **Touch-target audit compliance:** The codebase consistently uses `min-h-11` / `min-w-11` (44 px) for interactive elements, meeting WCAG 2.5.5 AAA requirements.
 
 ---
 
