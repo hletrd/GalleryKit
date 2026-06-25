@@ -241,9 +241,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
         // AGG-R11C11-L11: gate prefetch on connection type and data-saver mode
         // so users on slow or metered connections don't pay the bandwidth cost.
-        const conn = (navigator as any).connection as
-            | { saveData?: boolean; effectiveType?: string }
-            | undefined;
+        interface ConnInfo { saveData?: boolean; effectiveType?: string }
+        const conn = (navigator as Navigator & { connection?: ConnInfo }).connection;
         if (conn?.saveData) return;
         if (conn?.effectiveType === '2g' || conn?.effectiveType === 'slow-2g') return;
 

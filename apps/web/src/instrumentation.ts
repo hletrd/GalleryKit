@@ -9,7 +9,7 @@ export async function register() {
         // lookup does not pay the 50-100 ms module-load penalty on the hot path.
         // The module is optional (dev environments may not have the data files).
         try {
-            require('geoip-lite');
+            await import('geoip-lite');
         } catch {
             // geoip-lite data files not present — lookups will gracefully fall
             // back to 'unknown' country code in analytics.ts

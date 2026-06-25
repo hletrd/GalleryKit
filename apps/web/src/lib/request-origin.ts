@@ -54,12 +54,6 @@ export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
 
 function getExpectedOrigin(requestHeaders: HeaderLookup) {
     const protocol = getTrustedRequestProtocol(requestHeaders);
-    // AGG-R11C11-L6: return null early when protocol is missing rather than
-    // falling back to 'http' for host normalization (which could produce a
-    // misleading http:// origin on an HTTPS-only deployment).
-    if (!protocol) {
-        return null;
-    }
 
     const trustedForwardedHost = trustsProxyHeaders()
         ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))
@@ -70,8 +64,8 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
         return null;
     }
 
-    const host = stripDefaultPort(rawHost, protocol);
-    return toOrigin(`${protocol}://${host}`);
+    const host = stripDefaultPort(rawHost, protocol ?? 'http');
+    return toOrigin(`${protocol ?? 'http'}://${host}`);
 }
 
 function toOrigin(candidate: string) {
