@@ -111,6 +111,14 @@ describe('hasTrustedSameOrigin', () => {
     });
 
 
+    it('returns null when all protocol headers are missing', () => {
+        delete process.env.TRUST_PROXY;
+
+        expect(getTrustedRequestProtocol(makeHeaders({
+            host: 'gallery.atik.kr',
+        }))).toBe(null);
+    });
+
     it('uses the same right-most trusted forwarded proto for cookie security decisions', () => {
         process.env.TRUST_PROXY = 'true';
 

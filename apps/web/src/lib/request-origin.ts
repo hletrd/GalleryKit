@@ -49,7 +49,7 @@ export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
     return trustedForwardedProto
         || getProtocolFromCandidate(requestHeaders.get('origin'))
         || getProtocolFromCandidate(requestHeaders.get('referer'))
-        || 'http';
+        || null;
 }
 
 function getExpectedOrigin(requestHeaders: HeaderLookup) {
@@ -80,7 +80,7 @@ export function hasTrustedSameOrigin(requestHeaders: HeaderLookup) {
     return hasTrustedSameOriginWithOptions(requestHeaders);
 }
 
-export function hasTrustedSameOriginWithOptions(
+function hasTrustedSameOriginWithOptions(
     requestHeaders: HeaderLookup,
     options: { allowMissingSource?: boolean } = {}
 ) {
@@ -105,3 +105,5 @@ export function hasTrustedSameOriginWithOptions(
 
     return allowMissingSource;
 }
+
+export { hasTrustedSameOriginWithOptions };
