@@ -436,22 +436,23 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
 
             // US-P52: Fire-and-forget caption hook. MUST NOT block the queue job.
             // Runs after Sharp processing completes and processed=true is committed.
-            generateCaption(
-                { imageId: job.id, camera_model: job.camera_model, capture_date: job.capture_date },
-                autoAltTextEnabled,
-            ).then(async (caption) => {
-                if (caption === null) return;
+            // Uses the same void-IIFE pattern as the embedding hook below for
+            // consistency (L7).
+            void (async () => {
                 try {
+                    const caption = await generateCaption(
+                        { imageId: job.id, camera_model: job.camera_model, capture_date: job.capture_date },
+                        autoAltTextEnabled,
+                    );
+                    if (caption === null) return;
                     await db.update(images)
                         .set({ alt_text_suggested: caption })
                         .where(eq(images.id, job.id));
                     console.debug(`[Queue] Caption stored for image ${job.id}`);
                 } catch (captionErr) {
-                    console.warn(`[Queue] Failed to store caption for image ${job.id}:`, captionErr);
+                    console.warn(`[Queue] Caption generation failed for image ${job.id}:`, captionErr);
                 }
-            }).catch((captionErr) => {
-                console.warn(`[Queue] Caption generation failed for image ${job.id}:`, captionErr);
-            });
+            })();
 
             // US-P51: Fire-and-forget embedding hook. MUST NOT block the queue job.
             // Runs after Sharp processing + processed=true is committed. Gated by
@@ -721,9 +722,23 @@ export const bootstrapImageProcessingQueue = async () => {
         if (lastPending) {
             state.bootstrapCursorId = lastPending.id;
         }
-        state.bootstrapped = pending.length < BOOTSTRAP_BATCH_SIZE;
+        // R10-M14: When pending.length === 0, we cannot distinguish "no pending
+        // images at all" from "all pending images in this batch are permanently
+        // failed". Only set bootstrapped = true when we got a non-empty batch
+        // that is smaller than the batch size (meaning we've reached the end).
+        // An empty batch keeps bootstrapped = false so the retry timer will
+        // re-run bootstrap; if there are truly no pending images, the retry
+        // will also return empty and bootstrapped stays false — but the retry
+        // delay (30s) is acceptable for this edge case. If there ARE valid
+        // pending images after the failed batch, they will be discovered on
+        // the retry because the cursor is null (no cursor when pending is empty).
+        state.bootstrapped = pending.length > 0 && pending.length < BOOTSTRAP_BATCH_SIZE;
         if (state.bootstrapped) {
             state.bootstrapCursorId = null;
+        } else if (pending.length === 0) {
+            // Empty batch — reset cursor so retry scans from the beginning
+            state.bootstrapCursorId = null;
+            scheduleBootstrapRetry(state, '[Queue] Bootstrap returned zero pending images.');
         } else {
             scheduleBootstrapContinuation(state);
         }

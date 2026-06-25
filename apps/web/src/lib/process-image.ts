@@ -570,9 +570,12 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
                 await safeCloseDirHandle(dirHandle);
             }
         } catch (err) {
-            // ENOENT means the directory doesn't exist yet — nothing to scan,
-            // the known filesToDelete set above is sufficient. Log non-ENOENT
-            // errors so disk/permission issues don't go silently unnoticed.
+            // ENOENT means the directory doesn't exist yet — nothing to scan.
+            // This is EXPECTED when the upload directory hasn't been created
+            // (first upload, or the directory was removed). The known
+            // filesToDelete set above (base file + size variants) is sufficient
+            // for cleanup in this case. Non-ENOENT errors (EACCES, EIO, EMFILE)
+            // are logged so disk/permission issues don't go silently unnoticed.
             if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
                 console.warn(`[deleteImageVariants] Directory scan failed for ${dir}:`, err);
             }

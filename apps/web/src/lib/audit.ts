@@ -1,9 +1,42 @@
 import { db, auditLog } from '@/db';
 import { lt } from 'drizzle-orm';
 
+// Security-relevant fields that should be preserved when truncating audit metadata.
+// These are prioritized so they appear first in the serialized JSON, making them
+// more likely to survive truncation while still capturing the full metadata when
+// it fits within the limit.
+const SECURITY_PRIORITY_KEYS = ['ip', 'userAgent', 'action', 'userId', 'targetType', 'targetId'];
+
+/**
+ * Reorder metadata object so security-relevant fields appear first.
+ * This maximizes the chance that critical forensic fields survive truncation.
+ */
+function prioritizeSecurityFields(metadata: Record<string, unknown>): Record<string, unknown> {
+    const prioritized: Record<string, unknown> = {};
+    // Copy priority keys first (only if present)
+    for (const key of SECURITY_PRIORITY_KEYS) {
+        if (key in metadata) {
+            prioritized[key] = metadata[key];
+        }
+    }
+    // Copy remaining keys
+    for (const key of Object.keys(metadata)) {
+        if (!SECURITY_PRIORITY_KEYS.includes(key)) {
+            prioritized[key] = metadata[key];
+        }
+    }
+    return prioritized;
+}
+
 /**
  * Fire-and-forget audit log writer.
  * Callers should use `.catch(console.debug)` to avoid blocking.
+ *
+ * Security note: When metadata exceeds 4096 chars, it is truncated to a 4000-char
+ * preview. Security-relevant fields (ip, userAgent, action, userId, targetType,
+ * targetId) are reordered to appear first in the JSON so they are more likely
+ * to survive truncation. The `preview` field is a raw character slice and is NOT
+ * meant to be parsed programmatically.
  */
 export async function logAuditEvent(
     userId: number | null,
@@ -16,7 +49,8 @@ export async function logAuditEvent(
     let serializedMetadata: string | null = null;
     if (metadata) {
         try {
-            serializedMetadata = JSON.stringify(metadata);
+            const prioritizedMetadata = prioritizeSecurityFields(metadata);
+            serializedMetadata = JSON.stringify(prioritizedMetadata);
         } catch {
             serializedMetadata = JSON.stringify({ note: 'metadata serialization failed' });
         }
