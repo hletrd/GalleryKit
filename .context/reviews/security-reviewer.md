@@ -1,9 +1,9 @@
 # Security Review Report — GalleryKit
 
-**Scope:** GalleryKit repository at HEAD c0522dec
+**Scope:** GalleryKit repository at HEAD bcd67b12
 **Reviewer:** Security Reviewer (OWASP Top 10, secrets, auth, input validation, data protection)
 **Date:** 2026-06-25
-**Risk Level:** LOW (no confirmed exploitable vulnerabilities; defense-in-depth gaps identified)
+**Risk Level:** LOW (no confirmed exploitable vulnerabilities; defense-in-depth gaps identified and remediated)
 
 ---
 
@@ -17,6 +17,8 @@
 | LOW | 0 | All previously identified LOW issues have been addressed or were informational |
 
 **Overall Assessment:** The GalleryKit codebase demonstrates mature security engineering. All three security lint gates pass (`api-auth`, `action-origin`, `public-route-rate-limit`). No hardcoded secrets were found. No CRITICAL or HIGH CVEs in dependencies. The authentication layer (Argon2id, HMAC-SHA256 sessions, dual-bucket rate limiting) exceeds OWASP minimums. Input validation is comprehensive (Unicode bidi/zero-width rejection, C0/C1 strip, path traversal prevention, symlink rejection). The two MEDIUM findings from the prior review (run-8 cycle-2) have been fully remediated. The three LOW findings have also been addressed.
+
+Six new commits since the prior review (c0522dec → bcd67b12) include two security fixes (missing `isAdmin()` checks, mutable reference leak in rate-limit getters), one input-validation hardening (`Array.isArray` guard), two operational safety improvements (restore-maintenance consistency, revalidation error isolation), and one error-handling improvement (ENOENT distinction). All are positive security or safety improvements. No new vulnerabilities were introduced.
 
 ---
 
@@ -133,35 +135,131 @@ This is applied in production (not development) alongside other security headers
 
 ---
 
-## New Security-Relevant Changes Since Prior Review (HEAD f13130aeb → c0522dec)
+## New Security-Relevant Changes Since Prior Review (HEAD c0522dec → bcd67b12)
 
-### AGG-M2: Precomputed Dummy Argon2 Hash at Module Init
-**Location:** `apps/web/src/app/actions/auth.ts:65-68`  
-**Impact:** Positive — closes a TOCTOU race condition where concurrent logins after restart could race the lazy initialization of the dummy hash. The dummy hash is now computed once at module initialization (not lazily), ensuring consistent timing-equalization behavior from the first login attempt.
+### SEC-FIX-1: Missing `isAdmin()` Checks in `deleteAdminUser` and LR Token Actions (SECURITY FIX)
+**Commits:** `b22fa85e`  
+**Location:** `apps/web/src/app/actions/admin-users.ts:183`, `apps/web/src/app/actions/lr-tokens.ts:36,107`  
+**Impact:** Positive — closes a broken access control gap where `deleteAdminUser` and LR token actions (`createLrToken`, `revokeLrToken`) only checked `requireSameOriginAdmin()` (which verifies origin) but did not verify the caller was actually an admin before proceeding to the `getCurrentUser()` check.
 
+**Previous State:** The functions checked `requireSameOriginAdmin()` (origin verification) and then `getCurrentUser()` (session validity), but skipped the `isAdmin()` gate. While `getCurrentUser()` returns null for non-admin sessions, the ordering meant a valid non-admin session could reach the `getCurrentUser()` call and potentially trigger audit logging or other side effects before the null check. More importantly, the defense-in-depth posture was inconsistent with every other mutating admin action.
+
+**Current State:**
 ```typescript
-const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
+// admin-users.ts:183
+if (!(await isAdmin())) return { error: t('unauthorized') };
+
+// lr-tokens.ts:36
+if (!(await isAdmin())) return { error: t('unauthorized') };
+
+// lr-tokens.ts:107
+if (!(await isAdmin())) return { error: t('unauthorized') };
 ```
 
-**Security Relevance:** Prevents timing-based user enumeration attacks that could exploit the window between module load and first dummy hash computation.
+All three functions now follow the standard pattern: `maintenance check → isAdmin() → requireSameOriginAdmin() → getCurrentUser()`. This is the same ordering used in `createAdminUser`, `uploadImages`, `updateGallerySettings`, and all other mutating admin actions.
 
-### AGG-M3: BoundedMap Auto-Enforces Hard Cap on Write
-**Location:** `apps/web/src/lib/bounded-map.ts:67-88`  
-**Impact:** Positive — prevents unbounded growth in rate-limit Maps when consumers forget to call `prune()` explicitly. The class name implies bounded behavior; this change makes it truly bounded by auto-evicting oldest entries on every `set()` call.
+**Confidence:** High — the fix is straightforward and consistent with the established pattern.
 
-**Security Relevance:** Prevents memory exhaustion from forgotten prune calls in rate-limiting code paths.
+---
 
-### AGG-M4: View-Count Flush Chunk Reduced from 20 to 5
-**Location:** `apps/web/src/lib/data.ts:66`  
-**Impact:** Positive — reduces connection pool exhaustion risk during view-count flush operations. The smaller chunk size (5 concurrent updates instead of 20) leaves more connections available for live request traffic.
+### SEC-FIX-2: Rate-Limit Entry Getters Return Shallow Copies (DEFENSE IN DEPTH)
+**Commit:** `5f4a5e95`  
+**Location:** `apps/web/src/lib/auth-rate-limit.ts:28,38,109`  
+**Impact:** Positive — prevents external mutation of internal rate-limit state.
 
-**Security Relevance:** Prevents denial-of-service via view-count buffer flooding that could starve the connection pool.
+**Previous State:** `getLoginRateLimitEntry`, `getAccountLoginRateLimitEntry`, and `getPasswordChangeRateLimitEntry` returned the internal `WindowEntry` object directly. Callers could mutate `entry.count` or `entry.lastAttempt`, affecting the shared in-memory rate-limit state. While the only callers in the codebase (`recordFailedLoginAttempt`, `clearSuccessfulLoginAttempts`, etc.) correctly copy the entry before modifying it, the API surface was vulnerable to future misuse.
 
-### AGG-M1: Fresh Dimension Read from Sharp
-**Location:** `apps/web/src/lib/process-image.ts:983-997`  
-**Impact:** Positive — reads both dimensions fresh from Sharp at processing time instead of using the upload-time width. Prevents mixed-freshness inconsistency if the original file is modified between upload and processing.
+**Current State:** All three getters now return `{ ...entry }` (shallow copy):
+```typescript
+return { ...entry };
+```
 
-**Security Relevance:** Prevents potential bypass of the 50 MP wide-gamut downscale gate if a file is swapped after upload validation.
+This ensures callers receive a snapshot of the rate-limit state that cannot affect the internal Map entries. The change is defensive — no known exploit existed, but it hardens the API contract against future bugs.
+
+**Confidence:** High — the fix is a standard defensive pattern.
+
+---
+
+### SEC-FIX-3: `Array.isArray` Guard on `loadMoreImages` tagSlugs (INPUT VALIDATION HARDENING)
+**Commit:** `bcd67b12`  
+**Location:** `apps/web/src/app/actions/public.ts:93-95`  
+**Impact:** Positive — prevents prototype pollution / unexpected behavior from non-array tagSlugs parameter.
+
+**Previous State:** `loadMoreImages` accepted `tagSlugs?: string[]` and passed it directly to `canonicalizeRequestedTagSlugs(tagSlugs || [])`. If a malicious client sent a non-array value (e.g., an object with a custom `length` property, or a string), `canonicalizeRequestedTagSlugs` would receive an unexpected input shape. While `canonicalizeRequestedTagSlugs` iterates with `.map()` and `.filter()`, non-array inputs could cause unexpected behavior.
+
+**Current State:**
+```typescript
+const safeTags = Array.isArray(tagSlugs)
+    ? canonicalizeRequestedTagSlugs(tagSlugs).filter(isValidTagSlug)
+    : [];
+```
+
+The `Array.isArray` guard ensures only actual arrays are processed; non-array inputs are treated as empty tags. This is consistent with the defense-in-depth input validation posture used throughout the codebase.
+
+**Confidence:** High — the fix is a standard input validation pattern.
+
+---
+
+### SEC-FIX-4: Restore-Maintenance Checks Added to Smart Collections and Embedding Backfill (OPERATIONAL SAFETY)
+**Commit:** `7453030e`  
+**Location:** `apps/web/src/app/actions/collections.ts:17-18`, `apps/web/src/app/actions/embeddings.ts:22+`  
+**Impact:** Positive — prevents mutating operations during DB restore, maintaining consistency with all other admin actions.
+
+**Previous State:** `createSmartCollection` and the embedding backfill action did not check `isRestoreMaintenanceActive()` before proceeding. While these are admin-only actions with `isAdmin()` and `requireSameOriginAdmin()` checks, the restore-maintenance gate was missing. All other mutating admin actions (upload, delete, settings, topic CRUD, admin user CRUD, LR token CRUD) check this gate.
+
+**Current State:** Both actions now include the standard restore-maintenance check:
+```typescript
+const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+if (maintenanceError) return { error: maintenanceError };
+```
+
+This ensures the DB cannot be modified during a restore operation, preventing inconsistent state.
+
+**Confidence:** High — the fix is consistent with the established pattern.
+
+---
+
+### SEC-FIX-5: ENOENT Distinction in `deleteImageVariants` (ERROR HANDLING IMPROVEMENT)
+**Commit:** `9c5c38ca`  
+**Location:** `apps/web/src/lib/process-image.ts:537-543`  
+**Impact:** Positive — prevents silent suppression of disk/permission errors during image cleanup.
+
+**Previous State:** The `deleteImageVariants` function caught all `opendir` errors silently, logging nothing. A disk failure or permission error would be silently swallowed, making debugging difficult and potentially leaving orphaned files undetected.
+
+**Current State:**
+```typescript
+catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`[deleteImageVariants] Directory scan failed for ${dir}:`, err);
+    }
+}
+```
+
+`ENOENT` (directory doesn't exist yet) is expected and silent; all other errors are logged as warnings. This improves operational visibility without changing security semantics.
+
+**Confidence:** High — the fix improves observability without changing security behavior.
+
+---
+
+### SEC-FIX-6: Revalidation Moved Outside try/catch (ERROR ISOLATION)
+**Commit:** `db55056f`  
+**Location:** `apps/web/src/app/actions/topics.ts:166-172,334-338`  
+**Impact:** Positive — prevents Next.js revalidation errors from triggering image cleanup rollback.
+
+**Previous State:** In `createTopic` and `updateTopic`, `revalidateAllAppData()` was called inside the try block, after the DB transaction succeeded. If revalidation threw (e.g., Next.js internal error), the catch block would execute the image cleanup code (deleting the uploaded topic image file), even though the DB transaction had already committed. This created a state where the DB referenced a file that no longer existed on disk.
+
+**Current State:** Revalidation is now in the `finally` block:
+```typescript
+} finally {
+    // Run revalidation outside the try/catch so a revalidation error never
+    // triggers the image cleanup in the catch block.
+    revalidateAllAppData();
+}
+```
+
+This ensures revalidation errors are isolated from the DB transaction + file cleanup logic. A revalidation failure no longer corrupts the file/DB consistency.
+
+**Confidence:** High — the fix is a standard error-isolation pattern.
 
 ---
 
@@ -180,6 +278,7 @@ const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('
 - [x] Password change with session rotation
 - [x] Personal Access Tokens (PATs) with SHA-256 hashing and constant-time comparison
 - [x] Token scope enforcement (`lr:upload`, `lr:read`, `lr:delete`)
+- [x] **FIXED (b22fa85e):** `isAdmin()` check added to `deleteAdminUser` and LR token actions
 
 ### Input Validation
 - [x] All user inputs validated and sanitized
@@ -192,6 +291,7 @@ const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('
 - [x] JSON-LD uses `safeJsonLd` with `<`/`>` escaping
 - [x] Admin string validation uses `sanitizeAdminString` (rejects + returns null on formatting chars)
 - [x] `requireCleanInput` used for server action payload validation
+- [x] **FIXED (bcd67b12):** `Array.isArray` guard on `loadMoreImages` tagSlugs parameter
 
 ### Output Encoding
 - [x] HTML output escaped via React (no `innerHTML` or `dangerouslySetInnerHTML` except JSON-LD)
@@ -235,6 +335,7 @@ const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('
 - [x] Advisory locks prevent concurrent restore/backfill/upload operations
 - [x] `safeInsertId` prevents BigInt coercion overflow
 - [x] `normalizeStringRecord` validates server action payload shapes
+- [x] **FIXED (7453030e):** Restore-maintenance checks added to smart collections and embedding backfill
 
 ### Rate Limiting
 - [x] Login: per-IP (5/15min) + per-account (5/15min)
@@ -246,6 +347,7 @@ const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('
 - [x] Semantic search: per-IP rate limited (Pattern-2: rollback on validation failure)
 - [x] View recording: per-IP rate limited (in-memory only, best-effort)
 - [x] Lightroom upload: cumulative tracker with TOCTOU protection
+- [x] **FIXED (5f4a5e95):** Rate-limit entry getters return shallow copies to prevent mutable reference leaks
 
 ### Privacy & Data Protection
 - [x] GPS coordinates excluded from public API responses
@@ -271,6 +373,7 @@ const dummyHashPromise: Promise<string> = argon2.hash(randomBytes(32).toString('
 - [x] Audit log retention with negative-value guard (COR-R4C6-10)
 - [x] Rate-limit purge with bounded growth
 - [x] Structured error responses (no stack traces in production)
+- [x] **FIXED (9c5c38ca):** ENOENT distinction in `deleteImageVariants` improves error observability
 
 ---
 
@@ -327,6 +430,9 @@ All three security lint gates passed:
 | CSV Injection | NOT FOUND | `escapeCsvField` strips C0/C1, bidi, zero-width, and prefixes formula chars |
 | Backup/Restore Security | NOT FOUND | Authenticated download route; path containment; symlink rejection; SQL dump header validation |
 | Shared Group Access Control | NOT FOUND | Base56 key validation; expiry check; rate limiting; view-count buffering |
+| Broken Access Control (missing auth) | NOT FOUND | **FIXED (b22fa85e):** `isAdmin()` checks added to `deleteAdminUser` and LR token actions |
+| Mutable State Leak | NOT FOUND | **FIXED (5f4a5e95):** Rate-limit getters return shallow copies |
+| Input Validation (type confusion) | NOT FOUND | **FIXED (bcd67b12):** `Array.isArray` guard on `loadMoreImages` tagSlugs |
 
 ---
 
@@ -343,17 +449,20 @@ GalleryKit's security posture is **strong and has improved since the prior revie
 7. **Audit and monitoring**: Fire-and-forget audit logging, structured error responses, stderr sanitization
 8. **Security headers**: CSP with nonce, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, X-Content-Type-Options
 
-**All findings from the prior review have been remediated.** No new CRITICAL, HIGH, or MEDIUM findings were identified in this review. The changes since the last review (f13130aeb → c0522dec) are all positive security improvements:
-- AGG-M2: Precomputed dummy Argon2 hash closes TOCTOU race
-- AGG-M3: BoundedMap auto-enforces hard cap preventing memory exhaustion
-- AGG-M4: Smaller view-count flush chunks prevent pool exhaustion
-- AGG-M1: Fresh dimension reads prevent potential gate bypass
+**All findings from the prior review have been remediated.** No new CRITICAL, HIGH, or MEDIUM findings were identified in this review. The six commits since the last review (c0522dec → bcd67b12) are all positive security or safety improvements:
+- **b22fa85e:** `isAdmin()` checks added to `deleteAdminUser` and LR token actions (closes broken access control gap)
+- **5f4a5e95:** Rate-limit entry getters return shallow copies (prevents mutable reference leaks)
+- **bcd67b12:** `Array.isArray` guard on `loadMoreImages` tagSlugs (input validation hardening)
+- **7453030e:** Restore-maintenance checks added to smart collections and embedding backfill (operational consistency)
+- **9c5c38ca:** ENOENT distinction in `deleteImageVariants` (error observability improvement)
+- **db55056f:** Revalidation moved outside try/catch (prevents file/DB inconsistency on revalidation errors)
 
 **Recommended ongoing maintenance:**
 1. Continue maintaining the three security lint gates as blocking CI checks
 2. Monitor `npm audit` for new CVEs in security-critical dependencies (`argon2`, `sharp`, `mysql2`, `next`)
 3. Review the `TRUST_PROXY` configuration on production deployments (the rate-limit system emits a one-time `[SECURITY]` warning when proxy headers are present but `TRUST_PROXY` is not set)
+4. Consider adding a lint rule or code review checklist item to verify `isAdmin()` is present before `requireSameOriginAdmin()` in all new mutating admin actions (the b22fa85e fix suggests this pattern was missed in two places)
 
 ---
 
-*Report generated by Security Reviewer agent. All findings verified against source code at HEAD c0522dec.*
+*Report generated by Security Reviewer agent. All findings verified against source code at HEAD bcd67b12.*

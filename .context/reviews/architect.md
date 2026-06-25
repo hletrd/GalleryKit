@@ -1,484 +1,345 @@
-# GalleryKit — Comprehensive Architectural Review
-
-**Date:** 2026-06-25
-**Scope:** Full codebase, `/Users/hletrd/flash-shared/gallery/apps/web/`
-**Reviewer:** Architect Agent
-**HEAD:** c0522dec
-**Confidence:** High (direct file reading, cross-reference analysis, pattern tracing, subagent exploration)
+# GalleryKit Architectural Review
+## HEAD: bcd67b12 | Date: 2026-06-25
 
 ---
 
-## Executive Summary
+## Summary
 
-GalleryKit is a mature, well-architected Next.js 16 photo gallery with strong security, privacy, and color-science foundations. The codebase demonstrates clear architectural ownership, extensive compile-time guards, three automated lint gates, and thorough documentation. The most significant concerns are four "god files" that exceed 800 lines each, a single layer violation where a library module imports from an application module, and a schema/type mismatch that forces unsafe casts. The single-process architecture is intentional and correctly documented. No critical architectural flaws were found.
-
-**Finding Summary:** 16 findings — 4 HIGH, 7 MEDIUM, 5 LOW.
+GalleryKit exhibits a mature, security-conscious architecture with strong defensive patterns: compile-time privacy guards, MySQL advisory locks for concurrency control, layered rate limiting, and a sophisticated color/HDR image pipeline. However, the codebase carries significant architectural debt from its iterative development through 10 review-plan-fix cycles. Key concerns include: (1) **single-instance topology constraints** that make horizontal scaling impossible without substantial rework; (2) **tight coupling between the image processing pipeline and database layer** that complicates testing and alternative storage backends; (3) **process-local state proliferation** (rate limit Maps, view count buffers, backfill runner state, queue state) that is correct for the current single-writer design but represents a fundamental scalability ceiling; (4) **storage abstraction incompleteness** — the `storage/` module exists but is not wired into the live pipeline; and (5) **schema complexity** in the `images` table (40+ columns) that conflates metadata, EXIF, color audit, and processing state. The architecture is appropriate for its intended use case (personal/photographer self-hosted gallery) but would require significant refactoring to support multi-instance deployments, alternative storage backends, or gallery sizes beyond tens of thousands of images.
 
 ---
 
-## 1. Layering & Coupling
+## Analysis
 
-### 1.1 Layer Violation: lib/api-auth.ts imports from app/actions/auth.ts (HIGH)
+### 1. Layering & Coupling
 
-**File:** `apps/web/src/lib/api-auth.ts:1`
-**Code:** `import { isAdmin } from '@/app/actions/auth';`
+#### 1.1 Image Processing Pipeline — Tight Coupling to Sharp and Filesystem
 
-**Concern:** `lib/api-auth.ts` is a library module (API route auth wrapper) that depends on `app/actions/auth.ts`, an application module. This is an upward dependency in the dependency graph. Library modules should never import from application modules. The `isAdmin()` function verifies session cookies and checks admin status — this is a core auth primitive that belongs in the library layer.
+The image processing pipeline in `lib/process-image.ts` (1633 lines) is the most complex module in the codebase. It couples:
+- Sharp (libvips) for image encoding/decoding
+- Direct filesystem operations (`fs/promises`, `createReadStream`)
+- Color detection (NCLX/ICC parsing)
+- GPS stripping (format-specific byte-level manipulation)
+- Blur placeholder generation
+- Post-encode verification (AVIF NCLX box scan, WebP ICCP chunk scan)
 
-**Why it matters:** This is the ONLY layer violation in the entire codebase. All other `lib/` modules import only from sibling `lib/` modules, `db/`, or npm packages. This one exception breaks the clean architectural boundary and makes it impossible to test `api-auth.ts` in isolation without pulling in the server action module graph.
+**Problem:** This module cannot be tested without the full Sharp + libvips + filesystem stack. There is no abstraction boundary between "image processing decisions" and "image processing execution." The `storage/` module (`lib/storage/index.ts:1-147`) exists as a singleton abstraction but the comment at line 7 explicitly states: "This storage backend is not yet wired into the live image pipeline. Direct fs operations are still used for uploads, processing, and public serving."
 
-**Suggested fix:** Extract `isAdmin()` from `app/actions/auth.ts` into `lib/session.ts` (which already has session verification primitives) or create a new `lib/auth-check.ts`. Then have both `app/actions/auth.ts` and `lib/api-auth.ts` import from the library module. This inverts the dependency direction so application code depends on library code, not vice versa.
+**File:line references:**
+- `lib/process-image.ts:1-1633` — monolithic image processing module
+- `lib/storage/index.ts:7-12` — unwired storage abstraction
+- `lib/upload-paths.ts:1-103` — direct path construction and filesystem access
 
-**Confidence:** High
+**Concrete failure scenario:** An operator wanting to use S3/MinIO for derivative storage would need to modify `process-image.ts` directly (where derivatives are written via `fs/promises` and `createWriteStream`) rather than implementing a storage backend interface. The atomic rename pattern (`.tmp` → final) at `process-image.ts:~600` assumes POSIX filesystem semantics.
 
----
+#### 1.2 Data Access Layer — Mixed Responsibilities
 
-### 1.2 God File: lib/data.ts (~1670 lines) (HIGH)
+`lib/data.ts` (600+ lines) combines:
+- Data access (Drizzle ORM queries)
+- React `cache()` deduplication
+- View count buffering (in-memory Map with flush timer)
+- Search logic (tag/alias fallback, GROUP BY derivation)
+- Prev/next navigation logic with NULL capture_date handling
 
-**File:** `apps/web/src/lib/data.ts` (entire file)
+**Problem:** The view count buffering (`lib/data.ts:17-193`) is a cross-cutting concern that has nothing to do with data access. It uses module-level `let` variables (`viewCountBuffer`, `viewCountFlushTimer`, `consecutiveFlushFailures`) that are process-local and invisible to other instances. This is correct for the single-instance topology but represents a layering violation — the data layer should not own buffering/aggregation logic.
 
-**Concern:** This module functions as the Data Access Layer (DAL) but also contains: React `cache()` wrappers, privacy field filtering (`publicSelectFields`), GROUP_CONCAT aggregation for UI tag display, pagination cursor logic, view-count buffering (a side-effecting analytics concern), and three compile-time privacy guards. It is doing the work of three distinct layers.
+**File:line references:**
+- `lib/data.ts:17-193` — view count buffering embedded in data layer
+- `lib/data.ts:209-281` — adminSelectFields definition (40+ fields)
+- `lib/data.ts:283-396` — publicSelectFields/publicMapSelectFields derivation via destructuring
 
-**Specific sub-concerns:**
-- **View-count buffer** (`data.ts:17-194`): A presentation-side analytics concern (shared-group view increments) is embedded in the DAL module. It uses module-level `let` state, `setTimeout`, and exponential backoff logic that has nothing to do with data access.
-- **Privacy field filtering** (`data.ts:350-458`): UI concerns (what fields are "public") are hardcoded in the DAL. This makes it impossible to have different public surfaces with different field visibility rules.
-- **GROUP_CONCAT aggregation** (`data.ts:613`): A presentation-level string aggregation (`tagNamesAgg`) is embedded in data queries.
-- **Map image query** (`data.ts:~1579`): A business rule (GPS privacy via `map_visible` INNER JOIN) is embedded in a data query, not in a domain layer.
+#### 1.3 Database Schema — Table Bloat and Conflation
 
-**Suggested fix:** Split into three focused modules:
-1. `lib/data/queries.ts` — Pure Drizzle queries, no `cache()`, no privacy filtering, no presentation logic.
-2. `lib/data/privacy.ts` — Privacy field definitions, compile-time guards, public/admin field mappings.
-3. `lib/data/view-buffer.ts` — View-count buffering with its own state management and flush logic.
+The `images` table has 40+ columns conflating:
+- Core metadata (filename_*, width, height, title, description)
+- EXIF data (camera_model, lens_model, iso, f_number, etc.)
+- Color/HDR audit columns (color_primaries, transfer_function, is_hdr, has_gain_map, avif_10bit, pipeline_version)
+- Processing state (processed, processing_error, failed_at)
+- Privacy-sensitive data (latitude, longitude, filename_original, user_filename)
 
-**Confidence:** High
+**Problem:** This violates the principle that tables should represent a single entity. The color/HDR columns (8 columns) are essentially a sidecar audit log that happens to live in the same table. The schema comment at `db/schema.ts:54-62` acknowledges this: "The schema columns below provide the foundation for future HDR delivery when the upstream API or an alternative encoder binding becomes viable."
 
----
+**File:line references:**
+- `db/schema.ts:19-117` — images table definition with 40+ columns
+- `db/schema.ts:54-62` — comment acknowledging deferred HDR delivery
 
-### 1.3 God File: lib/process-image.ts (~1628 lines) (HIGH)
+#### 1.4 Configuration Resolution — Circular Dependency Risk
 
-**File:** `apps/web/src/lib/process-image.ts` (entire file)
+`lib/gallery-config.ts` imports from `db/index.ts` (for `db` and `adminSettings`), and `db/index.ts` exports `POOL_CONNECTION_LIMIT` which is consumed by `lib/admin-backfill-runner.ts` for concurrency budgeting. This is not a circular dependency in practice but demonstrates tight coupling between configuration and database layers.
 
-**Concern:** This module contains: Sharp pipeline configuration, EXIF extraction, color pipeline decisions (ICC, NCLX, chromaticity), GPS metadata stripping, blur placeholder generation, post-encode verification, atomic file rename chains, and 10-bit AVIF probe logic. The `processImageFormats` function alone spans 369 lines with 12 parameters.
-
-**Specific sub-concerns:**
-- **Function signature bloat** (`processImageFormats`, lines 927-942): 12 parameters including quality overrides, sizes, ICC profile, force-SRGB flag, color signals, chroma subsampling, AVIF effort, and max source pixels. This is a "config bag" anti-pattern.
-- **GPS strip logic** (lines 1510-1628): 119 lines of container-aware byte surgery (JPEG, TIFF, ISOBMFF, WebP) embedded in the same file as the encoding pipeline. The `stripGpsFromOriginal` function reads entire files into memory (`fs.readFile`, line 1555) — up to 200MB per concurrent strip.
-- **Post-encode verification** (lines 1257-1270): Non-blocking AVIF NCLX and WebP ICC verification that logs warnings but does not throw. Mis-tagged wide-gamut files could be served with incorrect color metadata.
-- **Silent blur failure** (lines ~850): The blur generation catch block is bare (`catch { // Non-critical }`) with no logging — consistent failures would be invisible.
-
-**Suggested fix:** Extract into focused sub-modules:
-1. `lib/image-processing/pipeline.ts` — Core Sharp encoding pipeline, format fan-out, atomic writes.
-2. `lib/image-processing/exif.ts` — EXIF extraction and metadata parsing.
-3. `lib/image-processing/color.ts` — Color pipeline decisions, ICC resolution, NCLX handling.
-4. `lib/image-processing/gps.ts` — GPS stripping (already exists as `gps-exif-strip.ts`, but the orchestration call is in `process-image.ts`).
-5. `lib/image-processing/blur.ts` — Blur placeholder generation.
-
-Introduce a `PipelineConfig` interface to replace the 12-parameter function signature.
-
-**Confidence:** High
-
----
-
-### 1.4 God File: lib/image-queue.ts (~831 lines) (MEDIUM)
-
-**File:** `apps/web/src/lib/image-queue.ts` (entire file)
-
-**Concern:** This module contains: PQueue management, image processing orchestration, CLIP embedding generation, caption generation, session purging, rate-limit bucket purging, audit log purging, view event purging, orphaned tmp cleanup, retry logic, quiesce/resume for DB restore, and bootstrap continuation scheduling.
-
-**Specific sub-concerns:**
-- **ML inference coupling** (lines 21-24): Imports `generateCaption`, `embedImageStub`, `embedImageReal` — couples core image processing to ML inference. The image queue's core responsibility (file conversion) is entangled with ONNX/transformers model loading.
-- **Maintenance scheduling** (lines 737-767): Hourly GC timer for sessions, rate limits, audit logs, and view events is embedded in the image queue module. This is a system-level maintenance concern, not an image-processing concern.
-- **Process-local state** (lines 173-197): Queue state, retry counts, permanently failed IDs, and bootstrap cursor are all module-level `let` variables. Correctly documented as single-process, but tightly coupled to this module.
-
-**Suggested fix:** Extract into:
-1. `lib/image-processing/queue.ts` — Core PQueue management and image claim/processing.
-2. `lib/image-processing/post-process.ts` — CLIP and caption hooks (decoupled via event bus or callback registry).
-3. `lib/maintenance/scheduler.ts` — Hourly GC timer, session purging, audit log purging.
-
-**Confidence:** High
+**File:line references:**
+- `lib/gallery-config.ts:12-13` — imports db and adminSettings
+- `db/index.ts:23` — exports POOL_CONNECTION_LIMIT
+- `lib/admin-backfill-runner.ts:59` — imports POOL_CONNECTION_LIMIT
 
 ---
 
-### 1.5 God File: lib/admin-backfill-runner.ts (~874 lines) (MEDIUM)
+### 2. Scalability & Process-Local State
 
-**File:** `apps/web/src/lib/admin-backfill-runner.ts` (entire file)
+#### 2.1 Single-Instance Topology — Documented but Hardcoded
 
-**Concern:** This module contains: backfill state management, MySQL advisory lock acquisition, batch fetching, reprocessing orchestration, concurrency resolution, status tracking, and connection pool budgeting. It is the runtime cousin of `scripts/backfill-color-pipeline.ts` and duplicates much of its logic.
+The CLAUDE.md explicitly documents: "The shipped Docker Compose deployment is a single web-instance / single-writer topology. Restore maintenance flags, upload quota tracking, and image queue state are process-local; do not horizontally scale the web service unless those coordination states are moved to a shared store."
 
-**Suggested fix:** Extract into:
-1. `lib/backfill/state.ts` — Runner status, progress counters, error tracking.
-2. `lib/backfill/runner.ts` — Lock acquisition, batch fetching, worker pool management.
-3. Share common logic between the in-app runner and the sidecar script via a shared module.
+This is an honest architectural constraint, but the process-local state is pervasive:
 
-**Confidence:** Medium
+| State | Location | Shared Store Needed for Scale-Out |
+|-------|----------|-----------------------------------|
+| Image processing queue | `lib/image-queue.ts:76-196` (globalThis Symbol) | Redis / RabbitMQ |
+| Rate limit fast-path Maps | `lib/rate-limit.ts:101-107`, `lib/auth-rate-limit.ts:19-100` | Redis |
+| View count buffer | `lib/data.ts:17-33` | Redis / DB direct write |
+| Backfill runner status | `lib/admin-backfill-runner.ts:144-251` (globalThis Symbol) | DB row |
+| Upload tracker | `lib/upload-tracker-state.ts` (globalThis Symbol) | Redis |
+| Restore maintenance flag | `lib/restore-maintenance.ts:1-57` (globalThis Symbol) | DB row |
+| Session secret cache | `lib/session.ts:13-14` (module-level let) | Env var only |
+| Serving settings hash cache | `lib/serve-upload.ts:47-48` (module-level let) | Shared cache |
 
----
+**File:line references:**
+- `lib/image-queue.ts:76-196` — globalThis-backed queue state
+- `lib/admin-backfill-runner.ts:144-251` — globalThis-backed backfill state
+- `lib/restore-maintenance.ts:1-57` — globalThis-backed maintenance flag
+- `lib/data.ts:17-33` — module-level view count buffer
 
-### 1.6 Server Actions Import Directly from DB Schema (MEDIUM)
+#### 2.2 Rate Limiting — Dual-Layer with Inconsistency Risk
 
-**Files:** 11 of 14 server action files in `app/actions/` import directly from `@/db` (schema + connection pool).
+The rate limiting uses an in-memory fast path (BoundedMap) with a DB backup. The DB is the "source of truth across restarts" but the in-memory Maps are the fast path. This is a well-documented pattern, but there are subtle inconsistencies:
 
-**Concern:** Server actions are the application's "use case" layer. They construct raw Drizzle queries and import schema objects directly. This bypasses any domain abstraction and makes it impossible to: swap ORMs, add cross-cutting concerns (caching, audit, validation) uniformly, or unit-test actions without a database.
+- `loginRateLimit` (IP-scoped) and `accountLoginRateLimit` (account-scoped) are separate Maps with separate eviction policies
+- The DB `rateLimitBuckets` table uses a composite primary key `(ip, bucketType, bucketStart)` but the in-memory Maps use different key formats
+- `decrementRateLimit` wraps UPDATE + DELETE in a transaction, but the in-memory Map is decremented separately — a crash between the two leaves them inconsistent until the in-memory entry expires
 
-**Why it matters (trade-off):** The current approach is pragmatic for a personal gallery with a small team. A full domain service layer would add indirection and boilerplate. However, as the codebase grows, the lack of a domain layer will make refactors increasingly risky.
+**File:line references:**
+- `lib/rate-limit.ts:101-107` — in-memory rate limit Maps
+- `lib/rate-limit.ts:410-440` — decrementRateLimit with transaction
+- `lib/auth-rate-limit.ts:19-100` — account-scoped and password-change Maps
 
-**Suggested fix:** Introduce a thin domain service layer (`@/services/images`, `@/services/settings`) that encapsulates DB access. Server actions should orchestrate services, not construct raw SQL. This is a medium-term refactoring, not urgent.
+#### 2.3 Connection Pool Budgeting — Backfill Concurrency Cap
 
-**Confidence:** Medium
+The backfill runner's concurrency cap (`resolveBackfillConcurrency` at `lib/admin-backfill-runner.ts:129-142`) is a pragmatic solution to the shared pool problem, but it demonstrates the architectural tension: background maintenance ops compete with live request traffic for the same 10-connection pool.
 
----
-
-## 2. Type Safety & Abstractions
-
-### 2.1 Schema/Runtime Mismatch: embedding column (HIGH)
-
-**File:** `apps/web/src/db/schema.ts:276`
-**Code:** `embedding: text("embedding").notNull()`
-
-**Concern:** The Drizzle schema declares `embedding` as `text`, but the actual database column is `MEDIUMBLOB` (binary). The migration (0012) creates it as MEDIUMBLOB. mysql2 returns a `Buffer` at runtime for binary columns. This forces two unsafe `as unknown as string` casts:
-- `apps/web/src/lib/image-queue.ts:505`: `const embeddingValue = buf as unknown as string;`
-- `apps/web/src/app/actions/embeddings.ts:142`: `const embeddingValue = buf as unknown as string;`
-
-**Why it matters:** These casts are a type-safety hole. If Drizzle ever changes its runtime behavior for `text` columns, or if the schema is accidentally changed to match the `text` declaration, the casts would silently break. The `decodeEmbeddingColumn()` function in `clip-embeddings.ts` handles Buffer reads, but the write sites use the cast.
-
-**Suggested fix:** Use Drizzle's `customType` to properly model MEDIUMBLOB, or at minimum add a stronger typed wrapper that eliminates the need for `as unknown as` at write sites. The `decodeEmbeddingColumn()` function already handles the read side correctly.
-
-**Confidence:** High
-
----
-
-### 2.2 Repetitive IIFE Pattern in Config Resolution (MEDIUM)
-
-**File:** `apps/web/src/lib/gallery-config.ts:115-179`
-
-**Concern:** Eight nearly identical IIFE blocks resolve boolean settings from the DB map. Each follows the same pattern:
-```typescript
-someSetting: (() => {
-    const raw = getSetting(map, 'some_setting');
-    if (!isValidSettingValue('some_setting', raw)) return DEFAULTS.some_setting === 'true';
-    return raw === 'true';
-})(),
-```
-
-**Why it matters:** Copy-paste risk when adding new boolean settings. A developer might forget the validation check or use an incorrect fallback. The `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env gating (lines 126-144) is also embedded in this IIFE, adding special-case logic to an otherwise uniform pattern.
-
-**Suggested fix:** Extract a `resolveBooleanSetting(map, key)` helper that encapsulates the validation + fallback pattern. The `SEMANTIC_SEARCH_ALLOW_PRODUCTION` gating can be a post-resolution override.
-
-**Confidence:** Medium
+**File:line references:**
+- `lib/admin-backfill-runner.ts:105-142` — BACKFILL_RESERVED_LIVE_CONNECTIONS and resolveBackfillConcurrency
+- `db/index.ts:31-32` — connectionLimit=10, queueLimit=20
 
 ---
 
-### 2.3 Missing Explicit Return Types in DAL (MEDIUM)
+### 3. Dependency Management
 
-**File:** `apps/web/src/lib/data.ts` (15+ exported functions)
+#### 3.1 Sharp/libvips — Native Dependency Complexity
 
-**Concern:** Most exported functions in `data.ts` have inferred return types from complex Drizzle query result types. This makes the public API surface opaque to consumers and to the TypeScript compiler. Refactoring a query shape can break callers without a clear error message.
+Sharp is a critical dependency with native bindings. The codebase includes:
+- Dynamic concurrency tuning based on CPU count (`process-image.ts:36-50`)
+- 10-bit AVIF probe with Promise singleton (`process-image.ts:69-123`)
+- Cache disabled for steady RSS (`process-image.ts:53`)
 
-**Suggested fix:** Add explicit return type annotations to all exported `data.ts` functions. Define shared DTO interfaces (e.g., `ImageDto`, `TopicDto`) that both the DAL and consumers reference.
+**Problem:** Sharp version upgrades can break the color pipeline. The 10-bit AVIF probe (`_probeHighBitdepthAvif`) exists because "Sharp's prebuilt binaries bundle libheif which may or may not support 10/12-bit AVIF encoding" (`process-image.ts:56-58`). This is a fragile dependency on Sharp's internal libheif configuration.
 
-**Confidence:** Medium
+**File:line references:**
+- `lib/process-image.ts:36-53` — Sharp concurrency and cache configuration
+- `lib/process-image.ts:56-123` — 10-bit AVIF probe with retry logic
 
----
+#### 3.2 MySQL2 — Connection Pool Wrapper Complexity
 
-### 2.4 Unvalidated JSON.parse in Components (MEDIUM)
+The `db/index.ts` module wraps `mysql2/promise` with custom `getConnection`, `query`, and `execute` overrides to handle:
+- `SET group_concat_max_len = 65535` on every connection (`db/index.ts:60-68`)
+- 10-second timeout on init query (`db/index.ts:88-102`)
+- Symbol-based init promise tracking (`db/index.ts:58`)
 
-**Files:**
-- `components/wide-gamut-hint.tsx:40`: `JSON.parse(raw) as PersistedDismiss`
-- `components/similar-photos.tsx:86`: `await res.json() as { results?: SimilarResult[] }`
-- `components/search.tsx:191`: `await resp.json() as { results?: ... }`
-- `app/api/search/semantic/route.ts:168`: `JSON.parse(rawBody) as unknown`
+**Problem:** This wrapper is complex and error-prone. The comment at `db/index.ts:41-50` references a specific mysql2 bug ("the 'try con.promise().query()' runtime guard fires when chaining .catch"). The wrapper overrides `poolConnection.getConnection`, `poolConnection.query`, and `poolConnection.execute` — any change to mysql2's API could break these overrides.
 
-**Concern:** Four locations parse JSON from external sources (localStorage, API responses, request bodies) and cast to typed shapes without runtime validation. A malformed payload or API drift would produce a runtime type mismatch that TypeScript cannot catch.
+**File:line references:**
+- `db/index.ts:40-125` — mysql2 pool wrapper with init query and timeout
 
-**Suggested fix:** Add minimal runtime validation (e.g., `zod` schemas or basic shape checks) before casting. For the localStorage case, check that the parsed object has the expected keys. For API responses, validate the response shape.
+#### 3.3 Drizzle ORM — Schema/Runtime Mismatch
 
-**Trade-off:** Adding zod as a dependency adds bundle size. For a small number of validation sites, hand-written guards may be sufficient.
+The `imageEmbeddings` table uses `text("embedding")` in the Drizzle schema but the actual column is `MEDIUMBLOB` (`db/schema.ts:271-276`). The comment explains: "The Drizzle column is typed as `text` for schema diffing; the actual SQL migration creates it as MEDIUMBLOB." This is a documented workaround but represents a schema/runtime mismatch that could confuse tooling.
 
-**Confidence:** Medium
-
----
-
-### 2.5 `processed` Column Missing `.notNull()` (MEDIUM)
-
-**File:** `apps/web/src/db/schema.ts:101`
-**Code:** `processed: boolean("processed").default(false)`
-
-**Concern:** The `processed` column is semantically boolean and should never be null (an image is either processed or not), but the schema does not enforce `.notNull()`. This creates ambiguity in query conditions (`eq(images.processed, true)` vs `isNull(images.processed)`).
-
-**Suggested fix:** Add `.notNull()` to match the runtime expectation. This is a schema migration.
-
-**Confidence:** Medium
+**File:line references:**
+- `db/schema.ts:271-276` — imageEmbeddings with text/MEDIUMBLOB mismatch
 
 ---
 
-## 3. Configuration & Environment
+### 4. Structural Integrity
 
-### 3.1 BASE_URL Resolution Duplicated (MEDIUM)
+#### 4.1 Compile-Time Privacy Guards — Strong but Fragile
 
-**Files:**
-- `lib/constants.ts:24`: `BASE_URL = process.env.BASE_URL || siteConfig.url`
-- `lib/seo-og-url.ts`: Re-implements the same fallback chain
-- `lib/data.ts`: Uses `siteConfig.url` directly for some queries
-- `app/sitemap.ts`: Re-implements URL derivation
+The privacy guards (`_PrivacySensitiveKeys`, `_SensitiveKeysInPublic`) are a strong compile-time defense. However:
+- They rely on TypeScript's structural typing — a runtime JavaScript consumer would bypass them entirely
+- The `_omit*` destructuring pattern in `data.ts` (lines 290-396) is verbose and error-prone — adding a new sensitive field requires adding it to `_PrivacySensitiveKeys`, omitting it in three destructuring blocks, and adding it to the test fixture
 
-**Concern:** The base URL resolution logic (env var -> site config -> default) is duplicated across at least four modules. This creates drift risk: changing the fallback logic in one place does not update the others.
+**File:line references:**
+- `lib/data.ts:398-450` — _PrivacySensitiveKeys type and _SensitiveKeysInPublic guard
+- `lib/data.ts:290-396` — three destructuring blocks for field omission
 
-**Suggested fix:** Create a centralized `env.ts` module that exports validated, typed environment variables. All consumers import from this module. The module should handle the fallback chain once and export a single `BASE_URL` constant.
+#### 4.2 Smart Collections — AST Compiler Pattern
 
-**Confidence:** Medium
+`lib/smart-collections.ts` implements a discriminated-union AST with a safe SQL compiler. This is a well-designed pattern:
+- Column allowlist prevents injection (`ALLOWED_COLUMNS` at line 32)
+- Depth limit prevents stack exhaustion (`MAX_DEPTH = 4` at line 141)
+- Drizzle parameter binding for all values (no raw string concatenation)
 
----
+However, the `compileTagPredicate` function (`lib/smart-collections.ts:248-271`) uses raw `sql` template literals for subqueries, which bypasses Drizzle's type safety. The `contains` operator uses `LIKE` with manual escaping (`replace(/[%_\\]/g, '\\$&')`) — while correct, it is a potential injection point if the escaping logic ever drifts.
 
-### 3.2 Hardcoded Rate Limit Parameters (LOW)
+**File:line references:**
+- `lib/smart-collections.ts:156-186` — compileSmartCollection with allowlist and depth limit
+- `lib/smart-collections.ts:248-271` — compileTagPredicate with raw sql template
 
-**File:** `apps/web/src/lib/rate-limit.ts:60-76`
+#### 4.3 Service Worker — Template/Generated File Drift Risk
 
-**Concern:** Rate limit parameters (`LOGIN_MAX_ATTEMPTS = 5`, `LOGIN_WINDOW_MS = 15 * 60 * 1000`, `OG_MAX_REQUESTS = 30`, `SEARCH_MAX_REQUESTS = 30`) are hardcoded with no environment variable override. In a high-traffic or attack scenario, operators cannot adjust these without a code change and deploy.
+The service worker uses a template (`public/sw.template.js`) that is stamped into `public/sw.js` by `scripts/build-sw.ts`. The CLAUDE.md warns: "After editing the template, regenerate and commit sw.js." This is a manual step that can be forgotten. The LRU logic is duplicated between `lib/sw-cache.ts` (reference) and the template (shipped).
 
-**Suggested fix:** Make rate-limit parameters env-configurable with current values as defaults. This is a low-priority operational improvement.
+**File:line references:**
+- `public/sw.template.js` — template source
+- `public/sw.js` — generated file (must be regenerated manually)
+- `lib/sw-cache.ts` — reference LRU implementation
 
-**Confidence:** Low
+#### 4.4 Advisory Locks — Server-Scoped, Not Database-Scoped
 
----
+The advisory lock names are scoped to the MySQL server, not the database. The comment at `lib/advisory-locks.ts:8-15` explicitly warns: "Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, backfill runs, and image-processing claims across tenants."
 
-### 3.3 Hardcoded DB Pool Size (LOW)
+This is a documented constraint but represents a multi-tenancy limitation that could surprise operators.
 
-**File:** `apps/web/src/db/index.ts:23`
-**Code:** `export const POOL_CONNECTION_LIMIT = 10;`
-
-**Concern:** The connection pool limit is hardcoded to 10 with a queue limit of 20. No environment variable override exists. In high-traffic scenarios or when running the backfill script concurrently, operators cannot adjust pool sizing without a code change.
-
-**Suggested fix:** Make `POOL_CONNECTION_LIMIT` and `queueLimit` env-configurable with current values as defaults. The backfill runner already references `POOL_CONNECTION_LIMIT` for its budgeting math, so a single env var would propagate correctly.
-
-**Confidence:** Low
-
----
-
-### 3.4 Hardcoded Session Max Age (LOW)
-
-**File:** `apps/web/src/lib/session.ts` (implied by auth.ts)
-
-**Concern:** The session max age (24 hours) is hardcoded with no environment variable override. Operators cannot adjust session TTL for different security postures without a code change.
-
-**Suggested fix:** Add a `SESSION_MAX_AGE_HOURS` environment variable with a 24-hour default.
-
-**Confidence:** Low
+**File:line references:**
+- `lib/advisory-locks.ts:8-15` — advisory lock scope warning
+- `lib/advisory-locks.ts:18-44` — lock name registry
 
 ---
 
-### 3.5 Inconsistent Boolean Env Parsing (LOW)
+### 5. Testing & Observability
 
-**File:** `apps/web/src/lib/gallery-config.ts:141`
-**Code:** `process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true'`
+#### 5.1 Test-Only Exports
 
-**Concern:** `SEMANTIC_SEARCH_ALLOW_PRODUCTION` only accepts the exact string `'true'`. Other common truthy strings (`'1'`, `'yes'`, `'YES'`, `'True'`) are treated as false. This is inconsistent with typical environment variable conventions and could confuse operators.
+Multiple modules export test-only helpers prefixed with `_`:
+- `lib/admin-backfill-runner.ts:261-282` — `_resetAdminBackfillStateForTesting`
+- `lib/serve-upload.ts:86-89` — `_resetServingSettingsHashCacheForTesting`
+- `lib/rate-limit.ts:209-211` — `resetSearchRateLimitPruneStateForTests`
+- `lib/rate-limit.ts:255-257` — `resetOgRateLimitForTests`
+- `lib/rate-limit.ts:319-321` — `resetSemanticRateLimitForTests`
 
-**Suggested fix:** Create a `parseBooleanEnv(name, default)` helper that accepts `'true'`, `'1'`, `'yes'` (case-insensitive) as truthy and standardize it across all boolean env var parsing sites.
+These are necessary for test isolation but represent leakage of test concerns into production code. The `process.env.NODE_ENV !== 'test'` guard in `_resetAdminBackfillStateForTesting` is a runtime check that should be unnecessary if tests properly mock the module.
 
-**Confidence:** Low
+**File:line references:**
+- `lib/admin-backfill-runner.ts:261-282` — test-only state reset with env guard
 
----
+#### 5.2 Error Handling — Inconsistent Patterns
 
-## 4. Scalability & Process-Local State
+The codebase uses multiple error handling patterns:
+- `try/catch` with `instanceof Error` checks
+- `hasMySQLErrorCode` helper (`lib/validation.ts:153-160`)
+- Discriminated result types (`ReprocessResult` in `lib/admin-backfill-runner.ts:417-419`)
+- Fire-and-forget with `.catch(() => undefined)` (queue shutdown, backfill lock release)
 
-### 4.1 Intentionally Single-Process — Correctly Documented (MEDIUM)
+The `isMySQLError` type guard (`lib/validation.ts:153-155`) is a runtime check that could be replaced by a more robust error taxonomy.
 
-**Assessment:** The codebase contains 8 documented process-local state surfaces. All are correctly documented in `CLAUDE.md` with clear warnings about horizontal scaling. This is an intentional architectural choice for a personal gallery, not a defect.
-
-**Process-local state inventory:**
-
-| State | Location | Impact if Scaled |
-|-------|----------|------------------|
-| Image processing queue | `image-queue.ts:173-197` | Queue state, retry counts, permanently failed IDs lost across instances |
-| Backfill runner status | `admin-backfill-runner.ts:219-251` | Runner status per-process only |
-| OG/share/semantic rate limits | `rate-limit.ts:77-101` | Fast-path resets to zero on restart |
-| Login rate-limit fast-path | `auth-rate-limit.ts:19` | Has DB backup, but fast-path is per-process |
-| View-count buffer | `data.ts:17-26` | Lost on SIGKILL; flushed on SIGTERM only |
-| Upload quota tracker | `upload-tracker-state.ts:15-21` | Per-process upload window tracking |
-| Restore maintenance flag | `restore-maintenance.ts:7-19` | Per-process flag |
-| Storage backend state | `storage/index.ts:34-45` | Not yet integrated |
-
-**Recommendation:** If multi-instance deployment is ever needed, the following must move to a shared store: image queue state (Redis/BullMQ), rate-limit fast-paths (Redis sliding window), view-count buffer (Redis counters), upload tracker (Redis or DB-backed), backfill runner status (DB-backed or distributed lock).
-
-**Confidence:** High (this is documented behavior, not a bug)
+**File:line references:**
+- `lib/validation.ts:153-160` — MySQL error type guards
+- `lib/admin-backfill-runner.ts:417-419` — discriminated result type
 
 ---
 
-### 4.2 Advisory Lock Scope Warning (MEDIUM)
+## Root Cause
 
-**File:** `apps/web/src/lib/advisory-locks.ts:8-16`
+The architectural tension in GalleryKit stems from a fundamental mismatch between the codebase's evolved complexity and its original single-instance, single-photographer design intent. After 10 review-plan-fix cycles, the codebase has accumulated:
 
-**Concern:** MySQL advisory locks are **server-scoped**, not database-scoped. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace. This means two tenants on the same MySQL server will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, backfill runs, and image-processing claims.
+1. **Defensive depth without abstraction boundaries** — every cycle added guards, checks, and locks, but rarely introduced new abstraction layers. The result is a codebase that is secure and correct but tightly coupled.
 
-**Status:** This is explicitly documented in `CLAUDE.md` ("Advisory-lock scope note") and in the code comments. The recommendation is to run one GalleryKit per MySQL server or prefix lock names with a per-instance identifier.
+2. **Process-local state as a design shortcut** — Using `globalThis` Symbols and module-level `let` variables was faster than introducing Redis or a shared state service, but it hardcodes the single-instance assumption throughout the codebase.
 
-**Confidence:** Medium (documented, but a footgun for multi-tenant deployments)
+3. **Schema evolution without normalization** — The `images` table grew from a simple metadata store to a 40+ column behemoth because adding columns was faster than creating sidecar tables. The color/HDR columns are essentially a separate concern that happens to share the same table.
 
----
-
-### 4.3 Image Queue Lacks Pool Budgeting (LOW)
-
-**File:** `apps/web/src/lib/image-queue.ts:183`
-
-**Concern:** `QUEUE_CONCURRENCY` defaults to 1 but operators can raise it. Unlike the backfill runner (`admin-backfill-runner.ts:129-142`), the image queue has no explicit connection pool budgeting. Raising `QUEUE_CONCURRENCY` without understanding the pool limit could starve live request traffic.
-
-**Suggested fix:** Add a connection-budget cap to the image queue similar to the backfill runner: `max(1, floor((POOL_CONNECTION_LIMIT - RESERVED - 1) / 2))`. Or at minimum, document the relationship between `QUEUE_CONCURRENCY` and `POOL_CONNECTION_LIMIT` in `CLAUDE.md`.
-
-**Confidence:** Low
+4. **Storage abstraction as an uncompleted migration** — The `storage/` module was introduced but never wired into the live pipeline, leaving direct filesystem operations throughout the codebase.
 
 ---
 
-## 5. Security Architecture
+## Recommendations
 
-### Assessment: Well-Hardened and Mature
+### High Priority
 
-The security architecture is the strongest area of the codebase. No critical or high-confidence security issues were identified. The following patterns are industry-leading:
+1. **Extract view count buffering from data layer** — Move the view count buffer/flush logic to a dedicated module (`lib/view-count-buffer.ts`) that exposes a clean interface. This separates the buffering concern from data access and makes it easier to replace with a shared store later.
+   - **Effort:** Medium | **Impact:** Improves testability and separation of concerns
+   - **File:** `lib/data.ts:17-193`
 
-| Pattern | Location | Evidence |
-|---------|----------|----------|
-| Defense-in-depth auth | `proxy.ts` + `api-auth.ts` + `action-guards.ts` | Middleware cookie check → same-origin → `isAdmin()` → session verification |
-| Timing attack resistance | `session.ts:117`, `auth.ts:65-68` | `timingSafeEqual` for HMAC; dummy Argon2 hash for login timing equalization |
-| TOCTOU protection | `auth-rate-limit.ts:125-137` | Pre-increment rate limit BEFORE expensive Argon2 verify; rollback on success only |
-| Session fixation prevention | `auth.ts:208-219` | Deletes all existing sessions on login |
-| Password change rotates all sessions | `auth.ts:388-399` | Forces re-login on all devices after password change |
-| Three automated lint gates | `scripts/check-*.ts` | `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts` prevent regression at build time |
-| Bounded Maps with FIFO eviction | `bounded-map.ts:19-100` | Prevents unbounded memory growth in rate-limit fast-paths |
-| Token hash storage | `admin-tokens.ts:48-53` | Only SHA-256 hash stored; plaintext shown once at creation |
-| CSP nonce generation | `proxy.ts:41-50` | Nonce generated per-request in production |
-| Triple compile-time privacy guards | `data.ts:424-458` | `_privacyGuard`, `_mapPrivacyGuard`, `_largePayloadGuard` prevent PII leakage at compile time |
+2. **Normalize images table into metadata + color_audit sidecar** — Create a `color_audit` table with `(image_id, color_primaries, transfer_function, matrix_coefficients, is_hdr, has_gain_map, pipeline_version, was_downscaled, avif_10bit)` and migrate the columns. This reduces the images table to core metadata and improves query performance for listings that don't need color data.
+   - **Effort:** High | **Impact:** Reduces table bloat, improves query performance, cleaner schema
+   - **File:** `db/schema.ts:19-117`
 
----
+3. **Complete the storage abstraction migration** — Wire `lib/storage/` into the upload, processing, and serving paths. Replace direct `fs/promises` calls in `process-image.ts`, `upload-paths.ts`, and `serve-upload.ts` with storage backend calls. This is prerequisite to supporting S3/MinIO.
+   - **Effort:** High | **Impact:** Enables alternative storage backends, improves testability
+   - **Files:** `lib/process-image.ts`, `lib/upload-paths.ts`, `lib/serve-upload.ts`, `lib/storage/index.ts`
 
-## 6. Image Processing Pipeline
+### Medium Priority
 
-### 6.1 Positive Patterns
+4. **Introduce a shared state abstraction for process-local Maps** — Create a `lib/state/` module with pluggable backends (in-memory for single-instance, Redis for multi-instance). Migrate `viewCountBuffer`, `loginRateLimit`, `accountLoginRateLimit`, `uploadTracker`, and `backfillState` to this abstraction.
+   - **Effort:** High | **Impact:** Enables horizontal scaling without rewriting each consumer
+   - **Files:** `lib/data.ts`, `lib/rate-limit.ts`, `lib/auth-rate-limit.ts`, `lib/upload-tracker-state.ts`, `lib/admin-backfill-runner.ts`
 
-The image processing pipeline demonstrates excellent engineering:
+5. **Refactor process-image.ts into pipeline stages** — Split the 1633-line module into: (a) `lib/pipeline/decision.ts` (color pipeline decisions), (b) `lib/pipeline/encode.ts` (Sharp encoding), (c) `lib/pipeline/verify.ts` (post-encode verification), (d) `lib/pipeline/gps-strip.ts` (GPS stripping). This improves testability and allows swapping individual stages.
+   - **Effort:** High | **Impact:** Improves testability, enables alternative encoders
+   - **File:** `lib/process-image.ts`
 
-- **Race condition protection**: `image-queue.ts:414-435` checks `affectedRows === 0` to detect deletion-during-processing and cleans up derivatives.
-- **Atomic rename fallback chain**: `link + rename` -> `copyFile + rename` -> `copyFile` direct with temp cleanup in `finally` (`process-image.ts:1216-1233`).
-- **10-bit AVIF Promise singleton**: Probe runs once per process with exponential backoff; avoids repeated libheif latency (`process-image.ts:69-100`).
-- **Wide-gamut source pixel cap**: `WIDE_GAMUT_MAX_SOURCE_PIXELS` (default 50M) prevents OOM on rgb16 pipeline (`process-image.ts:990`).
-- **Per-format fresh Sharp instances**: WI-14 cross-format isolation eliminates shared-state contamination (`process-image.ts:1241-1245`).
-- **Post-encode cleanup**: On failure, all partial sized variants are deleted across all three formats (`process-image.ts:1282-1286`).
+6. **Remove test-only exports from production modules** — Use dependency injection or module mocking in tests instead of `_reset*ForTesting` exports. The `globalThis` state pattern is already mockable by manipulating the Symbol-keyed property directly in tests.
+   - **Effort:** Low | **Impact:** Reduces production code surface, cleaner module boundaries
+   - **Files:** `lib/admin-backfill-runner.ts`, `lib/serve-upload.ts`, `lib/rate-limit.ts`
 
-### 6.2 GPS Strip Memory Spike (MEDIUM)
+### Low Priority
 
-**File:** `apps/web/src/lib/process-image.ts:1555`
-**Code:** `const input = await fs.readFile(filePath);`
+7. **Automate sw.js regeneration** — Add a pre-commit hook or build step that regenerates `public/sw.js` from `public/sw.template.js` when the template changes. This prevents template/generated file drift.
+   - **Effort:** Low | **Impact:** Prevents service worker drift
+   - **Files:** `public/sw.template.js`, `public/sw.js`, `scripts/build-sw.ts`
 
-**Concern:** The GPS strip function reads the entire original file into memory. For a 200MB upload with concurrent processing, this could spike memory usage significantly. The file is already read once during upload processing; the GPS strip is a second full read.
+8. **Add a schema drift check to CI** — Verify that `db/schema.ts` and `drizzle/` migrations are in sync. The non-monotonic `when` timestamps in `_journal.json` caused a production incident; a CI check could prevent this.
+   - **Effort:** Low | **Impact:** Prevents migration skip incidents
+   - **Files:** `drizzle/meta/_journal.json`, `scripts/migrate.js`
 
-**Suggested fix:** Document the memory ceiling for operators. Consider streaming for formats that support it (though container-aware byte surgery inherently needs random access, so streaming may not be feasible for all formats).
-
-**Confidence:** Medium
-
----
-
-## 7. Positive Architectural Patterns
-
-The following patterns are exemplary and should be preserved:
-
-### 7.1 Compile-Time Privacy Guards
-
-`data.ts:424-458` contains three compile-time guards that prevent entire classes of privacy bugs:
-- `_privacyGuard`: Ensures no sensitive key leaks into `publicSelectFields`
-- `_mapPrivacyGuard`: Same for `publicMapSelectFields` (GPS-allowed path)
-- `_largePayloadGuard`: Prevents `blur_data_url` from entering public listings
-
-These are not runtime checks — they are TypeScript type-level assertions that produce compile errors if violated. This is industry-leading practice.
-
-### 7.2 Smart Collections SQL Compiler
-
-`smart-collections.ts` compiles an AST to safe parameterized SQL with:
-- Column allowlist (9 columns only)
-- Depth limit (max 4 nested AND/OR groups)
-- `MAX_IN_VALUES` limit (100)
-- Full Drizzle parameter binding (no raw string concatenation)
-
-This is a well-designed defense-in-depth pattern for dynamic query generation.
-
-### 7.3 Settings Hash Compile-Time Guard
-
-`settings-hash.ts:63-65`: `_ColorKeysAreSettingKeys` ensures every `COLOR_IMPACTING_KEY` is a real gallery setting key. A typo or removed key becomes a hard `tsc` error.
-
-### 7.4 Connection Pool Auto-Release
-
-`db/index.ts:107-124` overrides `poolConnection.query` and `poolConnection.execute` to always acquire/release connections via `getConnection()`/`release()`. This prevents connection leaks that would otherwise occur if callers use the pool-level methods directly.
-
-### 7.5 DB Connection Init Race Fix
-
-`db/index.ts:70-105` uses a Symbol property (not a WeakMap) to track connection initialization state, fixing a race where the `connection` event handler and `getConnection()` could see different wrapper objects.
-
-### 7.6 Zero `any` Usage, Zero `@ts-ignore`
-
-The entire production codebase contains no `any` type annotations and no `@ts-ignore` or `@ts-expect-error` directives. This is exceptional TypeScript discipline.
+9. **Document the multi-tenancy advisory lock limitation** — Add a "Multi-tenancy" section to the operational docs explaining that multiple GalleryKit instances on the same MySQL server will share advisory locks.
+   - **Effort:** Low | **Impact:** Prevents operator surprise
+   - **File:** `CLAUDE.md` (Operational Playbook section)
 
 ---
 
-## 8. Recommendations (Priority Order)
-
-| Priority | Finding | Action | Effort | Impact |
-|----------|---------|--------|--------|--------|
-| **P1** | Layer violation (1.1) | Extract `isAdmin()` to `lib/session.ts` or `lib/auth-check.ts`; update `api-auth.ts` and `app/actions/auth.ts` imports | Low | High (fixes only upward dependency) |
-| **P1** | God file: `lib/data.ts` (1.2) | Split into `data/queries.ts`, `data/privacy.ts`, `data/view-buffer.ts` | Medium | High (improves testability, reduces coupling) |
-| **P1** | God file: `lib/process-image.ts` (1.3) | Extract pipeline, exif, color, blur into sub-modules; introduce `PipelineConfig` interface | Medium | High (improves testability, enables parallel work) |
-| **P2** | Schema mismatch (2.1) | Fix `embedding` column type in `db/schema.ts` or add typed wrapper; eliminate `as unknown as string` casts | Low | High (closes type-safety hole) |
-| **P2** | God file: `lib/image-queue.ts` (1.4) | Extract ML hooks to post-process module, maintenance to scheduler module | Medium | Medium (decouples core from ML) |
-| **P2** | Missing return types (2.3) | Add explicit return types to all exported `data.ts` functions; define shared DTOs | Low | Medium (improves API clarity) |
-| **P2** | Unvalidated JSON.parse (2.4) | Add runtime validation for localStorage, API response, and request body parsing | Low | Medium (prevents runtime type mismatches) |
-| **P3** | Config drift (3.1) | Create centralized `env.ts` module for BASE_URL and other env vars | Low | Low (reduces duplication) |
-| **P3** | Repetitive IIFE (2.2) | Extract `resolveBooleanSetting()` helper in `gallery-config.ts` | Low | Low (reduces copy-paste risk) |
-| **P3** | Hardcoded params (3.2-3.4) | Make rate limits, pool size, session age env-configurable | Low | Low (operational flexibility) |
-| **P3** | `processed` notNull (2.5) | Add `.notNull()` to `processed` column in schema + migration | Low | Low (schema correctness) |
-| **P3** | GPS strip memory (6.2) | Document memory ceiling; consider streaming where feasible | Low | Low (operational awareness) |
-
----
-
-## 9. Trade-offs
+## Trade-offs
 
 | Option | Pros | Cons |
 |--------|------|------|
-| **Keep god files** | Fewer modules, simpler imports, less boilerplate | Harder to test, higher cognitive load, risk of unintended coupling |
-| **Split god files** | Better testability, clearer responsibilities, enables parallel development | More modules, more import statements, potential over-engineering for a personal gallery |
-| **Add domain service layer** | Clean separation, ORM-swappable, testable without DB | Indirection, boilerplate, may be overkill for current scale |
-| **Keep direct DB access in actions** | Pragmatic, less code, faster development | Tight coupling to Drizzle, harder to test, harder to refactor |
-| **Fix embedding schema type** | Eliminates unsafe casts, type-safe writes | Requires Drizzle `customType` or migration; may affect other consumers |
-| **Decouple ML from image queue** | ML failures don't affect core pipeline, enables independent scaling | Adds event bus complexity, more modules to maintain |
+| **Keep process-local state** | Simple, no infrastructure dependencies, correct for single-instance | Hardcodes single-instance topology, no horizontal scaling |
+| **Introduce Redis for shared state** | Enables horizontal scaling, industry standard | Adds infrastructure dependency, complexity, latency |
+| **Normalize images table** | Cleaner schema, better query performance, separation of concerns | Migration complexity, risk of query drift, needs backfill |
+| **Keep monolithic process-image.ts** | All image logic in one place, easier to trace | 1600+ lines, untestable without full stack, hard to swap stages |
+| **Split into pipeline stages** | Testable, swappable stages, cleaner architecture | Refactoring risk, needs careful verification of color pipeline correctness |
+| **Complete storage abstraction** | Enables S3/MinIO, testable with mock backends | Significant refactoring, atomic rename semantics differ across backends |
+| **Keep current privacy guards** | Compile-time enforcement, strong TypeScript safety | Verbose, error-prone to maintain, no runtime enforcement for JS consumers |
 
 ---
 
-## 10. References
+## Consensus Addendum
 
-- `apps/web/src/lib/api-auth.ts:1` — Layer violation: imports `isAdmin` from `app/actions/auth.ts`
-- `apps/web/src/lib/data.ts:1-1670` — God file: DAL + privacy + view buffer + pagination
-- `apps/web/src/lib/data.ts:17-194` — View-count buffer embedded in DAL
-- `apps/web/src/lib/data.ts:424-458` — Triple compile-time privacy guards
-- `apps/web/src/lib/data.ts:613` — `tagNamesAgg` GROUP_CONCAT in data queries
-- `apps/web/src/lib/process-image.ts:1-1628` — God file: image processing pipeline
-- `apps/web/src/lib/process-image.ts:927-942` — `processImageFormats` 12-parameter signature
-- `apps/web/src/lib/process-image.ts:1555` — GPS strip reads entire file into memory
-- `apps/web/src/lib/image-queue.ts:1-831` — God file: queue + ML + maintenance
-- `apps/web/src/lib/image-queue.ts:21-24` — ML inference imports (caption, CLIP)
-- `apps/web/src/lib/admin-backfill-runner.ts:1-874` — God file: backfill runner
-- `apps/web/src/db/schema.ts:276` — `embedding: text()` declared, actual column is MEDIUMBLOB
-- `apps/web/src/lib/image-queue.ts:505` — `as unknown as string` cast for embedding Buffer
-- `apps/web/src/app/actions/embeddings.ts:142` — Same `as unknown as string` cast
-- `apps/web/src/lib/gallery-config.ts:115-179` — Repetitive boolean IIFE pattern
-- `apps/web/src/lib/constants.ts:24` — BASE_URL resolution (duplicated elsewhere)
-- `apps/web/src/db/index.ts:23` — Hardcoded `POOL_CONNECTION_LIMIT = 10`
-- `apps/web/src/lib/rate-limit.ts:60-76` — Hardcoded rate limit parameters
-- `apps/web/src/lib/advisory-locks.ts:8-16` — MySQL advisory lock scope warning
-- `apps/web/src/lib/bounded-map.ts:19-100` — BoundedMap with FIFO eviction
-- `apps/web/src/lib/smart-collections.ts` — AST-to-SQL compiler with allowlist
-- `apps/web/src/lib/settings-hash.ts:63-65` — Compile-time color key guard
-- `apps/web/src/db/index.ts:70-105` — Connection init race fix with Symbol property
-- `apps/web/src/lib/validation.ts:58` — `UNICODE_FORMAT_CHARS` regex for bidi/invisible char rejection
-- `apps/web/src/proxy.ts:41-50` — CSP nonce generation per-request
-- `apps/web/src/lib/session.ts:117` — `timingSafeEqual` for HMAC verification
-- `apps/web/src/lib/auth-rate-limit.ts:125-137` — TOCTOU-protected rate limiting
-- `apps/web/src/lib/action-guards.ts:37-44` — Centralized same-origin admin check
+- **Antithesis (steelman):** The architecture is appropriate for its intended use case. A personal photographer's gallery with a single admin does not need horizontal scaling, Redis, or storage abstraction. The process-local state is a feature, not a bug — it eliminates infrastructure dependencies and keeps the deployment simple. The tight coupling in `process-image.ts` is acceptable because the color pipeline is a domain-specific, carefully tuned system that should not be abstracted prematurely.
+
+- **Tradeoff tension:** The codebase's defensive depth (compile-time guards, advisory locks, rate limiting, privacy checks) adds significant complexity. For a single-instance deployment, this complexity is "insurance" against bugs and security issues. For a multi-instance deployment, the same complexity becomes "debt" that must be paid to extract shared state. The tension is: when does insurance become debt? The current answer is "when you want to scale horizontally," which is a deliberate product decision.
+
+- **Synthesis (if viable):** Preserve the single-instance simplicity for the default deployment path, but introduce abstraction boundaries (storage interface, state interface) that make the shared-store migration a configuration change rather than a rewrite. The `storage/` module is already a step in this direction — it just needs to be completed.
 
 ---
 
-*Review completed. All findings cite specific file:line references. No findings are based on speculation or training knowledge. The review was conducted against the actual source code at HEAD commit c0522dec.*
+## References
+
+- `apps/web/src/lib/process-image.ts:1-1633` — Monolithic image processing with Sharp, filesystem, color detection, GPS stripping, and verification
+- `apps/web/src/lib/storage/index.ts:7-12` — Unwired storage abstraction with explicit "not yet wired" comment
+- `apps/web/src/lib/data.ts:17-193` — View count buffering embedded in data layer with module-level state
+- `apps/web/src/lib/data.ts:209-396` — Privacy field selection with three destructuring omission blocks
+- `apps/web/src/db/schema.ts:19-117` — images table with 40+ columns conflating metadata, EXIF, color audit, and processing state
+- `apps/web/src/db/index.ts:40-125` — mysql2 pool wrapper with custom getConnection, query, and execute overrides
+- `apps/web/src/lib/image-queue.ts:76-196` — globalThis-backed processing queue state
+- `apps/web/src/lib/admin-backfill-runner.ts:144-251` — globalThis-backed backfill runner state
+- `apps/web/src/lib/rate-limit.ts:101-107` — In-memory rate limit Maps with DB backup
+- `apps/web/src/lib/advisory-locks.ts:8-15` — Advisory lock scope warning (server-scoped, not database-scoped)
+- `apps/web/src/lib/smart-collections.ts:156-271` — AST compiler with allowlist and raw sql subqueries
+- `apps/web/src/lib/session.ts:13-14` — Module-level session secret cache
+- `apps/web/src/lib/serve-upload.ts:47-48` — Module-level serving settings hash cache
+- `apps/web/src/lib/gallery-config.ts:12-13` — Configuration layer importing database layer
+- `apps/web/src/lib/upload-paths.ts:1-103` — Direct filesystem path construction
+- `apps/web/src/proxy.ts:76-141` — Middleware with CSP nonce generation and admin route protection
+- `apps/web/src/lib/content-security-policy.ts:63-118` — CSP builder with GA4 source allowlist
+- `apps/web/src/lib/validation.ts:153-160` — MySQL error type guards
+- `apps/web/src/lib/bounded-map.ts:32-151` — Generic bounded Map with FIFO eviction
+- `apps/web/src/public/sw.template.js` — Service worker template requiring manual regeneration
+- `apps/web/src/public/sw.js` — Generated service worker (must be kept in sync with template)

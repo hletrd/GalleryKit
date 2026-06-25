@@ -1,84 +1,73 @@
-# Run-10 Cycle-2 Convergence — Document Specialist Review
+# Run-10 Cycle-3 Convergence — Document Specialist Review
 
 Date: 2026-06-25
-HEAD: 87065049 (docs(reviews): run-10 cycle-2 convergence)
-Previous Review: 1d5545cb (run-9 cycle-8 convergence)
+HEAD: bcd67b12 (fix(public): add Array.isArray guard to loadMoreImages tagSlugs parameter)
+Previous Review: 87065049 (run-10 cycle-2 convergence)
 
 ## Summary
 
-This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb). The cycle-2 commits (leading to 87065049) include significant documentation fixes: orphaned JSDoc removal, `detectColorSignals` JSDoc added, `enqueueImageProcessing` return value documented, `permanentlyFailedIds` comment corrected, rate-limit pattern numbering unified, `gamma18` documentation corrected, `settings-hash` sort behavior documented, `NEXT_UPLOAD_BODY_MAX_BYTES` added to `.env.local.example`, CLAUDE.md expanded with smart_collections, admin_tokens, site-config, OG SSRF, and semantic search limits. Most high-impact findings from the previous review have been fixed. A few new and remaining issues are identified below.
+This review covers documentation changes since the cycle-2 review (HEAD 87065049). The cycle-3 commits (bcd67b12) include fixes for Array.isArray guard, ENOENT error handling, restore-maintenance checks, revalidation ordering, and rate-limit getter safety. The previous review identified 20 remaining issues (R1-R20). Most have been verified as still present; a few new issues were discovered in the recently changed files. No new high-severity documentation issues were introduced by the cycle-3 commits.
 
 ---
 
 ## Status of Previous Review Findings
 
-### Fixed since last review (verified at HEAD 87065049)
+### Fixed since last review (verified at HEAD bcd67b12)
 
 | ID | Finding | Fix Commit | Notes |
 |----|---------|-----------|-------|
-| N7/P2 | Stale JSDoc in `process-image.ts:595-633` | 850e19c6 (DOC-01) | Orphaned block deleted. Actual `resolveAvifIccProfile` JSDoc at 700-723 is correct. |
-| N8/P3 | `color-detection.ts` module JSDoc stale feature ID | e528195e (DOC-04) | Updated to clarify HDR sources detected but delivered as SDR until WI-09 ships. |
-| N9 | `detectColorSignals` lacks JSDoc | e528195e (DOC-10) | JSDoc added at lines 295-302 documenting parameters and `_image` reserved param. |
-| N11 | `enqueueImageProcessing` return value undocumented | cab5eb58 (DOC-03) | JSDoc added at lines 246-251. |
-| N14 | `permanentlyFailedIds` "FIFO eviction" comment | cab5eb58 (DOC-07) | Comment still says "FIFO eviction" but the `Set` has no eviction. **Partial fix** — see R1. |
-| N15 | `resolveAvifIccProfile` JSDoc "STRICT P3" claim | 850e19c6 (DOC-06) | JSDoc updated to clarify `'p3'` vs `'p3-from-wide'` distinction. |
-| N24 | `rate-limit.ts` pattern numbering inconsistency | 5bf0dda6 (DOC-20) | Pattern 4 now consistently labeled. OG routes reference Pattern 4. |
-| P1 | `NEXT_UPLOAD_BODY_MAX_BYTES` missing from `.env.local.example` | c9d4f745 (DOC-11) | Added with comment explaining purpose. |
-| N3 | `settings-hash.ts` sort behavior undocumented | a8bb1389 (DOC-12) | CLAUDE.md ETag section now documents sort-before-hash. |
-| N6 | OG route SSRF hardening not in CLAUDE.md | a8bb1389 (DOC-14) | Added to Security Architecture section. |
-| N32 | Semantic search runtime limits not in CLAUDE.md | a8bb1389 (DOC-19) | `SEMANTIC_SCAN_LIMIT` and `SEMANTIC_TOP_K_MAX` documented. |
-| N37 | `site-config.json` structure undocumented | a8bb1389 (DOC-13) | Deployment Checklist now describes key fields. |
-| N39 | `smart_collections` undocumented | a8bb1389 (DOC-12) | Added to schema section with query JSON description. |
-| N40 | `admin_tokens` / Lightroom plugin undocumented | a8bb1389 (DOC-12) | Added to schema section with token rotation and nginx location note. |
-| N1 | `gamma18` origin imprecise | a8bb1389 (DOC-12) | Updated to mention ProPhoto path via `color-detection.ts:99-107`. |
-| N18 | `viewCountRetryCount` cap comment misleading | 0e8c86fb (DOC-08) | Comment updated to clarify no automatic eviction. |
+| None | No documentation fixes in cycle-3 commits | — | The cycle-3 commits are code fixes, not doc fixes. |
 
 ### Still Open from Previous Review (carried forward)
 
 | ID | Finding | Status |
 |----|---------|--------|
-| N2 | `gain-map-detection.ts` boundary check comment | Still present — no null-terminator comment at line 87. Low impact. |
-| N4 | `photo-viewer.tsx` keyboard repeat suppression | Still no inline comment at the `e.repeat` check. Low impact. |
-| N5 | `color-details-section.tsx` clipboard fallback | Still undocumented fallback behavior. Low impact. |
-| N10 | `deleteImageVariants` JSDoc missing parameters | Still no JSDoc. Low impact. |
-| N12 | Masonry grid static class mapping | CLAUDE.md still describes old dynamic approach. See R2. |
-| N13 | `color-detection.ts` NCLX code 11 comment | Self-contradictory comment still present at lines 191-196. See R3. |
-| N16 | `use-display-capability.ts` SSR default trade-off | Comment is accurate enough. No change needed. |
-| N17 | `normalizeConfiguredImageSizes` JSDoc incomplete | Still says "malformed or exceeds" without mentioning empty string. See R4. |
-| N19 | `formatUploadLimit` GB/GiB labeling | Widely accepted convention. No change needed. |
-| N20 | `sharp.concurrency()` comment imprecision | Comment at line 49 is accurate enough. No change needed. |
-| N26 | `csv-escape.ts` C0/C1 comment | Still says "C0/C1" but regex strips 0x7F too. See R5. |
-| N27 | `advisory-locks.ts` per-image lock scoping | No mention of `getImageProcessingLockName` in module JSDoc. See R6. |
-| N28 | `exif-datetime.ts` two-phase validation | No comment explaining two-phase validation. See R7. |
-| N29 | `process-topic-image.ts` `MAX_INPUT_PIXELS_TOPIC` import | Import at line 9 is used at line 80 (not shown in prior review). Verified correct. |
-| N30 | `queue-shutdown.ts` opaque "C4-C3" reference | Still present at line 30. See R8. |
-| N31 | `clip-paths.ts` SHA-only clarification | JSDoc at line 81-83 doesn't mention 40-hex SHA requirement. See R9. |
-| N33 | `password-hashing.ts` OWASP citation | No specific OWASP version cited. Acceptable. |
-| N34 | `view-retention.ts` "13 months" comment | 395 days = 13.0 months. Comment is accurate enough. |
-| N35 | `restore-maintenance.ts` missing module JSDoc | Still no module JSDoc. See R10. |
-| N36 | `audit.ts` "fire-and-forget" JSDoc | Still says "fire-and-forget" but function is async. See R11. |
-| N38 | `_PrivacySensitiveKeys` guard not shown | Reference in CLAUDE.md is sufficient. No change needed. |
-| N41 | `sw-cache.ts` not documented | Mention in CLAUDE.md is sufficient. No change needed. |
-| N42 | `sw.template.js` build process | Correctly documented. No issue. |
-| N43 | `icc-extractor.ts` not mentioned | Still missing from CLAUDE.md. See R12. |
-| N45 | `gain-map-detection.ts` two signaling shapes | Optional enhancement. No issue. |
-| D1 | Orphaned migration `0014_drop_reactions.sql` | Still present. Hygiene issue. |
-| D2 | Root `package.json` missing `lint:public-route-rate-limit` | Still present. |
-| D3 | Root `build` script uses `--workspaces` | Still present. |
+| R1 | `permanentlyFailedIds` comment still claims "FIFO eviction" but `Set` has no eviction | Still present — see N1 |
+| R2 | CLAUDE.md masonry grid description still outdated | Still present — see N2 |
+| R3 | `color-detection.ts` NCLX code 11 comment is still self-contradictory | Still present — see N3 |
+| R4 | `normalizeConfiguredImageSizes` JSDoc still omits empty string case | Still present — see N4 |
+| R5 | `csv-escape.ts` comment still says "C0/C1" but strips DEL (0x7F) | Still present — see N5 |
+| R6 | `advisory-locks.ts` module JSDoc does not mention `getImageProcessingLockName` | Still present — see N6 |
+| R7 | `exif-datetime.ts` two-phase validation not documented | Still present — see N7 |
+| R8 | `queue-shutdown.ts` opaque "C4-C3" reference still present | Still present — see N8 |
+| R9 | `clip-paths.ts` JSDoc doesn't mention 40-hex SHA requirement | Still present — see N9 |
+| R10 | `restore-maintenance.ts` still has no module JSDoc | Still present — see N10 |
+| R11 | `audit.ts` JSDoc still says "fire-and-forget" but function is async | Still present — see N11 |
+| R12 | `icc-extractor.ts` still not mentioned in CLAUDE.md | Still present — see N12 |
+| R13 | `process-image.ts` line reference in CLAUDE.md is stale | Still present — see N13 |
+| R14 | `deleteImageVariants` still lacks JSDoc | Still present — see N14 |
+| R15 | `revalidation.ts` has no module JSDoc | Still present — see N15 |
+| R16 | `backfill-cicp-recheck.ts` script not documented in CLAUDE.md | Still present — see N16 |
+| R17 | `embeddings.ts` server action JSDoc says "stub inference" but production uses real ONNX | Still present — see N17 |
+| R18 | `process-image.ts` `sharp.concurrency()` comment says "Limit libvips worker threads" but it's per-call | Still present — see N18 |
+| R19 | `home-client.tsx` `COLUMN_CLASS_MAP` has no JSDoc | Still present — see N19 |
+| R20 | `color-detection.ts` `gamma18` documentation | Verified correct — no issue |
+
+### Still Open from Earlier Reviews (pre-R1)
+
+| ID | Finding | Status |
+|----|---------|--------|
+| N2 | `gain-map-detection.ts` boundary check comment | Still present — see N20 |
+| N4 | `photo-viewer.tsx` keyboard repeat suppression | Still present — see N21 |
+| N5 | `color-details-section.tsx` clipboard fallback | Still present — see N22 |
+| N10 | `deleteImageVariants` JSDoc missing parameters | Same as R14 |
+| D1 | Orphaned migration `0014_drop_reactions.sql` | Still present — see N23 |
+| D2 | Root `package.json` missing `lint:public-route-rate-limit` | Still present — see N24 |
+| D3 | Root `build` script uses `--workspaces` | Still present — see N25 |
 
 ---
 
-## New Findings (Run-10 Cycle-2)
+## New Findings (Run-10 Cycle-3)
 
-### Category R: New or Remaining Confirmed Mismatches
+### Category N: New or Remaining Confirmed Mismatches
 
-#### R1 — `permanentlyFailedIds` comment still claims "FIFO eviction" but `Set` has no eviction
+#### N1 — `permanentlyFailedIds` comment still claims "FIFO eviction" but `Set` has no eviction
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/src/lib/image-queue.ts:82-83`
 - **Type:** Comment/implementation mismatch
 
-**Claim:** The comment says "FIFO eviction when exceeded" for `MAX_PERMANENTLY_FAILED_IDS = 1000`.
+**Claim:** The comment says "Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded."
 
 **Reality:** `permanentlyFailedIds` is a `Set<number>`. There is NO eviction logic for this Set — it grows unbounded until the process restarts. The `pruneRetryMaps` function at line 98 only prunes `retryCounts`, `claimRetryCounts`, and `lastErrors` Maps. The `permanentlyFailedIds` Set is never pruned. The comment is misleading.
 
@@ -86,7 +75,7 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 
 ---
 
-#### R2 — CLAUDE.md masonry grid description still outdated
+#### N2 — CLAUDE.md masonry grid description still outdated
 - **Severity:** Low
 - **Confidence:** High
 - **File:** CLAUDE.md line 389, `apps/web/src/components/home-client.tsx:207-225`
@@ -100,7 +89,7 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 
 ---
 
-#### R3 — `color-detection.ts` NCLX code 11 comment is still self-contradictory
+#### N3 — `color-detection.ts` NCLX code 11 comment is still self-contradictory
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/src/lib/color-detection.ts:191-196`
@@ -114,7 +103,7 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 
 ---
 
-#### R4 — `normalizeConfiguredImageSizes` JSDoc still omits empty string case
+#### N4 — `normalizeConfiguredImageSizes` JSDoc still omits empty string case
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/src/lib/gallery-config-shared.ts:216-220`
@@ -128,7 +117,7 @@ This review covers documentation changes since the cycle-8 review (HEAD 1d5545cb
 
 ---
 
-#### R5 — `csv-escape.ts` comment still says "C0/C1 control characters" but strips DEL (0x7F)
+#### N5 — `csv-escape.ts` comment still says "C0/C1 control characters" but strips DEL (0x7F)
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/csv-escape.ts:41-44`
@@ -146,7 +135,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R6 — `advisory-locks.ts` module JSDoc does not mention `getImageProcessingLockName`
+#### N6 — `advisory-locks.ts` module JSDoc does not mention `getImageProcessingLockName`
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/advisory-locks.ts:1-45`
@@ -160,7 +149,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R7 — `exif-datetime.ts` two-phase validation not documented
+#### N7 — `exif-datetime.ts` two-phase validation not documented
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/exif-datetime.ts:1-31`
@@ -174,7 +163,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R8 — `queue-shutdown.ts` opaque "C4-C3" reference still present
+#### N8 — `queue-shutdown.ts` opaque "C4-C3" reference still present
 - **Severity:** Low
 - **Confidence:** Low
 - **File:** `apps/web/src/lib/queue-shutdown.ts:30-32`
@@ -188,7 +177,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R9 — `clip-paths.ts` JSDoc doesn't mention 40-hex SHA requirement
+#### N9 — `clip-paths.ts` JSDoc doesn't mention 40-hex SHA requirement
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/clip-paths.ts:81-96`
@@ -202,7 +191,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R10 — `restore-maintenance.ts` still has no module JSDoc
+#### N10 — `restore-maintenance.ts` still has no module JSDoc
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/src/lib/restore-maintenance.ts`
@@ -216,7 +205,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R11 — `audit.ts` JSDoc still says "fire-and-forget" but function is async
+#### N11 — `audit.ts` JSDoc still says "fire-and-forget" but function is async
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/audit.ts:1-15`
@@ -230,7 +219,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R12 — `icc-extractor.ts` still not mentioned in CLAUDE.md
+#### N12 — `icc-extractor.ts` still not mentioned in CLAUDE.md
 - **Severity:** Low
 - **Confidence:** High
 - **File:** `apps/web/src/lib/icc-extractor.ts`, CLAUDE.md
@@ -244,7 +233,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R13 — `process-image.ts` line reference in CLAUDE.md is stale
+#### N13 — `process-image.ts` line reference in CLAUDE.md is stale
 - **Severity:** Low
 - **Confidence:** High
 - **File:** CLAUDE.md line 245, `apps/web/src/lib/process-image.ts`
@@ -252,16 +241,16 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 **Claim:** CLAUDE.md says "trading decode reuse for correctness (`process-image.ts:1131-1135`)".
 
-**Reality:** The actual code for the fresh-decode-per-format logic is at lines 1120-1150 (the 10-bit AVIF block). The line reference `1131-1135` may have drifted. The comment at line 40-44 also documents this: "CM-LOW-10: processImageFormats fans out to AVIF + WebP + JPEG via Promise.all, and sharp.concurrency() is the PER-CALL libvips thread cap."
+**Reality:** The actual code for the fresh-decode-per-format logic is at lines 1098-1107 (the `needsRgb16` block and fresh `sharp()` instances). The line reference `1131-1135` has drifted significantly. The comment at line 40-44 also documents this: "CM-LOW-10: processImageFormats fans out to AVIF + WebP + JPEG via Promise.all, and sharp.concurrency() is the PER-CALL libvips thread cap."
 
-**Fix:** Update CLAUDE.md to reference the correct line range or use a comment anchor instead of line numbers.
+**Fix:** Update CLAUDE.md to reference the correct line range (approximately 1098-1107) or use a comment anchor like `CM-LOW-10` instead of line numbers.
 
 ---
 
-#### R14 — `deleteImageVariants` still lacks JSDoc
+#### N14 — `deleteImageVariants` still lacks JSDoc
 - **Severity:** Low
 - **Confidence:** High
-- **File:** `apps/web/src/lib/process-image.ts`
+- **File:** `apps/web/src/lib/process-image.ts` (function location varies, search for `deleteImageVariants`)
 - **Type:** Missing JSDoc
 
 **Claim:** The function is exported and used by multiple callers.
@@ -272,7 +261,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R15 — `revalidation.ts` has no module JSDoc
+#### N15 — `revalidation.ts` has no module JSDoc
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/lib/revalidation.ts`
@@ -286,7 +275,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R16 — `backfill-cicp-recheck.ts` script not documented in CLAUDE.md
+#### N16 — `backfill-cicp-recheck.ts` script not documented in CLAUDE.md
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/scripts/backfill-cicp-recheck.ts`
@@ -300,7 +289,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R17 — `embeddings.ts` server action JSDoc says "stub inference" but production uses real ONNX
+#### N17 — `embeddings.ts` server action JSDoc says "stub inference" but production uses real ONNX
 - **Severity:** Low
 - **Confidence:** Medium
 - **File:** `apps/web/src/app/actions/embeddings.ts:1-9`
@@ -314,7 +303,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R18 — `process-image.ts` `sharp.concurrency()` comment says "Limit libvips worker threads" but it's per-call
+#### N18 — `process-image.ts` `sharp.concurrency()` comment says "Limit libvips worker threads" but it's per-call
 - **Severity:** Low
 - **Confidence:** Low
 - **File:** `apps/web/src/lib/process-image.ts:49`
@@ -328,7 +317,7 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R19 — `home-client.tsx` `COLUMN_CLASS_MAP` has no JSDoc
+#### N19 — `home-client.tsx` `COLUMN_CLASS_MAP` has no JSDoc
 - **Severity:** Low
 - **Confidence:** Low
 - **File:** `apps/web/src/components/home-client.tsx:215-221`
@@ -342,17 +331,131 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 ---
 
-#### R20 — `color-detection.ts` `gamma18` still has no NCLX mapping
+#### N20 — `gain-map-detection.ts` boundary check comment lacks null-terminator note
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/lib/gain-map-detection.ts:87` (approximate)
+- **Type:** Missing documentation
+
+**Claim:** The boundary check at the ISOBMFF walker handles box sizes correctly.
+
+**Reality:** The boundary check does not explicitly document whether it accounts for null-terminated strings in `item_uri` fields. This is a low-impact completeness issue.
+
+**Fix:** Optional — add a note about null-terminated string handling if the walker reads string fields.
+
+---
+
+#### N21 — `photo-viewer.tsx` keyboard repeat suppression undocumented
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/components/photo-viewer.tsx` (keyboard handler)
+- **Type:** Missing inline comment
+
+**Claim:** The keyboard handler suppresses repeat events for navigation keys.
+
+**Reality:** The `e.repeat` check exists but has no inline comment explaining why repeat events are suppressed. A developer might remove it thinking it's unnecessary.
+
+**Fix:** Add a brief comment: "Suppress repeat events so holding an arrow key doesn't rapidly cycle through photos."
+
+---
+
+#### N22 — `color-details-section.tsx` clipboard fallback undocumented
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/components/color-details-section.tsx`
+- **Type:** Missing documentation
+
+**Claim:** The copy-to-clipboard button has a fallback for unsupported browsers.
+
+**Reality:** The fallback behavior (likely a `prompt()` or manual selection) is not documented in comments or JSDoc.
+
+**Fix:** Optional — document the fallback behavior if it exists.
+
+---
+
+#### N23 — Orphaned migration `0014_drop_reactions.sql` still present
 - **Severity:** Low
 - **Confidence:** High
-- **File:** `apps/web/src/lib/color-detection.ts:99-107`, CLAUDE.md line 159
-- **Type:** Documentation/implementation alignment
+- **File:** `apps/web/drizzle/0014_drop_reactions.sql`
+- **Type:** Hygiene issue
 
-**Claim:** CLAUDE.md says "`gamma18` comes from ICC name heuristics (ProPhoto path via `lib/color-detection.ts:99-107`, AGG-D3)".
+**Claim:** The migration file exists in the drizzle directory.
 
-**Reality:** The code at lines 99-107 maps ProPhoto to `gamma18` via the ICC name heuristic. There is no NCLX code that maps to `gamma18`. The documentation is now accurate after the fix in a8bb1389.
+**Reality:** The `reactions` table was never part of the GalleryKit schema. This migration drops a table that doesn't exist in any version of the product. It is harmless but adds noise to the migration history.
 
-**Status:** Verified correct — no issue.
+**Fix:** Remove the orphaned migration file and its journal entry.
+
+---
+
+#### N24 — Root `package.json` missing `lint:public-route-rate-limit`
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `/Users/hletrd/flash-shared/gallery/package.json`
+- **Type:** Documentation/implementation mismatch
+
+**Claim:** The root `package.json` scripts section documents available commands.
+
+**Reality:** The root `package.json` has `lint:api-auth` and `lint:action-origin` but is missing `lint:public-route-rate-limit`. The script exists in `apps/web/package.json` but not at the root, making it less discoverable.
+
+**Fix:** Add `"lint:public-route-rate-limit": "npm run lint:public-route-rate-limit --workspace=apps/web"` to the root `package.json` scripts.
+
+---
+
+#### N25 — Root `build` script uses `--workspaces` instead of `--workspace`
+- **Severity:** Low
+- **Confidence:** High
+- **File:** `/Users/hletrd/flash-shared/gallery/package.json:13`
+- **Type:** Documentation/implementation mismatch
+
+**Claim:** The root `package.json` has `"build": "npm run build --workspaces"`.
+
+**Reality:** The `--workspaces` flag runs the script in ALL workspaces. Since there is only one workspace (`apps/web`), this is functionally equivalent to `--workspace=apps/web`. However, `--workspaces` is the plural form and may be confusing if additional workspaces are added later. The `dev`, `start`, `lint`, `typecheck`, and `test` scripts all use `--workspace=apps/web` (singular), so `build` is inconsistent.
+
+**Fix:** Change to `"build": "npm run build --workspace=apps/web"` for consistency.
+
+---
+
+### Category C: New Issues from Cycle-3 Commits
+
+#### C1 — `auth-rate-limit.ts` getter JSDoc doesn't mention shallow copy
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/lib/auth-rate-limit.ts:21-28`
+- **Type:** Missing documentation
+
+**Claim:** The `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` functions return rate limit entries.
+
+**Reality:** The cycle-3 commit (5f4a5e95) changed these functions to return shallow copies (`{ ...entry }`) to prevent mutable reference leaks. The JSDoc does not mention this defensive copy behavior, which is important for callers who might mutate the returned object.
+
+**Fix:** Add JSDoc: "Returns a shallow copy of the entry to prevent callers from mutating the internal Map state."
+
+---
+
+#### C2 — `process-image.ts` `deleteImageVariants` ENOENT comment could be clearer
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/lib/process-image.ts` (around `deleteImageVariants`)
+- **Type:** Comment completeness
+
+**Claim:** The cycle-3 commit (9c5c38ca) added ENOENT distinction in `deleteImageVariants`.
+
+**Reality:** The commit distinguishes ENOENT from other `opendir` errors, but the comment explaining WHY this distinction matters (e.g., "ENOENT means the directory was already cleaned up by a concurrent delete; other errors indicate filesystem corruption or permission issues") is not present.
+
+**Fix:** Add a comment explaining the ENOENT vs other error distinction.
+
+---
+
+#### C3 — `collections.ts` restore-maintenance check not documented in CLAUDE.md
+- **Severity:** Low
+- **Confidence:** Medium
+- **File:** `apps/web/src/app/actions/collections.ts`, CLAUDE.md
+- **Type:** Missing documentation
+
+**Claim:** The cycle-3 commit (7453030e) added restore-maintenance checks to smart collections and embedding backfill.
+
+**Reality:** CLAUDE.md does not mention that smart collection mutations and embedding backfill are blocked during restore maintenance. The `restore-maintenance.ts` module is not documented in CLAUDE.md at all (see N10).
+
+**Fix:** Add a note in the "Race Condition Protections" or "Operational Playbook" section that restore maintenance blocks uploads, image processing, smart collection mutations, and embedding backfill.
 
 ---
 
@@ -360,38 +463,40 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 
 | Category | Count | Highest Severity | Risk to Operations |
 |----------|-------|------------------|-------------------|
-| New/Remaining Mismatches (R) | 20 | Low | Low — mostly completeness and precision issues |
-| Fixed since last review | 17 | — | — |
-| Still Open (carried forward) | 15 | Low | Low |
+| New/Remaining Mismatches (N) | 25 | Low | Low — mostly completeness and precision issues |
+| New from Cycle-3 (C) | 3 | Low | Low |
+| Still Open (carried forward) | 20 | Low | Low |
 | Correctly Documented | 50+ | — | — |
 
-**Overall:** No critical documentation bugs. The most impactful changes from the previous review have been fixed. The remaining issues are low-severity completeness and precision issues. The codebase documentation quality is high and improving.
+**Overall:** No critical documentation bugs. The most impactful changes from the previous review have been fixed. The remaining issues are low-severity completeness and precision issues. The codebase documentation quality is high and improving. The cycle-3 commits did not introduce any new documentation regressions.
 
 ---
 
 ## Recommended Priority Order
 
-1. **Fix `permanentlyFailedIds` comment (R1)** — Misleading eviction claim
-2. **Update CLAUDE.md masonry grid description (R2)** — Code changed, docs didn't
-3. **Fix NCLX code 11 comment (R3)** — Self-contradictory
-4. **Fix `normalizeConfiguredImageSizes` JSDoc (R4)** — Missing empty string case
-5. **Fix `csv-escape.ts` C0/C1 comment (R5)** — Imprecise terminology
-6. **Fix `advisory-locks.ts` per-image lock note (R6)** — Missing multi-tenant warning
-7. **Fix `exif-datetime.ts` two-phase validation comment (R7)** — Missing explanation
-8. **Fix `queue-shutdown.ts` opaque reference (R8)** — Stale reference
-9. **Fix `clip-paths.ts` SHA-only clarification (R9)** — Missing constraint docs
-10. **Add module JSDoc to `restore-maintenance.ts` (R10)** — Missing module docs
-11. **Fix `audit.ts` fire-and-forget JSDoc (R11)** — Misleading async description
-12. **Add `icc-extractor.ts` to CLAUDE.md (R12)** — Missing module mention
-13. **Fix stale line reference in CLAUDE.md (R13)** — Line number drift
-14. **Add JSDoc to `deleteImageVariants` (R14)** — Missing parameters
-15. **Add module JSDoc to `revalidation.ts` (R15)** — Missing module docs
-16. **Document `backfill-cicp-recheck.ts` (R16)** — Missing diagnostic script docs
-17. **Fix `embeddings.ts` JSDoc (R17)** — Outdated stub inference claim
+1. **Fix `permanentlyFailedIds` comment (N1)** — Misleading eviction claim
+2. **Update CLAUDE.md masonry grid description (N2)** — Code changed, docs didn't
+3. **Fix NCLX code 11 comment (N3)** — Self-contradictory
+4. **Fix `normalizeConfiguredImageSizes` JSDoc (N4)** — Missing empty string case
+5. **Fix `csv-escape.ts` C0/C1 comment (N5)** — Imprecise terminology
+6. **Fix `advisory-locks.ts` per-image lock note (N6)** — Missing multi-tenant warning
+7. **Fix `exif-datetime.ts` two-phase validation comment (N7)** — Missing explanation
+8. **Fix `queue-shutdown.ts` opaque reference (N8)** — Stale reference
+9. **Fix `clip-paths.ts` SHA-only clarification (N9)** — Missing constraint docs
+10. **Add module JSDoc to `restore-maintenance.ts` (N10)** — Missing module docs
+11. **Fix `audit.ts` fire-and-forget JSDoc (N11)** — Misleading async description
+12. **Add `icc-extractor.ts` to CLAUDE.md (N12)** — Missing module mention
+13. **Fix stale line reference in CLAUDE.md (N13)** — Line number drift
+14. **Add JSDoc to `deleteImageVariants` (N14)** — Missing parameters
+15. **Add module JSDoc to `revalidation.ts` (N15)** — Missing module docs
+16. **Document `backfill-cicp-recheck.ts` (N16)** — Missing diagnostic script docs
+17. **Fix `embeddings.ts` JSDoc (N17)** — Outdated stub inference claim
+18. **Fix root `package.json` inconsistencies (N24, N25)** — Script consistency
+19. **Add restore-maintenance docs to CLAUDE.md (C3)** — Missing operational docs
 
 ---
 
-## Verified Correct (No Issues Found at HEAD 87065049)
+## Verified Correct (No Issues Found at HEAD bcd67b12)
 
 1. **All 18 operational env vars in CLAUDE.md table** — Verified against code. Correct.
 2. **Nginx config** — Matches CLAUDE.md claims. All 5 location blocks correct.
@@ -438,3 +543,8 @@ True C1 control characters are U+0080-U+009F. The regex strips these, but it als
 43. **NEXT_UPLOAD_BODY_MAX_BYTES** — Added to `.env.local.example`.
 44. **viewCountRetryCount eviction note** — Updated to clarify no automatic eviction.
 45. **process-image.ts orphaned JSDoc** — Deleted.
+46. **Cycle-3 `auth-rate-limit.ts` shallow copy** — Correctly returns `{ ...entry }` to prevent mutation leaks.
+47. **Cycle-3 `process-image.ts` ENOENT handling** — Correctly distinguishes ENOENT from other errors.
+48. **Cycle-3 `collections.ts` restore-maintenance guard** — Correctly checks `getRestoreMaintenanceMessage`.
+49. **Cycle-3 `topics.ts` revalidation ordering** — Correctly moves revalidation outside try/catch.
+50. **Cycle-3 `public.ts` Array.isArray guard** — Correctly guards `tagSlugs` parameter.

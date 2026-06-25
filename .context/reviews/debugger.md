@@ -1,16 +1,16 @@
 # Comprehensive Latent Bug Review — GalleryKit Debugger
 
-**Scope:** Full repository review of all source files for latent bugs, failure modes, and potential regressions.  
+**Scope:** Full repository review of all source files for latent bugs, failure modes, edge cases, null/undefined handling, error path gaps, and bugs that might not surface during normal testing.  
 **Date:** 2026-06-25  
 **Reviewer:** Debugger agent  
-**HEAD:** c0522dec (run-9 cycle-8 convergence)  
+**HEAD:** bcd67b12 (run-9 cycle-8 convergence)  
 **Confidence labels:** High, Medium, Low
 
 ---
 
 ## Summary
 
-After reviewing 40+ source files across the GalleryKit codebase at HEAD c0522dec, I verified the status of all 15 findings from the previous cycle's debugger review. **3 findings have been fixed** since cycle 8 (Finding 2: normalizeExposureTime NaN/Infinity; Finding 4: failRestore async; Finding 6: dummyHash TOCTOU). The remaining 12 findings were re-evaluated: 6 are confirmed still present, 6 were previously verified as correct. No new latent bugs were introduced in the changed files. The codebase remains exceptionally well-hardened.
+After reviewing 40+ source files across the GalleryKit codebase at HEAD bcd67b12, I verified the status of all 15 findings from the previous cycle's debugger review. **3 findings have been fixed** since cycle 8 (Finding 2: normalizeExposureTime NaN/Infinity; Finding 4: failRestore async; Finding 6: dummyHash TOCTOU). The remaining 12 findings were re-evaluated: 6 are confirmed still present, 6 were previously verified as correct. No new latent bugs were introduced in the changed files. The codebase remains exceptionally well-hardened.
 
 ---
 
@@ -265,7 +265,7 @@ Reviewed all React components. No hook violations found. All hooks are called at
 
 ## Conclusion
 
-The GalleryKit codebase remains exceptionally well-hardened at HEAD c0522dec. The 3 fixes since cycle 8 demonstrate active maintenance:
+The GalleryKit codebase remains exceptionally well-hardened at HEAD bcd67b12. The 3 fixes since cycle 8 demonstrate active maintenance:
 
 1. **Finding 2 (FIXED):** `normalizeExposureTime` now has `Number.isFinite()` checks for array form handling.
 2. **Finding 4 (FIXED):** `failRestore` is now synchronous with `.catch()` on unlink.

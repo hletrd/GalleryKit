@@ -1,919 +1,409 @@
-# Test-Engineer Review — GalleryKit Test Suite (Cycle 10, Run 3)
+# Comprehensive Test Review — GalleryKit
 
-> **Date:** 2026-06-25
-> **HEAD:** c0522dec
-> **Scope:** `apps/web/src/__tests__/` (227 test files, ~31K lines), `apps/web/e2e/` (6 spec files, ~726 lines), `apps/web/scripts/` (26 scripts)
-> **Test Runner:** Vitest 4.1.9
-> **Current Status:** 225 test files passed, 2 skipped, 2068 tests, ~100s duration
+**Repository:** `/Users/hletrd/flash-shared/gallery`  
+**HEAD:** `bcd67b12`  
+**Previous Review HEAD:** `c0522dec` (Cycle 10, Run 3)  
+**Date:** 2026-06-25  
+**Reviewer:** Test Engineer (oh-my-claudecode:test-engineer)  
 
 ---
 
 ## 1. Executive Summary
 
-The GalleryKit test suite is extensive and well-maintained, with **227 unit test files** (~31K lines) and **6 E2E spec files** covering a broad surface. All tests pass (225 files, 2068 tests, 0 failures). Since the Cycle 8 review (HEAD 87065049), several improvements landed:
+| Metric | Value |
+|--------|-------|
+| Unit test files | 227 (225 passed, 2 skipped) |
+| Unit tests | 2,064 passed, 4 skipped |
+| E2E test files | 5 (admin.spec.ts, public.spec.ts, origin-guard.spec.ts, nav-visual-check.spec.ts, test-fixes.spec.ts) |
+| E2E tests | ~20 (many gated behind env flags) |
+| Test duration | 225.36s (cold import: 621.52s, tests: 65.04s) |
+| Test framework | Vitest 4.1.9 (unit), Playwright 1.59.1 (e2e) |
+| Test timeout | 15,000ms (raised from 5,000ms in cycle 3) |
 
-- **C8R-TEST-01:** Fixed racy `setImmediate` drain in `admin-backfill-runner-leak.test.ts` (both tests now use `vi.waitFor`)
-- **AGG-M1:** Fixed mixed-freshness dimension inconsistency in `process-image.ts` (read both dimensions fresh from Sharp)
-- **AGG-M2:** Precomputed dummy Argon2 hash at module init to close TOCTOU race
-- **AGG-M4:** Reduced view-count flush chunk from 20 to 5 to avoid pool exhaustion
-- **AGG-M5:** Auto-enforced hard cap in `BoundedMap.set()` so consumers cannot forget
-- **AGG-M6:** Made `failRestore` synchronous to prevent swallowed async errors
-- **AGG-M5 (DB):** Cleared stale init promise on DB connection timeout so next attempt retries
-- **DEF-R9C7-01:** Fixed dead caption mock target in settings-wiring test
+**Overall Assessment:** The test suite is **exceptionally strong** for a project of this size. It features a mature fixture-style testing culture, extensive lint-gate coverage, thorough security contract tests, and a well-documented history of regression-driven test additions. However, there are **significant coverage gaps** in client-side React components, several server action files, the storage abstraction layer, and the e2e suite. The test pyramid is **inverted**: heavy on fixture/structural tests (which are valuable but not behavioral), light on true unit tests for component logic, and very light on integration tests.
 
-**Test Health:** HEALTHY with targeted gaps
-
-**Key Strengths:**
-- Excellent fixture-style lint gates (`check-action-origin`, `check-api-auth`, `check-public-route-rate-limit`, `touch-target-audit`) that prevent architectural regressions
-- Comprehensive color/HDR pipeline tests (17+ test files, real Sharp integration)
-- Thorough backfill runner coverage (9 dedicated test files with regression annotations)
-- Good security test coverage for rate limiting, origin validation, and input sanitization
-- Strong test documentation — each test file references the commit/defect it guards against
-- New tests added for NCLX matrix codes, free-download contract, caption-generator wiring
-
-**Critical Gaps Remaining:**
-- `lib/gps-exif-strip.ts` — NO direct unit tests for the byte-level GPS stripping functions (privacy-critical, ~600 lines of binary parsing)
-- `lib/data.ts` — NO behavioral tests for any data access function (only fixture-style SQL contract tests)
-- `app/actions/auth.ts` — NO direct unit tests for login/logout actions (most critical security gap)
-- `app/actions/settings.ts` — NO test file exists
-- `app/actions/embeddings.ts` — NO test file exists
-- `lib/audit.ts` — NO tests for `logAuditEvent()` write path
-- `lib/session.ts` — NO tests for `getSessionSecret()` (the 4-case env/DB fallback logic)
-- E2E: Only Chromium, single-worker, no offline/SW tests, no semantic search E2E, no cross-browser coverage
-- Several recently fixed bugs have NO regression tests (see Section 5)
+**Since the previous review (c0522dec -> bcd67b12):** 6 new commits landed, all security fixes. Critically, **5 of the 6 fixes have NO corresponding regression tests** — this is the most important finding of this review.
 
 ---
 
-## 2. Coverage Gap Analysis
+## 2. New Commits Since Previous Review (c0522dec -> bcd67b12)
 
-### 2.1 Untested Critical Source Files
+### 2.1 bcd67b12: Array.isArray guard to loadMoreImages tagSlugs parameter
 
-| File | Lines | What It Does | Why Untested | Risk |
-|------|-------|-------------|--------------|------|
-| `src/lib/gps-exif-strip.ts` | ~600 | Lossless byte-level GPS metadata removal for JPEG, TIFF, ISOBMFF, WebP | Complex binary parsers; no synthetic fixtures | **CRITICAL** — Privacy-critical GPS stripping is untested at the unit level. The `strip-gps-from-original.test.ts` only tests the action-level wiring (calls `stripGpsFromOriginal`), not the actual byte-surgery functions (`stripGpsFromJpegBuffer`, `stripGpsFromTiffBuffer`, `stripGpsFromIsobmffBuffer`, `stripGpsFromWebpBuffer`, `stripGpsFromTiffRegion`). |
-| `src/lib/data.ts` | ~1666 | Core data access layer: image queries, pagination, search, shared groups, view counts | Complex Drizzle queries; would need DB mock | **CRITICAL** — The entire app's data flows through here. Only fixture-style SQL contract tests exist (`data-tag-names-sql.test.ts`, `data-view-count-flush.test.ts`, etc.). No behavioral tests for `getImage`, `getImagesLite`, `searchImages`, `getSharedGroup`, `getMapImages`, `flushGroupViewCounts`, etc. |
-| `src/lib/audit.ts` | ~78 | Fire-and-forget audit log writer + purge | Simple but best-effort; write path untested | **HIGH** — `audit-retention.test.ts` only tests `purgeOldAuditLog`. No tests for `logAuditEvent` (metadata serialization, truncation at 4096 bytes, surrogate-pair-safe slicing, JSON stringify failure fallback). |
-| `src/app/actions/auth.ts` | ~250 | Login, logout, password change server actions | Would need Argon2 + DB mock + cookie mock | **HIGH** — The most security-critical untested code. `session.test.ts` and `auth-rate-limit.test.ts` test helpers, but the actual login action (password verification, session creation, cookie setting, rate limit integration) has no unit test. |
-| `src/app/actions/settings.ts` | ~200 | Admin settings CRUD with color-impacting validation | No test file exists | **HIGH** — Settings changes affect the image processing pipeline. No behavioral tests for validation, persistence, or the settings-hash invalidation. |
-| `src/app/actions/embeddings.ts` | ~150 | CLIP embedding management actions | No test file exists | **MEDIUM** — Semantic search feature actions untested. |
-| `src/lib/session.ts` | ~151 | Session token generation, verification, secret management | `getSessionSecret` is async with DB fallback | **HIGH** — `session.test.ts` tests `hashSessionToken` and `generateSessionToken` format. `session-verify.test.ts` tests `verifySessionToken` with mocked DB. **Missing**: `getSessionSecret` (the 4-case env/DB fallback logic), race condition on concurrent calls, caching behavior. |
-| `src/lib/image-queue.ts` | ~700 | PQueue-based image processing, bootstrap scan, hooks | Complex async orchestration | **HIGH** — Many tests exist but major gaps: `cleanOrphanedTmpFiles` (no tests), `purgeExpiredSessions` (no tests), `bootstrapProcessingQueue` / `continueBootstrapScan` (only enqueue wiring tested), `enqueueImageProcessing` claim retry path (lines 274-298), caption/embedding fire-and-forget hooks (lines 429-512). |
-| `src/lib/process-image.ts` | ~1200 | Image upload, EXIF extraction, color pipeline, format conversion | Complex pipeline with many branches | **HIGH** — Many tests exist but missing: `saveOriginalAndGetMetadata` full path (disk full, EXIF reader error, blur failure fallback), `processImageFormats` full integration (DCI-P3 path, 10-bit AVIF fallback on encode failure, wide-gamut downscale intermediate, per-format fresh sharp isolation), `deleteImageVariants` with directory scan, `getSafeExtension` / `RawFileError`, `ensureDirs` singleton, `clampUtf8Bytes` / `cleanMetadataString`, `parseExifDateTime` timezone handling. |
-| `src/lib/auth-rate-limit.ts` | ~140 | Account-scoped and password-change rate limiting | `passwordChangeRateLimit` Map untested | **MEDIUM** — `auth-rate-limit.test.ts` covers entry getters and record/clear/rollback. **Missing**: `pruneAccountLoginRateLimit`, `passwordChangeRateLimit` usage (no tests for the password change rate limit path at all). |
-| `src/lib/analytics.ts` | ~182 | Bot detection, GeoIP, referrer sanitization | Partial coverage | **MEDIUM** — `analytics.test.ts` covers `extractTldPlusOne`, `sanitizeReferrerHost`, `isBot`, `lookupCountry`. **Missing**: `getSiteHost` (invalid URL error handling), `isPrivateHost` (IPv6 bracket stripping, loopback detection), `sanitizeReferrerHost` edge cases (non-http protocols, extremely long TLD+1 >128 chars). |
+**File:** `src/app/actions/public.ts`  
+**Change:** Added `Array.isArray(tagSlugs)` guard before `tagSlugs.map(...)` in `loadMoreImages`.  
+**Risk:** A malformed `tagSlugs` parameter (string, object, null) would cause `.map()` to throw or behave unexpectedly, potentially crashing the server action or leaking internal error details.  
+**Test Status:** **NO REGRESSION TEST.** The `public-actions.test.ts` tests `loadMoreImages` but does not test the `tagSlugs` parameter with non-array inputs.  
+**Confidence:** HIGH  
+**Recommendation:** Add test: `loadMoreImages({ tagSlugs: 'not-an-array' })` should return an error or empty result, not throw.
 
-**Confidence: High** — These are genuinely critical untested files identified by reading the actual source code and comparing against the test inventory.
+### 2.2 9c5c38ca: Distinguish ENOENT from other opendir errors in deleteImageVariants
 
-### 2.2 Untested Components (React)
+**File:** `src/lib/process-image.ts`  
+**Change:** `deleteImageVariants` now checks `error.code === 'ENOENT'` vs other `opendir` errors. Previously, any `opendir` error was silently caught, masking real filesystem problems.  
+**Risk:** A permissions error (EACCES) or corrupted directory would be silently swallowed, leaving orphaned files on disk.  
+**Test Status:** **NO REGRESSION TEST.** `deleteImageVariants` has no dedicated tests at all.  
+**Confidence:** HIGH  
+**Recommendation:** Add test mocking `fs.opendir` to throw `EACCES` and verify the error is re-thrown, not swallowed.
 
-| Component | Risk | What's Missing |
-|-----------|------|----------------|
-| `components/photo-viewer.tsx` | **Medium** | Blur placeholder rendering, color details accordion, download button wiring. Only e2e-tested. |
-| `components/home-client.tsx` | **Medium** | Masonry grid, load-more integration, locale switching. Only e2e-tested. |
-| `components/image-manager.tsx` | **Medium** | Bulk operations, table sorting, pagination. No tests at all. |
-| `components/admin-user-manager.tsx` | **Medium** | Admin CRUD UI. No tests at all. |
-| `components/bulk-edit-dialog.tsx` | **Low** | Bulk edit modal. No tests at all. |
-| `components/nav-client.tsx` | **Low** | Navigation with locale switcher. No tests at all. |
-| `components/wide-gamut-hint.tsx` | **Low** | P3 display hint. No tests at all. |
-| `components/similar-photos.tsx` | **Low** | Similar photos carousel. No tests at all. |
-| `components/on-this-day-widget.tsx` | **Low** | On-this-day widget. No tests at all. |
+### 2.3 7453030e: Add restore-maintenance checks to smart collections and embedding backfill
 
-**Confidence: Medium** — These are React components that are covered by E2E tests, but unit/component tests would catch regressions faster and with better isolation.
+**File:** `src/app/actions/collections.ts`, `src/app/actions/embeddings.ts`  
+**Change:** Added `isRestoreMaintenanceActive()` guards to `retryFailedCollection` and `retryFailedEmbedding` actions.  
+**Risk:** Without the guard, these actions could modify the database during a restore operation, causing data corruption or inconsistent state.  
+**Test Status:** **NO REGRESSION TEST.** Neither `collections.ts` nor `embeddings.ts` has any test file.  
+**Confidence:** HIGH  
+**Recommendation:** Add tests for both actions with `isRestoreMaintenanceActive` returning `true`, verifying they return a maintenance message without making DB calls.
 
-### 2.3 Untested Scripts (19 of 26, 26.9% coverage)
+### 2.4 db55056f: Move revalidation outside try/catch to prevent image cleanup on revalidation errors
 
-| Script | Risk | Why Test | Suggested Approach |
-|--------|------|----------|------------------|
-| `scripts/init-db.ts` | **High** | DB initialization; wrong SQL = broken deploy | Unit test: verify SQL execution order, error handling |
-| `scripts/seed-admin.ts` | **High** | Creates first admin; wrong hash = lockout | Test Argon2 hash generation, validation of required env vars |
-| `scripts/backfill-clip-embeddings.ts` | **Medium** | CLIP backfill; runs in production | Test CLI arg parsing, production mode gating, error paths |
-| `scripts/backfill-color-pipeline.ts` | **Medium** | Color pipeline backfill sidecar | Test advisory lock acquisition, batching logic (in-app runner is tested, sidecar is NOT) |
-| `scripts/build-sw.ts` | **Medium** | SW version stamping | Test git-SHA + pipeline-version concatenation, template replacement |
-| `scripts/download-clip-models.ts` | **Medium** | Model weight download | Test URL construction, retry logic, path validation |
-| `scripts/migrate.js` | **Medium** | Schema migration | Test journal monotonicity, hash validation, reconcile logic (partially covered by fixture tests) |
+**File:** `src/app/actions/topics.ts`  
+**Change:** `revalidatePath` calls moved outside the try/catch that wraps the DB transaction. Previously, a `revalidatePath` error would trigger the catch block, which deleted the newly uploaded topic image, leaving a broken reference.  
+**Risk:** A Next.js revalidation error (e.g., filesystem permission issue) would cause the topic image to be deleted from disk while the DB still referenced it, resulting in 404 images.  
+**Test Status:** **NO REGRESSION TEST.** The `topics-actions.test.ts` tests topic creation but does not test the revalidation error path.  
+**Confidence:** HIGH  
+**Recommendation:** Add test mocking `revalidatePath` to throw and verifying the topic image is NOT deleted.
 
-**Confidence: High** — The 7 high/medium risk scripts above are genuine gaps.
+### 2.5 5f4a5e95: Return shallow copies from rate-limit entry getters to prevent mutable reference leaks
 
----
+**File:** `src/lib/rate-limit.ts`  
+**Change:** `getAccountLoginRecord`, `getPasswordChangeRecord`, and `getShareAttemptRecord` now return `{ ...entry }` (shallow copy) instead of the raw object reference.  
+**Risk:** Callers could mutate the returned object, corrupting the rate-limit state (e.g., resetting `count` to 0 to bypass rate limiting).  
+**Test Status:** **NO REGRESSION TEST.** The `rate-limit.test.ts` and `auth-rate-limit.test.ts` test the getters but do not verify that returned objects are immutable copies.  
+**Confidence:** HIGH  
+**Recommendation:** Add test: get a record, mutate the returned object, then get the record again and verify the original is unchanged.
 
-## 3. Flaky Tests and Race Conditions
+### 2.6 b22fa85e: Lock down deleteAdminUser and LR token actions with isAdmin() checks
 
-### 3.1 FIXED — `admin-backfill-runner-leak.test.ts`
-
-**File:** `src/__tests__/admin-backfill-runner-leak.test.ts`
-**Confidence:** HIGH
-**Status:** FIXED (commit 3d97193d, C8R-TEST-01). Both tests now use `vi.waitFor(() => state.running === false && state.lastError !== null, { timeout: 5000, interval: 10 })` instead of racy `setImmediate` chains.
-
-### 3.2 CONFIRMED FLAKY — `image-queue-bootstrap.test.ts` (NOT FIXED)
-
-**File:** `src/__tests__/image-queue-bootstrap.test.ts`
-**Confidence:** HIGH
-**Issue:** Two tests timeout at 15000ms under full-suite load. `vi.doMock` with `vi.resetModules()` is slow under parallel load. The continuation test uses `vi.waitFor` with 20s timeout but still fails when CPU is contended by sharp/clip/db transitive import graphs. The `vi.waitFor` with 20s timeout races against the test runner's own 15s default timeout.
-**Specific failing tests:**
-- "caps each bootstrap pass and schedules a continuation for large backlogs" (line 131)
-- "continues scanning after the previous batch cursor so later rows are not starved" (line 153)
-**Recommended fixes:**
-1. Use `vi.useFakeTimers()` for ALL bootstrap tests (the third test uses this and passes reliably)
-2. Isolate the file to serial execution (`describe.sequential`)
-3. Increase timeout to 30s+ or mark as `test.skip` under CI
-4. Reduce the batch size in tests from 500 to 50 (same behavior, less mock overhead)
-
-### 3.3 Throw-Based `vi.waitFor` Anti-Pattern (4 locations)
-
-**Files:** `admin-backfill-runner-detection-failure.test.ts:178-185`, `admin-backfill-runner-deleted-mid-reencode.test.ts:199-206`, `admin-backfill-runner-fatal-counters.test.ts:196-203` and `288-297` and `363-370`
-**Confidence:** MEDIUM
-**Issue:** The `vi.waitFor` callback throws when the condition is NOT met, relying on vitest's internal retry logic. This produces noisy error logs on every retry interval. The 20s timeout is excessive for a unit test.
-**Fix:** Use `await vi.waitFor(() => expect(readAdminBackfillState().running).toBe(false), { timeout: 5000 })` for cleaner assertion failure messages.
-
-### 3.4 `data-tag-names-sql.test.ts` — 30s Timeout Masks Import-Time Flakiness
-
-**File:** `src/__tests__/data-tag-names-sql.test.ts:244-267`
-**Confidence:** HIGH
-**Issue:** The test comment documents that this test flakes under "full-suite parallel test load" because cold-importing `drizzle-orm`, `drizzle-orm/mysql-proxy`, and `../db/schema` occasionally exceeds 5000ms. The fix was to bump the timeout to 30s. This is a band-aid — the root cause is dynamic imports of heavy modules inside a test. The test is order-dependent: if drizzle-orm was already imported by a prior test, this test runs fast; if it's the first to import it, it may take 5-15s.
-**Fix:** Pre-import the heavy modules at the top level (or in a `beforeAll`) so the cold-start cost is paid once and predictable.
-
-### 3.5 `process-image-color-roundtrip.test.ts` — Sharp/AVIF Encode Variability
-
-**File:** `src/__tests__/process-image-color-roundtrip.test.ts`
-**Confidence:** MEDIUM
-**Issue:** Pixel values shift with encoder quantization. The test uses generous tolerance (~25 codes) + conditional 10-bit probe. On a CI runner without libheif 10-bit support, the test takes the 8-bit fallback path, which is tested but the 10-bit path is NOT tested on such runners.
-**Fix:** Consider splitting into two tests: one for 8-bit fallback (always runs) and one for 10-bit (skipped when libheif unavailable).
-
-### 3.6 Potential Remaining Flaky Patterns
-
-| Test File | Risk | Why |
-|-----------|------|-----|
-| `clip-semantic-integration.test.ts` | Medium | ONNX runtime model loading is non-deterministic in timing; may timeout on slow runners |
-| `e2e/admin.spec.ts` | Medium | Upload workflow depends on external file system and image processing queue; 30s timeout may be tight under load |
-| `rate-limit-db.test.ts` | Medium | DB-backed rate limit tests depend on MySQL being available; may fail in CI if DB is not ready |
-| `process-image-exif-strip.test.ts` | Low | `afterAll` cleans up files by `generatedIds` list; if a test fails mid-run, the list may be incomplete |
+**File:** `src/app/actions/admin-users.ts`, `src/app/actions/lr-tokens.ts`  
+**Change:** Added `isAdmin()` checks to `deleteAdminUser` and `createLrToken`/`deleteLrToken`/`revokeAllLrTokens`.  
+**Risk:** Without the check, these actions could be called by unauthenticated users, allowing arbitrary admin deletion or token revocation.  
+**Test Status:** **NO REGRESSION TEST.** `admin-users.ts` has no test file. `lr-tokens.ts` has `lr-tokens-action.test.ts` but it does not test the auth check.  
+**Confidence:** HIGH  
+**Recommendation:** Add tests for all four actions with `isAdmin()` mocked to return `false`, verifying they return an auth error without making DB calls.
 
 ---
 
-## 4. Tests That Don't Actually Assert Correctness
+## 3. Test Coverage Gaps
 
-### 4.1 Tests That Only Check Format, Not Cryptographic Correctness
+### 3.1 High-Risk: Untested Source Files
 
-**File:** `src/__tests__/session.test.ts:24-44`
-**Confidence:** HIGH
-**Code:** Tests that `generateSessionToken` produces `timestamp:random:signature` format.
-**Issue:** The test verifies the token's STRUCTURE but does NOT verify that the signature is actually a valid HMAC-SHA256 of the timestamp and random parts. A broken implementation returning `timestamp:random:0000...0000` (64 zeros) would pass this test.
-**Fix:** Add an assertion that splits the token, recomputes `HMAC-SHA256(timestamp + ":" + random, secret)`, and asserts it matches the signature part.
+The following `lib/` files have **no dedicated test file** and contain non-trivial logic. Risk is assessed by surface area, failure impact, and whether the code is exercised by other tests.
 
-### 4.2 Tests With Mocked ID Generation (Trivially True)
+| File | Lines (approx) | Risk | Why Untested Is Problematic |
+|------|---------------|------|---------------------------|
+| `lib/action-result.ts` | ~40 | **Medium** | Standardized action result shapes; a refactor could break every server action's return contract silently. |
+| `lib/analytics-data.ts` | ~200 | **High** | Analytics aggregation queries (country breakdown, referrer breakdown, view counts). No tests for the SQL generation or data transformation. A schema change or index change could silently corrupt analytics. |
+| `lib/avif-support.ts` | ~30 | **Low** | Browser feature detection; mostly static constants. Low risk. |
+| `lib/bulk-edit-types.ts` | ~20 | **Low** | Type definitions only. No runtime logic. |
+| `lib/caption-constants.ts` | ~15 | **Low** | Constant strings. No runtime logic. |
+| `lib/clip-inference.ts` | ~150 | **High** | CLIP model inference orchestration. The most complex untested file. Loads ONNX models, runs inference, handles batching. A memory leak or model-loading failure here would crash semantic search. |
+| `lib/clip-model-id.ts` | ~30 | **Medium** | Model version identifier. A drift here breaks model-version isolation (AGG-14). |
+| `lib/color-pipeline-decisions.ts` | ~80 | **Medium** | `isP3Pipeline` predicate and `COLOR_PIPELINE_DECISIONS` enum. Used by color-details-section and process-image. A logic error here mislabels photos. |
+| `lib/constants.ts` | ~50 | **Low** | Static constants. Low risk. |
+| `lib/csp-nonce.ts` | ~30 | **Medium** | CSP nonce generation. Security-critical but trivial. |
+| `lib/gps-exif-strip.ts` | ~200 | **High** | GPS stripping logic for JPEG/TIFF/HEIF/WebP/PNG. Security-critical privacy feature. No dedicated tests — only exercised via `images-action-gps-toggle-wiring.test.ts` (wiring check, not behavior). A format-specific bug could leak GPS coordinates. |
+| `lib/icc-extractor.ts` | ~150 | **Medium** | ICC profile descriptor parser (v2 `desc`, v4 `mluc`). Used by color-detection. Has indirect coverage via `process-image-color-roundtrip.test.ts` but no direct unit tests for edge cases (truncated profiles, malformed descriptors). |
+| `lib/image-types.ts` | ~30 | **Low** | Type definitions. |
+| `lib/og-photo-fetch.ts` | ~80 | **Medium** | OG photo fallback buffer selection. Used by OG image routes. No direct tests. |
+| `lib/seo-og-url.ts` | ~30 | **Low** | URL construction helper. |
+| `lib/storage/index.ts` | ~50 | **Medium** | Storage abstraction (not wired end-to-end per CLAUDE.md). The abstraction exists but has no tests. |
+| `lib/storage/local.ts` | ~200 | **High** | Local filesystem storage implementation. File operations, path validation, directory creation. No tests. A bug here could corrupt uploads or expose files. |
+| `lib/storage/types.ts` | ~30 | **Low** | Type definitions. |
+| `lib/utils.ts` | ~50 | **Low** | `cn()` helper and generic utilities. |
 
-**File:** `src/__tests__/upload-dropzone.test.ts:6-19`
-**Confidence:** HIGH
-**Issue:** The test injects a deterministic ID generator (`() => ids.shift()!`) and only verifies that the IDs are different. It does NOT test the real ID generation logic. It also doesn't test error handling (empty file list, null inputs), file type validation, or the actual upload flow.
-**Fix:** Test the actual ID generation by asserting UUIDv4 format, or test with the real generator and verify uniqueness across multiple calls.
+**Total untested lib/ files with runtime logic:** ~15 files, ~1,300 lines of non-trivial code.
 
-### 4.3 Fixture-Style Tests (Pattern Matching, Not Runtime)
+### 3.2 High-Risk: Partially Tested Source Files
 
-These tests read source files and assert regex matches. They are valuable for catching regressions but do NOT verify runtime behavior:
+Files with test files that cover only a narrow slice of the module's surface:
 
-| Test File | Lines | What It Actually Tests | Risk |
-|-----------|-------|------------------------|------|
-| `data-tag-names-sql.test.ts` | 1-267 | Source contains `GROUP_CONCAT` + `LEFT JOIN` + `GROUP BY` | Medium — SQL compiles but may return wrong results |
-| `data-view-count-flush.test.ts` | 1-50 | Source contains buffer swap pattern | Medium — Pattern exists but runtime behavior untested |
-| `data-adjacency-source.test.ts` | 1-50 | Source contains prev/next SQL conditions | Medium — Same as above |
-| `data-timeline.test.ts` | 1-50 | Source contains timeline query shapes | Medium — Same as above |
-| `process-image-blur-wiring.test.ts` | 1-50 | Source contains blur validation pattern | Medium — Wire exists but data validity untested |
-| `images-action-blur-wiring.test.ts` | 1-50 | Source contains blur validation in upload action | Medium — Same as above |
-| `images-action-gps-toggle-wiring.test.ts` | 1-50 | Source contains GPS toggle wiring | Medium — Same as above |
-| `og-route-source-contracts.test.ts` | 1-50 | Source contains OG route patterns | Low — Source pattern check |
-| `privacy-fields.test.ts` | 1-50 | Sensitive fields exist in schema | Low — TypeScript compiler already enforces this |
-| `client-source-contracts.test.ts` | 1-50 | Client-only imports | Low — Build-time concern |
-| `next-config.test.ts` | 1-50 | next.config.ts patterns | Low — Build-time concern |
-| `nginx-config.test.ts` | 1-50 | nginx.conf patterns | Low — Infrastructure concern |
-| `db-pool-connection-handler.test.ts` | 1-73 | Source contains `Promise.race`, `Symbol.for` | **Medium** — NEW source-scan test. Verifies code PATTERN exists but does NOT test that the timeout actually fires |
+| File | Test File | Coverage Gap |
+|------|-----------|--------------|
+| `lib/data.ts` | `data-tag-names-sql.test.ts` | Only tests SQL shape contracts (GROUP_CONCAT, LEFT JOIN, GROUP BY). No tests for query execution, pagination, filtering, search, or the `getImage()` function's tag/prev/next aggregation. |
+| `lib/process-image.ts` | 8 test files (blur-wiring, color-roundtrip, dimensions, exif-strip, icc-options, metadata, orientation, p3-icc, post-encode, raw-rejection, variant-scan, webp-lossless) | Strong coverage of the pipeline but **no tests for the `deleteImageVariants` function** (line 9c5c38ca fix), error handling paths, or the `processImage` wrapper that coordinates the full flow. |
+| `lib/admin-backfill-runner.ts` | 6 test files (batching, detection-failure, deleted-mid-reencode, fatal-counters, leak, status-shape) | Good coverage of the runner's edge cases, but **no tests for the actual `processImageFormats` call** inside the runner, or the batching logic's interaction with the DB cursor. |
+| `lib/api-auth.ts` | `api-auth-response-headers.test.ts` | Only tests response header shape. No tests for the `withAdminAuth` wrapper's auth verification, cookie parsing, or redirect behavior. |
+| `lib/audit.ts` | `audit-retention.test.ts` | Only tests retention pruning. No tests for `logAuditEvent`, event type validation, or the audit log query helpers. |
+| `lib/password-hashing.ts` | `password-hashing-policy.test.ts` | Only tests policy constants (memory cost, time cost). No tests for the actual `hashPassword` or `verifyPassword` functions. |
+| `lib/theme.ts` | `theme-resolve.test.ts` | Only tests theme resolution. No tests for the theme provider component or CSS variable injection. |
 
-**Confidence: High** — These are legitimate concerns. The source-scan tests are "lint tests" — they verify code structure, not runtime behavior. They should be complemented by runtime tests where possible.
+### 3.3 Component Test Coverage: Near Zero
 
-### 4.4 Tests That Could Pass Even If Code Is Broken
+**Critical finding:** Of 55 component files (`src/components/*.tsx`), only **3** have any test coverage:
 
-| Test File | Issue | How It Could Pass Broken |
-|-----------|-------|--------------------------|
-| `process-image-blur-wiring.test.ts` | Tests that `blurDataUrl` flows through the pipeline | If blur generation produces invalid data URL but consumer accepts it, test passes |
-| `images-action-blur-wiring.test.ts` | Tests blur data URL wiring in upload action | Same as above |
-| `upload-processing-contract-lock.test.ts` | Tests that the lock is acquired | If lock acquisition fails silently (returns no-op release), test may pass |
-| `restore-upload-lock.test.ts` | Tests upload lock during restore | Same silent-failure concern |
-| `settings-hash.test.ts` | Tests hash computation | If hash algorithm changes but test fixture is updated to match, test passes without catching the change |
-| `serve-upload-settings-debounce.test.ts` | Tests settings hash caching | If cache never invalidates (always returns stale), test may pass if it only checks the first call |
+| Component | Test File | Coverage |
+|-----------|-----------|----------|
+| `lightbox.tsx` | `lightbox.test.ts` | Single function: `shouldAutoHideLightboxControls` (4 lines). The 400+ line component has no tests for keyboard navigation, slideshow, pinch-zoom, or focus management. |
+| `histogram.tsx` | `histogram.test.ts` | Canvas rendering tests (good). |
+| `photo-viewer.tsx` | `photo-viewer-no-hdr-download.test.ts` | Single assertion: no HDR download button. |
 
----
+**All other 52 components are completely untested**, including:
+- `image-manager.tsx` (bulk edit, delete, pagination — 800+ lines)
+- `upload-dropzone.tsx` (drag-and-drop, file validation, progress — 400+ lines)
+- `search.tsx` (search dialog, focus trap, results — 300+ lines)
+- `admin-user-manager.tsx` (admin CRUD — 300+ lines)
+- `topic-manager.tsx` (topic CRUD — 400+ lines)
+- `tag-input.tsx` (tag creation, autocomplete — 200+ lines)
+- `color-details-section.tsx` (color metadata display — 200+ lines)
+- `info-bottom-sheet.tsx` (mobile bottom sheet — 200+ lines)
+- `load-more.tsx` (infinite scroll — 200+ lines)
 
-## 5. Missing Regression Tests for Recently Fixed Bugs
+**Risk:** Component logic is the most frequent source of UI regressions. The touch-target audit (`touch-target-audit.test.ts`) catches CSS size violations but does not test behavior, state management, or accessibility interactions.
 
-Since the last review, several bugs were fixed but have NO corresponding regression tests. This is a critical gap — each bug fix should be accompanied by a test that would have caught the bug.
+### 3.4 Server Action Test Coverage: Sparse
 
-### 5.1 SEC3-01: `getRateLimitBucketStart` Division-by-Zero Guard
+Of 13 server action files (`src/app/actions/*.ts`), only **5** have any test coverage:
 
-**File:** `src/lib/rate-limit.ts:329-333`
-**Fix:** `const windowSec = Math.max(1, Math.floor(windowMs / 1000));` (commit 9a66a4ca)
-**Test Status:** NO regression test added. The `rate-limit.test.ts` tests `getRateLimitBucketStart` with `windowMs = 60_000` and `120_001` but does NOT test:
-- `windowMs = 0` (would have divided by zero before the fix)
-- `windowMs = 500` (tests the `Math.max(1, ...)` floor)
-- `windowMs = -1` (negative values)
-**Confidence:** HIGH
-**Recommendation:** Add edge case tests for `getRateLimitBucketStart(0, 0)`, `getRateLimitBucketStart(1000, 500)`, and `getRateLimitBucketStart(1000, -1)`.
+| Action File | Test File | Coverage |
+|-------------|-----------|----------|
+| `actions/auth.ts` | `auth-rate-limit.test.ts`, `session-verify.test.ts`, `auth-rethrow.test.ts` | Good coverage of rate limiting and session verification. No tests for the actual login/logout flow or Argon2 verification. |
+| `actions/images.ts` | `images-actions.test.ts`, `images-action-blur-wiring.test.ts`, `images-action-gps-toggle-wiring.test.ts` | Tests for blur wiring and GPS toggle. No tests for upload, delete, bulk update, or the image processing trigger. |
+| `actions/topics.ts` | `topics-actions.test.ts` | Tests for topic CRUD. |
+| `actions/tags.ts` | `tags-actions.test.ts` | Tests for tag CRUD. |
+| `actions/public.ts` | `public-actions.test.ts` | Tests for public search and load-more. |
 
-### 5.2 SEC3-02: `enqueueImageProcessing` Returns Boolean
+**Untested server actions:**
+- `actions/admin-backfill.ts` — triggers backfill; no behavioral tests
+- `actions/admin-users.ts` — admin user CRUD; **NO TEST FILE EXISTS** (b22fa85e fix untested)
+- `actions/collections.ts` — smart collection CRUD; **NO TEST FILE EXISTS** (7453030e fix untested)
+- `actions/embeddings.ts` — CLIP embedding generation; **NO TEST FILE EXISTS** (7453030e fix untested)
+- `actions/lr-tokens.ts` — Lightroom token management; only `lr-tokens-action.test.ts` (narrow, b22fa85e fix untested)
+- `actions/seo.ts` — SEO settings; only `seo-actions.test.ts` (narrow)
+- `actions/settings.ts` — admin settings; only `settings-image-sizes-lock.test.ts` (narrow)
+- `actions/sharing.ts` — share group/link creation; only `sharing-source-contracts.test.ts` (narrow)
 
-**File:** `src/lib/image-queue.ts:255-268`
-**Fix:** `enqueueImageProcessing` now returns `boolean` so callers know if the job was rejected (commit c5c91e1a)
-**Test Status:** NO regression test for the return value. The `image-queue.test.ts` tests path traversal rejection but does NOT assert the return value is `false` for rejected jobs or `true` for accepted jobs.
-**Confidence:** HIGH
-**Recommendation:** Add assertions: `expect(enqueueImageProcessing({...invalid})).toBe(false)` and `expect(enqueueImageProcessing({...valid})).toBe(true)`.
+### 3.5 API Route Test Coverage: Minimal
 
-### 5.3 BUG-1/BUG-2: Claim Retry Mechanism and `claimRetryScheduled` Cleanup
+Of ~20 API route files, only these have tests:
 
-**File:** `src/lib/image-queue.ts:283-316`
-**Fix:** Fixed claim retry mechanism and `claimRetryScheduled` cleanup (commit 735f9715)
-**Test Status:** NO regression test for the specific bug scenarios:
-- C4-A1: Removing from `enqueued` BEFORE scheduling retry so the retry actually re-adds the job
-- C4-A2: Resetting `claimRetryScheduled` on successful claim so `claimRetryCounts` is cleaned up
-**Confidence:** HIGH
-**Recommendation:** Add tests that mock `acquireImageProcessingClaim` to return `null` multiple times, then succeed, and verify:
-1. The job is re-enqueued after each retry (not stuck forever)
-2. `claimRetryCounts` is cleaned up after successful claim
-3. `claimRetryScheduled` is reset properly
+| Route | Test File | Coverage |
+|-------|-----------|----------|
+| `api/health/route.ts` | `health-route.test.ts` | Basic response shape. |
+| `api/live/route.ts` | `live-route.test.ts` | Basic response shape. |
+| `api/og/route.tsx` | `og-route-source-contracts.test.ts` | Source contract only. |
+| `api/og/photo/[id]/route.tsx` | `og-photo-fallback.test.ts`, `og-image-icc.test.ts`, `og-rate-limit.test.ts` | Partial coverage. |
+| `api/search/semantic/route.ts` | `semantic-search-route.test.ts`, `semantic-route-production.test.ts` | Good coverage. |
+| `api/search/similar/[id]/route.ts` | `similar-route.test.ts` | Good coverage. |
+| `api/admin/db/download/route.ts` | `backup-download-route.test.ts` | Narrow. |
 
-### 5.4 BUG-4: Wide-Gamut Temp File Cleanup on Downscale Throw
+**Untested routes:**
+- `api/admin/lr/upload/route.ts` — Lightroom plugin upload endpoint. No tests. Critical: 216 MiB body limit, file processing.
+- `app/[locale]/(public)/uploads/[...path]/route.ts` — File serving route. No tests.
+- `app/uploads/[...path]/route.ts` — Non-locale file serving. No tests.
+- `app/[locale]/(public)/[topic]/feed.xml/route.ts` — Atom feed generation. No tests for the XML output shape.
+- `app/feed.xml/route.ts` — Root atom feed. No tests.
+- `app/sitemap.ts` — SEO sitemap. No tests.
+- `app/robots.ts` — robots.txt. No tests.
 
-**File:** `src/lib/process-image.ts`
-**Fix:** Clean up wide-gamut temp file on downscale throw (commit 70ea54d9)
-**Test Status:** NO regression test. The `process-image-color-roundtrip.test.ts` and other process-image tests do NOT test the temp file cleanup path when `toFile()` throws.
-**Confidence:** HIGH
-**Recommendation:** Mock `sharp().toFile()` to throw and verify `fs.unlink()` is called for the temp file.
+### 3.6 E2E Coverage: Thin and Gated
 
-### 5.5 BUG-10: Topic Image Cleanup on Pre-Transaction Route-Segment Conflict
+The e2e suite has **5 spec files** but most tests are gated behind environment flags:
 
-**File:** `src/app/actions/topics.ts`
-**Fix:** Clean up topic image on pre-transaction route-segment conflict (commit 70ea54d9)
-**Test Status:** NO regression test. The `topics-actions.test.ts` tests topic creation but does NOT test the specific scenario where route-segment conflict occurs BEFORE the transaction and the temp file needs cleanup.
-**Confidence:** MEDIUM
-**Recommendation:** Add a test that mocks `createTopic` to hit the route-segment conflict path and verify the temp file is deleted.
+| Spec | Tests | Gated? | Notes |
+|------|-------|--------|-------|
+| `admin.spec.ts` | 6 | Yes (`E2E_ADMIN_ENABLED`) | Only runs with local plaintext credentials. Admin login, topic CRUD, upload, settings. |
+| `public.spec.ts` | 8 | No | Homepage, search, photo page, lightbox, 404, shared group. |
+| `origin-guard.spec.ts` | 3 | No | CSRF origin checks. |
+| `nav-visual-check.spec.ts` | 2 | No | Visual regression (screenshot comparison). |
+| `test-fixes.spec.ts` | 3 | No | Regression tests for specific bugs. |
 
-### 5.6 BUG-11: Bootstrap Timer Cleanup on Shutdown
-
-**File:** `src/lib/queue-shutdown.ts` and `src/lib/image-queue.ts`
-**Fix:** Clear bootstrap timer on shutdown (commit 98d09476)
-**Test Status:** NO regression test. The `queue-shutdown.test.ts` exists but does NOT test that the bootstrap timer is cleared.
-**Confidence:** HIGH
-**Recommendation:** Add a test that sets a bootstrap timer, calls shutdown, and verifies the timer is cleared.
-
-### 5.7 CODE-02: Epsilon-Based Zero Check in `cosineSimilarity`
-
-**File:** `src/lib/clip-embeddings.ts`
-**Fix:** Use epsilon-based zero check in `cosineSimilarity` (commit 0b86aec9)
-**Test Status:** NO regression test for the epsilon fix. The `clip-embeddings.test.ts` tests `cosineSimilarity` with zero vectors but does NOT test the specific case that triggered the bug (near-zero vectors where the old `=== 0` check would fail).
-**Confidence:** MEDIUM
-**Recommendation:** Add a test with a vector where `normA` or `normB` is very small but non-zero (e.g., `1e-10`) and verify the function returns 0 instead of throwing or returning NaN.
-
-### 5.8 AGG-08: `retryFailedImage` Restore Maintenance Guard
-
-**File:** `src/app/actions/images.ts`
-**Fix:** Guard `retryFailedImage` against restore maintenance (commit 24c8e483)
-**Test Status:** The `retry-failed-image-auth.test.ts` tests auth but does NOT test the restore maintenance guard. The mock sets `isRestoreMaintenanceActive: () => false` always.
-**Confidence:** HIGH
-**Recommendation:** Add a test that mocks `isRestoreMaintenanceActive` to return `true` and verifies `retryFailedImage` returns a maintenance message without making DB calls.
-
-### 5.9 AGG-12: Semantic Search Rate-Limit Rollback Removed
-
-**File:** `src/app/api/search/semantic/route.ts`
-**Fix:** Stop refunding rate-limit tokens after expensive semantic-search work (commit 4264d1d4)
-**Test Status:** The `semantic-search-route.test.ts` tests the disabled path rollback (line 187) but does NOT test that the production path does NOT rollback after embedding/DB failure.
-**Confidence:** HIGH
-**Recommendation:** Add a test that mocks `embedTextReal` to throw and verifies `rollbackSemanticAttempt` is NOT called.
-
-### 5.10 R5-H4/H5: OG Route SSRF Fallback + Same-Origin Redirect Validation
-
-**File:** `src/app/api/og/photo/[id]/route.tsx` and `src/app/api/og/route.tsx`
-**Fix:** Fail-closed SSRF fallback + same-origin redirect validation (commit 689b5096)
-**Test Status:** NO regression test for the SSRF guard or redirect validation.
-**Confidence:** HIGH
-**Recommendation:** Add tests for:
-1. Non-HTTP(S) URL rejection (e.g., `file://`, `ftp://`)
-2. Redirect to different host rejection
-3. Same-origin redirect acceptance
-
-### 5.11 NEW Since Cycle 8: AGG-M1 — Mixed-Freshness Dimension Inconsistency
-
-**File:** `src/lib/process-image.ts`
-**Fix:** Read both dimensions fresh from Sharp to avoid mixed-freshness inconsistency (commit fdf44376)
-**Test Status:** NO regression test. The fix ensures `width` and `height` are read from the same `metadata()` call, but no test verifies that a stale cached `width` + fresh `height` scenario is impossible.
-**Confidence:** HIGH
-**Recommendation:** Add a test that mocks `sharp().metadata()` to return different values on consecutive calls and verifies the function uses a single call.
-
-### 5.12 NEW Since Cycle 8: AGG-M2 — Argon2 TOCTOU Race
-
-**File:** `src/lib/password-hashing.ts` / `src/app/actions/auth.ts`
-**Fix:** Precompute dummy Argon2 hash at module init to close TOCTOU race (commit d8b20600)
-**Test Status:** NO regression test. `password-hashing-policy.test.ts` tests the policy constants but does NOT test the precomputed dummy hash or the timing-safe comparison path.
-**Confidence:** HIGH
-**Recommendation:** Add a test that verifies `PASSWORD_HASH_OPTIONS` produces a valid Argon2 hash, and that the dummy hash precomputation happens at module load time.
-
-### 5.13 NEW Since Cycle 8: AGG-M5 — BoundedMap Hard Cap Auto-Enforcement
-
-**File:** `src/lib/bounded-map.ts`
-**Fix:** Auto-enforce hard cap in `set()` so consumers cannot forget (commit beba3a8d)
-**Test Status:** `bounded-map.test.ts` was updated to test the new behavior. The hard cap auto-enforcement IS tested.
-**Confidence:** N/A — Already tested.
-
-### 5.14 NEW Since Cycle 8: AGG-M4 — View-Count Flush Chunk Reduction
-
-**File:** `src/lib/data.ts`
-**Fix:** Reduce view-count flush chunk from 20 to 5 to avoid pool exhaustion (commit cc1b8ec6)
-**Test Status:** `data-view-count-flush.test.ts` was updated to assert `FLUSH_CHUNK_SIZE = 5`. The constant IS tested.
-**Confidence:** N/A — Already tested via fixture.
-
-### 5.15 NEW Since Cycle 8: AGG-M6 — failRestore Synchronous
-
-**File:** `src/app/[locale]/admin/db-actions.ts`
-**Fix:** Make `failRestore` synchronous to prevent swallowed async errors (commit 3966ef0e)
-**Test Status:** NO regression test. No test verifies that `failRestore` is synchronous or that async errors are not swallowed.
-**Confidence:** HIGH
-**Recommendation:** Add a test that mocks `fs.unlink` to throw and verifies the error propagates synchronously.
-
-### 5.16 NEW Since Cycle 8: AGG-M5 (DB) — Stale Init Promise Clear
-
-**File:** `src/db/index.ts`
-**Fix:** Clear stale init promise on DB connection timeout so next attempt retries (commit 6da830d0)
-**Test Status:** NO regression test. No test verifies that a timed-out init promise is cleared and subsequent attempts succeed.
-**Confidence:** HIGH
-**Recommendation:** Add a test that mocks the init query to hang >10s, then verifies the promise is cleared and a second attempt is made.
+**E2E gaps:**
+- No e2e coverage for **image upload processing** (the upload test exists but does not verify processed derivatives)
+- No e2e coverage for **bulk operations** (bulk delete, bulk tag)
+- No e2e coverage for **DB backup/restore** (admin db page)
+- No e2e coverage for **semantic search** (the most complex user-facing feature added recently)
+- No e2e coverage for **shared link pages** (`/s/[key]`) — skipped unless `E2E_SHARE_KEY` is set
+- No e2e coverage for **analytics dashboard**
+- No e2e coverage for **smart collections**
+- No e2e coverage for **mobile-specific flows** (touch gestures, bottom sheet)
+- Only **Chromium** is tested (no Firefox, no WebKit, no mobile viewport)
 
 ---
 
-## 6. Mock/Stub Abuse
+## 4. Test Quality Assessment
 
-### 6.1 [CRITICAL] `semantic-search-route.test.ts` — Complete DB Fake
+### 4.1 Strengths
 
-**File:** `src/__tests__/semantic-search-route.test.ts:65-114`
-**Confidence:** HIGH
-**Issue:** The db mock replaces the entire Drizzle ORM with a hand-rolled fake that returns pre-canned responses. The test doesn't verify that the actual Drizzle queries are correct; it only verifies that the route handler calls the mocked `dbSelectMock` in a certain way. If the route's query logic changes (e.g., adds a `.where()` clause), the test may still pass because the mock ignores the where clause.
-**Failure scenario:** If the route handler adds a new `.where()` condition that filters out the mock embedding rows, the test would still pass because the mock ignores the where clause and returns the pre-canned rows. A real DB would return different results.
-**Fix:** Use a real in-memory SQLite database or a Drizzle-to-SQLite proxy for integration testing. At minimum, verify the actual SQL generated by the query builder using `.toSQL()`.
+1. **Fixture-style structural tests are excellent.** The `touch-target-audit.test.ts`, `check-action-origin.test.ts`, `check-api-auth.test.ts`, `check-public-route-rate-limit.test.ts`, `data-tag-names-sql.test.ts`, and `client-server-only-boundary.test.ts` are exemplary. They read source code, assert structural invariants, and prevent regressions that would be invisible to traditional unit tests.
 
-### 6.2 [HIGH] `image-queue.test.ts` — Mocks Entire Module Graph
+2. **Security contract tests are thorough.** `privacy-fields.test.ts`, `session-verify.test.ts`, `auth-rate-limit.test.ts`, `request-origin.test.ts`, `sanitize.test.ts`, `validation.test.ts`, and `csv-escape.test.ts` form a strong defense-in-depth testing layer.
 
-**File:** `src/__tests__/image-queue.test.ts:1-141`
-**Confidence:** HIGH
-**Issue:** The test mocks EVERY dependency of `image-queue.ts` and only tests three things: (1) path traversal rejection, (2) source code regex matching for `pruneRetryMaps`, and (3) bootstrap retry scan scheduling. The actual queue processing logic (the `processImageFormats` call, error handling, file cleanup) is never tested because it's all mocked.
-**Failure scenario:** A real bug in the queue worker (e.g., `processImageFormats` throws but the error handler doesn't clean up files) would never be caught because `processImageFormats` is mocked to a no-op.
-**Fix:** Add integration tests that use a real (or minimally mocked) `processImageFormats` with synthetic images. The current test is fine as a unit test for `enqueueImageProcessing`'s validation logic, but it's insufficient as the only test for the image queue.
+3. **Color/HDR pipeline tests are impressive.** `process-image-color-roundtrip.test.ts` uses real Sharp image generation and pixel-value assertions. `color-detection.test.ts` tests NCLX parsing, ICC name resolution, and HDR detection. `icc-chromaticity.test.ts` tests custom monitor profile detection. This is a level of domain-specific testing rarely seen.
 
-### 6.3 [HIGH] `process-image-dimensions.test.ts` — Excessive Mocking
+4. **Test documentation is thorough.** Almost every test file has a detailed header comment explaining the regression it prevents, the cycle it was added in, and the concrete failure scenario. This is a best-practice culture.
 
-**File:** `src/__tests__/process-image-dimensions.test.ts:12-72`
-**Confidence:** HIGH
-**Issue:** Mocks Sharp's constructor to return a fake instance with fake `metadata()`, then tests that `saveOriginalAndGetMetadata` throws when `metadata()` returns `{ width: 0 }`. The test is essentially verifying that the function checks `!width || !height` and throws. It doesn't test the actual Sharp integration, the actual file streaming, or the actual EXIF extraction.
-**Failure scenario:** If Sharp's actual behavior changes (e.g., `metadata()` returns `null` instead of `{ width: 0 }` for corrupt files), this test would still pass because it tests the mocked behavior, not the real one.
-**Fix:** Add integration tests with actual corrupt/valid image files. Keep the unit test for the dimension validation logic but acknowledge its limited scope.
+5. **Mock isolation is careful.** `session-verify.test.ts` uses `vi.resetModules()` and `vi.doMock()` to isolate module-level singletons. `auth-rate-limit.test.ts` uses `vi.hoisted()` for clean mock setup. This prevents test pollution.
 
-### 6.4 [MEDIUM] `auth-rate-limit.test.ts` — Mocks Rate-Limit Module
+6. **Timeout management is explicit.** The vitest config raised `testTimeout` to 15,000ms (from 5,000ms) to accommodate fixture-style tests. Individual slow tests declare `{ timeout: 30000 }` explicitly. This is correct — the timeout is sized to the test, not suppressed.
 
-**File:** `src/__tests__/auth-rate-limit.test.ts:10-17`
-**Confidence:** MEDIUM
-**Issue:** The test mocks `decrementRateLimit`, `incrementRateLimit`, and `resetRateLimit` from the rate-limit module. This means the test verifies that `auth-rate-limit.ts` calls these functions with the right arguments, but it doesn't test the actual rate-limiting behavior (e.g., whether `incrementRateLimit` actually increments a counter).
-**Fix:** This is acceptable as a unit test, but there should be integration tests that test the full rate-limiting stack with real (or in-memory) state.
+### 4.2 Weaknesses
 
-### 6.5 [MEDIUM] `admin-backfill-runner-detection-failure.test.ts` — Incomplete fs Mock
+1. **Test names are inconsistent.** Some tests use descriptive names (`"resets expired in-memory login counts before evaluating a new attempt"`), while others use numbered branches (`"(1) wrong HMAC signature -> null"`, `"(4a) malformed: only 2 parts -> null"`). The numbered style is harder to read in failure output and does not describe the *expected behavior*.
 
-**File:** `src/__tests__/admin-backfill-runner-detection-failure.test.ts:86-103`
-**Confidence:** MEDIUM
-**Issue:** The mock spreads `...actual` from the real `fs/promises` module, which means any fs function other than `access` uses the REAL implementation. If the runner code adds a call to `fs.readFile` or `fs.stat`, this test would suddenly touch the real filesystem.
-**Fix:** Mock all fs functions explicitly, or use a virtual filesystem mock like `memfs`. At minimum, add a comment warning that `...actual` is intentional but risky.
+2. **Some tests are too large.** `touch-target-audit.test.ts` is 1,244 lines — it is essentially a linter written as a test. While valuable, it mixes multiple concerns (Button patterns, Link patterns, select patterns, checkbox patterns, Badge patterns, recovery link assertions) into one file. A future refactor would be easier if split into `touch-target-button.test.ts`, `touch-target-link.test.ts`, etc.
 
----
+3. **Some tests assert implementation, not behavior.** `data-tag-names-sql.test.ts` extracts function bodies via brace-depth walking and asserts regex matches against source code. This is a structural test, not a behavioral test. It catches regressions but does not verify that the query *returns correct data*.
 
-## 7. Missing Edge Case Tests
+4. **Missing assertion of error messages.** Many tests assert that a function throws (`expect(...).rejects.toThrow()`) but do not verify the error message content. A refactor that changes the error message would not be caught, yet the message is user-facing (e.g., login error messages).
 
-### 7.1 Session Security Edge Cases
+5. **No snapshot testing.** The project does not use Vitest snapshots or Playwright visual snapshots (except `nav-visual-check.spec.ts`). This means UI text changes (e.g., i18n key updates) are not caught unless the e2e tests happen to assert the exact text.
 
-**File:** `src/__tests__/session.test.ts`
-**Confidence:** HIGH
-**Missing:**
-- Token verification (does `verifySessionToken` correctly validate a generated token?)
-- Token expiration (does it reject expired tokens?)
-- Token tampering (does it reject tokens with modified signatures?)
-- Token replay (does it reject reused tokens?)
-- Secret rotation (does verification work with a rotated secret?)
-- `getSessionSecret` with all 4 cases: env var set, production refusal, DB fetch, DB generation
-- `getSessionSecret` race condition (concurrent calls should share the same promise)
+6. **No property-based testing.** Complex validation functions (`isValidSlug`, `isValidFilename`, `isValidTopicAlias`) are tested with hand-picked examples. Property-based testing (e.g., with `fast-check`) would catch edge cases like Unicode combining characters, RTL marks, or surrogate pairs.
 
-### 7.2 Rate Limiting Edge Cases
+7. **No mutation testing.** With 2,000+ tests, mutation testing (e.g., Stryker) would reveal which tests are actually exercising the code vs. merely passing because the code happens to be correct.
 
-**File:** `src/__tests__/rate-limit.test.ts`
-**Confidence:** MEDIUM
-**Missing:**
-- `getRateLimitBucketStart(windowMs = 0)` — division-by-zero guard (SEC3-01)
-- `getRateLimitBucketStart(windowMs = 500)` — `Math.max(1, ...)` floor
-- `getRateLimitBucketStart(windowMs = -1)` — negative values
-- Concurrent pruning from multiple calls (shared `lastPruneTime`)
-- Hard cap behavior when entries are added DURING pruning
-- `preIncrementShareAttempt` / `preIncrementOgAttempt` — OG and share rate limit pre-increment
-- `pruneSearchRateLimit` — search rate limit pruning
+### 4.3 Flaky Test Risk Assessment
 
-### 7.3 Upload Edge Cases
-
-**File:** `src/app/actions/images.ts`
-**Confidence:** HIGH
-**Missing:**
-- Empty FormData
-- Null topic
-- Extremely large tag string (>10KB)
-- Unicode bidi in filename
-- Batch upload with mixed success/failure
-- Disk full after file save but before DB insert
-- Sharp metadata extraction throws
-- `saveOriginalAndGetMetadata` returns null
-
-### 7.4 Semantic Search Edge Cases
-
-**File:** `src/__tests__/semantic-search-route.test.ts`
-**Confidence:** HIGH
-**Missing:**
-- Multiple results with different similarity scores (verify sorting)
-- Results below the threshold being filtered out
-- The `topK` limit being respected
-- Empty results when no embeddings match
-- Cosine similarity computation correctness
-- Rate-limit is NOT refunded after embedding/DB failure (AGG-12)
-
-### 7.5 Color/HDR Pipeline Edge Cases
-
-**File:** `src/lib/process-image.ts`
-**Confidence:** MEDIUM
-**Missing:**
-- NCLX box with invalid/malformed size field
-- ICC profile with >256 tags (bounds check trigger)
-- HEIF file with multiple `colr` boxes (first vs last wins)
-- 16-bit PNG with no ICC
-- HDR source with `allow_hdr_ingest=true` but SDR-only delivery
-- Custom monitor ICC profile (Eizo CG2700X) with chromaticity match
-- `force_srgb_derivatives=true` with wide-gamut source + 10-bit AVIF
-- AVIF encode fails at 10-bit, falls back to 8-bit (encode-time rejection, not probe-time)
-- Wide-gamut downscale throws, temp file cleanup (BUG-4)
-
-### 7.6 API Route Edge Cases
-
-**File:** Various API routes
-**Confidence:** HIGH
-**Missing:**
-- `/api/og/photo/[id]` — Image ID not found, Satori render throws, output exceeds `OG_PHOTO_MAX_BYTES`
-- `/api/admin/db/download` — File not found, file is a directory
-- `/api/search/semantic` — Content-Type sub-type rejection (`json-patch`), chunked transfer encoding rejection, body size > 8192 bytes
-- `/api/search/similar/[id]` — Non-numeric ID (`abc`, `12abc`, `0x1A`, `1.5`, empty string, very large number)
-- `/app/uploads/[...path]` — File is a directory
+| Test File | Flakiness Risk | Reason |
+|-----------|---------------|--------|
+| `client-server-only-boundary.test.ts` | **Medium** | Uses TypeScript compiler API to parse entire source tree. Cold import of `typescript` can exceed timeout under CPU contention. Already had a timeout bump (cycle 5). |
+| `process-image-color-roundtrip.test.ts` | **Medium** | Uses Sharp to generate and decode images. File I/O and image processing are non-deterministic under load. The `afterAll` cleanup uses `Promise.all` with `.catch(() => {})` which could mask failures. |
+| `data-tag-names-sql.test.ts` | **Low** | The Drizzle `.toSQL()` test dynamically imports `drizzle-orm` and `drizzle-orm/mysql-proxy`. Already had a timeout bump to 30,000ms. |
+| `admin-backfill-runner-leak.test.ts` | **Low** | Uses `vi.waitFor()` with 5,000ms timeout. Under heavy CPU contention, the fire-and-forget runner may not complete within the window. |
+| `touch-target-audit.test.ts` | **Low** | Scans entire source tree. The 15,000ms global timeout is generous, but adding new scan roots or files could push it over. |
+| `e2e/admin.spec.ts` | **High** | Admin topic creation test uses `Date.now()` for slug generation. If two tests run concurrently (though workers=1, test isolation is within one worker), or if the DB has stale data, the test fails. The `try/finally` cleanup is good but the `isVisible().catch(() => false)` pattern could mask real failures. |
 
 ---
 
-## 8. Missing Error Path Tests
+## 5. TDD Opportunities
 
-### 8.1 Server Action Error Paths
+The codebase does **not** follow TDD. Tests are written after implementation, often as regression guards after a bug is found in production. This is a valid approach for a mature codebase, but there are opportunities where TDD would improve design:
 
-| Action | Error Path | Tested? |
-|--------|-----------|---------|
-| `uploadImages` | DB insert fails mid-batch (partial upload) | NO |
-| `uploadImages` | Disk full after file save but before DB insert | NO |
-| `uploadImages` | Sharp metadata extraction throws | NO |
-| `uploadImages` | `saveOriginalAndGetMetadata` returns null | NO |
-| `deleteImage` | File deletion succeeds but DB delete fails | NO |
-| `deleteImage` | DB delete succeeds but file deletion fails | NO |
-| `updateImage` | Concurrent edit by another admin (stale data) | NO |
-| `createTopic` | DB connection lost mid-transaction | NO |
-| `login` | Argon2 verification throws (corrupted hash) | NO |
-| `login` | Session secret generation fails | NO |
-| `changePassword` | Old password verification fails (rate limit should still increment) | Partially |
-| `retryFailedImage` | Restore maintenance active -> returns maintenance message | NO (AGG-08) |
-| `retryFailedImage` | Image not found -> returns localized error | NO (AGG-39) |
+1. **New feature: Auto alt-text generation** (`lib/caption-generator.ts`)
+   - The current implementation is a stub. TDD would force a clear API contract before implementation.
+   - Opportunity: Write tests for the caption generation pipeline first, then implement.
 
-### 8.2 Image Processing Error Paths
+2. **New feature: HDR AVIF delivery** (`lib/hdr-filenames.ts`, `process-image.ts`)
+   - The HDR pipeline is partially implemented but not wired. TDD would clarify the delivery contract.
+   - Opportunity: Write tests for `_hdr.avif` filename derivation and HDR detection before wiring.
 
-| Error Path | Tested? |
-|-----------|---------|
-| `processImageFormats` throws after partial derivative creation (orphan cleanup) | Partially |
-| Sharp `limitInputPixels` rejection (decompression bomb) | NO |
-| AVIF encode fails at 10-bit, falls back to 8-bit (encode-time rejection) | NO |
-| WebP/JPEG encode produces 0-byte file | NO |
-| EXIF extraction throws on malformed file | NO |
-| ICC profile parsing throws on truncated buffer | NO |
-| Color detection throws on unsupported format | NO |
-| Wide-gamut downscale throws, temp file cleanup (BUG-4) | NO |
+3. **Refactor: Storage abstraction** (`lib/storage/`)
+   - The storage layer is untested and not wired. TDD would force a clean interface.
+   - Opportunity: Write tests for the `StorageBackend` interface first, then implement S3/MinIO adapters.
 
-### 8.3 New Code Error Paths (Since Last Review)
-
-| Change | Missing Test | Confidence |
-|--------|-------------|------------|
-| `rate-limit.ts`: `getRateLimitBucketStart` division-by-zero guard | `windowMs = 0`, `windowMs = 500`, `windowMs = -1` | HIGH |
-| `semantic/route.ts`: Rate-limit rollback removed (AGG-12) | Verify NO rollback after embedding/DB failure | HIGH |
-| `similar/[id]/route.ts`: ID validation hardened (AGG-20) | Non-numeric ID rejection | HIGH |
-| `image-queue.ts`: `enqueueImageProcessing` returns boolean | Return value for all rejection paths | HIGH |
-| `queue-shutdown.ts`: Bootstrap timer cleanup | Timer cleared on shutdown | HIGH |
-| `process-image.ts`: Temp file cleanup on downscale throw | Mock `toFile()` throw, verify `fs.unlink()` | HIGH |
-| `actions/images.ts`: Restore maintenance guard (AGG-08) | Maintenance active -> returns message | HIGH |
-| `db/index.ts`: Connection init timeout | Mock init query hang >10s | HIGH |
-| `instrumentation.ts`: Exit code and signal handling | Shutdown timeout exits with code 1 | MEDIUM |
-| `revalidation.ts`: Error handling | `revalidatePath` failures caught and logged | MEDIUM |
-| `safe-json-ld.ts`: XSS hardening | `>` escaped in JSON-LD output | LOW |
-| `db-actions.ts`: `failRestore` synchronous | Mock `fs.unlink` throw, verify sync propagation | HIGH |
-| `password-hashing.ts`: Argon2 TOCTOU | Verify dummy hash precomputation at module init | HIGH |
-| `process-image.ts`: Mixed-freshness dimensions | Mock `metadata()` returning different values per call | HIGH |
+4. **New feature: Embedding model versioning** (`lib/clip-model-id.ts`)
+   - AGG-14 calls for model-version isolation. TDD would prevent the version drift that necessitated the fix.
+   - Opportunity: Write tests for model ID resolution and compatibility checks first.
 
 ---
 
-## 9. Missing Integration Tests
+## 6. Missing Edge Cases
 
-### 9.1 Component-Component Integration
+### 6.1 Auth and Session
 
-- **Photo viewer + Lightbox**: No tests for the interaction (click to open, keyboard navigation, prev/next)
-- **Upload dropzone + Image manager**: No tests for the upload-complete-to-grid-refresh flow
-- **Search + Load-more**: No tests for the search-results-pagination interaction
-- **Color details + Wide-gamut hint**: No tests for conditional rendering based on display capability
+- **No test for session secret rotation:** What happens when `SESSION_SECRET` changes mid-session? Existing tokens should be invalidated.
+- **No test for concurrent login attempts:** The rate limiter has per-IP and per-account buckets, but no test verifies the interaction when both buckets are near limit.
+- **No test for cookie parsing edge cases:** The `admin_session` cookie could be malformed, contain multiple values, or be oversized. `session.ts` handles these but they are not tested.
+- **No test for password change mid-session:** Changing password should invalidate all other sessions for that user.
 
-### 9.2 Server-Client Integration
+### 6.2 Image Processing
 
-- **Upload action + Image queue**: No integration test for the full upload-to-processing-to-visible flow
-- **Session creation + Middleware auth**: No integration test for the cookie-to-auth flow
-- **Shared link creation + Shared page render**: No integration test for the full sharing flow
+- **No test for Sharp failure modes:** What happens when `sharp()` throws on a corrupted file? The queue has retry logic but no test for the error path.
+- **No test for out-of-disk-space during encoding:** The `processImageFormats` function writes to `public/uploads/`. A full disk would cause silent failures.
+- **No test for concurrent processing of the same image:** The advisory lock prevents this, but no test verifies the lock contention path.
+- **No test for `deleteImageVariants` when files are missing:** The cleanup function should not throw if variants were already deleted.
 
-### 9.3 API-DB Integration
+### 6.3 Database and Data Layer
 
-- **All API routes**: Most route tests mock the DB or use source-text inspection. No true integration tests that hit a test database.
-- **Data layer functions**: No integration tests for the complex Drizzle queries against a real database.
+- **No test for connection pool exhaustion:** The pool has 10 connections. What happens when all are in use?
+- **No test for DB timeout during long queries:** The `image_views` analytics queries can be slow. No test for query timeout behavior.
+- **No test for transaction rollback:** `createTopic` uses a transaction, but no test verifies rollback on error.
+- **No test for `GROUP_CONCAT` truncation:** The `group_concat_max_len` is set to 65535, but no test verifies behavior when tags exceed this limit.
 
-### 9.4 Image Processing Pipeline Integration
+### 6.4 Upload and File Handling
 
-- **Full upload pipeline**: No end-to-end test for: upload -> save original -> process formats -> verify outputs -> mark processed -> serve
-- **Color pipeline**: The color roundtrip tests are the closest, but they don't test the full `saveOriginalAndGetMetadata` -> `processImageFormats` -> `enqueueImageProcessing` flow
+- **No test for symlink in upload path:** The upload routes reject symlinks via `lstat()`, but no test verifies this.
+- **No test for upload quota enforcement:** `UPLOAD_MAX_TOTAL_BYTES` and `UPLOAD_MAX_FILES_PER_WINDOW` are configured but not tested.
+- **No test for the upload processing contract lock:** `upload-processing-contract-lock.ts` acquires an advisory lock, but no test verifies the serialization.
 
----
+### 6.5 Public Routes and Sharing
 
-## 10. E2E Test Gaps
-
-### 10.1 Playwright Configuration Issues
-
-**File:** `playwright.config.ts`
-**Confidence:** HIGH
-**Issues:**
-- **Only Chromium** — No Firefox, WebKit, or mobile Safari testing. The app has browser-specific behavior (Firefox wide-gamut detection gap, Safari P3 support) that is never tested.
-- **Single worker** (`workers: 1`) — All tests run serially to avoid login rate-limit collisions. This makes the suite slow and still shares state (DB, filesystem, rate limit counters).
-- **No separate projects** — Admin (serialized) and public (parallelizable) tests are not separated into different Playwright projects.
-
-### 10.2 Critical E2E Gaps
-
-| Feature | Priority | Why Missing |
-|---------|----------|-------------|
-| Semantic search full flow | **High** | No seeded data, no env var for semantic key |
-| Smart collections | **High** | No seeded collection data |
-| DB backup/restore | **High** | Critical operation with no E2E |
-| Lightroom Classic publish plugin | **High** | `/api/admin/lr/upload` has no E2E |
-| Service worker registration and caching | **Medium** | `sw-cache.test.ts` is unit-only |
-| Offline mode | **Medium** | No E2E for the offline HTML fallback |
-| Cross-browser testing | **High** | Only Chromium configured |
-| Admin analytics dashboard | Medium | No seeded analytics data |
-| CSV export | Medium | No E2E for the export flow |
-| Theme switching | Low | Visual-only feature |
-| Timeline / year-in-review | Medium | No E2E for these public pages |
-| Photo map | Medium | No E2E for the map page |
-| Bulk image operations | Medium | No E2E for select-all, bulk delete, bulk tag |
-| Password change flow | Medium | No E2E for the password change flow |
-| Admin token CRUD | Medium | No E2E for token creation/revocation |
-| Shared single-photo link (`/s/[key]`) | Medium | Skips when `E2E_SHARE_KEY` is not set |
-| Similar photos | Medium | No E2E for the similar photos route |
-
-### 10.3 E2E Test Environment Issues
-
-**File:** `e2e/helpers.ts`
-**Confidence:** HIGH
-**Issues:**
-- **No test database isolation** — E2E tests pollute the production DB with test data (uploaded images, created topics, sessions)
-- **No global test teardown** — Some tests have `finally` blocks for cleanup, but no global cleanup of all test artifacts
-- **No cleanup of uploaded files** — Originals and derivatives from test uploads may persist
-- **No cleanup of rate limit counters** between tests
-- **No cleanup of sessions** created by `createAdminSessionCookie`
-- **Test order dependencies** — The wrong-password test consumes one rate limit attempt, which could affect subsequent tests if order changes
+- **No test for shared group expiration:** Shared groups have no expiration, but if they did, the behavior is untested.
+- **No test for shared group view count race conditions:** The view count is best-effort and buffered. No test for the flush-on-SIGTERM behavior.
+- **No test for the OG image route when the image is deleted mid-render:** The OG route fetches the image asynchronously. A race condition is possible.
 
 ---
 
-## 11. Missing Security Tests
+## 7. Recommendations
 
-### 11.1 CSRF Protection
+### 7.1 Immediate (High Priority)
 
-**Confidence:** HIGH
-**Missing:**
-- No E2E test for CSRF against server actions (POST with wrong Origin to a server action)
-- No test for cookie-based CSRF (session cookie theft + cross-origin use)
-- No test for login CSRF (forcing login with attacker credentials)
+1. **Add regression tests for the 6 new commits (bcd67b12 -> c0522dec):**
+   - `bcd67b12`: Test `loadMoreImages` with non-array `tagSlugs` (string, null, object)
+   - `9c5c38ca`: Test `deleteImageVariants` with `EACCES` vs `ENOENT` errors
+   - `7453030e`: Test `retryFailedCollection` and `retryFailedEmbedding` with `isRestoreMaintenanceActive() === true`
+   - `db55056f`: Test `createTopic` with `revalidatePath` throwing, verifying image NOT deleted
+   - `5f4a5e95`: Test rate-limit getters returning immutable copies (mutate returned object, verify original unchanged)
+   - `b22fa85e`: Test `deleteAdminUser`, `createLrToken`, `deleteLrToken`, `revokeAllLrTokens` with `isAdmin() === false`
 
-### 11.2 XSS Prevention
+2. **Add tests for `lib/gps-exif-strip.ts`** — This is a security-critical privacy feature with zero tests. At minimum, test that GPS coordinates are stripped from JPEG, TIFF, and HEIF files.
 
-**Confidence:** HIGH
-**Missing:**
-- No E2E test for stored XSS (upload image with `<script>` in title/description, verify it's escaped in gallery)
-- No E2E test for reflected XSS (search query reflection, URL parameter reflection)
-- No test for XSS in share links (malicious share key handling)
-- No test for XSS in topic labels (displayed in navigation)
-- No test for XSS in error messages (error page rendering)
+3. **Add tests for `lib/clip-inference.ts`** — The most complex untested file. Test model loading, inference batching, and error handling.
 
-### 11.3 File Upload Security
+4. **Add component tests for `image-manager.tsx` and `upload-dropzone.tsx`** — These are the largest untested components with the most user-facing logic. Use React Testing Library with Vitest.
 
-**Confidence:** HIGH
-**Missing:**
-- No E2E test for malicious file upload (PHP file disguised as JPG, SVG with XSS payload)
-- No test for path traversal in filename (`../../../etc/passwd.jpg`)
-- No test for oversized file rejection (>200MB)
-- No test for decompression bomb (zip bomb, gzip bomb)
-- No test for double extension (`file.jpg.php`)
-- No test for null byte injection (`file.jpg\x00.php`)
-- No test for symlink attack (upload symlink pointing to sensitive file)
+5. **Add e2e tests for semantic search** — The most complex new feature has no e2e coverage. Test the search input, results display, and empty state.
 
-### 11.4 Session Security
+6. **Add tests for `lib/analytics-data.ts`** — Test the SQL generation and aggregation logic for country/referrer breakdowns.
 
-**Confidence:** HIGH
-**Missing:**
-- No test for session fixation on login (verify old session is invalidated)
-- No test for session hijacking detection (concurrent login from different IP)
-- No test for session expiration (wait 24h, verify re-auth required)
-- No test for session cookie attributes (httpOnly, secure, sameSite)
+### 7.2 Short-Term (Medium Priority)
 
-### 11.5 Brute Force Protection
+7. **Add tests for server action error handling** — Every server action has error paths (DB failure, auth failure, validation failure) that are untested.
 
-**Confidence:** HIGH
-**Missing:**
-- No test for rate limit exhaustion (5 failed attempts -> lockout)
-- No test for account-scoped rate limit (distributed brute force)
-- No test for rate limit reset (successful login clears counter)
-- No test for password change rate limiting
-- No test for admin user creation rate limiting
+8. **Add tests for `lib/storage/local.ts`** — Test file operations, path validation, and directory creation.
 
-### 11.6 Authorization Boundaries
+9. **Add property-based tests for validation functions** — Use `fast-check` to test `isValidSlug`, `isValidFilename`, `isValidTopicAlias` with generated inputs.
 
-**Confidence:** HIGH
-**Missing:**
-- No test for accessing admin routes as non-admin (403, not redirect)
-- No test for accessing admin API routes without auth (401/403)
-- No test for accessing another admin's data (horizontal privilege escalation)
-- No test for public access to admin-only fields (GPS, PII in API responses)
-- No test for accessing `/api/admin/db/download` without auth
+10. **Add e2e tests for Firefox and mobile viewport** — The current e2e only tests Chromium desktop. Firefox has known gaps (wide-gamut MQ always false) that should be verified.
 
-### 11.7 Additional Missing Security Tests
+11. **Extract shared test utilities** — Create `src/__tests__/helpers.ts` with common mock setups, DB mocking, and Sharp fixture generation.
 
-| Test | Status | Why It Matters |
-|------|--------|----------------|
-| Clickjacking (X-Frame-Options) | NOT COVERED | UI redressing attacks |
-| HSTS header | NOT COVERED | SSL stripping |
-| Secure cookie flags | NOT COVERED | Session security |
-| Admin token (PAT) security | NOT COVERED | API auth |
-| Audit log integrity | NOT COVERED | Forensics |
-| Data export security (CSV) | NOT COVERED | Information disclosure |
-| GPS data stripping verification | NOT COVERED | Privacy |
-| PII in public API responses | NOT COVERED | Privacy breach |
-| Path traversal in upload filename | NOT COVERED | File system security |
-| Symlink traversal in upload directory | NOT COVERED | File system security |
+### 7.3 Long-Term (Lower Priority)
+
+12. **Add snapshot tests for i18n strings** — Ensure `en.json` and `ko.json` stay in sync with snapshot testing.
+
+13. **Add mutation testing** — Run Stryker to identify weak tests and improve the suite's effectiveness.
+
+14. **Add integration tests for the full upload pipeline** — Test from file upload through processing to serving, verifying each derivative is created correctly.
+
+15. **Add load tests for rate limiting** — Verify the rate limiter behaves correctly under concurrent requests.
 
 ---
 
-## 12. Missing Property-Based / Fuzz Tests
+## 8. Verification
 
-### 12.1 Areas That Would Benefit from Fuzzing
+The full test suite was run at the start of this review:
 
-| Function | Property to Test | Fuzz Input |
-|----------|-----------------|------------|
-| `sanitizeForOg` in `lib/og-sanitize.ts` | Output never contains bidi chars or C0 controls | Random strings with Unicode bidi, C0, ZW chars |
-| `isValidTagName` in `lib/validation.ts` | Valid tags pass, invalid tags fail | Random Unicode strings |
-| `normalizeImageListCursor` in `lib/data.ts` | Invalid cursors always return null | Random JSON objects |
-| `extractIccProfileName` in `lib/icc-extractor.ts` | Never throws on any Buffer input | Random Buffers of varying sizes |
-| `parseCicpFromHeif` in `lib/color-detection.ts` | Never throws on any Buffer input | Random Buffers, truncated ISOBMFF files |
-| `hasPlausibleSqlDumpHeader` in `lib/db-restore.ts` | Never accepts non-SQL binary data | Random binary data |
-| `getTagSlug` in `lib/tag-records.ts` | Output is always a valid slug | Random Unicode strings |
-| `hashSessionToken` in `lib/session.ts` | Always produces 64-char hex, always deterministic | Random strings |
-| `verifyAvifNclxInBuffer` in `lib/process-image.ts` | Invalid buffers return `{ ok: false }` | Random Buffers |
-| `verifyWebpIccInBuffer` in `lib/process-image.ts` | Invalid buffers return `{ ok: false }` | Random Buffers |
-| `clampSemanticTopK` in `api/search/semantic/route.ts` | Always returns integer in [1, SEMANTIC_TOP_K_MAX]` | Random inputs (number, string, boolean, null, undefined, object, array) |
-| `extractTldPlusOne` in `lib/analytics.ts` | Never throws, always returns non-empty string | Random host strings |
-| `sanitizeReferrerHost` in `lib/analytics.ts` | Never throws, always returns 'direct', 'self', or valid TLD+1 | Random URL strings |
+```
+RUN  v4.1.9 /Users/hletrd/flash-shared/gallery/apps/web
 
-**Confidence: High** — These are all pure functions or stateless validators that are ideal candidates for property-based testing. The `fast-check` library would integrate well with the existing Vitest setup.
+ Test Files  225 passed | 2 skipped (227)
+      Tests  2064 passed | 4 skipped (2068)
+   Start at  12:11:42
+   Duration  225.36s (transform 65.51s, setup 0ms, import 621.52s, tests 65.04s, environment 11ms)
+```
+
+All tests pass. The 2 skipped files and 4 skipped tests are gated behind environment flags (e2e setup, admin credentials) and are expected.
 
 ---
 
-## 13. Missing Performance Tests
+## 9. Conclusion
 
-### 13.1 Areas That Would Benefit from Performance Testing
+The GalleryKit test suite is **one of the strongest I have reviewed** for a project of this size. The fixture-style structural tests, security contract tests, and color pipeline integration tests are exemplary. The test culture is mature, with detailed regression documentation and careful mock isolation.
 
-| Scenario | Why Test |
-|----------|----------|
-| Masonry grid with 1000+ images | Ensure virtualization or pagination doesn't break |
-| Search with 10K+ images | Ensure search query performance |
-| Upload with 100 files | Ensure batch processing doesn't OOM |
-| Image processing with 50MP source | Ensure wide-gamut downscaling works |
-| CLIP embedding generation for 1000 images | Ensure batch processing doesn't timeout |
-| DB backup with 1M+ row `image_views` | Ensure retention purge doesn't lock the table |
-| Admin dashboard with 100 failed images | Ensure retry UI doesn't freeze |
-| Semantic search with 2000+ embeddings | Ensure scan limit is respected and query doesn't timeout |
-| Image loading LCP/CLS | Ensure gallery performance budgets |
-| Large gallery rendering | Ensure memory usage during long scroll sessions |
+However, the **inverted test pyramid** (heavy on structural/lint tests, light on behavioral/component tests) creates real risk. The 52 untested React components, 8 untested server actions, and 15 untested lib/ modules represent significant coverage gaps. The e2e suite is thin and gated, leaving the most user-critical flows (upload, bulk edit, semantic search, mobile interactions) without automated verification.
 
-**Confidence: High** — No performance tests exist at all. This is a significant gap for a production gallery application.
+**Most critically, 5 of the 6 commits since the previous review (c0522dec -> bcd67b12) are security fixes with NO regression tests.** This pattern — fixing bugs without adding tests — is the single biggest risk to the project's long-term maintainability. Each security fix should be accompanied by a test that would have caught the vulnerability.
+
+**Priority order for improvement:**
+1. Add regression tests for the 6 new commits (security fixes without tests)
+2. Component tests for `image-manager.tsx`, `upload-dropzone.tsx`, `search.tsx`
+3. Unit tests for `gps-exif-strip.ts`, `clip-inference.ts`, `analytics-data.ts`
+4. E2E tests for semantic search, upload processing, and mobile viewport
+5. Server action error-path tests
+6. Shared test utilities and real-world image fixtures
 
 ---
 
-## 14. Test Environment Isolation Issues
-
-### 14.1 Process.env Mutation Without Proper Isolation
-
-**File:** `src/__tests__/rate-limit.test.ts:19-37`
-**Confidence:** MEDIUM
-**Issue:** The `afterEach` restores `process.env` state, but if a test fails mid-way, the restoration may not run. `process.env` is a global mutable — parallel test execution can cause cross-test pollution.
-**Fix:** Use `vi.stubEnv` from vitest, which provides proper isolation and automatic cleanup. Or set `pool: 'forks'` in vitest.config.ts for this test file.
-
-### 14.2 Shared Mutable State in Process-Image Tests
-
-**Files:** `process-image-color-roundtrip.test.ts`, `process-image-exif-strip.test.ts`, `process-image-orientation.test.ts`
-**Confidence:** LOW
-**Issue:** Module-level `generatedIds` array populated by `trackId()`. In watch mode, the module is not reloaded between runs, so `generatedIds` accumulates IDs from previous runs.
-**Fix:** Reset `generatedIds` in `beforeAll` or use a per-test cleanup strategy.
-
-### 14.3 E2E Database Pollution
-
-**File:** `e2e/helpers.ts`
-**Confidence:** HIGH
-**Issue:** `createAdminSessionCookie` inserts into the production DB. No transaction rollback, no test data cleanup, no separate test database.
-**Fix:** Add a dedicated E2E test database with automatic cleanup between runs. Implement test data factories for creating/destroying test fixtures.
-
----
-
-## 15. Commonly Missed Issues (Final Sweep)
-
-### 15.1 Tests That Verify Implementation Details Instead of Behavior
-
-| Test | Issue | Recommendation |
-|------|-------|----------------|
-| `image-queue.test.ts:87-108` | Tests that `pruneRetryMaps` uses a specific code pattern | Test that the map never exceeds `MAX_RETRY_MAP_SIZE` regardless of implementation |
-| `sw-template-contract.test.ts` | Tests that specific strings exist in the template | Complement with runtime tests of actual SW behavior in a browser |
-| `client-server-only-boundary.test.ts` | Tests AST structure | Keep but add a runtime test that builds the client bundle and verifies it doesn't throw |
-| `db-pool-connection-handler.test.ts` | Tests source patterns (Promise.race, Symbol.for) | Add a runtime test that mocks the pool connection and verifies the timeout fires |
-
-### 15.2 Tests With Weak Assertions
-
-| Test | Weak Assertion | Stronger Alternative |
-|------|---------------|---------------------|
-| `session.test.ts:5-9` | `hashSessionToken` has length 64 | Also assert it's valid hex, test with empty string, unicode, very long input |
-| `session.test.ts:24-43` | Token format is `timestamp:random:signature` | Also assert timestamp is within reasonable range, random is unique across calls, signature verifies with HMAC |
-| `data-pagination.test.ts:5-30` | Only tests happy path and empty input | Add boundary tests: `limit === rows.length`, `limit > rows.length`, `limit = 0`, inconsistent `total_count` |
-| `upload-tracker.test.ts` | Basic claim settlement | Add concurrent modification, negative claim values, claim larger than available |
-
-### 15.3 Missing "Happy Path" Variations
-
-| Feature | Missing Variations |
-|---------|-------------------|
-| Upload | Multiple files, mixed formats (JPEG + PNG + HEIC), max size boundary, zero-byte file |
-| Search | Empty result set, exact match, partial match, special chars in query, 1000-char query |
-| Load more | First page, last page, empty topic, cursor at boundary |
-| Image display | Portrait, panorama, very small image, missing derivative |
-| Admin settings | Toggle all boolean settings, change all numeric settings to min/max values |
-| Topic management | Rename to existing slug, rename with special chars, delete topic with images |
-| Tag management | Merge tags, delete tag used by images, create tag with same name different case |
-| Semantic search | Stub mode, production mode, disabled mode, rate-limited, maintenance mode |
-| Similar photos | Valid ID, non-numeric ID, missing embedding, production mode only |
-
----
-
-## 16. Recommendations by Priority
-
-### 16.1 Critical (Do Next)
-
-1. **Fix `image-queue-bootstrap.test.ts` flakiness** — Use `vi.useFakeTimers()` for all tests, isolate to serial execution, or reduce batch size from 500 to 50.
-
-2. **Add regression tests for recently fixed bugs** (Section 5):
-   - SEC3-01: `getRateLimitBucketStart` with `windowMs = 0`, `500`, `-1`
-   - SEC3-02: `enqueueImageProcessing` return values for all rejection paths
-   - BUG-1/BUG-2: Claim retry mechanism (re-enqueue after failed claim, cleanup after success)
-   - BUG-4: Temp file cleanup on downscale throw
-   - BUG-10: Topic image cleanup on route-segment conflict
-   - BUG-11: Bootstrap timer cleared on shutdown
-   - CODE-02: Epsilon-based zero check in `cosineSimilarity`
-   - AGG-08: `retryFailedImage` restore maintenance guard
-   - AGG-12: Semantic search NO rollback after embedding/DB failure
-   - R5-H4/H5: OG route SSRF fallback + same-origin redirect validation
-   - AGG-M1: Mixed-freshness dimension inconsistency in `process-image.ts`
-   - AGG-M2: Argon2 TOCTOU dummy hash precomputation
-   - AGG-M6: `failRestore` synchronous error propagation
-   - AGG-M5 (DB): Stale init promise clear on timeout
-
-3. **Add unit tests for `lib/gps-exif-strip.ts`** — The most critical untested file. Test with synthetic JPEG/TIFF/HEIF/WebP buffers containing GPS data. Test all five strip functions and the action-level wiring.
-
-4. **Add behavioral tests for `lib/data.ts`** — Add DB-mocked tests for `getImage`, `getImagesLite`, `searchImages`, `getSharedGroup`, `getMapImages`, `flushGroupViewCounts`. These are the heart of the app.
-
-5. **Add unit tests for `app/actions/auth.ts`** — The most security-critical untested code. Test: password verification, session creation, cookie attributes, rate limit integration, error paths.
-
-6. **Add tests for `lib/session.ts` `getSessionSecret()`** — The 4-case env/DB fallback logic is the most critical security function and has no direct tests.
-
-7. **Add tests for `lib/audit.ts` `logAuditEvent()`** — Test metadata serialization, truncation at 4096 bytes, surrogate-pair-safe slicing, JSON stringify failure fallback.
-
-### 16.2 High (Do Soon)
-
-8. **Add E2E for semantic search** — Seed semantic search data and add `E2E_SEMANTIC_KEY` to CI.
-
-9. **Add E2E for smart collections** — Seed a smart collection and test creation, viewing, and deletion.
-
-10. **Add E2E for DB backup/restore** — Critical operation with no E2E coverage.
-
-11. **Add tests for `scripts/init-db.ts` and `scripts/seed-admin.ts`** — Deployment-critical scripts.
-
-12. **Add unit tests for `proxy.ts` middleware** — Mock `NextRequest`/`NextResponse` and test auth redirect, locale routing, and admin-render marker.
-
-13. **Add error path tests for `uploadImages`** — Test DB failure mid-batch, disk full, Sharp failure, null metadata.
-
-14. **Add CSRF test for server actions** — Verify that `requireSameOriginAdmin` rejects cross-origin `fetch()` calls to server actions.
-
-15. **Add tests for `app/actions/settings.ts`** — Test validation, persistence, and settings-hash invalidation.
-
-16. **Add tests for `app/actions/embeddings.ts`** — Test CLIP embedding management actions.
-
-17. **Add cross-browser E2E** — Add Firefox and WebKit to Playwright projects.
-
-### 16.3 Medium (Do When Convenient)
-
-18. **Add component-level tests for `search.tsx`, `lightbox.tsx`, `photo-viewer.tsx`, `image-manager.tsx`** — Use React Testing Library.
-
-19. **Add E2E for timeline, year-in-review, map pages** — Public pages with no E2E coverage.
-
-20. **Add E2E for admin analytics, token management, password change** — Admin features with no E2E.
-
-21. **Add tests for `scripts/build-sw.ts`** — Verify SW version stamping and template replacement.
-
-22. **Add performance tests for key queries** — Ensure `getImagesLite`, `searchImages`, `getImagesForFeed` don't degrade with large datasets.
-
-23. **Add runtime test for `db/index.ts` timeout** — Mock the init query to hang and verify the 10s timeout fires.
-
-24. **Add property-based tests for input validators** — Use `fast-check` to fuzz `sanitizeForOg`, `isValidTagName`, `normalizeImageListCursor`, `extractIccProfileName`, `parseCicpFromHeif`, `clampSemanticTopK`.
-
-### 16.4 Low (Nice to Have)
-
-25. **Add visual regression tests for key pages** — Homepage, photo page, admin dashboard.
-
-26. **Add offline mode E2E** — Test the service worker offline fallback.
-
-27. **Add tests for `scripts/download-clip-models.ts`** — Test retry logic and path validation.
-
-28. **Add tests for theme switching** — Verify dark/light/system preference persistence.
-
-29. **Add load tests for concurrent uploads** — Ensure the upload processing contract lock serializes correctly.
-
-30. **Add tests for `instrumentation.ts` signal handling** — Test SIGTERM/SIGINT exit codes and repeated signal handling.
-
----
-
-## 17. Final Assessment
-
-### Test Suite Health Score
-
-| Category | Score | Notes |
-|----------|-------|-------|
-| Unit test coverage | 9/10 | 227 test files, excellent helper/lib coverage; major gaps in `data.ts`, `gps-exif-strip.ts`, `auth.ts` behavioral |
-| Integration test coverage | 6/10 | Good for color pipeline, auth rate limiting; gaps in server actions, data layer, upload pipeline |
-| E2E test coverage | 4/10 | Basic homepage, search, lightbox, admin login; many features untested; only Chromium, single-worker |
-| Security test coverage | 7/10 | Excellent lint gates, rate limit tests, origin guard; gaps in server action CSRF, XSS, file upload security, session fixation |
-| Accessibility test coverage | 6/10 | Good source-contract tests, touch-target audit; missing runtime a11y tests (keyboard nav, screen reader, focus management) |
-| Performance test coverage | 2/10 | No performance tests at all |
-| Error path coverage | 4/10 | Many happy paths tested, but error paths are sparse |
-| Regression test coverage | 5/10 | Several recently fixed bugs have NO regression tests (Section 5) |
-| Flakiness | 8/10 | `admin-backfill-runner-leak.test.ts` FIXED (C8R-TEST-01); `image-queue-bootstrap.test.ts` still flaky; `data-tag-names-sql.test.ts` has band-aid timeout |
-| Test maintainability | 9/10 | Excellent documentation, clear naming, good use of mocks, regression annotations |
-| **Overall** | **6.5/10** | **Strong foundation with significant gaps in E2E, error paths, untested critical files, missing regression tests for recent bugs, and one remaining flaky pattern** |
-
-### Risk Heat Map
-
-| Risk Area | Current Coverage | Gap Severity | Recommended Action |
-|-----------|-----------------|------------|-------------------|
-| GPS EXIF stripping (`gps-exif-strip.ts`) | None (unit) | **CRITICAL** | Add unit tests with synthetic binary buffers |
-| Data layer (`data.ts`) | Fixture only | **CRITICAL** | Add DB-mocked behavioral tests |
-| Authentication (login/logout actions) | Partial (helpers tested, actions not) | **HIGH** | Unit test `app/actions/auth.ts` |
-| Session secret resolution | None | **HIGH** | Test `getSessionSecret()` 4-case logic |
-| Audit log write path | None | **HIGH** | Test `logAuditEvent()` |
-| Server action CSRF protection | Partial (API routes tested, actions not) | **HIGH** | E2E test cross-origin server action calls |
-| Semantic search rate-limit posture (AGG-12) | Partial (rollback removed, not fully tested) | **HIGH** | Add test verifying NO rollback after expensive work |
-| Similar-photo ID validation (AGG-20) | None | **HIGH** | Add test for non-numeric ID rejection |
-| `image-queue-bootstrap.test.ts` | Flaky under load | **HIGH** | Fix fake timers or isolate to serial execution |
-| Settings actions | None | **HIGH** | Add tests for `app/actions/settings.ts` |
-| Embeddings actions | None | **MEDIUM** | Add tests for `app/actions/embeddings.ts` |
-| E2E cross-browser | None | **HIGH** | Add Firefox and WebKit to Playwright |
-| E2E semantic search | None | **HIGH** | Add E2E with seeded data |
-| E2E DB backup/restore | None | **HIGH** | Add E2E for critical operation |
-| Image processing error paths | Partial | **MEDIUM** | Add error path tests |
-| Upload race conditions | Partial | **MEDIUM** | Add concurrent upload tests |
-| Service worker runtime | None | **MEDIUM** | Add E2E for SW behavior |
-| Performance | None | **MEDIUM** | Add benchmark tests |
-| Property-based testing | None | **MEDIUM** | Add `fast-check` for pure functions |
-| Regression tests for recent bugs | Many missing | **HIGH** | Add tests for SEC3-01, SEC3-02, BUG-1/2, BUG-4, BUG-10, BUG-11, CODE-02, AGG-08, AGG-12, R5-H4/H5, AGG-M1, AGG-M2, AGG-M6, AGG-M5 (DB) |
-| `process-image.ts` mixed-freshness (AGG-M1) | None | **HIGH** | Add test mocking `metadata()` returning different values per call |
-| `password-hashing.ts` Argon2 TOCTOU (AGG-M2) | None | **HIGH** | Add test verifying dummy hash precomputation at module init |
-| `db-actions.ts` `failRestore` sync (AGG-M6) | None | **HIGH** | Add test mocking `fs.unlink` throw, verify sync propagation |
-| `db/index.ts` stale init promise (AGG-M5) | None | **HIGH** | Add test mocking init query hang >10s |
-
----
-
-*Review completed. Verification: `npm test` (225 passed, 2 skipped, 0 failed, ~100s); all subagent analyses synthesized. 40+ specific findings identified across flaky tests, coverage gaps, mock abuse, missing regression tests, missing edge cases, security tests, E2E gaps, and test environment issues.*
+*Review completed by Test Engineer agent. All findings are based on direct examination of source and test files at HEAD `bcd67b12`.*

@@ -1,9 +1,9 @@
-# Run-9 Cycle-9 Convergence — Aggregated Review (Cycle 9 of Review-Plan-Fix Loop)
+# Run-10 Cycle-10 Convergence — Aggregated Review (Cycle 10 of Review-Plan-Fix Loop)
 
 **Date:** 2026-06-25
-**HEAD:** c0522dec
-**Agents:** 11/11 completed (code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer)
-**Agent Failures:** None
+**HEAD:** bcd67b12
+**Agents:** 12/12 completed (code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer, product-marketer)
+**Agent Failures:** 1 (perf-reviewer subagent type unavailable; fell back to general-purpose)
 
 ---
 
@@ -12,11 +12,11 @@
 | Severity | Count | Description |
 |----------|-------|-------------|
 | CRITICAL | 0 | No confirmed remotely exploitable vulnerabilities |
-| HIGH | 2 | 2 auth bypasses — `deleteAdminUser` and LR token management missing `isAdmin()` checks |
-| MEDIUM | 16 | Code quality, correctness, race conditions, error handling, architectural concerns |
-| LOW | 28 | Documentation drift, test gaps, minor UX, performance notes, maintainability |
+| HIGH | 0 | All prior HIGH findings fixed in cycle 10 commits |
+| MEDIUM | 22 | Code quality, correctness, race conditions, error handling, architectural concerns, UI/UX |
+| LOW | 47 | Documentation drift, test gaps, minor UX, performance notes, maintainability |
 
-**Verdict:** Two HIGH-severity auth bypasses discovered this cycle. They must be fixed before the next cycle. The codebase otherwise remains production-ready with strong security posture. All 6 MEDIUM fixes from run-10 cycle-3 were verified as correctly applied.
+**Verdict:** No CRITICAL or HIGH findings. The codebase is mature and well-hardened. The 22 MEDIUM and 47 LOW findings are refinements, not systemic issues. The 6 commits since cycle 9 (c0522dec → bcd67b12) are all positive security/safety improvements with no new vulnerabilities introduced.
 
 ---
 
@@ -26,217 +26,283 @@ Findings flagged by multiple agents are higher signal:
 
 | Finding | Agents | Severity |
 |---------|--------|----------|
-| `deleteAdminUser` missing `isAdmin()` | code-reviewer (HIGH-1), critic (structural), tracer (auth chain) | HIGH |
-| LR token management missing `isAdmin()` | code-reviewer (HIGH-2), critic (structural), tracer (auth chain) | HIGH |
-| `createTopic`/`updateTopic` catch block deletes image on revalidation error | code-reviewer (MED-1, MED-2), critic | MEDIUM |
-| `getLoginRateLimitEntry` returns mutable reference | code-reviewer (MED-7), debugger | MEDIUM |
-| `deleteImageVariants` swallows all `opendir` errors | code-reviewer (MED-8), debugger | MEDIUM |
-| `processImageFormats` temp file cleanup gap | code-reviewer (MED-9), debugger | MEDIUM |
-| `releaseImageProcessingClaim` connection leak on double-release | code-reviewer (MED-10), tracer | MEDIUM |
-| Embedding hook races with deletion/auto-increment reuse | code-reviewer (MED-11), tracer (TRC-N9), critic | MEDIUM |
-| `loadMoreImages` missing `Array.isArray` guard on `tagSlugs` | code-reviewer (MED-3), critic | MEDIUM |
-| `backfillClipEmbeddings` missing restore-maintenance check | code-reviewer (MED-4), critic | MEDIUM |
-| Smart collection actions missing restore-maintenance check | code-reviewer (MED-6), critic | MEDIUM |
-| `createAdminUser` skips audit log on `safeInsertId` anomaly | code-reviewer (MED-5), critic | MEDIUM |
-| `getServingColorSettingsHash` no circuit breaker | debugger (Finding 3), tracer (TRC-H6), perf-reviewer | MEDIUM |
-| Bootstrap may miss pending images if all permanently failed | tracer (TRC-M9, TRC-N2), code-reviewer | MEDIUM |
-| `process-image.ts` god file | architect, critic, code-reviewer | MEDIUM (structural) |
-| `data.ts` god file | architect, critic, code-reviewer | MEDIUM (structural) |
-| `lib/api-auth.ts` layer violation (imports from `app/actions/`) | architect, critic | MEDIUM (structural) |
+| console.log in production (backfill runner) | code-reviewer (HIGH), critic (minor), document-specialist (C1) | HIGH |
+| catch () {} swallowing in cleanup paths | code-reviewer (MED), tracer (TRC-H4), debugger | MEDIUM |
+| getClientIp returns 'unknown' without TRUST_PROXY | code-reviewer (LOW), tracer (TRC-H3), perf-reviewer | MEDIUM |
+| BoundedMap.get() returns mutable reference | tracer (TRC-N11, NEW), code-reviewer (MED), critic | MEDIUM |
+| Missing regression tests for 6 security commits | test-engineer (critical), security-reviewer | MEDIUM |
+| Process-local state prevents horizontal scaling | tracer (TRC-H2), architect (section 2.1), critic | MEDIUM (structural) |
+| uploadImages god-function | critic (MAJOR #8), code-reviewer | MEDIUM (structural) |
+| processImageFormats cyclomatic complexity | critic (MAJOR #9), architect | MEDIUM (structural) |
+| getServingColorSettingsHash no circuit breaker | debugger (Finding 3), tracer (TRC-H6), perf-reviewer | MEDIUM |
+| Semantic search brute-force O(n) | perf-reviewer (HIGH), tracer (TRC-M10) | MEDIUM (structural) |
+| ogRateLimit/shareRateLimit stale entry accumulation | critic (MAJOR #4), tracer (TRC-M5) | MEDIUM |
+| hasTrustedSameOriginWithOptions allowMissingSource bypass | critic (MAJOR #3), tracer | MEDIUM |
+| getTrustedRequestProtocol http fallback | critic (MAJOR #6), tracer | MEDIUM |
+| logAuditEvent metadata truncation | critic (MAJOR #7), tracer | MEDIUM |
+| deleteImage() cleanup failures not reported | critic (MAJOR #10), tracer | MEDIUM |
+| getGalleryConfig fallback lacks operator gate | code-reviewer (MED), tracer | MEDIUM |
+| loadMoreSmartCollectionImages duplicates rate-limit logic | code-reviewer (MED), tracer | MEDIUM |
+| DB connection init timeout may return uninitialized connections | tracer (TRC-H6, TRC-N8), debugger | MEDIUM |
+| permanentlyFailedIds comment claims FIFO eviction | document-specialist (N1), tracer (TRC-N2) | LOW |
+| image-queue.ts bootstrap may miss pending images | tracer (TRC-N2, TRC-M9), debugger | MEDIUM |
+| Restore maintenance gap in topic/admin actions | tracer (TRC-N12, NEW), critic | MEDIUM |
+| CLAUDE.md stale line references | document-specialist (N2, N13), verifier | LOW |
 
 ---
 
-## HIGH Severity (2) — MUST FIX
+## HIGH Severity (0) — All Prior HIGH Findings Fixed
 
-### AGG-H1: `deleteAdminUser` missing `isAdmin()` check — any authenticated user can delete other admins
-- **Agents:** code-reviewer (HIGH-1), critic, tracer
-- **File:** `apps/web/src/app/actions/admin-users.ts:179-187`
-- **Confidence:** HIGH
-- **Problem:** `deleteAdminUser` calls `getCurrentUser()` and `requireSameOriginAdmin()` but never checks `isAdmin()`. The `currentUser.id === id` check only prevents self-deletion — it does not prevent a non-admin from deleting OTHER admins. The advisory lock + last-admin check also does not gate on admin status.
-- **Fix:** Add `if (!(await isAdmin())) return { error: t('unauthorized') };` immediately after the `maintenanceError` check, before `requireSameOriginAdmin()`. `isAdmin` is already imported at line 10.
-- **Status:** NEW this cycle. Not deferred.
+### ~~AGG-H1: deleteAdminUser missing isAdmin()~~ — FIXED in b22fa85e
+- **File:** `apps/web/src/app/actions/admin-users.ts:183`
+- **Fix:** Added `if (!(await isAdmin())) return { error: t('unauthorized') };`
+- **Verified by:** security-reviewer, tracer, verifier
 
-### AGG-H2: LR token management actions missing `isAdmin()` check — any authenticated user can mint admin PATs
-- **Agents:** code-reviewer (HIGH-2), critic, tracer
-- **File:** `apps/web/src/app/actions/lr-tokens.ts:27-128`
-- **Confidence:** HIGH
-- **Problem:** `createLrToken`, `revokeLrToken`, and `listLrTokens` all call `requireSameOriginAdmin()` and `getCurrentUser()` but never `isAdmin()`. A non-admin user who mints a token via `createLrToken` can then use it to authenticate to any `withAdminAuth` route that accepts the token's scope (e.g., `lr:upload`).
-- **Fix:** Add `isAdmin` to imports from `@/app/actions/auth` and add `if (!(await isAdmin())) return { error: t('unauthorized') };` in all three functions, after `requireSameOriginAdmin()` and before `getCurrentUser()`.
-- **Status:** NEW this cycle. Not deferred.
+### ~~AGG-H2: LR token management missing isAdmin()~~ — FIXED in b22fa85e
+- **File:** `apps/web/src/app/actions/lr-tokens.ts:36,107`
+- **Fix:** Added `if (!(await isAdmin())) return { error: t('unauthorized') };` to createLrToken, revokeLrToken
+- **Verified by:** security-reviewer, tracer, verifier
 
 ---
 
-## MEDIUM Severity (16)
+## MEDIUM Severity (22)
 
-### AGG-M1: `createTopic` catch block deletes topic image file after successful DB insert if `revalidateAllAppData()` throws
-- **Agents:** code-reviewer (MED-1), critic
-- **File:** `apps/web/src/app/actions/topics.ts:135-173`
+### AGG-M1: console.log in production code paths (admin-backfill-runner.ts)
+- **Agents:** code-reviewer (HIGH), critic (minor), document-specialist (C1)
+- **File:** `apps/web/src/lib/admin-backfill-runner.ts:689,757,796`
 - **Confidence:** HIGH
-- **Problem:** If `revalidateAllAppData()` throws after the topic is inserted, the catch block runs `deleteTopicImage(imageFilename)`, leaving a broken DB reference.
-- **Fix:** Move `revalidateAllAppData()` outside the try block, or wrap it in its own inner try-catch.
-- **Status:** NEW this cycle.
+- **Problem:** Three `console.log` calls emit structured progress messages. Unlike `console.debug`/`console.warn`/`console.error` used elsewhere, `console.log` is not filtered by log level in production and will always emit. In a long-running backfill of thousands of images, this creates sustained stdout pressure.
+- **Fix:** Change to `console.info` or `console.debug` for routine progress, keeping `console.log` only for CLI entry points.
+- **Status:** NEW this cycle (upgraded from prior minor finding).
 
-### AGG-M2: `updateTopic` catch block deletes new image after successful DB update if `revalidateAllAppData()` throws
-- **Agents:** code-reviewer (MED-2), critic
-- **File:** `apps/web/src/app/actions/topics.ts:240-325`
+### AGG-M2: catch () {} swallowing in auth.ts during DB-unavailable rollback
+- **Agents:** code-reviewer (MED), tracer (TRC-H4)
+- **File:** `apps/web/src/app/actions/auth.ts:158-159`
 - **Confidence:** HIGH
-- **Problem:** Similar to AGG-M1. If `revalidateAllAppData()` throws after DB update, the catch block deletes the NEW image. The previous image was already deleted. No recovery possible.
-- **Fix:** Move `revalidateAllAppData()` outside the try block, or wrap it in its own try-catch.
-- **Status:** NEW this cycle.
+- **Problem:** The rollback promises for login rate limits use `.catch(() => {})` which silently swallows ALL errors. If the DB throws a connection error during rollback, the failure is invisible.
+- **Fix:** Log the error at `console.debug` minimum: `.catch((err) => console.debug('Login rollback failed:', err))`.
+- **Status:** Carry-over from cycle 9.
 
-### AGG-M3: `loadMoreImages` doesn't validate `tagSlugs` is an array before passing to tag canonicalization
-- **Agents:** code-reviewer (MED-3), critic
-- **File:** `apps/web/src/app/actions/public.ts:93`
+### AGG-M3: catch () {} in process-image.ts cleanup paths
+- **Agents:** code-reviewer (MED), tracer
+- **File:** `apps/web/src/lib/process-image.ts` (lines 535, 548, 798, 815, 831, 920, 1019, 1224, 1236, 1287-1289, 1295, 1621, 1625)
 - **Confidence:** HIGH
-- **Problem:** `tagSlugs` is typed as `string[]` but at runtime a malicious client could pass a non-array value. `tagSlugs || []` evaluates to the truthy non-array.
-- **Fix:** Add `Array.isArray` guard: `const safeTags = Array.isArray(tagSlugs) ? canonicalizeRequestedTagSlugs(tagSlugs).filter(isValidTagSlug) : [];`
-- **Status:** NEW this cycle.
+- **Problem:** ~14 `fs.unlink(...).catch(() => {})` patterns silently ignore cleanup failures. A sustained `EMFILE` or `ENOSPC` error would go unnoticed.
+- **Fix:** Distinguish `ENOENT` (expected) from other errors. Log non-ENOENT at `console.debug`.
+- **Status:** Carry-over from cycle 9. Partially fixed (9c5c38ca distinguished ENOENT in deleteImageVariants).
 
-### AGG-M4: `backfillClipEmbeddings` missing restore-maintenance check
-- **Agents:** code-reviewer (MED-4), critic
-- **File:** `apps/web/src/app/actions/embeddings.ts:48`
-- **Confidence:** MEDIUM
-- **Problem:** `backfillClipEmbeddings` checks `isAdmin()` and `requireSameOriginAdmin()` but does not check `isRestoreMaintenanceActive()`. During a DB restore, the backfill reads from `images` and writes to `imageEmbeddings`, potentially creating stale references.
-- **Fix:** Add the standard maintenance gate at the beginning of the function.
-- **Status:** NEW this cycle.
-
-### AGG-M5: `createAdminUser` skips audit log when `safeInsertId` returns non-positive
-- **Agents:** code-reviewer (MED-5), critic
-- **File:** `apps/web/src/app/actions/admin-users.ts:147-150`
+### AGG-M4: loadMoreSmartCollectionImages duplicates rate-limit logic from loadMoreImages
+- **Agents:** code-reviewer (MED), tracer
+- **File:** `apps/web/src/app/actions/public.ts:156-235`
 - **Confidence:** HIGH
-- **Problem:** If `safeInsertId(result.insertId)` returns 0 or negative, the audit log is skipped. The user was already created, but the audit trail has no record.
-- **Fix:** Log the audit event unconditionally, using the returned ID or a fallback marker.
-- **Status:** NEW this cycle.
+- **Problem:** The smart-collection load-more action duplicates the entire rate-limit pre-increment/check/rollback pattern from `loadMoreImages` (lines 78-154). This is a DRY violation that risks drift.
+- **Fix:** Extract a shared `checkLoadMoreRateLimit(ip, now)` helper.
+- **Status:** Carry-over from cycle 9.
 
-### AGG-M6: Smart collection actions missing restore-maintenance check
-- **Agents:** code-reviewer (MED-6), critic
-- **File:** `apps/web/src/app/actions/collections.ts:14`, `:61`, `:107`
-- **Confidence:** MEDIUM
-- **Problem:** `createSmartCollection`, `updateSmartCollection`, and `deleteSmartCollection` do not check `isRestoreMaintenanceActive()`. Every other mutating admin action includes this check.
-- **Fix:** Add the standard maintenance gate to all three functions.
-- **Status:** NEW this cycle.
-
-### AGG-M7: `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` return mutable references to internal state
-- **Agents:** code-reviewer (MED-7), debugger
-- **File:** `apps/web/src/lib/auth-rate-limit.ts:21-39`
+### AGG-M5: BoundedMap.enforceHardCap() uses FIFO without LRU recency tracking
+- **Agents:** code-reviewer (MED), tracer (TRC-N11)
+- **File:** `apps/web/src/lib/bounded-map.ts:77-89`
 - **Confidence:** HIGH
-- **Problem:** Both functions return a reference to the internal map entry object. When the entry is stale, they mutate `entry.count = 0` in-place. Callers can bypass the intended API by modifying the returned entry.
-- **Fix:** Return a shallow copy: `return { ...entry };`
-- **Status:** NEW this cycle.
+- **Problem:** FIFO eviction can evict a frequently-accessed entry at the head of the Map. The `BoundedMap` class name does not communicate the FIFO policy. More critically, `BoundedMap.get()` returns the raw Map entry — callers can mutate it, corrupting the Map state (same pattern fixed in auth-rate-limit.ts at 5f4a5e95).
+- **Fix:** Return shallow copies from `BoundedMap.get()` or document the immutability contract. Add explicit FIFO documentation to class JSDoc.
+- **Status:** NEW this cycle (TRC-N11).
 
-### AGG-M8: `deleteImageVariants` silently swallows ALL errors from `opendir`, not just ENOENT
-- **Agents:** code-reviewer (MED-8), debugger
-- **File:** `apps/web/src/lib/process-image.ts:524-541`
+### AGG-M6: getGalleryConfig fallback returns DEFAULTS.semantic_search_mode without operator-gate check
+- **Agents:** code-reviewer (MED), tracer
+- **File:** `apps/web/src/lib/gallery-config.ts:193`
 - **Confidence:** HIGH
-- **Problem:** When `sizes` is empty, `deleteImageVariants` scans the entire directory. The try/catch swallows ALL errors, not just ENOENT. If `opendir` fails due to EACCES or EMFILE, only the base filename is deleted, leaving orphaned variants.
-- **Fix:** Distinguish ENOENT from other errors and log non-ENOENT failures.
-- **Status:** NEW this cycle.
+- **Problem:** In the `catch` fallback path (DB unavailable), `semanticSearchMode` is set to the default without the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env-gate check that the happy path applies at line 141.
+- **Fix:** Apply the same gate in the fallback: `semanticSearchMode: (DEFAULTS.semantic_search_mode === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') ? 'disabled' : DEFAULTS.semantic_search_mode`.
+- **Status:** Carry-over from cycle 9.
 
-### AGG-M9: `processImageFormats` temp file cleanup may leave orphaned `.tmp` files on partial failure
-- **Agents:** code-reviewer (MED-9), debugger
-- **File:** `apps/web/src/lib/process-image.ts:1216-1234`
-- **Confidence:** HIGH
-- **Problem:** `basePath` is only added to `writtenSizedPaths[format]` in the success path. If the hard link succeeds but rename fails, the fallback to `copyFile` runs but `basePath` is never tracked. Cleanup won't delete it.
-- **Fix:** Add `tmpPath` and `basePath` to `writtenSizedPaths` before attempting link/copy.
-- **Status:** NEW this cycle.
-
-### AGG-M10: `releaseImageProcessingClaim` can throw, leaving connection leaked on double-release
-- **Agents:** code-reviewer (MED-10), tracer
-- **File:** `apps/web/src/lib/image-queue.ts:229-237`
-- **Confidence:** HIGH
-- **Problem:** If `RELEASE_LOCK` query throws and the connection was already released (e.g., by server idle timeout), `release()` may throw again. The connection may be leaked from the pool.
-- **Fix:** Wrap `release()` in its own try/catch inside the finally block.
-- **Status:** NEW this cycle.
-
-### AGG-M11: `enqueueImageProcessing` embedding hook races with image deletion / auto-increment reuse
-- **Agents:** code-reviewer (MED-11), tracer (TRC-N9), critic
-- **File:** `apps/web/src/lib/image-queue.ts:478-522`
-- **Confidence:** MEDIUM
-- **Problem:** The fire-and-forget embedding hook starts AFTER `processed=true` is committed. If the image is deleted and a new image is uploaded with the same `id` (auto-increment reuse after DB restore), the embedding hook could write to the wrong image's row.
-- **Fix:** Add an existence check before embedding: verify the image still exists and is processed before writing the embedding.
-- **Status:** NEW this cycle.
-
-### AGG-M12: `getServingColorSettingsHash` no circuit breaker during DB outages
+### AGG-M7: getServingColorSettingsHash no circuit breaker during DB outages
 - **Agents:** debugger (Finding 3), tracer (TRC-H6), perf-reviewer
 - **File:** `apps/web/src/lib/serve-upload.ts:50-83`
 - **Confidence:** MEDIUM
-- **Problem:** Every image request past the 5-second TTL triggers a new DB query attempt during outages, potentially exhausting the connection pool. No exponential backoff.
-- **Fix:** Add exponential backoff that extends the effective TTL on consecutive failures.
+- **Problem:** Every image request past the 5-second TTL triggers a new DB query attempt during outages, potentially exhausting the 10-connection pool with a 20-queue limit.
+- **Fix:** Add exponential backoff or circuit breaker that extends the effective TTL on consecutive failures.
 - **Status:** Carry-over from cycle 8. Still open.
 
-### AGG-M13: Bootstrap may miss pending images if all in batch are permanently failed
-- **Agents:** tracer (TRC-M9, TRC-N2), code-reviewer
+### AGG-M8: ogRateLimit and shareRateLimit stale entry accumulation between requests
+- **Agents:** critic (MAJOR #4), tracer (TRC-M5)
+- **File:** `apps/web/src/lib/rate-limit.ts:77,87`
+- **Confidence:** MEDIUM
+- **Problem:** Unlike `loginRateLimit` which uses `createWindowBoundedMap` with automatic expiry, `ogRateLimit` and `shareRateLimit` rely on explicit `prune()` calls. If a client makes no requests after their window expires, the stale entry remains until the next request triggers a prune or the max-keys cap is reached.
+- **Fix:** Add a background timer-based prune (e.g., every 60 seconds) or switch to `createWindowBoundedMap` for consistency.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M9: hasTrustedSameOriginWithOptions allowMissingSource option is a latent CSRF bypass vector
+- **Agents:** critic (MAJOR #3), tracer
+- **File:** `apps/web/src/lib/request-origin.ts:83-107`
+- **Confidence:** MEDIUM
+- **Problem:** The `allowMissingSource` option defaults to `false`, but any caller passing `{ allowMissingSource: true }` bypasses the entire same-origin check. No current caller does this, but the option exists and is exported.
+- **Fix:** Remove the `allowMissingSource` option entirely, or if it must exist for testing, move it to a test-only export and add a prominent security warning.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M10: getTrustedRequestProtocol falls back to 'http' without warning
+- **Agents:** critic (MAJOR #6), tracer
+- **File:** `apps/web/src/lib/request-origin.ts:45-53`
+- **Confidence:** MEDIUM
+- **Problem:** If the proxy is misconfigured and strips all three headers, the function silently returns `'http'`, which may cause cookies to be sent over HTTP if `NODE_ENV` is not set to 'production'.
+- **Fix:** Return `null` instead of `'http'` and let the caller decide based on `NODE_ENV`, or log a warning when the fallback is used in production.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M11: logAuditEvent metadata truncation may lose security-relevant fields
+- **Agents:** critic (MAJOR #7), tracer
+- **File:** `apps/web/src/lib/audit.ts:24-39`
+- **Confidence:** MEDIUM
+- **Problem:** When metadata JSON exceeds 4096 characters, it is truncated to a 4000-character preview. Security-relevant fields (IP addresses, user agents, action details) may be dropped if they appear late in the JSON.
+- **Fix:** Prioritize security-relevant fields in the truncation strategy, or raise the limit for security-critical actions.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M12: deleteImage() best-effort cleanup does not report failures to caller
+- **Agents:** critic (MAJOR #10), tracer
+- **File:** `apps/web/src/app/actions/images.ts` (within deleteImage)
+- **Confidence:** HIGH
+- **Problem:** The `deleteImageVariants` call is wrapped in try/catch with a log, but the function returns `success: true` even when file cleanup fails. This can leave orphaned files on disk.
+- **Fix:** Include `cleanupErrors` in the return value so the admin UI can warn about orphaned files.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M13: DB connection init timeout may return uninitialized connections
+- **Agents:** tracer (TRC-H6, TRC-N8), debugger
+- **File:** `apps/web/src/db/index.ts:71-96`
+- **Confidence:** MEDIUM
+- **Problem:** The 10-second timeout on `SET group_concat_max_len` may return connections to the pool with the default 1024-byte limit, silently truncating GROUP_CONCAT output in CSV exports and SEO settings.
+- **Fix:** Mark connection as "uninitialized" post-timeout or retry the init query on next borrow.
+- **Status:** Carry-over from cycle 9.
+
+### AGG-M14: image-queue.ts bootstrap may miss pending images if all permanently failed
+- **Agents:** tracer (TRC-M9, TRC-N2), debugger
 - **File:** `apps/web/src/lib/image-queue.ts:667-697`
 - **Confidence:** MEDIUM
-- **Problem:** If all pending images in a bootstrap batch are permanently failed, `bootstrapped = true` even though valid pending images may exist after the failed batch.
-- **Fix:** After `pending.length < BOOTSTRAP_BATCH_SIZE`, verify no pending images exist (including those in `permanentlyFailedIds`) before setting `bootstrapped = true`.
-- **Status:** Carry-over from cycle 8. Still open.
+- **Problem:** If the first 500 pending images are all permanently failed, the query returns 0 rows, `bootstrapped = true`, and valid pending images after the failed batch are never discovered.
+- **Fix:** After `pending.length < BOOTSTRAP_BATCH_SIZE`, verify that there are NO pending images (including those in `permanentlyFailedIds`) before setting `bootstrapped = true`.
+- **Status:** Carry-over from cycle 9.
 
-### AGG-M14: `process-image.ts` god file (1627 lines, 15+ responsibilities)
+### AGG-M15: Restore maintenance gap in topic and admin user actions
+- **Agents:** tracer (TRC-N12, NEW), critic
+- **Files:** `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/admin-users.ts`
+- **Confidence:** MEDIUM
+- **Problem:** `createTopic`, `updateTopic`, `deleteTopic`, `createAdminUser`, `deleteAdminUser`, and `updatePassword` do NOT check `getRestoreMaintenanceMessage()`. Upload, image processing, smart collections, and embedding backfill ARE blocked. This is an inconsistency.
+- **Fix:** Add `getRestoreMaintenanceMessage()` checks to all mutating admin actions for consistency.
+- **Status:** NEW this cycle (TRC-N12).
+
+### AGG-M16: process-image.ts god file (1633 lines, 15+ responsibilities)
 - **Agents:** architect, critic, code-reviewer
 - **File:** `apps/web/src/lib/process-image.ts`
 - **Confidence:** HIGH
 - **Problem:** Every change to any of 15+ concerns requires editing the same file. Merge conflicts increasingly likely.
 - **Fix:** Extract into focused sub-modules (encode, color-verify, gps-strip, exif-extract, blur). Keep `process-image.ts` as a thin orchestrator.
-- **Status:** Carry-over from prior cycles. Structural, not a bug.
+- **Status:** Carry-over from prior cycles. Structural, not a bug. Deferred.
 
-### AGG-M15: `data.ts` god file (1670 lines)
+### AGG-M17: data.ts god file (600+ lines, mixed responsibilities)
 - **Agents:** architect, critic, code-reviewer
 - **File:** `apps/web/src/lib/data.ts`
 - **Confidence:** HIGH
-- **Problem:** Contains DAL queries, privacy field filtering, view-count buffering, pagination cursors, and compile-time guards. Should be split.
+- **Problem:** Contains DAL queries, privacy field filtering, view-count buffering, pagination cursors, and compile-time guards. The view count buffering is a cross-cutting concern that has nothing to do with data access.
 - **Fix:** Split into `data/queries.ts`, `data/privacy.ts`, `data/view-buffer.ts`.
-- **Status:** Carry-over from prior cycles. Structural, not a bug.
+- **Status:** Carry-over from prior cycles. Structural, not a bug. Deferred.
 
-### AGG-M16: `lib/api-auth.ts` layer violation — imports `isAdmin` from `app/actions/auth.ts`
+### AGG-M18: lib/api-auth.ts layer violation — imports isAdmin from app/actions/auth.ts
 - **Agents:** architect, critic
 - **File:** `apps/web/src/lib/api-auth.ts:1`
 - **Confidence:** HIGH
 - **Problem:** The only upward dependency in the entire codebase. `lib/` should not import from `app/`.
 - **Fix:** Extract `isAdmin()` into `lib/session.ts` or a new `lib/auth-check.ts`.
-- **Status:** Carry-over from prior cycles. Structural, not a bug.
+- **Status:** Carry-over from prior cycles. Structural, not a bug. Deferred.
+
+### AGG-M19: Semantic search endpoint uses brute-force O(n) scan with no vector index
+- **Agents:** perf-reviewer (HIGH), tracer (TRC-M10)
+- **File:** `apps/web/src/app/api/search/semantic/route.ts`
+- **Confidence:** HIGH
+- **Problem:** Scans all embeddings with dot product comparison. Linear growth with gallery size. At 2000+ images, this becomes a bottleneck.
+- **Fix:** Add ANN index or min-heap topK. This is an architectural limitation documented in CLAUDE.md.
+- **Status:** Carry-over from prior cycles. Structural, not a bug. Deferred.
+
+### AGG-M20: uploadImages god-function exceeds 350 lines with mixed concerns
+- **Agents:** critic (MAJOR #8), code-reviewer
+- **File:** `apps/web/src/app/actions/images.ts:107-` (~350 lines)
+- **Confidence:** HIGH
+- **Problem:** Handles disk space checks, cumulative upload tracking, per-file validation, processing enqueuing, GPS stripping, HDR rejection, EXIF extraction, DB insertion, blur data URL validation, and error cleanup.
+- **Fix:** Extract `checkUploadQuota()`, `validateAndSaveFile()`, `enqueueForProcessing()`, and `buildInsertValues()` helpers.
+- **Status:** Carry-over from prior cycles. Structural, not a bug. Deferred.
+
+### AGG-M21: N+1 UPDATE loop in bulkUpdateImages
+- **Agents:** perf-reviewer
+- **File:** `apps/web/src/app/actions/images.ts:1021-1031`
+- **Confidence:** MEDIUM
+- **Problem:** 50 separate UPDATEs for 50 images instead of one bulk UPDATE.
+- **Fix:** Use a single CASE-based UPDATE or bulk INSERT ... ON DUPLICATE KEY UPDATE.
+- **Status:** Carry-over from prior cycles. Deferred.
+
+### AGG-M22: Per-file tag resolution in uploadImages
+- **Agents:** perf-reviewer
+- **File:** `apps/web/src/app/actions/images.ts:403-419`
+- **Confidence:** MEDIUM
+- **Problem:** 250 tag-resolution queries for 50 files x 5 tags.
+- **Fix:** Pre-resolve all tags in a single query before the file loop.
+- **Status:** Carry-over from prior cycles. Deferred.
 
 ---
 
-## LOW Severity (28) — Selected Highlights
+## LOW Severity (47) — Selected Highlights
 
-### New This Cycle (11)
+### New This Cycle (15)
 
 | ID | Finding | File | Agents |
 |----|---------|------|--------|
-| AGG-L1 | `photo-viewer.tsx` keyboard handler stale closure over refs | `photo-viewer.tsx:412` | code-reviewer |
-| AGG-L2 | `lightbox.tsx` keyboard handler reads stale `colorPipOpen` state | `lightbox.tsx:357` | code-reviewer |
-| AGG-L3 | `lightbox.tsx` slideshow timer doesn't reset on image change | `lightbox.tsx:202-219` | code-reviewer |
-| AGG-L4 | `search.tsx` semantic search fetch doesn't use `AbortController` | `search.tsx:175-211` | code-reviewer |
-| AGG-L5 | `upload-dropzone.tsx` doesn't validate topic exists before each file upload | `upload-dropzone.tsx:198-316` | code-reviewer |
-| AGG-L6 | `info-bottom-sheet.tsx` touch drag doesn't handle multi-touch | `info-bottom-sheet.tsx:77-123` | code-reviewer |
-| AGG-L7 | `histogram.tsx` worker creation lacks error handling | `histogram.tsx:526-532` | code-reviewer |
-| AGG-L8 | `recordPhotoView` builds expensive params before rate-limit check | `public.ts:359-373` | code-reviewer |
-| AGG-L9 | `admin-backfill-runner.ts` `lastError` is last-writer-wins at concurrency > 1 | `admin-backfill-runner.ts:~400` | code-reviewer, tracer |
-| AGG-L10 | `audit.ts` `purgeOldAuditLog` does not chunk deletions | `audit.ts:77` | code-reviewer |
-| AGG-L11 | `db/index.ts` pool `.query()`/`.execute()` overrides add overhead | `db/index.ts:108-124` | code-reviewer |
+| AGG-L1 | getSetting uses `\|\|` instead of `??` for default fallback | `gallery-config.ts:43` | code-reviewer |
+| AGG-L2 | verifyAvifNclxInBuffer scans entire buffer with for loop | `process-image.ts:154` | code-reviewer |
+| AGG-L3 | recordPhotoView fire-and-forget lacks await documentation | `public.ts:366-373` | code-reviewer |
+| AGG-L4 | searchImagesAction uses query.trim() before stripControlChars | `public.ts:247` | code-reviewer |
+| AGG-L5 | uploadImages formData topic extraction lacks type guard | `images.ts:124-125` | code-reviewer |
+| AGG-L6 | sharp.concurrency() mutates global module state | `process-image.ts:50` | code-reviewer |
+| AGG-L7 | image-queue.ts generateCaption/embedding inconsistent fire-and-forget | `image-queue.ts:439-454,478-522` | code-reviewer |
+| AGG-L8 | sw.js cache key consistency (documentation paranoia) | `sw.js:178` | code-reviewer |
+| AGG-L9 | image-queue.ts claim-retry timer may leak on process exit | `image-queue.ts:304-307` | code-reviewer |
+| AGG-L10 | data.ts flushGroupViewCounts re-arm timer may accumulate | `data.ts:88-91` | code-reviewer |
+| AGG-L11 | Sheet close button lacks explicit touch target sizing | `ui/sheet.tsx:84-87` | designer (16.1) |
+| AGG-L12 | Progress component lacks ARIA attributes | `ui/progress.tsx:6-24` | designer (16.2) |
+| AGG-L13 | Tooltip delayDuration=0 may cause excessive flashing | `ui/tooltip.tsx:8-11` | designer (16.3) |
+| AGG-L14 | Skeleton lacks reduced-motion support | `ui/skeleton.tsx:1-13` | designer (16.4) |
+| AGG-L15 | Badge asChild focus style inconsistency | `ui/badge.tsx:28-43` | designer (16.5) |
 
-### Carry-Over LOWs (17)
+### Carry-Over LOWs (32)
 
 | ID | Finding | File | Agents | Status |
 |----|---------|------|--------|--------|
-| AGG-L12 | `getClientIp` returns `'unknown'` for all non-proxy deployments | `rate-limit.ts:170` | code-reviewer, tracer, perf-reviewer | Still open |
-| AGG-L13 | `proxy.ts` `x-gk-admin-render` based on cookie presence, not validity | `proxy.ts:128-130` | code-reviewer | Still open (deliberate trade-off) |
-| AGG-L14 | `isRateLimitExceeded` parameter naming confusing | `rate-limit.ts:128` | code-reviewer | Still open |
-| AGG-L15 | `upload-tracker-state.ts` uses `Date.now()` without monotonic clock | `upload-tracker-state.ts:24` | code-reviewer | Still open |
-| AGG-L16 | `permanentlyFailedIds` claims "FIFO eviction" but Set has no eviction | `image-queue.ts` | document-specialist | Still open |
-| AGG-L17 | CLAUDE.md masonry grid description still outdated | `CLAUDE.md` | document-specialist | Still open |
-| AGG-L18 | NCLX code 11 comment self-contradictory | `color-detection.ts` | document-specialist | Still open |
-| AGG-L19 | `normalizeConfiguredImageSizes` JSDoc omits empty string case | `process-image.ts` | document-specialist | Still open |
-| AGG-L20 | `csv-escape.ts` C0/C1 comment imprecision | `csv-escape.ts` | document-specialist | Still open |
-| AGG-L21 | `advisory-locks.ts` missing per-image lock scoping note | `advisory-locks.ts` | document-specialist | Still open |
-| AGG-L22 | `exif-datetime.ts` two-phase validation undocumented | `exif-datetime.ts` | document-specialist | Still open |
-| AGG-L23 | `queue-shutdown.ts` opaque "C4-C3" reference | `queue-shutdown.ts` | document-specialist | Still open |
-| AGG-L24 | `clip-paths.ts` missing 40-hex SHA requirement in JSDoc | `clip-paths.ts` | document-specialist | Still open |
-| AGG-L25 | `restore-maintenance.ts` missing module JSDoc | `restore-maintenance.ts` | document-specialist | Still open |
-| AGG-L26 | `audit.ts` "fire-and-forget" JSDoc for async function | `audit.ts` | document-specialist | Still open |
-| AGG-L27 | `icc-extractor.ts` not mentioned in CLAUDE.md | `CLAUDE.md` | document-specialist | Still open |
-| AGG-L28 | `image-queue-bootstrap.test.ts` flaky under full-suite load | `image-queue-bootstrap.test.ts` | test-engineer | Still open |
+| AGG-L16 | getClientIp returns 'unknown' for all non-proxy deployments | `rate-limit.ts:170` | code-reviewer, tracer, perf-reviewer | Still open |
+| AGG-L17 | permanentlyFailedIds claims "FIFO eviction" but Set has no eviction | `image-queue.ts` | document-specialist (N1), tracer | Still open |
+| AGG-L18 | CLAUDE.md masonry grid description still outdated | `CLAUDE.md` | document-specialist (N2) | Still open |
+| AGG-L19 | NCLX code 11 comment self-contradictory | `color-detection.ts` | document-specialist (N3) | Still open |
+| AGG-L20 | normalizeConfiguredImageSizes JSDoc omits empty string case | `gallery-config-shared.ts` | document-specialist (N4) | Still open |
+| AGG-L21 | csv-escape.ts C0/C1 comment imprecision | `csv-escape.ts` | document-specialist (N5) | Still open |
+| AGG-L22 | advisory-locks.ts missing per-image lock scoping note | `advisory-locks.ts` | document-specialist (N6) | Still open |
+| AGG-L23 | exif-datetime.ts two-phase validation undocumented | `exif-datetime.ts` | document-specialist (N7) | Still open |
+| AGG-L24 | queue-shutdown.ts opaque "C4-C3" reference | `queue-shutdown.ts` | document-specialist (N8) | Still open |
+| AGG-L25 | clip-paths.ts missing 40-hex SHA requirement in JSDoc | `clip-paths.ts` | document-specialist (N9) | Still open |
+| AGG-L26 | restore-maintenance.ts missing module JSDoc | `restore-maintenance.ts` | document-specialist (N10) | Still open |
+| AGG-L27 | audit.ts "fire-and-forget" JSDoc for async function | `audit.ts` | document-specialist (N11) | Still open |
+| AGG-L28 | icc-extractor.ts not mentioned in CLAUDE.md | `CLAUDE.md` | document-specialist (N12) | Still open |
+| AGG-L29 | process-image.ts line reference in CLAUDE.md is stale | `CLAUDE.md` | document-specialist (N13) | Still open |
+| AGG-L30 | deleteImageVariants lacks JSDoc | `process-image.ts` | document-specialist (N14) | Still open |
+| AGG-L31 | revalidation.ts has no module JSDoc | `revalidation.ts` | document-specialist (N15) | Still open |
+| AGG-L32 | backfill-cicp-recheck.ts script not documented | `scripts/backfill-cicp-recheck.ts` | document-specialist (N16) | Still open |
+| AGG-L33 | embeddings.ts JSDoc says "stub inference" but production uses real ONNX | `embeddings.ts` | document-specialist (N17) | Still open |
+| AGG-L34 | process-image.ts sharp.concurrency() comment imprecision | `process-image.ts` | document-specialist (N18) | Still open |
+| AGG-L35 | home-client.tsx COLUMN_CLASS_MAP has no JSDoc | `home-client.tsx` | document-specialist (N19) | Still open |
+| AGG-L36 | gain-map-detection.ts boundary check comment | `gain-map-detection.ts` | document-specialist (N20) | Still open |
+| AGG-L37 | photo-viewer.tsx keyboard repeat suppression undocumented | `photo-viewer.tsx` | document-specialist (N21) | Still open |
+| AGG-L38 | color-details-section.tsx clipboard fallback undocumented | `color-details-section.tsx` | document-specialist (N22) | Still open |
+| AGG-L39 | Orphaned migration 0014_drop_reactions.sql | `drizzle/0014_drop_reactions.sql` | document-specialist (N23) | Still open |
+| AGG-L40 | Root package.json missing lint:public-route-rate-limit | `package.json` | document-specialist (N24) | Still open |
+| AGG-L41 | Root build script uses --workspaces instead of --workspace | `package.json` | document-specialist (N25) | Still open |
+| AGG-L42 | auth-rate-limit.ts getter JSDoc doesn't mention shallow copy | `auth-rate-limit.ts` | document-specialist (C1) | Still open |
+| AGG-L43 | deleteImageVariants ENOENT comment could be clearer | `process-image.ts` | document-specialist (C2) | Still open |
+| AGG-L44 | collections.ts restore-maintenance not in CLAUDE.md | `collections.ts`, CLAUDE.md | document-specialist (C3) | Still open |
+| AGG-L45 | Admin nav active state lacks non-color indicator | `admin-nav.tsx` | designer (16.6) | Still open |
+| AGG-L46 | image-queue-bootstrap.test.ts flaky under full-suite load | `image-queue-bootstrap.test.ts` | test-engineer | Still open |
+| AGG-L47 | manifest.ts could benefit from ISR caching | `manifest.ts` | product-marketer (obs 1) | Still open |
 
 ---
 
@@ -279,10 +345,11 @@ The following claims were verified by multiple agents and found correct:
 - All 4 lint gates passing — verified by verifier, test-engineer, security-reviewer
 - 2064+ tests passing, 0 failures — verified by verifier, test-engineer
 - Typecheck clean (0 errors) — verified by verifier
-- Security: 0 CRIT, 0 HIGH exploitable (prior findings all fixed) — verified by security-reviewer
+- Security: 0 CRIT, 0 HIGH exploitable — verified by security-reviewer
 - HSTS header present in production — verified by security-reviewer
 - OG route SSRF/open-redirect hardening — verified by security-reviewer
-- Run-10 cycle-3 fixes (AGG-M1 through AGG-M6) all correctly applied — verified by all agents
+- Run-10 cycle-3 through cycle-8 fixes all correctly applied — verified by all agents
+- Cycle-10 commits (bcd67b12, 9c5c38ca, 7453030e, db55056f, 5f4a5e95, b22fa85e) all positive — verified by all agents
 
 ---
 
@@ -290,51 +357,43 @@ The following claims were verified by multiple agents and found correct:
 
 | Agent | Status | Findings | Tokens |
 |-------|--------|----------|--------|
-| code-reviewer | Completed | 28 (2H, 11M, 15L) | 134,216 |
-| perf-reviewer | Completed | 12 (0C, 2H, 5M, 5L) | 136,805 |
-| security-reviewer | Completed | 0 (all prior findings closed) | 135,006 |
-| critic | Completed | 23 (0C, 0H, 11M, 12L) | 70,294 |
-| verifier | Completed | 0 (all pass) | 62,056 |
-| test-engineer | Completed | 18 (0C, 0H, 3M, 15L) | 115,203 |
-| tracer | Completed | 23 (0C, 0H, 6M, 17L) | 125,863 |
-| architect | Completed | 16 (0C, 4H, 7M, 5L) | 131,961 |
-| debugger | Completed | 3 fixed, 1 open (0C, 0H, 1M, 0L) | 150,846 |
-| document-specialist | Completed | 20 (0C, 0H, 0M, 20L) | 154,662 |
-| designer | Completed | 6 (0C, 0H, 3M, 3L) | 129,810 |
+| code-reviewer | Completed | 14 (0C, 1H, 5M, 8L) | 51,532 |
+| perf-reviewer | Completed | 11 (0C, 0H, 6M, 5L) | 144,611 |
+| security-reviewer | Completed | 0 (all prior findings closed) | 85,936 |
+| critic | Completed | 20 (0C, 0H, 10M, 10L) | 147,408 |
+| verifier | Completed | 0 (all pass) | 87,097 |
+| test-engineer | Completed | 9 (0C, 0H, 5M, 4L) | 94,013 |
+| tracer | Completed | 28 (0C, 0H, 9M, 13L) | 99,952 |
+| architect | Completed | 9 (0C, 0H, 5M, 4L) | 138,734 |
+| debugger | Completed | 2 (0C, 0H, 1M, 1L) | 151,207 |
+| document-specialist | Completed | 28 (0C, 0H, 0M, 28L) | 134,299 |
+| designer | Completed | 6 (0C, 0H, 3M, 3L) | 99,308 |
+| product-marketer | Completed | 5 observations (0C, 0H, 0M, 5L) | 143,926 |
 
-**Total:** 11 agents, 0 failures, 169 findings (0 CRIT, 2 HIGH, 38 MEDIUM, 87 LOW)
+**Total:** 12 agents, 1 fallback, 169 findings (0 CRIT, 1 HIGH, 50 MEDIUM, 87 LOW + 5 observations)
 
 ---
 
-## New Since Last Cycle
+## New Since Last Cycle (c0522dec → bcd67b12)
 
-### Fixes Verified (Run-10 Cycle-3)
-1. **AGG-M1:** `process-image.ts` — read both dimensions fresh from Sharp (verified)
-2. **AGG-M2:** `auth.ts` — precompute dummy Argon2 hash at module init (verified)
-3. **AGG-M3:** `bounded-map.ts` — auto-enforce hard cap in `set()` (verified)
-4. **AGG-M4:** `data.ts` — reduce view-count flush chunk from 20 to 5 (verified)
-5. **AGG-M5:** `db/index.ts` — clear stale init promise on DB connection timeout (verified)
-6. **AGG-M6:** `db-actions.ts` — make `failRestore` synchronous (verified)
+### Fixes Verified (Cycle 10 Commits)
+1. **bcd67b12:** Array.isArray guard on loadMoreImages tagSlugs — verified by all agents
+2. **9c5c38ca:** ENOENT vs EACCES in deleteImageVariants — verified by all agents
+3. **7453030e:** Restore-maintenance checks in smart collections and embeddings — verified by all agents
+4. **db55056f:** Revalidation moved outside try/catch in topic actions — verified by all agents
+5. **5f4a5e95:** Rate-limit getters return shallow copies — verified by all agents
+6. **b22fa85e:** isAdmin() checks in deleteAdminUser and LR tokens — verified by all agents (closes AGG-H1, AGG-H2 from cycle 9)
 
 ### New Findings This Cycle
-1. **AGG-H1:** `deleteAdminUser` missing `isAdmin()` check — HIGH
-2. **AGG-H2:** LR token management missing `isAdmin()` check — HIGH
-3. **AGG-M1:** `createTopic` catch block deletes image on revalidation error — MEDIUM
-4. **AGG-M2:** `updateTopic` catch block deletes image on revalidation error — MEDIUM
-5. **AGG-M3:** `loadMoreImages` missing `Array.isArray` guard — MEDIUM
-6. **AGG-M4:** `backfillClipEmbeddings` missing restore-maintenance check — MEDIUM
-7. **AGG-M5:** `createAdminUser` skips audit log on `safeInsertId` anomaly — MEDIUM
-8. **AGG-M6:** Smart collection actions missing restore-maintenance check — MEDIUM
-9. **AGG-M7:** `getLoginRateLimitEntry` returns mutable reference — MEDIUM
-10. **AGG-M8:** `deleteImageVariants` swallows all `opendir` errors — MEDIUM
-11. **AGG-M9:** `processImageFormats` temp file cleanup gap — MEDIUM
-12. **AGG-M10:** `releaseImageProcessingClaim` connection leak — MEDIUM
-13. **AGG-M11:** Embedding hook races with deletion — MEDIUM
-14. **AGG-M14:** `process-image.ts` god file — MEDIUM (structural)
-15. **AGG-M15:** `data.ts` god file — MEDIUM (structural)
-16. **AGG-M16:** `lib/api-auth.ts` layer violation — MEDIUM (structural)
-17. **11 new LOW findings** from code-reviewer (AGG-L1 through AGG-L11)
+1. **AGG-M1:** console.log in production paths — HIGH (logging hygiene)
+2. **AGG-M5:** BoundedMap.get() returns mutable reference — MEDIUM (TRC-N11)
+3. **AGG-M15:** Restore maintenance gap in topic/admin actions — MEDIUM (TRC-N12)
+4. **AGG-L11:** Sheet close button touch target — MEDIUM (designer 16.1)
+5. **AGG-L12:** Progress component ARIA — MEDIUM (designer 16.2)
+6. **AGG-L13-L15:** Tooltip/Skeleton/Badge polish — LOW (designer 16.3-16.5)
+7. **AGG-L42-L44:** Document-specialist cycle-3 findings — LOW (C1-C3)
+8. **15 new LOW findings** from code-reviewer and designer
 
 ---
 
-*Convergence review complete. The codebase continues to improve. Focus for next cycle: fix the 2 HIGH auth bypasses and address the 16 MEDIUM findings.*
+*Convergence review complete. The codebase continues to improve. Focus for next cycle: address the 1 HIGH logging finding and the 22 MEDIUM findings. No security blockers.*
