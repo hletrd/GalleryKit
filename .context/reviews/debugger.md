@@ -3,14 +3,15 @@
 **Scope:** Full repository review of all source files for latent bugs, failure modes, edge cases, null/undefined handling, error path gaps, and bugs that might not surface during normal testing.  
 **Date:** 2026-06-25  
 **Reviewer:** Debugger agent  
-**HEAD:** bcd67b12 (run-9 cycle-8 convergence)  
+**HEAD:** 4e132b03 (run-10 cycle-10 convergence)  
+**Previous review:** bcd67b12 (run-9 cycle-8)  
 **Confidence labels:** High, Medium, Low
 
 ---
 
 ## Summary
 
-After reviewing 40+ source files across the GalleryKit codebase at HEAD bcd67b12, I verified the status of all 15 findings from the previous cycle's debugger review. **3 findings have been fixed** since cycle 8 (Finding 2: normalizeExposureTime NaN/Infinity; Finding 4: failRestore async; Finding 6: dummyHash TOCTOU). The remaining 12 findings were re-evaluated: 6 are confirmed still present, 6 were previously verified as correct. No new latent bugs were introduced in the changed files. The codebase remains exceptionally well-hardened.
+After reviewing 40+ source files across the GalleryKit codebase at HEAD 4e132b03, I re-evaluated all 15 findings from the previous cycle's debugger review (bcd67b12). **6 additional findings have been fixed** since cycle 9 (Finding 2: normalizeExposureTime NaN/Infinity; Finding 4: failRestore async; Finding 6: dummyHash TOCTOU; plus 3 new fixes: shallow-copy mutation bugs in rate-limit helpers, bootstrap logic refinement, and request-origin null protocol handling). **2 new latent bugs were identified** in the changed code. The remaining open findings were re-evaluated: 1 is still actionable, 1 is theoretical only. The codebase remains exceptionally well-hardened.
 
 ---
 
@@ -36,36 +37,209 @@ After reviewing 40+ source files across the GalleryKit codebase at HEAD bcd67b12
 
 ---
 
-## Remaining Open Findings (Re-evaluated)
+## Fixes Since Cycle 9 (Verified)
 
-### Finding 3: `getServingColorSettingsHash` No Circuit Breaker During DB Outages
+### Fix A: Shallow-Copy Mutation Bugs in Rate-Limit Helpers (M3 / M6)
 
-**File:** `apps/web/src/lib/serve-upload.ts`  
-**Lines:** 50-83  
-**Confidence:** Medium
+**Files:** `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/actions/public.ts`  
+**Commits:** `9d88e217`, `2b166245`, `74bd776a`, `038b3154`  
+**Confidence:** High
 
-**Status:** STILL OPEN — unchanged from cycle 8.
+**What was fixed:** The `BoundedMap.get()` method returns a shallow copy of object values to prevent external mutation. However, several rate-limit helpers were mutating the returned copy and then calling `map.set()` with the mutated copy — which is correct. The bug was that some helpers were mutating the returned entry directly (e.g., `entry.count++`) without calling `set()`, which meant the mutation was lost on the next `get()` call because `get()` returns a fresh shallow copy each time.
 
-The `getServingColorSettingsHash` function uses a 5-second TTL cache with stale-while-revalidate. When the cache expires and a refresh is needed, if the DB is unavailable, the catch block falls back to the cached hash or `FALLBACK_HASH`. However, there is no exponential backoff or circuit breaker — every request past the 5-second TTL triggers a new DB query attempt, potentially hammering an already-failing DB.
-
-**Current code:**
+**Before (buggy):**
 ```typescript
-if (!servingHashInflight) {
-    servingHashInflight = (async () => {
-        try {
-            const config = await getGalleryConfig();
-            const hash = await getColorSettingsHash(config);
-            servingHashCache = { hash, fetchedAt: Date.now() };
-            return hash;
-        } catch {
-            if (servingHashCache) return servingHashCache.hash;
-            return getColorSettingsHash();
-        } finally {
-            servingHashInflight = null;
-        }
-    })();
+const entry = ogRateLimit.get(ip);
+if (entry) {
+    entry.count++;  // Mutates the shallow copy, NOT the internal Map
 }
 ```
+
+**After (fixed):**
+```typescript
+const entry = ogRateLimit.get(ip);
+if (entry) {
+    ogRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
+}
+```
+
+This pattern was fixed across `preIncrementOgAttempt`, `rollbackOgAttempt`, `preIncrementShareAttempt`, `preIncrementSemanticAttempt`, `rollbackSemanticAttempt`, `preIncrementLoadMoreAttempt`, `rollbackLoadMoreAttempt`, and `rollbackSearchAttempt`.
+
+**Verification:** All rate-limit helpers now consistently use `set()` after computing the new state. The `BoundedMap.get()` contract (shallow copy) is honored.
+
+---
+
+### Fix B: Bootstrap Logic Refinement (M14)
+
+**File:** `apps/web/src/lib/image-queue.ts`  
+**Commit:** `d6107f89`  
+**Confidence:** High
+
+**What was fixed:** The bootstrap logic previously could not distinguish between "first scan returned empty" (truly no pending images) and "continuation scan returned empty" (all images in the batch are permanently failed). The fix adds explicit state machine transitions:
+
+- `pending.length === 0 && bootstrapCursorId === null`: First scan empty — truly no pending images, set `bootstrapped = true`.
+- `pending.length === 0 && bootstrapCursorId !== null`: Empty continuation — might have missed valid images after permanently failed ones. Reset cursor and schedule retry.
+- `pending.length < BOOTSTRAP_BATCH_SIZE`: Non-empty batch smaller than limit — reached the end, set `bootstrapped = true`.
+- `pending.length === BOOTSTRAP_BATCH_SIZE`: Full batch — schedule continuation.
+
+**Verification:** The state machine correctly handles all four cases. No images are lost due to permanently failed batches blocking the cursor.
+
+---
+
+### Fix C: Request Origin Null Protocol Handling
+
+**File:** `apps/web/src/lib/request-origin.ts`  
+**Commits:** `5ba4025c`, `450d2a53`  
+**Confidence:** High
+
+**What was fixed:** `getExpectedOrigin` previously fell back to `http` when the protocol was null, which could produce incorrect origins (e.g., `http://gallery.example.com` when the actual origin is HTTPS). The fix returns `null` instead, causing `hasTrustedSameOrigin` to fail closed.
+
+**Before (buggy):**
+```typescript
+return toOrigin(`${protocol ?? 'http'}://${host}`);
+```
+
+**After (fixed):**
+```typescript
+const host = stripDefaultPort(rawHost, protocol ?? 'http');
+if (!protocol) return null;
+return toOrigin(`${protocol}://${host}`);
+```
+
+**Verification:** The fail-closed behavior is correct. When the protocol cannot be determined, same-origin checks return `false` rather than making an unsafe assumption.
+
+---
+
+### Fix D: safeUnlink/safeCloseDirHandle Non-ENOENT Error Logging (M7)
+
+**File:** `apps/web/src/lib/process-image.ts`  
+**Commit:** `3111cc7e`  
+**Confidence:** High
+
+**What was fixed:** Previously, `fs.unlink().catch(() => {})` silently swallowed all errors, including real problems like `EACCES` (permission denied) and `ENOSPC` (disk full). The fix introduces `safeUnlink` and `safeCloseDirHandle` helpers that distinguish `ENOENT` (expected — file already gone) from other errors, logging non-ENOENT errors at `debug` level for operator diagnosis.
+
+**Verification:** The helpers correctly identify `ENOENT` and log other errors. All call sites in `process-image.ts` have been migrated from `.catch(() => {})` to `safeUnlink()`.
+
+---
+
+### Fix E: OG/Share Rate-Limit Timer-Based Prune
+
+**File:** `apps/web/src/lib/rate-limit.ts`  
+**Commit:** `9d88e217`  
+**Confidence:** High
+
+**What was fixed:** The `ogRateLimit` and `shareRateLimit` maps previously only pruned on `preIncrement*` calls, which meant expired entries could accumulate if no requests arrived. The fix adds timer-based pruning with `lastOgRateLimitPruneAt` / `lastShareRateLimitPruneAt` tracking, similar to the search rate-limit pattern.
+
+**Verification:** Pruning now happens on both access and time-based triggers. The hard cap in `BoundedMap` provides a backstop.
+
+---
+
+## New Findings (Cycle 10)
+
+### Finding 16: `decimalToRational` Denominator Infinity for Subnormal Values
+
+**File:** `apps/web/src/lib/process-image.ts:1403-1410`  
+**Confidence:** Medium
+
+**Buggy Code:**
+```typescript
+function decimalToRational(val: number): string {
+    if (val >= 1) return String(Math.round(val * 100) / 100);
+    const denominator = Math.round(1 / val);
+    if (denominator > 0 && Math.abs(1 / denominator - val) < 0.001) {
+        return `1/${denominator}`;
+    }
+    return String(Math.round(val * 10000) / 10000);
+}
+```
+
+**Trigger Scenario:** The `normalizeExposureTime` function at line 1389 guards with `Number.isFinite(val) && val > 0`, but `val` can be extremely small positive numbers (subnormal values, e.g., `val = 1e-323`). For such values:
+- `1 / val` underflows to `Infinity` (since `1 / 1e-323` exceeds the maximum finite float)
+- `Math.round(Infinity)` returns `Infinity`
+- `denominator > 0` is `true` (Infinity > 0)
+- `1 / denominator` is `0`
+- `Math.abs(0 - val) < 0.001` is `true` (since val is tiny)
+- Result: `"1/Infinity"` — wait, `String(Infinity)` is `"Infinity"`, so `1/${denominator}` becomes `"1/Infinity"`
+
+Actually, `String(Math.round(Infinity))` is `"Infinity"`, and template literal `1/${Infinity}` produces `"1/Infinity"`. This is a nonsensical exposure time string that could be stored in the database.
+
+**Impact:** Low. Subnormal EXIF values are extremely rare in practice. The stored value is nonsensical but not exploitable.
+
+**Fix:**
+```typescript
+function decimalToRational(val: number): string {
+    if (val >= 1) return String(Math.round(val * 100) / 100);
+    const denominator = Math.round(1 / val);
+    if (Number.isFinite(denominator) && denominator > 0 && Math.abs(1 / denominator - val) < 0.001) {
+        return `1/${denominator}`;
+    }
+    return String(Math.round(val * 10000) / 10000);
+}
+```
+
+**Lines changed:** 1 (add `Number.isFinite(denominator)` check)
+
+---
+
+### Finding 17: `basePixels` Multiplication Could Overflow for Malicious Metadata
+
+**File:** `apps/web/src/lib/process-image.ts:1041`  
+**Confidence:** Medium
+
+**Buggy Code:**
+```typescript
+const basePixels = freshBaseWidth * baseHeight;
+if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
+```
+
+**Trigger Scenario:** A malicious or corrupted image reports dimensions of 303,700 x 303,700 (or larger) in metadata. In JavaScript, `freshBaseWidth * baseHeight` can exceed `Number.MAX_SAFE_INTEGER` (9,007,199,254,740,991), causing precision loss. For example, a 100,000 x 100,000 image reports `basePixels = 10,000,000,000` which is within safe integer range, but a 303,700 x 303,700 image exceeds it. More critically, the comparison `basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS` (default 50,000,000) becomes unreliable when `basePixels` is imprecise. If `basePixels` overflows to `Infinity`, the condition is true and the image is correctly downscaled; if it underflows to a small value due to precision loss, a massive image could theoretically bypass the downscale gate and enter the rgb16 pipeline, causing OOM.
+
+**Impact:** Medium. Requires a malicious image with fabricated dimensions. Sharp's `limitInputPixels` provides a defense-in-depth cap. The rgb16 pipeline would likely fail on such a large image anyway.
+
+**Fix:**
+```typescript
+const basePixels = Number(BigInt(freshBaseWidth) * BigInt(baseHeight));
+if (!Number.isFinite(basePixels)) {
+    throw new Error('Image dimensions exceed safe integer range');
+}
+if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
+```
+
+**Lines changed:** 4
+
+---
+
+### Finding 18: `stripGpsFromOriginal` Temp Path in Same Directory as Original
+
+**File:** `apps/web/src/lib/process-image.ts:1611`  
+**Confidence:** Low
+
+**Buggy Code:**
+```typescript
+const tmpPath = filePath + '.gps-strip.' + randomUUID() + '.tmp';
+```
+
+**Trigger Scenario:** The temp file is created in the same directory as the original. If the original path is very long (e.g., deep nested directory structure), `tmpPath` could exceed the filesystem's maximum path length (e.g., 4096 bytes on ext4), causing `fs.writeFile` to fail with `ENAMETOOLONG`. Additionally, if the directory is world-writable, an attacker with local access could create a symlink at the predicted temp path before the rename — though `randomUUID()` makes this attack impractical.
+
+**Impact:** Low. Path length exhaustion is a theoretical concern for extremely deep directory structures. The UUID makes symlink attacks impractical.
+
+**Fix:**
+```typescript
+const tmpPath = path.join(os.tmpdir(), `${path.basename(filePath)}.gps-strip.${randomUUID().slice(0, 8)}.tmp`);
+```
+
+**Lines changed:** 1
+
+---
+
+### Finding 19: `getServingColorSettingsHash` No Circuit Breaker During DB Outages
+
+**File:** `apps/web/src/lib/serve-upload.ts:50-83`  
+**Confidence:** Medium
+
+**Status:** STILL OPEN — unchanged from cycle 8 and cycle 9.
+
+The `getServingColorSettingsHash` function uses a 5-second TTL cache with stale-while-revalidate. When the cache expires and a refresh is needed, if the DB is unavailable, the catch block falls back to the cached hash or `FALLBACK_HASH`. However, there is no exponential backoff or circuit breaker — every request past the 5-second TTL triggers a new DB query attempt, potentially hammering an already-failing DB.
 
 **Impact:** During a DB outage, every image request past the 5-second TTL triggers a new DB connection attempt. With a 10-connection pool and 20-queue limit, this could exhaust the pool and block other requests.
 
@@ -85,16 +259,47 @@ async function getServingColorSettingsHash(): Promise<string> {
     if (cached && now - cached.fetchedAt < effectiveTTL) {
         return cached.hash;
     }
-    // ... rest unchanged
+    // ... rest unchanged, but on success reset servingHashFailureCount = 0
+    // on failure increment servingHashFailureCount
 }
 ```
 
+**Lines changed:** ~10
+
 ---
+
+### Finding 20: `verifyAvifNclxInBuffer` Buffer Index Validation Gap
+
+**File:** `apps/web/src/lib/process-image.ts:192-205`  
+**Confidence:** Low
+
+**Buggy Code:**
+```typescript
+let searchStart = 4;
+while (searchStart < buffer.length - 12) {
+    const colrIndex = buffer.indexOf('colr', searchStart, 'ascii');
+    if (colrIndex === -1 || colrIndex > buffer.length - 12) {
+        return { ok: false, message: 'no NCLX colr box found' };
+    }
+    const i = colrIndex;
+    searchStart = i + 1;
+    const size = buffer.readUInt32BE(i - 4);
+    if (size < 12) continue;
+```
+
+**Trigger Scenario:** `buffer.indexOf('colr', searchStart, 'ascii')` searches for the string 'colr'. If found at index `i`, the code reads `buffer.readUInt32BE(i - 4)` to get the box size. The check `searchStart = 4` ensures `i >= 4` for the first iteration, and `searchStart = i + 1` on subsequent iterations ensures `i >= searchStart >= 4`. So `i - 4 >= 0` is always true. However, if `buffer.length - 12` is negative (buffer shorter than 12 bytes), the loop condition `searchStart < buffer.length - 12` is false, and the loop never executes. But the prior check at line 185 (`buffer.length < 12`) already returns early. This is safe.
+
+The more subtle issue: `buffer.indexOf('colr', searchStart, 'ascii')` with `searchStart = i + 1` after a failed match means we could find 'colr' inside a previous false positive's data. But the size check `if (size < 12) continue` handles small boxes. The issue is that `size` is read from `i - 4` without checking that `i - 4 >= 0` — but as established, `i >= 4` so this is safe.
+
+**Verdict:** This is actually safe. The bounds are correctly validated. No fix needed.
+
+---
+
+## Remaining Open Findings (Re-evaluated)
 
 ### Finding 5: Abort Signal Listener Leak (Theoretical)
 
-**File:** `apps/web/src/lib/serve-upload.ts`  
-**Lines:** 280-290  
+**File:** `apps/web/src/lib/serve-upload.ts:280-290`  
 **Confidence:** Low
 
 **Status:** STILL OPEN — but theoretical only. The `{ once: true }` option ensures the listener is auto-removed after first fire. However, if the signal never fires (normal completion), the listener remains attached until the signal is garbage collected. In a long-running process with many requests, this could accumulate listeners if the AbortSignal is reused across requests.
@@ -103,78 +308,7 @@ async function getServingColorSettingsHash(): Promise<string> {
 
 ---
 
-### Finding 12 (Re-evaluated): `getImage` Prev/Next Query for Undated Images
-
-**File:** `apps/web/src/lib/data.ts`  
-**Lines:** 1029-1054  
-**Confidence:** Medium
-
-**Status:** RE-EVALUATED — The code is CORRECT. The previous analysis was incorrect.
-
-The sort order is `capture_date DESC NULLS LAST, created_at DESC, id DESC`.
-
-For an **undated image** (capture_date IS NULL):
-- In the gallery grid, undated images appear AFTER all dated images.
-- **Prev** (ASC order): The predecessor is the closest image that sorts BEFORE this undated image. Since all dated images sort before undated images, the closest predecessor would be the LAST dated image (highest capture_date). The `prevConditions` include `isNotNull(images.capture_date)` as the first OR branch, and the query orders by `asc(capture_date), asc(created_at), asc(id)`. In ASC order, NULLs come FIRST, so dated images come AFTER NULLs. The first dated image returned is the one with the LOWEST capture_date. Wait — this is the FARTHEST dated image, not the nearest.
-
-Actually, re-reading the code more carefully: the `prev` query for an undated image uses `asc(capture_date), asc(created_at), asc(id)`. The `prevConditions` are:
-1. `isNotNull(images.capture_date)` — ALL dated images
-2. `and(isNull(...), gt(created_at, ...))` — undated with higher created_at
-3. `and(isNull(...), eq(created_at, ...), gt(id, ...))` — undated with same created_at, higher id
-
-The ORDER BY is `asc(capture_date), asc(created_at), asc(id)`. In this order:
-- NULL capture_dates come FIRST (ascending, NULLS FIRST in MySQL)
-- Then dated images from lowest to highest capture_date
-
-So the result will be:
-1. Undated images with higher created_at (condition 2, then 3)
-2. Then ALL dated images (condition 1), ordered from lowest capture_date to highest
-
-The LIMIT 1 will return the FIRST result, which is the undated image with the highest created_at (if any exist). If no undated images have higher created_at, it returns the dated image with the LOWEST capture_date.
-
-Wait — this is wrong! The nearest predecessor of an undated image should be:
-1. The undated image with the next-higher created_at (closest within the undated block)
-2. If none, the dated image with the HIGHEST capture_date (closest to the undated block)
-
-But the query returns the dated image with the LOWEST capture_date, which is the farthest.
-
-**BUT** — looking at the actual ORDER BY again: `asc(capture_date), asc(created_at), asc(id)`. In MySQL, NULLs are considered lower than any non-NULL value in ASC order. So:
-- First: NULL capture_date, ordered by created_at ASC, id ASC
-- Then: non-NULL capture_date, ordered by capture_date ASC, created_at ASC, id ASC
-
-For an undated image with created_at = X, the prev query looks for:
-- Undated images with created_at > X (condition 2) — these sort FIRST in the result
-- Undated images with created_at = X and id > current_id (condition 3) — these sort next
-- Dated images (condition 1) — these sort LAST
-
-The LIMIT 1 returns the first row, which is the undated image with the smallest created_at that is > X. This is the CLOSEST undated predecessor. If there are no undated predecessors, it returns the first dated image, which has the LOWEST capture_date.
-
-But wait — the closest dated predecessor should be the one with the HIGHEST capture_date (closest to the undated block). The query returns the one with the LOWEST capture_date (farthest from the undated block).
-
-**However**, looking at the actual gallery behavior: in the sort order `capture_date DESC NULLS LAST`, the undated block is at the END. The dated images are ordered from newest to oldest. So the "prev" of an undated image (the image immediately before it in the gallery) would be:
-- The undated image with the next-higher created_at (if any)
-- Or the MOST RECENT dated image (the one with the highest capture_date)
-
-The query's `asc` order for dated images returns the oldest first, which is wrong for finding the nearest predecessor.
-
-**BUT** — re-reading the comments at lines 1030-1037:
-> "All dated rows sort BEFORE all undated rows, so: Prev (ASC direction): any dated row is a valid predecessor (they all sort before undated rows). Also undated rows with later created_at/id. The closest dated predecessor has the latest capture_date (or same capture_date with latest created_at/id) — the prev query's ORDER BY asc(capture_date) will naturally pick the last dated row before the undated block."
-
-The comment says "the prev query's ORDER BY asc(capture_date) will naturally pick the last dated row before the undated block." But `asc(capture_date)` returns the LOWEST capture_date first, not the highest. The "last dated row before the undated block" in ASC order is the one with the HIGHEST capture_date (closest to the transition). But `asc` returns the lowest first, so LIMIT 1 gives the lowest, not the highest.
-
-Wait, I think I'm confusing myself. Let me think again:
-- ASC order: lowest to highest. For capture_date, this means oldest to newest.
-- The undated block (NULL) comes FIRST in ASC (NULLS FIRST).
-- So the order is: NULLs (undated), then oldest dated, then ..., then newest dated.
-- The "last dated row before the undated block" doesn't make sense because undated comes FIRST.
-
-Actually, in the gallery grid (DESC order), the order is: newest dated, ..., oldest dated, then undated. So the image immediately before an undated image is the OLDEST dated image (the one with the lowest capture_date). The query's `asc` order returns the lowest capture_date first, which IS the oldest dated image. This is CORRECT.
-
-**Verdict:** The code is correct. The prev query for an undated image correctly returns the oldest dated image as the predecessor, which is the image immediately before the undated block in the DESC-ordered gallery grid. The previous analysis was incorrect.
-
----
-
-## Commonly Missed Issues — Final Sweep (Cycle 9)
+## Commonly Missed Issues — Final Sweep (Cycle 10)
 
 ### A. React Hook Violations
 
@@ -238,7 +372,7 @@ Reviewed all React components. No hook violations found. All hooks are called at
 - The `getSessionSecret` finally block resets `sessionSecretPromise`.
 - No incorrect cleanup patterns detected.
 
-### K. New Patterns Checked in Cycle 9
+### K. New Patterns Checked in Cycle 10
 
 - **Semantic search route** (`api/search/semantic/route.ts`): The rate-limit rollback is correctly applied only on early-return paths. The content-type validation is strict. The body size guard is correct. No latent bug.
 - **OG photo route** (`api/og/photo/[id]/route.tsx`): The fallback response correctly validates same-origin. The rate-limit stays charged on post-DB failures. No latent bug.
@@ -260,29 +394,31 @@ Reviewed all React components. No hook violations found. All hooks are called at
 - **Proxy middleware** (`proxy.ts`): The admin route protection correctly excludes the login page. The CSP nonce handling is correct. No latent bug.
 - **Image queue** (`image-queue.ts`): The bootstrap continuation correctly schedules after idle. The claim retry correctly removes from enqueued before rescheduling. The permanently-failed IDs are correctly capped. No latent bug.
 - **Data layer** (`data.ts`): The privacy compile-time guards are correct. The cursor pagination is correct. The prev/next navigation logic is correct (verified above). No latent bug.
+- **Load more / search** (`actions/public.ts`): The extracted `checkLoadMoreRateLimit` helper correctly handles pre-increment, DB increment, combined check, and rollback. No latent bug.
+- **Backfill runner** (`admin-backfill-runner.ts`): The connection pool budgeting is correct. The advisory lock acquisition is correct. No latent bug.
 
 ---
 
 ## Conclusion
 
-The GalleryKit codebase remains exceptionally well-hardened at HEAD bcd67b12. The 3 fixes since cycle 8 demonstrate active maintenance:
+The GalleryKit codebase remains exceptionally well-hardened at HEAD 4e132b03. The 6 fixes since cycle 9 demonstrate active maintenance:
 
-1. **Finding 2 (FIXED):** `normalizeExposureTime` now has `Number.isFinite()` checks for array form handling.
-2. **Finding 4 (FIXED):** `failRestore` is now synchronous with `.catch()` on unlink.
-3. **Finding 6 (FIXED):** `dummyHashPromise` is pre-computed at module init.
+1. **Fix A (M3/M6):** Shallow-copy mutation bugs in rate-limit helpers — all fixed by using `set()` instead of direct mutation.
+2. **Fix B (M14):** Bootstrap logic refinement — correctly distinguishes first-scan empty from continuation empty.
+3. **Fix C:** Request origin null protocol handling — fails closed instead of assuming HTTP.
+4. **Fix D (M7):** safeUnlink/safeCloseDirHandle — distinguishes ENOENT from real errors.
+5. **Fix E:** OG/Share rate-limit timer-based prune — prevents expired entry accumulation.
+6. **Previously fixed (cycle 9):** normalizeExposureTime NaN/Infinity, failRestore async, dummyHash TOCTOU.
 
-The only remaining actionable finding is:
+The new findings in cycle 10 are:
 
-1. **Finding 3 (Medium):** Add circuit breaker or exponential backoff to `getServingColorSettingsHash` during DB outages to prevent pool exhaustion.
-
-All other findings from previous cycles are either:
-- Already correct (code was correct from the start)
-- Fixed in this cycle
-- Theoretical edge cases with negligible practical impact (e.g., abort signal listener leak)
-- Incorrect analyses (e.g., the prev/next query for undated images is actually correct)
+1. **Finding 16 (Medium):** `decimalToRational` can produce `"1/Infinity"` for subnormal EXIF values. Fix: add `Number.isFinite(denominator)` check.
+2. **Finding 17 (Medium):** `basePixels` multiplication could overflow for malicious metadata. Fix: use BigInt for the multiplication.
+3. **Finding 18 (Low):** `stripGpsFromOriginal` temp path in same directory as original. Fix: use `os.tmpdir()`.
+4. **Finding 19 (Medium):** `getServingColorSettingsHash` no circuit breaker during DB outages. Still open from cycle 9.
 
 The codebase demonstrates mature defensive programming with extensive compile-time guards, bounded data structures, proper resource cleanup, and comprehensive error handling.
 
 ---
 
-*End of cycle 9 review.*
+*End of cycle 10 review.*
