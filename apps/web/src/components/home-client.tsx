@@ -27,6 +27,9 @@ function useColumnCount() {
 
     useEffect(() => {
         let rafId: number | null = null;
+        const mountedRef = { current: true };
+        // AGG-R11C11-L10: mountedRef guard prevents rAF callback from running
+        // after component unmount (cleanup races the callback on the same frame).
         // AGG1L-LOW-02 / plan-301-B: thresholds mirror the Tailwind
         // breakpoints used in the masonry container's class string
         // (`columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5`),
@@ -36,6 +39,7 @@ function useColumnCount() {
         // images as `loading="eager"` / `fetchPriority="high"` and the
         // 5th slot would lazy-load (LCP regression).
         const update = () => {
+            if (!mountedRef.current) return;
             const w = window.innerWidth;
             setViewportWidth(w);
             if (w < 640) setCount(1);
@@ -54,6 +58,7 @@ function useColumnCount() {
         update();
         window.addEventListener('resize', handleResize);
         return () => {
+            mountedRef.current = false;
             window.removeEventListener('resize', handleResize);
             if (rafId !== null) cancelAnimationFrame(rafId);
         };

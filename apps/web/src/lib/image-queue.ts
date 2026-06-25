@@ -174,26 +174,38 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         [processingQueueKey]?: ProcessingQueueState;
     };
 
-    if (!globalWithQueue[processingQueueKey]) {
-        globalWithQueue[processingQueueKey] = {
-            // One image-processing job can already encode AVIF/WebP/JPEG and
-            // use multiple libvips workers. Default to one foreground-friendly
-            // job per web process; operators can raise QUEUE_CONCURRENCY after
-            // sizing it together with SHARP_CONCURRENCY.
-            queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 }),
-            enqueued: new Set<number>(),
-            retryCounts: new Map<number, number>(),
-            claimRetryCounts: new Map<number, number>(),
-            lastErrors: new Map<number, string>(),
-            permanentlyFailedIds: new Set<number>(),
-            bootstrapped: false,
-            shuttingDown: false,
-            bootstrapContinuationScheduled: false,
-            bootstrapCursorId: null,
-        };
+    const existing = globalWithQueue[processingQueueKey];
+    // AGG-R11C11-L1: runtime shape validation — if a test or future code path
+    // sets the global symbol to a non-object value, re-initialize instead of
+    // crashing. Mirrors the defensive pattern in admin-backfill-runner.ts.
+    if (
+        existing
+        && typeof existing === 'object'
+        && 'queue' in existing
+        && 'enqueued' in existing
+        && 'bootstrapped' in existing
+    ) {
+        return existing;
     }
 
-    return globalWithQueue[processingQueueKey]!;
+    const newState: ProcessingQueueState = {
+        // One image-processing job can already encode AVIF/WebP/JPEG and
+        // use multiple libvips workers. Default to one foreground-friendly
+        // job per web process; operators can raise QUEUE_CONCURRENCY after
+        // sizing it together with SHARP_CONCURRENCY.
+        queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 }),
+        enqueued: new Set<number>(),
+        retryCounts: new Map<number, number>(),
+        claimRetryCounts: new Map<number, number>(),
+        lastErrors: new Map<number, string>(),
+        permanentlyFailedIds: new Set<number>(),
+        bootstrapped: false,
+        shuttingDown: false,
+        bootstrapContinuationScheduled: false,
+        bootstrapCursorId: null,
+    };
+    globalWithQueue[processingQueueKey] = newState;
+    return newState;
 };
 
 function getProcessingLockName(jobId: number) {

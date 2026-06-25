@@ -239,6 +239,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         const ids = [prevId, nextId].filter((id): id is number => id != null);
         if (ids.length === 0) return;
 
+        // AGG-R11C11-L11: gate prefetch on connection type and data-saver mode
+        // so users on slow or metered connections don't pay the bandwidth cost.
+        const conn = (navigator as any).connection as
+            | { saveData?: boolean; effectiveType?: string }
+            | undefined;
+        if (conn?.saveData) return;
+        if (conn?.effectiveType === '2g' || conn?.effectiveType === 'slow-2g') return;
+
         const cancelFns: (() => void)[] = [];
 
         const scheduleIdle = (fn: () => void): (() => void) => {

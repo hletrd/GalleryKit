@@ -59,6 +59,10 @@ export class BoundedMap<K, V> {
         const value = this.map.get(key);
         // Return a shallow copy for object values to prevent external mutation
         // of the internal Map state (same pattern as auth-rate-limit.ts).
+        // AGG-R11C11-L3: This is a SHALLOW copy — nested objects within the
+        // returned value are still references to the original. Callers must not
+        // mutate nested properties; if deep immutability is required, use
+        // structuredClone() on the return value.
         if (value !== undefined && typeof value === 'object' && value !== null) {
             return { ...value } as V;
         }
