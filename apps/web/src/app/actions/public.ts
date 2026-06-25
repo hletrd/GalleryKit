@@ -29,7 +29,7 @@ export type SearchImagesResult =
 async function rollbackSearchAttempt(ip: string, bucketStart: number) {
     const currentEntry = searchRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        searchRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else {
         searchRateLimit.delete(ip);
     }
@@ -53,7 +53,7 @@ function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
     if (!entry || entry.resetAt <= now) {
         loadMoreRateLimit.set(ip, { count: 1, resetAt: now + LOAD_MORE_WINDOW_MS });
     } else {
-        entry.count++;
+        loadMoreRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     }
     return (loadMoreRateLimit.get(ip)?.count ?? 0) > LOAD_MORE_MAX_REQUESTS;
 }
@@ -61,7 +61,7 @@ function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
 function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
     const currentEntry = loadMoreRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        loadMoreRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else {
         loadMoreRateLimit.delete(ip);
     }
