@@ -75,6 +75,8 @@ export const OG_WINDOW_MS = 60 * 1000;
 export const OG_MAX_REQUESTS = 30;
 export const OG_RATE_LIMIT_MAX_KEYS = 2000;
 export const ogRateLimit = createResetAtBoundedMap<string>(OG_RATE_LIMIT_MAX_KEYS);
+const OG_RATE_LIMIT_PRUNE_INTERVAL_MS = 60 * 1000; // 1 minute
+let lastOgRateLimitPruneAt = 0;
 
 // In-memory rate limit for public share-key lookup routes (/s/[key] and /g/[key]).
 // These routes are unauthenticated and each lookup hits the DB. Without rate
@@ -85,6 +87,8 @@ export const SHARE_WINDOW_MS = 60 * 1000;
 export const SHARE_MAX_REQUESTS = 60;
 export const SHARE_RATE_LIMIT_MAX_KEYS = 2000;
 export const shareRateLimit = createResetAtBoundedMap<string>(SHARE_RATE_LIMIT_MAX_KEYS);
+const SHARE_RATE_LIMIT_PRUNE_INTERVAL_MS = 60 * 1000; // 1 minute
+let lastShareRateLimitPruneAt = 0;
 
 // Re-export RateLimitEntry from bounded-map for backward compatibility
 export type RateLimitEntry = WindowEntry;
@@ -213,8 +217,19 @@ export function resetSearchRateLimitPruneStateForTests() {
 // AGG8F-01 / plan-233: pre-increment-then-check helpers for `/api/og`.
 // Uses the same pattern as `loadMoreImages` in actions/public.ts so the
 // public-unauthenticated rate-limit posture is uniform across surfaces.
-export function pruneOgRateLimit(now: number) {
+export function pruneOgRateLimit(now: number, options?: { force?: boolean }) {
+    const shouldPrune =
+        options?.force
+        || ogRateLimit.size > OG_RATE_LIMIT_MAX_KEYS
+        || now - lastOgRateLimitPruneAt >= OG_RATE_LIMIT_PRUNE_INTERVAL_MS;
+
+    if (!shouldPrune) {
+        return false;
+    }
+
+    lastOgRateLimitPruneAt = now;
     ogRateLimit.prune(now);
+    return true;
 }
 
 /** Returns `true` when the (pre-incremented) bucket is over the limit. */
@@ -224,7 +239,7 @@ export function preIncrementOgAttempt(ip: string, now: number): boolean {
     if (!entry || entry.resetAt <= now) {
         ogRateLimit.set(ip, { count: 1, resetAt: now + OG_WINDOW_MS });
     } else {
-        entry.count++;
+        ogRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     }
     return (ogRateLimit.get(ip)?.count ?? 0) > OG_MAX_REQUESTS;
 }
@@ -246,7 +261,7 @@ export function preIncrementOgAttempt(ip: string, now: number): boolean {
 export function rollbackOgAttempt(ip: string) {
     const currentEntry = ogRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        ogRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else {
         ogRateLimit.delete(ip);
     }
@@ -254,12 +269,24 @@ export function rollbackOgAttempt(ip: string) {
 
 export function resetOgRateLimitForTests() {
     ogRateLimit.clear();
+    lastOgRateLimitPruneAt = 0;
 }
 
 // ── Share-key rate-limit helpers ────────────────────────────────────
 
-export function pruneShareRateLimit(now: number) {
+export function pruneShareRateLimit(now: number, options?: { force?: boolean }) {
+    const shouldPrune =
+        options?.force
+        || shareRateLimit.size > SHARE_RATE_LIMIT_MAX_KEYS
+        || now - lastShareRateLimitPruneAt >= SHARE_RATE_LIMIT_PRUNE_INTERVAL_MS;
+
+    if (!shouldPrune) {
+        return false;
+    }
+
+    lastShareRateLimitPruneAt = now;
     shareRateLimit.prune(now);
+    return true;
 }
 
 /** Returns `true` when the (pre-incremented) bucket is over the limit. */
@@ -269,13 +296,14 @@ export function preIncrementShareAttempt(ip: string, now: number = Date.now()): 
     if (!entry || entry.resetAt <= now) {
         shareRateLimit.set(ip, { count: 1, resetAt: now + SHARE_WINDOW_MS });
     } else {
-        entry.count++;
+        shareRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     }
     return (shareRateLimit.get(ip)?.count ?? 0) > SHARE_MAX_REQUESTS;
 }
 
 export function resetShareRateLimitForTests() {
     shareRateLimit.clear();
+    lastShareRateLimitPruneAt = 0;
 }
 
 // ── Semantic search rate-limit helpers ────────────────────────────────
@@ -310,7 +338,7 @@ export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()
 export function rollbackSemanticAttempt(ip: string) {
     const currentEntry = semanticRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        semanticRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else {
         semanticRateLimit.delete(ip);
     }

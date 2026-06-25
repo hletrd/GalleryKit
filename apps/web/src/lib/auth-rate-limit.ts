@@ -66,7 +66,7 @@ export async function clearSuccessfulAccountLoginAttempts(accountKey: string, bu
 export async function rollbackLoginRateLimit(ip: string, bucketStart?: number) {
     const entry = loginRateLimit.get(ip);
     if (entry && entry.count > 1) {
-        entry.count -= 1;
+        loginRateLimit.set(ip, { count: entry.count - 1, lastAttempt: entry.lastAttempt });
     } else if (entry) {
         loginRateLimit.delete(ip);
     }
@@ -81,7 +81,7 @@ export async function rollbackLoginRateLimit(ip: string, bucketStart?: number) {
 export async function rollbackAccountLoginRateLimit(accountKey: string, bucketStart?: number) {
     const entry = accountLoginRateLimit.get(accountKey);
     if (entry && entry.count > 1) {
-        entry.count -= 1;
+        accountLoginRateLimit.set(accountKey, { count: entry.count - 1, lastAttempt: entry.lastAttempt });
     } else if (entry) {
         accountLoginRateLimit.delete(accountKey);
     }
@@ -122,7 +122,7 @@ export async function clearSuccessfulPasswordAttempts(ip: string, bucketStart?: 
 export async function rollbackPasswordChangeRateLimit(ip: string, bucketStart?: number) {
     const entry = passwordChangeRateLimit.get(ip);
     if (entry && entry.count > 1) {
-        entry.count -= 1;
+        passwordChangeRateLimit.set(ip, { count: entry.count - 1, lastAttempt: entry.lastAttempt });
     } else if (entry) {
         passwordChangeRateLimit.delete(ip);
     }
