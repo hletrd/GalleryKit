@@ -64,8 +64,8 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
         return null;
     }
 
-    const host = stripDefaultPort(rawHost, protocol);
-    return toOrigin(`${protocol}://${host}`);
+    const host = stripDefaultPort(rawHost, protocol ?? 'http');
+    return toOrigin(`${protocol ?? 'http'}://${host}`);
 }
 
 function toOrigin(candidate: string) {
