@@ -18,11 +18,17 @@ export async function register() {
         const gracefulShutdown = async (signal: string) => {
             console.debug(`[Shutdown] ${signal} received, draining queue...`);
             let completed = false;
+            // R12C12 AGG-R12-01: capture the sentinel timer so it can be cleared
+            // once the drain resolves. `.unref()` so the timer alone never keeps
+            // the event loop alive, and clearing it prevents a FALSE
+            // "[Shutdown] Timed out after 15s" warning after a clean sub-15s drain.
+            let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
             const shutdownTimeout = new Promise<void>((resolve) => {
-                setTimeout(() => {
+                shutdownTimer = setTimeout(() => {
                     console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
                     resolve();
                 }, 15_000);
+                shutdownTimer.unref?.();
             });
             try {
                 const { shutdownImageProcessingQueue } = await import('@/lib/image-queue');
@@ -41,12 +47,22 @@ export async function register() {
                 }
             } catch (e) {
                 console.error('[Shutdown] Failed to drain queue:', e);
+            } finally {
+                if (shutdownTimer) clearTimeout(shutdownTimer);
             }
             // C4-A3: Exit with code 1 on timeout so the orchestrator (Docker,
             // systemd) knows shutdown was truncated, not clean. A clean exit
             // (code 0) signals success, which is incorrect when work was
             // forcibly terminated.
-            process.exitCode = completed ? 0 : 1;
+            const exitCode = completed ? 0 : 1;
+            process.exitCode = exitCode;
+            // R12C12 AGG-R12-01: explicitly exit. The MySQL connection pool holds
+            // ref'd sockets that keep the event loop alive, so without this the
+            // process never terminates on its own — Docker then SIGKILLs it at the
+            // stop timeout (exit 137). The drain above has already finished (or
+            // timed out), so exiting now is safe and lets the orchestrator see a
+            // prompt, intentional exit code.
+            process.exit(exitCode);
         };
 
         // C4-A4: Use process.on (not process.once) with a handled-state guard
