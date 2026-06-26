@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections, adminUsers } from '@/db';
+import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull, isNotNull } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
@@ -268,9 +268,11 @@ const adminSelectFields = {
     // US-P52: alt_text_suggested is PUBLIC (SEO + a11y fallback, not PII).
     alt_text_suggested: images.alt_text_suggested,
     // R17-L2: admin user that performed the upload. ADMIN-ONLY — the raw
-    // numeric id is PII. Per-entry Atom <author> uses a JOIN-derived
-    // display name on the feed side (see getImagesForFeed below); the raw
-    // column never leaves the admin surface.
+    // numeric id is PII, and the linked admin LOGIN username must not reach
+    // public output either. The public Atom feed therefore no longer derives a
+    // per-entry <author> from this column (SEC-13-01 / AGG-R13-07 dropped the
+    // adminUsers join in getImagesForFeed); the raw column never leaves the
+    // admin surface.
     uploaded_by: images.uploaded_by,
     // R10-H2: processing diagnostics — admin-only retry surface.
     processing_error: images.processing_error,
@@ -781,20 +783,23 @@ export async function getImagesForFeed(limit: number, topicSlug?: string) {
     const where = topicSlug && isValidSlug(topicSlug)
         ? and(eq(images.processed, true), eq(images.topic, topicSlug))
         : eq(images.processed, true);
-    // R17-L2: LEFT JOIN admin_users so per-entry Atom <author> can carry
-    // the uploading admin's username. NULL falls back to the feed-level
-    // <author> at the route layer (RFC 4287 §4.1.1). The raw uploaded_by
-    // id stays admin-only (publicSelectFields omits it via the privacy
-    // guard); only the derived display name reaches the public feed.
+    // SEC-13-01 / AGG-R13-07: the public Atom feed must NOT expose the admin
+    // LOGIN username (one of the two login credentials). The login flow
+    // deliberately resists username enumeration (Argon2 dummy-hash timing,
+    // generic error, account-scoped rate limit), so handing out valid usernames
+    // via an unauthenticated GET /feed.xml undercuts that. Emit a constant NULL
+    // for author_name so every entry falls back to the feed-level <author>
+    // (RFC 4287 §4.1.1) at the route layer. Per-uploader attribution can be
+    // restored later via an admin-settable display_name column WITHOUT
+    // re-exposing the credential. (Was R17-L2's adminUsers.username join.)
     return db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
-        author_name: adminUsers.username,
+        author_name: sql<string | null>`NULL`,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
-        .leftJoin(adminUsers, eq(images.uploaded_by, adminUsers.id))
         .where(where)
         .groupBy(images.id)
         .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
