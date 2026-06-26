@@ -26,10 +26,14 @@
  * land. Adding a new migration with a `when` <= the current global max would fail
  * assertion (1) here.
  *
- * ORPHAN SQL FILE: `drizzle/0014_drop_reactions.sql` is an out-of-band cleanup
- * migration (removes the reverted reactions feature's columns) that intentionally
- * has NO journal entry. The tag->file direction (every journal tag has a .sql) is
- * asserted; the file->tag direction is NOT, so this orphan is allowed.
+ * ORPHAN SQL FILE: `drizzle/0014_drop_reactions.sql` has NO journal entry (the
+ * 0014 slot is 0014_add_icc_profile_name), so drizzle never applies it. The
+ * authoritative drop of the dead image_reactions table + images.reaction_count
+ * column lives in migrate.js `reconcileLegacySchema` (R15C15 Critic-F1), mirroring
+ * the entitlements/license_tier removal — that is the mechanism that actually
+ * cleans up a legacy-migrated DB. The .sql file is retained as documentation but
+ * is inert. The tag->file direction (every journal tag has a .sql) is asserted;
+ * the file->tag direction is NOT, so this orphan is allowed.
  */
 
 import { describe, expect, it } from 'vitest';

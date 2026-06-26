@@ -618,14 +618,23 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureForeignKey(connection, dbName, 'audit_log', 'audit_log_user_id_admin_users_id_fk', 'ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id)');
     await ensureForeignKey(connection, dbName, 'images', 'images_uploaded_by_admin_users_id_fk', 'ALTER TABLE images ADD CONSTRAINT images_uploaded_by_admin_users_id_fk FOREIGN KEY (uploaded_by) REFERENCES admin_users(id) ON DELETE SET NULL');
 
-    // ── Removals (migration 0023: drop Stripe paid-downloads US-P54) ──────────
+    // ── Removals (drop dead feature schema) ───────────────────────────────────
     // These run LAST so reconcile converges to the CURRENT schema. The .sql
     // migration's DROP statements never execute on an existing DB (they are
     // baselined, not run), so the authoritative drop for already-provisioned
     // databases lives here. Idempotent: no-ops once the objects are gone.
+    // migration 0023: drop Stripe paid-downloads US-P54.
     // DROP TABLE entitlements also removes its FK to images(id).
     await dropTableIfPresent(connection, 'entitlements');
     await dropColumnIfPresent(connection, dbName, 'images', 'license_tier');
+    // R15C15 Critic-F1: reactions (created by 0007_image_reactions.sql, idx 7)
+    // were removed, but the cleanup file 0014_drop_reactions.sql is ORPHANED —
+    // it is not in _journal.json (the 0014 slot is 0014_add_icc_profile_name),
+    // so drizzle never applies it. Mirror the entitlements removal here so a
+    // legacy-migrated DB that ran 0007 actually drops the dead image_reactions
+    // table + images.reaction_count column. Idempotent.
+    await dropTableIfPresent(connection, 'image_reactions');
+    await dropColumnIfPresent(connection, dbName, 'images', 'reaction_count');
 }
 
 async function getRecordedHashes(connection) {
