@@ -106,9 +106,23 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
         try {
             const text = JSON.stringify(data, null, 2);
             if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-                throw new Error('clipboard unavailable');
+                // R15C15 CR-15: clipboard API requires a secure context (HTTPS
+                // or localhost). Fall back to the legacy execCommand copy so
+                // photographers on HTTP LAN installs can export color metadata
+                // from the lightbox panel too — matches color-details-section.
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(textarea);
+                if (!ok) throw new Error('execCommand copy failed');
+            } else {
+                await navigator.clipboard.writeText(text);
             }
-            await navigator.clipboard.writeText(text);
             toast.success(t('viewer.colorMetadataCopied'));
             // R28-UX-LOW-2: 1.2 s checkmark flip mirrors color-details-section
             // so both copy entry points behave identically.

@@ -54,10 +54,13 @@ export function TagInput({
     const suggestionsId = React.useId();
 
     const filteredTags = React.useMemo(() => {
-        const lowerInput = inputValue.trim().toLowerCase();
+        // R15C15 CR-15: normalize both sides with NFKC (matching hasSelectedTag /
+        // resolveCanonicalTagName) so a fullwidth / composed-Unicode tag isn't
+        // shown in the dropdown after it has already been selected.
+        const normalizedInput = normalizeTagInputValue(inputValue);
         return availableTags
             .filter(tag => !hasSelectedTag(selectedTags, tag.name)) // Exclude selected
-            .filter(tag => tag.name.toLowerCase().includes(lowerInput)); // Match input
+            .filter(tag => normalizeTagInputValue(tag.name).includes(normalizedInput)); // Match input
     }, [availableTags, selectedTags, inputValue]);
 
     // Check if the current input exactly matches an existing tag (case-insensitive)

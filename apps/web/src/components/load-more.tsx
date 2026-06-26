@@ -78,7 +78,10 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
                     maintenanceCooldownRef.current = now;
                     toast.error(t('home.loadMoreMaintenance'));
                 }
-            } else if (page.status === 'error') {
+            } else if (page.status === 'error' || page.status === 'invalid') {
+                // R15C15 CR-15: 'invalid' (malformed cursor, e.g. a corrupted
+                // deep-link) previously fell through with no feedback — surface
+                // the same generic failure toast as 'error'.
                 toast.error(t('home.loadMoreFailed'));
             }
         } catch (error) {

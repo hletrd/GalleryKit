@@ -191,7 +191,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
         try {
             await clearSuccessfulAccountLoginAttempts(accountRateLimitKey, loginBucketStart);
         } catch (err) {
-            console.debug('Failed to reset account-scoped login rate limit:', err);
+            // R15C15 CR-15: same operational significance as the IP-scoped reset
+            // above (a stale entry could block a subsequent legitimate login in
+            // the same window) — surface it to log shippers, not console.debug.
+            console.error('Failed to reset account-scoped login rate limit:', err);
         }
         await logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 

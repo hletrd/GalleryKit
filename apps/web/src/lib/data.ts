@@ -139,6 +139,11 @@ async function flushGroupViewCounts() {
                             // overhead when count is large (e.g., accumulated during DB outage).
                             if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
                                 console.warn(`[viewCount] Buffer at capacity, dropping re-buffered increment for group ${groupId}`);
+                                // R15C15 CR-15: the increment is abandoned here —
+                                // clear its retry counter so a LATER increment for
+                                // the same group starts fresh instead of inheriting
+                                // a stale count that nears the eviction threshold.
+                                viewCountRetryCount.delete(groupId);
                                 return;
                             }
                             viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
