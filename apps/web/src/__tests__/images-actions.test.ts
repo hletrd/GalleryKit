@@ -163,7 +163,11 @@ import { uploadImages } from '@/app/actions/images';
 describe('uploadImages', () => {
     beforeEach(() => {
         statfsMock.mockReset();
-        statfsMock.mockResolvedValue({ bfree: 2_000_000, bsize: 1024 });
+        // R14C14 / TE-02: drive the mock with the field the code actually reads
+        // (`bavail`, NOT `bfree`). The prior `bfree`-only mock made the happy
+        // path pass by accident — `stats.bavail` was undefined → NaN → NaN <
+        // threshold is false — so the bavail fix had no real coverage.
+        statfsMock.mockResolvedValue({ bavail: 2_000_000, bsize: 1024 });
         mkdirMock.mockReset();
         mkdirMock.mockResolvedValue(undefined);
         insertMock.mockReset();
@@ -305,6 +309,26 @@ describe('uploadImages', () => {
         expect(mkdirMock).toHaveBeenCalled();
         expect(statfsMock).toHaveBeenCalled();
         expect(mkdirMock.mock.invocationCallOrder[0]).toBeLessThan(statfsMock.mock.invocationCallOrder[0]);
+    });
+
+    it('rejects the upload when available (non-root) disk space is below the 1 GiB threshold (R14C14 / TE-02)', async () => {
+        // Drive the mock with the field the code actually reads (`bavail`, NOT
+        // `bfree`). With `bavail` below the 1 GiB floor the pre-check must fail
+        // closed. This LOCKS the cycle-13 bfree→bavail contract: if the code is
+        // reverted to `stats.bfree`, the mock's missing `bfree` yields
+        // `undefined * bsize = NaN`, `NaN < 1GiB` is false, the upload proceeds,
+        // and this assertion fails — exactly the regression the prior bfree-only
+        // happy-path mock could not catch.
+        statfsMock.mockResolvedValue({ bavail: 1, bsize: 1024 });
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'insufficientDiskSpace' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
     });
 
     it('fails closed when upload disk-space inspection fails after directories are ensured', async () => {
