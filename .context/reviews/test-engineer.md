@@ -1,11 +1,11 @@
 # Comprehensive Test Review — GalleryKit
 
-**Repository:** `/Users/hletrd/flash-shared/gallery`  
-**HEAD:** `bcd67b12`  
-**Previous Review HEAD:** `c0522dec` (Cycle 10, Run 3)  
-**Date:** 2026-06-26  
-**Reviewer:** Test Engineer (oh-my-claudecode:test-engineer)  
-**Status:** NEEDS ATTENTION — 3 tests currently failing, 2 flaky tests, significant coverage gaps
+**Repository:** `/Users/hletrd/flash-shared/gallery`
+**HEAD:** `2a9976a1`
+**Previous Review HEAD:** `bcd67b12` (Cycle 11)
+**Date:** 2026-06-27
+**Reviewer:** Test Engineer (oh-my-claudecode:test-engineer)
+**Status:** HEALTHY — all 225 test files pass; 8 new coverage gaps identified for recent fixes
 
 ---
 
@@ -13,621 +13,320 @@
 
 | Metric | Value |
 |--------|-------|
-| Unit test files | 403 (400 passed, 3 failing in full suite, 2 skipped) |
+| Unit test files | 225 passed, 2 skipped (227 total) |
 | Unit tests | ~2,100+ total |
 | E2E test files | 5 (admin.spec.ts, public.spec.ts, origin-guard.spec.ts, nav-visual-check.spec.ts, test-fixes.spec.ts) |
-| E2E tests | ~20 (many gated behind env flags) |
-| Test framework | Vitest 4.1.9 (unit), Playwright 1.59.1 (e2e) |
-| Test timeout | 15,000ms (raised from 5,000ms in cycle 3) |
+| Test framework | Vitest (unit), Playwright 1.59.1 (e2e) |
+| Full suite duration | ~25s |
 
-**Overall Assessment:** The test suite is **exceptionally strong** for a project of this size. It features a mature fixture-style testing culture, extensive lint-gate coverage, thorough security contract tests, and a well-documented history of regression-driven test additions. However, there are **currently 3 failing tests** (2 timeouts, 1 test pollution), **significant coverage gaps** in schema validation, utility functions, and integration tests, and **5 of 6 recent security fixes have NO regression tests**.
+**Improvement from prior review:** The 3 previously failing tests are now resolved:
+- `image-queue-bootstrap.test.ts` — 2 timeout failures → FIXED (bootstrap logic refactored)
+- `touch-target-audit.test.ts` — new sub-44px violation → FIXED by `f1f6202d`
+- `request-origin.test.ts` — test pollution flake → NOW STABLE
 
----
-
-## 2. Currently Failing Tests (CRITICAL)
-
-### 2.1 `image-queue-bootstrap.test.ts` — 2 tests timeout (100% failure rate)
-
-| Test | Failure | Confidence |
-|------|---------|------------|
-| `caps each bootstrap pass and schedules a continuation for large backlogs` | Timeout at ~19s | High |
-| `continues scanning after the previous batch cursor so later rows are not starved` | Timeout at ~15s | High |
-
-**File:** `apps/web/src/__tests__/image-queue-bootstrap.test.ts:131-148` and `:153-185`
-
-**Root cause:** The `loadQueueModule` helper at line 28 sets `queueOnIdleMock` to return a never-resolving promise by default (`resolveIdle: false`). The `bootstrapImageProcessingQueue` function calls `scheduleBootstrapContinuation(state)` which attaches to `queue.onIdle()`. When `onIdle` never resolves, the `vi.waitFor` at line 173-179 polls forever and hits its 20s timeout.
-
-**The mock setup is fundamentally broken:** the first test expects `queueOnIdleMock` to have been called (line 148) but the continuation is scheduled off `onIdle().then(...)` which never fires. The second test sets `resolveIdle: true` but the `limitMock` only returns one batch, so `scheduleBootstrapContinuation` is never reached — the test expects 2 `limitMock` calls but only gets 1.
-
-**Fix:** The mock needs to either (a) make `queueOnIdleMock` return a resolvable promise that fires after all expected `add` calls complete, or (b) restructure the test to not depend on the continuation scheduling path.
-
-**Risk:** High — this tests the bootstrap continuation logic that prevents large backlogs from starving the event loop.
-
-### 2.2 `touch-target-audit.test.ts` — 1 test fails (NEW violation detected)
-
-| Test | Failure | Confidence |
-|------|---------|------------|
-| `matches the documented per-file violation count across all SCAN_ROOTS` | AssertionError: found N violation(s), allowed M | High |
-
-**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:731-787`
-
-**Root cause:** The `KNOWN_VIOLATIONS` map at line 112-245 documents a specific count of sub-44px touch targets per file. A recent code change added a new interactive element with a sub-44px size, or changed an existing element's className, causing the actual violation count to exceed the documented count.
-
-**This is a FEATURE, not a bug:** The test is designed to fail when new sub-44px elements are added. The failure means the audit is working. The fix is to either (a) raise the element to >=44px, or (b) update `KNOWN_VIOLATIONS` with a documented exemption.
-
-**Risk:** Medium — the failure indicates a real accessibility regression, but the test mechanism is working correctly.
-
-### 2.3 `request-origin.test.ts` — 1 test fails (intermittent in full suite, passes in isolation)
-
-| Test | Failure | Confidence |
-|------|---------|------------|
-| `retains the explicit loose opt-in via hasTrustedSameOriginWithOptions({ allowMissingSource: true })` | Expectation mismatch | Medium |
-
-**File:** `apps/web/src/__tests__/request-origin.test.ts:139-143`
-
-**Root cause:** This test passes when run in isolation (`npx vitest run src/__tests__/request-origin.test.ts`) but fails in the full suite. This is a **test pollution** issue — another test modifies `process.env.TRUST_PROXY` and does not clean it up, or the `afterEach` at line 16-22 does not fully restore the environment.
-
-**Fix:** Use `vi.stubEnv('TRUST_PROXY', ...)` instead of direct `process.env` mutation, which Vitest automatically restores. Or add `vi.resetModules()` and re-import the module under test in each test to isolate the env state.
-
-**Risk:** Medium — test pollution can mask real bugs and cause CI flakes.
+**New concern:** 11 code-changing commits landed between `bcd67b12` and `2a9976a1`. Of those, 8 introduce behavior changes with no regression test. The security and correctness fixes with the highest risk of silent regression are itemized below.
 
 ---
 
-## 3. Flaky Tests
+## 2. Commit-to-Test Mapping (since bcd67b12)
 
-### 3.1 `image-queue-bootstrap.test.ts` — Already failing (see 2.1)
-
-The comment at lines 167-172 explicitly acknowledges this was previously flaky: "the bare wait was flaky (~50% failure in the full 233-file run, 0% isolated)." The 20s timeout fix was insufficient.
-
-### 3.2 `admin-backfill-runner-*.test.ts` — 6 files use `vi.waitFor` with 20s timeout
-
-**Files:** `admin-backfill-runner-batching.test.ts`, `admin-backfill-runner-deleted-mid-reencode.test.ts`, `admin-backfill-runner-detection-failure.test.ts`, `admin-backfill-runner-fatal-counters.test.ts`, `admin-backfill-runner-leak.test.ts`
-
-**Pattern:** All use `vi.waitFor(() => { if (readAdminBackfillState().running) throw new Error('still running'); }, { timeout: 20_000, interval: 25 })`.
-
-**Assessment:** These are fire-and-forget runner tests that poll global state. The 20s timeout is generous and the tests have explicit comments explaining why `vi.waitFor` is used. Under normal conditions they pass. **Risk:** Low — but if the runner ever takes >20s (e.g., on a slow CI runner), these will flake.
-
-### 3.3 `process-image-color-roundtrip.test.ts` — 2 tests fail with real Sharp/libheif behavior
-
-**File:** `apps/web/src/__tests__/process-image-color-roundtrip.test.ts`
-
-**Failures:**
-- `P3-source AVIF raw pixel values are preserved, not sRGB-clipped` — "no NCLX colr box found"
-- `DCI-P3 source: AVIF output is P3-tagged` — "atomic rename fallback reached"
-
-**Root cause:** These are integration tests that depend on the actual Sharp/libheif installation. The NCLX colr box absence suggests the AVIF encoder is not embedding color metadata correctly in the test environment, or the test's verification logic needs updating for the current Sharp version.
-
-**Risk:** Medium — these tests validate critical color pipeline behavior. If they fail in CI, the color pipeline may have real regressions.
+| Commit | Description | Test added? |
+|--------|-------------|-------------|
+| `f1f6202d` | fix(ui): improve touch targets, ARIA, motion safety | No (test fixture updated) |
+| `5ba4025c` | fix(request-origin): return null on protocol fallback | Yes — 8 lines added |
+| `450d2a53` | fix(request-origin): handle null protocol in getExpectedOrigin | NO — specific edge case untested |
+| `9d88e217` | fix(rate-limit): timer-based prune + shallow-copy mutation fix | PARTIAL — existing tests don't cover new timer gate or mutation semantics |
+| `2b166245` | fix(public): shallow-copy mutation bugs in rate-limit helpers | NO |
+| `74bd776a` | fix(public): remaining shallow-copy mutation bugs | NO |
+| `3111cc7e` | fix(process-image): safeUnlink/safeCloseDirHandle ENOENT distinction | NO |
+| `6cfcc75d` | fix(audit): prioritize security fields in metadata truncation | NO |
+| `d6107f89` | fix(queue): distinguish first-scan empty from continuation empty | Indirect only |
+| `038b3154` | fix(rate-limit): semanticRateLimit.set() fix | NO |
+| `b3c55036` | fix(shutdown): SIGTERM handler, geoip pre-warm, queue state validation | NO |
+| `92ce7a9e` | fix(photo-viewer): local ConnInfo interface for navigator.connection | NO (TS-only) |
 
 ---
 
-## 4. Missing Coverage — Critical Paths
+## 3. New Findings
 
-### 4.1 `db/schema.ts` — No schema validation tests (Risk: HIGH)
+### R12-TEST-01 — `pruneOgRateLimit` / `pruneShareRateLimit` timer-gate behavior untested
 
-**File:** `apps/web/src/db/schema.ts` (~400 lines)
+**Severity:** HIGH  
+**Confidence:** HIGH  
+**Gap:** `9d88e217` added conditional skipping to both prune functions. `pruneOgRateLimit(now)` now returns `false` and skips the prune when called within 60 seconds of the last run (unless `force: true` is passed). The existing test in `og-rate-limit.test.ts` calls `pruneOgRateLimit(now)` exactly once and does not check the return value. There is no test verifying:
 
-**Gap:** No test verifies that the TypeScript schema definitions match the actual database migrations. This is a common gap in Drizzle-based projects, but it's critical because:
-- Foreign key constraints (`onDelete: 'cascade'` / `'restrict'` / `'set null'`) are not tested
-- Index definitions (composite indexes for query performance) are not verified
-- Default values and nullable columns are not validated
-- New columns added to `adminSelectFields` but not `publicSelectFields` (or vice versa) could leak data
+1. That a second call within the 60s window returns `false` and skips the prune
+2. That `pruneOgRateLimit(now, { force: true })` runs even within the window
+3. That `resetOgRateLimitForTests()` resets `lastOgRateLimitPruneAt` (it does via the module reset, but this is untested)
+4. Equivalent coverage for `pruneShareRateLimit`
 
-**Suggested test:** `schema-validation.test.ts` that:
-1. Connects to a test database (or uses `drizzle-kit generate` output)
-2. Verifies every table defined in schema.ts has a corresponding migration
-3. Verifies foreign key constraints match the intended behavior
-4. Verifies index definitions match the query patterns in `data.ts`
+**Risk:** If the timer gate logic has an off-by-one or the `lastPruneAt` state is corrupted, prune runs every request (performance hit) or never runs (unbounded memory growth for OG/share rate-limit maps). Neither regression would be caught.
 
-**Confidence:** High
-
-### 4.2 `validation.ts:safeInsertId()` — BigInt overflow protection untested (Risk: HIGH)
-
-**File:** `apps/web/src/lib/validation.ts`
-
-**Gap:** The `safeInsertId()` function handles BigInt overflow when inserting IDs. This is a security-critical path (prevents integer overflow attacks) but has no dedicated test.
-
-**Suggested test:** `safe-insert-id.test.ts` that tests:
-- Normal case: returns the BigInt value
-- Overflow case: returns null or throws
-- Non-BigInt input: returns null
-- Negative values: returns null
-
-**Confidence:** High
-
-### 4.3 `rate-limit.ts:normalizeIp()` — IPv6/IPv4 parsing untested (Risk: MEDIUM-HIGH)
-
-**File:** `apps/web/src/lib/rate-limit.ts`
-
-**Gap:** The `normalizeIp()` function handles IPv6 bracket stripping, IPv4 port stripping, and invalid IP rejection. This is a security-critical path (rate limiting depends on correct IP extraction) but has no dedicated test.
-
-**Suggested test:** `normalize-ip.test.ts` that tests:
-- IPv4 with port: `1.2.3.4:12345` → `1.2.3.4`
-- IPv6 with brackets and port: `[::1]:12345` → `::1`
-- IPv6 without brackets: `2001:db8::1` → `2001:db8::1`
-- Invalid IP: rejects or returns null
-- Empty string: returns null
-- Multiple commas (X-Forwarded-For): extracts first/last depending on config
-
-**Confidence:** High
-
-### 4.4 `serve-upload.ts:getServingColorSettingsHash()` — Stale-while-revalidate untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/lib/serve-upload.ts`
-
-**Gap:** The `getServingColorSettingsHash()` function implements a stale-while-revalidate cache with 5s TTL. The cache miss path, refresh failure fallback, and concurrent request deduplication are not tested.
-
-**Suggested test:** `serve-upload-settings-debounce.test.ts` already exists but tests the debounce mechanism. Add tests for:
-- Cache hit: returns cached hash without DB query
-- Cache miss: queries DB and caches result
-- Cache stale: serves stale value while refreshing in background
-- Refresh failure: falls back to `FALLBACK_HASH`
-- Concurrent requests: only one DB query during cache miss
-
-**Confidence:** Medium
-
-### 4.5 `process-image.ts:safeUnlink()` / `safeCloseDirHandle()` — Error-swallowing helpers untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/lib/process-image.ts`
-
-**Gap:** These error-swallowing helpers are used in cleanup paths. If they silently fail, orphaned files accumulate. No test verifies their behavior.
-
-**Suggested test:** `process-image-safe-unlink.test.ts` that tests:
-- Successful unlink: returns undefined
-- ENOENT: swallows error, returns undefined
-- EACCES: swallows error, logs warning
-- Non-Error thrown: catches and returns undefined
-
-**Confidence:** Medium
-
-### 4.6 `data.ts:flushGroupViewCounts()` — Exponential backoff and retry overflow untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/lib/data.ts`
-
-**Gap:** The view-count flush logic has complex exponential backoff (`consecutiveFlushFailures`, `getNextFlushInterval()`) and capacity-dropping during DB outage. Only the basic flush path is tested.
-
-**Suggested test:** `data-view-count-flush.test.ts` already exists but only tests the basic flush. Add tests for:
-- Exponential backoff: interval doubles with each failure
-- Max backoff cap: interval does not exceed maximum
-- Retry count overflow: `MAX_VIEW_COUNT_RETRY_SIZE` eviction
-- DB outage: buffered counts are dropped after capacity exceeded
-- Success after failure: backoff resets to initial interval
-
-**Confidence:** Medium
-
-### 4.7 `auth.ts:updatePassword()` — Full password change flow untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/app/actions/auth.ts`
-
-**Gap:** The `updatePassword()` action verifies the current password, hashes the new password with Argon2, updates the DB, and regenerates the session. Only the rate-limiting aspects are tested (via `auth-rate-limit.test.ts`).
-
-**Suggested test:** `auth-password-update.test.ts` that tests:
-- Correct current password: succeeds, updates DB, regenerates session
-- Wrong current password: returns error, does not update DB
-- Same password as current: returns error (or succeeds depending on policy)
-- Weak new password: validation error
-- Session regeneration: old session invalidated, new session issued
-
-**Confidence:** Medium
-
-### 4.8 `image-queue.ts:cleanOrphanedTmpFiles()` — Bootstrap cleanup untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/lib/image-queue.ts:32-73`
-
-**Gap:** The `cleanOrphanedTmpFiles()` function scans upload directories for `.tmp` files and removes them. It handles ENOENT (expected before first upload), EACCES (logs warning), and other errors. No test verifies this behavior.
-
-**Suggested test:** `image-queue-cleanup.test.ts` that tests:
-- Empty directory: no-op
-- `.tmp` files present: removes them
-- Mixed `.tmp` and non-`.tmp` files: only removes `.tmp`
-- ENOENT: swallows silently
-- EACCES: logs warning, continues with other files
-- Partial failure: reports count of removed vs failed
-
-**Confidence:** Medium
-
-### 4.9 `image-queue.ts:pruneRetryMaps()` — FIFO eviction untested (Risk: LOW-MEDIUM)
-
-**File:** `apps/web/src/lib/image-queue.ts:98-110`
-
-**Gap:** The `pruneRetryMaps()` function evicts oldest entries when Maps exceed `MAX_RETRY_MAP_SIZE` (10000). No test verifies the FIFO eviction behavior.
-
-**Suggested test:** `image-queue-prune.test.ts` that tests:
-- Map under limit: no eviction
-- Map at limit: no eviction
-- Map over limit by 1: evicts 1 oldest entry
-- Map over limit by 100: evicts 100 oldest entries
-- Multiple maps: all pruned independently
-
-**Confidence:** Medium
-
-### 4.10 `image-queue.ts:quiesceImageProcessingQueueForRestore()` / `resumeImageProcessingQueueAfterRestore()` — Restore quiesce/resume untested (Risk: MEDIUM)
-
-**File:** `apps/web/src/lib/image-queue.ts:815-813`
-
-**Gap:** The restore quiesce function pauses the queue, clears pending jobs, waits for idle, and resets state. The resume function is not tested. These are critical for DB restore safety (prevents processing during restore).
-
-**Suggested test:** `image-queue-quiesce.test.ts` already exists but only tests the basic quiesce. Add tests for:
-- Quiesce with queued jobs: clears queue, waits for in-flight to complete
-- Resume after quiesce: re-enables queue, resets state
-- Quiesce during processing: waits for current job to finish
-- Multiple quiesce calls: idempotent
-
-**Confidence:** Medium
-
----
-
-## 5. Mock/Stub Abuse That Hides Real Bugs
-
-### 5.1 `similar-route.test.ts` — Complex fake DB chain (Risk: MEDIUM)
-
-**File:** `apps/web/src/__tests__/similar-route.test.ts`
-
-**Issue:** The test mocks the entire Drizzle query chain with a complex fake chain object:
+**Concrete test to add** (`apps/web/src/__tests__/og-rate-limit.test.ts`):
 ```typescript
-const chain = { select: () => { selectCallCount += 1; return chain; } };
-```
+it('skips prune within the interval and returns false', () => {
+    const now = 10_000_000;
+    ogRateLimit.set('1.2.3.4', { count: 1, resetAt: now - 1 });
+    expect(pruneOgRateLimit(now)).toBe(true);           // first call — runs
+    ogRateLimit.set('1.2.3.5', { count: 1, resetAt: now - 1 });
+    expect(pruneOgRateLimit(now + 1)).toBe(false);      // within interval — skipped
+    expect(ogRateLimit.has('1.2.3.5')).toBe(true);      // entry not evicted
+});
 
-This fake chain does not match real Drizzle behavior. If Drizzle changes its internal method names or chaining order, the test would pass but the real code would fail. The test validates behavior through a very artificial interface.
-
-**Suggested fix:** Use a real in-memory SQLite database (via `better-sqlite3` or `drizzle-orm/sqlite`) for integration tests, or use a simpler mock that validates the SQL query text rather than the chain structure.
-
-**Confidence:** Medium
-
-### 5.2 `images-actions.test.ts` — Heavy mocking masks upload pipeline issues (Risk: MEDIUM)
-
-**File:** `apps/web/src/__tests__/images-actions.test.ts`
-
-**Issue:** The test mocks `fs`, `db`, `auth`, `process-image`, `image-queue`, and more. The real file I/O, Sharp processing, and DB interactions are never tested together. A bug in the interaction between `fs.writeFile` and `processImageFormats` would not be caught.
-
-**Assessment:** This is a trade-off — unit tests need mocks, but the project would benefit from integration tests that use a real temporary directory and a test database.
-
-**Suggested fix:** Add integration tests in a separate `__tests__/integration/` directory that use real file I/O and a test database (Docker MySQL or SQLite).
-
-**Confidence:** Medium
-
-### 5.3 `admin-backfill-runner-*.test.ts` — Heavy module mocking (Risk: LOW)
-
-**Files:** 6 test files for the admin backfill runner
-
-**Issue:** These tests mock `sharp`, `fs/promises`, `@/db`, `@/lib/process-image`, `@/lib/color-detection`, etc. The mock for `sharp` is particularly complex.
-
-**Assessment:** This is necessary for unit testing, but the mock complexity means a real Sharp API change (e.g., `metadata()` returning a different shape) would not be caught. The `process-image-color-roundtrip.test.ts` integration tests partially address this, but they are currently failing.
-
-**Confidence:** Low
-
----
-
-## 6. Skipped / Commented Tests
-
-### 6.1 E2E tests gated on environment variables
-
-| Test file | Skip condition | Assessment |
-|-----------|---------------|------------|
-| `e2e/admin.spec.ts:7` | `process.env.CI !== 'true'` | Intentional — local runs may omit credentials |
-| `e2e/admin.spec.ts:12` | `!adminE2EEnabled` | Intentional — requires seeded admin credentials |
-| `e2e/public.spec.ts:137` | `!shareKey` | **Gap** — `/s/[key]` share links have no e2e coverage |
-| `e2e/origin-guard.spec.ts:29` | `process.env.CI !== 'true'` | Intentional |
-| `e2e/origin-guard.spec.ts:56` | `!adminE2EEnabled` | Intentional |
-
-**The `/s/[key]` gap:** `e2e/public.spec.ts:131-135` has a TODO comment: "TODO (TEST-R5C3-08 / plan-327 deferred entry 1): the /s/[key] 200-path has NO e2e coverage until a share key is seeded."
-
-**Suggested fix:** Seed a deterministic share-link row in the e2e setup script and export `E2E_SHARE_KEY` in CI. Add a test that verifies the shared page loads, displays the correct image, and has the expected metadata.
-
-**Confidence:** High
-
-### 6.2 CLIP integration tests gated on model weights
-
-| Test file | Skip condition | Assessment |
-|-----------|---------------|------------|
-| `clip-offline-load.test.ts:41` | `!SEEDED` | Intentional — requires model weights |
-| `clip-semantic-integration.test.ts:31` | `!RUN` | Intentional — requires model weights |
-
-**Assessment:** These are correctly gated. Running them without model weights would fail. The skip logic is explicit and documented.
-
-**Confidence:** N/A
-
----
-
-## 7. TDD Opportunities
-
-### 7.1 `safeInsertId()` — Write failing test first
-
-The `safeInsertId()` function in `validation.ts` is a perfect TDD candidate:
-1. Write a test that expects `safeInsertId(BigInt(Number.MAX_SAFE_INTEGER) + 1n)` to return `null`
-2. Run test — it fails (function not tested, behavior unknown)
-3. Verify the function handles overflow correctly
-4. If not, fix the function
-5. Test passes
-
-### 7.2 `normalizeIp()` — Write failing test first
-
-1. Write a test that expects `normalizeIp('[::1]:12345')` to return `'::1'`
-2. Run test — it fails (function not tested)
-3. Verify the function handles IPv6 brackets
-4. If not, fix the function
-5. Test passes
-
-### 7.3 `getServingColorSettingsHash()` — Write failing test first
-
-1. Write a test that expects concurrent calls during cache miss to only query DB once
-2. Run test — it fails (no test for deduplication)
-3. Verify the function has proper inflight deduplication
-4. If not, fix the function
-5. Test passes
-
----
-
-## 8. Integration Test Gaps
-
-### 8.1 Upload pipeline end-to-end
-
-**Gap:** No integration test covers the full upload flow: file upload → original save → queue processing → derivative generation → DB update.
-
-**Suggested test:** `__tests__/integration/upload-pipeline.test.ts` that:
-1. Creates a temporary directory for uploads
-2. Calls `uploadImages()` with a real image file
-3. Waits for queue processing to complete
-4. Verifies all 3 derivatives (AVIF, WebP, JPEG) exist and are non-empty
-5. Verifies DB row has `processed = true`
-6. Verifies EXIF data was extracted
-7. Cleans up temporary files
-
-**Confidence:** High
-
-### 8.2 DB backup/restore
-
-**Gap:** No integration test covers the DB backup and restore flow.
-
-**Suggested test:** `__tests__/integration/db-backup-restore.test.ts` that:
-1. Creates a test database with known data
-2. Calls the backup action
-3. Verifies backup file exists and is valid SQL
-4. Modifies the database
-5. Calls the restore action with the backup file
-6. Verifies database is restored to original state
-
-**Confidence:** High
-
-### 8.3 Session lifecycle
-
-**Gap:** No integration test covers the full session lifecycle: login → session cookie → authenticated request → logout → session invalidation.
-
-**Suggested test:** `__tests__/integration/session-lifecycle.test.ts` that:
-1. Calls `login()` with valid credentials
-2. Verifies session cookie is set
-3. Makes an authenticated request using the cookie
-4. Calls `logout()`
-5. Verifies the same authenticated request now returns 401
-
-**Confidence:** High
-
----
-
-## 9. E2E Test Coverage Holes
-
-### 9.1 Share link (`/s/[key]`) — NO coverage
-
-**File:** `e2e/public.spec.ts:131-135` (TODO comment)
-
-**Gap:** The public share link page has zero e2e coverage. This is a critical user-facing feature.
-
-**Suggested test:** Add to `e2e/public.spec.ts`:
-```typescript
-test('shared link page displays the correct image and metadata', async ({ page }) => {
-  await page.goto(`/s/${shareKey}`);
-  await expect(page.locator('main img')).toBeVisible();
-  await expect(page.locator('h1')).toHaveCount(1);
+it('force option bypasses the timer gate', () => {
+    const now = 10_000_000;
+    ogRateLimit.set('1.2.3.6', { count: 1, resetAt: now - 1 });
+    pruneOgRateLimit(now);                              // sets lastPruneAt
+    ogRateLimit.set('1.2.3.7', { count: 1, resetAt: now - 1 });
+    expect(pruneOgRateLimit(now + 1, { force: true })).toBe(true);
+    expect(ogRateLimit.has('1.2.3.7')).toBe(false);    // evicted despite timer
 });
 ```
 
-**Confidence:** High
+---
 
-### 9.2 Admin upload flow — NO coverage
+### R12-TEST-02 — Audit metadata `prioritizeSecurityFields` function has zero tests
 
-**Gap:** The admin upload flow (drag-and-drop, topic selection, processing status) has no e2e coverage.
+**Severity:** HIGH  
+**Confidence:** HIGH  
+**Gap:** `6cfcc75d` introduced `prioritizeSecurityFields()` in `apps/web/src/lib/audit.ts`. This function reorders metadata so security-relevant keys (`ip`, `userAgent`, `action`, `userId`, `targetType`, `targetId`) appear first in the JSON, maximizing their survival under the 4000-char truncation limit. Every existing test that calls `logAuditEvent` mocks the entire `@/lib/audit` module and never exercises this function.
 
-**Suggested test:** Add to `e2e/admin.spec.ts`:
+**Risk:** If the priority order is wrong or the function silently drops keys, a large metadata payload could truncate away `ip` and `userAgent` before other fields — losing forensic data in the exact scenarios (high-volume or complex operations) where it matters most. No test would catch this.
+
+**Concrete test to add** (`apps/web/src/__tests__/audit-security-fields.test.ts`):
 ```typescript
-test('admin upload flow works end-to-end', async ({ page }) => {
-  await loginAsAdmin(page);
-  await page.goto('/admin');
-  // Drag and drop a test image
-  // Select a topic
-  // Verify upload completes
-  // Verify image appears in gallery
+import { describe, expect, it } from 'vitest';
+// Test the exported (or tested-via-integration) prioritizeSecurityFields behavior
+// by checking logAuditEvent serializes in the right order.
+
+it('places ip before non-security fields in serialized metadata', () => {
+    const ordered = prioritizeSecurityFields({
+        bulkCount: 50,
+        ip: '1.2.3.4',
+        details: 'some extra',
+        userId: 7,
+    });
+    const keys = Object.keys(ordered);
+    expect(keys.indexOf('ip')).toBeLessThan(keys.indexOf('bulkCount'));
+    expect(keys.indexOf('userId')).toBeLessThan(keys.indexOf('details'));
+});
+
+it('preserves all fields even when all are priority fields', () => {
+    const input = { ip: '1', userAgent: 'ua', action: 'login', userId: 1, targetType: 't', targetId: '1' };
+    const ordered = prioritizeSecurityFields(input);
+    expect(Object.keys(ordered)).toHaveLength(6);
 });
 ```
 
-**Confidence:** High
-
-### 9.3 Photo viewer / lightbox — Partial coverage
-
-**File:** `e2e/public.spec.ts:61-95`
-
-**Gap:** The existing test opens the lightbox but does not test navigation (prev/next), keyboard shortcuts (Escape, arrow keys), or the info bottom sheet.
-
-**Suggested tests**:
-- Lightbox prev/next navigation
-- Keyboard Escape to close
-- Keyboard arrow keys to navigate
-- Info bottom sheet opens and displays metadata
-- Color details section (if applicable)
-
-**Confidence:** Medium
-
-### 9.4 Search functionality — Partial coverage
-
-**File:** `e2e/public.spec.ts:21-59`
-
-**Gap:** The existing test verifies the search dialog opens and matches topic labels, but does not test:
-- Semantic search (if enabled)
-- Search result navigation
-- Empty search results
-- Search history (if applicable)
-
-**Confidence:** Medium
+Note: `prioritizeSecurityFields` is not currently exported. It must be either exported (with an `@internal` JSDoc note) or tested indirectly by inspecting the JSON string produced by `logAuditEvent`.
 
 ---
 
-## 10. Performance Test Absence
+### R12-TEST-03 — `getExpectedOrigin` null-protocol + present-host edge case untested
 
-**Gap:** No performance tests exist for:
-- Image processing throughput (images/second)
-- Gallery page load time (LCP, FCP)
-- Search query latency
-- Database query performance (N+1 detection)
-- Memory usage during large batch uploads
+**Severity:** MEDIUM-HIGH  
+**Confidence:** HIGH  
+**Gap:** `450d2a53` fixed `getExpectedOrigin` (in `request-origin.ts`) to return `null` early when `getTrustedRequestProtocol()` returns `null`, preventing the function from constructing an `http://host` origin for protocol-less requests. The test added by `5ba4025c` (8 lines) only tests `getTrustedRequestProtocol` in isolation — it verifies the helper returns `null` when `X-Forwarded-Proto` is absent. It does NOT test `hasTrustedSameOrigin` / `getExpectedOrigin` in the scenario where the protocol is missing but a `Host` header IS present.
 
-**Suggested tests**:
-1. **Benchmark test:** `__tests__/benchmark/image-processing.bench.ts` using Vitest's `bench()` API
-2. **Load test:** Use Playwright to simulate 100 concurrent gallery page loads
-3. **Query performance test:** Assert that gallery listing queries complete within 100ms for 1000 images
+The specific regression being guarded: before the fix, `request.headers.get('host') = 'gallery.atik.kr'` with no forwarded-proto would construct `http://gallery.atik.kr` and potentially match an Origin of `http://gallery.atik.kr`. After the fix it returns `null` so no origin matches.
 
-**Confidence:** Medium
+**Risk:** A future refactor reintroducing `?? 'http'` in the fallback path would silently downgrade an HTTPS-only deployment's origin guard on non-proxy requests.
 
----
-
-## 11. Test Data Edge Cases
-
-### 11.1 Missing edge cases in existing tests
-
-| Test file | Missing edge cases |
-|-----------|-------------------|
-| `validation.test.ts` | Empty string, null, undefined, Unicode emoji, very long strings (65535+ chars) |
-| `tag-slugs.test.ts` | Unicode characters, reserved words, empty string, duplicate slugs |
-| `upload-filenames.test.ts` | Path traversal attempts (`../`, `..\`, null bytes), Unicode filenames, very long filenames (255+ chars) |
-| `csv-escape.test.ts` | CRLF injection, tab characters, surrogate pairs, mixed line endings |
-| `og-sanitize.test.ts` | Very long strings (1MB+), null bytes, invalid UTF-8 sequences |
-| `session.test.ts` | Session exactly at expiry boundary, session with invalid format, concurrent session creation |
-| `rate-limit.test.ts` | Rate limit exactly at boundary, concurrent increments from same IP, IPv6 addresses |
-| `password-hashing-policy.test.ts` | Only tests constant existence; does not test Argon2 parameters are valid |
+**Concrete test to add** (`apps/web/src/__tests__/request-origin.test.ts`):
+```typescript
+it('hasTrustedSameOrigin returns false when Host is present but no protocol header exists', () => {
+    delete process.env.TRUST_PROXY;
+    // Attacker sends an http:// origin that happens to match the host.
+    // Must not be trusted when we cannot determine the real protocol.
+    expect(hasTrustedSameOrigin(
+        makeHeaders({ host: 'gallery.atik.kr' }),
+        new Headers({ origin: 'http://gallery.atik.kr' }),
+    )).toBe(false);
+});
+```
 
 ---
 
-## 12. Final Sweep — Commonly Missed Test Issues
+### R12-TEST-04 — `safeUnlink` / `safeCloseDirHandle` ENOENT discrimination untested
 
-### 12.1 No test for `process.env` mutation cleanup
+**Severity:** MEDIUM  
+**Confidence:** HIGH  
+**Gap:** `3111cc7e` replaced all `.catch(() => {})` swallowing with named helpers that treat `ENOENT` as expected-race (silent) and all other error codes as debug-logged. These helpers are private functions inside `process-image.ts` and are called from at least 6 call sites (cleanup after atomic rename fallback, deleteImageVariants, orphaned-file cleanup, etc.). No test exercises them.
 
-**Issue:** Several tests mutate `process.env` directly and rely on `afterEach` to restore. This is fragile in parallel test runs.
+**Risk:** Two failure modes: (1) ENOENT is mis-identified and logged at debug on every expected race, creating log spam; (2) a non-ENOENT error (EACCES, EMFILE) is silently swallowed, masking sustained filesystem problems. Both regressions are invisible without a test.
 
-**Files affected:**
-- `request-origin.test.ts` (lines 16-22)
-- `serve-upload-settings-debounce.test.ts` (uses `vi.useFakeTimers()` which is safer)
+**Concrete tests to add** (`apps/web/src/__tests__/process-image-safe-unlink.test.ts`):
+```typescript
+it('swallows ENOENT without logging', async () => {
+    const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    await safeUnlink('/tmp/nonexistent.avif'); // must not throw
+    expect(consoleSpy).not.toHaveBeenCalled();
+});
 
-**Suggested fix:** Use `vi.stubEnv()` instead of direct `process.env` mutation. Vitest automatically restores stubbed env vars after each test.
+it('logs at debug for non-ENOENT errors', async () => {
+    const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
+    await safeUnlink('/uploads/private.avif');
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[safeUnlink]'), expect.anything());
+});
+```
 
-### 12.2 No test for `console.error` / `console.warn` output
-
-**Issue:** Many tests spy on `console.error` and `console.warn` but never assert on the output. This means error paths that log but don't throw are not verified.
-
-**Files affected:**
-- `image-queue-bootstrap.test.ts` (lines 116-118)
-- `admin-backfill-runner-*.test.ts` (multiple files)
-
-**Suggested fix:** Add assertions that verify the expected warnings/errors are logged in error paths.
-
-### 12.3 No test for graceful degradation
-
-**Issue:** Many functions have fallback paths (e.g., DB unavailable → use defaults) but these are not tested.
-
-**Files affected:**
-- `image-queue.ts` (lines 389-391: DB unavailable during processing)
-- `serve-upload.ts` (cache miss fallback)
-- `data.ts` (view count flush failure)
-
-**Suggested fix:** Add tests that simulate DB failures and verify graceful degradation.
-
-### 12.4 No test for concurrent access
-
-**Issue:** The app is single-instance but tests should still verify thread-safety of shared state.
-
-**Files affected:**
-- `data.ts` (view count buffer — concurrent flushes)
-- `rate-limit.ts` (concurrent increments)
-- `image-queue.ts` (concurrent job claims)
-
-**Suggested fix:** Add tests that simulate concurrent operations and verify correct behavior.
-
-### 12.5 No test for migration compatibility
-
-**Issue:** The `migrate.js` script has complex logic for handling non-monotonic migration timestamps, but there are no tests for it.
-
-**File:** `apps/web/scripts/migrate.js`
-
-**Suggested test:** `__tests__/migrate.test.ts` that tests:
-- Fresh database: all migrations applied
-- Legacy database with missing migrations: reconciles and baselines
-- Non-monotonic timestamps: handles correctly
-- Missing hash: fails loud
-
-**Confidence:** High
+Note: `safeUnlink` is not currently exported. It must be either exported (with a test-only note) or tested via the higher-level `deleteImageVariants` wrapper.
 
 ---
 
-## 13. Recommendations Summary
+### R12-TEST-05 — `rollbackOgAttempt` behavior untested
 
-### Immediate (Fix before next deploy)
+**Severity:** MEDIUM  
+**Confidence:** HIGH  
+**Gap:** `9d88e217` also patched `rollbackOgAttempt` to use `ogRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt })` instead of mutating the shallow-copied entry object (`currentEntry.count--` which was a no-op due to the `BoundedMap.get()` copy semantics). The only existing tests that reference `rollbackOgAttempt` are source-text fixture tests (`og-photo-fallback.test.ts`, `og-route-source-contracts.test.ts`) that check the function name appears in the right positions in the source file — they do not test whether rollback actually decrements the count.
 
-1. **Fix `image-queue-bootstrap.test.ts`** — The mock setup is broken; the `queueOnIdleMock` never resolves, causing timeout.
-2. **Fix `request-origin.test.ts`** — Use `vi.stubEnv()` to prevent test pollution in parallel runs.
-3. **Fix `touch-target-audit.test.ts`** — Either fix the new sub-44px element or update `KNOWN_VIOLATIONS` with documentation.
-4. **Investigate `process-image-color-roundtrip.test.ts`** — Determine if the NCLX colr box failure is a real pipeline issue or a test environment issue.
+**Risk:** A caller that pre-increments past the rate limit and then successfully rolls back could be incorrectly blocked on the next request if the rollback is silently broken. This applies to the OG image routes which roll back the increment when the DB lookup fails.
 
-### Short-term (Next 2 weeks)
+**Concrete test to add** (`apps/web/src/__tests__/og-rate-limit.test.ts`):
+```typescript
+it('rollbackOgAttempt decrements the in-map count rather than the copy', () => {
+    const ip = '203.0.113.20';
+    const now = 3_000_000;
+    preIncrementOgAttempt(ip, now);
+    preIncrementOgAttempt(ip, now); // count = 2
+    rollbackOgAttempt(ip);
+    expect(ogRateLimit.get(ip)?.count).toBe(1); // not 2
+});
 
-5. **Add `safeInsertId()` test** — BigInt overflow is security-critical.
-6. **Add `normalizeIp()` test** — IP parsing is security-critical for rate limiting.
-7. **Add schema validation test** — Verify schema matches migrations.
-8. **Add `/s/[key]` e2e test** — Seed a share key and test the public share flow.
-9. **Add `cleanOrphanedTmpFiles()` test** — Verify cleanup behavior.
-10. **Add `flushGroupViewCounts()` backoff test** — Verify exponential backoff and retry overflow.
-
-### Medium-term (Next month)
-
-11. **Add integration tests** for upload pipeline, DB backup/restore, and session lifecycle.
-12. **Add performance benchmarks** for image processing and gallery page load.
-13. **Add concurrent access tests** for rate limiting and view count buffering.
-14. **Add migration compatibility test** for `migrate.js`.
-15. **Add admin upload e2e test** — Test drag-and-drop, topic selection, and processing status.
-
-### Ongoing
-
-16. **Monitor test flakiness** — Track `image-queue-bootstrap.test.ts` and `admin-backfill-runner-*.test.ts` in CI.
-17. **Reduce mock complexity** — Where possible, use real dependencies (temp DB, temp files) instead of heavy mocking.
-18. **Add edge case coverage** — Unicode, boundary values, empty inputs, concurrent access.
+it('rollbackOgAttempt deletes the entry when count reaches 1', () => {
+    const ip = '203.0.113.21';
+    const now = 3_000_000;
+    preIncrementOgAttempt(ip, now); // count = 1
+    rollbackOgAttempt(ip);
+    expect(ogRateLimit.has(ip)).toBe(false);
+});
+```
 
 ---
 
-## 14. Coverage Metrics
+### R12-TEST-06 — Bootstrap first-scan-empty path has no explicit test
 
-| Category | Test Files | Source Files | Coverage Assessment |
-|----------|-----------|--------------|---------------------|
-| Security (auth, rate limit, sanitization) | 25+ | 15 | Strong |
-| Color/HDR pipeline | 30+ | 12 | Very Strong |
-| Image processing | 15+ | 8 | Strong |
-| Data access (data.ts) | 18+ | 1 | Moderate-Strong |
-| Server actions | 20+ | 15 | Moderate |
-| GPS stripping | 5+ | 2 | Strong |
-| Schema | 0 | 1 | Weak |
-| Utilities (safeInsertId, normalizeIp, etc.) | 5+ | 30+ | Weak-Moderate |
-| E2E | 5 | All routes | Moderate (gaps in share links, admin upload) |
-| Lint/Scanner (touch-target, action-origin, etc.) | 10+ | N/A | Strong |
+**Severity:** MEDIUM  
+**Confidence:** HIGH  
+**Gap:** `d6107f89` changed the bootstrap logic to distinguish two empty-batch cases:
+- `pending.length === 0 && bootstrapCursorId === null` (first scan) → `bootstrapped = true` immediately
+- `pending.length === 0 && bootstrapCursorId !== null` (continuation) → `bootstrapped = false`, retry from null
 
-**Overall**: The test suite is well above average for a project of this size, with particularly strong coverage in security-critical and photographer-facing paths. The main gaps are in schema validation, utility functions, and integration tests that exercise real dependencies together.
+The ECONNREFUSED retry test (`image-queue-bootstrap.test.ts:187-205`) indirectly exercises the first path (the second `limitMock` returns `[]` after the cursor was reset to null), but this is incidental. There is no test whose name or assertion explicitly documents "first scan returning empty means bootstrapped immediately."
+
+**Risk:** A developer reading the bootstrap code and modifying the empty-batch handling won't see a failing test that describes the expected first-scan behavior — they could accidentally revert to always-retry on empty without breaking any clearly named test.
+
+**Concrete test to add** (`apps/web/src/__tests__/image-queue-bootstrap.test.ts`):
+```typescript
+it('sets bootstrapped = true immediately when first scan returns zero pending images', async () => {
+    vi.useFakeTimers();
+    const { bootstrapImageProcessingQueue, getProcessingQueueState, limitMock }
+        = await loadQueueModule({ pendingBatches: [[]], resolveIdle: false });
+
+    await bootstrapImageProcessingQueue();
+
+    expect(limitMock).toHaveBeenCalledTimes(1);
+    expect(getProcessingQueueState().bootstrapped).toBe(true);
+    // No retry timer should be scheduled — queue is truly empty
+    expect(getProcessingQueueState().bootstrapRetryTimer).toBeUndefined();
+    vi.useRealTimers();
+});
+```
 
 ---
 
-## 15. New Findings Since Previous Review (c0522dec -> bcd67b12)
+### R12-TEST-07 — `getProcessingQueueState()` shape validation path untested
 
-The previous review identified 6 security fixes without regression tests. This review confirms those findings and adds:
+**Severity:** LOW-MEDIUM  
+**Confidence:** MEDIUM  
+**Gap:** `b3c55036` added defensive shape validation to `getProcessingQueueState()`: if the global symbol already exists but is missing the `queue`, `enqueued`, or `bootstrapped` fields, the function re-initializes instead of crashing or returning a broken state. No test exercises this path.
 
-1. **3 currently failing tests** (previous review showed all tests passing)
-2. **Test pollution in `request-origin.test.ts`** (new finding — passes in isolation, fails in full suite)
-3. **Broken mock setup in `image-queue-bootstrap.test.ts`** (new finding — 2 tests timeout consistently)
-4. **Touch-target audit failure** (new finding — indicates a real accessibility regression was introduced)
-5. **Color roundtrip test failures** (new finding — may indicate real pipeline issues with AVIF color metadata)
+**Risk:** Test isolation failure or a future module-mocking change could accidentally install a partial object under the queue symbol. Without a test for the re-initialization path, this defensive code might break in a refactor (e.g., if the validation condition accidentally excludes a valid state).
+
+**Concrete test**: Requires module-level symbol manipulation — inject an object missing `bootstrapped` via the globalThis queue key symbol and verify `getProcessingQueueState()` returns a fully initialized state.
 
 ---
 
-*Review completed by Test Engineer agent. All findings are based on direct examination of source and test files at HEAD `bcd67b12`, with test suite execution via `npx vitest run`.*
+### R12-TEST-08 — `preIncrementShareAttempt` has no behavioral test file
+
+**Severity:** LOW-MEDIUM  
+**Confidence:** HIGH  
+**Gap:** `og-rate-limit.test.ts` tests `preIncrementOgAttempt`, window reset, and prune behavior. No equivalent file exists for `preIncrementShareAttempt`. `rate-limit.test.ts` has basic increment/window-reset tests (lines 249-265) but these are sparse and do not cover:
+- Timer-gated prune skip (newly added in `9d88e217`)
+- Window boundary exactly at `resetAt`
+- Capacity-cap eviction (`SHARE_RATE_LIMIT_MAX_KEYS = 2000`) behavior
+- The `rollbackShareAttempt` function (if it exists — the OG path has one but share may not)
+
+**Risk:** Share rate limit regressions are less visible than OG rate limit regressions because `/s/[key]` and `/g/[key]` are lower-traffic paths.
+
+---
+
+## 4. Previously Reported Issues — Status Update
+
+| Issue | Prior Status | Current Status |
+|-------|-------------|---------------|
+| `image-queue-bootstrap.test.ts` 2 timeouts | FAILING | RESOLVED — tests pass |
+| `touch-target-audit.test.ts` new violation | FAILING | RESOLVED — `f1f6202d` fixed the element |
+| `request-origin.test.ts` test pollution | FLAKY | STABLE — passes consistently |
+| `process-image-color-roundtrip.test.ts` failures | FAILING | Not re-evaluated (environment-dependent Sharp integration test) |
+| No test for `safeInsertId()` BigInt overflow | Gap | Still open (carried over) |
+| No test for `normalizeIp()` | Gap | Still open (carried over) |
+| No test for `prioritizeSecurityFields` | New in cycle 12 | Open — see R12-TEST-02 |
+| `/s/[key]` e2e gap | Gap | Still open (carried over) |
+
+---
+
+## 5. Invariants CLAUDE.md Claims Are "Locked by Tests" — Verification
+
+All claimed test locks are confirmed to still exist:
+
+| Invariant | Locked by | Status |
+|-----------|-----------|--------|
+| Blur data URL contract | `process-image-blur-wiring.test.ts`, `images-action-blur-wiring.test.ts` | PRESENT |
+| View retention purge | `view-retention.test.ts` | PRESENT |
+| OG sanitize shared helper | `sanitize-for-og-global.test.ts`, `og-sanitize.test.ts` | PRESENT |
+| `backfill-color-pipeline` column set | `backfill-color-pipeline.test.ts` | PRESENT |
+| `admin-backfill-runner` no-version-bump on detection failure | `admin-backfill-runner-detection-failure.test.ts` | PRESENT |
+| SW template contract | `sw-template-contract.test.ts` | PRESENT |
+| `tagNamesAgg` SQL contract | `data-tag-names-sql.test.ts` | PRESENT |
+| `_PrivacySensitiveKeys` public fields guard | `privacy-fields.test.ts` | PRESENT |
+| Touch target 44px floor | `touch-target-audit.test.ts` | PRESENT |
+| API admin auth wrapping | `check-api-auth.test.ts` | PRESENT |
+| Action origin guard | `check-action-origin.test.ts` | PRESENT |
+| Public route rate limit | `check-public-route-rate-limit.test.ts` | PRESENT |
+
+---
+
+## 6. Findings Summary
+
+| ID | Gap | Severity | Confidence |
+|----|-----|----------|------------|
+| R12-TEST-01 | `pruneOgRateLimit`/`pruneShareRateLimit` timer-gate behavior not tested | HIGH | HIGH |
+| R12-TEST-02 | `prioritizeSecurityFields` in audit.ts has zero tests | HIGH | HIGH |
+| R12-TEST-03 | `getExpectedOrigin` null-protocol + present-host edge case untested | MEDIUM-HIGH | HIGH |
+| R12-TEST-04 | `safeUnlink`/`safeCloseDirHandle` ENOENT discrimination untested | MEDIUM | HIGH |
+| R12-TEST-05 | `rollbackOgAttempt` behavioral tests absent | MEDIUM | HIGH |
+| R12-TEST-06 | Bootstrap first-scan-empty path has no named test | MEDIUM | HIGH |
+| R12-TEST-07 | `getProcessingQueueState()` shape validation path untested | LOW-MEDIUM | MEDIUM |
+| R12-TEST-08 | `preIncrementShareAttempt` has no behavioral test file | LOW-MEDIUM | HIGH |
+
+---
+
+## 7. Verification
+
+Test run at HEAD `2a9976a1`:
+
+```
+Test Files  225 passed | 2 skipped (227)
+Duration    24.75s
+```
+
+The 2 skipped files are the CLIP integration tests (gated on model weights — intentional and correct).
+
+No failing tests. No timeout flakes observed in this run.
+
+---
+
+*Review completed by Test Engineer agent at HEAD `2a9976a1` (2026-06-27). All findings based on direct examination of source, test files, and `git show` diffs for commits `bcd67b12..2a9976a1`.*

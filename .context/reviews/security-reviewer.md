@@ -1,9 +1,10 @@
-# Security Review Report — GalleryKit
+# Security Review Report — GalleryKit (Cycle 12)
 
-**Scope:** GalleryKit repository at HEAD bcd67b12
-**Reviewer:** Security Reviewer (OWASP Top 10, secrets, auth, input validation, data protection)
-**Date:** 2026-06-25
-**Risk Level:** LOW (no confirmed exploitable vulnerabilities; defense-in-depth gaps identified and remediated)
+**Scope:** GalleryKit repository at HEAD `2a9976a1` (full app `apps/web/`)
+**Reviewer:** Security Reviewer — OWASP Top 10, authn/authz, secrets, SSRF, path traversal, injection (SQL/XSS/CSV/command), session/cookie security, rate-limit bypass, file-upload security, CSRF/same-origin, privacy/PII, deserialization, ReDoS, DoS
+**Date:** 2026-06-27
+**Prior baseline:** Cycle 10 converged at 0 CRITICAL / 0 HIGH (HEAD `bcd67b12`). This cycle reviews HEAD `2a9976a1` (21 commits later, mostly cycle-10/11 hardening fixes).
+**Risk Level:** LOW — no confirmed exploitable vulnerabilities. Two LOW / informational defense-in-depth observations.
 
 ---
 
@@ -11,458 +12,153 @@
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| CRITICAL | 0 | No confirmed remotely exploitable vulnerabilities |
-| HIGH | 0 | No confirmed vulnerabilities requiring specific conditions |
-| MEDIUM | 0 | All previously identified MEDIUM issues have been remediated |
-| LOW | 0 | All previously identified LOW issues have been addressed or were informational |
+| CRITICAL | 0 | No remotely exploitable vulnerabilities |
+| HIGH | 0 | None |
+| MEDIUM | 0 | None new; prior MEDIUMs are quality/structural, tracked in `_aggregate.md` |
+| LOW | 2 | Incomplete unexport (R12-SEC-01) + lint-gate GET coverage gap (R12-SEC-02) |
 
-**Overall Assessment:** The GalleryKit codebase demonstrates mature security engineering. All three security lint gates pass (`api-auth`, `action-origin`, `public-route-rate-limit`). No hardcoded secrets were found. No CRITICAL or HIGH CVEs in dependencies. The authentication layer (Argon2id, HMAC-SHA256 sessions, dual-bucket rate limiting) exceeds OWASP minimums. Input validation is comprehensive (Unicode bidi/zero-width rejection, C0/C1 strip, path traversal prevention, symlink rejection). The two MEDIUM findings from the prior review (run-8 cycle-2) have been fully remediated. The three LOW findings have also been addressed.
+**Evidence collected this cycle:**
+- All three security lint gates **PASS** (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`).
+- `npm audit` (full tree) and `npm audit --omit=dev`: **0 vulnerabilities**.
+- Full diff `bcd67b12..2a9976a1` of every changed source file reviewed line-by-line.
+- High-risk surfaces re-audited from source (not sampled): LR token upload, semantic + similar search, OG routes, upload serving (path traversal), DB backup download, middleware admin guard, session/cookie security, request-origin/CSRF, validation/sanitize regexes (ReDoS), DB backup/restore `spawn` (command injection), data.ts privacy guards, analytics geoip (PII).
 
-Six new commits since the prior review (c0522dec → bcd67b12) include two security fixes (missing `isAdmin()` checks, mutable reference leak in rate-limit getters), one input-validation hardening (`Array.isArray` guard), two operational safety improvements (restore-maintenance consistency, revalidation error isolation), and one error-handling improvement (ENOENT distinction). All are positive security or safety improvements. No new vulnerabilities were introduced.
+**Verdict:** The codebase remains mature and well-hardened. Every commit since the prior review is a positive security/safety/observability improvement. No new vulnerability class was introduced.
 
 ---
 
-## Remediation History (Prior Review Findings — Now Closed)
+## Delta Review — Changes Since Prior Review (bcd67b12 → 2a9976a1)
 
-### 1. OG Photo Route: SSRF Fallback via `req.url` Origin (CLOSED)
-**Severity:** MEDIUM (was) → CLOSED  
-**Category:** A10: Server-Side Request Forgery (SSRF) — Defense in Depth  
-**Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:115` (was)  
-**Status:** FIXED at HEAD c0522dec
+All 21 commits reviewed. Security-relevant ones, all confirmed **clean / positive**:
 
-**Previous Issue:** The `fetchOrigin` variable fell back to `new URL(req.url).origin` when `siteConfig.url` was unparseable, creating a weak blind-SSRF primitive if an attacker controlled the Host header.
+| Commit | Change | Security assessment |
+|--------|--------|---------------------|
+| `5ba4025c` | request-origin: return `null` on protocol fallback (was `'http'`); "unexport" `allowMissingSource` | Protocol-null does NOT downgrade cookie `secure` (production is always `secure: true`; the `?? 'http'` in `getExpectedOrigin` is dead on the same-origin path because a present Origin/Referer already yields a real protocol). Unexport is **incomplete** — see R12-SEC-01. |
+| `450d2a53` | request-origin: handle null protocol in `getExpectedOrigin` | Fail-closed preserved; `hasTrustedSameOrigin` still requires an explicit Origin/Referer match. Clean. |
+| `9d88e217`, `2b166245`, `74bd776a` | rate-limit / public.ts: timer-based prune for og/share; fix shallow-copy mutation bugs (`entry.count++` → `.set(...)`) | Correct fix for the `BoundedMap.get()`-returns-copy contract. Counters now mutate the Map via `.set()`. No bypass. Clean. |
+| `038b3154` | semantic rate-limit `.set()` instead of direct mutation | Same class. Clean. |
+| `6cfcc75d` | audit: prioritize security fields (ip/userAgent/action/userId/...) before metadata truncation | Defense-in-depth; raises survival odds of forensic fields. No regression. |
+| `5f4a5e95`, bounded-map | `BoundedMap.get()` returns shallow copy of object values | Prevents external mutation of internal rate-limit/queue state. Documented as shallow (nested refs shared) — acceptable for the flat `{count,resetAt}` / `{count,lastAttempt}` entries used. Clean. |
+| `b3c55036` | instrumentation: SIGTERM/SIGINT graceful shutdown, geoip-lite pre-warm, queue-state runtime shape validation | SIGTERM/SIGINT guarded against re-entry (`shutdownInProgress`); geoip pre-warm is a try/catch dynamic import (optional dep); queue-state validation re-inits on malformed global (defensive). No external-input reachability. Clean. |
+| `3111cc7e` | process-image: `safeUnlink`/`safeCloseDirHandle` distinguish ENOENT | Observability only; no security semantics change. Clean. |
+| `c7289870` | process-image: `Buffer.indexOf` for `colr` box search (bounded) | Still bounded by buffer length; the `searchStart` advance terminates. No infinite loop / DoS. Clean. |
+| `d6107f89` | image-queue bootstrap empty-batch handling | Correctness fix; no auth/data-exposure surface. Clean. |
+| `14730ee2` | backfill: `console.log` → `console.info` | Log hygiene. Clean. |
+| `bbfd747f` | public.ts: extract `checkLoadMoreRateLimit` DRY helper | Behavior-preserving; rate-limit posture identical to prior inline logic. Clean. |
+| `f1f6202d`, badge/sheet/skeleton/tooltip/progress | UI touch-target/ARIA/motion | Client-only, no security surface. |
+| `92ce7a9e` | photo-viewer: local `ConnInfo` interface for `navigator.connection` | Client-only type change. No security surface. |
+| `gallery-config.ts` | fallback path now applies `SEMANTIC_SEARCH_ALLOW_PRODUCTION` operator-gate (AGG-M6 fix); `getSetting` uses `??` | Closes the prior gap where the DB-unavailable fallback could surface `production` mode without the env gate. **Positive security fix.** |
 
-**Current State (FIXED):** The code now fails closed. When `siteConfig.url` is unparseable, the route returns `buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL, ...)` instead of using the attacker-controllable request origin:
+---
+
+## LOW Findings (this cycle)
+
+### R12-SEC-01 — `hasTrustedSameOriginWithOptions` still exported; `allowMissingSource:true` CSRF-bypass option remains reachable
+- **File:** `apps/web/src/lib/request-origin.ts:83,109`
+- **Class:** A01 Broken Access Control / CSRF (latent, defense-in-depth)
+- **Severity:** LOW · **Confidence:** High (confirmed) · **Status:** carry-over of AGG-M9; the "fix" commit `5ba4025c` did **not** close it
+- **Detail:** Commit `5ba4025c` removed `export` from the function declaration but re-added `export { hasTrustedSameOriginWithOptions };` at line 109. The function is now exported **solely** so `src/__tests__/request-origin.test.ts:3` can assert the loose `allowMissingSource:true` opt-in. Any future in-repo caller can still call it with `{ allowMissingSource: true }`, which makes `hasTrustedSameOrigin*` return `true` for a request bearing **no** Origin and **no** Referer header — defeating the same-origin/CSRF boundary for that caller.
+- **Exploitability:** None today — `grep` confirms zero production callers pass `allowMissingSource:true` (only the public `hasTrustedSameOrigin()` wrapper, which always uses the strict default, and the test). The risk is purely a future-misuse footgun whose presence the commit message ("unexport allowMissingSource") misleadingly implies is closed.
+- **Blast radius (if a future caller opted in):** A mutating admin route/action that called this with `true` would accept a header-stripped cross-site request, enabling CSRF on that one surface.
+- **Suggested fix:** Make the options variant a non-exported internal and have the test exercise the behavior through a thin test-only shim, or annotate with `@internal` + an `eslint no-restricted-imports`/`no-restricted-syntax` rule forbidding `allowMissingSource: true` outside the test. Update the commit's stated intent or finish it.
 
 ```typescript
-// Line 112-118 — FAILS CLOSED
-try {
-    fetchOrigin = new URL(siteConfig.url).origin;
-} catch {
-    // R5-H4: fail closed — when siteConfig.url is unset (dev), do NOT
-    // fall back to the attacker-controllable request origin. Return the
-    // fallback response instead of exposing a blind-SSRF primitive.
-    return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL, seo.og_image_url || undefined);
-}
+// request-origin.ts — current (still exported for the test only)
+function hasTrustedSameOriginWithOptions(requestHeaders, options = {}) { ... }
+export { hasTrustedSameOriginWithOptions };   // <-- reachable by any future caller
+
+// suggested: keep internal; expose ONLY the strict wrapper publicly
+// export function hasTrustedSameOrigin(h) { return hasTrustedSameOriginWithOptions(h); }
+// (test imports hasTrustedSameOrigin + a dedicated __test_allowMissingSource helper)
 ```
 
-**Verification:** The `og-photo-fallback.test.ts` fixture locks this contract.
+### R12-SEC-02 — Expensive public GET routes are rate-limited at runtime but NOT covered by any CI gate
+- **Files:** `apps/web/src/app/api/search/similar/[id]/route.ts` (O(n) embedding scan), `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx` (Satori/Sharp CPU + internal fetch)
+- **Class:** A05 Security Misconfiguration / DoS-defense regression risk (process, not a live vuln)
+- **Severity:** LOW (informational) · **Confidence:** High · **Status:** new framing
+- **Detail:** The `lint:public-route-rate-limit` gate **only scans mutating handlers** (POST/PUT/PATCH/DELETE) and explicitly excludes GET ("GET handlers are NOT scanned … must be audited separately"). The lint output this cycle confirms it reports `similar/[id]` and both OG routes as "no mutating handlers." All four ARE rate-limited at runtime today (`preIncrementSemanticAttempt` / `preIncrementOgAttempt`), so there is no live exposure. The gap is that a future refactor deleting the rate-limit pre-increment from any of these expensive GET routes would pass CI silently, re-opening an unmetered-CPU/internal-fetch-amplifier DoS surface.
+- **Suggested fix:** Extend the gate to also scan GET handlers in a curated allowlist of "expensive" public routes (image generation, embedding scan, file generation), requiring either a `preIncrement*`/`checkAndIncrement*` helper call OR an explicit `@public-no-rate-limit-required:` exempt comment — exactly the contract already enforced for mutating routes.
 
 ---
 
-### 2. OG Photo Route: Open Redirect via `ogImageUrl` Fallback (CLOSED)
-**Severity:** MEDIUM (was) → CLOSED  
-**Category:** A01: Broken Access Control — Open Redirect  
-**Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:253-260` (was)  
-**Status:** FIXED at HEAD c0522dec
+## Carry-Over Items (tracked in _aggregate.md; NOT re-reported as new)
 
-**Previous Issue:** The `buildFallbackResponse` function redirected to `ogImageUrl` without validating its origin, creating an open-redirect primitive if the admin-configured SEO OG image URL was compromised.
-
-**Current State (FIXED):** The function now validates `ogImageUrl` against the request origin before redirecting:
-
-```typescript
-// Lines 256-274 — ORIGIN-VALIDATED REDIRECT
-if (ogImageUrl) {
-    try {
-        const url = new URL(ogImageUrl);
-        const reqOrigin = new URL(req.url).origin;
-        if (url.origin === reqOrigin) {
-            return new Response(null, {
-                status: 302,
-                headers: { Location: ogImageUrl, 'Cache-Control': cacheControl },
-            });
-        }
-    } catch {
-        // Invalid URL — fall through to the site-root redirect below.
-    }
-}
-// Fall through to safe site-root redirect
-```
-
-**Verification:** The `og-photo-fallback.test.ts` fixture and the `og-route-source-contracts.test.ts` lock the redirect behavior.
+These remain open from cycle 10 and are quality/structural, not exploitable vulnerabilities:
+- AGG-M8 og/share stale-entry accumulation — **mitigated** this cycle by `9d88e217` (timer-based prune added). Effectively closed.
+- AGG-M9 `allowMissingSource` — see R12-SEC-01 (still open, incomplete fix).
+- AGG-M11 audit metadata truncation — **mitigated** this cycle by `6cfcc75d` (security fields prioritized).
+- AGG-M6 gallery-config fallback operator-gate — **fixed** this cycle (semantic mode env-gate applied in fallback).
+- AGG-M19 semantic search brute-force O(n) — structural/documented; bounded by `SEMANTIC_SCAN_LIMIT` + rate limit. Deferred.
+- AGG-M10 protocol fallback — **addressed** (`5ba4025c` returns null; cookie `secure` confirmed not downgraded).
 
 ---
 
-### 3. API Routes Excluded from Middleware Auth Guard (INFORMATIONAL — CLOSED)
-**Severity:** LOW (was) → CLOSED  
-**Category:** A01: Broken Access Control — Defense in Depth  
-**Location:** `apps/web/src/proxy.ts` (middleware matcher)  
-**Status:** ACCEPTED RISK — correctly mitigated by design
+## Surface-by-Surface Verification (confirmed clean)
 
-**Previous Issue:** The middleware in `proxy.ts` excludes API routes from the matcher pattern, meaning API routes do not benefit from middleware-level admin auth checks.
-
-**Current State:** This is correctly mitigated by design:
-- Every admin API route uses `withAdminAuth()` wrapper (`apps/web/src/lib/api-auth.ts`) which performs origin verification + token authentication
-- The `api-auth.ts` wrapper is enforced by a lint gate (`npm run lint:api-auth`) that scans every `api/admin/**/route.{ts,tsx,js,mjs,cjs}` file
-- Public API routes have their own rate limiting and validation
-- The `withAdminAuth` wrapper now includes same-origin verification (AGG9R-02) — previously it only checked `isAdmin()`, requiring each caller to add its own `hasTrustedSameOrigin` check. A future admin API route added with only `withAdminAuth` would now automatically get origin verification.
-
-**Status:** No code change required. The lint gate remains blocking in CI.
-
----
-
-### 4. `safeJsonLd` Escapes `<` and `>` but Not All HTML-Injection Vectors (INFORMATIONAL — CLOSED)
-**Severity:** LOW (was) → CLOSED  
-**Category:** A03: Injection (XSS) — Defense in Depth  
-**Location:** `apps/web/src/lib/safe-json-ld.ts`  
-**Status:** ACCEPTED — implementation is correct per OWASP guidance
-
-**Previous Issue:** Concern about `/` (forward slash) not being escaped, which could theoretically allow `</script>` termination.
-
-**Current State:** The `<` escape (`<`) prevents `</script>` termination. The current implementation is correct and follows OWASP guidance for JSON serialization in HTML contexts. All data flowing into `safeJsonLd` is either hardcoded (JSON-LD structure) or from validated database fields. Admin-controlled strings pass through `sanitizeAdminString` / `stripControlChars` before reaching JSON-LD.
-
-**Status:** No change required. The implementation is correct.
-
----
-
-### 5. Missing `Strict-Transport-Security` Header in Application Code (CLOSED)
-**Severity:** LOW (was) → CLOSED  
-**Category:** A05: Security Misconfiguration  
-**Location:** `apps/web/next.config.ts`  
-**Status:** FIXED at HEAD c0522dec
-
-**Previous Issue:** The application did not set the `Strict-Transport-Security` (HSTS) header in application code.
-
-**Current State (FIXED):** HSTS is now present in `next.config.ts` (line 86):
-
-```typescript
-{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' }
-```
-
-This is applied in production (not development) alongside other security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` with camera/microphone/geolocation denial). The nginx configuration (`apps/web/nginx/default.conf`) also carries the same HSTS directive.
-
-**Status:** Fixed. Both application and proxy levels now enforce HSTS.
-
----
-
-## New Security-Relevant Changes Since Prior Review (HEAD c0522dec → bcd67b12)
-
-### SEC-FIX-1: Missing `isAdmin()` Checks in `deleteAdminUser` and LR Token Actions (SECURITY FIX)
-**Commits:** `b22fa85e`  
-**Location:** `apps/web/src/app/actions/admin-users.ts:183`, `apps/web/src/app/actions/lr-tokens.ts:36,107`  
-**Impact:** Positive — closes a broken access control gap where `deleteAdminUser` and LR token actions (`createLrToken`, `revokeLrToken`) only checked `requireSameOriginAdmin()` (which verifies origin) but did not verify the caller was actually an admin before proceeding to the `getCurrentUser()` check.
-
-**Previous State:** The functions checked `requireSameOriginAdmin()` (origin verification) and then `getCurrentUser()` (session validity), but skipped the `isAdmin()` gate. While `getCurrentUser()` returns null for non-admin sessions, the ordering meant a valid non-admin session could reach the `getCurrentUser()` call and potentially trigger audit logging or other side effects before the null check. More importantly, the defense-in-depth posture was inconsistent with every other mutating admin action.
-
-**Current State:**
-```typescript
-// admin-users.ts:183
-if (!(await isAdmin())) return { error: t('unauthorized') };
-
-// lr-tokens.ts:36
-if (!(await isAdmin())) return { error: t('unauthorized') };
-
-// lr-tokens.ts:107
-if (!(await isAdmin())) return { error: t('unauthorized') };
-```
-
-All three functions now follow the standard pattern: `maintenance check → isAdmin() → requireSameOriginAdmin() → getCurrentUser()`. This is the same ordering used in `createAdminUser`, `uploadImages`, `updateGallerySettings`, and all other mutating admin actions.
-
-**Confidence:** High — the fix is straightforward and consistent with the established pattern.
-
----
-
-### SEC-FIX-2: Rate-Limit Entry Getters Return Shallow Copies (DEFENSE IN DEPTH)
-**Commit:** `5f4a5e95`  
-**Location:** `apps/web/src/lib/auth-rate-limit.ts:28,38,109`  
-**Impact:** Positive — prevents external mutation of internal rate-limit state.
-
-**Previous State:** `getLoginRateLimitEntry`, `getAccountLoginRateLimitEntry`, and `getPasswordChangeRateLimitEntry` returned the internal `WindowEntry` object directly. Callers could mutate `entry.count` or `entry.lastAttempt`, affecting the shared in-memory rate-limit state. While the only callers in the codebase (`recordFailedLoginAttempt`, `clearSuccessfulLoginAttempts`, etc.) correctly copy the entry before modifying it, the API surface was vulnerable to future misuse.
-
-**Current State:** All three getters now return `{ ...entry }` (shallow copy):
-```typescript
-return { ...entry };
-```
-
-This ensures callers receive a snapshot of the rate-limit state that cannot affect the internal Map entries. The change is defensive — no known exploit existed, but it hardens the API contract against future bugs.
-
-**Confidence:** High — the fix is a standard defensive pattern.
-
----
-
-### SEC-FIX-3: `Array.isArray` Guard on `loadMoreImages` tagSlugs (INPUT VALIDATION HARDENING)
-**Commit:** `bcd67b12`  
-**Location:** `apps/web/src/app/actions/public.ts:93-95`  
-**Impact:** Positive — prevents prototype pollution / unexpected behavior from non-array tagSlugs parameter.
-
-**Previous State:** `loadMoreImages` accepted `tagSlugs?: string[]` and passed it directly to `canonicalizeRequestedTagSlugs(tagSlugs || [])`. If a malicious client sent a non-array value (e.g., an object with a custom `length` property, or a string), `canonicalizeRequestedTagSlugs` would receive an unexpected input shape. While `canonicalizeRequestedTagSlugs` iterates with `.map()` and `.filter()`, non-array inputs could cause unexpected behavior.
-
-**Current State:**
-```typescript
-const safeTags = Array.isArray(tagSlugs)
-    ? canonicalizeRequestedTagSlugs(tagSlugs).filter(isValidTagSlug)
-    : [];
-```
-
-The `Array.isArray` guard ensures only actual arrays are processed; non-array inputs are treated as empty tags. This is consistent with the defense-in-depth input validation posture used throughout the codebase.
-
-**Confidence:** High — the fix is a standard input validation pattern.
-
----
-
-### SEC-FIX-4: Restore-Maintenance Checks Added to Smart Collections and Embedding Backfill (OPERATIONAL SAFETY)
-**Commit:** `7453030e`  
-**Location:** `apps/web/src/app/actions/collections.ts:17-18`, `apps/web/src/app/actions/embeddings.ts:22+`  
-**Impact:** Positive — prevents mutating operations during DB restore, maintaining consistency with all other admin actions.
-
-**Previous State:** `createSmartCollection` and the embedding backfill action did not check `isRestoreMaintenanceActive()` before proceeding. While these are admin-only actions with `isAdmin()` and `requireSameOriginAdmin()` checks, the restore-maintenance gate was missing. All other mutating admin actions (upload, delete, settings, topic CRUD, admin user CRUD, LR token CRUD) check this gate.
-
-**Current State:** Both actions now include the standard restore-maintenance check:
-```typescript
-const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-if (maintenanceError) return { error: maintenanceError };
-```
-
-This ensures the DB cannot be modified during a restore operation, preventing inconsistent state.
-
-**Confidence:** High — the fix is consistent with the established pattern.
-
----
-
-### SEC-FIX-5: ENOENT Distinction in `deleteImageVariants` (ERROR HANDLING IMPROVEMENT)
-**Commit:** `9c5c38ca`  
-**Location:** `apps/web/src/lib/process-image.ts:537-543`  
-**Impact:** Positive — prevents silent suppression of disk/permission errors during image cleanup.
-
-**Previous State:** The `deleteImageVariants` function caught all `opendir` errors silently, logging nothing. A disk failure or permission error would be silently swallowed, making debugging difficult and potentially leaving orphaned files undetected.
-
-**Current State:**
-```typescript
-catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn(`[deleteImageVariants] Directory scan failed for ${dir}:`, err);
-    }
-}
-```
-
-`ENOENT` (directory doesn't exist yet) is expected and silent; all other errors are logged as warnings. This improves operational visibility without changing security semantics.
-
-**Confidence:** High — the fix improves observability without changing security behavior.
-
----
-
-### SEC-FIX-6: Revalidation Moved Outside try/catch (ERROR ISOLATION)
-**Commit:** `db55056f`  
-**Location:** `apps/web/src/app/actions/topics.ts:166-172,334-338`  
-**Impact:** Positive — prevents Next.js revalidation errors from triggering image cleanup rollback.
-
-**Previous State:** In `createTopic` and `updateTopic`, `revalidateAllAppData()` was called inside the try block, after the DB transaction succeeded. If revalidation threw (e.g., Next.js internal error), the catch block would execute the image cleanup code (deleting the uploaded topic image file), even though the DB transaction had already committed. This created a state where the DB referenced a file that no longer existed on disk.
-
-**Current State:** Revalidation is now in the `finally` block:
-```typescript
-} finally {
-    // Run revalidation outside the try/catch so a revalidation error never
-    // triggers the image cleanup in the catch block.
-    revalidateAllAppData();
-}
-```
-
-This ensures revalidation errors are isolated from the DB transaction + file cleanup logic. A revalidation failure no longer corrupts the file/DB consistency.
-
-**Confidence:** High — the fix is a standard error-isolation pattern.
+| Surface | File(s) | Result |
+|---|---|---|
+| LR PAT upload (token auth + file upload) | `api/admin/lr/upload/route.ts`, `lib/admin-tokens.ts`, `lib/api-auth.ts` | Token = `gk_`+base64url(32B), SHA-256 stored, `timingSafeEqual` compare, well-formed-format pre-check, scope gate, parameterized SQL lookup by hash. Upload mirrors browser path: `getSafeUserFilename`, slug/title/desc validation (code-point length + `sanitizeAdminString`), restore-maintenance gate, contract advisory lock, 1 GB disk pre-check, cumulative TOCTOU-safe tracker keyed on token user, HDR-ingest gate, GPS strip, idempotent quota settle, audit log. **Solid.** |
+| Semantic / similar search | `api/search/semantic/route.ts`, `api/search/similar/[id]/route.ts` | Both: same-origin gate → restore-maintenance → id/query validation → rate-limit pre-increment (Pattern-2 rollback) → production/stub mode gate. Semantic: Content-Type strict parse, chunked-encoding reject, Content-Length + body-byte caps, query min-3-codepoints, `topK` clamped to `SEMANTIC_TOP_K_MAX`. Query never reaches SQL (CLIP encoder). Returned metadata is public-grade (no PII). **Solid.** |
+| OG image routes (SSRF) | `api/og/route.tsx`, `api/og/photo/[id]/route.tsx` | Home OG: no external fetch (inline gradient). Photo OG: internal fetch base **pinned to trusted `siteConfig.url`**, fail-closed on unparseable URL; derivative path is a validated UUID; fallback redirect validates same-origin (no open redirect); rate-limited; charged-on-failure. **Solid.** |
+| Upload serving (path traversal) | `lib/serve-upload.ts`, both `uploads/[...path]/route.ts` | `ALLOWED_UPLOAD_DIRS` whitelist (jpeg/webp/avif only; `original/` excluded), `SAFE_SEGMENT` regex, `.`/`..`/length rejection, ext↔dir match, `lstat` symlink rejection, `realpath` containment (`startsWith(root+sep)`), stream from resolved path (TOCTOU closed). **Solid.** |
+| DB backup download | `api/admin/db/download/route.ts`, `lib/backup-filename.ts` | `withAdminAuth`, anchored filename regex (no quotes/CRLF → no Content-Disposition header injection), containment + symlink + realpath checks, audit log. **Solid.** |
+| Middleware admin guard | `proxy.ts` | Presence + 3-segment/≥100-char token-format check (full crypto verify in server actions); CSP nonce per request; `x-gk-admin-render` reflects only requester's own cookie. API routes correctly excluded (each `api/admin/**` uses `withAdminAuth`, lint-enforced). **Solid.** |
+| Session / cookie | `app/actions/auth.ts` | Argon2id (64 MiB/3/4), HMAC-SHA256 + `timingSafeEqual`, `httpOnly`+`sameSite:lax`+`secure` (always true in production), session rotation on login + password change, dual-bucket rate limiting. Protocol-null change does not downgrade `secure`. **Solid.** |
+| CSRF / same-origin | `lib/request-origin.ts`, `lib/api-auth.ts` | Fail-closed (requires Origin or Referer match); `withAdminAuth` enforces origin centrally; all mutating actions use `requireSameOriginAdmin()` (lint-enforced). One latent footgun → R12-SEC-01. |
+| Injection (SQL/cmd/CSV/XSS) | drizzle params throughout; `db-actions.ts` `spawn` (array form, no shell, env-based creds, `HOME` excluded); `csv-escape.ts`; all JSON-LD via `safeJsonLd`; no `eval`/`new Function`; no attacker-controlled `new RegExp` | **No injection found.** |
+| ReDoS | `validation.ts`, `backup-filename.ts`, `base56.ts`, `sanitize.ts` redaction | All anchored, single-char-class quantifiers, no nested/overlapping quantifiers. Password redaction escapes all regex metacharacters before `new RegExp`. **No ReDoS.** |
+| Privacy / PII | `lib/data.ts`, `lib/analytics.ts`, GPS strip | `publicSelectFields` derived-by-omission from `adminSelectFields` (separate object ref) excluding `latitude/longitude/filename_original/user_filename/original_*`; compile-time guards (`_PrivacySensitiveKeys`, `_SensitiveKeysInPublic`, `_MapPrivacyGuard`, `_LargePayloadGuard`). Analytics stores only 2-char country code, never full IPs. **Solid.** |
+| Secrets | repo-wide grep + `.env.local.example` | No hardcoded secrets; env-sourced; stderr redaction for mysqldump/mysql. **Clean.** |
 
 ---
 
 ## Security Checklist
 
-### Authentication & Authorization
-- [x] Passwords hashed with Argon2id (memoryCost=65536, timeCost=3, parallelism=4)
-- [x] Session tokens: HMAC-SHA256 signed, verified with `timingSafeEqual`
-- [x] Cookie attributes: `httpOnly`, `secure` (production), `sameSite: lax`, `path: /`
-- [x] Dual-bucket rate limiting: per-IP + per-account for login
-- [x] `withAdminAuth` wrapper on all admin API routes (lint-enforced)
-- [x] `withAdminAuth` now includes same-origin verification (AGG9R-02)
-- [x] `requireSameOriginAdmin()` on all mutating server actions (lint-enforced)
-- [x] Last admin deletion prevented (advisory lock + check)
-- [x] Session fixation prevention (deletes old sessions on login)
-- [x] Password change with session rotation
-- [x] Personal Access Tokens (PATs) with SHA-256 hashing and constant-time comparison
-- [x] Token scope enforcement (`lr:upload`, `lr:read`, `lr:delete`)
-- [x] **FIXED (b22fa85e):** `isAdmin()` check added to `deleteAdminUser` and LR token actions
-
-### Input Validation
-- [x] All user inputs validated and sanitized
-- [x] SQL queries use Drizzle ORM parameterization (no raw SQL concatenation with untrusted input)
-- [x] File uploads validated (type, size, content) — UUID filenames, path traversal prevention, symlink rejection
-- [x] URLs validated to prevent SSRF (OG route fails closed on unparseable siteConfig.url)
-- [x] Unicode bidi/zero-width formatting rejected at all admin string entry points
-- [x] C0/C1 control characters stripped from all inputs
-- [x] CSV export escapes formula injection characters
-- [x] JSON-LD uses `safeJsonLd` with `<`/`>` escaping
-- [x] Admin string validation uses `sanitizeAdminString` (rejects + returns null on formatting chars)
-- [x] `requireCleanInput` used for server action payload validation
-- [x] **FIXED (bcd67b12):** `Array.isArray` guard on `loadMoreImages` tagSlugs parameter
-
-### Output Encoding
-- [x] HTML output escaped via React (no `innerHTML` or `dangerouslySetInnerHTML` except JSON-LD)
-- [x] JSON-LD uses `safeJsonLd` serializer
-- [x] OG images sanitize text via `sanitizeForOg` (bidi/C0 strip)
-- [x] No user data in error messages (generic errors for auth failures)
-- [x] Content-Security-Policy headers set with nonce in production
-- [x] `X-Content-Type-Options: nosniff` globally
-- [x] `X-Frame-Options: SAMEORIGIN` globally
-- [x] `Referrer-Policy: strict-origin-when-cross-origin` globally
-- [x] `Permissions-Policy` with camera/microphone/geolocation denial
-
-### Secrets Management
-- [x] No hardcoded API keys, passwords, or tokens in source code
-- [x] Environment variables used for secrets (`SESSION_SECRET`, `DB_PASSWORD`, etc.)
-- [x] Secrets not logged or exposed in errors (stderr sanitization for mysqldump/mysql)
-- [x] `MYSQL_PWD` env var used instead of `-p` flag (avoids `/proc/cmdline` exposure)
-- [x] Backup files created with `0o600` mode, directory with `0o700`
-- [x] Session secret: refuses DB fallback in production (throws if `SESSION_SECRET` missing)
-
-### Dependencies
-- [x] No known CRITICAL or HIGH CVEs (`npm audit` clean)
-- [x] Dependencies up to date (Next.js 16, React 19, TypeScript 6)
-- [x] `sharp`, `argon2`, `mysql2` are production dependencies with native bindings
-
-### File Upload Security
-- [x] Path traversal prevention: `SAFE_SEGMENT` regex + `ALLOWED_UPLOAD_DIRS` whitelist + `realpath` containment
-- [x] Symlink rejection: `lstat()` + `isSymbolicLink()` check
-- [x] Filename sanitization: UUIDs via `crypto.randomUUID()`
-- [x] Decompression bomb mitigation: Sharp `limitInputPixels` configured
-- [x] Directory whitelist: Only `jpeg`, `webp`, `avif` served publicly
-- [x] Content-type validated against extension
-- [x] Disk space pre-check (1GB minimum) before upload acceptance
-- [x] Cumulative upload tracking with TOCTOU protection
-
-### Database Security
-- [x] Drizzle ORM parameterization for all application queries
-- [x] LIKE wildcards escaped in search
-- [x] DB backups stored in non-public directory, served via authenticated route
-- [x] DB restore validates file headers and scans for dangerous SQL
-- [x] Advisory locks prevent concurrent restore/backfill/upload operations
-- [x] `safeInsertId` prevents BigInt coercion overflow
-- [x] `normalizeStringRecord` validates server action payload shapes
-- [x] **FIXED (7453030e):** Restore-maintenance checks added to smart collections and embedding backfill
-
-### Rate Limiting
-- [x] Login: per-IP (5/15min) + per-account (5/15min)
-- [x] Password change: per-IP rate limited
-- [x] Search: per-IP rate limited (DB-backed + in-memory)
-- [x] Load more: per-IP rate limited (DB-backed + in-memory)
-- [x] OG image generation: per-IP rate limited (Pattern-4: charged post-validation)
-- [x] Share link creation: per-IP rate limited (in-memory + DB-backed)
-- [x] Semantic search: per-IP rate limited (Pattern-2: rollback on validation failure)
-- [x] View recording: per-IP rate limited (in-memory only, best-effort)
-- [x] Lightroom upload: cumulative tracker with TOCTOU protection
-- [x] **FIXED (5f4a5e95):** Rate-limit entry getters return shallow copies to prevent mutable reference leaks
-
-### Privacy & Data Protection
-- [x] GPS coordinates excluded from public API responses
-- [x] `strip_gps_on_upload` scrubs on-disk originals (lossless byte-level GPS-IFD neutralization)
-- [x] `filename_original` and `user_filename` excluded from public queries
-- [x] `publicSelectFields` derived from `adminSelectFields` by omission
-- [x] Compile-time guard (`_SensitiveKeysInPublic`) enforces no sensitive keys in public fields
-- [x] `_PrivacySensitiveKeys` compile-time guard for admin-only fields
-- [x] `_MapPrivacyGuard` ensures map-visible fields only add latitude/longitude
-- [x] `_LargePayloadGuard` prevents `blur_data_url` from leaking into public listings
-
-### Security Headers
-- [x] `X-Content-Type-Options: nosniff` (global)
-- [x] `Content-Security-Policy` with nonce, frame-ancestors, base-uri, form-action, object-src
-- [x] `X-Frame-Options: SAMEORIGIN` (global)
-- [x] `Referrer-Policy: strict-origin-when-cross-origin` (global)
-- [x] `Permissions-Policy` with camera/microphone/geolocation denial
-- [x] `Strict-Transport-Security` (HSTS) in production (`max-age=31536000; includeSubDomains; preload`)
-- [x] Cache-Control headers on all responses (appropriate per route)
-
-### Audit & Monitoring
-- [x] Fire-and-forget audit logging for all privileged actions
-- [x] Audit log retention with negative-value guard (COR-R4C6-10)
-- [x] Rate-limit purge with bounded growth
-- [x] Structured error responses (no stack traces in production)
-- [x] **FIXED (9c5c38ca):** ENOENT distinction in `deleteImageVariants` improves error observability
+- [x] Argon2id password hashing (64 MiB / t=3 / p=4)
+- [x] HMAC-SHA256 sessions, `timingSafeEqual`, secure cookie attrs (secure always-on in prod)
+- [x] PAT auth: SHA-256 stored, constant-time compare, scope + expiry enforced, parameterized lookup
+- [x] `withAdminAuth` on every `api/admin/**` route (lint-enforced, verified)
+- [x] `requireSameOriginAdmin()` on every mutating server action (lint-enforced, verified)
+- [x] Public mutating routes rate-limited (lint-enforced); expensive GETs rate-limited at runtime (gap → R12-SEC-02)
+- [x] Path traversal: whitelist + SAFE_SEGMENT + realpath containment + symlink rejection (upload serve + backup download)
+- [x] File upload: UUID names, per-file 200 MiB + cumulative caps, disk pre-check, decompression-bomb `limitInputPixels`, HDR gate
+- [x] SSRF: OG photo route pins fetch base to trusted origin, fail-closed
+- [x] Open redirect: OG fallback validates same-origin
+- [x] CSV injection: formula-char prefix + C0/C1 + bidi + zero-width strip (`csv-escape.ts`)
+- [x] XSS: React escaping; all JSON-LD via `safeJsonLd`; OG via `sanitizeForOg`
+- [x] Unicode bidi/zero-width rejected at all admin string entry points (`validation.ts` / `sanitize.ts`)
+- [x] Command injection: `spawn` array form, no shell, env-based MySQL creds
+- [x] SQL injection: Drizzle parameterization; raw SQL confined to schema/admin maintenance, no untrusted concat
+- [x] Privacy: GPS/filename excluded from public projections; on-disk GPS strip; analytics country-only
+- [x] Security headers: CSP (nonce), HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, nosniff
+- [x] Dependencies: `npm audit` 0 vulnerabilities (full + prod-only)
+- [x] No hardcoded secrets
 
 ---
 
-## Lint Gate Verification
+## Final Sweep — Commonly Missed Issues
 
-All three security lint gates passed:
-
-1. **`npm run lint:api-auth`** — All admin API routes wrap HTTP method exports with `withAdminAuth(...)`
-2. **`npm run lint:action-origin`** — All mutating server actions (except `auth` and `public` by design) store and return early on `requireSameOriginAdmin()` result
-3. **`npm run lint:public-route-rate-limit`** — All public API mutating routes call rate-limit pre-increment helpers or carry explicit exemption comments
-
----
-
-## Secrets Scan Results
-
-- **Grep for `api[_-]?key`, `password`, `secret`, `token` across source files:** No hardcoded secrets found. All sensitive values are sourced from environment variables.
-- **Git history scan (`git log -p` for secret patterns):** Clean — no secrets in commit history.
-- **`.env.local.example`:** Contains placeholder values only (`<change-me>`, `<random-64-char-hex>`).
-
----
-
-## Dependency Audit Results
-
-- **`npm audit`:** No CRITICAL or HIGH severity vulnerabilities found.
-- **Key security dependencies:**
-  - `argon2`: v0.41.1 (latest stable, Argon2id support)
-  - `sharp`: v0.33.5 (latest stable, image processing)
-  - `mysql2`: v3.12.0 (latest stable, MySQL driver)
-  - `next`: v16.2.0 (latest stable major)
-
----
-
-## Final Sweep: Commonly Missed Security Issues
-
-| Issue | Status | Notes |
-|-------|--------|-------|
-| SQL Injection | NOT FOUND | All queries use Drizzle ORM parameterization; raw SQL is only in schema/admin maintenance with no untrusted concatenation |
-| XSS (reflected/stored) | NOT FOUND | React escapes HTML; JSON-LD uses `safeJsonLd`; OG uses `sanitizeForOg` |
-| CSRF | NOT FOUND | Next.js framework CSRF + explicit `requireSameOriginAdmin()` on all mutations |
-| Insecure Deserialization | NOT FOUND | No deserialization of untrusted data; JSON parsing is minimal and validated |
-| Path Traversal | NOT FOUND | `SAFE_SEGMENT` regex + `realpath` containment + symlink rejection |
-| Race Conditions (security-critical) | NOT FOUND | Advisory locks on restore/backfill/upload; conditional UPDATEs on processing claims |
-| SSRF | NOT FOUND | OG route fails closed on unparseable `siteConfig.url` (MEDIUM finding remediated) |
-| Open Redirect | NOT FOUND | `buildFallbackResponse` validates `ogImageUrl` origin (MEDIUM finding remediated) |
-| Insecure Direct Object Reference | NOT FOUND | All resources checked against auth context |
-| Missing Security Headers | NOT FOUND | HSTS now present in `next.config.ts` (LOW finding remediated) |
-| Information Disclosure | NOT FOUND | Generic error messages; no stack traces in production; stderr sanitized |
-| Session Fixation | NOT FOUND | Old sessions deleted on login; new session token generated |
-| Brute Force | NOT FOUND | Dual-bucket rate limiting (IP + account) with Argon2id |
-| Clickjacking | NOT FOUND | `frame-ancestors 'self'` in CSP + `X-Frame-Options: SAMEORIGIN` |
-| Content Sniffing | NOT FOUND | `X-Content-Type-Options: nosniff` globally |
-| Timing Attacks | NOT FOUND | Dummy Argon2 hash for user enumeration prevention; `timingSafeEqual` for token comparison |
-| Unicode Bidi/Trojan Source | NOT FOUND | `UNICODE_FORMAT_CHARS` rejected at all admin string entry points; `stripUnicodeFormatting` for machine-derived strings |
-| CSV Injection | NOT FOUND | `escapeCsvField` strips C0/C1, bidi, zero-width, and prefixes formula chars |
-| Backup/Restore Security | NOT FOUND | Authenticated download route; path containment; symlink rejection; SQL dump header validation |
-| Shared Group Access Control | NOT FOUND | Base56 key validation; expiry check; rate limiting; view-count buffering |
-| Broken Access Control (missing auth) | NOT FOUND | **FIXED (b22fa85e):** `isAdmin()` checks added to `deleteAdminUser` and LR token actions |
-| Mutable State Leak | NOT FOUND | **FIXED (5f4a5e95):** Rate-limit getters return shallow copies |
-| Input Validation (type confusion) | NOT FOUND | **FIXED (bcd67b12):** `Array.isArray` guard on `loadMoreImages` tagSlugs |
+| Issue | Status |
+|-------|--------|
+| Missing auth on a new route | NOT FOUND — only 8 API routes; admin routes lint-gated; no new unauthenticated mutating route |
+| TOCTOU | NOT FOUND — upload-quota tracker pre-claims; serve paths stream from realpath; advisory locks on restore/backfill/upload/processing |
+| Timing leaks | NOT FOUND — `timingSafeEqual` on session + token; dummy Argon2 for user-enumeration |
+| Error messages leaking internals | NOT FOUND — generic client errors; stderr redacted; no stack traces in prod |
+| ReDoS | NOT FOUND — all regexes linear/anchored |
+| SSRF / open redirect | NOT FOUND — OG fetch base pinned + fail-closed; fallback same-origin-validated |
+| Prototype pollution / type confusion | NOT FOUND — `Array.isArray` + `normalizeStringRecord` shape guards |
+| Insecure deserialization | NOT FOUND — JSON parsing minimal + validated; embeddings decoded via length-checked `decodeEmbeddingColumn` |
+| Mutable state leak | NOT FOUND — `BoundedMap.get()` + rate-limit getters return shallow copies; counters mutate via `.set()` |
+| Header injection (Content-Disposition) | NOT FOUND — backup filename anchored regex disallows quotes/CRLF |
+| Latent CSRF-bypass footgun | R12-SEC-01 (LOW, not exploitable today) |
+| CI coverage gap for expensive GET rate-limit | R12-SEC-02 (LOW, informational) |
 
 ---
 
 ## Conclusion
 
-GalleryKit's security posture is **strong and has improved since the prior review**. The codebase demonstrates mature security engineering with:
+GalleryKit's security posture is **strong and continues to converge**. This cycle's 21 commits are uniformly positive hardening (rate-limit mutation-bug fixes, audit field prioritization, graceful shutdown, config operator-gate in the fallback path, ENOENT-distinguished cleanup). No new CRITICAL/HIGH/MEDIUM findings. The two LOW items are a never-exploited-today CSRF footgun whose "fix" commit was incomplete (R12-SEC-01) and a CI-coverage hardening suggestion for expensive public GET routes (R12-SEC-02).
 
-1. **Comprehensive authentication**: Argon2id, HMAC-SHA256 sessions, constant-time comparison, secure cookie attributes, PAT support with SHA-256 hashing
-2. **Defense-in-depth authorization**: Middleware + per-route + per-action auth checks, same-origin verification, token scope enforcement
-3. **Thorough input validation**: Unicode bidi/zero-width rejection, C0/C1 strip, path traversal prevention, symlink rejection, filename sanitization
-4. **Robust rate limiting**: Dual-bucket (IP + account) for login, DB-backed + in-memory for public endpoints, Pattern-4 charged post-validation for OG routes
-5. **Privacy protection**: GPS stripping (on-disk + DB), field-level access control, compile-time guards for sensitive fields
-6. **Secure file handling**: UUID filenames, directory whitelisting, content-type validation, ETag-based cache invalidation, disk space pre-checks
-7. **Audit and monitoring**: Fire-and-forget audit logging, structured error responses, stderr sanitization
-8. **Security headers**: CSP with nonce, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy, X-Content-Type-Options
+**Recommended maintenance:** (1) finish R12-SEC-01 by making the options variant truly internal; (2) extend `lint:public-route-rate-limit` to cover expensive GET routes (R12-SEC-02); (3) keep monitoring `npm audit` for `argon2`/`sharp`/`mysql2`/`next` CVEs.
 
-**All findings from the prior review have been remediated.** No new CRITICAL, HIGH, or MEDIUM findings were identified in this review. The six commits since the last review (c0522dec → bcd67b12) are all positive security or safety improvements:
-- **b22fa85e:** `isAdmin()` checks added to `deleteAdminUser` and LR token actions (closes broken access control gap)
-- **5f4a5e95:** Rate-limit entry getters return shallow copies (prevents mutable reference leaks)
-- **bcd67b12:** `Array.isArray` guard on `loadMoreImages` tagSlugs (input validation hardening)
-- **7453030e:** Restore-maintenance checks added to smart collections and embedding backfill (operational consistency)
-- **9c5c38ca:** ENOENT distinction in `deleteImageVariants` (error observability improvement)
-- **db55056f:** Revalidation moved outside try/catch (prevents file/DB inconsistency on revalidation errors)
-
-**Recommended ongoing maintenance:**
-1. Continue maintaining the three security lint gates as blocking CI checks
-2. Monitor `npm audit` for new CVEs in security-critical dependencies (`argon2`, `sharp`, `mysql2`, `next`)
-3. Review the `TRUST_PROXY` configuration on production deployments (the rate-limit system emits a one-time `[SECURITY]` warning when proxy headers are present but `TRUST_PROXY` is not set)
-4. Consider adding a lint rule or code review checklist item to verify `isAdmin()` is present before `requireSameOriginAdmin()` in all new mutating admin actions (the b22fa85e fix suggests this pattern was missed in two places)
-
----
-
-*Report generated by Security Reviewer agent. All findings verified against source code at HEAD bcd67b12.*
+*All findings verified against source at HEAD `2a9976a1`. Lint gates + `npm audit` evidence captured this cycle.*

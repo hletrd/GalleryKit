@@ -1,905 +1,292 @@
-# Comprehensive Latent Bug Review — GalleryKit Debugger
+# Debugger Review — Cycle 12
 
-**Scope:** Full repository review of all source files for latent bugs, failure modes, edge cases, null/undefined handling, error path gaps, and bugs that might not surface during normal testing.  
-**Date:** 2026-06-25  
-**Reviewer:** Debugger agent  
-**HEAD:** 4e132b03 (run-10 cycle-10 convergence)  
-**Previous review:** bcd67b12 (run-9 cycle-8)  
-**Confidence labels:** High, Medium, Low
+**Date:** 2026-06-27
+**HEAD:** 2a9976a1
+**Reviewer:** debugger agent
+**Scope:** Latent bug surface, failure modes, regressions introduced by cycle 11 changes; deep inspection of image processing, queue, rate-limit, retention GC, color detection, DB init/timeout, session, migrate.js
 
 ---
 
 ## Summary
 
-After reviewing 40+ source files across the GalleryKit codebase at HEAD 4e132b03, I re-evaluated all 15 findings from the previous cycle's debugger review (bcd67b12). **6 additional findings have been fixed** since cycle 9 (Finding 2: normalizeExposureTime NaN/Infinity; Finding 4: failRestore async; Finding 6: dummyHash TOCTOU; plus 3 new fixes: shallow-copy mutation bugs in rate-limit helpers, bootstrap logic refinement, and request-origin null protocol handling). **2 new latent bugs were identified** in the changed code. The remaining open findings were re-evaluated: 1 is still actionable, 1 is theoretical only. The codebase remains exceptionally well-hardened.
+**Cycle 12 new findings: 4 (0 CRITICAL, 1 MEDIUM, 3 LOW)**
+**Carry-over open findings from prior cycles: 3 (0 CRITICAL, 0 MEDIUM, 3 LOW)**
+**Confirmed closed from prior cycles: 2 (AGG-M6, AGG-M13 core)**
 
 ---
 
-## Previously Identified Issues — Status Check
+## New Findings
 
-| # | Finding | File | Status | Notes |
-|---|---------|------|--------|-------|
-| 1 | `cosineSimilarity` denormal underflow | `clip-embeddings.ts:37` | **FIXED** | EPSILON check added (`denom < EPSILON`) |
-| 2 | `normalizeExposureTime` NaN/Infinity | `process-image.ts:1337` | **FIXED** | `Number.isFinite()` checks added for array form |
-| 3 | `getServingColorSettingsHash` no circuit breaker | `serve-upload.ts:50` | **STILL OPEN** | No exponential backoff during DB outages |
-| 4 | `failRestore` async in sync handler | `db-actions.ts:465` | **FIXED** | Now synchronous with `.catch()` on unlink |
-| 5 | Abort signal listener leak | `serve-upload.ts:280` | **STILL OPEN** | `{ once: true }` is acceptable; belt-and-braces only |
-| 6 | `getDummyHash` TOCTOU race | `auth.ts:65` | **FIXED** | Pre-computed at module init |
-| 7 | `deleteAdminUser` TOCTOU | `admin-users.ts` | Already correct | Global advisory lock prevents race |
-| 8 | `getDummyHash` timing side-channel | `auth.ts:65` | **FIXED** | Same fix as #6 eliminates timing diff |
-| 9 | `BoundedMap` hard cap not enforced | `bounded-map.ts:65` | Already correct | `set()` auto-calls `enforceHardCap()` |
-| 10 | `iloc` parse offset bug | `gps-exif-strip.ts:480` | Already correct | Bounds check is correct |
-| 11 | `readS15Fixed16` NaN propagation | `icc-chromaticity.ts:106` | Already correct | Callers check `isFinite()` |
-| 12 | `useDisplayCapability` SSR mismatch | `use-display-capability.ts:39` | Already correct | Documented intentional trade-off |
-| 13 | `getGalleryConfig` cache invalidation | `gallery-config.ts` | Already correct | Request-scoped cache is correct |
-| 14 | `purgeOldViewEvents` missing transaction | `view-retention.ts:57` | Already correct | Idempotent GC operation |
-| 15 | `logAuditEvent` metadata serialization | `audit.ts:16` | Already correct | Fallback is sufficient |
+### R12-DBG-01 — Shutdown timeout timer never cleared on successful drain
 
----
+- **ID:** R12-DBG-01
+- **Severity:** MEDIUM
+- **Confidence:** Confirmed by reasoning
+- **File:** `apps/web/src/instrumentation.ts:21-36`
 
-## Fixes Since Cycle 9 (Verified)
+**Latent bug:**
+`shutdownTimeout` is created unconditionally with `new Promise<void>((resolve) => { setTimeout(() => { console.warn('[Shutdown] Timed out ...'); resolve(); }, 15_000); })`. The `setTimeout` handle is never captured and never cleared. When `Promise.all([shutdownImageProcessingQueue(), flushBufferedSharedGroupViewCounts()])` resolves first (the normal success path), `Promise.race` resolves and `gracefulShutdown` continues to set `process.exitCode = 0`. Fifteen seconds later, the stale timer fires and logs:
 
-### Fix A: Shallow-Copy Mutation Bugs in Rate-Limit Helpers (M3 / M6)
+```
+[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining
+```
 
-**Files:** `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/actions/public.ts`  
-**Commits:** `9d88e217`, `2b166245`, `74bd776a`, `038b3154`  
-**Confidence:** High
+even though `completed = true` and the drain succeeded cleanly.
 
-**What was fixed:** The `BoundedMap.get()` method returns a shallow copy of object values to prevent external mutation. However, several rate-limit helpers were mutating the returned copy and then calling `map.set()` with the mutated copy — which is correct. The bug was that some helpers were mutating the returned entry directly (e.g., `entry.count++`) without calling `set()`, which meant the mutation was lost on the next `get()` call because `get()` returns a fresh shallow copy each time.
+**Trigger condition:** Any clean process shutdown where queue drains in < 15s. Fires on every clean SIGTERM and SIGINT handled by the cycle 11 code.
 
-**Before (buggy):**
+**Observable failure:** Misleading log entry in production deployment logs 15 seconds after every clean container stop. Operators seeing this in logs may misdiagnose as failed drains and trigger unnecessary incident investigation. Additionally, the Node.js event loop is held alive for an extra 15 seconds by the active timer (see also R12-DBG-04).
+
+**Suggested fix:**
+Capture the timer handle so it can be cleared in the success branch:
 ```typescript
-const entry = ogRateLimit.get(ip);
-if (entry) {
-    entry.count++;  // Mutates the shallow copy, NOT the internal Map
+let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+const shutdownTimeout = new Promise<void>((resolve) => {
+    shutdownTimer = setTimeout(() => {
+        console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
+        resolve();
+    }, 15_000);
+    shutdownTimer.unref();
+});
+try {
+    await Promise.race([
+        Promise.all([
+            shutdownImageProcessingQueue(),
+            flushBufferedSharedGroupViewCounts(),
+        ]).then(() => {
+            completed = true;
+            if (shutdownTimer !== undefined) clearTimeout(shutdownTimer);
+        }),
+        shutdownTimeout,
+    ]);
+```
+
+---
+
+### R12-DBG-02 — getProcessingQueueState() key-presence guard regressed for null queue
+
+- **ID:** R12-DBG-02
+- **Severity:** LOW
+- **Confidence:** Confirmed by reasoning
+- **File:** `apps/web/src/lib/image-queue.ts:183-192`
+
+**Latent bug:**
+The `getProcessingQueueState()` function validates the global state object with:
+
+```typescript
+if (
+    existing
+    && typeof existing === 'object'
+    && 'queue' in existing
+    && 'enqueued' in existing
+    && 'bootstrapped' in existing
+) {
+    return existing;
 }
 ```
 
-**After (fixed):**
+`'queue' in existing` is a key-presence check, not a type/value check. If `existing.queue === null` (possible in test teardown, state corruption, or an edge-case re-initialization path where the key is set but the value is `null`), this guard passes and returns the corrupt state object. Any downstream caller that subsequently invokes `state.queue.add(...)`, `state.queue.size`, or `state.queue.onIdle()` throws `TypeError: Cannot read properties of null (reading 'add')`.
+
+The pre-cycle-11 guard `if (!globalWithQueue[processingQueueKey])` treated `null` as falsy and would fall through to re-initialize, preventing this path.
+
+**Trigger condition:** State object with `queue: null` present on `globalThis`. Realistic in integration test teardown or a process restart boundary where partial cleanup nulled the queue handle.
+
+**Observable failure:** `TypeError: Cannot read properties of null (reading 'add')` on the first upload or queue operation after state corruption. Manifests as a 500 on image upload with no queue re-initialization.
+
+**Suggested fix:** Add a non-null value check alongside the key-presence check:
 ```typescript
-const entry = ogRateLimit.get(ip);
-if (entry) {
-    ogRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
-}
+&& 'queue' in existing
+&& (existing as { queue: unknown }).queue !== null
+&& typeof (existing as { queue: unknown }).queue === 'object'
 ```
 
-This pattern was fixed across `preIncrementOgAttempt`, `rollbackOgAttempt`, `preIncrementShareAttempt`, `preIncrementSemanticAttempt`, `rollbackSemanticAttempt`, `preIncrementLoadMoreAttempt`, `rollbackLoadMoreAttempt`, and `rollbackSearchAttempt`.
-
-**Verification:** All rate-limit helpers now consistently use `set()` after computing the new state. The `BoundedMap.get()` contract (shallow copy) is honored.
-
 ---
 
-### Fix B: Bootstrap Logic Refinement (M14)
+### R12-DBG-03 — initTimeout timer accumulates on every pool-reuse getConnection() call
 
-**File:** `apps/web/src/lib/image-queue.ts`  
-**Commit:** `d6107f89`  
-**Confidence:** High
+- **ID:** R12-DBG-03
+- **Severity:** LOW
+- **Confidence:** Confirmed by reasoning
+- **File:** `apps/web/src/db/index.ts:87-100`
 
-**What was fixed:** The bootstrap logic previously could not distinguish between "first scan returned empty" (truly no pending images) and "continuation scan returned empty" (all images in the batch are permanently failed). The fix adds explicit state machine transitions:
+**Latent bug:**
+`getConnection()` is patched to race `initPromise` against a fresh `initTimeout = new Promise<void>((_, reject) => { setTimeout(() => reject(...), 10_000); })`. The `setTimeout` handle is never captured and never cleared. For the first use of a freshly created pool connection, `initPromise` is pending (the `SET group_concat_max_len` query) and the race correctly waits. However, after `SET` succeeds, `connectionInitSymbol` still holds the already-RESOLVED promise. On every subsequent `getConnection()` call for that same connection, `if (initPromise)` is truthy (a resolved Promise is truthy), so a fresh 10-second `setTimeout` is armed. `Promise.race` resolves immediately via microtask queue (since `initPromise` is already settled), and the function returns — but the 10-second timer is now orphaned.
 
-- `pending.length === 0 && bootstrapCursorId === null`: First scan empty — truly no pending images, set `bootstrapped = true`.
-- `pending.length === 0 && bootstrapCursorId !== null`: Empty continuation — might have missed valid images after permanently failed ones. Reset cursor and schedule retry.
-- `pending.length < BOOTSTRAP_BATCH_SIZE`: Non-empty batch smaller than limit — reached the end, set `bootstrapped = true`.
-- `pending.length === BOOTSTRAP_BATCH_SIZE`: Full batch — schedule continuation.
+`Promise.race` registers an internal rejection handler on `initTimeout`, so the eventual `reject()` does not produce an unhandled rejection warning. The harm is purely resource: under steady production traffic (multiple queries per second), there is a constant backlog of active 10-second timers. Each is individually trivial, but the cumulative effect keeps the event loop artificially busy and inflates Node.js timer-queue pressure.
 
-**Verification:** The state machine correctly handles all four cases. No images are lost due to permanently failed batches blocking the cursor.
+**Trigger condition:** Any production workload with more than a few queries per second after initial pool warm-up. Every `db.execute()` and `db.query()` calls `getConnection()`, so this fires for every single database operation.
 
----
+**Observable failure:** Subtle event-loop keepalive inflation under load. Also contributes to the process-won't-exit-on-its-own issue (R12-DBG-04), since there are always active timers in steady state.
 
-### Fix C: Request Origin Null Protocol Handling
-
-**File:** `apps/web/src/lib/request-origin.ts`  
-**Commits:** `5ba4025c`, `450d2a53`  
-**Confidence:** High
-
-**What was fixed:** `getExpectedOrigin` previously fell back to `http` when the protocol was null, which could produce incorrect origins (e.g., `http://gallery.example.com` when the actual origin is HTTPS). The fix returns `null` instead, causing `hasTrustedSameOrigin` to fail closed.
-
-**Before (buggy):**
+**Suggested fix (option A):** Clear the stored `initPromise` after successful race so future calls skip the block entirely:
 ```typescript
-return toOrigin(`${protocol ?? 'http'}://${host}`);
-```
-
-**After (fixed):**
-```typescript
-const host = stripDefaultPort(rawHost, protocol ?? 'http');
-if (!protocol) return null;
-return toOrigin(`${protocol}://${host}`);
-```
-
-**Verification:** The fail-closed behavior is correct. When the protocol cannot be determined, same-origin checks return `false` rather than making an unsafe assumption.
-
----
-
-### Fix D: safeUnlink/safeCloseDirHandle Non-ENOENT Error Logging (M7)
-
-**File:** `apps/web/src/lib/process-image.ts`  
-**Commit:** `3111cc7e`  
-**Confidence:** High
-
-**What was fixed:** Previously, `fs.unlink().catch(() => {})` silently swallowed all errors, including real problems like `EACCES` (permission denied) and `ENOSPC` (disk full). The fix introduces `safeUnlink` and `safeCloseDirHandle` helpers that distinguish `ENOENT` (expected — file already gone) from other errors, logging non-ENOENT errors at `debug` level for operator diagnosis.
-
-**Verification:** The helpers correctly identify `ENOENT` and log other errors. All call sites in `process-image.ts` have been migrated from `.catch(() => {})` to `safeUnlink()`.
-
----
-
-### Fix E: OG/Share Rate-Limit Timer-Based Prune
-
-**File:** `apps/web/src/lib/rate-limit.ts`  
-**Commit:** `9d88e217`  
-**Confidence:** High
-
-**What was fixed:** The `ogRateLimit` and `shareRateLimit` maps previously only pruned on `preIncrement*` calls, which meant expired entries could accumulate if no requests arrived. The fix adds timer-based pruning with `lastOgRateLimitPruneAt` / `lastShareRateLimitPruneAt` tracking, similar to the search rate-limit pattern.
-
-**Verification:** Pruning now happens on both access and time-based triggers. The hard cap in `BoundedMap` provides a backstop.
-
----
-
-## New Findings (Cycle 10)
-
-### Finding 16: `decimalToRational` Denominator Infinity for Subnormal Values
-
-**File:** `apps/web/src/lib/process-image.ts:1403-1410`  
-**Confidence:** Medium
-
-**Buggy Code:**
-```typescript
-function decimalToRational(val: number): string {
-    if (val >= 1) return String(Math.round(val * 100) / 100);
-    const denominator = Math.round(1 / val);
-    if (denominator > 0 && Math.abs(1 / denominator - val) < 0.001) {
-        return `1/${denominator}`;
+try {
+    await Promise.race([initPromise, initTimeout]);
+    // Mark this connection as initialized so future getConnection()
+    // calls skip the race entirely rather than spawning a new timer.
+    if (underlying) {
+        underlying[connectionInitSymbol] = undefined;
     }
-    return String(Math.round(val * 10000) / 10000);
-}
+} catch (err) { ... }
 ```
 
-**Trigger Scenario:** The `normalizeExposureTime` function at line 1389 guards with `Number.isFinite(val) && val > 0`, but `val` can be extremely small positive numbers (subnormal values, e.g., `val = 1e-323`). For such values:
-- `1 / val` underflows to `Infinity` (since `1 / 1e-323` exceeds the maximum finite float)
-- `Math.round(Infinity)` returns `Infinity`
-- `denominator > 0` is `true` (Infinity > 0)
-- `1 / denominator` is `0`
-- `Math.abs(0 - val) < 0.001` is `true` (since val is tiny)
-- Result: `"1/Infinity"` — wait, `String(Infinity)` is `"Infinity"`, so `1/${denominator}` becomes `"1/Infinity"`
-
-Actually, `String(Math.round(Infinity))` is `"Infinity"`, and template literal `1/${Infinity}` produces `"1/Infinity"`. This is a nonsensical exposure time string that could be stored in the database.
-
-**Impact:** Low. Subnormal EXIF values are extremely rare in practice. The stored value is nonsensical but not exploitable.
-
-**Fix:**
+**Suggested fix (option B):** Unref the timer so it does not hold the event loop:
 ```typescript
-function decimalToRational(val: number): string {
-    if (val >= 1) return String(Math.round(val * 100) / 100);
-    const denominator = Math.round(1 / val);
-    if (Number.isFinite(denominator) && denominator > 0 && Math.abs(1 / denominator - val) < 0.001) {
-        return `1/${denominator}`;
-    }
-    return String(Math.round(val * 10000) / 10000);
-}
+const initTimeout = new Promise<void>((_, reject) => {
+    const t = setTimeout(() => reject(new Error('DB connection init query timed out after 10s')), 10_000);
+    t.unref();
+});
 ```
 
-**Lines changed:** 1 (add `Number.isFinite(denominator)` check)
+Option A is preferred: it eliminates the race creation entirely for the common case.
 
 ---
 
-### Finding 17: `basePixels` Multiplication Could Overflow for Malicious Metadata
+### R12-DBG-04 — gracefulShutdown never calls process.exit(); process does not exit after drain
 
-**File:** `apps/web/src/lib/process-image.ts:1041`  
-**Confidence:** Medium
+- **ID:** R12-DBG-04
+- **Severity:** LOW
+- **Confidence:** Confirmed by reasoning
+- **File:** `apps/web/src/instrumentation.ts:49,63,71`
 
-**Buggy Code:**
+**Latent bug:**
+After `gracefulShutdown` completes — either by draining successfully or hitting the 15-second timeout — it sets `process.exitCode = completed ? 0 : 1` and returns. It never calls `process.exit()`. The mysql2 connection pool, Next.js HTTP server, and (until R12-DBG-01/R12-DBG-03 are fixed) orphaned timers all keep the event loop alive indefinitely. The process does NOT exit on its own after the graceful shutdown function completes.
+
+In the Docker deployment (`docker stop gallerykit-web`), the consequence is:
+1. SIGTERM sent → `gracefulShutdown` starts draining the queue (good)
+2. Docker's default stop timeout is 10 seconds (`stop_grace_period`)
+3. If the drain completes in < 10s: `process.exitCode = 0` is set, function returns, process KEEPS RUNNING
+4. Docker stop timeout expires → SIGKILL
+5. Process exits via SIGKILL; `process.exitCode = 0` is irrelevant (exit code from SIGKILL is 137)
+
+The 15-second code timeout is longer than Docker's 10-second default stop timeout, so Docker SIGKILL's before the code's own timer can ever fire. The `completed ? 0 : 1` distinction in `process.exitCode` is never surfaced to Docker or systemd.
+
+**Trigger condition:** Every `docker stop` in production.
+
+**Observable failure:** Docker always reports exit code 137 (SIGKILL) for the container stop, never a voluntary 0 or 1. The intention of setting `process.exitCode` to distinguish clean vs truncated shutdown is unrealized. Additionally, if future code uses the `'exit'` event to perform last-chance cleanup, that cleanup runs only if `process.exit()` is called first.
+
+**Suggested fix:** Call `process.exit()` at the end of `gracefulShutdown` after setting `process.exitCode`:
 ```typescript
-const basePixels = freshBaseWidth * baseHeight;
-if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
+process.exitCode = completed ? 0 : 1;
+process.exit(process.exitCode);
 ```
 
-**Trigger Scenario:** A malicious or corrupted image reports dimensions of 303,700 x 303,700 (or larger) in metadata. In JavaScript, `freshBaseWidth * baseHeight` can exceed `Number.MAX_SAFE_INTEGER` (9,007,199,254,740,991), causing precision loss. For example, a 100,000 x 100,000 image reports `basePixels = 10,000,000,000` which is within safe integer range, but a 303,700 x 303,700 image exceeds it. More critically, the comparison `basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS` (default 50,000,000) becomes unreliable when `basePixels` is imprecise. If `basePixels` overflows to `Infinity`, the condition is true and the image is correctly downscaled; if it underflows to a small value due to precision loss, a massive image could theoretically bypass the downscale gate and enter the rgb16 pipeline, causing OOM.
+`process.exit()` triggers registered `'exit'` event handlers synchronously before the process terminates, which is the correct semantic. Calling it after the drain is complete is safe.
 
-**Impact:** Medium. Requires a malicious image with fabricated dimensions. Sharp's `limitInputPixels` provides a defense-in-depth cap. The rgb16 pipeline would likely fail on such a large image anyway.
+---
 
-**Fix:**
+## Carry-Over Open Findings
+
+The following findings were raised in prior cycles and are confirmed still present at HEAD 2a9976a1.
+
+---
+
+### R12-DBG-05 — decimalToRational subnormal input returns "1/Infinity"
+
+- **ID:** R12-DBG-05 (originally Finding 16 from prior cycle)
+- **Severity:** LOW
+- **Confidence:** Confirmed by reasoning
+- **File:** `apps/web/src/lib/process-image.ts` (`normalizeExposureTime`, `decimalToRational`)
+
+**Latent bug:**
+`normalizeExposureTime` guards with `typeof val === 'number' && Number.isFinite(val) && val > 0` before calling `decimalToRational(val)`. The guard `val > 0` passes for subnormal floats such as `Number.MIN_VALUE` (≈ 5e-324). Inside `decimalToRational`:
+- `1 / Number.MIN_VALUE = Infinity`
+- `Math.round(Infinity) = Infinity`
+- `Infinity > 0 = true` (passes the "rational denominator" check)
+- `1 / Infinity = 0`
+- `|0 - Number.MIN_VALUE| < 0.001 = true` (passes the tolerance check)
+- Returns `"1/Infinity"` as the exposure time string
+
+**Trigger condition:** EXIF `ExposureTime` rational tag with an astronomically small non-zero numerator (sub-1e-300 range). Not realistically occurring in camera-produced files; possible in a crafted or corrupted EXIF payload.
+
+**Observable failure:** `"1/Infinity"` stored in the `exposure_time` DB column and rendered in the photo viewer's EXIF panel.
+
+**Suggested fix:** Strengthen the guard to `val >= Number.EPSILON` instead of `val > 0`, or add `Number.isFinite(Math.round(1 / val))` inside `decimalToRational` before attempting rational formatting.
+
+---
+
+### R12-DBG-06 — BoundedMap.entries() returns raw iterator without shallow copies
+
+- **ID:** R12-DBG-06 (originally Finding 35 from prior cycle)
+- **Severity:** LOW
+- **Confidence:** Confirmed by code inspection
+- **File:** `apps/web/src/lib/bounded-map.ts:115-117`
+
+**Latent bug:**
+`BoundedMap.get()` returns `{ ...value }` (a shallow copy) specifically to prevent external mutation of internal state. `entries()` at line 115 returns `this.map.entries()` — the raw internal Map iterator, exposing actual stored references. A caller that iterates `entries()` and mutates returned objects directly mutates the BoundedMap's internal state, bypassing the copy-on-read guarantee. `[Symbol.iterator]()` at line 119 has the same issue.
+
+Currently, no known callsite uses `entries()` to mutate entries, but the asymmetry is a correctness trap for future callers.
+
+**Suggested fix:**
 ```typescript
-const basePixels = Number(BigInt(freshBaseWidth) * BigInt(baseHeight));
-if (!Number.isFinite(basePixels)) {
-    throw new Error('Image dimensions exceed safe integer range');
-}
-if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
-```
-
-**Lines changed:** 4
-
----
-
-### Finding 18: `stripGpsFromOriginal` Temp Path in Same Directory as Original
-
-**File:** `apps/web/src/lib/process-image.ts:1611`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-const tmpPath = filePath + '.gps-strip.' + randomUUID() + '.tmp';
-```
-
-**Trigger Scenario:** The temp file is created in the same directory as the original. If the original path is very long (e.g., deep nested directory structure), `tmpPath` could exceed the filesystem's maximum path length (e.g., 4096 bytes on ext4), causing `fs.writeFile` to fail with `ENAMETOOLONG`. Additionally, if the directory is world-writable, an attacker with local access could create a symlink at the predicted temp path before the rename — though `randomUUID()` makes this attack impractical.
-
-**Impact:** Low. Path length exhaustion is a theoretical concern for extremely deep directory structures. The UUID makes symlink attacks impractical.
-
-**Fix:**
-```typescript
-const tmpPath = path.join(os.tmpdir(), `${path.basename(filePath)}.gps-strip.${randomUUID().slice(0, 8)}.tmp`);
-```
-
-**Lines changed:** 1
-
----
-
-### Finding 19: `getServingColorSettingsHash` No Circuit Breaker During DB Outages
-
-**File:** `apps/web/src/lib/serve-upload.ts:50-83`  
-**Confidence:** Medium
-
-**Status:** STILL OPEN — unchanged from cycle 8 and cycle 9.
-
-The `getServingColorSettingsHash` function uses a 5-second TTL cache with stale-while-revalidate. When the cache expires and a refresh is needed, if the DB is unavailable, the catch block falls back to the cached hash or `FALLBACK_HASH`. However, there is no exponential backoff or circuit breaker — every request past the 5-second TTL triggers a new DB query attempt, potentially hammering an already-failing DB.
-
-**Impact:** During a DB outage, every image request past the 5-second TTL triggers a new DB connection attempt. With a 10-connection pool and 20-queue limit, this could exhaust the pool and block other requests.
-
-**Fix:** Add a circuit breaker or exponential backoff for the refresh failure path. Track consecutive failures and extend the TTL on failure:
-
-```typescript
-let servingHashFailureCount = 0;
-const MAX_SERVING_HASH_FAILURES = 3;
-const SERVING_HASH_FAILURE_BACKOFF_MS = 30_000;
-
-async function getServingColorSettingsHash(): Promise<string> {
-    const now = Date.now();
-    const cached = servingHashCache;
-    const effectiveTTL = servingHashFailureCount > 0 
-        ? SERVING_SETTINGS_HASH_TTL_MS + (servingHashFailureCount * SERVING_HASH_FAILURE_BACKOFF_MS)
-        : SERVING_SETTINGS_HASH_TTL_MS;
-    if (cached && now - cached.fetchedAt < effectiveTTL) {
-        return cached.hash;
-    }
-    // ... rest unchanged, but on success reset servingHashFailureCount = 0
-    // on failure increment servingHashFailureCount
-}
-```
-
-**Lines changed:** ~10
-
----
-
-### Finding 20: `verifyAvifNclxInBuffer` Buffer Index Validation Gap
-
-**File:** `apps/web/src/lib/process-image.ts:192-205`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-let searchStart = 4;
-while (searchStart < buffer.length - 12) {
-    const colrIndex = buffer.indexOf('colr', searchStart, 'ascii');
-    if (colrIndex === -1 || colrIndex > buffer.length - 12) {
-        return { ok: false, message: 'no NCLX colr box found' };
-    }
-    const i = colrIndex;
-    searchStart = i + 1;
-    const size = buffer.readUInt32BE(i - 4);
-    if (size < 12) continue;
-```
-
-**Trigger Scenario:** `buffer.indexOf('colr', searchStart, 'ascii')` searches for the string 'colr'. If found at index `i`, the code reads `buffer.readUInt32BE(i - 4)` to get the box size. The check `searchStart = 4` ensures `i >= 4` for the first iteration, and `searchStart = i + 1` on subsequent iterations ensures `i >= searchStart >= 4`. So `i - 4 >= 0` is always true. However, if `buffer.length - 12` is negative (buffer shorter than 12 bytes), the loop condition `searchStart < buffer.length - 12` is false, and the loop never executes. But the prior check at line 185 (`buffer.length < 12`) already returns early. This is safe.
-
-The more subtle issue: `buffer.indexOf('colr', searchStart, 'ascii')` with `searchStart = i + 1` after a failed match means we could find 'colr' inside a previous false positive's data. But the size check `if (size < 12) continue` handles small boxes. The issue is that `size` is read from `i - 4` without checking that `i - 4 >= 0` — but as established, `i >= 4` so this is safe.
-
-**Verdict:** This is actually safe. The bounds are correctly validated. No fix needed.
-
----
-
-## Remaining Open Findings (Re-evaluated)
-
-### Finding 5: Abort Signal Listener Leak (Theoretical)
-
-**File:** `apps/web/src/lib/serve-upload.ts:280-290`  
-**Confidence:** Low
-
-**Status:** STILL OPEN — but theoretical only. The `{ once: true }` option ensures the listener is auto-removed after first fire. However, if the signal never fires (normal completion), the listener remains attached until the signal is garbage collected. In a long-running process with many requests, this could accumulate listeners if the AbortSignal is reused across requests.
-
-**Verdict:** The `{ once: true }` option is the standard pattern. The leak is theoretical and would require the same AbortSignal to be reused across many requests without firing. Next.js creates a new AbortSignal per request, so this is not a practical concern. No fix needed.
-
----
-
-## Commonly Missed Issues — Final Sweep (Cycle 10)
-
-### A. React Hook Violations
-
-Reviewed all React components. No hook violations found. All hooks are called at the top level, dependency arrays are complete, and no hooks are called conditionally.
-
-### B. Memory Leaks
-
-- Event listeners in `useDisplayCapability` are properly cleaned up in the unsubscribe function.
-- The `image-queue.ts` queue is properly cleared on shutdown.
-- The `viewCountBuffer` Map is bounded and flushed periodically.
-- No obvious memory leaks detected.
-
-### C. Resource Leaks
-
-- File descriptors in `serveUploadFile` are properly closed via `stream.destroy()` and the abort signal listener.
-- DB connections are managed by the Drizzle connection pool (10 connections, queue limit 20).
-- The `createReadStream` fd is released on error paths.
-
-### D. Unhandled Promise Rejections
-
-- All async IIFEs in `image-queue.ts` have internal try/catch blocks.
-- The `logAuditEvent` calls use `.catch(console.debug)`.
-- The `getColorSettingsHash` fallback path catches errors.
-- No unhandled promise rejections detected.
-
-### E. Race Conditions
-
-- The advisory lock pattern is used correctly for serialization.
-- The `PQueue` concurrency limit prevents concurrent processing of the same image.
-- The `flushGroupViewCounts` function uses `isFlushing` guard and Map swapping to prevent races.
-- The `getServingColorSettingsHash` has a benign race (duplicate promise creation) that doesn't affect correctness.
-
-### F. Type Coercion
-
-- The `safeInsertId` function properly handles BigInt to Number conversion with bounds checking.
-- The `isValidTagSlug` and `isValidSlug` functions use regex validation.
-- No dangerous type coercion patterns detected.
-
-### G. Buffer Overflow/Underflow
-
-- All buffer operations in `gps-exif-strip.ts` are bounds-checked.
-- The `readS15Fixed16` function checks offset bounds.
-- The ISOBMFF walker in `color-detection.ts` has max depth and scan limits.
-- No buffer overflow vulnerabilities detected.
-
-### H. ReDoS
-
-- No user-controlled regex patterns. All regexes are bounded (no nested quantifiers with backtracking), use character classes, or have explicit length limits. The `SAFE_SEGMENT` regex `/^[a-zA-Z0-9._-]+$/` is anchored and safe.
-- No ReDoS vulnerabilities detected.
-
-### I. Incorrect Error Handling
-
-- The `process-image.ts` `isTransientError` function correctly identifies retryable errors.
-- The `isBitdepthRejection` function correctly identifies permanent failures.
-- Error paths in `serveUploadFile` properly clean up streams.
-- No incorrect error handling detected.
-
-### J. Incorrect Cleanup in Finally Blocks
-
-- The `flushGroupViewCounts` finally block properly resets `isFlushing` and reschedules the timer.
-- The `getSessionSecret` finally block resets `sessionSecretPromise`.
-- No incorrect cleanup patterns detected.
-
-### K. New Patterns Checked in Cycle 10
-
-- **Semantic search route** (`api/search/semantic/route.ts`): The rate-limit rollback is correctly applied only on early-return paths. The content-type validation is strict. The body size guard is correct. No latent bug.
-- **OG photo route** (`api/og/photo/[id]/route.tsx`): The fallback response correctly validates same-origin. The rate-limit stays charged on post-DB failures. No latent bug.
-- **OG route** (`api/og/route.tsx`): The ETag computation covers all inputs. The rate-limit is correctly pre-incremented. No latent bug.
-- **Color detection** (`color-detection.ts`): The NCLX per-field guard correctly preserves ICC-derived values for unspecified fields. The ICC chromaticity fallback is correct. No latent bug.
-- **CLIP embeddings** (`clip-embeddings.ts`): The `decodeEmbeddingColumn` handles all three input cases. The `topK` function is correct. No latent bug.
-- **CLIP model** (`clip-model.ts`): The lazy singleton correctly nulls the promise on failure. The image preprocessing is correct. No latent bug.
-- **OG photo fetch** (`og-photo-fetch.ts`): The byte cap and timeout are correctly enforced. The fallback chain is correct. No latent bug.
-- **Request origin** (`request-origin.ts`): The trusted proxy header handling is correct. The default port stripping is correct. No latent bug.
-- **Audit logging** (`audit.ts`): The metadata truncation uses code-point-aware slicing. The fallback serialization is correct. No latent bug.
-- **Restore maintenance** (`restore-maintenance.ts`): The global state is correctly managed via Symbol.for. No latent bug.
-- **Action guards** (`action-guards.ts`): The same-origin check is correct. No latent bug.
-- **BoundedMap** (`bounded-map.ts`): The `set()` method auto-enforces the hard cap. The `prune()` method correctly evicts expired entries. No latent bug.
-- **Rate limiting** (`rate-limit.ts`): The `getClientIp` correctly handles proxy headers. The `normalizeIp` correctly handles IPv6 and IPv4 with ports. No latent bug.
-- **Auth rate limiting** (`auth-rate-limit.ts`): The rollback functions correctly decrement instead of deleting. No latent bug.
-- **GPS EXIF strip** (`gps-exif-strip.ts`): All buffer operations are bounds-checked. The ExtendedXMP reconstruction is correct. No latent bug.
-- **View retention** (`view-retention.ts`): The `resolveRetentionMs` correctly guards against negative values. The chunked DELETE is bounded. No latent bug.
-- **Upload tracker** (`upload-tracker.ts`): The settlement math correctly handles partial successes. No latent bug.
-- **Proxy middleware** (`proxy.ts`): The admin route protection correctly excludes the login page. The CSP nonce handling is correct. No latent bug.
-- **Image queue** (`image-queue.ts`): The bootstrap continuation correctly schedules after idle. The claim retry correctly removes from enqueued before rescheduling. The permanently-failed IDs are correctly capped. No latent bug.
-- **Data layer** (`data.ts`): The privacy compile-time guards are correct. The cursor pagination is correct. The prev/next navigation logic is correct (verified above). No latent bug.
-- **Load more / search** (`actions/public.ts`): The extracted `checkLoadMoreRateLimit` helper correctly handles pre-increment, DB increment, combined check, and rollback. No latent bug.
-- **Backfill runner** (`admin-backfill-runner.ts`): The connection pool budgeting is correct. The advisory lock acquisition is correct. No latent bug.
-
----
-
-## Conclusion
-
-The GalleryKit codebase remains exceptionally well-hardened at HEAD 4e132b03. The 6 fixes since cycle 9 demonstrate active maintenance:
-
-1. **Fix A (M3/M6):** Shallow-copy mutation bugs in rate-limit helpers — all fixed by using `set()` instead of direct mutation.
-2. **Fix B (M14):** Bootstrap logic refinement — correctly distinguishes first-scan empty from continuation empty.
-3. **Fix C:** Request origin null protocol handling — fails closed instead of assuming HTTP.
-4. **Fix D (M7):** safeUnlink/safeCloseDirHandle — distinguishes ENOENT from real errors.
-5. **Fix E:** OG/Share rate-limit timer-based prune — prevents expired entry accumulation.
-6. **Previously fixed (cycle 9):** normalizeExposureTime NaN/Infinity, failRestore async, dummyHash TOCTOU.
-
-The new findings in cycle 10 are:
-
-1. **Finding 16 (Medium):** `decimalToRational` can produce `"1/Infinity"` for subnormal EXIF values. Fix: add `Number.isFinite(denominator)` check.
-2. **Finding 17 (Medium):** `basePixels` multiplication could overflow for malicious metadata. Fix: use BigInt for the multiplication.
-3. **Finding 18 (Low):** `stripGpsFromOriginal` temp path in same directory as original. Fix: use `os.tmpdir()`.
-4. **Finding 19 (Medium):** `getServingColorSettingsHash` no circuit breaker during DB outages. Still open from cycle 9.
-5. **Finding 21 (Medium):** `photo-viewer.tsx` `imageLoaded` state not reset on `image` reference change without `id` change. Fix: use `image` object identity as dependency.
-6. **Finding 22 (Medium):** `photo-viewer.tsx` `prevImage`/`nextImage` preload may be stale after navigation. Fix: add `image?.id` to dependency array.
-7. **Finding 23 (Medium):** `photo-viewer.tsx` `showLightboxRef` updated asynchronously — race condition. Fix: use `useLayoutEffect` or callback ref pattern.
-8. **Finding 24 (Medium):** `photo-viewer.tsx` `requestIdleCallback` fallback timer may leak on unmount. Fix: add `mountedRef` guard in callback.
-9. **Finding 25 (Medium):** `histogram.tsx` worker leak on rapid photo changes. Fix: use module-scope worker singleton or pool.
-10. **Finding 26 (Medium):** `info-bottom-sheet.tsx` `preventDefault()` may be no-op on passive touch listeners. Fix: attach natively with `{ passive: false }` or use `touch-action: none` CSS.
-11. **Finding 27 (Low):** `lightbox.tsx` focus trap may trap focus on unmount if `closeButtonRef` is null. Fix: ensure ref is always populated before activation.
-12. **Finding 28 (Low):** `sw.template.js` `recordAndEvict` may evict just-added entry if single image exceeds cache cap. Fix: document as intentional or add guard.
-13. **Finding 29 (Low):** `search.tsx` debounce timer not cleared on unmount for in-flight searches. Fix: add `mountedRef` check before committing results.
-14. **Finding 30 (Low):** `tag-input.tsx` `highlightedIndex` may go out of bounds after filter change. Fix: clamp `maxIndex` to at least 0.
-
-The codebase demonstrates mature defensive programming with extensive compile-time guards, bounded data structures, proper resource cleanup, and comprehensive error handling.
-
----
-
-## Client-Side Findings (from UI/components agent)
-
-### HIGH Severity
-
-#### Finding 21: Missing `imageLoaded` reset when `image` reference changes without `id` change
-
-**File:** `apps/web/src/components/photo-viewer.tsx:128`  
-**Confidence:** Medium
-
-**Buggy Code:**
-```tsx
-useEffect(() => {
-    setImageLoaded(false);
-    const fallbackTimer = setTimeout(() => setImageLoaded(true), 3000);
-    return () => clearTimeout(fallbackTimer);
-}, [image?.id]);
-```
-
-**Trigger:** If the `images` prop is mutated in-place (e.g., a parent re-renders with the same array reference but mutated objects), `image?.id` stays the same but `image` metadata changes. The `imageLoaded` state does not reset, so the blur placeholder stays hidden while the new image decodes, showing a blank or stale image.
-
-**Fix:** Use `image` object identity as the dependency:
-```tsx
-}, [image]);
-```
-
-**Lines changed:** 1
-
----
-
-#### Finding 22: `prevImage` / `nextImage` preload may be stale after navigation
-
-**File:** `apps/web/src/components/photo-viewer.tsx:283`  
-**Confidence:** Medium
-
-**Buggy Code:**
-```tsx
-const imgs = [image?.prevImage, image?.nextImage].filter(Boolean) as Array<NonNullable<typeof image.prevImage>>;
-```
-
-**Trigger:** The `image` object is derived from `images[currentIndex]`. When the user navigates to a new photo, `currentImageId` updates, `currentIndex` recalculates, and `image` points to the new photo. However, the `useEffect` at line 282 depends on `[image, imageSizes, photoViewerSizes]`. If `image` is the same reference object (e.g., from a cached data layer), the effect may not re-run, and preloads for the wrong neighbors are emitted.
-
-**Fix:** Add `image?.id` to the dependency array:
-```tsx
-}, [image?.id, imageSizes, photoViewerSizes]);
-```
-
-**Lines changed:** 1
-
----
-
-### MEDIUM Severity
-
-#### Finding 23: Race condition — `showLightboxRef` updated asynchronously
-
-**File:** `apps/web/src/components/photo-viewer.tsx:97-98`  
-**Confidence:** High
-
-**Buggy Code:**
-```tsx
-const showLightboxRef = useRef(showLightbox);
-useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
-```
-
-**Trigger:** In `navigate()` (line 219), `showLightboxRef.current` is read to decide whether to set `gallery_auto_lightbox` in sessionStorage. If `setShowLightbox(true)` is called and `navigate()` runs before the effect at line 98 fires, `showLightboxRef.current` will be stale (`false`), and the auto-lightbox flag won't be set. This is a classic React state-ref synchronization race.
-
-**Fix:** Use `useLayoutEffect` for the ref sync (narrows the window, though doesn't close it completely), or use a callback ref pattern that is set synchronously in the state setter.
-
-**Lines changed:** 1 (change `useEffect` to `useLayoutEffect`)
-
----
-
-#### Finding 24: `requestIdleCallback` fallback timer may leak on unmount
-
-**File:** `apps/web/src/components/photo-viewer.tsx:244-263`  
-**Confidence:** High
-
-**Buggy Code:**
-```tsx
-const scheduleIdle = (fn: () => void): (() => void) => {
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        const id = window.requestIdleCallback(fn, { timeout: 3000 });
-        return () => window.cancelIdleCallback(id);
-    }
-    const id = setTimeout(fn, 1500);
-    return () => clearTimeout(id);
-};
-```
-
-**Trigger:** The cleanup function returned by `scheduleIdle` is stored in `cancelFns` and called in the effect cleanup. However, if the component unmounts between `scheduleIdle` being called and the idle callback firing, the callback may still execute (the cancel function is not called until cleanup). If the component remounts quickly, the old callback may fire after the new mount, causing a stale `router.prefetch()`.
-
-**Fix:** Track a `mountedRef` and guard the callback body:
-```tsx
-const scheduleIdle = (fn: () => void): (() => void) => {
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        const id = window.requestIdleCallback(() => { if (mountedRef.current) fn(); }, { timeout: 3000 });
-        return () => window.cancelIdleCallback(id);
-    }
-    const id = setTimeout(() => { if (mountedRef.current) fn(); }, 1500);
-    return () => clearTimeout(id);
-};
-```
-
-**Lines changed:** 2
-
----
-
-#### Finding 25: `histogram.tsx` worker leak on rapid photo changes
-
-**File:** `apps/web/src/components/histogram.tsx:526-532`  
-**Confidence:** High
-
-**Buggy Code:**
-```tsx
-useEffect(() => {
-    workerRef.current = new Worker(`/histogram-worker.js?v=${IMAGE_PIPELINE_VERSION}`);
-    return () => {
-        workerRef.current?.terminate();
-        workerRef.current = null;
-    };
-}, []);
-```
-
-**Trigger:** The worker is created once per component mount and terminated on unmount. However, if the component is remounted frequently (e.g., navigating between photos rapidly in the photo viewer, where each photo change may remount the histogram), workers are created and terminated repeatedly. This is expensive and can exhaust browser worker limits in extreme cases.
-
-**Fix:** Consider using a module-scope worker singleton or a worker pool, since the worker is stateless and can be reused across component instances.
-
-**Lines changed:** ~10 (refactor to module-scope singleton)
-
----
-
-#### Finding 26: `info-bottom-sheet.tsx` touch handler does not prevent default on `touchmove`
-
-**File:** `apps/web/src/components/info-bottom-sheet.tsx:82-87`  
-**Confidence:** High
-
-**Buggy Code:**
-```tsx
-const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (touchStartY.current === null) return;
-    e.preventDefault(); // prevent background scroll while dragging the sheet
-    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
-    setLiveTranslateY(deltaY);
-}, []);
-```
-
-**Trigger:** The `handleTouchMove` is attached to the drag handle button's `onTouchMove`. However, React's synthetic event system does not call `preventDefault()` on passive touch listeners by default in modern browsers. The `e.preventDefault()` here may be a no-op if the browser has made the listener passive (which React does by default for touch events). Background scroll may still occur while dragging the sheet.
-
-**Fix:** Attach the touch move handler natively with `{ passive: false }` on the drag handle ref, or use `touch-action: none` CSS on the drag handle element.
-
-**Lines changed:** 2-3 (add CSS or native handler)
-
----
-
-### LOW Severity
-
-#### Finding 27: `lightbox.tsx` focus trap may trap focus on unmount if `closeButtonRef` is null
-
-**File:** `apps/web/src/components/lightbox.tsx:447`  
-**Confidence:** Medium
-
-**Buggy Code:**
-```tsx
-<FocusTrap focusTrapOptions={{ allowOutsideClick: true, fallbackFocus: () => closeButtonRef.current || document.body }}>
-```
-
-**Trigger:** If `closeButtonRef.current` is null at mount time (e.g., the close button is conditionally rendered, though it is not in this case), the fallback focus lands on `document.body`. On unmount, `previouslyFocusedRef.current` is restored. If the previously focused element was inside a modal or another focus trap, restoring focus there may break the focus trap of the new active modal.
-
-**Fix:** Ensure `closeButtonRef` is always populated before the focus trap activates, or use a more robust focus restoration strategy that checks if the previously focused element is still focusable and visible.
-
-**Lines changed:** 3-5
-
----
-
-#### Finding 28: `sw.template.js` `recordAndEvict` may evict the just-added entry if it is the only entry and exceeds cap
-
-**File:** `apps/web/public/sw.template.js:95-126`  
-**Confidence:** Medium
-
-**Trigger:** If a single image is larger than `MAX_IMAGE_BYTES` (50 MB), the loop will evict the entry that was just added (since it is the only entry). The `deleted` check on `cache.delete` will be `true`, `total` drops to 0, and the entry is removed from metadata. However, the image may still be in the cache (the `cache.delete` succeeded, but if it was the only entry, the cache is now empty). The metadata and cache are consistent, but the behavior is surprising: a single large image cannot be cached even if it is the only thing being viewed.
-
-**Fix:** Add a guard to skip eviction of the just-added entry unless absolutely necessary, or document this behavior as intentional (preventing a single image from blowing the cache).
-
-**Lines changed:** 2-3
-
----
-
-#### Finding 29: `search.tsx` debounce timer not cleared on unmount for in-flight searches
-
-**File:** `apps/web/src/components/search.tsx:237-250`  
-**Confidence:** High
-
-**Trigger:** The cleanup function clears the debounce timer. However, if the component unmounts while a `performSearch` is in-flight (after the debounce timer has fired but before the async operation completes), the `requestIdRef.current` check in `performSearch` will not catch this because `requestIdRef` is only incremented at the start of a new search, not on unmount. The stale search may still commit its results after unmount.
-
-**Fix:** Add a `mountedRef` and check it before committing results in `performSearch`:
-```tsx
-const mountedRef = useRef(true);
-useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-// In performSearch:
-if (requestId !== requestIdRef.current || !mountedRef.current) return;
-```
-
-**Lines changed:** 4-5
-
----
-
-#### Finding 30: `tag-input.tsx` `highlightedIndex` may go out of bounds after filter change
-
-**File:** `apps/web/src/components/tag-input.tsx:136-143`  
-**Confidence:** High
-
-**Buggy Code:**
-```tsx
-} else if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    setIsOpen(true);
-    const maxIndex = filteredTags.length + (showCreateOption ? 0 : -1);
-    setHighlightedIndex(prev => (prev < maxIndex ? prev + 1 : 0));
-} else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    setIsOpen(true);
-    const maxIndex = filteredTags.length + (showCreateOption ? 0 : -1);
-    setHighlightedIndex(prev => (prev > 0 ? prev - 1 : maxIndex));
-}
-```
-
-**Trigger:** If `filteredTags.length` is 0 and `showCreateOption` is false, `maxIndex` becomes `-1`. The `ArrowDown` path sets `highlightedIndex` to `0` (since `prev < -1` is false for any non-negative `prev`), which is out of bounds. The `ArrowUp` path sets `highlightedIndex` to `-1`, also out of bounds. This can cause `aria-activedescendant` to point to a non-existent ID.
-
-**Fix:** Clamp `maxIndex` to at least 0:
-```tsx
-const maxIndex = Math.max(0, filteredTags.length + (showCreateOption ? 0 : -1));
-```
-
-**Lines changed:** 1
-
----
-
-## Positive Observations (Client-Side)
-
-- **Excellent SSR/hydration boundary handling:** `useDisplayCapability` correctly uses `useSyncExternalStore` with a stable snapshot reference to avoid React #185 infinite loops, and `WideGamutHint` defers rendering until after mount to prevent CLS.
-- **Robust image fallback patterns:** The `jpegFallbackTriedRef` + `sizedSourcesFailed` state machine in `photo-viewer.tsx` and `lightbox.tsx` correctly handles legacy photos missing sized derivatives, with the atomic-rename contract guaranteeing base filename availability.
-- **Comprehensive IME composition handling:** `isImeComposingReactEvent` and `isImeComposingNativeEvent` guards are consistently applied across search, tag input, and lightbox keyboard handlers, preventing half-composed input submission.
-- **Strong accessibility:** ARIA live regions, `aria-activedescendant`, `role="dialog"`, `aria-modal`, and focus trap management are consistently implemented across modals and overlays.
-- **Touch-target audit compliance:** The codebase consistently uses `min-h-11` / `min-w-11` (44 px) for interactive elements, meeting WCAG 2.5.5 AAA requirements.
-
----
-
-## Security/Auth Findings (from Security Agent)
-
-### MEDIUM Severity
-
-#### Finding 31: `tokenHashesEqual` Early Length Check Creates Timing Side-Channel
-
-**File:** `apps/web/src/lib/admin-tokens.ts:64-73`  
-**Confidence:** Medium
-
-**Buggy Code:**
-```typescript
-export function tokenHashesEqual(a: string, b: string): boolean {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    if (a.length !== b.length) return false;  // Early return = timing oracle
-    if (!/^[0-9a-f]+$/i.test(a) || !/^[0-9a-f]+$/i.test(b)) return false;
-    try {
-        return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
-    } catch {
-        return false;
+*entries(): IterableIterator<[K, V]> {
+    for (const [k, v] of this.map) {
+        yield [k, typeof v === 'object' && v !== null ? { ...v } as V : v];
     }
 }
 ```
 
-**Trigger:** The early `a.length !== b.length` return creates a timing oracle. A hash with a different length returns immediately (fast path), while a matching-length hash continues to regex validation and `timingSafeEqual` (slow path).
+---
 
-**Impact Assessment:** LOW in practice. Both `a` (stored hash) and `b` (presented hash) are always SHA-256 hex digests (64 chars). An attacker cannot control the stored hash length, and `verifyToken` always hashes the presented token to 64 hex chars before comparison. The timing difference is only exploitable if the attacker can present a hash of a different length, which they cannot.
+### R12-DBG-07 — tokenHashesEqual length check leaks token length via timing
 
-However, the pattern violates constant-time comparison principles and could leak information if the hash algorithm changes in the future.
+- **ID:** R12-DBG-07 (originally Finding 28 from prior cycle)
+- **Severity:** LOW
+- **Confidence:** Needs validation
+- **File:** `apps/web/src/lib/admin-tokens.ts:64-66`
 
-**Fix:** Remove the early length check and handle length mismatch inside the constant-time path:
+**Latent bug:**
+`tokenHashesEqual` exits early with `return false` if `a.length !== b.length`. The early-exit path is faster than the `timingSafeEqual` path, leaking whether the candidate token has the correct length.
+
+**Mitigating factors:** Both `a` and `b` are SHA-256 hex digests (always 64 chars) for valid tokens. In practice the early-exit is never taken on the happy path. Exploitability requires sub-microsecond remote timing precision. Severity remains LOW.
+
+**Suggested fix:** Always run `timingSafeEqual` on fixed-size 32-byte buffers, using a dummy buffer for invalid-length inputs:
 ```typescript
-export function tokenHashesEqual(a: string, b: string): boolean {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    const bufA = Buffer.from(a, 'hex');
-    const bufB = Buffer.from(b, 'hex');
-    if (bufA.length !== bufB.length) {
-        // Constant-time dummy comparison to prevent timing leak
-        const dummy = Buffer.alloc(bufA.length);
-        timingSafeEqual(bufA, dummy); // Ignore result, just consume time
-        return false;
-    }
-    return timingSafeEqual(bufA, bufB);
-}
+const EXPECTED_HEX_LEN = 64;
+const aBuf = a.length === EXPECTED_HEX_LEN ? Buffer.from(a, 'hex') : Buffer.alloc(32);
+const bBuf = b.length === EXPECTED_HEX_LEN ? Buffer.from(b, 'hex') : Buffer.alloc(32, 1);
+const equal = timingSafeEqual(aBuf, bBuf);
+return a.length === EXPECTED_HEX_LEN && b.length === EXPECTED_HEX_LEN && equal;
 ```
-
-**Lines changed:** 5-8
 
 ---
 
-#### Finding 32: `verifyToken` Fire-and-Forget `last_used_at` UPDATE Can Cause Connection Pool Contention
+## Confirmed Closed in Prior Cycles
 
-**File:** `apps/web/src/lib/admin-tokens.ts:157-159`  
-**Confidence:** Medium
+- **AGG-M6** (`gallery-config.ts` — `semanticSearchMode` fallback missing operator gate): **CLOSED.** The fallback path now applies the same `value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true'` gate as the happy path. Confirmed at HEAD 2a9976a1.
 
-**Buggy Code:**
-```typescript
-db.execute(sql`UPDATE admin_tokens SET last_used_at = NOW() WHERE id = ${row.id}`)
-    .catch((err: unknown) => { console.debug('admin_tokens last_used_at update failed', err); });
-```
+- **AGG-M13** (`db/index.ts` — connection init never times out): **CORE CLOSED.** A `Promise.race` against a 10-second `initTimeout` was added. The initTimeout timer accumulation on pool-reuse paths is filed separately as R12-DBG-03.
 
-**Trigger:** A script makes 100 concurrent API requests with the same token (e.g., Lightroom plugin batch upload). Each triggers a `last_used_at` UPDATE fire-and-forget query. The DB connection pool handles 100 concurrent updates to the same row, causing lock contention. If the pool is exhausted, subsequent legitimate requests may queue or fail.
-
-**Impact:** Medium. Only affects high-volume API usage (Lightroom plugin batch upload). The update is simple and fast, but concurrency can spike.
-
-**Fix:** Debounce the `last_used_at` update to at most once per minute per token:
-```typescript
-if (!row.last_used_at || Date.now() - row.last_used_at.getTime() > 60_000) {
-    db.execute(sql`UPDATE admin_tokens SET last_used_at = NOW() WHERE id = ${row.id}`)
-        .catch((err: unknown) => { console.warn('admin_tokens last_used_at update failed', err); });
-}
-```
-
-**Lines changed:** 3-5
+- **`normalizeExposureTime` NaN/Inf regression** (prior cycles): `Number.isFinite(val) && val > 0` guard added. The subnormal sub-case (R12-DBG-05) is carried over but is a pre-existing gap, not a regression.
 
 ---
 
-#### Finding 33: `getSessionSecret` Dev-Only DB-Stored Secret Cache Is Stale on Rotation
+## Module Coverage (Cycle 12 Inspection)
 
-**File:** `apps/web/src/lib/session.ts:13-80`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-let cachedSessionSecret: string | null = null;
-let sessionSecretPromise: Promise<string> | null = null;
-```
-
-**Trigger:** In development (not production), if the DB-stored session secret is rotated by updating the `admin_settings` row, the running process continues using the old cached secret forever. New sessions generated by the process are signed with the old secret. Cross-process session validation failures occur if another process uses the new secret.
-
-**Impact:** Low. Only affects development environments. Production requires `SESSION_SECRET` env var and throws if missing.
-
-**Fix:** Add a cache TTL for the dev-only DB fallback path:
-```typescript
-let cachedAt = 0;
-const CACHE_TTL_MS = 60_000; // 1 minute
-
-// In getSessionSecret, after the env var check:
-if (cachedSessionSecret && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return cachedSessionSecret;
-}
-// ... re-fetch from DB ...
-cachedAt = Date.now();
-```
-
-**Lines changed:** 3-5
+| Module | Status |
+|---|---|
+| `instrumentation.ts` | Inspected — 2 new findings (R12-DBG-01, R12-DBG-04) |
+| `image-queue.ts` | Inspected — 1 new finding (R12-DBG-02) |
+| `db/index.ts` | Inspected — 1 new finding (R12-DBG-03) |
+| `process-image.ts` | Inspected — carry-over R12-DBG-05 confirmed present |
+| `bounded-map.ts` | Inspected — carry-over R12-DBG-06 confirmed present |
+| `admin-tokens.ts` | Inspected — carry-over R12-DBG-07 confirmed present |
+| `view-retention.ts` | Inspected — clean |
+| `gallery-config.ts` | Inspected — AGG-M6 confirmed closed |
+| `gps-exif-strip.ts` | Inspected — bounded ISOBMFF walker with `BigInt(Number.MAX_SAFE_INTEGER)` guard; clean |
+| `auth-rate-limit.ts` | Inspected (prior session) — shallow copies correct; clean |
+| `icc-chromaticity.ts` | Inspected (prior session) — all `readS15Fixed16` callers guard with `!Number.isFinite`; clean |
+| `gain-map-detection.ts` | Inspected (prior session) — bounded ISOBMFF walk; clean |
+| `migrate.js` | Inspected (prior session) — hash-based post-condition prevents silent skips; clean |
 
 ---
 
-### LOW Severity
+## References
 
-#### Finding 34: `isProtectedAdminRoute` Case-Sensitive Locale Check May Allow Partial Bypass
-
-**File:** `apps/web/src/proxy.ts:54-74`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-function isProtectedAdminRoute(pathname: string): boolean {
-  for (const locale of LOCALES) {  // LOCALES = ['en', 'ko']
-    if (pathname.startsWith(`/${locale}/admin/`) || pathname === `/${locale}/admin`) {
-      if (pathname.startsWith(`/${locale}/admin/`)) {
-        return true;
-      }
-    }
-  }
-  // ...
-}
-```
-
-**Trigger:** On macOS development (case-insensitive filesystem), accessing `/EN/admin/dashboard` does NOT match the middleware check (`/en/admin/`), so the middleware auth redirect is skipped. Next.js might resolve the route due to case-insensitive filesystem behavior. However, every server action inside the admin routes independently checks `isAdmin()`, so this is a partial bypass at best (middleware redirect skipped, but action auth still enforced).
-
-**Impact:** Low. Development-only. Production runs on Linux (case-sensitive) inside Docker.
-
-**Fix:** Normalize pathname to lowercase before checking:
-```typescript
-const normalizedPath = pathname.toLowerCase();
-for (const locale of LOCALES) {
-    const lowerLocale = locale.toLowerCase();
-    if (normalizedPath.startsWith(`/${lowerLocale}/admin/`) || normalizedPath === `/${lowerLocale}/admin`) {
-        return true;
-    }
-}
-```
-
-**Lines changed:** 3
-
----
-
-#### Finding 35: `BoundedMap.entries()` and `keys()` Expose Internal Map Iterators
-
-**File:** `apps/web/src/lib/bounded-map.ts:106-117`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-keys(): IterableIterator<K> {
-    return this.map.keys();
-}
-
-entries(): IterableIterator<[K, V]> {
-    return this.map.entries();
-}
-```
-
-**Trigger:** A consumer iterates over `entries()` and accidentally modifies values. Since `entries()` returns the internal Map's iterator, mutations to object values corrupt the internal Map state. Note: `get()` already returns shallow copies, but `entries()` does not.
-
-**Impact:** Low. Only affects consumers that mutate iterated values. All internal consumers are trusted.
-
-**Fix:** Return shallow copies in `entries()`:
-```typescript
-*entries(): Generator<[K, V]> {
-    for (const [key, value] of this.map) {
-        yield [key, typeof value === 'object' && value !== null ? { ...value } as V : value];
-    }
-}
-```
-
-**Lines changed:** 5-8
-
----
-
-#### Finding 36: `BoundedMap` Hard Cap Momentarily Exceeded Between `set()` and `enforceHardCap()`
-
-**File:** `apps/web/src/lib/bounded-map.ts:72-80`  
-**Confidence:** Low
-
-**Buggy Code:**
-```typescript
-set(key: K, value: V): this {
-    this.map.set(key, value);
-    this.enforceHardCap();
-    return this;
-}
-```
-
-**Trigger:** The map momentarily exceeds `maxKeys` by 1 between `map.set()` and `enforceHardCap()`. In a memory-constrained environment with rapid insertions, this brief window could accumulate.
-
-**Impact:** Very low. The window is microseconds (single synchronous call). The `enforceHardCap()` is immediate.
-
-**Fix:** Enforce cap before insertion for new keys:
-```typescript
-set(key: K, value: V): this {
-    if (!this.map.has(key)) {
-        this.enforceHardCap();
-    }
-    this.map.set(key, value);
-    return this;
-}
-```
-
-**Lines changed:** 3
-
----
-
-## Positive Observations (Security/Auth)
-
-- **No hardcoded secrets found.** All secrets come from env vars or DB-stored generated values.
-- **All inputs validated.** Drizzle ORM parameterization prevents SQL injection. Unicode bidi/zero-width rejection prevents Trojan-Source spoofing.
-- **Authentication is robust.** Argon2id password hashing exceeds OWASP minimums. HMAC-SHA256 session tokens with `timingSafeEqual` verification. Cookie attributes are secure (`httpOnly`, `secure`, `sameSite: lax`).
-- **Rate limiting is defense-in-depth.** Per-IP + per-account buckets with DB backup. In-memory fast-path + persistent counters. Rollback patterns are documented and audited.
-- **Advisory locks prevent races.** MySQL `GET_LOCK` serializes restore, upload contract changes, topic renames, admin deletes, backfill runs, and image processing claims.
-- **No CRITICAL or HIGH severity remotely exploitable issues found.**
-
----
-
-*End of cycle 10 review.*
+- `apps/web/src/instrumentation.ts:21-26` — stale timeout timer (R12-DBG-01)
+- `apps/web/src/instrumentation.ts:49,63,71` — missing `process.exit()` (R12-DBG-04)
+- `apps/web/src/lib/image-queue.ts:183-192` — null queue guard regression (R12-DBG-02)
+- `apps/web/src/db/index.ts:87-100` — initTimeout timer accumulation (R12-DBG-03)
+- `apps/web/src/lib/process-image.ts` — `decimalToRational` subnormal (R12-DBG-05, carry-over)
+- `apps/web/src/lib/bounded-map.ts:115-117` — `entries()` no shallow copy (R12-DBG-06, carry-over)
+- `apps/web/src/lib/admin-tokens.ts:64-66` — length timing leak (R12-DBG-07, carry-over)

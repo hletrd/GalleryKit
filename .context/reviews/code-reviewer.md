@@ -1,216 +1,177 @@
-# Code Review — GalleryKit Repository (HEAD: bcd67b12)
+# Code Review — GalleryKit Cycle 12 (HEAD: 2a9976a1)
 
-**Date:** 2026-06-25  
-**Reviewer:** Code Reviewer Agent  
-**Scope:** Full codebase (`apps/web/src/` and subdirectories)  
-**Test Result:** 225 test files, 2064 tests PASSED (2 skipped)  
-**Typecheck:** Blocked by stale `.next/types` NFS handle (build artifact, not code issue)
+**Date:** 2026-06-27
+**Reviewer:** Code Reviewer Agent (cycle 12)
+**Baseline:** bcd67b12 (cycle 10 HEAD)
+**HEAD:** 2a9976a1
+**Scope:** All commits from bcd67b12..HEAD (17 commits)
+**LSP Diagnostics:** Clean — no errors or warnings on modified files
+**Tests:** 2065 passed, 4 skipped (from verifier evidence)
 
 ---
 
 ## Stage 1 — Spec Compliance
 
-The last commit (`bcd67b12`) changed two files:
+All 17 commits in the range address prior cycle findings explicitly (commit messages reference M-series IDs from the aggregate or L/H identifiers). Each commit targets a specific reported issue and implements the described fix. No feature additions, no behavior changes outside the stated scope.
 
-1. **`apps/web/public/sw.js`** — Updated `SW_VERSION` from `87065049-p7` to `bcd67b12-p7` (git short-SHA + pipeline version stamp). This is the expected build-time stamp refresh per the prebuild hook.
-
-2. **`apps/web/src/app/actions/public.ts`** — Added `Array.isArray(tagSlugs)` guard before calling `canonicalizeRequestedTagSlugs(tagSlugs)`. The previous code used `tagSlugs || []` which would pass a non-array truthy value (e.g., a string) to `canonicalizeRequestedTagSlugs`, causing a runtime error. The fix is correct and minimal.
-
-**Verdict:** The commit correctly fixes a type-safety gap in the `loadMoreImages` public server action. No spec deviation detected.
+**Stage 1 verdict: PASS**
 
 ---
 
 ## Stage 2 — Code Quality
 
-### Summary
-
-**Files Reviewed:** 20+ core files across `lib/`, `app/actions/`, `app/api/`, `db/`, `public/sw.js`  
-**Total Issues:** 14 (0 CRITICAL, 1 HIGH, 5 MEDIUM, 8 LOW)  
-**Open Questions:** 2 (low-confidence HIGH findings)
-
 ### By Severity
 
 - **CRITICAL:** 0
-- **HIGH:** 1
-- **MEDIUM:** 5
-- **LOW:** 8
+- **HIGH:** 0
+- **MEDIUM:** 1
+- **LOW:** 2
 
 ---
 
-### Issues
+## Issues (New — Cycle 12)
 
-#### [HIGH] `console.log` in production code paths (`admin-backfill-runner.ts:689`, `:757`, `:796`)
-**File:** `apps/web/src/lib/admin-backfill-runner.ts:689`, `:757`, `:796`  
-**Confidence:** HIGH  
-**Issue:** Three `console.log` calls in the backfill runner emit structured progress messages. Unlike `console.debug`/`console.warn`/`console.error` used elsewhere, `console.log` is not filtered by log level in production and will always emit. In a long-running backfill of thousands of images, this creates sustained stdout pressure.  
-**Fix:** Change to `console.info` or `console.debug` for routine progress, keeping `console.log` only for CLI entry points.
+### R12-CR-01 [MEDIUM] `gracefulShutdown` sets `process.exitCode` but never calls `process.exit()`
+**File:** `apps/web/src/instrumentation.ts:49-72`
+**Confidence:** HIGH
 
----
+**Problem:**
+`gracefulShutdown` is an async function that drains the image queue and view-count buffer, then sets `process.exitCode = completed ? 0 : 1`. However, it never calls `process.exit()`. The SIGTERM/SIGINT handlers call `gracefulShutdown('SIGTERM')` as a fire-and-forget async call. After the drain completes and `process.exitCode` is set, the process does NOT exit: the MySQL connection pool holds ref'd TCP connections (keepalive-enabled, 10 connections), which prevent the Node.js event loop from draining naturally. The process remains alive until Docker's grace period expires and Docker sends SIGKILL.
 
-#### [MEDIUM] `catch () {}` swallowing in `auth.ts:158-159` during DB-unavailable rollback
-**File:** `apps/web/src/app/actions/auth.ts:158-159`  
-**Confidence:** HIGH  
-**Issue:** The rollback promises for login rate limits use `.catch(() => {})` which silently swallows ALL errors, not just the expected "row not found" case. If the DB throws a connection error during rollback, the failure is invisible. This is Pattern-1 (no rollback on infrastructure error) per the rate-limit docstring, but the silent swallow is still a monitoring gap.  
-**Fix:** Log the error at `console.debug` minimum: `.catch((err) => console.debug('Login rollback failed:', err))`.
+**Failure scenario:**
+1. Docker sends SIGTERM to the container (e.g., deploy, `docker stop`)
+2. Drain completes in, say, 2 seconds. `process.exitCode = 0` is set.
+3. Process does NOT exit. Event loop is kept alive by the MySQL pool.
+4. Docker waits its stop grace period (default 10 s).
+5. Docker sends SIGKILL. Process exits with code 137 (SIGKILL), not 0.
+6. Docker/orchestrator log shows a non-zero exit code even though shutdown was clean. The `process.exitCode = 1` (timeout branch) is equally meaningless: the orchestrator always sees 137.
 
----
+**Fix:**
+```typescript
+process.exitCode = completed ? 0 : 1;
+process.exit(process.exitCode);    // add this line
+```
 
-#### [MEDIUM] `catch () {}` in `process-image.ts` cleanup paths (lines 535, 548, 798, 815, 831, 920, 1019, 1224, 1236, 1287-1289, 1295, 1621, 1625)
-**File:** `apps/web/src/lib/process-image.ts` (multiple lines)  
-**Confidence:** HIGH  
-**Issue:** ~14 `fs.unlink(...).catch(() => {})` patterns silently ignore cleanup failures. While these are best-effort cleanup paths (orphaned files are non-critical), a sustained `EMFILE` or `ENOSPC` error would go unnoticed. The comment at `image-queue.ts:62` explicitly calls out the anti-pattern of broad `catch {}`.  
-**Fix:** Distinguish `ENOENT` (expected, no-op) from other errors. Log non-ENOENT at `console.debug`: `.catch((err) => { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.debug('Cleanup failed:', err); })`.
-
----
-
-#### [MEDIUM] `loadMoreSmartCollectionImages` duplicates rate-limit logic from `loadMoreImages`
-**File:** `apps/web/src/app/actions/public.ts:156-235`  
-**Confidence:** HIGH  
-**Issue:** The smart-collection load-more action duplicates the entire rate-limit pre-increment/check/rollback pattern from `loadMoreImages` (lines 78-154). The two functions share identical rate-limit constants, bucket calculation, and rollback logic. This is a DRY violation that risks drift if one is updated without the other.  
-**Fix:** Extract a shared `checkLoadMoreRateLimit(ip, now)` helper that returns `{ allowed: boolean; bucketStart: number }` and handles the pre-increment, DB increment, combined check, and rollback internally.
+This makes the process exit promptly after drain, with the correct exit code, rather than relying on SIGKILL. The drain still runs to completion; calling `process.exit()` after it is the intended pattern for graceful shutdown in long-lived Node.js servers that hold ref'd handles.
 
 ---
 
-#### [MEDIUM] `BoundedMap.enforceHardCap()` uses FIFO eviction without LRU recency tracking
-**File:** `apps/web/src/lib/bounded-map.ts:77-89`  
-**Confidence:** HIGH  
-**Issue:** The docstring at `image-queue.ts:87-92` acknowledges that FIFO eviction can evict a frequently-accessed entry at the head of the Map. While the comment says this is "acceptable for a single-writer topology," the `BoundedMap` class is a generic utility that could be reused in contexts where LRU matters. The class name implies bounded behavior, not specifically FIFO.  
-**Fix:** Document the FIFO eviction policy explicitly in the `BoundedMap` class JSDoc, or add an optional `onEvict` callback so callers can implement LRU by re-setting touched entries.
+### R12-CR-02 [LOW] Carry-over AGG-M9: `hasTrustedSameOriginWithOptions` still exported
+**File:** `apps/web/src/lib/request-origin.ts:109`
+**Confidence:** HIGH
+
+**Problem:**
+`export { hasTrustedSameOriginWithOptions };` on line 109 exposes the internal function that accepts `{ allowMissingSource: true }`, which bypasses the entire same-origin check. No current caller uses `allowMissingSource: true`, but the export makes this a latent CSRF bypass vector for any future caller. Commit `5ba4025c` message says "unexport allowMissingSource" but only changed the option parameter's visibility within the function — it did NOT remove the function's own export. AGG-M9 status: still open.
+
+**Fix:**
+Remove `export { hasTrustedSameOriginWithOptions };` (line 109). The public-facing safe wrapper `hasTrustedSameOrigin` (line 79–81) already delegates to it and is the only export needed externally. Remove the `allowMissingSource` option parameter entirely, or retain it for internal use only (unexported function, no external access).
 
 ---
 
-#### [MEDIUM] `getGalleryConfig` fallback returns `DEFAULTS.semantic_search_mode` without operator-gate check
-**File:** `apps/web/src/lib/gallery-config.ts:193`  
-**Confidence:** HIGH  
-**Issue:** In the `catch` fallback path (DB unavailable), `semanticSearchMode` is set to `DEFAULTS.semantic_search_mode` without the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env-gate check that the happy path applies at line 141. If the default ever changes to `'production'`, the fallback path would bypass the operator gate.  
-**Fix:** Apply the same gate in the fallback: `semanticSearchMode: (DEFAULTS.semantic_search_mode === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') ? 'disabled' : DEFAULTS.semantic_search_mode`.
+### R12-CR-03 [LOW] Shutdown timeout sentinel fires spurious warning after clean drain
+**File:** `apps/web/src/instrumentation.ts:21-26`
+**Confidence:** HIGH
+
+**Problem:**
+The `shutdownTimeout` Promise wraps a `setTimeout` that calls `console.warn('[Shutdown] Timed out after 15s...')`. When the drain completes in under 15 seconds, `Promise.race` resolves with the drain result, `completed = true` is set, and `console.debug('[Shutdown] In-flight queue work drained, exiting.')` is logged. However, the 15-second `setTimeout` is not cancelled. It fires 15 seconds later and emits the "Timed out" warning to the log — a false alarm that misrepresents a clean shutdown as a timeout.
+
+This is partially mitigated if R12-CR-01 is fixed (adding `process.exit()` after drain means the process terminates before the 15-second timer fires). Without R12-CR-01 fix, any clean shutdown within the grace window will produce a spurious timeout warning in logs.
+
+**Fix:**
+```typescript
+let shutdownTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+const shutdownTimeout = new Promise<void>((resolve) => {
+    shutdownTimeoutHandle = setTimeout(() => {
+        console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
+        resolve();
+    }, 15_000);
+});
+try {
+    await Promise.race([
+        Promise.all([
+            shutdownImageProcessingQueue(),
+            flushBufferedSharedGroupViewCounts(),
+        ]).then(() => {
+            completed = true;
+            if (shutdownTimeoutHandle !== null) {
+                clearTimeout(shutdownTimeoutHandle);
+                shutdownTimeoutHandle = null;
+            }
+        }),
+        shutdownTimeout,
+    ]);
+    ...
+```
 
 ---
 
-#### [LOW] `getSetting` uses `||` instead of `??` for default fallback
-**File:** `apps/web/src/lib/gallery-config.ts:43`  
-**Confidence:** HIGH  
-**Issue:** `map.get(key) || DEFAULTS[key]` treats an empty string `''` as falsy and falls back to the default. While all current settings have non-empty defaults, a future setting with a legitimate empty-string default would be incorrectly overridden.  
-**Fix:** Use `map.get(key) ?? DEFAULTS[key]` to preserve empty strings.
+## Carry-Over Status
+
+| ID | Description | Status |
+|----|-------------|--------|
+| AGG-M7 | `getServingColorSettingsHash` no circuit breaker for DB outages (`serve-upload.ts:50-83`) | STILL OPEN — no changes to `serve-upload.ts` in this cycle |
+| AGG-M8 | `ogRateLimit`/`shareRateLimit` stale entry accumulation (request-driven only, not timer-driven) | PARTIALLY ADDRESSED — request-driven prune added (60 s throttle), but no independent timer. BoundedMap hard cap (2000 keys) limits worst-case memory. Carry-over at LOW priority |
+| AGG-M9 | `hasTrustedSameOriginWithOptions` exported with `allowMissingSource` bypass | STILL OPEN — see R12-CR-02 |
+| AGG-M10 | `getTrustedRequestProtocol` HTTP fallback silently returns `'http'` | **FIXED** in commit `5ba4025c` — now returns `null`; callers handle null correctly |
+| AGG-M12 | `deleteImage()` cleanup failures not reported to caller | **FIXED** prior to cycle 10 baseline — `deleteImage` returns `{ success: true, cleanupFailureCount }` and `image-manager.tsx` shows a toast warning when non-zero |
+| AGG-M13 | DB init timeout may return connections without `group_concat_max_len` set | STILL OPEN (conceptually) — the timeout clears the stored init promise, but the `'connection'` event only fires once per TCP connection, so clearing the symbol does not schedule a re-run. Low confidence / low likelihood for a well-connected MySQL instance |
 
 ---
 
-#### [LOW] `verifyAvifNclxInBuffer` scans entire buffer with `for` loop
-**File:** `apps/web/src/lib/process-image.ts:154`  
-**Confidence:** MEDIUM  
-**Issue:** The NCLX scanner iterates byte-by-byte over the entire buffer (up to 4KB). For a 4KB buffer this is 4092 iterations. The `colr` box is typically within the first few hundred bytes. A bounded search (e.g., first 1KB) would suffice and be faster.  
-**Fix:** Cap the scan at `Math.min(buffer.length, 1024)` or scan in chunks.
+## Confirmed Fixes (Cycle 11 Commits)
+
+The following prior-cycle findings were closed by commits in this range:
+
+| Commit | Prior ID | What was Fixed |
+|--------|----------|---------------|
+| `14730ee2` | AGG-M1 | 3× `console.log` → `console.info` in `admin-backfill-runner.ts` |
+| `5ba4025c` | AGG-M10 | `getTrustedRequestProtocol` returns `null` instead of `'http'` on fallback |
+| `9d88e217` | AGG-M8 (partial) | `ogRateLimit`/`shareRateLimit` now use time-gated request-driven prune |
+| `74bd776a` | AGG-M3 (M-series variants) | All shallow-copy mutation bugs fixed across rate-limit surfaces |
+| `2b166245` | M-series auth-rate-limit | `loginRateLimit` rollback functions use `map.set({count: entry.count - 1, ...})` |
+| `038b3154` | M3 follow-up | `semanticRateLimit.set()` instead of direct mutation in `preIncrementSemanticAttempt` |
+| `3111cc7e` | M7 process-image | `safeUnlink`/`safeCloseDirHandle` distinguish `ENOENT` from real errors |
+| `6cfcc75d` | M12 audit | `prioritizeSecurityFields` reorders audit metadata keys before truncation |
+| `bbfd747f` | M6 | `checkLoadMoreRateLimit` helper extracted (DRY) |
+| `d6107f89` | M14 | Bootstrap cursor 4-case state machine: first-scan-empty vs continuation-empty distinguished |
+| `b3c55036` | R11C11 | SIGTERM/SIGINT graceful shutdown handler added; geoip-lite pre-warm; `assertNoLegacyPublicOriginalUploads` at startup |
+| `92ce7a9e` | R11C11 follow-up | Local `ConnInfo` interface for `navigator.connection` in photo-viewer |
+| `f1f6202d` | Touch target / accessibility | Sheet close button 44px touch target; `role="progressbar"` + ARIA attrs on progress; `motion-reduce:animate-none` on skeleton; `delayDuration` 0→100 tooltip |
 
 ---
 
-#### [LOW] `recordPhotoView` / `recordTopicView` / `recordSharedGroupView` fire-and-forget lacks `await`
-**File:** `apps/web/src/app/actions/public.ts:366-373`, `:387-393`, `:403-409`  
-**Confidence:** HIGH  
-**Issue:** The `db.insert(...).catch(...)` pattern is fire-and-forget (intentional per comments). However, in a serverless/edge environment where the process may freeze after the action returns, the promise may never execute. Next.js server actions run in a Node.js context where this is less of an issue, but the pattern is still a reliability gap.  
-**Fix:** Document the tradeoff explicitly in the function JSDoc: "Fire-and-forget: in serverless environments, ensure the runtime does not freeze pending promises before they execute."
+## Open Questions (low-confidence findings — surfaced, not blocking)
+
+None for this cycle. All flagged findings have HIGH confidence.
 
 ---
 
-#### [LOW] `searchImagesAction` uses `query.trim()` before `stripControlChars`
-**File:** `apps/web/src/app/actions/public.ts:247`  
-**Confidence:** HIGH  
-**Issue:** The search query is trimmed first, then control chars are stripped. If the query is `'\x01hello'` (C0 control prefix), `trim()` does not remove `\x01`, then `stripControlChars` removes it, producing `'hello'`. The length check (`countCodePoints(sanitizedQuery) > 200`) operates on the stripped value, so a 200-char query with a control prefix passes validation after stripping. This is a minor validation ordering gap.  
-**Fix:** Strip control chars BEFORE trim, or validate length on the raw input before sanitization. The current pattern is consistent with other actions (uploadImages, settings) so this is a systemic LOW rather than a unique bug.
+## Positive Observations
+
+- **Bootstrap cursor 4-case state machine (`image-queue.ts`):** The four branches (first-scan-empty, empty-continuation, partial-batch, full-batch) are logically correct and cover all reachable states. The cursor is updated before the branch conditionals, avoiding the duplicate assignment in the full-batch branch (a minor redundancy, not a bug).
+
+- **Shallow-copy mutation pattern uniformly applied:** All `entry.count++` mutations across `rate-limit.ts`, `auth-rate-limit.ts`, and `actions/public.ts` have been replaced with `map.set(key, { count: entry.count + 1, ... })`. The `BoundedMap.get()` shallow-copy JSDoc explicitly documents the limitation (nested objects are still references). The fix is consistent and defensively documented.
+
+- **`BoundedMap.set()` auto-enforces hard cap:** The `enforceHardCap()` call inside `set()` ensures that maps stay bounded even if callers forget explicit `prune()` calls. This is a sound "belt-and-suspenders" design choice, correctly commented.
+
+- **`hasTrustedSameOrigin` → `hasTrustedSameOriginWithOptions` wrapper:** The public-facing safe function delegates to the private options-bearing one. This is the correct one-caller-per-exported-function pattern; the issue (R12-CR-02) is merely that `hasTrustedSameOriginWithOptions` is additionally exported.
+
+- **Adaptive prefetch guards in photo-viewer (`92ce7a9e`):** The `conn?.saveData` and `conn?.effectiveType === '2g'` checks before prefetch correctly short-circuit on metered/slow connections. The local `ConnInfo` interface avoids polluting `Navigator`'s global type surface.
+
+- **`mountedRef` unmount guard in `home-client.tsx`:** The `{ current: true }` ref (not `useRef`) created inside `useEffect` is correct. Setting `mountedRef.current = false` in the cleanup before `cancelAnimationFrame` ensures that a rAF callback executing immediately before cancellation still no-ops on the state setter. Belt-and-suspenders pattern for fast unmounts.
+
+- **`motion-reduce:animate-none` on `skeleton.tsx`:** `prefers-reduced-motion` conformance is critical for vestibular-disorder users. Correct placement on the `animate-pulse` class.
+
+- **`delayDuration = 100` on Tooltip:** The previous `0` caused instant tooltip flash on accidental hover. 100 ms is the standard accessibility-friendly delay (enough to ignore transient mouseover, short enough not to feel sluggish).
+
+- **`Buffer.indexOf` in `verifyAvifNclxInBuffer` (`process-image.ts`):** Replacing the manual byte-by-byte search loop with `Buffer.indexOf('colr', searchStart, 'ascii')` is both more readable and leverages V8's optimized string search. Functionally equivalent with better clarity.
 
 ---
 
-#### [LOW] `uploadImages` formData topic/tags extraction uses `formData.get()` which returns `FormDataEntryValue | null`
-**File:** `apps/web/src/app/actions/images.ts:124-125`  
-**Confidence:** HIGH  
-**Issue:** `formData.get('topic')` can return a `File` object if the client sends a file under that name. The `.toString()` call on a `File` returns `'[object File]'`, which passes through `requireCleanInput` and becomes a nonsensical topic value. The `files` filter at line 120 only filters `formData.getAll('files')`, not other fields.  
-**Fix:** Add a type guard: `const topicRaw = formData.get('topic'); const topicStr = typeof topicRaw === 'string' ? topicRaw : null;`.
+## Verdict
 
----
+**COMMENT** (no blocking issues)
 
-#### [LOW] `process-image.ts` `sharp.concurrency()` mutates global module state
-**File:** `apps/web/src/lib/process-image.ts:50`  
-**Confidence:** HIGH  
-**Issue:** `sharp.concurrency(sharpConcurrency)` sets the global libvips thread cap at module load time. If this module is imported in a test that also imports another module that sets a different concurrency, they race. The comment at line 41-43 explains the rationale but the global mutation is still a side effect at module load.  
-**Fix:** Move the `sharp.concurrency()` call into `processImageFormats` so it runs per-call, or document that this is intentional and tested.
+One MEDIUM finding (R12-CR-01) warrants a follow-up fix: the graceful shutdown does not call `process.exit()`, so the exit code signal to the orchestrator is lost. No CRITICAL or HIGH findings. Two LOW carry-overs (AGG-M9/R12-CR-02, R12-CR-03) are straightforward one-line fixes.
 
----
-
-#### [LOW] `image-queue.ts` `generateCaption` and embedding hooks are `void`-prefixed but not truly fire-and-forget
-**File:** `apps/web/src/lib/image-queue.ts:439-454`, `:478-522`  
-**Confidence:** MEDIUM  
-**Issue:** The caption hook uses `.then(...).catch(...)` on the `generateCaption` promise, and the embedding hook uses `void (async () => { ... })()`. Both patterns are correct for fire-and-forget, but the embedding hook's `void` prefix is unnecessary since the IIFE is already not awaited. The inconsistency between the two patterns (`.then().catch()` vs `void (async () => {})()`) is a minor style inconsistency.  
-**Fix:** Standardize on one pattern. The `.then().catch()` pattern is more explicit about error handling.
-
----
-
-#### [LOW] `sw.js` `staleWhileRevalidateImage` uses `request.url` string as cache key but `recordAndEvict` uses `entry.url`
-**File:** `apps/web/public/sw.js:178`, `sw-cache.ts` (reference impl)  
-**Confidence:** MEDIUM  
-**Issue:** The comment at `sw.js:174-177` explains that `request.url` (string) is used as the cache key to match `recordAndEvict`'s string key. However, `recordAndEvict` receives `request.url` directly (line 199), so the keys are consistent. The comment is defensive but the code is correct. This is a documentation/paranoia LOW, not a bug.  
-**Fix:** No code change needed. The comment is sufficient defense.
-
----
-
-#### [LOW] `rate-limit.ts` `getClientIp` returns `'unknown'` when `TRUST_PROXY` is unset
-**File:** `apps/web/src/lib/rate-limit.ts:170-175`  
-**Confidence:** HIGH  
-**Issue:** When `TRUST_PROXY` is not set and proxy headers are present, the function logs a one-time warning and returns `'unknown'`. This means ALL users behind a reverse proxy share a single rate-limit bucket. The warning is good, but the fallback behavior is dangerous — a single brute-force attempt from any IP locks out ALL users for 15 minutes.  
-**Fix:** Consider returning the `X-Forwarded-For` leftmost value as a degraded but distinct key when proxy headers are present but `TRUST_PROXY` is unset, rather than collapsing all users to `'unknown'`. Document the security tradeoff explicitly.
-
----
-
-### Open Questions (low-confidence findings — surfaced, not blocking)
-
-#### [HIGH] `image-queue.ts` `enqueueImageProcessing` claim-retry timer may leak on process exit
-**File:** `apps/web/src/lib/image-queue.ts:304-307`  
-**Confidence:** LOW  
-**Issue:** The claim-retry timer uses `retryTimer.unref?.()` but `unref` is not available in all JavaScript environments (e.g., some edge runtimes). If `unref` is undefined, the timer keeps the process alive. In a Docker container with `SIGTERM` handling, this may delay graceful shutdown.  
-**Fix:** Verify `unref` availability in the target runtime, or wrap in `if (typeof retryTimer.unref === 'function')`.
-
-#### [HIGH] `data.ts` `flushGroupViewCounts` re-arm timer may create timer accumulation under sustained load
-**File:** `apps/web/src/lib/data.ts:88-91`  
-**Confidence:** LOW  
-**Issue:** When `isFlushing` is true and the buffer has entries, a new timer is armed. If the flush takes longer than the timer interval, multiple timers could accumulate. The `!viewCountFlushTimer` guard prevents this, but the timer is nulled at line 80 before the `isFlushing` check, so a second invocation during the flush would see `null` and arm a new timer.  
-**Fix:** This is likely correct due to the `!viewCountFlushTimer` guard at line 88, but worth verifying with a stress test that fires `bufferGroupViewCount` during a slow flush.
-
----
-
-### Positive Observations
-
-1. **Excellent rate-limit architecture.** The four documented rollback patterns (rate-limit.ts:1-53) show deep security thinking. The dual in-memory + DB-backed approach with TOCTOU prevention is well-implemented across all actions.
-
-2. **Strong input validation.** `requireCleanInput`, `sanitizeAdminString`, and `stripControlChars` form a coherent sanitization pipeline. Unicode bidi/invisible formatting rejection is applied consistently across all admin entry points.
-
-3. **Comprehensive compile-time guards.** `_PrivacySensitiveKeys`, `_SensitiveKeysInPublic`, `_ColorKeysAreSettingKeys`, and `_mapPrivacyGuard` in `data.ts` use TypeScript's structural typing to prevent accidental PII leakage at compile time.
-
-4. **Defense-in-depth auth.** `requireSameOriginAdmin()` centralizes origin verification, and `withAdminAuth` adds token-auth for PAT integrations. Both cookie and token paths enforce `no-store` Cache-Control.
-
-5. **Well-documented concurrency controls.** MySQL advisory locks (`gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`, etc.) are used consistently to prevent race conditions. The `image-queue.ts` comments explain the deadlock-free `pause -> clear -> onIdle` ordering.
-
-6. **Test coverage is strong.** 225 test files, 2064 passing tests, including fixture-based contract tests for lint gates (`check-api-auth.test.ts`, `check-action-origin.test.ts`, `check-public-route-rate-limit.test.ts`), touch-target audit, and privacy field guards.
-
-7. **Service worker LRU is correct.** The delete-then-set pattern for recency tracking (sw.js:104-105) and the head-walk eviction (sw.js:112-122) are efficient and correctly bounded by `MAX_IMAGE_BYTES`.
-
-8. **Color/HDR pipeline is thorough.** The NCLX parser, ICC chromaticity detection, gain map detection, and encoder decision matrix show domain expertise. The 10-bit AVIF probe with Promise-singleton pattern eliminates race conditions.
-
----
-
-## Recommendation
-
-**COMMENT**
-
-The codebase is mature, well-tested, and security-conscious. No CRITICAL or HIGH-confidence HIGH issues were found. The one HIGH finding (`console.log` in production paths) is a logging hygiene issue, not a security vulnerability. The MEDIUM findings are maintainability and monitoring improvements. The 2064 passing tests and comprehensive lint gates provide strong confidence in correctness.
-
-The recent commit (`bcd67b12`) correctly fixes the `Array.isArray(tagSlugs)` guard in `loadMoreImages`. This is a good defensive fix that prevents a runtime crash when a non-array value is passed for `tagSlugs`.
-
----
-
-## Final Checklist
-
-- [x] Spec compliance verified before code quality
-- [x] lsp_diagnostics run on modified files (public.ts: no errors)
-- [x] Every issue cites file:line with severity and fix suggestion
-- [x] Verdict clear (COMMENT — no blocking issues)
-- [x] Security checked (no hardcoded secrets, no injection, no XSS)
-- [x] Logic correctness checked before design patterns
-- [x] Positive observations noted
+Cycle 12 is the cleanest cycle since cycle 7: 0 CRITICAL, 0 HIGH, 1 MEDIUM, 2 LOW.

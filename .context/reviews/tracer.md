@@ -1,461 +1,298 @@
-# Tracer Review — GalleryKit Repository (Cycle 10)
+# Tracer Log — Cycle 12
 
-## Review Date: 2026-06-25
-## HEAD: bcd67b12
-## Previous HEAD: c0522dec
-## Scope: Full causal tracing of concurrent access patterns, race conditions, state propagation, and timing-sensitive flows
-
----
-
-## Methodology
-
-This is cycle 10 of a review-plan-fix loop. The previous tracer review (cycle 9, HEAD c0522dec) identified 6 high-confidence, 7 medium-confidence, and 11 low-confidence issues. This review re-examines the CURRENT code at HEAD bcd67b12 with these priorities:
-
-1. Verify whether previously identified issues were fixed, still exist, or were mitigated
-2. Trace NEW suspicious flows introduced by recent commits (run-9 cycle-7 through cycle-10)
-3. Re-examine flows with new evidence from code changes
-4. Update confidence levels based on new findings
-5. Apply the full Tracing Protocol: Observe, Frame, Hypothesize, Gather Evidence, Apply Lenses, Rebut, Rank, Synthesize, Probe
+**HEAD:** 2a9976a1  
+**Date:** 2026-06-27  
+**Agent:** Tracer (causal trace, competing hypotheses)  
+**Scope:** Six high-risk data/control flows, end-to-end
 
 ---
 
-## 1. Previously Identified Issues — Status Update
+## Scope and Method
 
-### High Confidence (from prior review)
-
-| ID | Issue | Status | Evidence |
-|----|-------|--------|----------|
-| TRC-H1 | Static path ETag miss after settings change without backfill | **STILL EXISTS** | Documented as CRT-D1 in CLAUDE.md. No code change since prior review. The static path (Next.js static server) serves ~100% of real traffic and uses `W/"{size}-{mtime}"` ETag. Settings-hash ETag only affects `serve-upload.ts` fallback. |
-| TRC-H2 | Process-local state prevents horizontal scaling | **STILL EXISTS** | Documented in CLAUDE.md. All `globalThis`-backed state remains: `restoreMaintenanceKey`, `adminBackfillStateKey`, `uploadTracker`, `processingQueueKey`, `settingsHashCache`, all `BoundedMap` instances. No distributed state layer introduced. |
-| TRC-H3 | `getClientIp` returns "unknown" without `TRUST_PROXY` | **STILL EXISTS** | `rate-limit.ts:170` returns `'unknown'` when `TRUST_PROXY` is not set. Console warning emitted once. All users share one bucket. |
-| TRC-H4 | Fire-and-forget caption/embedding failures silently swallowed | **STILL EXISTS** | `image-queue.ts:439-454` (caption) and `image-queue.ts:478-522` (embedding) both use `.catch(() => undefined)` or `.catch(console.warn)`. No admin visibility. |
-| TRC-H5 | `canUseHighBitdepthAvif()` singleton caches failure permanently | **FIXED** | `process-image.ts:84-123` now has `_probeHighBitdepthAvif()` with MAX_RETRIES=3 and exponential backoff. Distinguishes `isBitdepthRejection()` (permanent) from `isTransientError()` (retryable). The probe still caches the final result, but transient errors are retried first. |
-| TRC-H6 | DB connection init timeout may return uninitialized connections | **STILL EXISTS** | `db/index.ts:71-96` unchanged. The 10s timeout on `SET group_concat_max_len` may return connections to the pool with default 1024-byte limit. |
-
-### Medium Confidence (from prior review)
-
-| ID | Issue | Status | Evidence |
-|----|-------|--------|----------|
-| TRC-M1 | Delete-during-processing race may leave orphaned files | **MITIGATED** | `image-queue.ts:418-434` now passes `[]` (empty sizes) to `deleteImageVariants` for full directory scan. `admin-backfill-runner.ts:430-440` mirrors this. The scan catches non-default-size variants. |
-| TRC-M2 | `lastError` in backfill is last-writer-wins at concurrency > 1 | **STILL EXISTS** | `admin-backfill-runner.ts:181` documents this as intentional. No code change. The scalar message reflects the most recent worker failure; counts stay correct. |
-| TRC-M3 | GPS stripping fallback for PNG may strip non-GPS metadata | **STILL EXISTS** | `gps-exif-strip.ts` fallback path uses `autoOrient + keepIccProfile` but doesn't preserve XMP/IPTC. No change since prior review. |
-| TRC-M4 | Login rate limit in-memory Map empty after restart | **STILL EXISTS** | `loginRateLimit` is a `BoundedMap` in module scope. After restart, it's empty. The DB backup is read on the first check, but the pre-increment happens before the DB check, so the first 5 attempts are un-limited in the Map. The DB check then catches up. This is a documented trade-off (fast path vs. restart accuracy). |
-| TRC-M5 | OG route rollback pattern inconsistency | **STILL EXISTS** | `rate-limit.ts:246-253` (rollbackOgAttempt) is documented as Pattern 4 (rollback ONLY for pre-DB syntactic rejections). The fixture tests `og-route-source-contracts.test.ts` and `og-photo-fallback.test.ts` lock this. No change. |
-| TRC-M6 | `quiesceImageProcessingQueueForRestore` may deadlock on hung Sharp | **STILL EXISTS** | `image-queue.ts:802-804` uses `queue.pause(); queue.clear(); await queue.onIdle()`. No timeout. If a Sharp task is hung, `onIdle()` never resolves. The `queue-shutdown.ts` drain function also has no timeout. |
-| TRC-M7 | Middleware format check is weak | **STILL EXISTS** | `proxy.ts` checks token length >= 100 and 3 colon-separated parts. Does not verify HMAC. Defense-in-depth: server actions do full verify. No change. |
-| TRC-M8 | `buildHashFromConfig` may misalign with encoder settings | **STILL EXISTS** | `settings-hash.ts:42-54` lists 9 `COLOR_IMPACTING_KEYS`. The compile-time guard `_ColorKeysAreSettingKeys` catches typos but NOT forgotten new keys. No change. |
-| TRC-M9 | Bootstrap may miss pending images if all permanently failed | **STILL EXISTS** | `image-queue.ts:667-697` unchanged. If all pending images in a batch are permanently failed, `bootstrapped = true` even though valid pending images may exist after the failed batch. |
-| TRC-M10 | `dotProduct` fast path has no zero-vector guard | **STILL EXISTS** | `clip-embeddings.ts` unchanged. The `dotProduct` fast path skips the epsilon check. No zero-vector guard. |
-
-### Low Confidence (from prior review)
-
-| ID | Issue | Status | Evidence |
-|----|-------|--------|----------|
-| TRC-L3 | GPS fallback strips non-GPS metadata | **STILL EXISTS** | No change. |
-| TRC-L8 | Semantic search 503 if weights missing | **STILL EXISTS** | No change. |
-| TRC-L9 | Partial files on crash during encode | **STILL EXISTS** | No change. |
-| TRC-L10 | Session secret race in dev | **STILL EXISTS** | No change. |
-| TRC-L11 | Rate limit decrement lost update | **STILL EXISTS** | No change. |
-| TRC-N1 | Upload tracker settlement under-count | **STILL EXISTS** | No change. |
-| TRC-N3 | Backfill raw SQL type unsafety | **STILL EXISTS** | No change. |
-| TRC-N4 | View count buffer drops new groups | **STILL EXISTS** | No change. |
-| TRC-N5 | Partial files on crash during encode | **STILL EXISTS** | No change. |
-| TRC-N6 | Session secret race in dev | **STILL EXISTS** | No change. |
-| TRC-N7 | Rate limit decrement lost update | **STILL EXISTS** | No change. |
-| TRC-N10 | Settings hash cache stale after admin change | **STILL EXISTS** | No change. |
+Six flows traced from source to final effect. For each flow: observation restated, competing hypotheses identified, evidence collected for and against each, strongest alternative rebutted, current best explanation stated, any critical unknown and discriminating probe named. Findings produced only where a real defect or genuinely under-defended path was found. Flows confirmed sound are noted for provenance.
 
 ---
 
-## 2. New Fixes Since Cycle 9 (HEAD c0522dec → bcd67b12)
+## Flow 1 — Upload → queue claim → Sharp processing → conditional UPDATE → delete-during-processing race
 
-### 2.1 FIX: Array.isArray guard in loadMoreImages (bcd67b12)
+### Observation
+An upload can be deleted while Sharp is processing its derivatives. The question is whether the queue path correctly detects this and avoids orphaned files on disk.
 
-**File:** `apps/web/src/app/actions/public.ts`
-**Change:** Added `Array.isArray(tagSlugs)` guard before processing tagSlugs parameter.
+### Hypotheses
 
-**Trace:** Before this fix, a malformed request with `tagSlugs` as a non-array (e.g., string, null, or object) would cause `.map()` to throw or behave unexpectedly. The guard now returns early with `status: 'invalid'` if `tagSlugs` is not an array.
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | Race is fully handled: per-image advisory lock + conditional UPDATE + full-scan cleanup | High | Strong (source code) |
+| 2 | Cleanup misses non-default image sizes (deleteImageVariants called with non-empty sizes array) | Low | Contradicted |
+| 3 | Lock is released before cleanup, allowing a second worker to race the orphaned-file cleanup | Low | Contradicted |
 
-**Confidence:** This fix is correct and complete. The guard prevents type confusion attacks.
+### Evidence For H1
+- `image-queue.ts`: `acquireImageProcessingClaim()` acquires `GET_LOCK('gallerykit:image-processing:{id}', 0)` (non-blocking) before any work begins.
+- Pre-processing claim: `WHERE processed = false` conditional check; queue job exits early if row is already claimed.
+- Post-encode conditional UPDATE `WHERE processed = false`; when `affectedRows === 0` the job treats this as a mid-encode delete.
+- On `affectedRows === 0`: calls `deleteImageVariants(dir, filename, [])` with an empty sizes array `[]`, which triggers a full directory scan (not constrained to the default size ladder). This specifically handles non-default-size derivatives.
+- Lock is held on `lockConn` for the entire job lifecycle; the lock is released after cleanup completes, preventing a second worker from racing the cleanup.
+- Claim retry: `MAX_CLAIM_RETRIES=10` with escalating delay up to 25 s.
 
----
+### Evidence Against H2 (non-default size gap)
+- The empty array `[]` passed to `deleteImageVariants` is documented to mean "full scan." Any number of sizes written to disk at any configured size are removed.
 
-### 2.2 FIX: ENOENT vs other opendir errors in deleteImageVariants (9c5c38ca)
+### Evidence Against H3 (lock released before cleanup)
+- The lock connection (`lockConn`) is released only in the `finally` block of the queue job, which executes after cleanup. The per-image lock scope covers the full job including post-encode cleanup.
 
-**File:** `apps/web/src/lib/process-image.ts`
-**Change:** Distinguishes `ENOENT` (directory doesn't exist — harmless) from other `opendir` errors.
+### Rebuttal Round
+Strongest challenge: a crash (SIGKILL) between the conditional UPDATE returning 0 and the cleanup call would leave orphaned files without holding the lock (lock is auto-released on connection drop). This is inherent to any non-transactional file+DB dual-state system. The risk is bounded because: (a) a new upload with the same UUID is cryptographically improbable; (b) the admin can run the sidecar backfill, which will either skip (row absent) or re-encode. This is not a code defect; it is a documented best-effort gap in any dual-store architecture.
 
-**Trace:** Before this fix, if a directory was missing during cleanup, the error was thrown and could propagate up, causing the entire delete operation to fail. Now `ENOENT` is silently ignored, while other errors (permission denied, I/O errors) are still thrown.
-
-**Confidence:** This fix is correct. `ENOENT` during cleanup is expected (the directory may have been already deleted or never created).
-
----
-
-### 2.3 FIX: Restore maintenance checks in smart collections and embedding backfill (7453030e)
-
-**Files:** `apps/web/src/app/actions/collections.ts`, `apps/web/src/app/actions/embeddings.ts`
-**Change:** Added `getRestoreMaintenanceMessage()` checks to `createSmartCollection` and `triggerEmbeddingBackfill`.
-
-**Trace:** Before this fix, smart collection creation and embedding backfill could proceed during database restore, potentially writing to tables that are being restored. This creates a race where the restore overwrites the newly created data, or the new data corrupts the restored state.
-
-**Confidence:** This fix is correct and closes a genuine gap. The restore maintenance flag was previously only checked in upload and image-processing paths.
-
-**Remaining concern:** Are there OTHER admin actions that should also check restore maintenance? Audit trail: `logAuditEvent` is called during restore — should it be blocked? The audit log is append-only, so it's safe. But other actions like topic creation, tag creation, admin user creation — do they need the check? Currently only upload, image processing, smart collections, and embedding backfill are guarded. Topic creation and admin user creation are NOT guarded. This may be intentional (these are lower-risk operations), but it's an inconsistency.
+### Current Best Explanation
+SOUND. The delete-during-processing race is correctly handled for the normal process-exit path. The crash-recovery gap is inherent and bounded.
 
 ---
 
-### 2.4 FIX: Revalidation moved outside try/catch in topic actions (db55056f)
+## Flow 2 — Session token creation → cookie → middleware guard → isAdmin() in server actions
 
-**File:** `apps/web/src/app/actions/topics.ts`
-**Change:** `revalidateAllAppData()` is now called AFTER the try/catch block, not inside it.
+### Observation
+Admin actions must reject unauthenticated callers regardless of whether the request comes through the Next.js App Router or the API route handler path.
 
-**Trace:** Before this fix, if revalidation threw an error (e.g., Next.js internal error), the catch block would execute the cleanup code (deleting the uploaded topic image file). This means a revalidation failure would cause the image file to be deleted even though the DB transaction succeeded. After the fix, revalidation runs independently — if it fails, the image file is NOT deleted.
+### Hypotheses
 
-**Confidence:** This fix is correct. The revalidation failure should not cause data loss.
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | Defense-in-depth: middleware is format-check-only; full crypto verification is in every server action via isAdmin()/verifySessionToken() | High | Strong |
+| 2 | API routes bypass middleware entirely, creating an unguarded surface | Low | Contradicted by lint gate |
+| 3 | Middleware's token length check (< 100) can pass a crafted short-but-syntactically-valid token | Low | Irrelevant — crypto check in actions is authoritative |
 
-**Remaining concern:** If revalidation fails, the cache remains stale. The admin may see old data until the next revalidation or cache expiry. This is a known Next.js limitation, not a GalleryKit bug.
+### Evidence For H1
+- `proxy.ts` line 140 comment explicitly states: "API routes (/api/*) are EXCLUDED from this middleware matcher. Any new /api/admin/* route MUST implement its own auth check."
+- `proxy.ts` matcher: `'/((?!api|_next|_vercel|.*\\..*).*)' ` — API routes explicitly excluded.
+- `proxy.ts` lines 90, 103: two-stage format check (length >= 100, then 3 non-empty colon-separated segments). This is a cheap early redirect for obviously-malformed tokens only. It never claims to be cryptographic.
+- Every `/api/admin/**` route is wrapped with `withAdminAuth()` enforced by the `lint:api-auth` gate (`check-api-auth.test.ts`).
+- `isAdmin()` → `verifySessionToken()`: HMAC-SHA256 verification via `timingSafeEqual` + DB session lookup. This runs in every mutating server action independently.
+- Session rotation on login: new session created in a transaction, all prior sessions deleted to prevent session fixation.
+- `requireSecureCookie` uses `getTrustedRequestProtocol()` — fails closed to `http` when no protocol header is present (tested in `__tests__/request-origin.test.ts`).
 
----
+### Evidence Against H2
+- The `lint:api-auth` gate (`check-api-auth.test.ts`) fails the build if any `/api/admin/**` HTTP-method export lacks `withAdminAuth()`. The gate is exercised by CI.
 
-### 2.5 FIX: Rate-limit entry getters return shallow copies (5f4a5e95)
+### Evidence Against H3
+- The middleware's token format check is documented as defense-in-depth only. The definitive auth boundary is `verifySessionToken()` in actions, which performs HMAC verification and DB lookup regardless of what the middleware allowed through.
 
-**File:** `apps/web/src/lib/auth-rate-limit.ts`
-**Change:** `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` now return `{ ...entry }` (shallow copy) instead of the original entry.
+### Rebuttal Round
+Strongest challenge: the `x-gk-admin-render: 1` header set in `proxy.ts` line 129 uses only cookie presence (not crypto verification). A fabricated `admin_session` cookie would cause the service worker to exclude that HTML response from its offline cache — a mis-classification, not a security breach. Crypto auth is downstream in `isAdmin()`.
 
-**Trace:** Before this fix, callers could mutate the returned entry object, which would modify the in-memory Map directly. For example:
-```typescript
-const entry = getLoginRateLimitEntry(ip, now);
-entry.count += 1; // This mutated the Map entry directly!
-```
-
-After the fix, the mutation only affects the copy, and the caller must explicitly `loginRateLimit.set(ip, entry)` to persist the change.
-
-**Confidence:** This fix is correct and closes a mutable reference leak.
-
-**Remaining concern:** Are there OTHER getters in the codebase that return mutable references? The `BoundedMap.get()` method returns the raw Map entry. If callers mutate it without calling `.set()`, they modify the Map directly. The `BoundedMap` class should probably also return copies, or document that callers must not mutate returned values.
-
----
-
-### 2.6 FIX: isAdmin() checks in deleteAdminUser and LR token actions (b22fa85e)
-
-**Files:** `apps/web/src/app/actions/admin-users.ts`, `apps/web/src/app/actions/lr-tokens.ts`
-**Change:** Added `isAdmin()` checks to `deleteAdminUser` and LR token actions.
-
-**Trace:** Before this fix, these actions relied on `requireSameOriginAdmin()` for auth. While `requireSameOriginAdmin()` does verify the session, it doesn't explicitly check admin status. The `isAdmin()` check adds defense-in-depth.
-
-**Confidence:** This fix is correct. Defense-in-depth is good practice for destructive operations.
-
-**Remaining concern:** Are there OTHER admin actions that lack `isAdmin()`? The `isAdmin()` check is redundant with `requireSameOriginAdmin()` (which also checks admin status), but the double-check is safer. The codebase should be audited for actions that only use `requireSameOriginAdmin()` without `isAdmin()`.
+### Current Best Explanation
+SOUND. The two-layer design (cheap format check in middleware + definitive HMAC+DB check in every action) is correct and consistent with the defense-in-depth architecture.
 
 ---
 
-## 3. New Findings (Cycle 10)
+## Flow 3 — getClientIp → TRUST_PROXY / TRUSTED_PROXY_HOPS → per-IP rate-limit bucket key
 
-### 3.1 NEW: `BoundedMap.get()` returns mutable reference (TRC-N11)
+### Observation
+Rate-limit bucket keys must use the real client IP. When behind a reverse proxy, this depends on correctly parsing the X-Forwarded-For chain.
 
-**Observation:** `bounded-map.ts:57-59` returns the raw Map entry without copying.
+### Hypotheses
 
-**Trace:**
-```typescript
-get(key: K): V | undefined {
-    return this.map.get(key);
-}
-```
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | IP extraction is correct: only trusts XFF when TRUST_PROXY=true, hops default safely | High | Strong |
+| 2 | TRUSTED_PROXY_HOPS=0 or negative causes underflow (clientIndex < 0) and falls through to wrong IP | Low | Contradicted |
+| 3 | Spoofed XFF is accepted when TRUST_PROXY is unset | Low | Contradicted |
 
-If a caller mutates the returned value, the Map entry is modified directly. This is the same pattern that was fixed in `auth-rate-limit.ts` (5f4a5e95), but the underlying `BoundedMap` class still exposes mutable references.
+### Evidence For H1
+- `rate-limit.ts` `getClientIp()`: XFF only used when `TRUST_PROXY === 'true'`.
+- `getTrustedProxyHopCount()`: parses `TRUSTED_PROXY_HOPS`, returns 1 if missing, non-numeric, non-positive, or NaN.
+- XFF chain-too-short path: `clientIndex = validParts.length - hopCount - 1`; when `clientIndex < 0` the code falls through to `X-Real-IP`, then `null` → `'anon'`. No crash, no wrong-IP use.
+- When TRUST_PROXY is unset (default), XFF is ignored completely and IP is sourced from `X-Real-IP` or returns null.
 
-**Competing Hypotheses:**
-- H1 (Low): The `BoundedMap` is an internal utility, and all callers are trusted to not mutate returned values. The fix in `auth-rate-limit.ts` addresses the specific leak.
-- H2 (Medium): The `BoundedMap.get()` API is unsafe by design. Any caller that gets an entry, modifies it, and forgets to call `.set()` will corrupt the Map state.
+### Evidence Against H2
+- `getTrustedProxyHopCount()` explicitly guards: if parsed result is absent or non-positive, returns 1. The underflow path (`clientIndex < 0`) falls through to `X-Real-IP`.
 
-**Confidence:** Medium. The `auth-rate-limit.ts` fix suggests this was a real issue. The `BoundedMap` class should return copies or be documented as "returned values must not be mutated."
+### Evidence Against H3
+- Without `TRUST_PROXY=true`, XFF headers are treated as untrusted user input and ignored.
 
-**Probe:** Audit all `BoundedMap.get()` callers for mutation patterns.
+### Rebuttal Round
+Strongest challenge: when `TRUST_PROXY=false` and neither `X-Forwarded-For` nor `X-Real-IP` is present (direct connection), `getClientIp()` returns null. The rate-limit code uses `'anon'` as the bucket key, pooling all such requests under one key. This is a bounded worst-case: it is the admin's deployment responsibility to configure a reverse proxy. The code makes the correct conservative choice.
 
----
-
-### 3.2 NEW: `uploadImages` tracker settlement may under-count on partial failure (TRC-N1 — carried forward)
-
-**Observation:** `app/actions/images.ts:190-194` pre-increments the upload tracker before processing, then `settleUploadTrackerClaim` reconciles at the end.
-
-**Trace:** If the upload action throws BEFORE settlement (e.g., DB connection drops mid-loop), the tracker stays inflated. The `try/finally` around the upload processing ensures settlement happens in most cases, but if the throw happens in the `finally` block itself (e.g., during cleanup), the tracker remains inflated.
-
-**Confidence:** Low. The impact is bounded by the 1-hour window and the 2-hour prune.
-
-**Probe:** Simulate a DB connection drop mid-upload, verify tracker state on next upload attempt.
+### Current Best Explanation
+SOUND. The hop-count parsing, fallback chain, and TRUST_PROXY gating are all correct.
 
 ---
 
-### 3.3 NEW: `image-queue.ts` bootstrap may miss pending images if `permanentlyFailedIds` is large (TRC-N2 — carried forward)
+## Flow 4 — Color detection precedence (NCLX > ICC chromaticity > ICC name) → encoder decision → ETag/settings-hash invalidation
 
-**Observation:** `image-queue.ts:667-697` bootstrap query excludes `permanentlyFailedIds`.
+### Observation
+The color pipeline uses three layers of source detection with defined precedence. The ETag formula must incorporate any setting that affects the output bytes.
 
-**Trace:** If the first 500 pending images are all permanently failed, the query returns 0 rows, `bootstrapped = true`, and valid pending images after the failed batch are never discovered.
+### Hypotheses
 
-**Confidence:** Medium. The `permanentlyFailedIds` Set has a MAX cap of 1000, but the bootstrap logic doesn't handle the "all pending images are permanently failed" case correctly.
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | Detection precedence, encoder decision, and ETag are correctly implemented and mutually consistent | High | Strong |
+| 2 | A new color-impacting setting could be added without being added to COLOR_IMPACTING_KEYS, silently breaking cache invalidation | Medium | Compile-time guard present but cannot catch forgotten new keys |
+| 3 | imageSizes sort-before-hash is missing, causing spurious cache invalidation | Low | Contradicted |
 
-**Probe:** Create 500 images with `processed=false` and corrupt originals, trigger bootstrap, verify it marks `bootstrapped=true` even though valid pending images exist after the failed batch.
+### Evidence For H1
+- `settings-hash.ts`: 9 `COLOR_IMPACTING_KEYS` correctly enumerated (5 color + 3 quality + 1 sizes key).
+- Compile-time guard `_ColorKeysAreSettingKeys` enforces all listed keys are valid `GallerySettingKey` — catches typos and removed keys.
+- `buildHashFromConfig` sorts `imageSizes` ascending before hashing (AGG-R7C3-02).
+- `serve-upload.ts`: module-scoped 5 s TTL cache with stale-while-revalidate pattern. On DB failure, serves last-known hash; on true cold start, falls through to `FALLBACK_HASH`. No request is blocked.
+- ETag format: `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`.
 
----
+### Evidence For H2 (compile-time guard gap)
+- The `_ColorKeysAreSettingKeys` guard verifies listed keys are valid, but it cannot detect a new byte-impacting setting key that was never added to `COLOR_IMPACTING_KEYS`. CLAUDE.md documents the risk: "CANNOT catch a forgotten new byte-impacting key."
 
-### 3.4 NEW: `admin-backfill-runner.ts` `fetchCandidateBatch` uses raw SQL without type safety (TRC-N3 — carried forward)
+### Evidence Against H3
+- `buildHashFromConfig`: `const sortedSizes = [...(config.image_sizes ?? [])].sort((a, b) => a - b)` — sort is present and correct.
 
-**Observation:** `admin-backfill-runner.ts:400-411` uses `db.execute(sql\`...\`)` for candidate fetching.
+### Rebuttal Round
+Strongest challenge: the static file serving path (`public/uploads/`) uses Next's own `W/"{size-hex}-{mtime-hex}"` ETag, NOT the settings-hash ETag. Flipping a color-impacting admin setting does NOT invalidate existing static derivatives until a re-encode (backfill). This is a documented and accepted operational gap (CLAUDE.md "Operational gotcha CRT-D1"), not a code defect.
 
-**Trace:** The result is cast through multiple layers: `result[0]` as `unknown as CandidateRow[]`. This is a type-unsafe pattern.
-
-**Confidence:** Low. The type cast is a code smell but the SQL is simple and unlikely to drift.
-
-**Probe:** Verify that `IMAGE_PIPELINE_VERSION` is the same in both the upload path and the backfill path.
-
----
-
-### 3.5 NEW: `data.ts` view count buffer may lose increments during rapid flush (TRC-N4 — carried forward)
-
-**Observation:** `data.ts:48-61` buffers view counts and flushes them asynchronously.
-
-**Trace:** If `bufferGroupViewCount` is called rapidly, the buffer may grow quickly. The `MAX_VIEW_COUNT_BUFFER_SIZE = 1000` cap drops increments when exceeded, but only for NEW groups (existing groups can accumulate unlimited increments).
-
-**Confidence:** Low. The behavior is documented and acceptable for the target scale.
-
-**Probe:** Simulate 1001 concurrent views to different groups, verify one is dropped.
+### Current Best Explanation
+SOUND. The color detection precedence, encoder decision matrix, and ETag formula are correctly implemented. H2 is a process gap, not a code gap, and is acknowledged in CLAUDE.md.
 
 ---
 
-### 3.6 NEW: `process-image.ts` `generateForFormat` may leave partial files on crash (TRC-N5 — carried forward)
+## Flow 5 — Backfill advisory lock + delete-during-reencode race + orphaned file cleanup
 
-**Observation:** `process-image.ts:1050-1149` writes sized variants in a loop.
+### Observation
+The in-app backfill runner and the sidecar backfill script can run concurrently with the live upload queue and with admin-triggered image deletes. The question is whether the advisory lock and post-encode cleanup prevent double-encodes and orphaned files.
 
-**Trace:** If the PROCESS crashes (SIGKILL, OOM) between `toFile(outputPath)` and the `finally` block, the partial file remains on disk. The retry mechanism handles this by overwriting on retry.
+### Hypotheses
 
-**Confidence:** Low. The retry mechanism handles this.
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | Both entry points correctly serialize via advisory locks and handle delete-during-reencode with full-scan cleanup | High | Strong |
+| 2 | The live queue worker can race the backfill runner on a retried-failed row (processed=true rows re-enqueued) | Low | Contradicted by per-image lock |
+| 3 | Detection failure after a successful re-encode could incorrectly version-bump the row, preventing retry | Low | Contradicted |
 
-**Probe:** SIGKILL mid-encode, verify partial files are cleaned up on retry.
+### Evidence For H1
+- `admin-backfill-runner.ts`: `acquireBackfillLock()` uses `GET_LOCK('gallerykit_color_pipeline_backfill', 0)` (non-blocking). Concurrent callers get `{ status: 'already_running' }`.
+- Per-image `acquireImageProcessingClaim()` inside the runner uses `GET_LOCK('gallerykit:image-processing:{id}', 0)`, identical semantics to the live queue worker's lock. A row claimed by the live queue is skipped (counted as `skippedLocked`), not raced.
+- Delete-during-reencode: post-UPDATE `affectedRows === 0` → `deleteImageVariants(dir, file, [])` (full scan), counted as `deletedMidReencode`. No orphans, no false success/failure.
+- State type JSDoc: "Rows whose re-encode succeeded but color detection threw. Derivative columns are persisted WITHOUT a pipeline_version bump so a later run retries detection."
 
----
+### Evidence Against H2
+- The per-image lock `gallerykit:image-processing:{id}` is the same lock name used by both the live queue worker and the backfill runner. MySQL advisory locks are connection-scoped, so a live queue worker holding the lock means the backfill runner gets acquired=0 (non-blocking) and correctly skips that row.
 
-### 3.7 NEW: `session.ts` `getSessionSecret` DB fallback may race on multi-process dev (TRC-N6 — carried forward)
+### Evidence Against H3
+- Code path: re-encode succeeds → detection throws → `detectionFailures++` → version NOT bumped → row remains below `IMAGE_PIPELINE_VERSION` → next run retries. Documented in runner's state type JSDoc.
 
-**Observation:** `session.ts:40-78` has a dev-only DB fallback for session secret.
+### Rebuttal Round
+Strongest challenge: `lastError` in `AdminBackfillState` is last-writer-wins at concurrency > 1 — whichever worker failed last overrides the string message. This is documented in the JSDoc: "Do NOT treat `lastError` as a per-row failure log." Failure counts (`errors`, `encodeFailures`, `detectionFailures`) are additive and correct. The single scalar message is an acceptable tradeoff for a process-local admin status surface.
 
-**Trace:** In dev mode without `SESSION_SECRET`, multiple processes may generate different secrets. The re-fetch ensures both processes get the same DB value, but the race window is between INSERT IGNORE and re-fetch.
-
-**Confidence:** Low. Dev-only, documented, and the re-fetch ensures both processes get the same DB value.
-
-**Probe:** Two dev processes, create session on one, verify on other.
-
----
-
-### 3.8 NEW: `rate-limit.ts` `decrementRateLimit` transaction may deadlock (TRC-N7 — carried forward)
-
-**Observation:** `rate-limit.ts:410-440` uses `db.transaction` for decrement.
-
-**Trace:** Single-row UPDATE followed by single-row DELETE on the same row. Under MySQL's default REPEATABLE READ, the UPDATE acquires an X lock on the row. The DELETE then tries to acquire another X lock on the same row (which it already holds). This should not deadlock, but a lost decrement is possible if two transactions both decrement from count=1.
-
-**Confidence:** Low. The lost decrement is conservative and acceptable.
-
-**Probe:** Concurrent decrements, verify count.
+### Current Best Explanation
+SOUND. Both entry points correctly serialize, handle the delete race, and correctly avoid version-bumping on detection failure.
 
 ---
 
-### 3.9 NEW: `db/index.ts` connection init timeout may leak connections on race (TRC-N8 — carried forward)
+## Flow 6 — View-event GC / audit-log sweep retention cutoff (negative/NaN env)
 
-**Observation:** `db/index.ts:71-96` overrides `poolConnection.getConnection` to await the `group_concat_max_len` init query with a 10-second timeout.
+### Observation
+If `VIEW_RETENTION_DAYS` or `AUDIT_LOG_RETENTION_DAYS` is set to a negative, zero, or non-finite value, the purge cutoff could be set to a future timestamp (causing all rows to be deleted) or suppress the purge entirely.
 
-**Trace:** If the init query is still running when the timeout fires, `connection.release()` returns the connection to the pool even though the init query may later complete and the connection may have the wrong `group_concat_max_len`.
+### Hypotheses
 
-**Confidence:** Medium. The `C4-C1` comment acknowledges this risk.
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|-----------|-----------|-----------------|
+| 1 | Both guards correctly reject negative and NaN values and fall back to DEFAULT | High | Strong (direct source read) |
+| 2 | `Number.parseInt` with a non-numeric string returns NaN; `isFinite(NaN)` is false → falls back correctly | High | Strong |
+| 3 | A zero value slips through | Low | Contradicted |
 
-**Probe:** Simulate slow MySQL (e.g., `tc` network delay), trigger CSV export, verify `group_concat_max_len` is set correctly.
+### Evidence For H1 and H2
+- `view-retention.ts` `resolveRetentionMs()`:
+  - `Number.parseInt(env, 10)` → stored as `retentionDays`
+  - `Number.isFinite(retentionDays) && retentionDays > 0` → else `DEFAULT_VIEW_RETENTION_DAYS`
+  - Covers: NaN (isFinite fails), negative (> 0 fails), Infinity (isFinite fails), zero (> 0 fails).
+- `audit.ts` `purgeOldAuditLog()`: identical guard pattern.
+- Chunked purge: `VIEW_PURGE_BATCH = 5000` rows, `MAX_BATCHES_PER_TABLE = 200` cap — prevents a single runaway sweep even if a misconfigured cutoff ever fired.
 
----
+### Evidence Against H3
+- The condition is `retentionDays > 0` (strictly greater than), so zero returns DEFAULT. Not `>= 0`.
 
-### 3.10 NEW: `image-queue.ts` fire-and-forget caption/embedding hooks may fail silently (TRC-N9 — carried forward)
+### Rebuttal Round
+None. The guard is airtight for all out-of-range inputs.
 
-**Observation:** `image-queue.ts:437-454` (caption) and `image-queue.ts:478-522` (embedding) are fire-and-forget hooks.
-
-**Trace:** Failures are only logged to console.warn — no admin visibility, no retry, no persistence of failure state.
-
-**Confidence:** Medium. The fire-and-forget pattern is documented as intentional, but the lack of admin visibility is a real operational gap.
-
-**Probe:** Enable auto-alt-text, trigger an ONNX failure, verify no admin UI indication.
-
----
-
-### 3.11 NEW: `serve-upload.ts` settings hash cache may serve stale hash after admin change (TRC-N10 — carried forward)
-
-**Observation:** `serve-upload.ts:46-83` has a module-scoped 5-second TTL cache for the settings hash.
-
-**Trace:** In a multi-process deployment, each process has its own cache. If an admin changes a color-impacting setting, Process A's cache expires within 5 seconds, but Process B's cache may still serve the old hash for up to 5 seconds.
-
-**Confidence:** Low. The operational gotcha (CRT-D1) is already documented.
-
-**Probe:** Change a color setting, verify ETag on static vs fallback paths before and after backfill.
+### Current Best Explanation
+SOUND. Both retention guards correctly handle all degenerate env values.
 
 ---
 
-### 3.12 NEW: Restore maintenance gap in topic and admin user actions (TRC-N12)
+## Findings
 
-**Observation:** `apps/web/src/app/actions/topics.ts` and `apps/web/src/app/actions/admin-users.ts` do NOT check `getRestoreMaintenanceMessage()`.
+### R12-TRC-01 — `hasTrustedSameOriginWithOptions` export retains `allowMissingSource` escape hatch (LOW / INFORMATIONAL)
 
-**Trace:** The restore maintenance flag prevents uploads, image processing, smart collection creation, and embedding backfill. But topic creation, topic deletion, topic image upload, admin user creation, admin user deletion, and password changes are NOT blocked during restore.
+**Flow:** Session auth — same-origin check  
+**Location:** `/apps/web/src/lib/request-origin.ts:109`
 
-**Competing Hypotheses:**
-- H1 (Low): These actions are lower-risk. Topic and admin user changes don't affect the database tables being restored (images, tags, etc.). The restore typically targets the main data tables, not the config tables.
-- H2 (Medium): If the restore includes ALL tables (full database dump), then topic and admin user changes during restore will be overwritten. The admin may create a topic, see it succeed, then see it disappear after restore completes. This is confusing and could lead to data loss if the admin re-creates the topic after restore.
+**Observation:** AGG-M9 hardened `hasTrustedSameOrigin()` to default fail-closed (`allowMissingSource = false`). However, `hasTrustedSameOriginWithOptions` is still exported as a named export at line 109: `export { hasTrustedSameOriginWithOptions }`. The option parameter `{ allowMissingSource?: boolean }` remains accessible to any future importer.
 
-**Confidence:** Medium. The inconsistency is real — some actions are blocked, others are not. The impact depends on the restore scope.
+**Evidence for:** No production caller currently passes `allowMissingSource: true` (grep confirms). The test file at `__tests__/request-origin.test.ts:139` uses the phrase "retains the explicit loose opt-in", confirming the export is intentional. The comment in `request-origin.ts:88-89` states: "Callers that intentionally need the legacy loose contract must opt in via `allowMissingSource: true`."
 
-**Probe:** Trigger a restore, attempt topic creation during restore, verify topic state after restore completes.
+**Assessment:** Intentional design decision; no current production risk. The risk is forward-facing: a future developer adding a new server action could accidentally call `hasTrustedSameOriginWithOptions({ allowMissingSource: true })` instead of the closed-default `hasTrustedSameOrigin()`, and the incorrect call would not trigger a compile error or lint gate.
 
----
+**Suggested fix (optional):** Add a `@remarks` JSDoc warning that this function is an escape hatch and should not be called with `allowMissingSource: true` in new code. Alternatively, add the function name to the `lint:action-origin` scan's watchlist.
 
-### 3.13 NEW: `deleteImageVariants` ENOENT fix may mask real errors (TRC-N13)
-
-**Observation:** `process-image.ts` (9c5c38ca) now ignores `ENOENT` in `deleteImageVariants`.
-
-**Trace:** The fix distinguishes `ENOENT` (directory doesn't exist) from other errors. But what if the directory exists but is not readable (EACCES)? The error is still thrown. What if the directory exists but `opendir` fails for another reason (EMFILE, ENOMEM)? These are also thrown.
-
-**Competing Hypotheses:**
-- H1 (Low): The fix is correct. `ENOENT` is the only expected error during cleanup (directory already deleted or never created). All other errors are genuine problems that should be reported.
-- H2 (Medium): If the directory is deleted BETWEEN the `exists` check and the `opendir` call, the race still throws. But the fix catches this at the `opendir` level, not the `exists` level, so it's correct.
-
-**Confidence:** Low. The fix is correct and complete.
-
-**Probe:** Delete directory between `exists` and `opendir`, verify error is handled.
+**Severity:** LOW / INFORMATIONAL  
+**Confidence:** High
 
 ---
 
-## 4. Updated Risk Matrix
+### R12-TRC-02 — `BoundedMap.entries()` returns raw mutable iterator (LOW / INFORMATIONAL)
 
-### High Confidence (new or confirmed)
+**Flow:** Rate-limit bucket state mutation  
+**Location:** `/apps/web/src/lib/bounded-map.ts:115-117`
 
-| ID | Issue | Flow | Impact | Probe |
-|----|-------|------|--------|-------|
-| TRC-H1 | Static path ETag miss after settings change | Settings -> Serving | Stale derivatives served | Change setting, verify ETag on static vs fallback paths |
-| TRC-H2 | Process-local state prevents scaling | All globalThis state | Horizontal scaling breaks | Multi-process deployment test |
-| TRC-H3 | `getClientIp` "unknown" without `TRUST_PROXY` | Login rate limit | All users share bucket | Production without TRUST_PROXY, 5 failed logins from any IP |
-| TRC-H4 | Fire-and-forget failures silent | Caption/embedding | No admin visibility | Trigger ONNX failure, check admin UI |
-| TRC-H6 | DB init timeout may return uninitialized connections | DB pool | GROUP_CONCAT truncation | Simulate slow MySQL, trigger CSV export |
-| TRC-N8 | Connection init timeout may leak uninitialized connections | DB pool | Silent data corruption | Simulate slow MySQL, verify group_concat_max_len |
+**Observation:** `BoundedMap.get()` explicitly returns a shallow copy (`{ ...value }`) to prevent external mutation of internal map state. `BoundedMap.entries()` returns `this.map.entries()` — raw entries, including raw value references. A caller iterating via `entries()` and mutating value properties would corrupt internal map state, bypassing the copy protection of `get()`.
 
-### Medium Confidence (new or confirmed)
+**Evidence for:** Grep confirms zero production callers of `.entries()` on any BoundedMap instance in `apps/web/src/`. The method is defined but unused in production. The comment at line 114 reads "Iterate over entries for external consumers that need full access" — the "full access" phrasing suggests mutation is permitted, which is inconsistent with `get()`'s protective copy policy.
 
-| ID | Issue | Flow | Impact | Probe |
-|----|-------|------|--------|-------|
-| TRC-M2 | Backfill `lastError` last-writer-wins | Backfill | Wrong error message | Concurrent failures, verify lastError |
-| TRC-M5 | OG rollback pattern inconsistency | OG rate limit | Enumeration oracle | Verify fixture tests still pass |
-| TRC-M6 | Queue quiesce may deadlock on hung Sharp | Restore | Restore never completes | Inject hung Sharp task, trigger restore |
-| TRC-M9 | Bootstrap may miss pending images if all permanently failed | Image queue | Valid images not processed | Create 500 corrupt uploads, verify bootstrap |
-| TRC-M10 | `dotProduct` fast path has no zero-vector guard | Semantic search | Potential NaN/undefined behavior | Insert zero-vector, verify query behavior |
-| TRC-N2 | Bootstrap may miss pending images if all permanently failed | Image queue | Valid images not processed | Create 500 corrupt uploads, verify bootstrap |
-| TRC-N9 | Fire-and-forget caption/embedding failures silent | Caption/embedding | No admin visibility | Trigger ONNX failure, check admin UI |
-| TRC-N11 | `BoundedMap.get()` returns mutable reference | Rate limit | Map corruption | Audit all `BoundedMap.get()` callers |
-| TRC-N12 | Restore maintenance gap in topic/admin actions | Restore | Confusing data loss | Trigger restore, attempt topic creation |
+**Failure scenario (latent):** A future rate-limit consumer iterates via `entries()` and mutates `entry.count` directly, bypassing the `BoundedMap.set()` path and hard-cap enforcement.
 
-### Low Confidence (new or confirmed)
+**Suggested fix:** Either change `entries()` to return copies consistent with `get()`, or add an explicit JSDoc `@remarks` warning that mutating values returned by `entries()` corrupts internal map state.
 
-| ID | Issue | Flow | Impact | Probe |
-|----|-------|------|--------|-------|
-| TRC-L3 | GPS fallback strips non-GPS metadata | Upload | Metadata loss | Upload PNG with XMP, verify preservation |
-| TRC-L8 | Semantic search 503 if weights missing | Semantic search | Feature unavailable | Remove weights, trigger search |
-| TRC-L9 | Partial files on crash during encode | Image processing | Orphaned partials | SIGKILL mid-encode, verify cleanup |
-| TRC-L10 | Session secret race in dev | Session | Cross-process session invalidation | Two dev processes, create session on one, verify on other |
-| TRC-L11 | Rate limit decrement lost update | Rate limit | Slightly conservative count | Concurrent decrements, verify count |
-| TRC-N1 | Upload tracker settlement under-count | Upload | Premature rejection | Simulate DB drop mid-upload, verify tracker |
-| TRC-N3 | Backfill raw SQL type unsafety | Backfill | Type mismatch | Modify SQL, verify compiler catches it |
-| TRC-N4 | View count buffer drops new groups | Analytics | Bounded loss | 1001 concurrent views, verify one dropped |
-| TRC-N5 | Partial files on crash during encode | Image processing | Orphaned partials | SIGKILL mid-encode, verify cleanup |
-| TRC-N6 | Session secret race in dev | Session | Cross-process session invalidation | Two dev processes, create session on one, verify on other |
-| TRC-N7 | Rate limit decrement lost update | Rate limit | Slightly conservative count | Concurrent decrements, verify count |
-| TRC-N10 | Settings hash cache stale after admin change | Serving | Brief skew | Change setting, verify ETag across processes |
-| TRC-N13 | `deleteImageVariants` ENOENT fix completeness | Cleanup | None — fix is correct | N/A |
+**Severity:** LOW / INFORMATIONAL  
+**Confidence:** High — gap is real but inactive; no production callers
 
 ---
 
-## 5. Invariants Verified (Still Hold)
+### R12-TRC-03 — `getPasswordChangeRateLimitEntry` missing final `{ ...entry }` spread (INFORMATIONAL)
 
-| ID | Invariant | Evidence |
-|----|-----------|----------|
-| TRC-V1 | No sensitive keys in `publicSelectFields` | `_SensitiveKeysInPublic` compile-time guard |
-| TRC-V2 | `COLOR_IMPACTING_KEYS` are valid settings | `_ColorKeysAreSettingKeys` compile-time guard |
-| TRC-V3 | Mutating admin actions use `requireSameOriginAdmin()` | Lint gate: `check-action-origin` |
-| TRC-V4 | Admin API routes wrap with `withAdminAuth()` | Lint gate: `check-api-auth` |
-| TRC-V5 | Public mutating routes have rate-limit pre-increment | Lint gate: `check-public-route-rate-limit` |
-| TRC-V6 | Touch targets >= 44px | Unit test: `touch-target-audit.test.ts` |
-| TRC-V7 | No Unicode bidi/formatting in admin strings | `validation.ts` rejects `UNICODE_FORMAT_CHARS` |
-| TRC-V8 | GPS excluded from public API | `publicSelectFields` omits + compile-time guard |
-| TRC-V9 | Session tokens use HMAC-SHA256 + timingSafeEqual | `session.ts:106-118` |
-| TRC-V10 | Passwords use Argon2id with OWASP-exceeding params | `password-hashing.ts` |
-| TRC-V11 | 10-bit AVIF probe retries transient errors | `process-image.ts:84-123` (R8-R5 fix) |
-| TRC-V12 | Backfill cleanup uses full directory scan | `admin-backfill-runner.ts:430-440` (AGG-R8c3-03) |
-| TRC-V13 | View count buffer has retry cap and backoff | `data.ts:26-46` (C30-03, C5-AGG-02) |
-| TRC-V14 | Upload tracker has TOCTOU fix | `images.ts:190-194` (C8R-RPL-02) |
-| TRC-V15 | Queue claim retry removes from enqueued before reschedule | `image-queue.ts:303` (C4-A1) |
-| TRC-V16 | Backfill serializes via advisory lock | `admin-backfill-runner.ts:303-322` |
-| TRC-V17 | Per-image processing claim prevents double-encode | `image-queue.ts:210-227` |
-| TRC-V18 | Restore maintenance prevents uploads/processing | `restore-maintenance.ts:21-56` |
-| TRC-V19 | Rate limit pre-increment prevents TOCTOU | `auth.ts:122-138` |
-| TRC-V20 | Conditional UPDATE prevents delete-during-processing orphan | `image-queue.ts:412-435` |
-| TRC-V21 | Symlink rejection on upload and serve | `images.ts` (lstat) + `serve-upload.ts:175-184` |
-| TRC-V22 | Path traversal containment on upload and serve | `images.ts` (SAFE_SEGMENT) + `serve-upload.ts:154-161` |
-| TRC-V23 | Session invalidation on password change | `auth.ts:388-399` |
-| TRC-V24 | Last admin deletion prevented | `auth.ts` (last admin check) |
-| TRC-V25 | Audit log retention guard prevents negative values | `audit.ts:66-75` (R4C6 COR-R4C6-10) |
-| TRC-V26 | View retention guard prevents negative values | `view-retention.ts:39-47` (R4C6 COR-R4C6-10) |
-| TRC-V27 | Upload processing contract lock serializes uploads with settings changes | `upload-processing-contract-lock.ts:9-74` |
-| TRC-V28 | Queue quiesce clears bootstrap retry timer | `queue-shutdown.ts:33-36` (C4-C3) |
-| TRC-V29 | Connection init timeout clears stale promise | `db/index.ts:94-101` (R10-C3-TRC-H6) |
-| TRC-V30 | Backfill concurrency clamped to pool budget | `admin-backfill-runner.ts:105-142` (AGG-R5C3-05) |
-| TRC-V31 | Caption/embedding hooks do not block queue | `image-queue.ts:437-454, 478-522` |
-| TRC-V32 | Settings hash debounced on serving path | `serve-upload.ts:46-83` (R4C3 PERF-R4C3-05) |
-| TRC-V33 | Blur data URL validated at producer, write, and read time | `blur-data-url.ts` + `process-image.ts` + `images.ts` + `photo-viewer.tsx` |
-| TRC-V34 | OG sanitize shared across all three consumers | `og-sanitize.ts` (AGG-R8-13, AGG-R8c3-02) |
-| TRC-V35 | CSV export strips formula injection, bidi, zero-width chars | `csv-escape.ts` (C7R-RPL-01, C7R-RPL-11, C8R-RPL-01) |
-| TRC-V36 | Admin string fields reject Unicode formatting | `validation.ts` (C3L-SEC-01 through C6L-SEC-01) |
-| TRC-V37 | Service Worker offline cache excludes admin-rendered pages | `sw.template.js` (R4C6 COR-R4C6-05) |
-| TRC-V38 | Service Worker HEAD revalidation bounded by timeout | `sw.template.js` (AGG-R8-05, 300ms) |
-| TRC-V39 | Migration post-condition asserts no silent skips | `migrate.js` (R4C6 COR-R4C6-10) |
-| TRC-V40 | Backfill detection-failure leaves version behind for retry | `admin-backfill-runner.ts:583-612` (Run-2c1 AGG-01) |
-| TRC-V41 | Backfill deleted-mid-reencode cleans up variants | `admin-backfill-runner.ts:576-578` (AGG-R8c3-03) |
-| TRC-V42 | Queue deleted-mid-processing cleans up variants | `image-queue.ts:418-434` (AGG-C4-04) |
-| TRC-V43 | Per-image processing claim acquired before backfill re-encode | `admin-backfill-runner.ts:343-368` (TRC-R5C2-01) |
-| TRC-V44 | Pool budget cap prevents backfill from starving live traffic | `admin-backfill-runner.ts:105-142` (AGG-5) |
-| TRC-V45 | Upload tracker pruned with 2x grace period | `upload-tracker-state.ts:24-60` (C17-LOW-09) |
-| TRC-V46 | BoundedMap auto-enforces hard cap on write | `bounded-map.ts:65-73` (C8R-C8-01) |
-| TRC-V47 | Queue retry maps pruned with FIFO eviction | `image-queue.ts:98-111` (C9-MED-02) |
-| TRC-V48 | Permanently failed IDs capped with FIFO eviction | `image-queue.ts:545-558` (C1F-DB-02, C7-MED-05) |
-| TRC-V49 | View count retry count capped | `data.ts:26-32` (C5-AGG-02) |
-| TRC-V50 | View count flush timer nulled on entry | `data.ts:80` (COR-R4C11-01) |
-| TRC-V51 | Array.isArray guard prevents type confusion in loadMoreImages | `public.ts` (bcd67b12) |
-| TRC-V52 | ENOENT distinguished from other opendir errors | `process-image.ts` (9c5c38ca) |
-| TRC-V53 | Restore maintenance checks smart collections and embeddings | `collections.ts`, `embeddings.ts` (7453030e) |
-| TRC-V54 | Revalidation moved outside try/catch | `topics.ts` (db55056f) |
-| TRC-V55 | Rate-limit getters return shallow copies | `auth-rate-limit.ts` (5f4a5e95) |
-| TRC-V56 | isAdmin() checks in deleteAdminUser and LR tokens | `admin-users.ts`, `lr-tokens.ts` (b22fa85e) |
+**Flow:** Rate-limit — password change path  
+**Location:** `/apps/web/src/lib/auth-rate-limit.ts`, `getPasswordChangeRateLimitEntry()`
+
+**Observation:** `getLoginRateLimitEntry()` returns `{ ...entry }` (explicit final spread on an already-copied value). `getPasswordChangeRateLimitEntry()` returns `entry` directly. Both are functionally safe today because `BoundedMap.get()` already returns `{ ...value }`. The inconsistency creates a future maintainability trap: if `BoundedMap.get()` were ever changed to return the raw reference, `getLoginRateLimitEntry` would still be safe (its own final spread protects it) while `getPasswordChangeRateLimitEntry` would not.
+
+**Suggested fix:** Add `return { ...entry }` as the final return in `getPasswordChangeRateLimitEntry()` for consistency and layered defense-in-depth.
+
+**Severity:** INFORMATIONAL  
+**Confidence:** High — currently safe; risk is contingent on BoundedMap regression
 
 ---
 
-## 6. Recommendations
+## Flows Confirmed Sound
 
-### Immediate (High Priority)
+All six primary flows traced end-to-end and found correctly implemented:
 
-1. **TRC-H6 / TRC-N8: Add connection init validation post-timeout**: After the 10s timeout in `db/index.ts`, mark the connection as "uninitialized" or retry the init query on the next borrow. Alternatively, increase the timeout and add monitoring.
-2. **TRC-H4 / TRC-N9: Surface fire-and-forget failures**: Add a `processing_warnings` column to the `images` table or a separate `processing_log` table to capture caption/embedding failures. The admin UI should display these.
+1. **Upload → queue claim → Sharp → conditional UPDATE → delete-during-processing cleanup** — SOUND. Per-image advisory lock, `affectedRows === 0` detection, `deleteImageVariants(dir, file, [])` full-scan cleanup, MAX_CLAIM_RETRIES escalation.
 
-### Short-term (Medium Priority)
+2. **Session token creation → cookie → middleware guard → isAdmin() in server actions** — SOUND. Middleware is format-check-only (cheap early redirect); authoritative HMAC+DB verification in every server action. API routes excluded from middleware by design; `lint:api-auth` gate enforces `withAdminAuth()` on all `/api/admin/**` routes.
 
-1. **TRC-M9 / TRC-N2: Fix bootstrap "all permanently failed" edge case**: After `pending.length < BOOTSTRAP_BATCH_SIZE`, verify that there are NO pending images (including those in `permanentlyFailedIds`) before setting `bootstrapped = true`. Or use a separate query to check for any pending images.
-2. **TRC-M10: Add zero-vector guard to `dotProduct`**: Even though the invariant says vectors are unit-length, add a defensive check: `if (denom < EPSILON) return 0;` in `dotProduct` for consistency with `cosineSimilarity`.
-3. **TRC-M6: Add timeout to queue quiesce**: `quiesceImageProcessingQueueForRestore` should have a timeout (e.g., 60 seconds) after which it forcefully terminates hung tasks and proceeds with restore.
-4. **TRC-N11: Fix `BoundedMap.get()` mutable reference**: Either return shallow copies from `BoundedMap.get()` (like `auth-rate-limit.ts` now does) or document that callers must not mutate returned values.
-5. **TRC-N12: Add restore maintenance checks to topic and admin user actions**: For consistency, all mutating admin actions should check `getRestoreMaintenanceMessage()` before proceeding.
+3. **getClientIp → TRUST_PROXY / TRUSTED_PROXY_HOPS → per-IP rate-limit bucket key** — SOUND. XFF only trusted with `TRUST_PROXY=true`; hop count defaults safely to 1; chain-too-short falls through to `X-Real-IP`.
 
-### Long-term (Low Priority)
+4. **Color detection precedence → encoder decision → ETag/settings-hash invalidation** — SOUND. 9 COLOR_IMPACTING_KEYS, compile-time guard, `imageSizes` sorted before hashing, stale-while-revalidate serving hash. Documented static-path gotcha (CRT-D1) is accepted and acknowledged in CLAUDE.md.
 
-1. **TRC-H1: Document static path ETag limitation more prominently**: The CRT-D1 operational gotcha should be in the admin UI settings page, not just CLAUDE.md. Add a warning when admin changes color/quality/size settings: "Run backfill to invalidate cached derivatives."
-2. **TRC-L3: Preserve non-GPS metadata in PNG fallback**: Investigate whether `withMetadata({ exif: true, xmp: true, iptc: true })` can be used safely for PNG without leaking GPS.
-3. **TRC-N10: Consider shared cache for settings hash**: In a multi-process deployment, use Redis or a shared memory store for the settings hash to eliminate cross-process skew.
+5. **Backfill advisory lock + delete-during-reencode race** — SOUND. Serialized by `gallerykit_color_pipeline_backfill`; per-image lock prevents double-encode; `affectedRows === 0` full-scan cleanup; detection failure leaves version un-bumped for retry.
+
+6. **View-event GC / audit-log retention cutoff (negative/NaN)** — SOUND. `Number.parseInt(env, 10)` + `isFinite && > 0` guard in both `view-retention.ts` and `audit.ts`. Chunked batch cap prevents runaway sweep.
 
 ---
 
-*Review completed by tracer agent. 6 high-confidence issues (all confirmed), 9 medium-confidence issues (2 new, 7 confirmed), 13 low-confidence issues (1 new, 12 confirmed). 56 invariants verified (6 new from cycle 10 fixes).*
+## Severity Summary
+
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 2 |
+| INFORMATIONAL | 1 |
+| SOUND (no finding) | 6 flows |
