@@ -367,7 +367,7 @@ export function UploadDropzone({
                             // SelectTrigger primitive's min-h-11 floor, and phones are a
                             // real upload path. The audit's native-<select> patterns now
                             // lock this shape.
-                            className="flex h-11 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-11 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
                         >

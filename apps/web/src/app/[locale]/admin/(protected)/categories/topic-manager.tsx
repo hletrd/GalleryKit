@@ -330,7 +330,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                             <button
                                               type="button"
                                               onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, alias })}
-                                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:text-destructive-text focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:text-destructive-text focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                               aria-label={t('categories.deleteAliasButton', { alias })}
                                             >
                                                 <X className="h-3 w-3" />
