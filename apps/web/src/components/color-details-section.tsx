@@ -217,8 +217,15 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     // concurrent rendering / StrictMode mount-unmount-mount.
     useImperativeHandle(toggleRef, () => () => setShowColorDetails((prev) => !prev), []);
 
+    // AGG-R13-06 / TRC-13-02: `transfer_function` and `is_hdr` are admin-only
+    // fields (omitted from publicSelectFields), so guard their reads with
+    // `isAdmin` to match the AGG-M3 convention used by the HDR badge and the
+    // `color_pipeline_decision` arm. No-op for current behavior (both are
+    // undefined for public viewers and `color_primaries` already drives the
+    // public accordion); closes a defense-in-depth trap for a future call site
+    // that passes admin-fetched data with `isAdmin={false}`.
     const hasColorDetails = Boolean(
-        image.color_primaries || image.transfer_function || image.is_hdr || (isAdmin && image.color_pipeline_decision),
+        image.color_primaries || (isAdmin && image.transfer_function) || (isAdmin && image.is_hdr) || (isAdmin && image.color_pipeline_decision),
     );
     if (!hasColorDetails) return null;
 
@@ -390,7 +397,9 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             )}
                         </>
                     )}
-                    {image.transfer_function && (
+                    {/* AGG-R13-06 / TRC-13-02: transfer_function is admin-only; gate the
+                        render on isAdmin to match the AGG-M3 HDR-badge convention. */}
+                    {isAdmin && image.transfer_function && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.transferFunction')}</p>
                             <p className="font-medium">{humanizeTransferFunction(image.transfer_function, t) || t('viewer.colorUnknown')}</p>
