@@ -1,148 +1,193 @@
-# Debugger Review — Cycle 13
+# Cycle 14 Debugger Review
 
 **Date:** 2026-06-27
-**HEAD:** 2a9976a1
+**HEAD**: 80145992 (cycle-13 aggregate baseline)
 **Reviewer:** debugger agent (Sonnet 4.6)
-**Scope:** Cycle-12 regression verification + latent-bug surface hunt
-**Prior art consulted:** `.context/reviews/_aggregate.md`, `.context/plans/cycle-12-plan.md`
+**Scope**: Full latent-bug sweep — async/queue code, data layer, server actions, lib/* utilities, instrumentation.ts, scripts/migrate.js
+**Prior state**: All gates GREEN after cycle 13 (eslint, tsc, vitest 2071 pass/4 skip, lint:api-auth/action-origin/public-route-rate-limit)
 
 ---
 
-## Cycle-12 Regression Verification
+## Severity Table
 
-All four cycle-12 changes verified correct with no regressions introduced.
-
-### AGG-R12-01 — `instrumentation.ts` graceful shutdown
-
-`apps/web/src/instrumentation.ts`: `shutdownTimer` is captured before the `try` block, `.unref()` is called immediately, `clearTimeout(shutdownTimer)` runs in `finally`, and `process.exit(exitCode)` executes only after the `try/catch/finally` completes. The `process.on('SIGTERM', …)` guard uses a `shutdownInProgress` boolean to prevent re-entrant signals from stacking. **PASS.**
-
-### AGG-R12-02 — `_verifyAvifNclx` file-handle leak
-
-`apps/web/src/lib/process-image.ts`: the `fileHandle` obtained from `fs.open()` is now wrapped in a `try/finally` that calls `fileHandle.close()` unconditionally. The earlier partial-read path (4 KB read, returns early on buffer-scan result) executes inside that `finally`. **PASS.**
-
-### AGG-R12-04 — `db/index.ts` connection-init timer leak
-
-`apps/web/src/db/index.ts` lines 94–111: `initTimer` is declared outside `try`, `.unref()` is called immediately after creation, and `clearTimeout(initTimer)` runs in `finally`. On the timeout path the `catch` releases the connection and clears the stored init-promise symbol; the `finally` then calls `clearTimeout` (harmless no-op on a fired timer). **PASS.**
-
-### AGG-R12-11 — `image-queue.ts` runtime-shape guard
-
-No changes to this file in cycle 12 per git log. Previously verified. **Carried as PASS.**
+| ID | File:Line | Severity | Confidence | Summary |
+|----|-----------|----------|------------|---------|
+| R14-01 | `lib/data.ts:196-207` | MEDIUM | High | `flushBufferedSharedGroupViewCounts` returns early on empty buffer without checking `isFlushing` — in-flight DB writes silently dropped on SIGTERM during an active flush |
+| R14-02 | `lib/icc-extractor.ts:~95` | LOW | High | `mluc` bounds guard is `dataSize < 12` but `readUInt32BE(dataOffset+12)` needs 4 more bytes past that offset; requires `dataSize >= 16`; RangeError caught by outer try/catch |
+| TRC-13-04 | `lib/process-image.ts:1414-1421` | LOW | High | `decimalToRational` with subnormal inputs produces `"1/Infinity"`. Carry-over, confirmed unreachable with real EXIF exposure times |
+| TRC-13-05 | `lib/bounded-map.ts:114-117` | LOW | Medium | `entries()` returns raw Map iterator. Carry-over, confirmed zero production callers |
 
 ---
 
-## Latent Bug Surface — New Findings
+## Findings
 
-### DBG13-01 (LOW) — Disk-space pre-check uses `bfree` instead of `bavail`
+### R14-01 — `flushBufferedSharedGroupViewCounts` does not wait for an in-flight flush (MEDIUM)
 
-**File:** `apps/web/src/app/actions/images.ts` line 206
+**File**: `apps/web/src/lib/data.ts:196-207`
 
-```ts
-const stats = await statfs(UPLOAD_DIR_ORIGINAL);
-const freeBytes = stats.bfree * stats.bsize;
-if (freeBytes < 1024 * 1024 * 1024) { return { error: t('insufficientDiskSpace') }; }
-```
-
-`stats.bfree` is the total count of free blocks on the filesystem, including blocks that are kernel-reserved for root processes (typically 5 % on ext4 with default `mkfs.ext4` settings). The field that reflects what a non-root process can actually allocate is `stats.bavail`. When the disk is in the range where `bfree` is above 1 GiB but `bavail` is below (i.e., the filesystem is between 95 % and ~100 % full), the pre-check passes and the upload proceeds, but the subsequent `fs.writeFile` for the original may still fail with `ENOSPC`. The error path does clean up the saved file (`deleteOriginalUploadFile(savedOriginalFilename)`) so the failure is not catastrophic — it degrades to a generic upload error on the client side rather than surfacing the actionable "insufficient disk space" localized message.
-
-**Root cause:** `bfree` vs `bavail` semantic confusion in `statfs` field selection.
-
-**Minimal fix:** Change `stats.bfree` to `stats.bavail` at `images.ts:206`. One character insertion.
-
-**Reproduction:** Upload a large batch when the disk is between 95–100 % full. The pre-check passes, the write fails with `ENOSPC`, and the user sees a generic upload error rather than the "insufficient disk space" toast.
-
-**Similar pattern:** No other `statfs` calls exist in the codebase.
-
----
-
-### DBG13-02 (LOW) — `getPasswordChangeRateLimitEntry` returns raw entry without spread
-
-**File:** `apps/web/src/lib/auth-rate-limit.ts` line 115
-
-```ts
-// getLoginRateLimitEntry (line 33):
-return { ...entry };   // spread copy
-
-// getAccountLoginRateLimitEntry (line 43):
-return { ...entry };   // spread copy
-
-// getPasswordChangeRateLimitEntry (line 115):
-return entry;          // raw — no spread
-```
-
-`BoundedMap.get()` already returns a shallow copy of the stored value, so a caller mutating the returned object cannot corrupt the BoundedMap's internal state. The window-expiry branch at line 111 sets `entry.count = 0` before returning, which mutates the shallow copy from `BoundedMap.get()` — safe, since it is already a detached copy. However, the asymmetry with the two login-variant functions — which are documented as returning "a shallow copy so callers can mutate the returned object without corrupting the internal Map state" — creates a fragile contract. A future caller that reads the `getLoginRateLimitEntry` source and assumes `getPasswordChangeRateLimitEntry` behaves identically may pass the returned object somewhere unexpected. The inconsistency also complicates reasoning during audits of the rate-limit surface.
-
-**Root cause:** Missing `{ ...entry }` spread in the password-change variant.
-
-**Minimal fix:** Change `return entry;` to `return { ...entry };` at `auth-rate-limit.ts:115`. One word insertion.
-
-**Similar pattern:** `getAccountLoginRateLimitEntry` (line 43) correctly spreads; use that as the reference.
-
----
-
-### DBG13-05 (INFO) — Stale comment: FLUSH_CHUNK_SIZE = 20, actual value is 5
-
-**File:** `apps/web/src/lib/data.ts` lines 66 and 147
-
-```ts
-// line 66 — definition:
-const FLUSH_CHUNK_SIZE = 5;
-
-// line 147 — C1F-DB-01 comment:
-// The overflow is bounded by the chunk size (FLUSH_CHUNK_SIZE = 20).
-```
-
-The value at line 66 is 5. The comment on line 147 says 20. No runtime impact — the constant itself is correct and the logic is sound. Pure documentation drift.
-
-**Root cause:** The constant was changed from 20 to 5 (or was always 5) but the inline comment at the C1F-DB-01 post-flush buffer-cap note was not updated.
-
-**Minimal fix:** Update the comment at `data.ts:147` to read `(FLUSH_CHUNK_SIZE = 5)`.
-
----
-
-## Not Bugs — Confirmed Safe
-
-### WI-15 temporary TIFF intermediate cleanup
-
-`apps/web/src/lib/process-image.ts` lines 1358–1362: the `processingInputPath` (TIFF intermediate created when a wide-gamut source exceeds `wideGamutMaxSourcePixels`) is cleaned up unconditionally in a `finally` block:
-
-```ts
-} finally {
-    if (processingInputPath !== inputPath) {
-        await safeUnlink(processingInputPath);
+```typescript
+export async function flushBufferedSharedGroupViewCounts() {
+    if (viewCountFlushTimer) {
+        clearTimeout(viewCountFlushTimer);
+        viewCountFlushTimer = null;
     }
+
+    if (viewCountBuffer.size === 0) {
+        return;   // ← returns here without checking isFlushing
+    }
+
+    await flushGroupViewCounts();
 }
 ```
 
-This runs even when `processImageFormats` throws mid-encode. No file-handle or temp-file leak. Investigated as a potential regression from cycle-12 scope; confirmed SAFE.
+**Root cause**: `flushGroupViewCounts()` (lines 94-101) performs an atomic buffer swap BEFORE writing to the DB:
 
-### ICC extractor `declaredLength === 1` edge case
+```typescript
+isFlushing = true;
+const batch = viewCountBuffer;
+viewCountBuffer = new Map();   // ← buffer is now empty; DB writes begin for `batch`
+```
 
-`apps/web/src/lib/icc-extractor.ts`: when an ICC v2 `desc` tag has `declaredLength === 1` the computed string length becomes 0 after the `Math.max(0, declaredLength - 1)` trailing-null drop, the substring extraction produces an empty string, the `strStart >= strEnd` guard fires, and the function returns `null`. This is correct — a 1-byte desc tag contains only a null terminator with no meaningful name. Returning `null` is appropriate graceful behavior.
+When SIGTERM fires while `isFlushing = true`, the sequence is:
+1. `flushGroupViewCounts` sets `isFlushing = true`, swaps `viewCountBuffer` to an empty new Map, begins DB writes for the old batch.
+2. `gracefulShutdown` (instrumentation.ts) calls `flushBufferedSharedGroupViewCounts()`.
+3. `viewCountBuffer.size === 0` is true (the new empty Map) → early return immediately.
+4. `Promise.all([shutdownImageProcessingQueue(), flushBufferedSharedGroupViewCounts()])` resolves with `completed = true`.
+5. `process.exit(0)` is called — the in-flight `flushGroupViewCounts` DB writes are killed mid-execution.
+
+**Trigger**: SIGTERM received during the ~5–50 ms window while `isFlushing = true` (i.e., after the atomic swap but before `isFlushing` is reset to false in the finally block at line 141). This window is short per event but will occur in production across enough deployments.
+
+**Impact**: View counts from the swapped batch that were being written to the DB are lost. This is best-effort-by-design per CLAUDE.md ("view_count is best-effort approximate analytics…do not treat it as billing/audit-grade state"), so data loss is acceptable per spec. However the SIGTERM path was specifically hardened in cycles 11-13 to drain in-flight state; not waiting for an in-progress flush is inconsistent with that hardening intent.
+
+**Fix** — expose the in-flight flush promise at module scope (minimal diff):
+
+```typescript
+// NEW: track the in-flight flush so shutdown can await it
+let currentFlushPromise: Promise<void> | null = null;
+
+async function flushGroupViewCounts() {
+    viewCountFlushTimer = null;
+    if (isFlushing) { ... return; }
+    isFlushing = true;
+    const batch = viewCountBuffer;
+    viewCountBuffer = new Map();
+
+    // wrap the body in a tracked promise
+    const p = (async () => {
+        try { /* existing chunk-write loop unchanged */ }
+        finally {
+            isFlushing = false;
+            currentFlushPromise = null;
+            /* existing timer re-arm and eviction code unchanged */
+        }
+    })();
+    currentFlushPromise = p;
+    await p;
+}
+
+export async function flushBufferedSharedGroupViewCounts() {
+    if (viewCountFlushTimer) {
+        clearTimeout(viewCountFlushTimer);
+        viewCountFlushTimer = null;
+    }
+
+    // Wait for any in-flight flush to complete before inspecting the buffer.
+    if (currentFlushPromise) {
+        await currentFlushPromise;
+    }
+
+    if (viewCountBuffer.size === 0) {
+        return;
+    }
+
+    await flushGroupViewCounts();
+}
+```
+
+**Verification**: mock the DB chunk-write to sleep 500 ms; send SIGTERM mid-sleep; confirm the shutdown log shows the sentinel fires only AFTER the mock write returns.
+
+**Similar pattern**: `shutdownImageProcessingQueue` in queue-shutdown.ts correctly drains via `queue.onIdle()` before returning — same pattern should apply here.
 
 ---
 
-## Deferred / Carried-Forward Findings
+### R14-02 — ICC extractor `mluc` bounds guard off by 4 bytes (LOW)
 
-These were documented in earlier cycles and are not yet actioned. Re-verified still present in HEAD.
+**File**: `apps/web/src/lib/icc-extractor.ts` (~line 95, `mluc` branch)
 
-| ID | File | Severity | Summary |
-|----|------|----------|---------|
-| AGG-R12-09 | `lib/request-origin.ts:83` | LOW | `hasTrustedSameOriginWithOptions` exports an `options` param that `hasTrustedSameOrigin` never passes. Dead interface surface, harmless today. |
-| AGG-R12-10 | `lib/bounded-map.ts:115` | LOW | `BoundedMap.entries()` returns the raw `Map.entries()` iterator; callers holding the iterator across an eviction see entries removed from the live Map. |
-| DBG-05 | `lib/process-image.ts:1414` | LOW | `decimalToRational(Number.MIN_VALUE)` → `"1/Infinity"` string. No real camera produces sub-nanosecond exposure times; purely theoretical. |
-| DBG-07 | Admin token auth path | LOW | Length check `token.length !== 64` runs before the constant-time HMAC comparison, creating a timing oracle that leaks whether the submitted token has the correct length. |
+**Root cause**: The outer guard before `mluc` processing is:
+```typescript
+if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
+```
+Then inside the `mluc` branch:
+```typescript
+const numRecords = Math.min(icc.readUInt32BE(dataOffset + 8), 100);  // reads bytes [+8,+12) — within guard ✓
+const recordSize = icc.readUInt32BE(dataOffset + 12);                 // reads bytes [+12,+16) — NOT within guard ✗
+```
+
+`readUInt32BE(dataOffset + 12)` needs `dataOffset + 16 <= iccLen`. The guard only ensures `dataOffset + 12 <= iccLen` (via `dataOffset + dataSize <= iccLen` + `dataSize >= 12`). With a pathologically small `mluc` tag where `dataSize = 12` and `iccLen = dataOffset + 12`, Node.js throws `RangeError: The value of "offset" is out of range`.
+
+**Trigger**: Malformed ICC profile where the `mluc` tag's declared `dataSize = 12`. No valid `mluc` tag has fewer than 16 bytes (header + reserved + numRecords + recordSize). Only adversarially crafted or severely corrupted ICC data triggers this.
+
+**Impact**: The outer `try { ... } catch { /* ICC parsing is best-effort */ }` catches the `RangeError` and returns `null` for the profile name. No crash, no data corruption, no security impact — correct best-effort fallback.
+
+**Fix** (one character change):
+```typescript
+// Before:
+if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
+// After:
+if (dataOffset + 12 > iccLen || dataSize < 16 || dataOffset + dataSize > iccLen) break;
+```
+
+The `desc` path only reads up to `dataOffset + 12` so is unaffected by this guard tightening.
+
+---
+
+## Cycle-13 Commit Verification
+
+All five main cycle-13 commits verified correct:
+
+| Commit | Change | Verdict |
+|--------|--------|---------|
+| `7d1b3727` | `exec node server.js` in Dockerfile CMD | Correct — PID-1 signal delivery fixed |
+| `552df92c` | `stats.bavail` instead of `stats.bfree` | Correct — available-to-unprivileged-user disk check |
+| `f70d6579` | `getPasswordChangeRateLimitEntry` returns `{...entry}` copy | Correct — shallow-copy contract restored; matches `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` |
+| `8613e36f` | `hasColorDetails` and `transfer_function` gated on `isAdmin` | Correct — admin-only fields no longer leak to public color-details surface |
+| `85f580ea` | Feed query uses `null` not `adminUsers.username` | Correct — `uploaded_by` PII removed from public Atom feed |
+
+---
+
+## Deferred Carry-Overs (confirmed, no change)
+
+**TRC-13-04 — `decimalToRational` subnormal** (`process-image.ts:1414-1421`, LOW):
+`val = 5e-324` → `Math.round(1/val) = Infinity` → produces `"1/Infinity"`. Confirmed unreachable: real EXIF exposure times are always in the range `[1/32000 s, 30 s]`, never near `Number.MIN_VALUE`. No fix needed.
+
+**TRC-13-05 — `BoundedMap.entries()` raw iterator** (`bounded-map.ts:114-117`, LOW):
+Returns the Map's live iterator without a snapshot copy. Confirmed zero production callers of `entries()` across all of `src/` and `scripts/`. The safe alternative `windowedEntries()` (lines 119-125) is used exclusively in the one call site that needs iteration. No fix needed until a new `entries()` caller is added.
+
+---
+
+## Areas Inspected (no new issues found)
+
+- `lib/queue-shutdown.ts` — `drainProcessingQueueForShutdown` correctly clears `gcInterval` and `bootstrapRetryTimer` before `queue.onIdle()` drain. No resource leak.
+- `lib/icc-chromaticity.ts` — `chad` matrix inversion has `|det| < 1e-12` guard, `Number.isFinite(det)` check, `invert3x3` returns null on singular matrix; `xyzToXy` guards `|sum| < 1e-9`. All bounds correct.
+- `lib/gain-map-detection.ts` — ISOBMFF walker bounded at MAX_DEPTH=5 / MAX_SCAN_BYTES=1MB; `Number(readBigUInt64BE)` is safe for buffers well under `Number.MAX_SAFE_INTEGER`; `readBoxHeader` handles `size = 0` and extended 64-bit sizes correctly.
+- `lib/color-detection.ts` — NCLX `colr` box walker: `limit = Math.min(end, offset + MAX_SCAN_BYTES, buffer.length)` correct; 64-bit extended-size `Number(BigInt(...))` conversion is safe for practical 1 MB scan windows.
+- `lib/auth-rate-limit.ts` — All three `get*RateLimitEntry` functions return `{...entry}` shallow copies; rollback decrements (`count - 1` then delete at 0) are correct; DB-backed `decrementRateLimit` called consistently.
+- `lib/rate-limit.ts` — `preIncrementOgAttempt`, `rollbackOgAttempt`, `getClientIp` all correct.
+- `lib/csv-escape.ts` — formula-injection prefix, C0/C1 strip, bidi/ZW strip, interlinear-anchor strip all correct and symmetrical with the validation layer.
+- `app/actions/tags.ts` — `getAdminTags` has `@action-origin-exempt: read-only admin getter` comment (line 18); all mutating exports use `requireSameOriginAdmin()`.
+- `app/actions/admin-backfill.ts` — `triggerBackfill` and `getBackfillStatus` both gate on `isAdmin()` then `requireSameOriginAdmin()`; mutex status correctly surfaces `lastError`.
+- `app/actions/public.ts` — `preIncrementLoadMoreAttempt` and `checkLoadMoreRateLimit` cover public load-more mutations; analytics read actions carry `@action-origin-exempt` comments.
+- `scripts/migrate.js` — `getAllJournalMigrations` SHA-256 hash check, `reconcileLegacySchema` idempotent CREATE/ALTER guards, `baselineAllJournalMigrations` INSERT IGNORE pattern, `runMigrations` post-condition assertion that throws on any missing hash. No silent-skip regression and no new schema columns missing from `reconcileLegacySchema`.
 
 ---
 
 ## Summary
 
-**Cycle-12 regressions:** 0 (all 4 changes verified PASS).
+**New confirmed findings**: 2
+- R14-01 (MEDIUM): `data.ts:196-207` — `flushBufferedSharedGroupViewCounts` early-return on empty buffer misses in-flight DB writes when `isFlushing = true`. View counts from the swapped batch are killed on SIGTERM. Fix: expose `currentFlushPromise` and await it before the size check.
+- R14-02 (LOW): `icc-extractor.ts:~95` — `mluc` guard is `dataSize < 12` but should be `dataSize < 16`; the read at `dataOffset+12` needs 4 bytes beyond offset 12. Caught by outer try/catch; no security or correctness impact.
 
-**New actionable findings:** 2 code bugs (DBG13-01, DBG13-02) + 1 doc inconsistency (DBG13-05).
-
-All findings are LOW severity. No CRIT or HIGH issues found in this sweep.
-
-**Top findings by impact:**
-
-1. **DBG13-01** (`images.ts:206`) — one-character fix (`bfree` → `bavail`) makes the upload disk-space pre-check semantically correct for non-root processes, surfacing the localized "insufficient disk space" error instead of a generic upload failure near disk-full.
-2. **DBG13-02** (`auth-rate-limit.ts:115`) — add `{ ...` spread to `getPasswordChangeRateLimitEntry` return to match the contract of the two login-rate-limit accessors and close a latent mutation-asymmetry hazard.
+**Cycle-13 regressions**: None detected. All 5 commits verified correct.
+**Deferred carry-overs**: 2 confirmed low/theoretical — no change in disposition.
+**Build gates**: Not re-run (read-only investigation); all were GREEN at HEAD 80145992.

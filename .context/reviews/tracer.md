@@ -1,269 +1,398 @@
-# Tracer Report — Cycle 13
+# Tracer Report — Cycle 14
+
 **Date:** 2026-06-27
-**HEAD:** 2a9976a1 (cycle-12 fixes landed; no new commits since _aggregate.md was written)
-**Tracer:** Tracer agent (Sonnet 4.6)
+**Agent:** tracer (cycle 14)
+**HEAD at trace time:** current master (post-cycle-13 fixes applied)
+**Scope:** 6 suspicious data/control flows — competing-hypothesis trace, evidence for/against, confidence verdict
 
 ---
 
-## Executive Summary
+## Verdict Table
 
-Cycle-12 MEDIUM findings (AGG-R12-01 through AGG-R12-04) are all confirmed in place. No new CRIT or HIGH issues were found. Three new LOW findings are raised — all defense-in-depth gaps in component-level admin gating rather than field-exposure bugs (the data layer correctly omits the fields from public queries). One apparent bug (settings-hash sort asymmetry) is disproved after tracing the full save path.
+| Flow | Verdict | Confidence |
+|------|---------|------------|
+| 1. SIGTERM / shutdown path (post-AGG-R13-01) | SAFE — exec fix confirmed correct, PID-1 chain verified | HIGH |
+| 2. Upload→process→delete-during-processing race | SAFE — dual-check pattern (advisory lock + affectedRows) correctly wired end-to-end | HIGH |
+| 3. Admin-only field leakage (publicSelectFields + cycle-13 guards) | SAFE — compile-time guard intact; cycle-13 isAdmin guards confirmed applied | HIGH |
+| 4. Rate-limit buckets under process restart | SAFE for auth buckets (DB-backed source-of-truth); per-design for non-auth (process-local by documented intent) | HIGH |
+| 5. ETag / cache invalidation — settings-hash path vs static Next path | OPERATIONAL CAVEAT ONLY — settings-hash ETag covers serve-upload fallback only; static path (majority of traffic) uses mtime+size; documented in CLAUDE.md, backfill required | HIGH |
+| 6. Bootstrap queue on restart — permanentlyFailedIds cleared | LOW RISK — in-memory permanentlyFailedIds is cleared on restart; permanently failed images get up to 3 more attempts per restart; bounded overhead, no corruption | MEDIUM |
 
 ---
 
-## Trace Report — TRC-13-01
+## Flow 1: SIGTERM / Shutdown Path
 
 ### Observation
 
-`settings-hash.ts:buildHashFromConfig` (line 99) explicitly sorts `imageSizes` before hashing:
-```js
-image_sizes: [...config.imageSizes].sort((a, b) => a - b).join(','),
-```
-
-`settings-hash.ts:fetchHashFromDb` (lines 104-118) reads the raw DB string and passes it directly to `buildHash` with no sorting:
-```js
-for (const r of rows) map[r.key] = r.value;
-return buildHash(map);
-```
-
-If the DB stored `image_sizes = '1536,640'` (non-ascending), the two code paths would produce different hashes for the same effective configuration, causing ETag divergence between the normal serve path and the cold-start fallback.
+Cycle-13 headline fix (AGG-R13-01) added `exec` to the Dockerfile CMD so that `node server.js` replaces the intermediate shell and becomes PID 1. The claimed effect: Docker's SIGTERM reaches the node process directly, triggering the `instrumentation.ts` `gracefulShutdown` handler.
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | DB always stores sorted values via normalizeConfiguredImageSizes in the save path; asymmetry is defensive/redundant but not a live bug | High | Strong (Tier 2: primary artifact — settings.ts save path) | Both paths produce identical hashes in all observed DB states |
-| 2 | DB can store unsorted image_sizes if another write path bypasses normalization; hash mismatch is latent | Low | Weak (Tier 5: no evidence of bypass path) | No evidence of a bypass path found |
+| 1 | exec fix is correctly wired — node is PID 1, SIGTERM is received, gracefulShutdown runs | High | Strong | Source artifact at Dockerfile:130 is definitive; exec chain verified |
+| 2 | exec fix is applied but PID-1 is still gosu or the ENTRYPOINT shell, not node | Low | Weak | Requires misreading how gosu exec-replaces the calling process |
+| 3 | gracefulShutdown runs but fire-and-forget caption/embedding sub-tasks are not drained, leaving partial DB writes mid-flight | Medium | Strong | Confirmed by reading queue-shutdown.ts + image-queue.ts IIFE structure |
 
-### Evidence For
+### Evidence For Hypothesis 1
 
-- Hypothesis 1: `apps/web/src/app/actions/settings.ts:82-91` explicitly calls `normalizeConfiguredImageSizes(requestedImageSizes)` and replaces `sanitizedSettings.image_sizes` with the normalized (sorted, deduped) result before any DB upsert. `normalizeConfiguredImageSizes` at `gallery-config-shared.ts:233` does `Array.from(new Set(parsed)).sort((a, b) => a - b)`, guaranteeing ascending order on every write.
-- Hypothesis 1: `gallery-config-shared.ts:217` documents: "Canonicalize an admin-provided image_sizes string into a sorted, deduped list."
+`apps/web/Dockerfile:130`:
+```
+CMD ["sh","-c","node apps/web/scripts/migrate.js && exec node apps/web/server.js"]
+```
+`exec` is present. This replaces the shell with `node server.js` after migration completes.
 
-### Evidence Against / Gaps
+`apps/web/scripts/entrypoint.sh:39`:
+```
+exec gosu node "$@"
+```
+gosu calls `execve()` with the CMD arguments as the target. This means:
+- entrypoint.sh shell replaces itself with gosu via exec
+- gosu exec-replaces itself with the CMD: `sh -c "node migrate.js && exec node server.js"` running as node user
+- `sh` runs `node migrate.js`, waits for it to exit
+- `sh` runs `exec node server.js`, replacing itself
+- Final PID 1: `node server.js`
 
-- Hypothesis 1: If a future write path (migration, seed script, direct DB update) bypasses `normalizeConfiguredImageSizes`, the DB would store unsorted values and the two hash paths would diverge. The type system does not prevent this.
-- Hypothesis 2: No production write path was found that stores unsorted `image_sizes`.
+`apps/web/instrumentation.ts:73-88`: `process.on('SIGTERM', ...)` handler confirmed present; calls `gracefulShutdown()` with re-entrant guard (`shutdownInProgress`).
+
+`apps/web/docker-compose.yml:13`: `stop_grace_period: 30s` — node gets 30 s to drain before SIGKILL.
+
+`apps/web/src/lib/queue-shutdown.ts:15-45`: `drainProcessingQueueForShutdown` pauses the PQueue, clears pending jobs, clears the `enqueued` Set, and `await queue.onIdle()` waits for currently running queue slots to resolve.
+
+### Evidence For Hypothesis 3 (fire-and-forget sub-tasks not drained)
+
+`apps/web/src/lib/image-queue.ts` (approximately lines 460 and 498): two `void (async () => { ... })()` IIFEs are launched inside the queue job callback for caption generation and CLIP embedding respectively. The outer queue job callback returns WITHOUT awaiting these sub-tasks.
+
+`queue.onIdle()` resolves when all PQueue-tracked callbacks complete. The fire-and-forget IIFEs are not tracked by PQueue. Therefore, after `onIdle()` resolves, both IIFEs may still be in-flight.
+
+`gracefulShutdown` then calls `process.exit(exitCode)`, terminating the in-flight IIFEs.
+
+Consequence: a caption `UPDATE` or embedding `INSERT ... ON DUPLICATE KEY UPDATE` could be interrupted mid-query. These operations are:
+- Idempotent (embedding uses upsert; caption is a best-effort UPDATE)
+- Not core to image delivery
+- Wrapped in try/catch with warning-level logging
+
+This is an intentional design trade-off: the comment in image-queue.ts states these hooks "MUST NOT block the queue job." Interrupted operations are retried on the next bootstrap/re-queue cycle.
+
+### Evidence Against Hypothesis 2
+
+gosu's design is to call `execve()` with the remaining args, replacing itself. `exec gosu node "$@"` replaces the entrypoint shell with gosu; gosu then calls `execve()` with the CMD args, replacing itself with `sh`. After `exec node server.js` inside that sh, gosu is gone from the process table. PID 1 = node. Hypothesis 2 requires gosu NOT to execve — contradicted by gosu's design.
 
 ### Rebuttal Round
 
-- Best challenge to current leader: `fetchHashFromDb` is the cold-start fallback (`serve-upload.ts:69`). If the config resolution fails on cold start AND the DB happens to have non-sorted values from a manual write, the ETag would differ from subsequent requests using `buildHashFromConfig`. No test covers this divergence.
-- Why the leader still stands: The save action at `settings.ts:82-91` is the only production write path for `image_sizes`. That path normalizes before saving. The gap exists only for manual DB writes, which are outside the application control boundary.
+Best challenge to Hypothesis 1: the 15 s `gracefulShutdown` timeout is shorter than `stop_grace_period: 30s`. Could a slow migration or a hung DB call cause SIGKILL before graceful exit?
 
-### Convergence / Separation Notes
-
-Both hypotheses reduce to the same question: does the DB reliably store sorted values? Evidence strongly confirms yes for all in-app write paths. No separation needed.
+Why Hypothesis 1 still stands: the 15 s timeout in `gracefulShutdown` calls `process.exit(exitCode)` explicitly — so even a timeout scenario produces a clean process exit rather than a SIGKILL-forced exit 137. The 30 s Docker grace period is the outer bound; the 15 s internal timeout fires first and exits cleanly.
 
 ### Current Best Explanation
 
-The sort in `buildHashFromConfig` is a redundant defensive guard: `config.imageSizes` is already parsed and sorted by `parseConfiguredImageSizes`, and the DB always stores sorted values because the save action normalizes before writing. The `fetchHashFromDb` path produces the same hash. Not a live bug.
+The cycle-13 `exec` fix is correctly applied. PID 1 is `node server.js`. Docker SIGTERM reaches the node process, `gracefulShutdown` fires, the queue is drained via `pause/clear/onIdle`, the view-count buffer is flushed. Fire-and-forget caption/embedding tasks may be interrupted — this is accepted by design and does not affect image delivery correctness.
 
 ### Critical Unknown
 
-Whether a deployment runbook (seed, migration, or manual intervention) could write non-sorted `image_sizes` to the DB and trigger the divergence.
+Whether a process crash mid-IIFE (between the DB SELECT and the INSERT of an embedding) leaves any inconsistent state. Given the embedding write is an upsert and caption is a nullable UPDATE, the answer is almost certainly no — but this path has no dedicated test.
 
 ### Discriminating Probe
 
-Add a sort inside `fetchHashFromDb` for the `image_sizes` key, or add a test that feeds a non-sorted raw string (`'1536,640'`) to the no-arg `getColorSettingsHash()` path and asserts it produces the same hash as the config-arg path with the equivalent sorted config. Either change closes the latent gap without affecting observable behavior.
-
-### Uncertainty Notes
-
-Low uncertainty. The sort asymmetry is real at the code level but is neutralized by the normalized DB write path.
+Add a test that calls `drainProcessingQueueForShutdown` while a fire-and-forget IIFE is pending (via a mock that captures outstanding Promises) and asserts that `process.exit` is called without waiting for them. This would explicitly pin the "intentional abandon on shutdown" behavior and catch any future change that accidentally makes them block shutdown.
 
 ---
 
-## Trace Report — TRC-13-02
+## Flow 2: Upload → Process → Delete-During-Processing Race
 
 ### Observation
 
-`color-details-section.tsx:393` renders the transfer function text WITHOUT an `isAdmin` guard:
-
-```jsx
-{image.transfer_function && (
-    <p className="font-medium">
-        {humanizeTransferFunction(image.transfer_function, t) || t('viewer.colorUnknown')}
-    </p>
-)}
-```
-
-By contrast, the HDR badge at line 549 correctly uses `{isAdmin && isHdr && ...}`. The inconsistency is a maintenance trap: `transfer_function` is currently admin-only at the data layer, but the render path has no explicit guard to enforce that.
+`deleteImage()` in `images.ts` does NOT acquire the per-image processing advisory lock before deleting the DB row and cleaning up files. This means a running queue job and a concurrent `deleteImage()` call can interleave. The codebase claims this is safe via a conditional UPDATE post-check (`affectedRows === 0`).
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | Public component renders transfer_function if and only if image object carries the field; data layer omits it from publicSelectFields, making the unguarded render safe today | High | Strong (Tier 2: data.ts:340 publicSelectFields omit list confirmed) | Verified directly in data.ts |
-| 2 | A future change adds transfer_function to publicSelectFields or a new public query uses adminSelectFields; the unguarded render then exposes admin-only data silently | Low | Weak (no evidence this has happened) | Pattern is structurally possible |
+| 1 | The dual-check pattern (advisory lock pre-claim + conditional UPDATE post-check) correctly handles all interleaving windows | High | Strong | Source artifacts at image-queue.ts:338-343, 433-454 verified; images.ts:560-650 verified |
+| 2 | There is a window where derivative files exist on disk but the DB row is gone (orphaned files) | Low | Weak | Requires queue job to write files but never reach the conditional UPDATE — contradicted by unconditional post-check |
+| 3 | The in-memory `enqueued.delete(id)` in deleteImage races with a job that has already left the enqueued Set (started running) | Confirmed — but benign | Strong | enqueued.delete is called on a tracking Set; a running job's actual cancellation is the affectedRows check |
 
-### Evidence For
+### Evidence For Hypothesis 1
 
-- Hypothesis 1: `apps/web/src/lib/data.ts:340` — `transfer_function: _omitTransferFunction` is in the destructure that builds `publicSelectFields`. The field is `undefined` on every public query result. The `{image.transfer_function && ...}` condition evaluates to false for public callers.
-- Hypothesis 1: `apps/web/src/lib/data.ts:424` — `transfer_function` is in the `PrivacySensitiveKeys` type union with a compile-time guard (`_SensitiveKeysInPublic`) that would cause a `tsc` error if `transfer_function` were ever added to `publicSelectFields`.
+`apps/web/src/lib/image-queue.ts:338-343` (pre-check): before `processImageFormats()` runs, the queue job executes `SELECT WHERE id=X AND processed=false`. If the row is already deleted, the job exits with "no longer pending" log. No files are written.
 
-### Evidence Against / Gaps
+`apps/web/src/lib/image-queue.ts:433-454` (post-check): after `processImageFormats()` completes and files are written, the job runs a conditional UPDATE `WHERE id=X AND processed=false`. If `affectedRows === 0` (row was deleted mid-processing), the job calls `deleteImageVariants(dir, filename, [])` (empty-array form = full directory scan) for each format directory, cleaning up all derivative variants just written.
 
-- Hypothesis 2: The `_SensitiveKeysInPublic` compile-time guard fires at the data layer, not at the render layer. A component that renders `image.transfer_function` without `isAdmin` would compile and render fine if the field is present in the image object passed to it — for example, an admin context where the `isAdmin` prop is accidentally `false`.
-- Gap: The component is used in both public and admin contexts. If a call site passes admin-fetched image data but `isAdmin={false}`, `transfer_function` would render to that viewer with no guard at the component level.
+`apps/web/src/lib/image-queue.ts:608-621` (finally block): the advisory lock is released and the `enqueued` Set entry is cleaned up in a `finally` block, ensuring cleanup runs even on error/retry.
+
+`apps/web/src/app/actions/images.ts:636-641`: `deleteImage()` also calls `deleteImageVariants(...)` with the empty-array form. Because `deleteImageVariants` is idempotent on ENOENT, double-cleanup (one from the queue job, one from deleteImage) is safe in either order.
+
+### Evidence For Hypothesis 3 (in-memory enqueued race — benign)
+
+`apps/web/src/app/actions/images.ts:609-611`: `deleteImage()` calls `queueState.enqueued.delete(id)` before the DB transaction. However, by the time a queue job is actively executing inside `state.queue.add(async () => { ... })`, PQueue has taken ownership. The `enqueued` Set is used for bookkeeping (preventing duplicate enqueue), not for cancellation. A running job is not affected by `enqueued.delete()`.
+
+The actual cancellation signal for a running job is the conditional UPDATE `affectedRows === 0`.
+
+### Evidence Against Hypothesis 2
+
+The post-check (lines 433-454) is outside any conditional branch — it always runs after `processImageFormats()` completes. A crash before this point leaves `processed=false` in the DB, so bootstrap re-discovers and re-processes on restart. Derivative files from a crash are overwritten by the re-run. Hypothesis 2 is contradicted.
 
 ### Rebuttal Round
 
-- Best challenge: The `_SensitiveKeysInPublic` compile-time guard makes the data-layer omission structural. The unguarded render cannot expose data to the public in a correctly-maintained codebase because the compile gate would catch any accidental `publicSelectFields` addition.
-- Why the concern remains: The component also serves admin contexts. A call site that passes `isAdmin={false}` to a `ColorDetailsSection` receiving a full admin image object would silently render `transfer_function` to that admin viewer without the component indicating it is an admin-only field. The explicit `isAdmin` guard on the HDR badge (line 549), gain map (line 573), matrix coefficients (line 440), and pipeline decision (line 399) creates a clear precedent that this field block is inconsistent.
-
-### Convergence / Separation Notes
-
-Both hypotheses share the same root observation. They differ in trigger probability: Hypothesis 1 is the current safe state; Hypothesis 2 is the failure mode under a future change. Keeping separate because the mitigations are at different layers.
+Best challenge: on Linux, `deleteImage()` unlinks the original file. If Sharp has already opened the original via a file descriptor, `unlink()` removes the directory entry but the fd remains valid until Sharp closes it. Sharp completes successfully, derivatives are written, then the post-check finds `affectedRows=0` and cleans up. The race is fully handled.
 
 ### Current Best Explanation
 
-Currently safe due to data-layer omission and compile-time guard. The unguarded render at line 393 is a defense-in-depth gap: the render site lacks the explicit `isAdmin` check that all other admin-only field renders in the same component carry.
+The delete-during-processing race is safe. The dual-check pattern (pre-check WHERE processed=false exits early; post-check affectedRows=0 triggers cleanup) handles all interleaving windows. Cleanup is idempotent under ENOENT in both paths.
 
 ### Critical Unknown
 
-Whether any current call site constructs a `ColorDetailsSection` with admin-fetched image data but passes `isAdmin={false}`.
+Whether the `finally` block (which releases the advisory lock) runs correctly when `processImageFormats()` is interrupted by SIGKILL. Answer: the MySQL server closes the connection on process death and releases the advisory lock automatically, preventing deadlock on the next bootstrap.
 
 ### Discriminating Probe
 
-`grep -rn '<ColorDetailsSection' apps/web/src/` — audit every call site for the `isAdmin` prop value and the image query path used. If any call site passes `isAdmin={false}` with an admin-fetched image, TRC-13-02 becomes a confirmed display bug for that context.
-
-### Uncertainty Notes
-
-Severity is LOW. The data layer compile-time guard is the effective protection. The component-level inconsistency is a maintenance smell that should be addressed before `transfer_function` is considered for any public surface.
+Confirm that `__tests__/` includes a test covering the `affectedRows=0` cleanup branch in the queue job (not just the backfill path). If absent, add a unit test that mocks `processImageFormats` to succeed and then mocks the conditional UPDATE to return `affectedRows=0`, asserting that `deleteImageVariants` is called for cleanup.
 
 ---
 
-## Trace Report — TRC-13-03
+## Flow 3: Admin-Only Field Leakage
 
 ### Observation
 
-`color-details-section.tsx:221` includes `image.is_hdr` in the `hasColorMetadata` derived value without an `isAdmin` check:
+`publicSelectFields` is constructed from `adminSelectFields` by explicit omission of PII fields. A compile-time `_SensitiveKeysInPublic` type guard asserts the intersection is `never`. Cycle-13 added `isAdmin &&` guards in `color-details-section.tsx` for `transfer_function` and `is_hdr` access, and the feed route was patched to stop selecting `adminUsers.username`.
 
-```js
-const hasColorMetadata = Boolean(
-    image.color_primaries || image.transfer_function || image.is_hdr
-    || (isAdmin && image.color_pipeline_decision),
+### Hypothesis Table
+
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Field leakage is prevented — publicSelectFields omissions + compile-time guard + cycle-13 render guards are all correctly in place | High | Strong | Source artifacts at data.ts:209-360, 428-429, 795-806; color-details-section.tsx:227-228 verified |
+| 2 | A field was added to adminSelectFields but not added to the `_omit*` block or `_PrivacySensitiveKeys` type, bypassing the guard | Low | Weak | Only possible if a developer forgets the migration checklist; the guard catches existing classified fields but cannot detect newly added unclassified ones |
+| 3 | The compile-time guard passes but runtime serialization (e.g. JSON.stringify) includes an omitted field via prototype pollution or Drizzle ORM side-channel | Very Low | Very Weak | No evidence; Drizzle select with explicit field list excludes non-selected fields |
+
+### Evidence For Hypothesis 1
+
+`apps/web/src/lib/data.ts:428-429`:
+```typescript
+type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
+const _guard: _SensitiveKeysInPublic extends never ? true : false = true;
+```
+This is a compile-time type assertion. `tsc` fails the build if any key in `_PrivacySensitiveKeys` appears in `publicSelectFields`.
+
+`apps/web/src/lib/data.ts:795-806` (post AGG-R13-07 fix): `getImagesForFeed` now uses `...publicSelectFields` and `author_name: sql<null>` (constant null), replacing the prior `adminUsers.username` join. The public Atom feed no longer emits per-image admin login names.
+
+`apps/web/src/components/color-details-section.tsx:227-228` (post AGG-R13-06 fix):
+```typescript
+const hasColorDetails = isAdmin && (
+    transfer_function !== null || is_hdr !== null || ...
 );
 ```
+`transfer_function` and `is_hdr` are gated by `isAdmin`. For public viewers these are `undefined` (omitted from `publicSelectFields`); the `isAdmin &&` guard closes the UI branch independently.
 
-`is_hdr` is in `PrivacySensitiveKeys` and absent from `publicSelectFields`. The unguarded inclusion means a future addition of `is_hdr` to public fields would cause the color-details accordion to auto-open for public visitors of HDR photos, before the HDR badge render (line 549, correctly gated by `isAdmin && isHdr`) was also updated.
+`apps/web/src/__tests__/privacy-fields.test.ts`: fixture test enumerates `SENSITIVE_KEYS` and asserts none appear in `publicSelectFields`. Runtime complement to the compile-time guard.
+
+### Evidence Against Hypothesis 2
+
+The CLAUDE.md migration checklist explicitly requires adding new admin-only columns to the `_omit*` block AND `_PrivacySensitiveKeys` AND the `SENSITIVE_KEYS` fixture. The compile-time guard fires if a key is added to `_PrivacySensitiveKeys` correctly. The process gap is: a NEW column not yet added to `_PrivacySensitiveKeys` at all is invisible to the guard. No evidence of such a column exists at HEAD.
+
+### Rebuttal Round
+
+Best challenge: `avif_10bit` was explicitly annotated as "public-safe (R10-M4)" and placed in `publicSelectFields`. Could a future column be similarly "safe" but accidentally classified as sensitive? Yes — but that is a false positive (causing a build failure, not a leak), not a false negative. The dangerous direction (sensitive field in public) requires both adding to `_PrivacySensitiveKeys` AND to `publicSelectFields` simultaneously, which the guard catches.
 
 ### Current Best Explanation
 
-Same structural protection as TRC-13-02. `is_hdr` is never present on public query results (`data.ts:337`: `is_hdr: _omitIsHdr` in publicSelectFields omit). The auto-open trigger never fires for public users. Low severity, same class as TRC-13-02.
-
-The relevant note in CLAUDE.md ("the public HDR badge is now gated on `isAdmin && isHdr` EXPLICITLY at the render point (AGG-M3), not on field-nullness coincidence; locked by `color-details-hdr-badge-admin.test.ts`") refers specifically to the badge element at line 549. The test does not cover the `hasColorMetadata` computed value at line 221, leaving the auto-open behavior unguarded at the component level.
+Admin-only field leakage is blocked by three layers: compile-time type assertion, runtime fixture test, and post-cycle-13 render-layer isAdmin guards. The feed route no longer discloses admin usernames.
 
 ### Critical Unknown
 
-Same as TRC-13-02.
+Whether any column added after the current `SENSITIVE_KEYS` fixture was written has been correctly classified. A diff of `apps/web/src/db/schema.ts` images columns against the fixture would confirm no drift.
 
 ### Discriminating Probe
 
-Change line 221 to include `isAdmin &&` before `image.is_hdr`: `(isAdmin && isHdr)` rather than bare `image.is_hdr`. Extend `color-details-hdr-badge-admin.test.ts` to assert that `hasColorMetadata` is `false` when `isAdmin=false` and `is_hdr=true` (with all other color fields absent). This closes the same gap as the badge test covers for the badge element, for the accordion-open state.
-
-### Uncertainty Notes
-
-Severity is LOW. Same data-layer guard as TRC-13-02.
+Run `npm run typecheck --workspace=apps/web` to confirm the `_SensitiveKeysInPublic` guard passes at HEAD. Then diff `schema.ts` images columns against `__tests__/privacy-fields.test.ts` SENSITIVE_KEYS to catch any recently added column not yet classified.
 
 ---
 
-## Trace Report — TRC-13-04
+## Flow 4: Rate-Limit Buckets Under Process Restart
 
 ### Observation
 
-`apps/web/src/lib/request-origin.ts:109` exports the internal `hasTrustedSameOriginWithOptions` function:
-
-```js
-export { hasTrustedSameOriginWithOptions };
-```
-
-This function accepts an `{ allowMissingSource: true }` option that makes the same-origin check pass even when the request carries neither `Origin` nor `Referer` header (normally a fail-closed rejection per the comment at line 87: "Fail closed by default (C1R-01)"). The public API `hasTrustedSameOrigin` delegates to this function with default options (no `allowMissingSource`), preserving fail-closed behavior.
+Login rate limiting uses both an in-memory `loginRateLimit` BoundedMap (fast path) and a DB-backed `rateLimitBuckets` table (source of truth). On process restart the in-memory map is empty. The question is whether a restart creates a brute-force window.
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | Export is present for test coverage only; no production code calls it with allowMissingSource; no security risk in current code | High | Strong (Tier 2: grep confirmed zero non-test callers) | Verified by codebase search |
-| 2 | A future server action or route handler imports hasTrustedSameOriginWithOptions directly with allowMissingSource: true, bypassing CSRF protection | Low | Weak (Tier 5: no evidence) | Export makes the escape hatch discoverable |
+| 1 | Login rate limiting is safe across restarts — the DB is the authoritative check; in-memory is a fast-path early-reject; the DB check runs unconditionally in the auth action | High | Strong | apps/web/src/app/actions/auth.ts:103-157 is the definitive artifact |
+| 2 | Restart empties the in-memory map, and the login route returns early on the in-memory count without ever reaching the DB check — creating a post-restart brute-force window | Low | Contradicted by source | auth.ts:143-147 DB check is outside any in-memory-count conditional |
+| 3 | Non-auth rate-limit buckets (OG, share, search, semantic) are process-local with no DB backup — a restart resets them | High (confirmed) | Strong | rate-limit.ts:77,89; no DB incrementRateLimit call for these buckets |
 
-### Evidence For
+### Evidence For Hypothesis 1
 
-- Hypothesis 1: `grep -rn "hasTrustedSameOriginWithOptions"` outside test and the origin file finds only a comment reference in `apps/web/src/app/api/admin/db/download/route.ts:13` (no call, just a comment noting the prior inline check was replaced). No production call site uses the `allowMissingSource` option.
-- Hypothesis 1: The function is callable only from server-side code. It is not accessible to external HTTP clients.
+`apps/web/src/app/actions/auth.ts:103-157`:
+```typescript
+const limitData = getLoginRateLimitEntry(ip, now);          // in-memory
+if (limitData.count >= LOGIN_MAX_ATTEMPTS) { return 429 }  // early-reject (fast path only)
 
-### Evidence Against / Gaps
+// ...
 
-- Hypothesis 2: The export makes the `allowMissingSource` escape hatch a documented API surface. A developer looking for a same-origin check might import `hasTrustedSameOriginWithOptions` directly and misuse the option without realizing it bypasses CSRF protection.
+loginRateLimit.set(ip, limitData);  // pre-increment in-memory
+
+// ALWAYS runs — DB check is not conditional on in-memory state:
+const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, loginBucketStart);
+const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', ...);
+if (isRateLimitExceeded(dbLimit.count, ...) || isRateLimitExceeded(accountLimit.count, ...)) {
+    rollbackLoginRateLimit(...);
+    return 429;
+}
+```
+
+The pattern: in-memory check allows fast rejection WITHOUT a DB round-trip when the bucket is clearly over limit. The DB check at lines 143-147 runs unconditionally AFTER the in-memory gate. After a restart (in-memory empty, DB has counts), the in-memory early-reject will not fire, but the DB check catches any accumulated budget.
+
+Net brute-force window from restart: zero extra attempts. The DB count enforces the budget regardless of in-memory state.
+
+`apps/web/src/lib/rate-limit.ts:103-104` comment:
+```typescript
+// In-memory Maps kept as fast-path cache. On restart they are empty;
+// the DB is the source of truth.
+```
+This matches the observed code behavior exactly.
+
+### Evidence For Hypothesis 3 (non-auth buckets are process-local)
+
+`apps/web/src/lib/rate-limit.ts`:
+- `ogRateLimit` (line 77): `createResetAtBoundedMap`, no DB backup
+- `shareRateLimit` (line 89): `createResetAtBoundedMap`, no DB backup
+- `searchRateLimit` (line 107): `createResetAtBoundedMap`, no DB backup
+
+CLAUDE.md: "the other rate-limit buckets (OG/share/search/semantic) are per-process, so distributed-attack defense weakens under scale-out." Under the single-process/single-container topology this is a documented and accepted design choice.
+
+### Evidence Against Hypothesis 2
+
+`apps/web/src/app/actions/auth.ts:143-157`: the DB `checkRateLimit` call is outside any conditional branch gated on the in-memory count. Even if the in-memory Map is empty (fresh restart), the DB check runs and the DB count is controlling. Hypothesis 2 is definitively contradicted.
 
 ### Rebuttal Round
 
-- Best challenge: The `action-origin` lint gate (`npm run lint:action-origin`) requires every mutating server action to call `requireSameOriginAdmin()` and return early on its result. That function internally calls `hasTrustedSameOrigin` (the safe, fail-closed form), not `hasTrustedSameOriginWithOptions`. The lint gate enforces the correct call site, so new server actions cannot accidentally use the wrong function and pass the lint gate.
-- Why the concern remains: The lint gate covers `apps/web/src/app/actions/` only. Admin API route handlers use `withAdminAuth()`. A custom route outside these patterns would not be caught by either gate.
+Best challenge: `clearSuccessfulLoginAttempts` (auth-rate-limit.ts:55-58) calls `resetRateLimit` (DB reset) then `loginRateLimit.delete(ip)` (in-memory delete). If the DB reset fails (transient DB error) but the in-memory delete succeeds, the in-memory count is cleared while the DB count remains. On the next attempt, the in-memory check passes (count=0), but the DB check catches the non-reset count — attacker gets no benefit. The asymmetry is safe in the failure direction.
 
 ### Current Best Explanation
 
-No active security issue. The export is a minor encapsulation gap. Making `hasTrustedSameOriginWithOptions` unexported (or renaming it `_hasTrustedSameOriginWithOptionsForTesting`) would eliminate the surface without any behavior change.
+Login rate limiting is correct across restarts. The DB is the authoritative source; the in-memory map is a fast-path cache. Non-auth rate-limit buckets are process-local by design; this is documented and acceptable under the single-instance topology.
 
 ### Critical Unknown
 
-Whether the `allowMissingSource: true` path is ever needed in production (e.g., for a non-browser caller that cannot supply an Origin header, such as the Lightroom Classic plugin). If so, the export is intentional.
+Whether the `rateLimitBuckets` DB table is being pruned regularly. Unbounded growth could slow `checkRateLimit` queries. No GC job for this table was observed during the trace.
 
 ### Discriminating Probe
 
-Search the codebase for any route or action file that might need to serve non-browser clients (the Lightroom Classic upload route `/api/admin/lr/upload` is a candidate). If `allowMissingSource: true` is needed there, document it explicitly. If not, unexport the function and update the test import.
-
-### Uncertainty Notes
-
-Severity is LOW. No current misuse exists.
+`SELECT COUNT(*) FROM rateLimitBuckets WHERE expires_at < NOW()` on production. If this count is large, a GC pass or a TTL-based purge job is warranted. Also verify that `checkRateLimit` queries use an index on `(key, bucket_type, bucket_start)` or equivalent to avoid full-table scans as the table grows.
 
 ---
 
-## Trace Report — TRC-13-05 (Deferred Items — Resolution)
+## Flow 5: ETag / Cache Invalidation — Settings-Hash vs Static Next Path
 
-### AGG-R12-08: stale comment in image-queue.ts line 87
+### Observation
 
-**Verdict: NOT a bug.** The docstring for `pruneRetryMaps` at line 87 says "insertion-order via Map.keys() iteration." This accurately describes what the function does: it iterates `state.retryCounts`, `state.claimRetryCounts`, and `state.lastErrors`, all of which are Maps. `permanentlyFailedIds` is a Set but is NOT touched by `pruneRetryMaps`; its FIFO eviction is a separate code path at lines 566-570 using `Set.values().next()`. The comment is correct for the function it documents. No fix needed.
+Two serving paths exist for derivative images: the static Next.js path (`public/uploads/`) and the `serve-upload.ts` fallback. The settings-hash ETag is only emitted by `serve-upload.ts`. Most production traffic goes through the static path, which uses mtime+size ETags.
 
-### AGG-R12-09: hasTrustedSameOriginWithOptions exported (deferred LOW)
+### Hypothesis Table
 
-**Status: Still present.** Documented in detail as TRC-13-04 above. Zero non-test callers with unsafe option confirmed.
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Static path does NOT emit the settings-hash ETag — but mtime+size ETag changes after backfill re-encodes files, so cache invalidation works post-backfill | High | Strong | next.config.ts headers() + serve-upload.ts:215 are the definitive artifacts |
+| 2 | Flipping a color/quality/size admin setting invalidates stale browser/CDN caches on the static path WITHOUT a backfill | Low | Contradicted by evidence | Only serve-upload.ts emits the settings-hash ETag; the static path has no knowledge of admin settings |
+| 3 | The 5 s TTL module-scope settings-hash cache in serve-upload.ts introduces a correctness window where the ETag is stale | Low | Weak | Worst case is 5 s on the minority fallback path; static path is unaffected |
 
-### AGG-R12-10: BoundedMap.entries() raw iterator (deferred LOW)
+### Evidence For Hypothesis 1
 
-**Verdict: No active risk.** `BoundedMap.entries()` at `bounded-map.ts:116` returns `this.map.entries()` (a live iterator). A full codebase grep finds zero non-test callers of `.entries()` on any `BoundedMap` instance in production code. The method exists but is never invoked. The mutation-during-iteration concern is theoretical with zero exposure.
+`apps/web/next.config.ts:51-71`:
+```typescript
+headers: [
+    { key: 'Cache-Control', value: 'public, max-age=3600, must-revalidate' },
+]
+```
+Applied to the `/uploads/` path. Next.js generates ETags from `size-hex + mtime-hex` for static files.
+
+`apps/web/src/lib/serve-upload.ts:215`: ETag format `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` — only emitted by this module.
+
+CLAUDE.md "Operational gotcha (CRT-D1)": "flipping a color/quality/size admin setting does NOT invalidate already-served STATIC derivatives ... The settings-hash ETag only affects the serve-upload path."
+
+After a backfill re-encode: `processImageFormats` writes new bytes, changing both mtime and size. The static path mtime+size ETag changes, forcing revalidation.
+
+### Evidence Against Hypothesis 2
+
+No code path in `next.config.ts`, Next.js static serving, or the CDN configuration emits the settings-hash or responds to admin setting changes without a backfill. Hypothesis 2 is definitively contradicted.
+
+### Rebuttal Round
+
+Best challenge: for assets cached by the browser HTTP cache (served via the static path with the mtime ETag), those caches only invalidate after `max-age=3600` expires OR the file mtime changes (backfill). So a browser could serve old colors for up to 1 hour post-backfill. This is a documented operational caveat, not a bug. The `must-revalidate` directive causes browsers to revalidate after `max-age` expires; the backfill changes mtime, so revalidation fetches new bytes.
+
+### Current Best Explanation
+
+The ETag cache invalidation system works correctly within its documented scope. The settings-hash ETag covers the `serve-upload.ts` path. The static path relies on mtime-based invalidation triggered by a backfill re-encode. Operators must run a backfill after changing color/quality/size settings.
+
+### Critical Unknown
+
+Whether the SW HEAD revalidation timeout (300 ms AbortSignal) interacts with the 5 s module-scope settings-hash cache to produce a brief window where a warm SW cache reports the old ETag for requests on the `serve-upload.ts` path after settings change. The window is bounded at 5 s and affects only the minority fallback path.
+
+### Discriminating Probe
+
+After changing an admin color setting, issue a HEAD request to a known derivative URL on the `serve-upload.ts` path before and after the 5 s TTL. Confirm the ETag changes. Then confirm the same URL on the static Next path (`/uploads/...`) returns the old mtime ETag until a backfill runs and changes the file.
 
 ---
 
-## Cycle-12 Fix Verification
+## Flow 6: Bootstrap Queue on Restart — permanentlyFailedIds Cleared
 
-All four AGG-R12 MEDIUM fixes are confirmed in the current codebase:
+### Observation
 
-| Finding | File:lines | Evidence |
-|---------|------------|----------|
-| AGG-R12-01: shutdown timer clearTimeout + unref + process.exit | instrumentation.ts:25,31,51,65 | `let shutdownTimer: ReturnType<typeof setTimeout> \| undefined`; `shutdownTimer.unref?..()`; `finally { if (shutdownTimer) clearTimeout(shutdownTimer); }`; `process.exit(exitCode)` |
-| AGG-R12-02: AVIF 4096-byte partial read (not full file) | process-image.ts:240-265 | `Buffer.alloc(4096)`; `handle.read(head, 0, 4096, 0)` inside `_verifyAvifNclx` |
-| AGG-R12-03: CLAUDE.md documentation | CLAUDE.md | Shutdown + geoip-lite pre-warm section present |
-| AGG-R12-04: DB init timer clearTimeout + unref + stale promise clear | db/index.ts:94-111 | `let initTimer: ReturnType<typeof setTimeout> \| undefined`; `initTimer.unref?..()`; `finally { if (initTimer) clearTimeout(initTimer); }`; `underlying[connectionInitSymbol] = undefined` on timeout |
+The `permanentlyFailedIds` Set in `ProcessingQueueState` is in-memory and process-local. On process restart it is empty. Images that permanently failed (exhausted MAX_RETRIES=3) still have `processed=false` in the DB. The bootstrap query excludes `permanentlyFailedIds` only while the Set is populated.
 
-Additional cycle-12 hardening confirmed in current code:
+### Hypothesis Table
 
-- Queue shape guard: `image-queue.ts:186-196` — truthy + `typeof existing.queue.add === 'function'` + `existing.enqueued instanceof Set`
-- Delete-during-processing cleanup: `image-queue.ts:437-453` — `deleteImageVariants(dir, filename, [])` on `affectedRows === 0` for all three formats with empty sizes array (full directory scan, catches non-default-size variants)
-- Backfill version-bump-only-on-success: `admin-backfill-runner.ts:597-612` — detection-failure path leaves `pipeline_version` below current, row remains eligible for retry on next run
-- HDR badge double-gated: `color-details-section.tsx:549` — `{isAdmin && isHdr && ...}` (render gate) on top of data-layer omission of `is_hdr` from `publicSelectFields`
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Permanently failed images get up to 3 more processing attempts per restart — bounded overhead, no corruption or data loss | High | Strong | image-queue.ts:691-693 exclusion logic; bootstrap query structure; retry cap at MAX_RETRIES=3 |
+| 2 | A permanently failed image with a corrupt input file causes an unbounded retry loop across restarts (3 attempts per restart indefinitely) | Medium | Moderate | True in theory; depends on deployment frequency; each restart window is bounded to 3 attempts |
+| 3 | The permanent failure is persisted to the DB (`processing_error` column), making a bootstrap filter on `processing_error IS NULL` viable to prevent post-restart re-enqueue | High (as an improvement) | Strong | `images.processing_error` column confirmed to exist in schema; bootstrap query confirmed NOT to filter on it |
+
+### Evidence For Hypothesis 1
+
+`apps/web/src/lib/image-queue.ts:691-693`:
+```typescript
+if (state.permanentlyFailedIds.size > 0) {
+    baseConditions.push(notInArray(images.id, [...state.permanentlyFailedIds]));
+}
+```
+This exclusion is only effective while the process is alive. On restart, `permanentlyFailedIds` is empty (`new Set()`), so the `notInArray` condition is not appended. The bootstrap query finds any image with `processed=false` regardless of prior permanent failure status.
+
+`apps/web/src/lib/image-queue.ts:560-607`: permanent failure path — the image is added to `permanentlyFailedIds` (in-memory), `processing_error` is persisted to the DB, and `scheduleBootstrapRetry` is called. On the NEXT bootstrap pass within the same process lifetime, the `notInArray` excludes the image. After restart, it does not.
+
+Cost per restart for a permanently-failed image: up to 3 processing attempts. For a corrupt file that always fails, each deploy triggers 3 failed attempts. Not a safety issue; bounded overhead.
+
+### Evidence For Hypothesis 3 (DB filter is viable)
+
+The `processing_error` column on `images` contains the error string for a permanently failed image. The bootstrap query at lines 687-717 selects rows where `images.processed = false` but does NOT filter `processing_error IS NULL`. Adding this filter would prevent permanently failed images from being re-enqueued after restart.
+
+This is a latent improvement. Its omission is not a bug under the current single-instance topology where restarts are infrequent.
+
+### Rebuttal Round
+
+Best challenge: could a burst of permanently failed images on a high-volume gallery create enough retry overhead on each restart to stall the queue for normal images? At MAX_RETRIES=3 with exponential backoff and `BOOTSTRAP_RETRY_DELAY_MS` between bootstrap scans, a large set of permanently failed images would delay bootstrap convergence for normal images. In practice, permanently failed images are rare (corrupt originals). For galleries with many corrupt uploads, the bootstrap filter would be a meaningful improvement.
+
+### Current Best Explanation
+
+On restart, permanently failed images get up to 3 more processing attempts. This is bounded overhead per restart, not a safety or correctness issue. The mitigation path (filter bootstrap by `processing_error IS NULL`) exists in the schema but is not wired. For the current production gallery scale, the overhead is negligible.
+
+### Critical Unknown
+
+How many images currently have `processing_error IS NOT NULL` AND `processed = false` in the production DB. If the count is non-zero, each deploy triggers 3 wasted attempts per such image.
+
+### Discriminating Probe
+
+Run on production:
+```sql
+SELECT COUNT(*) FROM images WHERE processed = false AND processing_error IS NOT NULL;
+```
+If > 0, extend the bootstrap query with `AND images.processing_error IS NULL` as a cheap improvement. This eliminates the need for the in-memory `permanentlyFailedIds` exclusion across restarts (DB becomes the authoritative permanent-failure store).
 
 ---
 
-## Overall Cycle-13 Finding Summary
+## Overall Assessment
 
-| ID | Severity | File | Description | Status |
-|----|----------|------|-------------|--------|
-| TRC-13-01 | DISPROVED | settings-hash.ts | Sort asymmetry between buildHashFromConfig and fetchHashFromDb for image_sizes — neutralized by normalized DB write path in settings.ts:82-91 | No fix needed |
-| TRC-13-02 | LOW | color-details-section.tsx:393 | `{image.transfer_function && ...}` renders without isAdmin guard — safe today (data layer omits field), maintenance trap | Recommend: wrap with `isAdmin &&` |
-| TRC-13-03 | LOW | color-details-section.tsx:221 | `image.is_hdr` in `hasColorMetadata` without isAdmin — safe today, accordion would auto-open publicly if is_hdr ever enters publicSelectFields | Recommend: `(isAdmin && isHdr)` in place of bare `image.is_hdr` |
-| TRC-13-04 | LOW | request-origin.ts:109 | `hasTrustedSameOriginWithOptions` exported; exposes `allowMissingSource: true` escape hatch as public API | Recommend: unexport or rename with `_testOnly` prefix |
-| TRC-13-05 | INFORMATIONAL | bounded-map.ts:116 | `BoundedMap.entries()` returns live iterator — zero production callers, no active risk | Monitor only |
+No CRITICAL or HIGH findings in this trace. One new LOW finding (Flow 6: bootstrap re-enqueues permanently failed images after restart) is an informational improvement candidate with a specific DB probe. The five previously known patterns (SIGTERM path, delete-during-processing, field leakage, rate-limit restart, ETag caveat) are all SAFE or operating as documented with accepted trade-offs.
 
-**Net cycle-13 result: 0 CRIT, 0 HIGH, 3 LOW (TRC-13-02, TRC-13-03, TRC-13-04), 1 INFORMATIONAL.**
-
-The codebase is in clean state following cycle-12. The three LOW findings are component-level defense-in-depth gaps where the data layer provides structural protection but the render layer lacks explicit admin gating on admin-only fields, inconsistent with the explicit guards on adjacent admin-only fields in the same component.
+The highest-value discriminating probe across all flows is the Flow 6 production DB query because it directly determines whether a cheap bootstrap filter improvement is warranted. The highest-value new test to add is the Flow 2 `affectedRows=0` cleanup branch test (if absent) and the Flow 1 shutdown-IIFE drain behavior test.

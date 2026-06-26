@@ -1,379 +1,242 @@
-# Test Engineer Review — Cycle 13
+# Test Engineer Review — Cycle 14
 
 **Date:** 2026-06-27
-**Baseline:** 2071 tests pass, 4 skip (2 clip offline-load, 2 clip semantic-integration — require model weights on disk, correctly gated)
-**Test files:** 226 unit + 5 e2e (Playwright)
-**Vitest command:** `npm test --workspace=apps/web`
+**HEAD after cycle-13 fixes:** HEAD at cycle-13 convergence (2071 tests pass, 4 skip)
+**Scope:** Test coverage gaps on correctness-critical and security-critical paths following the cycle-13 fix set.
 
 ---
 
-## Executive Summary
+## Severity / Priority Table
 
-The test suite is healthy. All deferred items from cycle 12 (TEST-01 through TEST-06) were re-examined against current source. TEST-02 (audit-prioritize-security-fields) was confirmed complete in cycle 12. The remaining five deferred items are still open; this review updates their status and adds four new gaps arising from cycle-12 code changes. No flaky tests were detected.
-
----
-
-## Test Suite Health
-
-**Status: HEALTHY**
-- 226 test files, 2071 assertions passing
-- 4 skips are correctly gated behind missing CLIP model weights (clip-offline-load.test.ts, clip-semantic-integration.test.ts) — these are intentional environment-dependent tests, not flaky tests
-- No tests with `setTimeout`/`sleep` in the body (timing-dependent flakiness risk is low)
-- All `vi.resetModules()` + `vi.doMock()` isolation patterns are used correctly
+| ID | Severity | Category | File | Description |
+|----|----------|----------|------|-------------|
+| TE-01 | **HIGH** | Real Bug (missed fix) | `src/app/api/admin/lr/upload/route.ts:180` | LR upload route still uses `stats.bfree`; cycle-13 fixed `images.ts` but missed this parallel disk-check path |
+| TE-02 | **HIGH** | Broken Test Mock | `src/__tests__/images-actions.test.ts:166` | Mock supplies `{ bfree, bsize }` but production code reads `stats.bavail`; test passes via NaN arithmetic, regression to `bfree` undetectable |
+| TE-03 | **MEDIUM** | Missing regression test | `src/lib/data.ts:794-798` | No test locks `getImagesForFeed` emitting `author_name: sql\`NULL\``; reversion to the `adminUsers.username` join bypasses all CI gates |
+| TE-04 | **MEDIUM** | Missing test | `src/lib/auth-rate-limit.ts:107-120` | `getPasswordChangeRateLimitEntry` copy contract entirely untested; the cycle-13 `{ ...entry }` fix has no assertion that would fail on revert |
+| TE-05 | LOW | Missing test | `src/components/color-details-section.tsx:227-229` | `hasColorDetails` now guards `transfer_function`/`is_hdr` behind `isAdmin &&`; no source-inspection assertion locks the new guard expression |
+| TE-06 | LOW | Not unit-testable | `apps/web/Dockerfile:CMD` | Docker CMD `exec` fix (AGG-R13-01) cannot be validated by Vitest; correct by code inspection only |
+| TE-07 | LOW | Deferred carry-over | `src/__tests__/db-pool-connection-handler.test.ts` | `clearTimeout`/`unref` in `finally` around `Promise.race` (cycle-12 AGG-R12-04) not asserted; deferred per cycle-13 plan |
 
 ---
 
-## Deferred Items from Cycle 12 — Status Update
+## Findings
 
-### TEST-01: Prune timer-gate negative path
-**Status: STILL OPEN**
-**Priority: Medium | Confidence: High**
+### TE-01 — HIGH — Real Bug: LR upload route still uses `stats.bfree` (cycle-13 fix was incomplete)
 
-The three prune helpers (`pruneOgRateLimit`, `pruneShareRateLimit`, `pruneSearchRateLimit`) share identical guard logic:
+**File:** `apps/web/src/app/api/admin/lr/upload/route.ts:180`
 
+**What was changed in cycle-13:** `apps/web/src/app/actions/images.ts` had `stats.bfree * stats.bsize` corrected to `stats.bavail * stats.bsize` (AGG-R13-04). The rationale: `bfree` counts the ~5% root-reserved blocks the non-root `node` process cannot allocate, so the 1 GiB pre-check can pass while writable space is below the threshold.
+
+**What was missed:** The Lightroom Classic upload route at `apps/web/src/app/api/admin/lr/upload/route.ts` has an identical disk-space pre-check (introduced in parallel with the one in `images.ts`). It still reads `stats.bfree`:
+
+```typescript
+// route.ts:179-180
+const stats = await statfs(UPLOAD_DIR_ORIGINAL);
+const freeBytes = stats.bfree * stats.bsize;  // BUG: should be stats.bavail
 ```
-if (!shouldPrune) return false;
-```
 
-where `shouldPrune = options?.force || map.size > MAX_KEYS || now - lastPruneAt >= INTERVAL_MS`.
+This is an identical root-reserved-block bug on the Lightroom publish path. An admin using Lightroom Classic publish to a gallery within ~5% of full receives a false "disk is OK" signal from the pre-check, then gets an opaque 500/ENOSPC at the actual file write rather than the intended 507 response.
 
-The existing tests in `og-rate-limit.test.ts` and `rate-limit.test.ts` only verify the happy path: expired entries are removed, live entries are kept. There is no test that calls a prune function twice in rapid succession (within the interval, without the force flag, below the size cap) and asserts it returns `false` without running.
+**Why no CI gate caught it:** `lr-upload-hdr-gate.test.ts:195-203` checks that `statfs` is imported and called before the save, but never asserts `bavail` vs `bfree`. No test makes this distinction.
 
-**Risk:** If the `now - lastPruneAt >= INTERVAL` guard is accidentally inverted or removed, the prune will run on every request hit. For the OG route under moderate traffic, `pruneOgRateLimit` fires per OG image request; running `BoundedMap.prune()` (an O(n) scan of all rate-limit buckets) on every call adds measurable latency. The bug would be invisible to the current tests.
+**Fix required (not just a test):** Change `route.ts:180` to `stats.bavail * stats.bsize`, mirroring `images.ts`.
 
-**Proposed test (file: `apps/web/src/__tests__/og-rate-limit.test.ts`):**
-```ts
-it('skips eviction when called again within the prune interval (timer gate)', () => {
-    const now = 10_000_000;
-    ogRateLimit.set('10.0.0.1', { count: 1, resetAt: now - 1 }); // expired
-    pruneOgRateLimit(now);           // first call — runs, removes expired entry
-    ogRateLimit.set('10.0.0.2', { count: 1, resetAt: now - 1 }); // new expired entry
-    const pruned = pruneOgRateLimit(now + 1); // within interval — must NOT run
-    expect(pruned).toBe(false);
-    expect(ogRateLimit.has('10.0.0.2')).toBe(true); // still present
+**Regression test to add (source-inspection, matching the existing lr-upload test style):**
+```typescript
+it('uses stats.bavail (not stats.bfree) in the disk-space pre-check', () => {
+    expect(LR_SRC).toContain('stats.bavail');
+    expect(LR_SRC).not.toMatch(/stats\.bfree\b/);
 });
 ```
 
-The same pattern should be added for `pruneShareRateLimit` in `rate-limit.test.ts`.
+**Confidence:** High. Confirmed by direct source comparison of the two parallel code paths.
 
 ---
 
-### TEST-02: audit-prioritize-security-fields
-**Status: COMPLETE**
+### TE-02 — HIGH — Broken test mock: `images-actions.test.ts` provides `bfree` but code reads `bavail`
 
-`apps/web/src/__tests__/audit-prioritize-security-fields.test.ts` exists and is thorough. Six test cases cover ordering, non-priority key preservation, absent key skipping, value preservation, empty object, and all-six-present order. No action needed.
+**File:** `apps/web/src/__tests__/images-actions.test.ts:166`
+
+**Current `beforeEach` mock:**
+```javascript
+statfsMock.mockResolvedValue({ bfree: 2_000_000, bsize: 1024 });
+```
+
+**Production code reads (`images.ts:211`):**
+```javascript
+const freeBytes = stats.bavail * stats.bsize;
+```
+
+Since the mock provides no `bavail` key, `stats.bavail` is `undefined`. `undefined * 1024 = NaN`. The threshold check `if (freeBytes < 1024 * 1024 * 1024)` evaluates to `false` when `freeBytes` is `NaN` — NaN comparisons always return false in JavaScript. The disk check passes accidentally, not because the fix was validated.
+
+**Regression not caught:** Reverting `images.ts` back to `stats.bfree` would still satisfy all existing tests because the mock provides `bfree: 2_000_000` which gives `2_000_000 * 1024 = 2 GB > 1 GB threshold` — check passes either way. Additionally, there is no test that verifies the `insufficientDiskSpace` error is returned when `bavail` is *below* the threshold; the existing failure test at line 311 only exercises the `catch` branch (when `statfs` rejects entirely, not when it resolves with low `bavail`).
+
+**Tests to add:**
+1. Update the mock to `{ bavail: 2_000_000, bsize: 1024 }` so tests reflect what the code actually reads.
+2. Add a below-threshold test:
+```typescript
+it('returns insufficientDiskSpace when bavail * bsize is below 1 GiB', async () => {
+    statfsMock.mockResolvedValue({ bavail: 500_000, bsize: 1024 }); // ~488 MiB < 1 GiB
+    const formData = new FormData();
+    formData.append('files', new File(['x'], 'photo.jpg', { type: 'image/jpeg' }));
+    formData.set('topic', 'travel');
+    formData.set('tags', '');
+    await expect(uploadImages(formData)).resolves.toEqual({ error: 'insufficientDiskSpace' });
+    expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+});
+```
+
+**Confidence:** High. The mock/code field-name mismatch is direct and confirmed.
 
 ---
 
-### TEST-03: getExpectedOrigin null-host path
-**Status: SUBSTANTIALLY COVERED — gap is minor**
-**Priority: Low | Confidence: High**
+### TE-03 — MEDIUM — Feed username disclosure fix has no regression test
 
-`request-origin.test.ts` line 114 has `'returns null when all protocol headers are missing'` which covers `getTrustedRequestProtocol` returning null. Line 135 has `'fails closed by default when origin metadata is missing (C1R-01)'` which tests `hasTrustedSameOrigin` with host+proto but no origin/referer returning false. The specific scenario where the HOST header is also absent (making `getExpectedOrigin` return null) is not a named standalone test, but the behavioral outcome is exercised.
+**File:** `apps/web/src/lib/data.ts:794-798`
 
-The `hasTrustedSameOriginWithOptions` export (AGG-R12-09) is now tested at lines 139-150 with `allowMissingSource: true` and `allowMissingSource: false`. This was a deferred concern from cycle 12 — it is now covered.
+**What was fixed (cycle-13 AGG-R13-07):** `getImagesForFeed` previously joined `adminUsers` and selected `adminUsers.username` as `author_name`, exposing the admin login credential on the unauthenticated `GET /feed.xml`. The fix emits `author_name: sql<string | null>\`NULL\`` instead, dropping the `adminUsers` join entirely.
 
-**No new test required.** The named-test gap is cosmetic; the behavior is locked.
+**Coverage gap:** No test verifies this invariant. The existing test surface covers:
+- `atom-feed.test.ts`: tests `composeAtomFeed` (pure function over `AtomEntry[]`), not `getImagesForFeed`
+- `feed-sized-derivative.test.ts`: source-inspects feed routes for `sizedImageFilename`, not query shape
+- `privacy-fields.test.ts`: guards `publicSelectFields` schema exclusions via `_PrivacySensitiveKeys` guard, but not JOIN-derived fields in named query functions like `getImagesForFeed`
 
----
+A developer reverting the join (e.g., to surface per-uploader attribution) would not be caught by any CI gate.
 
-### TEST-04: safeUnlink ENOENT discrimination
-**Status: STILL OPEN — updated characterization**
-**Priority: Low | Confidence: Medium**
-
-`safeUnlink` (process-image.ts:89, private, not exported) handles errors as follows:
-- `ENOENT` — silent return (expected race with delete)
-- non-ENOENT (EMFILE, ENOSPC, EACCES) — `console.debug(...)` then also silently returns (does NOT rethrow)
-
-The key behavioral contract is: `safeUnlink` never throws. A cleanup failure in one file never aborts the rest of the cleanup fan-out in `processImageFormats`. This is the correct design, but if the catch block is accidentally removed and `fs.unlink` throws on ENOENT, the entire `Promise.all` cleanup sweep would reject.
-
-Since `safeUnlink` is private, the test must be a source-contract test.
-
-**Proposed test (new file: `apps/web/src/__tests__/process-image-safe-unlink.test.ts`):**
-```ts
-import { describe, it, expect } from 'vitest';
+**Test to add (source-inspection of `data.ts`, matching project convention):**
+```typescript
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-describe('safeUnlink (process-image.ts)', () => {
-    const source = readFileSync(resolve(__dirname, '../lib/process-image.ts'), 'utf8');
+const DATA_SRC = readFileSync(resolve(__dirname, '../lib/data.ts'), 'utf8');
 
-    it('catches ENOENT and returns silently', () => {
-        expect(source).toMatch(/if \(code === ['"]ENOENT['"]\)\s*\{[\s\S]*?return/);
+describe('getImagesForFeed — author_name privacy contract (SEC-13-01)', () => {
+    it('emits a literal NULL for author_name rather than adminUsers.username', () => {
+        // Confirm the NULL literal is present in the function.
+        expect(DATA_SRC).toMatch(/getImagesForFeed[\s\S]{0,800}author_name:\s*sql/);
+        expect(DATA_SRC).toMatch(/getImagesForFeed[\s\S]{0,800}NULL/);
     });
 
-    it('logs non-ENOENT errors at debug level without rethrowing', () => {
-        expect(source).toMatch(/console\.debug\(/);
-        // The catch block must not contain a bare throw after the ENOENT guard
-        const catchBlock = /catch \(err\)\s*\{([\s\S]*?)\n\s*\}/m.exec(source)?.[1] ?? '';
-        expect(catchBlock).not.toMatch(/\bthrow\b/);
-    });
-});
-```
-
----
-
-### TEST-05: rollbackOgAttempt behavioral
-**Status: STILL OPEN**
-**Priority: Medium | Confidence: High**
-
-`rollbackOgAttempt` (rate-limit.ts:261) is exported and has clear testable behavior:
-
-```ts
-export function rollbackOgAttempt(ip: string) {
-    const currentEntry = ogRateLimit.get(ip);
-    if (currentEntry && currentEntry.count > 1) {
-        ogRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
-    } else {
-        ogRateLimit.delete(ip);
-    }
-}
-```
-
-Currently only source-contract tests exist: `og-photo-fallback.test.ts` checks that the call site string `rollbackOgAttempt(ip)` appears exactly twice in the photo-route source, and `og-route-source-contracts.test.ts` checks it does NOT appear in the topic-route source. Neither test verifies the function's own behavior.
-
-**Risk:** If the decrement/delete logic is accidentally swapped (e.g., `count > 1` becomes `count > 0`, deleting entries prematurely), the source contract tests pass but rate-limit counters drift wrong. Under realistic OG traffic, a pre-DB 404 (image not found) would double-decrement the bucket.
-
-**Proposed test (file: `apps/web/src/__tests__/og-rate-limit.test.ts`, appended):**
-```ts
-import { rollbackOgAttempt } from '@/lib/rate-limit'; // add to existing import
-
-describe('rollbackOgAttempt', () => {
-    it('decrements count when greater than 1', () => {
-        const ip = '192.0.2.5';
-        const now = 1_000_000;
-        ogRateLimit.set(ip, { count: 3, resetAt: now + OG_WINDOW_MS });
-        rollbackOgAttempt(ip);
-        expect(ogRateLimit.get(ip)?.count).toBe(2);
-    });
-
-    it('deletes the entry when count equals 1', () => {
-        const ip = '192.0.2.6';
-        const now = 1_000_000;
-        ogRateLimit.set(ip, { count: 1, resetAt: now + OG_WINDOW_MS });
-        rollbackOgAttempt(ip);
-        expect(ogRateLimit.has(ip)).toBe(false);
-    });
-
-    it('is a no-op when the entry is absent', () => {
-        rollbackOgAttempt('192.0.2.7'); // must not throw
-        expect(ogRateLimit.has('192.0.2.7')).toBe(false);
+    it('does not join adminUsers in getImagesForFeed', () => {
+        const fnMatch = /export async function getImagesForFeed[\s\S]*?^\}/m.exec(DATA_SRC);
+        expect(fnMatch).not.toBeNull();
+        expect(fnMatch![0]).not.toContain('adminUsers');
     });
 });
 ```
 
+**Confidence:** High. The fix is an untested security-relevant invariant; a source-inspection test is the appropriate regression lock for query shape.
+
 ---
 
-### TEST-06: bootstrap first-scan-empty named test
-**Status: STILL OPEN**
-**Priority: Medium | Confidence: High**
+### TE-04 — MEDIUM — `getPasswordChangeRateLimitEntry` copy contract untested
 
-The three existing bootstrap tests ("caps each bootstrap pass", "continues scanning after cursor", "retries after ECONNREFUSED") all resolve to `bootstrapped = true` as a postcondition of cursor-pagination paths, not as a direct test of the first-scan-empty path. The branching logic at image-queue.ts:756 is:
+**File:** `apps/web/src/lib/auth-rate-limit.ts:107-120`
+**Test file:** `apps/web/src/__tests__/auth-rate-limit.test.ts`
 
-```ts
-if (pending.length === 0 && state.bootstrapCursorId === null) {
-    state.bootstrapped = true;  // first scan: truly no pending images
-    state.bootstrapCursorId = null;
-}
-```
+**What was fixed (cycle-13 AGG-R13-05):** `getPasswordChangeRateLimitEntry` previously returned the raw `entry` reference. The fix adds `return { ...entry };` to match the documented copy contract of `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry`.
 
-This branch only executes when the first scan (cursor is null) returns zero rows. It is the normal steady-state after all images are processed, but no test names or targets it explicitly.
+**Coverage gap:** `auth-rate-limit.test.ts` tests `getLoginRateLimitEntry` (expired-reset path) and `getAccountLoginRateLimitEntry` (expired-reset path), but the file contains zero assertions about `getPasswordChangeRateLimitEntry` at all — neither the reset behavior nor the copy contract. The test at line 101 uses `passwordChangeRateLimit.set(...)` / `.has(...)` to exercise `clearSuccessfulPasswordAttempts`, but never calls `getPasswordChangeRateLimitEntry`.
 
-**Proposed test (file: `apps/web/src/__tests__/image-queue-bootstrap.test.ts`, appended inside the `bootstrapImageProcessingQueue` describe):**
-```ts
-it('sets bootstrapped=true immediately when the first scan returns no pending images (TEST-06)', async () => {
-    const { bootstrapImageProcessingQueue, getProcessingQueueState } = await loadQueueModule({
-        getPendingImages: vi.fn().mockResolvedValue([]),
-    });
-    await bootstrapImageProcessingQueue();
-    const state = getProcessingQueueState();
-    expect(state.bootstrapped).toBe(true);
-    expect(state.bootstrapCursorId).toBeNull();
+The risk is currently lower than TE-02 because `BoundedMap.get()` already performs a shallow copy internally, making the `{ ...entry }` in the accessor redundant in practice. However: if a future backing-store swap drops `BoundedMap`'s internal copy behavior, or if someone reverts the `{ ...entry }` fix, no test fails.
+
+**Test to add:**
+```typescript
+it('getPasswordChangeRateLimitEntry resets count when window expired and returns a shallow copy', () => {
+    const now = Date.now();
+    passwordChangeRateLimit.set('10.0.0.1', { count: 3, lastAttempt: 1 });
+    const entry = getPasswordChangeRateLimitEntry('10.0.0.1', now + LOGIN_WINDOW_MS + 1);
+    // Window expired: count should reset.
+    expect(entry.count).toBe(0);
+    // Shallow copy: mutating the returned object must not corrupt the stored bucket.
+    entry.count = 99;
+    expect(passwordChangeRateLimit.get('10.0.0.1')?.count).not.toBe(99);
 });
 ```
 
----
-
-## New Findings from Cycle-12 Code Changes
-
-### NEW-01: db/index.ts initTimer clearTimeout fix not locked
-**Priority: Low | Confidence: High**
-**Source: AGG-R12-04 (cycle-12 fix)**
-
-`db/index.ts` was fixed to capture and clear the 10-second init timeout:
-```ts
-let initTimer: ReturnType<typeof setTimeout> | undefined;
-const initTimeout = new Promise<void>((_, reject) => {
-    initTimer = setTimeout(..., 10_000);
-    initTimer.unref?.();
-});
-try {
-    await Promise.race([initPromise, initTimeout]);
-} finally {
-    if (initTimer) clearTimeout(initTimer);
-}
-```
-
-`db-pool-connection-handler.test.ts` is an existing source-contract test that verifies structural patterns via regex. It does NOT check for `clearTimeout(initTimer)` or `initTimer.unref?.()`. If the finally clause is accidentally dropped (reverting the fix), no test catches it — the event loop leak silently reappears.
-
-**Proposed addition to `apps/web/src/__tests__/db-pool-connection-handler.test.ts`:**
-```ts
-it('captures and clears the init timeout in the finally block (AGG-R12-04)', () => {
-    expect(source).toMatch(/initTimer\s*=\s*setTimeout\(/);
-    expect(source).toMatch(/initTimer\.unref\?\.\(\)/);
-    expect(source).toMatch(/if \(initTimer\) clearTimeout\(initTimer\)/);
-});
-```
+**Confidence:** High for the gap; Medium for the immediate risk (currently safe due to `BoundedMap.get()` semantics).
 
 ---
 
-### NEW-02: instrumentation.ts shutdown timer fix not locked
-**Priority: Low | Confidence: High**
-**Source: AGG-R12-01 (cycle-12 fix)**
+### TE-05 — LOW — `hasColorDetails` `isAdmin` guard (cycle-13 AGG-R13-06) not test-locked
 
-`instrumentation.ts` was fixed to unref and clear the 15-second shutdown timeout:
-```ts
-shutdownTimer = setTimeout(..., 15_000);
-shutdownTimer.unref?.();
-// in finally:
-if (shutdownTimer) clearTimeout(shutdownTimer);
+**File:** `apps/web/src/components/color-details-section.tsx:227-229`
+
+**What was fixed:** The `hasColorDetails` gate that controls whether the Color Details accordion is shown at all was changed:
+```typescript
+// Before (cycle-12):
+const hasColorDetails = Boolean(
+    image.color_primaries || image.transfer_function || image.is_hdr || image.color_pipeline_decision,
+);
+// After (cycle-13):
+const hasColorDetails = Boolean(
+    image.color_primaries ||
+    (isAdmin && image.transfer_function) ||
+    (isAdmin && image.is_hdr) ||
+    (isAdmin && image.color_pipeline_decision),
+);
 ```
+A corresponding `isAdmin &&` guard was also added before the `transfer_function` row render at line 402.
 
-No test file covers `instrumentation.ts` at all. A source-contract test is cheap to add and would lock both the `unref?.()` and `clearTimeout` patterns, plus the SIGTERM/SIGINT handler registrations.
+**Coverage gap:** `color-details-section-delivered.test.ts` checks `isAdmin && isHdr && ... hdr-badge` (AGG-M3 contract), `isAdmin && image.matrix_coefficients`, and `isAdmin && image.color_space`, but the `hasColorDetails` formula itself is not asserted as a pattern. A reversion to the pre-`isAdmin` formula for `transfer_function`/`is_hdr` would not fail any existing test.
 
-**Proposed new file: `apps/web/src/__tests__/instrumentation-shutdown-timer.test.ts`:**
-```ts
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+**Tests to add (extend `color-details-section-delivered.test.ts`):**
+```typescript
+it('hasColorDetails gates transfer_function and is_hdr behind isAdmin', () => {
+    // The &&-guarded form must be present; bare `image.transfer_function` is rejected.
+    expect(SOURCE).toMatch(
+        /hasColorDetails\s*=\s*Boolean\s*\([\s\S]{0,200}\(isAdmin\s*&&\s*image\.transfer_function\)/,
+    );
+    expect(SOURCE).toMatch(
+        /hasColorDetails\s*=\s*Boolean\s*\([\s\S]{0,400}\(isAdmin\s*&&\s*image\.is_hdr\)/,
+    );
+});
 
-describe('instrumentation.ts — shutdown timer (AGG-R12-01)', () => {
-    const source = readFileSync(resolve(__dirname, '../instrumentation.ts'), 'utf8');
-
-    it('captures the shutdown timer for later cleanup', () => {
-        expect(source).toMatch(/shutdownTimer\s*=\s*setTimeout\(/);
-    });
-
-    it('calls unref() on the timer so it cannot alone keep the event loop alive', () => {
-        expect(source).toMatch(/shutdownTimer\.unref\?\.\(\)/);
-    });
-
-    it('clears the timer in the finally block to prevent spurious timeout warning', () => {
-        expect(source).toMatch(/if \(shutdownTimer\) clearTimeout\(shutdownTimer\)/);
-    });
-
-    it('registers SIGTERM and SIGINT handlers with process.on', () => {
-        expect(source).toMatch(/process\.on\(['"]SIGTERM['"]/);
-        expect(source).toMatch(/process\.on\(['"]SIGINT['"]/);
-    });
+it('renders the transfer_function row only when isAdmin is true', () => {
+    expect(SOURCE).toMatch(/isAdmin\s*&&\s*image\.transfer_function\s*&&/);
 });
 ```
 
----
-
-### NEW-03: getProcessingQueueState guard hardening not locked
-**Priority: Low | Confidence: Medium**
-**Source: AGG-R12-11 (cycle-12 fix)**
-
-The cycle-12 fix to `getProcessingQueueState` in `image-queue.ts` added validation:
-```ts
-if (existing.queue && typeof existing.queue.add === 'function' && existing.enqueued instanceof Set) {
-    return existing as ProcessingQueueState;
-}
-```
-
-No test verifies this guard. It protects against stale/corrupted module state after hot-reload or test isolation failures.
-
-**Proposed addition (source-contract, appended to `apps/web/src/__tests__/image-queue-bootstrap.test.ts`):**
-```ts
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-
-it('getProcessingQueueState validates queue.add and enqueued instanceof Set before reusing state (AGG-R12-11)', () => {
-    const src = readFileSync(resolve(__dirname, '../lib/image-queue.ts'), 'utf8');
-    expect(src).toMatch(/typeof.*queue\.add.*===.*['"]function['"]/);
-    expect(src).toMatch(/enqueued instanceof Set/);
-});
-```
+**Confidence:** Medium. Currently safe (admin-only fields are `undefined` for public API responses due to `publicSelectFields`), but regression could surface `transfer_function` in the accordion if a future call site passes admin-fetched data with `isAdmin={false}`.
 
 ---
 
-## Other Coverage Gaps
+### TE-06 — LOW — Docker CMD `exec` fix not unit-testable (noted)
 
-### GAP-01: formatShutterSpeed and hasExifData in image-types.ts — untested pure functions
-**Priority: Low | Confidence: High**
+**File:** `apps/web/Dockerfile:CMD`
 
-`apps/web/src/lib/image-types.ts` contains two non-trivial pure utility functions with no test coverage:
-
-- `hasExifData(val)` — returns false for null/undefined/empty string/non-finite numbers
-- `formatShutterSpeed(exposureTime)` — converts `"0.002"` to `"1/500"`, `"1.5"` to `"1.5s"`, `"1/125"` stays as `"1/125"`
-
-`formatShutterSpeed` has two non-obvious branches: the fraction-conversion path (checks `Math.abs(1/denominator - val) < 0.00001`) and the whole/decimal-second suffix path. These silently regress when someone edits the threshold or suffix logic.
-
-**Proposed new file: `apps/web/src/__tests__/image-types.test.ts`**
+The cycle-13 AGG-R13-01 fix prepends `exec` to `CMD` so `node server.js` runs as PID 1 and receives SIGTERM directly (rather than through a shell that ignores signals). This cannot be validated by Vitest or Playwright. Correct by code inspection. Verified at deploy time by observing a clean shutdown without the 30 s SIGKILL wait. No further test action possible at the unit level.
 
 ---
 
-### GAP-02: BoundedMap.entries() iterator — no behavioral test
-**Priority: Low | Confidence: Medium**
-**Source: AGG-R12-10 (deferred from cycle 12)**
+### TE-07 — LOW — `clearTimeout`/`unref` in `Promise.race` `finally` block (cycle-12 AGG-R12-04) not asserted
 
-`BoundedMap.entries()` (bounded-map.ts:115) returns `this.map.entries()` — a live ES6 Map iterator. `bounded-map.test.ts` has thorough coverage of `prune`, `set`, `get`, `has`, `size`, and `clear`, but no test for `entries()` or `Symbol.iterator`.
+**File:** `apps/web/src/__tests__/db-pool-connection-handler.test.ts`
 
-**Proposed addition to `apps/web/src/__tests__/bounded-map.test.ts`:**
-```ts
-it('entries() yields all entries in insertion order', () => {
-    const map = makeSlidingWindowMap(60_000, 10);
-    const now = 1_000_000;
-    map.set('a', { count: 1, lastAttempt: now });
-    map.set('b', { count: 2, lastAttempt: now });
-    expect([...map.entries()]).toEqual([
-        ['a', { count: 1, lastAttempt: now }],
-        ['b', { count: 2, lastAttempt: now }],
-    ]);
-});
-```
+The cycle-12 fix added `clearTimeout`/`unref` in a `finally` block around `Promise.race([initPromise, initTimeout])` in `db/index.ts` to prevent timer accumulation under steady query load. The test checks `Promise.race` is present but does not assert the `finally { clearTimeout(...); }` pattern. A regression dropping the `clearTimeout` call would not be caught.
+
+This was explicitly deferred by the cycle-13 plan as "additive-nice-to-have." Confirming the deferral remains appropriate — the worst case is timer accumulation under high load, not a correctness failure. Record for a future test-hardening pass.
 
 ---
 
-## Flaky Test Risk Assessment
+## Summary: Which Cycle-13 Fixes Have No Regression Lock
 
-**No flaky tests identified.**
-
-Key risk factors checked:
-- No test uses `setTimeout`, `setInterval`, or `sleep` in its body
-- All time-dependent tests pass an explicit `now` timestamp parameter rather than calling `Date.now()`
-- Module-isolation tests use `vi.resetModules()` + `vi.doMock()` (correct pattern for Vitest)
-- The 4 skipped CLIP tests are correctly gated by `CLIP_MODELS_ROOT` environment presence — they do not skip stochastically
-
-One low-risk observation: `image-queue-quiesce.test.ts:137` directly sets `state.bootstrapRetryTimer.unref?.()`, reaching into internal queue state. Not flaky, but tightly coupled to `ProcessingQueueState` field naming — a refactor of that field name would silently pass the test while the implementation drifts.
-
----
-
-## Proposed Test Additions — Prioritized
-
-| ID | File | Behavior | Priority |
-|----|------|----------|----------|
-| TEST-05 | `og-rate-limit.test.ts` | rollbackOgAttempt: decrement when count>1, delete when count=1, no-op when absent | Medium |
-| TEST-06 | `image-queue-bootstrap.test.ts` | first scan returns empty array with null cursor → bootstrapped=true | Medium |
-| TEST-01 | `og-rate-limit.test.ts` + `rate-limit.test.ts` | prune timer-gate returns false when called within interval without force | Medium |
-| NEW-02 | `instrumentation-shutdown-timer.test.ts` (new) | shutdownTimer unref+clearTimeout source contract, SIGTERM/SIGINT handler registration | Low |
-| NEW-01 | `db-pool-connection-handler.test.ts` | initTimer unref+clearTimeout source contract (AGG-R12-04) | Low |
-| GAP-01 | `image-types.test.ts` (new) | formatShutterSpeed fraction conversion, suffix logic; hasExifData edge cases | Low |
-| TEST-04 | `process-image-safe-unlink.test.ts` (new) | safeUnlink catches ENOENT silently, non-ENOENT logged, never rethrows | Low |
-| NEW-03 | `image-queue-bootstrap.test.ts` | getProcessingQueueState validates queue.add + enqueued instanceof Set (AGG-R12-11) | Low |
-| GAP-02 | `bounded-map.test.ts` | entries() yields correct [K,V] pairs in insertion order | Low |
+| Cycle-13 Fix | Has regression test? | Gap severity |
+|---|---|---|
+| `images.ts` `bavail` fix | Mock is broken (provides `bfree` only) — regression undetectable | HIGH |
+| LR route disk check | Not fixed at all — this is a missed fix, not a test gap | HIGH |
+| `getImagesForFeed` NULL `author_name` | No test | MEDIUM |
+| `getPasswordChangeRateLimitEntry` copy | No test | MEDIUM |
+| `color-details-section` `hasColorDetails` isAdmin guards | No test for the formula | LOW |
+| `color-details-section` `transfer_function` render gate | No test | LOW |
+| Docker CMD `exec` | Not unit-testable | N/A |
 
 ---
 
-## Verification
+## Recommended Priority Order
 
-Baseline run: `npm test --workspace=apps/web`
-
-```
-Test Files  226 passed | 2 skipped (228)
-     Tests  2071 passed | 4 skipped (2075)
-  Duration  21.00s
-```
-
-All passing. No regressions introduced by this review cycle (read-only analysis).
+1. **Fix TE-01 immediately** — this is a live production bug, not a test gap. The LR upload route needs `bfree` → `bavail` before the next deploy.
+2. **Fix TE-02 in the same pass** — update the `beforeEach` mock to `{ bavail: ..., bsize: ... }` and add the sub-threshold assertion. The current mock makes the disk-check tests actively misleading.
+3. **TE-03 next cycle** — source-inspection test for `getImagesForFeed` null-author contract (security regression lock, cheap to add).
+4. **TE-04 / TE-05** — low risk but cheap; batch into the same test-hardening pass as TE-03.
