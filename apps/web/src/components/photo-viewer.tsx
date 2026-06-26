@@ -566,8 +566,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             {/* F-9: the keyboard-shortcut hint is irrelevant on touch
                 devices (no arrow keys, no `F`, no `I`); hide it below the `md`
                 breakpoint to stop wasting precious vertical space above
-                the photo on phones. */}
-            <p className="mb-2 text-xs text-muted-foreground hidden md:block" id="photo-viewer-shortcuts">
+                the photo on phones. AGG-R13-03 / DES-13-01: use `sr-only`
+                (not `hidden`) on mobile so this element — the target of the
+                container's `aria-describedby="photo-viewer-shortcuts"` — stays
+                in the accessibility tree. `hidden md:block` set display:none on
+                mobile, which dropped it from the a11y tree and made the
+                aria-describedby reference resolve to an empty string. */}
+            <p className="mb-2 text-xs text-muted-foreground sr-only md:not-sr-only" id="photo-viewer-shortcuts">
                 {t('viewer.shortcutsHint')}
             </p>
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
