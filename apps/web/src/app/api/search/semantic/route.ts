@@ -6,7 +6,7 @@
  *   - Requires same-origin (no admin auth)
  *   - Rate-limit: 30 requests / min / IP (in-memory, ResetAt pattern)
  *   - Embeds query via stub CLIP text encoder
- *   - Scans up to SEMANTIC_SCAN_LIMIT (5000) most-recent embeddings
+ *   - Scans up to SEMANTIC_SCAN_LIMIT (2000) most-recent embeddings
  *   - Returns top-K image IDs with cosine score above COSINE_THRESHOLD (0.18)
  *
  * Rate-limit posture: Pattern 2 (rollback on validation failure). The counter
