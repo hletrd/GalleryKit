@@ -177,7 +177,12 @@ export const POST = withAdminAuth(
             // on ENOSPC. The upload tree was created above.
             try {
                 const stats = await statfs(UPLOAD_DIR_ORIGINAL);
-                const freeBytes = stats.bfree * stats.bsize;
+                // R14C14 / SEC-14-01: use `bavail` (blocks available to a
+                // NON-root process), not `bfree` — bfree counts the ~5%
+                // root-reserved blocks the non-root `node` user cannot allocate,
+                // so the pre-check could pass and then ENOSPC at writeFile.
+                // Mirrors the browser path (images.ts).
+                const freeBytes = stats.bavail * stats.bsize;
                 if (freeBytes < 1024 * 1024 * 1024) {
                     return NextResponse.json(
                         { error: 'Insufficient disk space' },
