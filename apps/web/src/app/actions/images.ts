@@ -203,7 +203,12 @@ export async function uploadImages(formData: FormData) {
         try {
             await ensureUploadDirectories();
             const stats = await statfs(UPLOAD_DIR_ORIGINAL);
-            const freeBytes = stats.bfree * stats.bsize;
+            // Use `bavail` (blocks available to a NON-root process), not `bfree`
+            // (which includes the ~5% root-reserved blocks the `node` user cannot
+            // allocate). Otherwise the pre-check can pass while the writable space
+            // is below the threshold, deferring the failure to an ENOSPC at
+            // writeFile with a generic error (R13C13 / AGG-R13-04).
+            const freeBytes = stats.bavail * stats.bsize;
             if (freeBytes < 1024 * 1024 * 1024) {
                 return { error: t('insufficientDiskSpace') };
             }
