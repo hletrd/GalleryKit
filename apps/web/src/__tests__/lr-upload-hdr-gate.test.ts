@@ -203,6 +203,14 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(statfsIndex).toBeLessThan(saveIndex);
         expect(LR_SRC).toMatch(/1024\s*\*\s*1024\s*\*\s*1024/);
         expect(LR_SRC).toMatch(/status:\s*507/);
+        // R15C15 TE-15-01: lock the bavail contract. The cycle-14 fix changed
+        // this route from `bfree` (raw free blocks, incl. root-reserved) to
+        // `bavail` (blocks the non-root node user can actually allocate); on
+        // ext4 with 5% root reserve a near-full disk passes a bfree-based check
+        // then fails at writeFile with ENOSPC. Without this assertion a revert
+        // to bfree passes the whole suite (same class as cycle-14 TE-02).
+        expect(LR_SRC).toMatch(/stats\.bavail\b/);
+        expect(LR_SRC).not.toMatch(/stats\.bfree\b/);
     });
 
     // DEF-C4-03 — cumulative upload-tracker window
