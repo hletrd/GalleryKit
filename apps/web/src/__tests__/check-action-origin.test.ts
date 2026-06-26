@@ -128,6 +128,37 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    // R15C15 TE-15-03: the raw Next.js cache primitives (not just the project's
+    // revalidate* wrappers) must count as mutations so an action calling them
+    // before the same-origin guard is flagged.
+    it('fails when raw revalidatePath happens before the same-origin guard', () => {
+        const src = `
+            export async function updateFoo(id) {
+                revalidatePath('/admin');
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('fails when raw revalidateTag happens before the same-origin guard', () => {
+        const src = `
+            export async function updateFoo(id) {
+                revalidateTag('images');
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('requires explicit exemptions for getter-style function declarations', () => {
         const src = `
             export async function getFoo() {

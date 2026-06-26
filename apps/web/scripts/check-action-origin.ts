@@ -195,6 +195,11 @@ const MUTATING_FUNCTION_NAMES = new Set([
     'logAuditEvent',
     'revalidateLocalizedPaths',
     'revalidateAllAppData',
+    // R15C15 TE-15-03: the project wraps cache invalidation in the helpers
+    // above, but a future action calling the raw Next.js primitives directly
+    // (before requireSameOriginAdmin()) would otherwise slip past the scanner.
+    'revalidatePath',
+    'revalidateTag',
 ]);
 
 /**
