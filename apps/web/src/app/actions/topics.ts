@@ -19,7 +19,7 @@ class TopicHasImagesError extends Error {
     constructor() { super('Topic still has associated images'); this.name = 'TopicHasImagesError'; }
 }
 
-import { connection, db, images, topics, topicAliases } from '@/db';
+import { connection, db, images, topics, topicAliases, topicViews } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
@@ -281,6 +281,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     });
                     await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
                     await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
+                    // DBG-16-01 (R16C16, data-loss): topic_views.topic → topics.slug
+                    // has ON DELETE CASCADE. The rename is a recreate (delete old
+                    // row below), so the analytics rows MUST be re-pointed first or
+                    // the delete CASCADE-wipes up to VIEW_RETENTION_DAYS (395 d) of
+                    // per-topic view history. The two FK children above were already
+                    // re-pointed; topicViews is the later-added third child that was
+                    // missed ("fix one sibling, miss the next").
+                    await tx.update(topicViews).set({ topic: slug }).where(eq(topicViews.topic, cleanCurrentSlug));
 
                     await tx.delete(topics)
                         .where(eq(topics.slug, cleanCurrentSlug));

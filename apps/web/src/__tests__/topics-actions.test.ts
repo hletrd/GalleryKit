@@ -98,6 +98,13 @@ vi.mock('@/db', () => ({
     images: {
         topic: 'images.topic',
     },
+    topicViews: {
+        topic: 'topic_views.topic',
+    },
+    smartCollections: {
+        id: 'smart_collections.id',
+        query_json: 'smart_collections.query_json',
+    },
 }));
 
 vi.mock('@/app/actions/auth', () => ({
@@ -286,7 +293,13 @@ describe('topic actions', () => {
                 };
             });
             const txUpdate = vi.fn((table: { topic?: string }) => {
-                steps.push(table.topic === 'images.topic' ? 'update-images' : 'update-aliases');
+                if (table.topic === 'images.topic') {
+                    steps.push('update-images');
+                } else if (table.topic === 'topic_views.topic') {
+                    steps.push('update-views');
+                } else {
+                    steps.push('update-aliases');
+                }
                 return makeUpdateChain([{ affectedRows: 1 }]);
             });
             const txDelete = vi.fn(() => {
@@ -308,7 +321,9 @@ describe('topic actions', () => {
         formData.set('order', '5');
 
         await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
-        expect(steps).toEqual(['insert-topic', 'update-images', 'update-aliases', 'delete-topic']);
+        // DBG-16-01: topic_views is re-pointed (update-views) BEFORE the delete so
+        // the ON DELETE CASCADE never wipes the analytics history.
+        expect(steps).toEqual(['insert-topic', 'update-images', 'update-aliases', 'update-views', 'delete-topic']);
         // COR-R4C13-01: the replacement row must carry EVERY non-form topics
         // column from the authoritative transaction-selected row. This is an
         // exact-object assertion on purpose: when a new topics column is
