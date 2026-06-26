@@ -1,332 +1,379 @@
-# Comprehensive Test Review — GalleryKit
+# Test Engineer Review — Cycle 13
 
-**Repository:** `/Users/hletrd/flash-shared/gallery`
-**HEAD:** `2a9976a1`
-**Previous Review HEAD:** `bcd67b12` (Cycle 11)
 **Date:** 2026-06-27
-**Reviewer:** Test Engineer (oh-my-claudecode:test-engineer)
-**Status:** HEALTHY — all 225 test files pass; 8 new coverage gaps identified for recent fixes
+**Baseline:** 2071 tests pass, 4 skip (2 clip offline-load, 2 clip semantic-integration — require model weights on disk, correctly gated)
+**Test files:** 226 unit + 5 e2e (Playwright)
+**Vitest command:** `npm test --workspace=apps/web`
 
 ---
 
-## 1. Executive Summary
+## Executive Summary
 
-| Metric | Value |
-|--------|-------|
-| Unit test files | 225 passed, 2 skipped (227 total) |
-| Unit tests | ~2,100+ total |
-| E2E test files | 5 (admin.spec.ts, public.spec.ts, origin-guard.spec.ts, nav-visual-check.spec.ts, test-fixes.spec.ts) |
-| Test framework | Vitest (unit), Playwright 1.59.1 (e2e) |
-| Full suite duration | ~25s |
-
-**Improvement from prior review:** The 3 previously failing tests are now resolved:
-- `image-queue-bootstrap.test.ts` — 2 timeout failures → FIXED (bootstrap logic refactored)
-- `touch-target-audit.test.ts` — new sub-44px violation → FIXED by `f1f6202d`
-- `request-origin.test.ts` — test pollution flake → NOW STABLE
-
-**New concern:** 11 code-changing commits landed between `bcd67b12` and `2a9976a1`. Of those, 8 introduce behavior changes with no regression test. The security and correctness fixes with the highest risk of silent regression are itemized below.
+The test suite is healthy. All deferred items from cycle 12 (TEST-01 through TEST-06) were re-examined against current source. TEST-02 (audit-prioritize-security-fields) was confirmed complete in cycle 12. The remaining five deferred items are still open; this review updates their status and adds four new gaps arising from cycle-12 code changes. No flaky tests were detected.
 
 ---
 
-## 2. Commit-to-Test Mapping (since bcd67b12)
+## Test Suite Health
 
-| Commit | Description | Test added? |
-|--------|-------------|-------------|
-| `f1f6202d` | fix(ui): improve touch targets, ARIA, motion safety | No (test fixture updated) |
-| `5ba4025c` | fix(request-origin): return null on protocol fallback | Yes — 8 lines added |
-| `450d2a53` | fix(request-origin): handle null protocol in getExpectedOrigin | NO — specific edge case untested |
-| `9d88e217` | fix(rate-limit): timer-based prune + shallow-copy mutation fix | PARTIAL — existing tests don't cover new timer gate or mutation semantics |
-| `2b166245` | fix(public): shallow-copy mutation bugs in rate-limit helpers | NO |
-| `74bd776a` | fix(public): remaining shallow-copy mutation bugs | NO |
-| `3111cc7e` | fix(process-image): safeUnlink/safeCloseDirHandle ENOENT distinction | NO |
-| `6cfcc75d` | fix(audit): prioritize security fields in metadata truncation | NO |
-| `d6107f89` | fix(queue): distinguish first-scan empty from continuation empty | Indirect only |
-| `038b3154` | fix(rate-limit): semanticRateLimit.set() fix | NO |
-| `b3c55036` | fix(shutdown): SIGTERM handler, geoip pre-warm, queue state validation | NO |
-| `92ce7a9e` | fix(photo-viewer): local ConnInfo interface for navigator.connection | NO (TS-only) |
+**Status: HEALTHY**
+- 226 test files, 2071 assertions passing
+- 4 skips are correctly gated behind missing CLIP model weights (clip-offline-load.test.ts, clip-semantic-integration.test.ts) — these are intentional environment-dependent tests, not flaky tests
+- No tests with `setTimeout`/`sleep` in the body (timing-dependent flakiness risk is low)
+- All `vi.resetModules()` + `vi.doMock()` isolation patterns are used correctly
 
 ---
 
-## 3. New Findings
+## Deferred Items from Cycle 12 — Status Update
 
-### R12-TEST-01 — `pruneOgRateLimit` / `pruneShareRateLimit` timer-gate behavior untested
+### TEST-01: Prune timer-gate negative path
+**Status: STILL OPEN**
+**Priority: Medium | Confidence: High**
 
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Gap:** `9d88e217` added conditional skipping to both prune functions. `pruneOgRateLimit(now)` now returns `false` and skips the prune when called within 60 seconds of the last run (unless `force: true` is passed). The existing test in `og-rate-limit.test.ts` calls `pruneOgRateLimit(now)` exactly once and does not check the return value. There is no test verifying:
+The three prune helpers (`pruneOgRateLimit`, `pruneShareRateLimit`, `pruneSearchRateLimit`) share identical guard logic:
 
-1. That a second call within the 60s window returns `false` and skips the prune
-2. That `pruneOgRateLimit(now, { force: true })` runs even within the window
-3. That `resetOgRateLimitForTests()` resets `lastOgRateLimitPruneAt` (it does via the module reset, but this is untested)
-4. Equivalent coverage for `pruneShareRateLimit`
+```
+if (!shouldPrune) return false;
+```
 
-**Risk:** If the timer gate logic has an off-by-one or the `lastPruneAt` state is corrupted, prune runs every request (performance hit) or never runs (unbounded memory growth for OG/share rate-limit maps). Neither regression would be caught.
+where `shouldPrune = options?.force || map.size > MAX_KEYS || now - lastPruneAt >= INTERVAL_MS`.
 
-**Concrete test to add** (`apps/web/src/__tests__/og-rate-limit.test.ts`):
-```typescript
-it('skips prune within the interval and returns false', () => {
+The existing tests in `og-rate-limit.test.ts` and `rate-limit.test.ts` only verify the happy path: expired entries are removed, live entries are kept. There is no test that calls a prune function twice in rapid succession (within the interval, without the force flag, below the size cap) and asserts it returns `false` without running.
+
+**Risk:** If the `now - lastPruneAt >= INTERVAL` guard is accidentally inverted or removed, the prune will run on every request hit. For the OG route under moderate traffic, `pruneOgRateLimit` fires per OG image request; running `BoundedMap.prune()` (an O(n) scan of all rate-limit buckets) on every call adds measurable latency. The bug would be invisible to the current tests.
+
+**Proposed test (file: `apps/web/src/__tests__/og-rate-limit.test.ts`):**
+```ts
+it('skips eviction when called again within the prune interval (timer gate)', () => {
     const now = 10_000_000;
-    ogRateLimit.set('1.2.3.4', { count: 1, resetAt: now - 1 });
-    expect(pruneOgRateLimit(now)).toBe(true);           // first call — runs
-    ogRateLimit.set('1.2.3.5', { count: 1, resetAt: now - 1 });
-    expect(pruneOgRateLimit(now + 1)).toBe(false);      // within interval — skipped
-    expect(ogRateLimit.has('1.2.3.5')).toBe(true);      // entry not evicted
-});
-
-it('force option bypasses the timer gate', () => {
-    const now = 10_000_000;
-    ogRateLimit.set('1.2.3.6', { count: 1, resetAt: now - 1 });
-    pruneOgRateLimit(now);                              // sets lastPruneAt
-    ogRateLimit.set('1.2.3.7', { count: 1, resetAt: now - 1 });
-    expect(pruneOgRateLimit(now + 1, { force: true })).toBe(true);
-    expect(ogRateLimit.has('1.2.3.7')).toBe(false);    // evicted despite timer
+    ogRateLimit.set('10.0.0.1', { count: 1, resetAt: now - 1 }); // expired
+    pruneOgRateLimit(now);           // first call — runs, removes expired entry
+    ogRateLimit.set('10.0.0.2', { count: 1, resetAt: now - 1 }); // new expired entry
+    const pruned = pruneOgRateLimit(now + 1); // within interval — must NOT run
+    expect(pruned).toBe(false);
+    expect(ogRateLimit.has('10.0.0.2')).toBe(true); // still present
 });
 ```
 
+The same pattern should be added for `pruneShareRateLimit` in `rate-limit.test.ts`.
+
 ---
 
-### R12-TEST-02 — Audit metadata `prioritizeSecurityFields` function has zero tests
+### TEST-02: audit-prioritize-security-fields
+**Status: COMPLETE**
 
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Gap:** `6cfcc75d` introduced `prioritizeSecurityFields()` in `apps/web/src/lib/audit.ts`. This function reorders metadata so security-relevant keys (`ip`, `userAgent`, `action`, `userId`, `targetType`, `targetId`) appear first in the JSON, maximizing their survival under the 4000-char truncation limit. Every existing test that calls `logAuditEvent` mocks the entire `@/lib/audit` module and never exercises this function.
+`apps/web/src/__tests__/audit-prioritize-security-fields.test.ts` exists and is thorough. Six test cases cover ordering, non-priority key preservation, absent key skipping, value preservation, empty object, and all-six-present order. No action needed.
 
-**Risk:** If the priority order is wrong or the function silently drops keys, a large metadata payload could truncate away `ip` and `userAgent` before other fields — losing forensic data in the exact scenarios (high-volume or complex operations) where it matters most. No test would catch this.
+---
 
-**Concrete test to add** (`apps/web/src/__tests__/audit-security-fields.test.ts`):
-```typescript
-import { describe, expect, it } from 'vitest';
-// Test the exported (or tested-via-integration) prioritizeSecurityFields behavior
-// by checking logAuditEvent serializes in the right order.
+### TEST-03: getExpectedOrigin null-host path
+**Status: SUBSTANTIALLY COVERED — gap is minor**
+**Priority: Low | Confidence: High**
 
-it('places ip before non-security fields in serialized metadata', () => {
-    const ordered = prioritizeSecurityFields({
-        bulkCount: 50,
-        ip: '1.2.3.4',
-        details: 'some extra',
-        userId: 7,
+`request-origin.test.ts` line 114 has `'returns null when all protocol headers are missing'` which covers `getTrustedRequestProtocol` returning null. Line 135 has `'fails closed by default when origin metadata is missing (C1R-01)'` which tests `hasTrustedSameOrigin` with host+proto but no origin/referer returning false. The specific scenario where the HOST header is also absent (making `getExpectedOrigin` return null) is not a named standalone test, but the behavioral outcome is exercised.
+
+The `hasTrustedSameOriginWithOptions` export (AGG-R12-09) is now tested at lines 139-150 with `allowMissingSource: true` and `allowMissingSource: false`. This was a deferred concern from cycle 12 — it is now covered.
+
+**No new test required.** The named-test gap is cosmetic; the behavior is locked.
+
+---
+
+### TEST-04: safeUnlink ENOENT discrimination
+**Status: STILL OPEN — updated characterization**
+**Priority: Low | Confidence: Medium**
+
+`safeUnlink` (process-image.ts:89, private, not exported) handles errors as follows:
+- `ENOENT` — silent return (expected race with delete)
+- non-ENOENT (EMFILE, ENOSPC, EACCES) — `console.debug(...)` then also silently returns (does NOT rethrow)
+
+The key behavioral contract is: `safeUnlink` never throws. A cleanup failure in one file never aborts the rest of the cleanup fan-out in `processImageFormats`. This is the correct design, but if the catch block is accidentally removed and `fs.unlink` throws on ENOENT, the entire `Promise.all` cleanup sweep would reject.
+
+Since `safeUnlink` is private, the test must be a source-contract test.
+
+**Proposed test (new file: `apps/web/src/__tests__/process-image-safe-unlink.test.ts`):**
+```ts
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+describe('safeUnlink (process-image.ts)', () => {
+    const source = readFileSync(resolve(__dirname, '../lib/process-image.ts'), 'utf8');
+
+    it('catches ENOENT and returns silently', () => {
+        expect(source).toMatch(/if \(code === ['"]ENOENT['"]\)\s*\{[\s\S]*?return/);
     });
-    const keys = Object.keys(ordered);
-    expect(keys.indexOf('ip')).toBeLessThan(keys.indexOf('bulkCount'));
-    expect(keys.indexOf('userId')).toBeLessThan(keys.indexOf('details'));
-});
 
-it('preserves all fields even when all are priority fields', () => {
-    const input = { ip: '1', userAgent: 'ua', action: 'login', userId: 1, targetType: 't', targetId: '1' };
-    const ordered = prioritizeSecurityFields(input);
-    expect(Object.keys(ordered)).toHaveLength(6);
-});
-```
-
-Note: `prioritizeSecurityFields` is not currently exported. It must be either exported (with an `@internal` JSDoc note) or tested indirectly by inspecting the JSON string produced by `logAuditEvent`.
-
----
-
-### R12-TEST-03 — `getExpectedOrigin` null-protocol + present-host edge case untested
-
-**Severity:** MEDIUM-HIGH  
-**Confidence:** HIGH  
-**Gap:** `450d2a53` fixed `getExpectedOrigin` (in `request-origin.ts`) to return `null` early when `getTrustedRequestProtocol()` returns `null`, preventing the function from constructing an `http://host` origin for protocol-less requests. The test added by `5ba4025c` (8 lines) only tests `getTrustedRequestProtocol` in isolation — it verifies the helper returns `null` when `X-Forwarded-Proto` is absent. It does NOT test `hasTrustedSameOrigin` / `getExpectedOrigin` in the scenario where the protocol is missing but a `Host` header IS present.
-
-The specific regression being guarded: before the fix, `request.headers.get('host') = 'gallery.atik.kr'` with no forwarded-proto would construct `http://gallery.atik.kr` and potentially match an Origin of `http://gallery.atik.kr`. After the fix it returns `null` so no origin matches.
-
-**Risk:** A future refactor reintroducing `?? 'http'` in the fallback path would silently downgrade an HTTPS-only deployment's origin guard on non-proxy requests.
-
-**Concrete test to add** (`apps/web/src/__tests__/request-origin.test.ts`):
-```typescript
-it('hasTrustedSameOrigin returns false when Host is present but no protocol header exists', () => {
-    delete process.env.TRUST_PROXY;
-    // Attacker sends an http:// origin that happens to match the host.
-    // Must not be trusted when we cannot determine the real protocol.
-    expect(hasTrustedSameOrigin(
-        makeHeaders({ host: 'gallery.atik.kr' }),
-        new Headers({ origin: 'http://gallery.atik.kr' }),
-    )).toBe(false);
+    it('logs non-ENOENT errors at debug level without rethrowing', () => {
+        expect(source).toMatch(/console\.debug\(/);
+        // The catch block must not contain a bare throw after the ENOENT guard
+        const catchBlock = /catch \(err\)\s*\{([\s\S]*?)\n\s*\}/m.exec(source)?.[1] ?? '';
+        expect(catchBlock).not.toMatch(/\bthrow\b/);
+    });
 });
 ```
 
 ---
 
-### R12-TEST-04 — `safeUnlink` / `safeCloseDirHandle` ENOENT discrimination untested
+### TEST-05: rollbackOgAttempt behavioral
+**Status: STILL OPEN**
+**Priority: Medium | Confidence: High**
 
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Gap:** `3111cc7e` replaced all `.catch(() => {})` swallowing with named helpers that treat `ENOENT` as expected-race (silent) and all other error codes as debug-logged. These helpers are private functions inside `process-image.ts` and are called from at least 6 call sites (cleanup after atomic rename fallback, deleteImageVariants, orphaned-file cleanup, etc.). No test exercises them.
+`rollbackOgAttempt` (rate-limit.ts:261) is exported and has clear testable behavior:
 
-**Risk:** Two failure modes: (1) ENOENT is mis-identified and logged at debug on every expected race, creating log spam; (2) a non-ENOENT error (EACCES, EMFILE) is silently swallowed, masking sustained filesystem problems. Both regressions are invisible without a test.
-
-**Concrete tests to add** (`apps/web/src/__tests__/process-image-safe-unlink.test.ts`):
-```typescript
-it('swallows ENOENT without logging', async () => {
-    const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
-    await safeUnlink('/tmp/nonexistent.avif'); // must not throw
-    expect(consoleSpy).not.toHaveBeenCalled();
-});
-
-it('logs at debug for non-ENOENT errors', async () => {
-    const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
-    await safeUnlink('/uploads/private.avif');
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[safeUnlink]'), expect.anything());
-});
+```ts
+export function rollbackOgAttempt(ip: string) {
+    const currentEntry = ogRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        ogRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
+    } else {
+        ogRateLimit.delete(ip);
+    }
+}
 ```
 
-Note: `safeUnlink` is not currently exported. It must be either exported (with a test-only note) or tested via the higher-level `deleteImageVariants` wrapper.
+Currently only source-contract tests exist: `og-photo-fallback.test.ts` checks that the call site string `rollbackOgAttempt(ip)` appears exactly twice in the photo-route source, and `og-route-source-contracts.test.ts` checks it does NOT appear in the topic-route source. Neither test verifies the function's own behavior.
 
----
+**Risk:** If the decrement/delete logic is accidentally swapped (e.g., `count > 1` becomes `count > 0`, deleting entries prematurely), the source contract tests pass but rate-limit counters drift wrong. Under realistic OG traffic, a pre-DB 404 (image not found) would double-decrement the bucket.
 
-### R12-TEST-05 — `rollbackOgAttempt` behavior untested
+**Proposed test (file: `apps/web/src/__tests__/og-rate-limit.test.ts`, appended):**
+```ts
+import { rollbackOgAttempt } from '@/lib/rate-limit'; // add to existing import
 
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Gap:** `9d88e217` also patched `rollbackOgAttempt` to use `ogRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt })` instead of mutating the shallow-copied entry object (`currentEntry.count--` which was a no-op due to the `BoundedMap.get()` copy semantics). The only existing tests that reference `rollbackOgAttempt` are source-text fixture tests (`og-photo-fallback.test.ts`, `og-route-source-contracts.test.ts`) that check the function name appears in the right positions in the source file — they do not test whether rollback actually decrements the count.
+describe('rollbackOgAttempt', () => {
+    it('decrements count when greater than 1', () => {
+        const ip = '192.0.2.5';
+        const now = 1_000_000;
+        ogRateLimit.set(ip, { count: 3, resetAt: now + OG_WINDOW_MS });
+        rollbackOgAttempt(ip);
+        expect(ogRateLimit.get(ip)?.count).toBe(2);
+    });
 
-**Risk:** A caller that pre-increments past the rate limit and then successfully rolls back could be incorrectly blocked on the next request if the rollback is silently broken. This applies to the OG image routes which roll back the increment when the DB lookup fails.
+    it('deletes the entry when count equals 1', () => {
+        const ip = '192.0.2.6';
+        const now = 1_000_000;
+        ogRateLimit.set(ip, { count: 1, resetAt: now + OG_WINDOW_MS });
+        rollbackOgAttempt(ip);
+        expect(ogRateLimit.has(ip)).toBe(false);
+    });
 
-**Concrete test to add** (`apps/web/src/__tests__/og-rate-limit.test.ts`):
-```typescript
-it('rollbackOgAttempt decrements the in-map count rather than the copy', () => {
-    const ip = '203.0.113.20';
-    const now = 3_000_000;
-    preIncrementOgAttempt(ip, now);
-    preIncrementOgAttempt(ip, now); // count = 2
-    rollbackOgAttempt(ip);
-    expect(ogRateLimit.get(ip)?.count).toBe(1); // not 2
-});
-
-it('rollbackOgAttempt deletes the entry when count reaches 1', () => {
-    const ip = '203.0.113.21';
-    const now = 3_000_000;
-    preIncrementOgAttempt(ip, now); // count = 1
-    rollbackOgAttempt(ip);
-    expect(ogRateLimit.has(ip)).toBe(false);
+    it('is a no-op when the entry is absent', () => {
+        rollbackOgAttempt('192.0.2.7'); // must not throw
+        expect(ogRateLimit.has('192.0.2.7')).toBe(false);
+    });
 });
 ```
 
 ---
 
-### R12-TEST-06 — Bootstrap first-scan-empty path has no explicit test
+### TEST-06: bootstrap first-scan-empty named test
+**Status: STILL OPEN**
+**Priority: Medium | Confidence: High**
 
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Gap:** `d6107f89` changed the bootstrap logic to distinguish two empty-batch cases:
-- `pending.length === 0 && bootstrapCursorId === null` (first scan) → `bootstrapped = true` immediately
-- `pending.length === 0 && bootstrapCursorId !== null` (continuation) → `bootstrapped = false`, retry from null
+The three existing bootstrap tests ("caps each bootstrap pass", "continues scanning after cursor", "retries after ECONNREFUSED") all resolve to `bootstrapped = true` as a postcondition of cursor-pagination paths, not as a direct test of the first-scan-empty path. The branching logic at image-queue.ts:756 is:
 
-The ECONNREFUSED retry test (`image-queue-bootstrap.test.ts:187-205`) indirectly exercises the first path (the second `limitMock` returns `[]` after the cursor was reset to null), but this is incidental. There is no test whose name or assertion explicitly documents "first scan returning empty means bootstrapped immediately."
+```ts
+if (pending.length === 0 && state.bootstrapCursorId === null) {
+    state.bootstrapped = true;  // first scan: truly no pending images
+    state.bootstrapCursorId = null;
+}
+```
 
-**Risk:** A developer reading the bootstrap code and modifying the empty-batch handling won't see a failing test that describes the expected first-scan behavior — they could accidentally revert to always-retry on empty without breaking any clearly named test.
+This branch only executes when the first scan (cursor is null) returns zero rows. It is the normal steady-state after all images are processed, but no test names or targets it explicitly.
 
-**Concrete test to add** (`apps/web/src/__tests__/image-queue-bootstrap.test.ts`):
-```typescript
-it('sets bootstrapped = true immediately when first scan returns zero pending images', async () => {
-    vi.useFakeTimers();
-    const { bootstrapImageProcessingQueue, getProcessingQueueState, limitMock }
-        = await loadQueueModule({ pendingBatches: [[]], resolveIdle: false });
-
+**Proposed test (file: `apps/web/src/__tests__/image-queue-bootstrap.test.ts`, appended inside the `bootstrapImageProcessingQueue` describe):**
+```ts
+it('sets bootstrapped=true immediately when the first scan returns no pending images (TEST-06)', async () => {
+    const { bootstrapImageProcessingQueue, getProcessingQueueState } = await loadQueueModule({
+        getPendingImages: vi.fn().mockResolvedValue([]),
+    });
     await bootstrapImageProcessingQueue();
-
-    expect(limitMock).toHaveBeenCalledTimes(1);
-    expect(getProcessingQueueState().bootstrapped).toBe(true);
-    // No retry timer should be scheduled — queue is truly empty
-    expect(getProcessingQueueState().bootstrapRetryTimer).toBeUndefined();
-    vi.useRealTimers();
+    const state = getProcessingQueueState();
+    expect(state.bootstrapped).toBe(true);
+    expect(state.bootstrapCursorId).toBeNull();
 });
 ```
 
 ---
 
-### R12-TEST-07 — `getProcessingQueueState()` shape validation path untested
+## New Findings from Cycle-12 Code Changes
 
-**Severity:** LOW-MEDIUM  
-**Confidence:** MEDIUM  
-**Gap:** `b3c55036` added defensive shape validation to `getProcessingQueueState()`: if the global symbol already exists but is missing the `queue`, `enqueued`, or `bootstrapped` fields, the function re-initializes instead of crashing or returning a broken state. No test exercises this path.
+### NEW-01: db/index.ts initTimer clearTimeout fix not locked
+**Priority: Low | Confidence: High**
+**Source: AGG-R12-04 (cycle-12 fix)**
 
-**Risk:** Test isolation failure or a future module-mocking change could accidentally install a partial object under the queue symbol. Without a test for the re-initialization path, this defensive code might break in a refactor (e.g., if the validation condition accidentally excludes a valid state).
-
-**Concrete test**: Requires module-level symbol manipulation — inject an object missing `bootstrapped` via the globalThis queue key symbol and verify `getProcessingQueueState()` returns a fully initialized state.
-
----
-
-### R12-TEST-08 — `preIncrementShareAttempt` has no behavioral test file
-
-**Severity:** LOW-MEDIUM  
-**Confidence:** HIGH  
-**Gap:** `og-rate-limit.test.ts` tests `preIncrementOgAttempt`, window reset, and prune behavior. No equivalent file exists for `preIncrementShareAttempt`. `rate-limit.test.ts` has basic increment/window-reset tests (lines 249-265) but these are sparse and do not cover:
-- Timer-gated prune skip (newly added in `9d88e217`)
-- Window boundary exactly at `resetAt`
-- Capacity-cap eviction (`SHARE_RATE_LIMIT_MAX_KEYS = 2000`) behavior
-- The `rollbackShareAttempt` function (if it exists — the OG path has one but share may not)
-
-**Risk:** Share rate limit regressions are less visible than OG rate limit regressions because `/s/[key]` and `/g/[key]` are lower-traffic paths.
-
----
-
-## 4. Previously Reported Issues — Status Update
-
-| Issue | Prior Status | Current Status |
-|-------|-------------|---------------|
-| `image-queue-bootstrap.test.ts` 2 timeouts | FAILING | RESOLVED — tests pass |
-| `touch-target-audit.test.ts` new violation | FAILING | RESOLVED — `f1f6202d` fixed the element |
-| `request-origin.test.ts` test pollution | FLAKY | STABLE — passes consistently |
-| `process-image-color-roundtrip.test.ts` failures | FAILING | Not re-evaluated (environment-dependent Sharp integration test) |
-| No test for `safeInsertId()` BigInt overflow | Gap | Still open (carried over) |
-| No test for `normalizeIp()` | Gap | Still open (carried over) |
-| No test for `prioritizeSecurityFields` | New in cycle 12 | Open — see R12-TEST-02 |
-| `/s/[key]` e2e gap | Gap | Still open (carried over) |
-
----
-
-## 5. Invariants CLAUDE.md Claims Are "Locked by Tests" — Verification
-
-All claimed test locks are confirmed to still exist:
-
-| Invariant | Locked by | Status |
-|-----------|-----------|--------|
-| Blur data URL contract | `process-image-blur-wiring.test.ts`, `images-action-blur-wiring.test.ts` | PRESENT |
-| View retention purge | `view-retention.test.ts` | PRESENT |
-| OG sanitize shared helper | `sanitize-for-og-global.test.ts`, `og-sanitize.test.ts` | PRESENT |
-| `backfill-color-pipeline` column set | `backfill-color-pipeline.test.ts` | PRESENT |
-| `admin-backfill-runner` no-version-bump on detection failure | `admin-backfill-runner-detection-failure.test.ts` | PRESENT |
-| SW template contract | `sw-template-contract.test.ts` | PRESENT |
-| `tagNamesAgg` SQL contract | `data-tag-names-sql.test.ts` | PRESENT |
-| `_PrivacySensitiveKeys` public fields guard | `privacy-fields.test.ts` | PRESENT |
-| Touch target 44px floor | `touch-target-audit.test.ts` | PRESENT |
-| API admin auth wrapping | `check-api-auth.test.ts` | PRESENT |
-| Action origin guard | `check-action-origin.test.ts` | PRESENT |
-| Public route rate limit | `check-public-route-rate-limit.test.ts` | PRESENT |
-
----
-
-## 6. Findings Summary
-
-| ID | Gap | Severity | Confidence |
-|----|-----|----------|------------|
-| R12-TEST-01 | `pruneOgRateLimit`/`pruneShareRateLimit` timer-gate behavior not tested | HIGH | HIGH |
-| R12-TEST-02 | `prioritizeSecurityFields` in audit.ts has zero tests | HIGH | HIGH |
-| R12-TEST-03 | `getExpectedOrigin` null-protocol + present-host edge case untested | MEDIUM-HIGH | HIGH |
-| R12-TEST-04 | `safeUnlink`/`safeCloseDirHandle` ENOENT discrimination untested | MEDIUM | HIGH |
-| R12-TEST-05 | `rollbackOgAttempt` behavioral tests absent | MEDIUM | HIGH |
-| R12-TEST-06 | Bootstrap first-scan-empty path has no named test | MEDIUM | HIGH |
-| R12-TEST-07 | `getProcessingQueueState()` shape validation path untested | LOW-MEDIUM | MEDIUM |
-| R12-TEST-08 | `preIncrementShareAttempt` has no behavioral test file | LOW-MEDIUM | HIGH |
-
----
-
-## 7. Verification
-
-Test run at HEAD `2a9976a1`:
-
-```
-Test Files  225 passed | 2 skipped (227)
-Duration    24.75s
+`db/index.ts` was fixed to capture and clear the 10-second init timeout:
+```ts
+let initTimer: ReturnType<typeof setTimeout> | undefined;
+const initTimeout = new Promise<void>((_, reject) => {
+    initTimer = setTimeout(..., 10_000);
+    initTimer.unref?.();
+});
+try {
+    await Promise.race([initPromise, initTimeout]);
+} finally {
+    if (initTimer) clearTimeout(initTimer);
+}
 ```
 
-The 2 skipped files are the CLIP integration tests (gated on model weights — intentional and correct).
+`db-pool-connection-handler.test.ts` is an existing source-contract test that verifies structural patterns via regex. It does NOT check for `clearTimeout(initTimer)` or `initTimer.unref?.()`. If the finally clause is accidentally dropped (reverting the fix), no test catches it — the event loop leak silently reappears.
 
-No failing tests. No timeout flakes observed in this run.
+**Proposed addition to `apps/web/src/__tests__/db-pool-connection-handler.test.ts`:**
+```ts
+it('captures and clears the init timeout in the finally block (AGG-R12-04)', () => {
+    expect(source).toMatch(/initTimer\s*=\s*setTimeout\(/);
+    expect(source).toMatch(/initTimer\.unref\?\.\(\)/);
+    expect(source).toMatch(/if \(initTimer\) clearTimeout\(initTimer\)/);
+});
+```
 
 ---
 
-*Review completed by Test Engineer agent at HEAD `2a9976a1` (2026-06-27). All findings based on direct examination of source, test files, and `git show` diffs for commits `bcd67b12..2a9976a1`.*
+### NEW-02: instrumentation.ts shutdown timer fix not locked
+**Priority: Low | Confidence: High**
+**Source: AGG-R12-01 (cycle-12 fix)**
+
+`instrumentation.ts` was fixed to unref and clear the 15-second shutdown timeout:
+```ts
+shutdownTimer = setTimeout(..., 15_000);
+shutdownTimer.unref?.();
+// in finally:
+if (shutdownTimer) clearTimeout(shutdownTimer);
+```
+
+No test file covers `instrumentation.ts` at all. A source-contract test is cheap to add and would lock both the `unref?.()` and `clearTimeout` patterns, plus the SIGTERM/SIGINT handler registrations.
+
+**Proposed new file: `apps/web/src/__tests__/instrumentation-shutdown-timer.test.ts`:**
+```ts
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+describe('instrumentation.ts — shutdown timer (AGG-R12-01)', () => {
+    const source = readFileSync(resolve(__dirname, '../instrumentation.ts'), 'utf8');
+
+    it('captures the shutdown timer for later cleanup', () => {
+        expect(source).toMatch(/shutdownTimer\s*=\s*setTimeout\(/);
+    });
+
+    it('calls unref() on the timer so it cannot alone keep the event loop alive', () => {
+        expect(source).toMatch(/shutdownTimer\.unref\?\.\(\)/);
+    });
+
+    it('clears the timer in the finally block to prevent spurious timeout warning', () => {
+        expect(source).toMatch(/if \(shutdownTimer\) clearTimeout\(shutdownTimer\)/);
+    });
+
+    it('registers SIGTERM and SIGINT handlers with process.on', () => {
+        expect(source).toMatch(/process\.on\(['"]SIGTERM['"]/);
+        expect(source).toMatch(/process\.on\(['"]SIGINT['"]/);
+    });
+});
+```
+
+---
+
+### NEW-03: getProcessingQueueState guard hardening not locked
+**Priority: Low | Confidence: Medium**
+**Source: AGG-R12-11 (cycle-12 fix)**
+
+The cycle-12 fix to `getProcessingQueueState` in `image-queue.ts` added validation:
+```ts
+if (existing.queue && typeof existing.queue.add === 'function' && existing.enqueued instanceof Set) {
+    return existing as ProcessingQueueState;
+}
+```
+
+No test verifies this guard. It protects against stale/corrupted module state after hot-reload or test isolation failures.
+
+**Proposed addition (source-contract, appended to `apps/web/src/__tests__/image-queue-bootstrap.test.ts`):**
+```ts
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+it('getProcessingQueueState validates queue.add and enqueued instanceof Set before reusing state (AGG-R12-11)', () => {
+    const src = readFileSync(resolve(__dirname, '../lib/image-queue.ts'), 'utf8');
+    expect(src).toMatch(/typeof.*queue\.add.*===.*['"]function['"]/);
+    expect(src).toMatch(/enqueued instanceof Set/);
+});
+```
+
+---
+
+## Other Coverage Gaps
+
+### GAP-01: formatShutterSpeed and hasExifData in image-types.ts — untested pure functions
+**Priority: Low | Confidence: High**
+
+`apps/web/src/lib/image-types.ts` contains two non-trivial pure utility functions with no test coverage:
+
+- `hasExifData(val)` — returns false for null/undefined/empty string/non-finite numbers
+- `formatShutterSpeed(exposureTime)` — converts `"0.002"` to `"1/500"`, `"1.5"` to `"1.5s"`, `"1/125"` stays as `"1/125"`
+
+`formatShutterSpeed` has two non-obvious branches: the fraction-conversion path (checks `Math.abs(1/denominator - val) < 0.00001`) and the whole/decimal-second suffix path. These silently regress when someone edits the threshold or suffix logic.
+
+**Proposed new file: `apps/web/src/__tests__/image-types.test.ts`**
+
+---
+
+### GAP-02: BoundedMap.entries() iterator — no behavioral test
+**Priority: Low | Confidence: Medium**
+**Source: AGG-R12-10 (deferred from cycle 12)**
+
+`BoundedMap.entries()` (bounded-map.ts:115) returns `this.map.entries()` — a live ES6 Map iterator. `bounded-map.test.ts` has thorough coverage of `prune`, `set`, `get`, `has`, `size`, and `clear`, but no test for `entries()` or `Symbol.iterator`.
+
+**Proposed addition to `apps/web/src/__tests__/bounded-map.test.ts`:**
+```ts
+it('entries() yields all entries in insertion order', () => {
+    const map = makeSlidingWindowMap(60_000, 10);
+    const now = 1_000_000;
+    map.set('a', { count: 1, lastAttempt: now });
+    map.set('b', { count: 2, lastAttempt: now });
+    expect([...map.entries()]).toEqual([
+        ['a', { count: 1, lastAttempt: now }],
+        ['b', { count: 2, lastAttempt: now }],
+    ]);
+});
+```
+
+---
+
+## Flaky Test Risk Assessment
+
+**No flaky tests identified.**
+
+Key risk factors checked:
+- No test uses `setTimeout`, `setInterval`, or `sleep` in its body
+- All time-dependent tests pass an explicit `now` timestamp parameter rather than calling `Date.now()`
+- Module-isolation tests use `vi.resetModules()` + `vi.doMock()` (correct pattern for Vitest)
+- The 4 skipped CLIP tests are correctly gated by `CLIP_MODELS_ROOT` environment presence — they do not skip stochastically
+
+One low-risk observation: `image-queue-quiesce.test.ts:137` directly sets `state.bootstrapRetryTimer.unref?.()`, reaching into internal queue state. Not flaky, but tightly coupled to `ProcessingQueueState` field naming — a refactor of that field name would silently pass the test while the implementation drifts.
+
+---
+
+## Proposed Test Additions — Prioritized
+
+| ID | File | Behavior | Priority |
+|----|------|----------|----------|
+| TEST-05 | `og-rate-limit.test.ts` | rollbackOgAttempt: decrement when count>1, delete when count=1, no-op when absent | Medium |
+| TEST-06 | `image-queue-bootstrap.test.ts` | first scan returns empty array with null cursor → bootstrapped=true | Medium |
+| TEST-01 | `og-rate-limit.test.ts` + `rate-limit.test.ts` | prune timer-gate returns false when called within interval without force | Medium |
+| NEW-02 | `instrumentation-shutdown-timer.test.ts` (new) | shutdownTimer unref+clearTimeout source contract, SIGTERM/SIGINT handler registration | Low |
+| NEW-01 | `db-pool-connection-handler.test.ts` | initTimer unref+clearTimeout source contract (AGG-R12-04) | Low |
+| GAP-01 | `image-types.test.ts` (new) | formatShutterSpeed fraction conversion, suffix logic; hasExifData edge cases | Low |
+| TEST-04 | `process-image-safe-unlink.test.ts` (new) | safeUnlink catches ENOENT silently, non-ENOENT logged, never rethrows | Low |
+| NEW-03 | `image-queue-bootstrap.test.ts` | getProcessingQueueState validates queue.add + enqueued instanceof Set (AGG-R12-11) | Low |
+| GAP-02 | `bounded-map.test.ts` | entries() yields correct [K,V] pairs in insertion order | Low |
+
+---
+
+## Verification
+
+Baseline run: `npm test --workspace=apps/web`
+
+```
+Test Files  226 passed | 2 skipped (228)
+     Tests  2071 passed | 4 skipped (2075)
+  Duration  21.00s
+```
+
+All passing. No regressions introduced by this review cycle (read-only analysis).

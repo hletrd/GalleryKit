@@ -1,7 +1,7 @@
-# Run-12 Cycle-12 Convergence — Aggregated Review (Cycle 12 of Review-Plan-Fix Loop)
+# Run-13 Cycle-13 Convergence — Aggregated Review (Cycle 13 of Review-Plan-Fix Loop)
 
 **Date:** 2026-06-27
-**HEAD:** 2a9976a1
+**HEAD:** 80145992
 **Agents:** 11/11 completed (code-reviewer, security-reviewer, perf-reviewer [via general-purpose], critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer)
 **Agent Failures:** 0 (perf-reviewer subagent type not registered → covered by a general-purpose agent, as in prior cycles)
 
@@ -11,23 +11,24 @@
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| CRITICAL | 0 | No exploitable vulnerabilities; npm audit clean (full + prod) |
-| HIGH | 0 | The one HIGH claim (critic R12-01) was DISPROVEN on verification — see "Verification Corrections" |
-| MEDIUM | 4 | One real shutdown-lifecycle bug, one perf waste, one operational doc drift, one timer-hygiene leak |
-| LOW | ~12 | Doc/comment drift, latent API-surface traps, test gaps, minor a11y |
+| CRITICAL | 0 | No exploitable vulnerabilities; `npm audit` clean (full + prod, 0 vulns) |
+| HIGH | 0 | None |
+| MEDIUM | 1 real | **R13-01** — Docker SIGTERM never reaches the node process (shell PID-1 without `exec`), nullifying cycle-12's headline shutdown fix on every deploy. Plus 2 MEDIUM doc + 2 MEDIUM a11y. |
+| LOW | ~14 | defense-in-depth render guards, rate-limit copy asymmetry, `bfree`/`bavail`, feed username disclosure, a11y polish, perf query-shapes, doc line drift |
 
-**Verdict:** Mature, well-hardened codebase. The 21 commits since cycle 10 are uniformly positive hardening. This cycle surfaces ONE genuinely deployable bug (graceful-shutdown never exits + spurious timeout warning on every per-iteration Docker deploy) and a cluster of doc/comment accuracy fixes. All three security lint gates PASS; vitest 2065 pass / 4 skipped; tsc + eslint clean (verified independently by verifier + test-engineer).
+**Verdict:** Mature, well-hardened codebase. All 6 blocking gates GREEN (verifier: eslint clean, tsc clean, vitest 2071 pass / 4 skip, lint:api-auth / lint:action-origin / lint:public-route-rate-limit all pass). All cycle-12 fixes verified individually correct and held with no regression. This cycle surfaces ONE genuinely deployable correctness/operational bug at the **Docker process-lifecycle boundary** (R13-01) that silently defeats the prior cycle's marquee work, plus a cluster of cheap doc-accuracy, defense-in-depth, and a11y fixes.
 
 ---
 
-## Verification Corrections (done by the cycle-12 lead, not delegated)
+## Verification done by the cycle-13 lead (read against installed code before planning)
 
-These were verified against the actual installed code before planning:
-
-1. **critic R12-01 (HIGH → DISPROVEN):** Claim was "Next.js 16.2.9 registers its own SIGTERM handler (`start-server.js:376`, `process.exit(143)`) that pre-empts the app's graceful drain." **FALSE.** `grep -rn "SIGTERM"` across the entire `node_modules/next/dist` returns ZERO matches; `NEXT_MANUAL_SIG_HANDLE` is referenced nowhere; the standalone `server.js` only `process.exit(1)`s on startup error. The app's `process.on('SIGTERM', gracefulShutdown)` in `instrumentation.ts:57` IS the active handler and DOES run. The symptom the critic observed (process not exiting cleanly) is real, but the root cause is the missing `process.exit()` + uncleaned sentinel timer (AGG-R12-01), not Next pre-emption. The CLAUDE.md "flushed on graceful SIGTERM" guarantee is therefore intact in principle — the drain runs; it just never exits afterward.
-2. **upload-limits default:** `DEFAULT_SERVER_ACTION_UPLOAD_BODY_BYTES = max(200 MiB, 250 MiB) + 16 MiB = 266 MiB = 278,921,216`. CLAUDE.md documents `279620608`. Confirmed typo (AGG-R12-07).
-3. **site-config keys:** `src/site-config.example.json` ships flat **snake_case** (`title`,`url`,`nav_title`,`author`,`home_link`,`footer_text`,`google_analytics_id`). CLAUDE.md deployment checklist documents **camelCase** (`siteName`,`siteUrl`,`navLinks`,`footerLinks`,`social.*`) — a schema that does not exist. Confirmed drift (AGG-R12-03).
-4. **smart_collections column:** `schema.ts:297` is `query_json` (not `rules`). Confirmed (AGG-R12-06).
+1. **R13-01 (critic, MEDIUM) — CONFIRMED from source.** `apps/web/Dockerfile:121,124` → `ENTRYPOINT ["entrypoint.sh"]` + `CMD ["sh","-c","node …/migrate.js && node …/server.js"]`; `entrypoint.sh:39` ends `exec gosu node "$@"`. So PID 1 becomes `gosu node sh -c "…"`, gosu execs into the **shell**, and the `&&` prevents shell exec-optimization, so `node server.js` runs as a **child** of a non-interactive `sh` that does not forward SIGTERM. Docker's SIGTERM (every `docker compose up --build` / restart) hits the shell, the node process never receives it, `process.on('SIGTERM', gracefulShutdown)` (`instrumentation.ts`) never runs, and the container is SIGKILLed at `docker-compose.yml:13` `stop_grace_period: 30s` (exit 137). This **directly nullifies cycle-12's AGG-R12-01 fix** in its stated trigger and breaks the CLAUDE.md "view-count buffer flushed on graceful SIGTERM" guarantee on every deploy. Canonical one-word fix: `… && exec node …/server.js`.
+2. **DOC-13-01 — CONFIRMED.** `api-auth.ts:14` `TOKEN_HEADER = 'x-gallerykit-token'`; CLAUDE.md:147 documents `X-Admin-Token`. Plugin developers following the doc get 401s.
+3. **DOC-13-02 — CONFIRMED.** `admin-tokens.ts:19-22,48-52` issues `gk_<base64url(32 bytes)>` = 46 chars (prefix 3 + 43 base64url); CLAUDE.md:147 says "32-char random hex string."
+4. **DBG13-01 — CONFIRMED.** `images.ts:206` uses `stats.bfree * stats.bsize`; `bfree` counts root-reserved blocks the non-root `node` user cannot allocate → pre-check can pass then `ENOSPC` at writeFile. Should be `bavail`.
+5. **SEC-13-01 — CONFIRMED.** `data.ts:792` `getImagesForFeed` selects `author_name: adminUsers.username` (the admin **login** username), emitted as per-entry `<author><name>` on the public Atom feed. The route already falls back to feed-level `<author>` when `author_name` is NULL (`data.ts:785-786`), so dropping the username selection closes the disclosure cleanly.
+6. **TRC-13-02/03 — CONFIRMED (currently safe).** `color-details-section.tsx:221` (`hasColorDetails`) and `:393` reference admin-only `transfer_function`/`is_hdr` without an `isAdmin` guard. Safe today because both are omitted from `publicSelectFields` (undefined for public viewers), but inconsistent with the explicit AGG-M3 `isAdmin && …` convention in the same file → maintenance trap.
+7. **PERF-13-01 — DISPROVEN as a new bug.** `data.ts:461-467` already carries an explicit comment acknowledging the per-topic `MAX(updated_at)` correlated subquery as "cheap at gallery scale" bounded by the `revalidate=3600` ISR sitemap cache. Documented tradeoff, not a regression → defer.
 
 ---
 
@@ -35,66 +36,55 @@ These were verified against the actual installed code before planning:
 
 | Finding | Agents | Severity |
 |---------|--------|----------|
-| Graceful shutdown never `process.exit()`s + sentinel timer never cleared/unref'd | code-reviewer (CR-01/CR-03), debugger (DBG-01/DBG-04), perf (PERF-6.1), critic (R12-01 symptom) | **MEDIUM** |
-| `_verifyAvifNclx` reads whole AVIF into heap to use 4 KB (WebP sibling already fixed) | perf (PERF-1.1) | MEDIUM |
-| `hasTrustedSameOriginWithOptions` still exported (AGG-M9 "fix" only moved the export) | code-reviewer (CR-02), security (SEC-01), critic (R12-03), tracer (TRC-01) | LOW (latent) |
-| `prioritizeSecurityFields` is an effective no-op + untested | critic (R12-02), test-engineer (TEST-02) | LOW |
-| `BoundedMap.entries()` returns raw mutable iterator (inconsistent with `get()` copy) | tracer (TRC-02), debugger (DBG-06), critic (R12-06) | LOW (latent) |
-| Stale comment `(5000)` in semantic route (constant is 2000) | verifier (VER-01), document-specialist (CC-01) | LOW |
-| db init-race `setTimeout` never cleared on pool-reused connections | debugger (DBG-03) | LOW-MED |
+| Docker SIGTERM never reaches node (shell PID-1, no `exec`) | critic (R13-01) | **MEDIUM** (headline) |
+| `getPasswordChangeRateLimitEntry` returns raw entry vs sibling `{...entry}` | code-reviewer (CR-13-01), debugger (DBG13-02) | LOW |
+| `color-details-section` render gates use admin-only fields without `isAdmin` | tracer (TRC-13-02/03) | LOW (defense-in-depth) |
+| `hasTrustedSameOriginWithOptions` still exported (carry-over AGG-R12-09) | security (SEC-13-02), tracer (TRC-13-04) | LOW (latent, deferred) |
+| CLAUDE.md admin-token header/format wrong | document-specialist (DOC-13-01/02) | MEDIUM (operational doc) |
+| `BoundedMap.entries()` raw iterator (carry-over AGG-R12-10) | tracer (TRC-13-05 INFO) | LOW (latent, deferred) |
 
 ---
 
-## MEDIUM — scheduled for cycle 12
+## MEDIUM — scheduled for cycle 13
 
-### AGG-R12-01 — Graceful shutdown never exits; sentinel timer leaks (HEADLINE)
-- **File:** `apps/web/src/instrumentation.ts:18-50`
-- **Evidence:** `gracefulShutdown` sets `process.exitCode = completed ? 0 : 1` (line 49) but never calls `process.exit()`. The MySQL pool holds ref'd connections, so the event loop never drains and the process lingers until Docker's stop-timeout SIGKILL (exit 137). Separately, the 15 s sentinel `setTimeout` (line 22) is never cleared or `.unref()`'d, so on a CLEAN sub-15 s drain it still fires `console.warn('[Shutdown] Timed out after 15s...')` — a false alarm — AND holds the loop alive for the full 15 s.
-- **Trigger:** Every per-iteration `npm run deploy` (Docker restart sends SIGTERM).
-- **Fix:** capture the timer handle; `clearTimeout` + `.unref()` it; call `process.exit(process.exitCode ?? 0)` after the drain. Agents: 5.
+### AGG-R13-01 — Docker SIGTERM never reaches node (HEADLINE) — `R13-01`
+- **File:** `apps/web/Dockerfile:124`
+- **Fix:** `CMD ["sh","-c","node apps/web/scripts/migrate.js && exec node apps/web/server.js"]` (add `exec`). After migrate completes, the shell replaces itself with node so node becomes PID 1 and receives SIGTERM directly → gracefulShutdown runs → view-count buffer flush honored, clean exit 0, no 30 s SIGKILL wait on every deploy. (Alternative `init: true` in compose was considered; `exec` is the minimal, idiomatic fix and keeps migrate-then-serve ordering.)
 
-### AGG-R12-02 — `_verifyAvifNclx` full-file read wastes heap
-- **File:** `apps/web/src/lib/process-image.ts:246-247`
-- **Evidence:** `const buffer = await fs.readFile(filePath)` loads the ENTIRE AVIF derivative (the 7680px AVIF can be multiple MB) only to pass `buffer.subarray(0, 4096)`. The adjacent `_verifyWebpIccChunk` (line 303-316) already does the right thing (`fs.open` + 1 KB partial read, AGG-L5). Under peak fan-out (`QUEUE_CONCURRENCY × 3 formats`) this transiently allocates concurrency × filesize of throwaway buffer.
-- **Fix:** mirror the WebP sibling — `fs.open` + `handle.read(head, 0, 4096, 0)` + `finally { handle?.close() }`.
+### AGG-R13-02 — CLAUDE.md admin-token header + format wrong — `DOC-13-01`, `DOC-13-02`
+- **File:** `CLAUDE.md` admin_tokens row (~line 147)
+- **Fix:** `X-Admin-Token` → `X-GalleryKit-Token` (case-insensitive `x-gallerykit-token`); "32-char random hex string" → "`gk_<base64url(32 random bytes)>` = 46 chars (prefix + 43 base64url), stored SHA-256-hashed."
 
-### AGG-R12-03 — CLAUDE.md site-config field names are wrong (operational)
-- **File:** `CLAUDE.md` Deployment Checklist step 3 + OG-hardening prose vs `apps/web/src/site-config.example.json`
-- **Evidence:** doc says `siteName`/`siteDescription`/`siteUrl`/`authorName`/`navLinks`/`footerLinks`/`social.*`; actual flat keys are `title`/`description`/`url`/`author`/`nav_title`/`home_link`/`footer_text`/`google_analytics_id`. A deployer who hand-writes the config from the doc silently gets blank OG cards + nav.
-- **Fix:** rewrite the CLAUDE.md key list to match the shipped example.
-
-### AGG-R12-04 — db init-race `setTimeout` never cleared (timer accrual)
-- **File:** `apps/web/src/db/index.ts:88-103`
-- **Evidence:** every `getConnection()` whose underlying connection still carries a (already-resolved) `initPromise` creates a fresh 10 s `setTimeout`. After `Promise.race` resolves, the timer is never cleared, so under steady query load up to (query-rate × 10 s) live timers accumulate, each holding the event loop briefly.
-- **Fix:** capture the timer; `clearTimeout` in a `finally`; `.unref()`.
+### AGG-R13-03 — aria-describedby points at a display:none element — `DES-13-01`
+- **File:** `apps/web/src/components/photo-viewer.tsx` (shortcuts paragraph, `hidden md:block`)
+- **Fix:** `hidden md:block` → `sr-only md:not-sr-only` so the `aria-describedby` target stays in the a11y tree on mobile (resolves to empty string today on mobile → SR announces no description).
 
 ---
 
-## LOW — selectively scheduled (cheap) / otherwise deferred
+## LOW — scheduled (cheap, clearly correct)
 
 | ID | File | Action |
 |----|------|--------|
-| AGG-R12-05 | `lib/audit.ts:14` `prioritizeSecurityFields` no-op | SCHEDULE: keep (defensive) + add regression test (TEST-02) |
-| AGG-R12-06 | `CLAUDE.md` smart_collections `rules`→`query_json` | SCHEDULE: doc fix |
-| AGG-R12-07 | `CLAUDE.md` `NEXT_UPLOAD_BODY_MAX_BYTES` `279620608`→`278921216` | SCHEDULE: doc fix |
-| AGG-R12-08 | `api/search/semantic/route.ts:9` `(5000)`→`(2000)`; `image-queue.ts:87` Map.keys()→Set/.values(); `:159` "no eviction"→has eviction | SCHEDULE: comment fixes |
-| AGG-R12-11 | `image-queue.ts:181-189` `'queue' in existing` accepts `{queue:null}` | SCHEDULE: strengthen guard to validate `queue`/`enqueued` types |
-| AGG-R12-09 | `request-origin.ts:109` `hasTrustedSameOriginWithOptions` exported | DEFER (latent; zero production callers; test locks it) |
-| AGG-R12-10 | `bounded-map.ts:115` `entries()` raw iterator | DEFER (latent; zero callers) |
-| AGG-R12-12 | `components/search.tsx:375` input `h-8` | DEFER (text input; container provides hit area; out of audit scope) |
+| AGG-R13-04 (`DBG13-01`) | `app/actions/images.ts:206` | `stats.bfree` → `stats.bavail` (root-reserved blocks) |
+| AGG-R13-05 (`CR-13-01`/`DBG13-02`) | `lib/auth-rate-limit.ts:114` | `return entry;` → `return { ...entry };` (match login-sibling copy contract) |
+| AGG-R13-06 (`TRC-13-02`/`03`) | `components/color-details-section.tsx:221,393` | wrap admin-only `transfer_function`/`is_hdr` reads in `isAdmin &&` (AGG-M3 convention; no-op for current behavior, closes trap) |
+| AGG-R13-07 (`SEC-13-01`) | `lib/data.ts:792` | stop selecting `adminUsers.username` for the public Atom feed; fall back to feed-level `<author>` (already supported) |
+| AGG-R13-08 (`DES-13-07`) | `components/load-more.tsx:147` | `h-11` → `min-h-11` (match floor convention; avoid label clip) |
+| AGG-R13-09 (`DOC-13-03`/`04`, `DBG13-05`) | `CLAUDE.md`, `lib/data.ts:147` | line-cite drift (`process-image.ts:1131-1135`→1157, `settings-hash.ts:41-53`→42-54) + comment `FLUSH_CHUNK_SIZE = 20`→`5` |
 
 ---
 
-## Deferred (carry-over / structural — see cycle-12-plan.md "Deferred" for citations + exit criteria)
+## DEFERRED — recorded, not dropped (bound by repo policy; see cycle-13-plan.md for citations + exit criteria)
 
-- Semantic search brute-force O(n) scan (perf PERF-7.1) — acknowledged structural deferral, documented in CLAUDE.md.
-- Process-local rate-limit/backfill/view-buffer state vs horizontal scale (architect) — BY DESIGN per CLAUDE.md single-instance topology.
-- `lib/storage/*` dead abstraction (architect R12-ARCH-04, critic R12-08) — CLAUDE.md explicitly says NOT integrated; quarantine decision deferred to a product call.
-- Shutdown-hook registry / handler-first ordering (architect R12-ARCH-01/02) — larger refactor; partial mitigation lands via AGG-R12-01.
-- `data.ts` / `uploadImages` / `processImageFormats` god-module splits (architect, critic) — structural debt, schedule as deliberate paydown.
-- Remaining designer a11y LOWs (lightbox swipe `aria-roledescription`, image-zoom forced-colors cursor) — carry-over LOW.
-- Remaining test gaps (TEST-01 rate-limit prune timer gate, TEST-03/04/05/06) — schedule where cheap; defer rest.
-- decimalToRational subnormal (DBG-05), admin-tokens length-timing (DBG-07) — latent/mitigated.
+- **SEC-13-02 / TRC-13-04 / AGG-R12-09** — `hasTrustedSameOriginWithOptions` exported (`request-origin.ts:109`). LOW latent; zero production callers; test-locked. Carry-over.
+- **SEC-13-03** — expensive public GET routes (`search/similar`, both OG) rate-limited at runtime but not CI-gated. LOW/informational; carry-over.
+- **TRC-13-05 / AGG-R12-10** — `BoundedMap.entries()` raw iterator (`bounded-map.ts:115`). LOW latent; zero callers. Carry-over.
+- **PERF-13-01..07** — getTopics N+1 (documented ISR-cached tradeoff), `COUNT(*) OVER()` pagination, `LIKE '%term%'` substring search (needs FULLTEXT), 4× LOW micro-opts. Structural / modest-scale; repo norm defers structural perf.
+- **DES-13-02..06** — aria-expanded combobox semantics (MED, combobox-risk), accordion motion, theme-toggle state-in-label, P3 sr-only badge, bottom-sheet 3-state aria (the last 3 need new en+ko i18n keys). LOW/MED a11y polish.
+- **R13-ARCH-01** — caption-stub feeds public alt-text fallback under an "AI" banner without an HDR-style honesty guard. LOW; mitigated (data layer strips stub prefix; default-off toggle; alt-text only).
+- **R13-ARCH-02..08 / R13-ARCH-10** — deferred-feature scaffolding policy, `data.ts`/`processImageFormats`/`uploadImages` god-module splits, shutdown-hook registry, `lib/storage/*` quarantine, view-buffer extraction. Structural debt; single-instance topology BY DESIGN per CLAUDE.md.
+- **TEST-01/05/06 + NEW-01/02/03 + GAP-01/02** — additive coverage (rollbackOgAttempt behavioral, bootstrap first-scan-empty named test, prune timer-gate negative path, shutdown/db timer locks, formatShutterSpeed, safeUnlink, queue shape-guard, bounded-map entries). Repo norm defers additive tests.
+- **DBG-05 / DBG-07** — decimalToRational subnormal, admin-token length-timing. LOW; not reachable with real inputs. Carry-over.
 
 ---
 

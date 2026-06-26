@@ -1,298 +1,269 @@
-# Tracer Log — Cycle 12
-
-**HEAD:** 2a9976a1  
-**Date:** 2026-06-27  
-**Agent:** Tracer (causal trace, competing hypotheses)  
-**Scope:** Six high-risk data/control flows, end-to-end
+# Tracer Report — Cycle 13
+**Date:** 2026-06-27
+**HEAD:** 2a9976a1 (cycle-12 fixes landed; no new commits since _aggregate.md was written)
+**Tracer:** Tracer agent (Sonnet 4.6)
 
 ---
 
-## Scope and Method
+## Executive Summary
 
-Six flows traced from source to final effect. For each flow: observation restated, competing hypotheses identified, evidence collected for and against each, strongest alternative rebutted, current best explanation stated, any critical unknown and discriminating probe named. Findings produced only where a real defect or genuinely under-defended path was found. Flows confirmed sound are noted for provenance.
+Cycle-12 MEDIUM findings (AGG-R12-01 through AGG-R12-04) are all confirmed in place. No new CRIT or HIGH issues were found. Three new LOW findings are raised — all defense-in-depth gaps in component-level admin gating rather than field-exposure bugs (the data layer correctly omits the fields from public queries). One apparent bug (settings-hash sort asymmetry) is disproved after tracing the full save path.
 
 ---
 
-## Flow 1 — Upload → queue claim → Sharp processing → conditional UPDATE → delete-during-processing race
+## Trace Report — TRC-13-01
 
 ### Observation
-An upload can be deleted while Sharp is processing its derivatives. The question is whether the queue path correctly detects this and avoids orphaned files on disk.
 
-### Hypotheses
+`settings-hash.ts:buildHashFromConfig` (line 99) explicitly sorts `imageSizes` before hashing:
+```js
+image_sizes: [...config.imageSizes].sort((a, b) => a - b).join(','),
+```
 
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | Race is fully handled: per-image advisory lock + conditional UPDATE + full-scan cleanup | High | Strong (source code) |
-| 2 | Cleanup misses non-default image sizes (deleteImageVariants called with non-empty sizes array) | Low | Contradicted |
-| 3 | Lock is released before cleanup, allowing a second worker to race the orphaned-file cleanup | Low | Contradicted |
+`settings-hash.ts:fetchHashFromDb` (lines 104-118) reads the raw DB string and passes it directly to `buildHash` with no sorting:
+```js
+for (const r of rows) map[r.key] = r.value;
+return buildHash(map);
+```
 
-### Evidence For H1
-- `image-queue.ts`: `acquireImageProcessingClaim()` acquires `GET_LOCK('gallerykit:image-processing:{id}', 0)` (non-blocking) before any work begins.
-- Pre-processing claim: `WHERE processed = false` conditional check; queue job exits early if row is already claimed.
-- Post-encode conditional UPDATE `WHERE processed = false`; when `affectedRows === 0` the job treats this as a mid-encode delete.
-- On `affectedRows === 0`: calls `deleteImageVariants(dir, filename, [])` with an empty sizes array `[]`, which triggers a full directory scan (not constrained to the default size ladder). This specifically handles non-default-size derivatives.
-- Lock is held on `lockConn` for the entire job lifecycle; the lock is released after cleanup completes, preventing a second worker from racing the cleanup.
-- Claim retry: `MAX_CLAIM_RETRIES=10` with escalating delay up to 25 s.
+If the DB stored `image_sizes = '1536,640'` (non-ascending), the two code paths would produce different hashes for the same effective configuration, causing ETag divergence between the normal serve path and the cold-start fallback.
 
-### Evidence Against H2 (non-default size gap)
-- The empty array `[]` passed to `deleteImageVariants` is documented to mean "full scan." Any number of sizes written to disk at any configured size are removed.
+### Hypothesis Table
 
-### Evidence Against H3 (lock released before cleanup)
-- The lock connection (`lockConn`) is released only in the `finally` block of the queue job, which executes after cleanup. The per-image lock scope covers the full job including post-encode cleanup.
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | DB always stores sorted values via normalizeConfiguredImageSizes in the save path; asymmetry is defensive/redundant but not a live bug | High | Strong (Tier 2: primary artifact — settings.ts save path) | Both paths produce identical hashes in all observed DB states |
+| 2 | DB can store unsorted image_sizes if another write path bypasses normalization; hash mismatch is latent | Low | Weak (Tier 5: no evidence of bypass path) | No evidence of a bypass path found |
+
+### Evidence For
+
+- Hypothesis 1: `apps/web/src/app/actions/settings.ts:82-91` explicitly calls `normalizeConfiguredImageSizes(requestedImageSizes)` and replaces `sanitizedSettings.image_sizes` with the normalized (sorted, deduped) result before any DB upsert. `normalizeConfiguredImageSizes` at `gallery-config-shared.ts:233` does `Array.from(new Set(parsed)).sort((a, b) => a - b)`, guaranteeing ascending order on every write.
+- Hypothesis 1: `gallery-config-shared.ts:217` documents: "Canonicalize an admin-provided image_sizes string into a sorted, deduped list."
+
+### Evidence Against / Gaps
+
+- Hypothesis 1: If a future write path (migration, seed script, direct DB update) bypasses `normalizeConfiguredImageSizes`, the DB would store unsorted values and the two hash paths would diverge. The type system does not prevent this.
+- Hypothesis 2: No production write path was found that stores unsorted `image_sizes`.
 
 ### Rebuttal Round
-Strongest challenge: a crash (SIGKILL) between the conditional UPDATE returning 0 and the cleanup call would leave orphaned files without holding the lock (lock is auto-released on connection drop). This is inherent to any non-transactional file+DB dual-state system. The risk is bounded because: (a) a new upload with the same UUID is cryptographically improbable; (b) the admin can run the sidecar backfill, which will either skip (row absent) or re-encode. This is not a code defect; it is a documented best-effort gap in any dual-store architecture.
+
+- Best challenge to current leader: `fetchHashFromDb` is the cold-start fallback (`serve-upload.ts:69`). If the config resolution fails on cold start AND the DB happens to have non-sorted values from a manual write, the ETag would differ from subsequent requests using `buildHashFromConfig`. No test covers this divergence.
+- Why the leader still stands: The save action at `settings.ts:82-91` is the only production write path for `image_sizes`. That path normalizes before saving. The gap exists only for manual DB writes, which are outside the application control boundary.
+
+### Convergence / Separation Notes
+
+Both hypotheses reduce to the same question: does the DB reliably store sorted values? Evidence strongly confirms yes for all in-app write paths. No separation needed.
 
 ### Current Best Explanation
-SOUND. The delete-during-processing race is correctly handled for the normal process-exit path. The crash-recovery gap is inherent and bounded.
+
+The sort in `buildHashFromConfig` is a redundant defensive guard: `config.imageSizes` is already parsed and sorted by `parseConfiguredImageSizes`, and the DB always stores sorted values because the save action normalizes before writing. The `fetchHashFromDb` path produces the same hash. Not a live bug.
+
+### Critical Unknown
+
+Whether a deployment runbook (seed, migration, or manual intervention) could write non-sorted `image_sizes` to the DB and trigger the divergence.
+
+### Discriminating Probe
+
+Add a sort inside `fetchHashFromDb` for the `image_sizes` key, or add a test that feeds a non-sorted raw string (`'1536,640'`) to the no-arg `getColorSettingsHash()` path and asserts it produces the same hash as the config-arg path with the equivalent sorted config. Either change closes the latent gap without affecting observable behavior.
+
+### Uncertainty Notes
+
+Low uncertainty. The sort asymmetry is real at the code level but is neutralized by the normalized DB write path.
 
 ---
 
-## Flow 2 — Session token creation → cookie → middleware guard → isAdmin() in server actions
+## Trace Report — TRC-13-02
 
 ### Observation
-Admin actions must reject unauthenticated callers regardless of whether the request comes through the Next.js App Router or the API route handler path.
 
-### Hypotheses
+`color-details-section.tsx:393` renders the transfer function text WITHOUT an `isAdmin` guard:
 
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | Defense-in-depth: middleware is format-check-only; full crypto verification is in every server action via isAdmin()/verifySessionToken() | High | Strong |
-| 2 | API routes bypass middleware entirely, creating an unguarded surface | Low | Contradicted by lint gate |
-| 3 | Middleware's token length check (< 100) can pass a crafted short-but-syntactically-valid token | Low | Irrelevant — crypto check in actions is authoritative |
+```jsx
+{image.transfer_function && (
+    <p className="font-medium">
+        {humanizeTransferFunction(image.transfer_function, t) || t('viewer.colorUnknown')}
+    </p>
+)}
+```
 
-### Evidence For H1
-- `proxy.ts` line 140 comment explicitly states: "API routes (/api/*) are EXCLUDED from this middleware matcher. Any new /api/admin/* route MUST implement its own auth check."
-- `proxy.ts` matcher: `'/((?!api|_next|_vercel|.*\\..*).*)' ` — API routes explicitly excluded.
-- `proxy.ts` lines 90, 103: two-stage format check (length >= 100, then 3 non-empty colon-separated segments). This is a cheap early redirect for obviously-malformed tokens only. It never claims to be cryptographic.
-- Every `/api/admin/**` route is wrapped with `withAdminAuth()` enforced by the `lint:api-auth` gate (`check-api-auth.test.ts`).
-- `isAdmin()` → `verifySessionToken()`: HMAC-SHA256 verification via `timingSafeEqual` + DB session lookup. This runs in every mutating server action independently.
-- Session rotation on login: new session created in a transaction, all prior sessions deleted to prevent session fixation.
-- `requireSecureCookie` uses `getTrustedRequestProtocol()` — fails closed to `http` when no protocol header is present (tested in `__tests__/request-origin.test.ts`).
+By contrast, the HDR badge at line 549 correctly uses `{isAdmin && isHdr && ...}`. The inconsistency is a maintenance trap: `transfer_function` is currently admin-only at the data layer, but the render path has no explicit guard to enforce that.
 
-### Evidence Against H2
-- The `lint:api-auth` gate (`check-api-auth.test.ts`) fails the build if any `/api/admin/**` HTTP-method export lacks `withAdminAuth()`. The gate is exercised by CI.
+### Hypothesis Table
 
-### Evidence Against H3
-- The middleware's token format check is documented as defense-in-depth only. The definitive auth boundary is `verifySessionToken()` in actions, which performs HMAC verification and DB lookup regardless of what the middleware allowed through.
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Public component renders transfer_function if and only if image object carries the field; data layer omits it from publicSelectFields, making the unguarded render safe today | High | Strong (Tier 2: data.ts:340 publicSelectFields omit list confirmed) | Verified directly in data.ts |
+| 2 | A future change adds transfer_function to publicSelectFields or a new public query uses adminSelectFields; the unguarded render then exposes admin-only data silently | Low | Weak (no evidence this has happened) | Pattern is structurally possible |
+
+### Evidence For
+
+- Hypothesis 1: `apps/web/src/lib/data.ts:340` — `transfer_function: _omitTransferFunction` is in the destructure that builds `publicSelectFields`. The field is `undefined` on every public query result. The `{image.transfer_function && ...}` condition evaluates to false for public callers.
+- Hypothesis 1: `apps/web/src/lib/data.ts:424` — `transfer_function` is in the `PrivacySensitiveKeys` type union with a compile-time guard (`_SensitiveKeysInPublic`) that would cause a `tsc` error if `transfer_function` were ever added to `publicSelectFields`.
+
+### Evidence Against / Gaps
+
+- Hypothesis 2: The `_SensitiveKeysInPublic` compile-time guard fires at the data layer, not at the render layer. A component that renders `image.transfer_function` without `isAdmin` would compile and render fine if the field is present in the image object passed to it — for example, an admin context where the `isAdmin` prop is accidentally `false`.
+- Gap: The component is used in both public and admin contexts. If a call site passes admin-fetched image data but `isAdmin={false}`, `transfer_function` would render to that viewer with no guard at the component level.
 
 ### Rebuttal Round
-Strongest challenge: the `x-gk-admin-render: 1` header set in `proxy.ts` line 129 uses only cookie presence (not crypto verification). A fabricated `admin_session` cookie would cause the service worker to exclude that HTML response from its offline cache — a mis-classification, not a security breach. Crypto auth is downstream in `isAdmin()`.
+
+- Best challenge: The `_SensitiveKeysInPublic` compile-time guard makes the data-layer omission structural. The unguarded render cannot expose data to the public in a correctly-maintained codebase because the compile gate would catch any accidental `publicSelectFields` addition.
+- Why the concern remains: The component also serves admin contexts. A call site that passes `isAdmin={false}` to a `ColorDetailsSection` receiving a full admin image object would silently render `transfer_function` to that admin viewer without the component indicating it is an admin-only field. The explicit `isAdmin` guard on the HDR badge (line 549), gain map (line 573), matrix coefficients (line 440), and pipeline decision (line 399) creates a clear precedent that this field block is inconsistent.
+
+### Convergence / Separation Notes
+
+Both hypotheses share the same root observation. They differ in trigger probability: Hypothesis 1 is the current safe state; Hypothesis 2 is the failure mode under a future change. Keeping separate because the mitigations are at different layers.
 
 ### Current Best Explanation
-SOUND. The two-layer design (cheap format check in middleware + definitive HMAC+DB check in every action) is correct and consistent with the defense-in-depth architecture.
+
+Currently safe due to data-layer omission and compile-time guard. The unguarded render at line 393 is a defense-in-depth gap: the render site lacks the explicit `isAdmin` check that all other admin-only field renders in the same component carry.
+
+### Critical Unknown
+
+Whether any current call site constructs a `ColorDetailsSection` with admin-fetched image data but passes `isAdmin={false}`.
+
+### Discriminating Probe
+
+`grep -rn '<ColorDetailsSection' apps/web/src/` — audit every call site for the `isAdmin` prop value and the image query path used. If any call site passes `isAdmin={false}` with an admin-fetched image, TRC-13-02 becomes a confirmed display bug for that context.
+
+### Uncertainty Notes
+
+Severity is LOW. The data layer compile-time guard is the effective protection. The component-level inconsistency is a maintenance smell that should be addressed before `transfer_function` is considered for any public surface.
 
 ---
 
-## Flow 3 — getClientIp → TRUST_PROXY / TRUSTED_PROXY_HOPS → per-IP rate-limit bucket key
+## Trace Report — TRC-13-03
 
 ### Observation
-Rate-limit bucket keys must use the real client IP. When behind a reverse proxy, this depends on correctly parsing the X-Forwarded-For chain.
 
-### Hypotheses
+`color-details-section.tsx:221` includes `image.is_hdr` in the `hasColorMetadata` derived value without an `isAdmin` check:
 
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | IP extraction is correct: only trusts XFF when TRUST_PROXY=true, hops default safely | High | Strong |
-| 2 | TRUSTED_PROXY_HOPS=0 or negative causes underflow (clientIndex < 0) and falls through to wrong IP | Low | Contradicted |
-| 3 | Spoofed XFF is accepted when TRUST_PROXY is unset | Low | Contradicted |
+```js
+const hasColorMetadata = Boolean(
+    image.color_primaries || image.transfer_function || image.is_hdr
+    || (isAdmin && image.color_pipeline_decision),
+);
+```
 
-### Evidence For H1
-- `rate-limit.ts` `getClientIp()`: XFF only used when `TRUST_PROXY === 'true'`.
-- `getTrustedProxyHopCount()`: parses `TRUSTED_PROXY_HOPS`, returns 1 if missing, non-numeric, non-positive, or NaN.
-- XFF chain-too-short path: `clientIndex = validParts.length - hopCount - 1`; when `clientIndex < 0` the code falls through to `X-Real-IP`, then `null` → `'anon'`. No crash, no wrong-IP use.
-- When TRUST_PROXY is unset (default), XFF is ignored completely and IP is sourced from `X-Real-IP` or returns null.
-
-### Evidence Against H2
-- `getTrustedProxyHopCount()` explicitly guards: if parsed result is absent or non-positive, returns 1. The underflow path (`clientIndex < 0`) falls through to `X-Real-IP`.
-
-### Evidence Against H3
-- Without `TRUST_PROXY=true`, XFF headers are treated as untrusted user input and ignored.
-
-### Rebuttal Round
-Strongest challenge: when `TRUST_PROXY=false` and neither `X-Forwarded-For` nor `X-Real-IP` is present (direct connection), `getClientIp()` returns null. The rate-limit code uses `'anon'` as the bucket key, pooling all such requests under one key. This is a bounded worst-case: it is the admin's deployment responsibility to configure a reverse proxy. The code makes the correct conservative choice.
+`is_hdr` is in `PrivacySensitiveKeys` and absent from `publicSelectFields`. The unguarded inclusion means a future addition of `is_hdr` to public fields would cause the color-details accordion to auto-open for public visitors of HDR photos, before the HDR badge render (line 549, correctly gated by `isAdmin && isHdr`) was also updated.
 
 ### Current Best Explanation
-SOUND. The hop-count parsing, fallback chain, and TRUST_PROXY gating are all correct.
+
+Same structural protection as TRC-13-02. `is_hdr` is never present on public query results (`data.ts:337`: `is_hdr: _omitIsHdr` in publicSelectFields omit). The auto-open trigger never fires for public users. Low severity, same class as TRC-13-02.
+
+The relevant note in CLAUDE.md ("the public HDR badge is now gated on `isAdmin && isHdr` EXPLICITLY at the render point (AGG-M3), not on field-nullness coincidence; locked by `color-details-hdr-badge-admin.test.ts`") refers specifically to the badge element at line 549. The test does not cover the `hasColorMetadata` computed value at line 221, leaving the auto-open behavior unguarded at the component level.
+
+### Critical Unknown
+
+Same as TRC-13-02.
+
+### Discriminating Probe
+
+Change line 221 to include `isAdmin &&` before `image.is_hdr`: `(isAdmin && isHdr)` rather than bare `image.is_hdr`. Extend `color-details-hdr-badge-admin.test.ts` to assert that `hasColorMetadata` is `false` when `isAdmin=false` and `is_hdr=true` (with all other color fields absent). This closes the same gap as the badge test covers for the badge element, for the accordion-open state.
+
+### Uncertainty Notes
+
+Severity is LOW. Same data-layer guard as TRC-13-02.
 
 ---
 
-## Flow 4 — Color detection precedence (NCLX > ICC chromaticity > ICC name) → encoder decision → ETag/settings-hash invalidation
+## Trace Report — TRC-13-04
 
 ### Observation
-The color pipeline uses three layers of source detection with defined precedence. The ETag formula must incorporate any setting that affects the output bytes.
 
-### Hypotheses
+`apps/web/src/lib/request-origin.ts:109` exports the internal `hasTrustedSameOriginWithOptions` function:
 
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | Detection precedence, encoder decision, and ETag are correctly implemented and mutually consistent | High | Strong |
-| 2 | A new color-impacting setting could be added without being added to COLOR_IMPACTING_KEYS, silently breaking cache invalidation | Medium | Compile-time guard present but cannot catch forgotten new keys |
-| 3 | imageSizes sort-before-hash is missing, causing spurious cache invalidation | Low | Contradicted |
+```js
+export { hasTrustedSameOriginWithOptions };
+```
 
-### Evidence For H1
-- `settings-hash.ts`: 9 `COLOR_IMPACTING_KEYS` correctly enumerated (5 color + 3 quality + 1 sizes key).
-- Compile-time guard `_ColorKeysAreSettingKeys` enforces all listed keys are valid `GallerySettingKey` — catches typos and removed keys.
-- `buildHashFromConfig` sorts `imageSizes` ascending before hashing (AGG-R7C3-02).
-- `serve-upload.ts`: module-scoped 5 s TTL cache with stale-while-revalidate pattern. On DB failure, serves last-known hash; on true cold start, falls through to `FALLBACK_HASH`. No request is blocked.
-- ETag format: `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`.
+This function accepts an `{ allowMissingSource: true }` option that makes the same-origin check pass even when the request carries neither `Origin` nor `Referer` header (normally a fail-closed rejection per the comment at line 87: "Fail closed by default (C1R-01)"). The public API `hasTrustedSameOrigin` delegates to this function with default options (no `allowMissingSource`), preserving fail-closed behavior.
 
-### Evidence For H2 (compile-time guard gap)
-- The `_ColorKeysAreSettingKeys` guard verifies listed keys are valid, but it cannot detect a new byte-impacting setting key that was never added to `COLOR_IMPACTING_KEYS`. CLAUDE.md documents the risk: "CANNOT catch a forgotten new byte-impacting key."
+### Hypothesis Table
 
-### Evidence Against H3
-- `buildHashFromConfig`: `const sortedSizes = [...(config.image_sizes ?? [])].sort((a, b) => a - b)` — sort is present and correct.
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Export is present for test coverage only; no production code calls it with allowMissingSource; no security risk in current code | High | Strong (Tier 2: grep confirmed zero non-test callers) | Verified by codebase search |
+| 2 | A future server action or route handler imports hasTrustedSameOriginWithOptions directly with allowMissingSource: true, bypassing CSRF protection | Low | Weak (Tier 5: no evidence) | Export makes the escape hatch discoverable |
 
-### Rebuttal Round
-Strongest challenge: the static file serving path (`public/uploads/`) uses Next's own `W/"{size-hex}-{mtime-hex}"` ETag, NOT the settings-hash ETag. Flipping a color-impacting admin setting does NOT invalidate existing static derivatives until a re-encode (backfill). This is a documented and accepted operational gap (CLAUDE.md "Operational gotcha CRT-D1"), not a code defect.
+### Evidence For
 
-### Current Best Explanation
-SOUND. The color detection precedence, encoder decision matrix, and ETag formula are correctly implemented. H2 is a process gap, not a code gap, and is acknowledged in CLAUDE.md.
+- Hypothesis 1: `grep -rn "hasTrustedSameOriginWithOptions"` outside test and the origin file finds only a comment reference in `apps/web/src/app/api/admin/db/download/route.ts:13` (no call, just a comment noting the prior inline check was replaced). No production call site uses the `allowMissingSource` option.
+- Hypothesis 1: The function is callable only from server-side code. It is not accessible to external HTTP clients.
 
----
+### Evidence Against / Gaps
 
-## Flow 5 — Backfill advisory lock + delete-during-reencode race + orphaned file cleanup
-
-### Observation
-The in-app backfill runner and the sidecar backfill script can run concurrently with the live upload queue and with admin-triggered image deletes. The question is whether the advisory lock and post-encode cleanup prevent double-encodes and orphaned files.
-
-### Hypotheses
-
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | Both entry points correctly serialize via advisory locks and handle delete-during-reencode with full-scan cleanup | High | Strong |
-| 2 | The live queue worker can race the backfill runner on a retried-failed row (processed=true rows re-enqueued) | Low | Contradicted by per-image lock |
-| 3 | Detection failure after a successful re-encode could incorrectly version-bump the row, preventing retry | Low | Contradicted |
-
-### Evidence For H1
-- `admin-backfill-runner.ts`: `acquireBackfillLock()` uses `GET_LOCK('gallerykit_color_pipeline_backfill', 0)` (non-blocking). Concurrent callers get `{ status: 'already_running' }`.
-- Per-image `acquireImageProcessingClaim()` inside the runner uses `GET_LOCK('gallerykit:image-processing:{id}', 0)`, identical semantics to the live queue worker's lock. A row claimed by the live queue is skipped (counted as `skippedLocked`), not raced.
-- Delete-during-reencode: post-UPDATE `affectedRows === 0` → `deleteImageVariants(dir, file, [])` (full scan), counted as `deletedMidReencode`. No orphans, no false success/failure.
-- State type JSDoc: "Rows whose re-encode succeeded but color detection threw. Derivative columns are persisted WITHOUT a pipeline_version bump so a later run retries detection."
-
-### Evidence Against H2
-- The per-image lock `gallerykit:image-processing:{id}` is the same lock name used by both the live queue worker and the backfill runner. MySQL advisory locks are connection-scoped, so a live queue worker holding the lock means the backfill runner gets acquired=0 (non-blocking) and correctly skips that row.
-
-### Evidence Against H3
-- Code path: re-encode succeeds → detection throws → `detectionFailures++` → version NOT bumped → row remains below `IMAGE_PIPELINE_VERSION` → next run retries. Documented in runner's state type JSDoc.
+- Hypothesis 2: The export makes the `allowMissingSource` escape hatch a documented API surface. A developer looking for a same-origin check might import `hasTrustedSameOriginWithOptions` directly and misuse the option without realizing it bypasses CSRF protection.
 
 ### Rebuttal Round
-Strongest challenge: `lastError` in `AdminBackfillState` is last-writer-wins at concurrency > 1 — whichever worker failed last overrides the string message. This is documented in the JSDoc: "Do NOT treat `lastError` as a per-row failure log." Failure counts (`errors`, `encodeFailures`, `detectionFailures`) are additive and correct. The single scalar message is an acceptable tradeoff for a process-local admin status surface.
+
+- Best challenge: The `action-origin` lint gate (`npm run lint:action-origin`) requires every mutating server action to call `requireSameOriginAdmin()` and return early on its result. That function internally calls `hasTrustedSameOrigin` (the safe, fail-closed form), not `hasTrustedSameOriginWithOptions`. The lint gate enforces the correct call site, so new server actions cannot accidentally use the wrong function and pass the lint gate.
+- Why the concern remains: The lint gate covers `apps/web/src/app/actions/` only. Admin API route handlers use `withAdminAuth()`. A custom route outside these patterns would not be caught by either gate.
 
 ### Current Best Explanation
-SOUND. Both entry points correctly serialize, handle the delete race, and correctly avoid version-bumping on detection failure.
+
+No active security issue. The export is a minor encapsulation gap. Making `hasTrustedSameOriginWithOptions` unexported (or renaming it `_hasTrustedSameOriginWithOptionsForTesting`) would eliminate the surface without any behavior change.
+
+### Critical Unknown
+
+Whether the `allowMissingSource: true` path is ever needed in production (e.g., for a non-browser caller that cannot supply an Origin header, such as the Lightroom Classic plugin). If so, the export is intentional.
+
+### Discriminating Probe
+
+Search the codebase for any route or action file that might need to serve non-browser clients (the Lightroom Classic upload route `/api/admin/lr/upload` is a candidate). If `allowMissingSource: true` is needed there, document it explicitly. If not, unexport the function and update the test import.
+
+### Uncertainty Notes
+
+Severity is LOW. No current misuse exists.
 
 ---
 
-## Flow 6 — View-event GC / audit-log sweep retention cutoff (negative/NaN env)
+## Trace Report — TRC-13-05 (Deferred Items — Resolution)
 
-### Observation
-If `VIEW_RETENTION_DAYS` or `AUDIT_LOG_RETENTION_DAYS` is set to a negative, zero, or non-finite value, the purge cutoff could be set to a future timestamp (causing all rows to be deleted) or suppress the purge entirely.
+### AGG-R12-08: stale comment in image-queue.ts line 87
 
-### Hypotheses
+**Verdict: NOT a bug.** The docstring for `pruneRetryMaps` at line 87 says "insertion-order via Map.keys() iteration." This accurately describes what the function does: it iterates `state.retryCounts`, `state.claimRetryCounts`, and `state.lastErrors`, all of which are Maps. `permanentlyFailedIds` is a Set but is NOT touched by `pruneRetryMaps`; its FIFO eviction is a separate code path at lines 566-570 using `Set.values().next()`. The comment is correct for the function it documents. No fix needed.
 
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|-----------|-----------|-----------------|
-| 1 | Both guards correctly reject negative and NaN values and fall back to DEFAULT | High | Strong (direct source read) |
-| 2 | `Number.parseInt` with a non-numeric string returns NaN; `isFinite(NaN)` is false → falls back correctly | High | Strong |
-| 3 | A zero value slips through | Low | Contradicted |
+### AGG-R12-09: hasTrustedSameOriginWithOptions exported (deferred LOW)
 
-### Evidence For H1 and H2
-- `view-retention.ts` `resolveRetentionMs()`:
-  - `Number.parseInt(env, 10)` → stored as `retentionDays`
-  - `Number.isFinite(retentionDays) && retentionDays > 0` → else `DEFAULT_VIEW_RETENTION_DAYS`
-  - Covers: NaN (isFinite fails), negative (> 0 fails), Infinity (isFinite fails), zero (> 0 fails).
-- `audit.ts` `purgeOldAuditLog()`: identical guard pattern.
-- Chunked purge: `VIEW_PURGE_BATCH = 5000` rows, `MAX_BATCHES_PER_TABLE = 200` cap — prevents a single runaway sweep even if a misconfigured cutoff ever fired.
+**Status: Still present.** Documented in detail as TRC-13-04 above. Zero non-test callers with unsafe option confirmed.
 
-### Evidence Against H3
-- The condition is `retentionDays > 0` (strictly greater than), so zero returns DEFAULT. Not `>= 0`.
+### AGG-R12-10: BoundedMap.entries() raw iterator (deferred LOW)
 
-### Rebuttal Round
-None. The guard is airtight for all out-of-range inputs.
-
-### Current Best Explanation
-SOUND. Both retention guards correctly handle all degenerate env values.
+**Verdict: No active risk.** `BoundedMap.entries()` at `bounded-map.ts:116` returns `this.map.entries()` (a live iterator). A full codebase grep finds zero non-test callers of `.entries()` on any `BoundedMap` instance in production code. The method exists but is never invoked. The mutation-during-iteration concern is theoretical with zero exposure.
 
 ---
 
-## Findings
+## Cycle-12 Fix Verification
 
-### R12-TRC-01 — `hasTrustedSameOriginWithOptions` export retains `allowMissingSource` escape hatch (LOW / INFORMATIONAL)
+All four AGG-R12 MEDIUM fixes are confirmed in the current codebase:
 
-**Flow:** Session auth — same-origin check  
-**Location:** `/apps/web/src/lib/request-origin.ts:109`
+| Finding | File:lines | Evidence |
+|---------|------------|----------|
+| AGG-R12-01: shutdown timer clearTimeout + unref + process.exit | instrumentation.ts:25,31,51,65 | `let shutdownTimer: ReturnType<typeof setTimeout> \| undefined`; `shutdownTimer.unref?..()`; `finally { if (shutdownTimer) clearTimeout(shutdownTimer); }`; `process.exit(exitCode)` |
+| AGG-R12-02: AVIF 4096-byte partial read (not full file) | process-image.ts:240-265 | `Buffer.alloc(4096)`; `handle.read(head, 0, 4096, 0)` inside `_verifyAvifNclx` |
+| AGG-R12-03: CLAUDE.md documentation | CLAUDE.md | Shutdown + geoip-lite pre-warm section present |
+| AGG-R12-04: DB init timer clearTimeout + unref + stale promise clear | db/index.ts:94-111 | `let initTimer: ReturnType<typeof setTimeout> \| undefined`; `initTimer.unref?..()`; `finally { if (initTimer) clearTimeout(initTimer); }`; `underlying[connectionInitSymbol] = undefined` on timeout |
 
-**Observation:** AGG-M9 hardened `hasTrustedSameOrigin()` to default fail-closed (`allowMissingSource = false`). However, `hasTrustedSameOriginWithOptions` is still exported as a named export at line 109: `export { hasTrustedSameOriginWithOptions }`. The option parameter `{ allowMissingSource?: boolean }` remains accessible to any future importer.
+Additional cycle-12 hardening confirmed in current code:
 
-**Evidence for:** No production caller currently passes `allowMissingSource: true` (grep confirms). The test file at `__tests__/request-origin.test.ts:139` uses the phrase "retains the explicit loose opt-in", confirming the export is intentional. The comment in `request-origin.ts:88-89` states: "Callers that intentionally need the legacy loose contract must opt in via `allowMissingSource: true`."
-
-**Assessment:** Intentional design decision; no current production risk. The risk is forward-facing: a future developer adding a new server action could accidentally call `hasTrustedSameOriginWithOptions({ allowMissingSource: true })` instead of the closed-default `hasTrustedSameOrigin()`, and the incorrect call would not trigger a compile error or lint gate.
-
-**Suggested fix (optional):** Add a `@remarks` JSDoc warning that this function is an escape hatch and should not be called with `allowMissingSource: true` in new code. Alternatively, add the function name to the `lint:action-origin` scan's watchlist.
-
-**Severity:** LOW / INFORMATIONAL  
-**Confidence:** High
-
----
-
-### R12-TRC-02 — `BoundedMap.entries()` returns raw mutable iterator (LOW / INFORMATIONAL)
-
-**Flow:** Rate-limit bucket state mutation  
-**Location:** `/apps/web/src/lib/bounded-map.ts:115-117`
-
-**Observation:** `BoundedMap.get()` explicitly returns a shallow copy (`{ ...value }`) to prevent external mutation of internal map state. `BoundedMap.entries()` returns `this.map.entries()` — raw entries, including raw value references. A caller iterating via `entries()` and mutating value properties would corrupt internal map state, bypassing the copy protection of `get()`.
-
-**Evidence for:** Grep confirms zero production callers of `.entries()` on any BoundedMap instance in `apps/web/src/`. The method is defined but unused in production. The comment at line 114 reads "Iterate over entries for external consumers that need full access" — the "full access" phrasing suggests mutation is permitted, which is inconsistent with `get()`'s protective copy policy.
-
-**Failure scenario (latent):** A future rate-limit consumer iterates via `entries()` and mutates `entry.count` directly, bypassing the `BoundedMap.set()` path and hard-cap enforcement.
-
-**Suggested fix:** Either change `entries()` to return copies consistent with `get()`, or add an explicit JSDoc `@remarks` warning that mutating values returned by `entries()` corrupts internal map state.
-
-**Severity:** LOW / INFORMATIONAL  
-**Confidence:** High — gap is real but inactive; no production callers
+- Queue shape guard: `image-queue.ts:186-196` — truthy + `typeof existing.queue.add === 'function'` + `existing.enqueued instanceof Set`
+- Delete-during-processing cleanup: `image-queue.ts:437-453` — `deleteImageVariants(dir, filename, [])` on `affectedRows === 0` for all three formats with empty sizes array (full directory scan, catches non-default-size variants)
+- Backfill version-bump-only-on-success: `admin-backfill-runner.ts:597-612` — detection-failure path leaves `pipeline_version` below current, row remains eligible for retry on next run
+- HDR badge double-gated: `color-details-section.tsx:549` — `{isAdmin && isHdr && ...}` (render gate) on top of data-layer omission of `is_hdr` from `publicSelectFields`
 
 ---
 
-### R12-TRC-03 — `getPasswordChangeRateLimitEntry` missing final `{ ...entry }` spread (INFORMATIONAL)
+## Overall Cycle-13 Finding Summary
 
-**Flow:** Rate-limit — password change path  
-**Location:** `/apps/web/src/lib/auth-rate-limit.ts`, `getPasswordChangeRateLimitEntry()`
+| ID | Severity | File | Description | Status |
+|----|----------|------|-------------|--------|
+| TRC-13-01 | DISPROVED | settings-hash.ts | Sort asymmetry between buildHashFromConfig and fetchHashFromDb for image_sizes — neutralized by normalized DB write path in settings.ts:82-91 | No fix needed |
+| TRC-13-02 | LOW | color-details-section.tsx:393 | `{image.transfer_function && ...}` renders without isAdmin guard — safe today (data layer omits field), maintenance trap | Recommend: wrap with `isAdmin &&` |
+| TRC-13-03 | LOW | color-details-section.tsx:221 | `image.is_hdr` in `hasColorMetadata` without isAdmin — safe today, accordion would auto-open publicly if is_hdr ever enters publicSelectFields | Recommend: `(isAdmin && isHdr)` in place of bare `image.is_hdr` |
+| TRC-13-04 | LOW | request-origin.ts:109 | `hasTrustedSameOriginWithOptions` exported; exposes `allowMissingSource: true` escape hatch as public API | Recommend: unexport or rename with `_testOnly` prefix |
+| TRC-13-05 | INFORMATIONAL | bounded-map.ts:116 | `BoundedMap.entries()` returns live iterator — zero production callers, no active risk | Monitor only |
 
-**Observation:** `getLoginRateLimitEntry()` returns `{ ...entry }` (explicit final spread on an already-copied value). `getPasswordChangeRateLimitEntry()` returns `entry` directly. Both are functionally safe today because `BoundedMap.get()` already returns `{ ...value }`. The inconsistency creates a future maintainability trap: if `BoundedMap.get()` were ever changed to return the raw reference, `getLoginRateLimitEntry` would still be safe (its own final spread protects it) while `getPasswordChangeRateLimitEntry` would not.
+**Net cycle-13 result: 0 CRIT, 0 HIGH, 3 LOW (TRC-13-02, TRC-13-03, TRC-13-04), 1 INFORMATIONAL.**
 
-**Suggested fix:** Add `return { ...entry }` as the final return in `getPasswordChangeRateLimitEntry()` for consistency and layered defense-in-depth.
-
-**Severity:** INFORMATIONAL  
-**Confidence:** High — currently safe; risk is contingent on BoundedMap regression
-
----
-
-## Flows Confirmed Sound
-
-All six primary flows traced end-to-end and found correctly implemented:
-
-1. **Upload → queue claim → Sharp → conditional UPDATE → delete-during-processing cleanup** — SOUND. Per-image advisory lock, `affectedRows === 0` detection, `deleteImageVariants(dir, file, [])` full-scan cleanup, MAX_CLAIM_RETRIES escalation.
-
-2. **Session token creation → cookie → middleware guard → isAdmin() in server actions** — SOUND. Middleware is format-check-only (cheap early redirect); authoritative HMAC+DB verification in every server action. API routes excluded from middleware by design; `lint:api-auth` gate enforces `withAdminAuth()` on all `/api/admin/**` routes.
-
-3. **getClientIp → TRUST_PROXY / TRUSTED_PROXY_HOPS → per-IP rate-limit bucket key** — SOUND. XFF only trusted with `TRUST_PROXY=true`; hop count defaults safely to 1; chain-too-short falls through to `X-Real-IP`.
-
-4. **Color detection precedence → encoder decision → ETag/settings-hash invalidation** — SOUND. 9 COLOR_IMPACTING_KEYS, compile-time guard, `imageSizes` sorted before hashing, stale-while-revalidate serving hash. Documented static-path gotcha (CRT-D1) is accepted and acknowledged in CLAUDE.md.
-
-5. **Backfill advisory lock + delete-during-reencode race** — SOUND. Serialized by `gallerykit_color_pipeline_backfill`; per-image lock prevents double-encode; `affectedRows === 0` full-scan cleanup; detection failure leaves version un-bumped for retry.
-
-6. **View-event GC / audit-log retention cutoff (negative/NaN)** — SOUND. `Number.parseInt(env, 10)` + `isFinite && > 0` guard in both `view-retention.ts` and `audit.ts`. Chunked batch cap prevents runaway sweep.
-
----
-
-## Severity Summary
-
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 0 |
-| HIGH | 0 |
-| MEDIUM | 0 |
-| LOW | 2 |
-| INFORMATIONAL | 1 |
-| SOUND (no finding) | 6 flows |
+The codebase is in clean state following cycle-12. The three LOW findings are component-level defense-in-depth gaps where the data layer provides structural protection but the render layer lacks explicit admin gating on admin-only fields, inconsistent with the explicit guards on adjacent admin-only fields in the same component.

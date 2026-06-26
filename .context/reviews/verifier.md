@@ -1,100 +1,100 @@
-# Verification Report — GalleryKit Cycle 12
+# Cycle-13 Verification Report
 
 **Date:** 2026-06-27
-**Reviewer:** verifier agent
-**HEAD:** 2a9976a1
-**Scope:** Evidence-based correctness of CLAUDE.md claims + recent-commit behavior verification
+**HEAD:** 2a9976a1 (no commits since aggregate was written — verifying cycle-12 landing)
+**Verifier:** verifier agent (Sonnet 4.6)
 
 ---
 
 ## Verdict
 
 **Status:** PASS
-**Confidence:** High
+**Confidence:** high
 **Blockers:** 0
 
 ---
 
 ## Evidence
 
-| Check | Result | Command/Source | Output |
-|-------|--------|----------------|--------|
-| Tests (full suite) | PASS | `cd apps/web && npx vitest run` | 2065 passed, 4 skipped, 0 failed |
-| Types | PASS | `npm run typecheck --workspace=apps/web` | 0 errors (ConnInfo fix from 92ce7a9e confirmed) |
-| ESLint | PASS | `npm run lint --workspace=apps/web` | 0 errors, 0 warnings |
-| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | All admin routes use withAdminAuth() |
-| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | All mutating server actions enforce same-origin |
-| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | semantic search uses rate-limit helper |
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| ESLint | PASS | `npm run lint --workspace=apps/web` | No errors, exit 0 |
+| TypeScript | PASS | `npm run typecheck --workspace=apps/web` | `typecheck:app` + `typecheck:scripts` both clean; route types generated; 7 JS scripts checked |
+| Vitest | PASS | `npm test --workspace=apps/web` | 2071 passed, 4 skipped (226 test files passed, 2 skipped). Duration 15.79s |
+| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | 2 admin API route files OK |
+| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | 35 mutating server actions OK, 6 exempt (read-only with explicit comment) |
+| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | 6 public route files OK |
+| Build | SKIPPED | — | Skipped: requires DB connection and is slow; all other gates green |
 
 ---
 
-## CLAUDE.md Claims — Confirmed
+## Cycle-12 Fix Verification
 
-| # | Claim | File:Line | Status |
-|---|-------|-----------|--------|
-| 1 | IMAGE_PIPELINE_VERSION = 7 defined in gallery-config-shared.ts:21 | `src/lib/gallery-config-shared.ts:21` | CONFIRMED |
-| 2 | COLOR_IMPACTING_KEYS count = 9 (settings-hash.ts:41-53) | `src/lib/settings-hash.ts:42-53` | CONFIRMED — array has exactly 9 entries |
-| 3 | 5 color keys: wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort, force_srgb_derivatives, wide_gamut_max_source_pixels | `src/lib/settings-hash.ts:43-47` | CONFIRMED |
-| 4 | 3 quality keys: image_quality_webp, image_quality_avif, image_quality_jpeg | `src/lib/settings-hash.ts:48-51` | CONFIRMED |
-| 5 | image_sizes is sorted ascending before hashing | `src/lib/settings-hash.ts:99` — `[...config.imageSizes].sort((a, b) => a - b)` | CONFIRMED |
-| 6 | HASH_LENGTH = 8; no .slice() at the ETag call site | `settings-hash.ts:68,81`; `serve-upload.ts:215` — ETag line has no slice | CONFIRMED |
-| 7 | ETag format `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` | `src/lib/serve-upload.ts:215` — uses `.toFixed(0)` for mtimeMs (equivalent) | CONFIRMED |
-| 8 | Login rate limit: 5 attempts / 15-min window, per-IP + per-account | `src/lib/rate-limit.ts:60-61` — LOGIN_WINDOW_MS=15*60*1000, LOGIN_MAX_ATTEMPTS=5 | CONFIRMED |
-| 9 | VIEW_RETENTION_DAYS default = 395 | `src/lib/view-retention.ts:29` — `DEFAULT_VIEW_RETENTION_MS = 395 * 24 * 60 * 60 * 1000` | CONFIRMED |
-| 10 | AUDIT_LOG_RETENTION_DAYS default = 90 | `src/lib/audit.ts:92` — fallback 90 days | CONFIRMED |
-| 11 | MAX_BLUR_DATA_URL_LENGTH = 4096 | `src/lib/blur-data-url.ts:45` | CONFIRMED |
-| 12 | POOL_CONNECTION_LIMIT = 10 | `src/db/index.ts:23` | CONFIRMED |
-| 13 | HEAD_REVALIDATE_TIMEOUT_MS = 300 | `public/sw.template.js:38` | CONFIRMED |
-| 14 | image_quality_avif default = 85 | `src/lib/gallery-config-shared.ts:93` | CONFIRMED |
-| 15 | image_quality_webp default = 90 | `src/lib/gallery-config-shared.ts:92` | CONFIRMED |
-| 16 | image_quality_jpeg default = 90 | `src/lib/gallery-config-shared.ts:94` | CONFIRMED |
-| 17 | avif_effort default = 6 | `src/lib/gallery-config-shared.ts:118` | CONFIRMED |
-| 18 | wide_gamut_max_source_pixels default = 50_000_000 | `src/lib/gallery-config-shared.ts:124` — `'50000000'` | CONFIRMED |
-| 19 | SEMANTIC_SCAN_LIMIT = 2000 | `src/lib/clip-embeddings.ts:18` | CONFIRMED |
-| 20 | SEMANTIC_TOP_K_MAX = 50 | `src/lib/clip-embeddings.ts:17` | CONFIRMED |
-| 21 | NCLX primaries: 1=BT.709, 9=BT.2020, 11=DCI-P3, 12=Display P3 | `src/lib/color-detection.ts:171-175` | CONFIRMED |
-| 22 | NCLX transfer: 4=gamma22, 5=gamma28, 13=sRGB, 14/15=gamma24, 17=gamma26, 18=hlg | `src/lib/color-detection.ts:186-212` | CONFIRMED |
-| 23 | Advisory lock name: gallerykit_color_pipeline_backfill | `src/lib/admin-backfill-runner.ts:14` | CONFIRMED |
-| 24 | Backfill concurrency cap = 2 at pool 10; formula `max(1, floor((LIMIT−RESERVED−1)/2))` | `src/lib/admin-backfill-runner.ts:33-34,122-123` | CONFIRMED |
-| 25 | SAFE_SEGMENT + ALLOWED_UPLOAD_DIRS in serve-upload.ts | `src/lib/serve-upload.ts:15-16` | CONFIRMED |
-| 26 | avif_10bit in publicSelectFields (public-safe) | `src/lib/data.ts` — NOT in the omit-from-public destructure list | CONFIRMED |
-| 27 | uploaded_by excluded from publicSelectFields | `src/lib/data.ts:343` | CONFIRMED |
-| 28 | x-gk-admin-render header in proxy.ts:129; SW honors it | `src/proxy.ts:129`; `public/sw.template.js:276-279` | CONFIRMED |
-| 29 | OG_PHOTO_MAX_BYTES = 1 MB | `src/lib/og-photo-fetch.ts:31` — `1024 * 1024` | CONFIRMED |
-| 30 | WIDE_GAMUT_PRIMARIES set in color-primaries.ts | `src/lib/color-primaries.ts:37` | CONFIRMED |
-| 31 | revalidate = 0 on home page | `src/app/[locale]/(public)/page.tsx:16` | CONFIRMED |
-| 32 | SIGTERM handler in instrumentation.ts | `src/instrumentation.ts:57` — `process.on('SIGTERM', ...)` | CONFIRMED (commit b3c55036) |
-| 33 | geoip-lite pre-warm in instrumentation.ts | `src/instrumentation.ts:8-15` — `await import('geoip-lite')` | CONFIRMED (commit b3c55036) |
-| 34 | ConnInfo type fix applied (R11C11 follow-up) | `src/components/photo-viewer.tsx:244-245` — local `interface ConnInfo` | CONFIRMED (commit 92ce7a9e) |
+### VER-13-01 — AGG-R12-01: Graceful shutdown `process.exit()` + sentinel timer cleared/unref'd
 
----
+- **Claim:** `instrumentation.ts` now captures timer handle, calls `shutdownTimer.unref?.()`, `clearTimeout(shutdownTimer)` in finally, and `process.exit(exitCode)` after drain.
+- **Evidence:** `instrumentation.ts:25-65` — `let shutdownTimer: ReturnType<typeof setTimeout> | undefined`; `shutdownTimer.unref?.()` at line 31; `clearTimeout(shutdownTimer)` at line 51 (in finally block); `process.exit(exitCode)` at line 65.
+- **Verdict:** CONFIRMED
 
-## Findings
+### VER-13-02 — AGG-R12-02: `_verifyAvifNclx` partial read (4 KB instead of full file)
 
-### R12-VER-01 — Stale "(5000)" comment in semantic/route.ts
+- **Claim:** `process-image.ts` `_verifyAvifNclx` now uses `fs.open` + `handle.read(head, 0, 4096, 0)` mirroring `_verifyWebpIccChunk`.
+- **Evidence:** `process-image.ts:251-255` — `handle = await fs.open(filePath, 'r')`, `const head = Buffer.alloc(4096)`, `const { bytesRead } = await handle.read(head, 0, 4096, 0)`. The old `fs.readFile(filePath)` is gone from this function.
+- **Verdict:** CONFIRMED
 
-**Severity:** LOW
-**Confidence:** HIGH
-**File:** `apps/web/src/app/api/search/semantic/route.ts:9`
+### VER-13-03 — AGG-R12-04: DB init-race `setTimeout` cleared in finally
 
-**Claim vs Reality:**
-- Doc comment in route.ts says: `"Scans up to SEMANTIC_SCAN_LIMIT (5000) most-recent embeddings"`
-- Actual constant: `SEMANTIC_SCAN_LIMIT = 2000` in `src/lib/clip-embeddings.ts:18`
-- CLAUDE.md correctly documents the value as 2000.
+- **Claim:** `db/index.ts` captures `initTimer`, calls `initTimer.unref?.()`, and `clearTimeout(initTimer)` in finally so timers don't accumulate under steady load.
+- **Evidence:** `db/index.ts:94-111` — `let initTimer: ReturnType<typeof setTimeout> | undefined`, `initTimer.unref?.()` at line 97, `clearTimeout(initTimer)` at line 111 (in finally per surrounding context).
+- **Verdict:** CONFIRMED
 
-**Impact:** The stale parenthetical `(5000)` in the JSDoc comment is a maintenance hazard — an operator reading the route file would see a false capability claim. No runtime impact.
+### VER-13-04 — AGG-R12-11: image-queue runtime shape guard strengthened
 
-**Suggested fix:** Update the route.ts JSDoc comment to `SEMANTIC_SCAN_LIMIT (2000)`, or remove the hardcoded number and let developers follow the import.
+- **Claim:** `image-queue.ts` runtime guard now validates `existing.queue` value (not null) and `typeof existing.queue.add === 'function'` and `existing.enqueued instanceof Set`.
+- **Evidence:** `image-queue.ts:186-194` — guard checks `existing.queue` (truthy), `typeof existing.queue.add === 'function'`, `existing.enqueued instanceof Set`, `'bootstrapped' in existing`. The bare `'queue' in existing` is still present but is now followed by the value-type checks.
+- **Verdict:** CONFIRMED
+
+### VER-13-05 — AGG-R12-05: `prioritizeSecurityFields` exported + tested
+
+- **Claim:** `audit.ts` exports `prioritizeSecurityFields`; test file `audit-prioritize-security-fields.test.ts` covers it.
+- **Evidence:** `audit.ts:20` — `export function prioritizeSecurityFields(...)`. Test file `/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/audit-prioritize-security-fields.test.ts` imports and calls the function in at least 5 describe/it blocks.
+- **Verdict:** CONFIRMED
+
+### VER-13-06 — AGG-R12-08: Stale comments fixed (semantic route + image-queue)
+
+- **Claim:** `api/search/semantic/route.ts` comment updated to `(2000)` (not `(5000)`); `image-queue.ts` Map.keys comment and "no eviction" claim corrected.
+- **Evidence:**
+  - `semantic/route.ts:9` — `Scans up to SEMANTIC_SCAN_LIMIT (2000) most-recent embeddings`. No `5000` present.
+  - `image-queue.ts:87` — `Eviction is FIFO (insertion-order via Map.keys() iteration), not LRU.` The `(5000)` stale claim is gone; FIFO eviction is now documented accurately.
+- **Verdict:** CONFIRMED
 
 ---
 
-## Recent Commits Verified
+## CLAUDE.md Behavioral Claim Spot-Checks
 
-| Commit | Claim | Verified |
-|--------|-------|---------|
-| 92ce7a9e | fix(photo-viewer): use local ConnInfo interface for navigator.connection | YES — `photo-viewer.tsx:244` uses `interface ConnInfo { saveData?: boolean; effectiveType?: string }` — typecheck now passes |
-| b3c55036 | fix(shutdown): add SIGTERM handler, geoip-lite pre-warm, and runtime validation | YES — SIGTERM at instrumentation.ts:57, geoip pre-warm at :8, assertNoLegacyPublicOriginalUploads at :3 |
-| 2a9976a1 | docs(reviews): add document-specialist findings for cycle 11 | YES — .context/reviews/ directory updated |
+### VER-13-07 — COLOR_IMPACTING_KEYS count = 9
+
+- **Claim (CLAUDE.md):** "The settings hash covers all 9 `COLOR_IMPACTING_KEYS`"
+- **Evidence:** `settings-hash.ts:42-54` — array contains exactly 9 entries: `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`, `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `image_sizes`.
+- **Verdict:** CONFIRMED (count matches)
+
+### VER-13-08 — `publicSelectFields` omits GPS (latitude/longitude)
+
+- **Claim (CLAUDE.md):** "GPS coordinates excluded from public API responses"
+- **Evidence:** `data.ts:329-330` — `latitude: _omitLatitude`, `longitude: _omitLongitude` (sentinel omit values, not the actual DB column). `adminSelectFields` at lines 241-242 includes them. Compile-time `_PrivacySensitiveKeys` guard at line 424 lists both. `publicMapSelectFields` (line 362) is the ONLY public select allowed to expose them.
+- **Verdict:** CONFIRMED
+
+### VER-13-09 — `SEMANTIC_SCAN_LIMIT` default = 2000
+
+- **Claim (CLAUDE.md):** "`SEMANTIC_SCAN_LIMIT` (default 2000) caps the brute-force vector scan"
+- **Evidence:** `clip-embeddings.ts:18` — `export const SEMANTIC_SCAN_LIMIT = 2000;`
+- **Verdict:** CONFIRMED
+
+### VER-13-10 — `HEAD_REVALIDATE_TIMEOUT_MS` = 300 in SW template
+
+- **Claim (CLAUDE.md):** "bounded by `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` (300 ms)"
+- **Evidence:** `sw.template.js:38` — `const HEAD_REVALIDATE_TIMEOUT_MS = 300;`, used at line 239 — `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)`.
+- **Verdict:** CONFIRMED
 
 ---
 
@@ -102,26 +102,35 @@
 
 | # | Criterion | Status | Evidence |
 |---|-----------|--------|----------|
-| 1 | All unit tests pass | VERIFIED | 2065 passed, 4 skipped (CLIP offline — require model weights), 0 failed |
-| 2 | TypeScript type-checking clean | VERIFIED | `npm run typecheck` exit 0; ConnInfo type error from cycle 11 fixed by 92ce7a9e |
-| 3 | ESLint zero errors | VERIFIED | `npm run lint` exit 0 |
-| 4 | Security lint gates pass | VERIFIED | All three (api-auth, action-origin, public-route-rate-limit) pass |
-| 5 | CLAUDE.md quantitative claims match code | VERIFIED | 34 claims spot-checked — all confirmed (see table above) |
-| 6 | NCLX code mappings correct | VERIFIED | Primaries (1/9/11/12) and transfer functions (4/5/13/14/15/17/18) match documented values |
-| 7 | Privacy field guard correct | VERIFIED | `avif_10bit` in publicSelectFields; `uploaded_by`, `is_hdr`, `transfer_function` etc. excluded |
-| 8 | Recent commit behaviors landed correctly | VERIFIED | SIGTERM handler + geoip pre-warm + ConnInfo fix all present at HEAD |
-| 9 | Stale comment found in semantic/route.ts | PARTIAL | Code is correct (value is 2000), comment says (5000) — LOW risk |
+| 1 | ESLint gate passes | VERIFIED | Exit 0, no errors |
+| 2 | TypeScript typecheck passes (app + scripts) | VERIFIED | Both clean, no errors |
+| 3 | Vitest suite passes | VERIFIED | 2071 passed, 4 skipped |
+| 4 | lint:api-auth passes | VERIFIED | 2 admin route files OK |
+| 5 | lint:action-origin passes | VERIFIED | 35 mutating actions OK |
+| 6 | lint:public-route-rate-limit passes | VERIFIED | 6 public route files OK |
+| 7 | AGG-R12-01 shutdown fix landed | VERIFIED | timer unref'd + cleared + process.exit called |
+| 8 | AGG-R12-02 _verifyAvifNclx partial read | VERIFIED | fs.open + 4096-byte read, no readFile |
+| 9 | AGG-R12-04 db timer cleanup | VERIFIED | initTimer captured, unref'd, cleared in finally |
+| 10 | AGG-R12-11 image-queue shape guard | VERIFIED | typeof queue.add + instanceof Set checks |
+| 11 | AGG-R12-05 prioritizeSecurityFields exported + tested | VERIFIED | exported at audit.ts:20, test file with 5+ cases |
+| 12 | AGG-R12-08 stale comments fixed | VERIFIED | (2000) in semantic route; FIFO eviction documented in image-queue |
+| 13 | CLAUDE.md COLOR_IMPACTING_KEYS = 9 | VERIFIED | settings-hash.ts array has exactly 9 entries |
+| 14 | CLAUDE.md publicSelectFields omits GPS | VERIFIED | omit sentinels at data.ts:329-330 |
+| 15 | CLAUDE.md SEMANTIC_SCAN_LIMIT = 2000 | VERIFIED | clip-embeddings.ts:18 |
+| 16 | CLAUDE.md HEAD_REVALIDATE_TIMEOUT_MS = 300 | VERIFIED | sw.template.js:38 |
 
 ---
 
 ## Gaps
 
-- **R12-VER-01** — Stale `(5000)` parenthetical in `semantic/route.ts:9` JSDoc. Risk: LOW. Suggestion: Update to `(2000)` or remove the hardcoded number.
+No new gaps identified. Pre-existing deferred items from cycle-12 carry over unchanged:
+
+- `hasTrustedSameOriginWithOptions` still exported (`request-origin.ts:109`) — Risk: low (zero production callers; test locks it) — Deferred per cycle-12 plan.
+- `BoundedMap.entries()` returns raw mutable iterator — Risk: low (zero callers) — Deferred per cycle-12 plan.
+- Build gate not run — Risk: low (tsc typecheck clean, ESLint clean, all tests pass; build failure from DB dependency would be a pre-existing infrastructure issue not introduced by cycle-12 changes).
 
 ---
 
 ## Recommendation
 
-**APPROVE**
-
-All quality gates pass with fresh evidence: 2065 tests pass, typecheck clean, ESLint clean, all three security lint gates green. The ConnInfo type error (blocker in cycle 11) is confirmed fixed. All 34 verified CLAUDE.md quantitative claims match code. One LOW-severity stale comment found in semantic search route; does not affect runtime behavior or documentation accuracy.
+APPROVE — All 6 blocking gates pass with fresh output; all 6 cycle-12 fixes are present and correct in the source; all 4 CLAUDE.md behavioral spot-checks match the implementation exactly. Zero blockers.

@@ -1,154 +1,126 @@
-# GalleryKit Architectural Review — Cycle 12
-## HEAD: 2a9976a1 | Date: 2026-06-27 | Angle: architecture & design risk
+# Cycle 13 — Architecture / Design-Risk Review (READ-ONLY)
+
+**Date:** 2026-06-27 · **HEAD:** `80145992` (post cycle-12 fixes) · **Reviewer:** architect
+**Scope:** module boundaries, coupling/cohesion, layering invariants, shared-state topology, extensibility traps, structural debt across the whole repo (`apps/web`).
 
 ---
 
 ## Summary
 
-Since cycle 10 (bcd67b12), the 18 intervening commits are point fixes (rate-limit
-shallow-copy, ENOENT discrimination, audit truncation, touch targets) plus ONE
-genuinely structural addition: a **new graceful-shutdown lifecycle** introduced in
-`instrumentation.ts` (commit b3c55036, R11C11). That addition is correct in isolation
-but creates the cycle's most important NEW design risk: shutdown/flush responsibility is
-now distributed and hardcoded, with no registry — the exact "forgotten-checklist" failure
-class that already burned this repo (migrations, `COLOR_IMPACTING_KEYS`). The pre-existing
-god-modules (`process-image.ts` 1694 lines, `data.ts` 1670, `image-queue.ts` 868,
-`images.ts` action 1164) all continued to grow; the deferred splits are accruing interest.
-Two coupling smells are newly load-bearing: (1) `image-queue.ts` has quietly become the
-app's **de-facto cron scheduler** — its hourly GC runs session/rate-limit/audit/view-retention
-purges, all gated on a successful image-queue bootstrap; (2) the `lib/storage/*` abstraction
-(3 files) is now provably **dead code** — zero production importers and a mutation API that
-can only ever switch local→local. The single `lib/ → app/` upward dependency persists. No
-finding here is a security or correctness CRITICAL; these are structural-debt items whose
-cost is paid by the next person who adds a background buffer, a maintenance sweep, or a
-storage backend.
+The codebase is structurally healthy and *getting healthier*. The 30 commits since cycle 11 are **all point-hardening** (timer hygiene, shutdown exit, partial reads, guard strengthening) — **zero new modules, zero new feature surfaces, no new architectural drift** introduced. The core processing DAG (`process-image → image-queue → actions`) is clean and **acyclic**; the read layer (`data.ts`) is a separate leaf. The layering invariants the prompt asked me to audit (client-safe/server-only, public vs admin field sets, color-primaries split) are **genuinely enforced by automated gates + compile-time guards, not merely convention** — this is a real strength (detail in R13-ARCH-09).
 
-I explicitly respect the documented intentional decisions (single web-instance / single-writer
-topology is BY DESIGN per CLAUDE.md). I do not re-flag process-local state as a bug; I only
-flag where NEW code makes a future violation of that boundary more likely, or where intra-process
-lifecycle coupling is itself the risk.
+What remains is the previously-catalogued structural debt (god-modules, dead `lib/storage`, manual shutdown wiring) plus **two newly-framed risks**: an accumulating "deferred-feature scaffolding" category (R13-ARCH-01/02), and the one genuinely new honesty/expectations gap — the caption stub wired to a public surface (R13-ARCH-01). The high-value deliverable this cycle is a **prioritized, lowest-risk paydown order** for the known-deferred debt (R13-ARCH-10), because the cheapest moment to install a shutdown registry and slice the first god-module seam is *now*, while only two in-memory buffers exist.
+
+| ID | Severity | NEW / Deferred | One-line |
+|----|----------|----------------|----------|
+| R13-ARCH-01 | LOW (→MED if enabled) | **NEW** | Caption *stub* feeds a PUBLIC alt/title fallback under a "Florence-2 AI" banner; no honesty guard |
+| R13-ARCH-02 | LOW | **NEW framing** | "Deferred-feature scaffolding" is accumulating (storage/, hdr-filenames, caption-generator) with no quarantine policy |
+| R13-ARCH-03 | LOW | known-deferred | `data.ts` god-module (1670 LOC, 43 exports, 22 importers) mixes read-layer + process-local buffer state |
+| R13-ARCH-04 | LOW | known-deferred | Shutdown drain is hand-wired in `instrumentation.ts`; no registry → each new buffer must be manually remembered |
+| R13-ARCH-05 | LOW | known-deferred | `lib/storage/*` dead abstraction (3 files, ~13 KB, 1 globalThis singleton, 0 prod importers) |
+| R13-ARCH-06 | LOW | known-deferred | `processImageFormats` / `uploadImages` god-functions |
+| R13-ARCH-07 | LOW (latent) | known | Client→server-only boundary test leans on a `mysql2`-in-closure heuristic; data layer carries no `server-only` marker |
+| R13-ARCH-08 | LOW (latent) | known | `COLOR_IMPACTING_KEYS` compile-guard cannot catch a *forgotten new* byte-impacting setting (author-responsibility seam) |
+| R13-ARCH-09 | — (positive) | assessment | Layering invariants are ENFORCED (gates + compile guards + runtime guards), not convention |
+| R13-ARCH-10 | — (recommendation) | — | Prioritized debt-paydown order (what to extract first, lowest-risk path) |
 
 ---
 
-## Structural-MAJOR Findings
+## Module inventory (boundaries as built)
 
-### R12-ARCH-01 (NEW) — No shutdown-hook registry: instrumentation.ts hardcodes the flush set
-- **Modules:** `apps/web/src/instrumentation.ts:28-36`, `apps/web/src/lib/data.ts:196` (`flushBufferedSharedGroupViewCounts`), `apps/web/src/lib/image-queue.ts:251` (`shutdownImageProcessingQueue`)
-- **Design risk:** The graceful-shutdown path flushes exactly TWO things by name —
-  `shutdownImageProcessingQueue()` and `flushBufferedSharedGroupViewCounts()` — inside a 15 s
-  `Promise.race`. There is no registry of "process-local state that must drain on SIGTERM."
-  Today the set is complete (I verified image-views are written directly via fire-and-forget
-  INSERT in `public.ts:357-369`, not buffered; only the shared-group `viewCountBuffer` in
-  `data.ts:17` is buffered). But the moment a developer adds a new in-memory aggregation buffer
-  (the obvious next candidates: a batched image-view buffer, an analytics counter buffer, or a
-  write-behind cache), nothing forces them to wire it into `instrumentation.ts`.
-- **Concrete failure scenario:** A future "batch image-view writes to reduce INSERT pressure"
-  optimization adds a module-level buffer in `data.ts` or `analytics.ts`. It works in dev. In
-  production every `docker compose up -d --build` deploy sends SIGTERM to the old container;
-  the new buffer is silently discarded on every deploy and every restart. The loss is invisible
-  (analytics undercount) and will not surface in any test. This is the SAME failure class as the
-  non-monotonic `_journal.json` migration skip and the "forgot to add a key to
-  `COLOR_IMPACTING_KEYS`" gap that CLAUDE.md already documents as recurring.
-- **Remediation (worth doing now — low effort, high leverage):** Introduce a tiny
-  `lib/shutdown-hooks.ts` with `registerShutdownHook(name, fn)` and `runShutdownHooks(deadlineMs)`.
-  Have `data.ts` and `image-queue.ts` self-register their drain functions at module load;
-  `instrumentation.ts` calls `runShutdownHooks()` instead of naming each one. This converts a
-  silent omission into "you didn't register, so nothing changed" — and a unit test can assert the
-  expected hook names are registered, closing the checklist gap the way the privacy-field and
-  color-key compile guards do.
-- **Severity:** MEDIUM | **Confidence:** HIGH
+- **Pipeline (server, leaf):** `lib/process-image.ts` (1705) — pure Sharp pipeline + EXIF + ICC/NCLX bridge. Imports none of the other core modules. 12 exports incl. the `processImageFormats` god-function (~440 LOC, 990-1430) and `saveOriginalAndGetMetadata`.
+- **Scheduler (server):** `lib/image-queue.ts` (875) → `process-image`. Owns the `globalThis` queue singleton + per-image advisory-lock claim + caption hook + view-retention GC. Shutdown logic partially extracted to `lib/queue-shutdown.ts` (PROGRESS).
+- **Orchestration (server actions):** `app/actions/*` (4619 total) → `process-image` + `image-queue`. `images.ts` (1164) is the `uploadImages` god-action.
+- **Read layer (server, leaf):** `lib/data.ts` (1670) → neither queue nor process-image. 43 exports, **22 importers** (highest fan-in module). Also hosts the shared-group view-count buffer (process-local state — cohesion smell).
+- **Config split:** `gallery-config-shared.ts` (pure constants/types/validators, **no db imports → client-safe**) vs `gallery-config.ts` (db-backed resolution). Clean split, verified.
+- **Color split:** `color-primaries.ts` + `color-pipeline-decisions.ts` (client-safe) vs `color-detection.ts` (server-heavy: HEIF walker, ICC parser, Sharp bridge). Client components import only the client-safe pair. Verified.
+- **Rate-limit:** split across `rate-limit.ts` (477: login/search/og/share/semantic) + `auth-rate-limit.ts` (142: account-login/password-change), both on `bounded-map.ts` primitives. `auth-rate-limit` imports `LOGIN_*` constants from `rate-limit` — slightly fuzzy boundary but cohesive enough; not flagged.
 
-### R12-ARCH-02 (NEW) — Signal handlers registered AFTER blocking startup work
-- **Modules:** `apps/web/src/instrumentation.ts:3-6` (assertion + bootstrap), `:57-72` (SIGTERM/SIGINT registration), `apps/web/src/lib/upload-paths.ts:82-103` (`assertNoLegacyPublicOriginalUploads`)
-- **Design risk:** `register()` runs, in order: (1) `assertNoLegacyPublicOriginalUploads({ failInProduction: true })` which can `throw`, (2) `await bootstrapImageProcessingQueue()` (a DB scan that can be slow or hang on a degraded DB), (3) geoip pre-warm, and ONLY THEN (4) registers the SIGTERM/SIGINT handlers. Two problems fall out of this ordering:
-  - **Startup-window race:** A SIGTERM arriving during the bootstrap DB scan (before line 57) is handled by Node's DEFAULT handler → immediate ungraceful exit, defeating the whole drain mechanism precisely when the queue may already be mid-encode.
-  - **Throw aborts handler registration entirely:** If the legacy-upload assertion throws (it `throw`s on any non-ENOENT `readdir` error too, e.g. EACCES on a mis-permissioned volume — `upload-paths.ts:91`), or if bootstrap throws synchronously, control never reaches line 57 and the process runs (or crash-loops) with NO graceful-shutdown handler.
-- **Concrete failure scenario:** A deploy mounts the legacy originals dir with wrong ownership. `fs.readdir` throws EACCES → `register()` throws → Next.js aborts startup → crash-loop. Operationally this looks identical to the disk-exhaustion incident in CLAUDE.md (userspace wedged) but the root cause is a startup-ordering choice, not disk.
-- **Remediation (low effort):** Register the SIGTERM/SIGINT handlers FIRST (they are cheap and idempotent), then run the assertion and bootstrap. Wrap the assertion so a non-ENOENT IO error logs-and-continues rather than bricking startup (the `failInProduction` throw should be reserved for the actual "legacy files present" condition it was designed for, not for incidental IO faults).
-- **Severity:** LOW-MEDIUM | **Confidence:** HIGH
-
-### R12-ARCH-03 (NEW framing) — image-queue.ts is the de-facto cron scheduler, gated on its own bootstrap
-- **Modules:** `apps/web/src/lib/image-queue.ts:795-803` (hourly `gcInterval`), `:619` (`purgeExpiredSessions`), and the imported sweeps `purgeOldBuckets` / `purgeOldAuditLog` / `purgeOldViewEvents`
-- **Design risk:** The image-processing queue module owns the app's only periodic scheduler. Its hourly `setInterval` runs four cross-cutting maintenance jobs that have nothing to do with image processing: `purgeExpiredSessions()` (auth/session domain), `purgeOldBuckets()` (rate-limit domain), `purgeOldAuditLog()` (audit/security domain), `purgeOldViewEvents()` (analytics retention). The scheduler's existence is **coupled to image-queue bootstrap success**: the `gcInterval` is armed inside `bootstrapImageProcessingQueue()` (line 794, guarded by `!state.gcInterval`). If bootstrap fails — DB unavailable at startup → `scheduleBootstrapRetry` (line 807) — the GC timer is never armed, so session expiry, rate-limit bucket cleanup, audit-log retention, and view-event retention ALL silently stop running for the life of the process.
-- **Concrete failure scenario:** DB is briefly unreachable at container start. Bootstrap enters the retry path and eventually processes images fine once DB returns — BUT the one-shot `if (!state.gcInterval)` arm sits inside the same try block that took the ECONNREFUSED branch, so on the retry path that re-enters bootstrap the GC may or may not arm depending on which branch wins. Net effect: a security-relevant sweep (expired session purge, audit-log retention) can be silently disabled by a transient startup DB blip, with no alert. A dev auditing "where are sessions purged?" must know to look inside the IMAGE QUEUE module — non-obvious.
-- **Remediation (medium effort, defer-able but flag now):** Extract a `lib/maintenance-scheduler.ts` that owns the hourly cadence and registers the four domain sweeps, started from `instrumentation.ts` independently of image-queue bootstrap. The image queue keeps only `pruneRetryMaps` (its own concern). This decouples security/retention hygiene from image-processing readiness.
-- **Severity:** MEDIUM | **Confidence:** HIGH
-
-### R12-ARCH-04 (CARRY-OVER, sharpened) — lib/storage/* is dead code with a misleading mutation API
-- **Modules:** `apps/web/src/lib/storage/index.ts` (147 lines), `lib/storage/local.ts`, `lib/storage/types.ts` — 3 files, ~13 KB
-- **Design risk:** Verified at this HEAD: **zero** production importers (`grep '@/lib/storage'` over `lib` + `app` + `components`, excluding tests = 0). Only `__tests__/storage-local.test.ts` exercises it. Worse than "unwired": `switchStorageBackend(type)` (`index.ts:85-128`) accepts only the literal type `'local'` (`StorageBackendType = 'local'`), so the function's entire body — dispose-old / init-new / rollback — is an unreachable branch that can only ever switch local→local. A reader encountering `getStorageBackendStatus()` / `switchStorageBackend()` reasonably concludes GalleryKit supports pluggable storage backends; CLAUDE.md explicitly says it does NOT, and warns not to expose S3/MinIO as a feature. The abstraction is carrying maintenance cost (it must keep compiling, tracking the `StorageBackend` interface) and onboarding-confusion cost while delivering zero behavior.
-- **Concrete failure scenario:** A new contributor is asked to "add S3 support," finds `lib/storage`, implements an `S3StorageBackend`, wires `switchStorageBackend('s3')` — and discovers nothing reads `getStorage()` in the upload/processing/serving paths (those still use direct `fs` in `process-image.ts`, `upload-paths.ts`, `serve-upload.ts`). Days of work against a façade.
-- **Remediation (decision, low effort either way):** Pick a lane. Either (a) complete the migration — route `process-image.ts` writes, `upload-paths.ts`, and `serve-upload.ts` reads through `getStorage()` (HIGH effort, the prior architect's rec #3), or (b) move `lib/storage/*` to an explicitly-marked `experimental/` location or delete it to a feature branch until the integration is real. Shipping a public API that no production path calls is the worst of both — it implies a capability that doesn't exist.
-- **Severity:** MEDIUM | **Confidence:** HIGH
-
-### R12-ARCH-05 (CARRY-OVER, magnitude corrected) — data.ts god-module (1670 lines) now exports lifecycle hooks
-- **Modules:** `apps/web/src/lib/data.ts` (1670 lines, 53 top-level functions)
-- **Design risk:** The prior architect review described `data.ts` as "600+ lines"; the real figure at this HEAD is **1670**. It conflates: the entire read-side DAL (queries, cursor pagination, search, sitemap, map images, feed rows), the privacy field-selection machinery (`adminSelectFields` → `publicSelectFields` derivation + `PrivacySensitiveKeys` guard, `:398-424`), AND a 5-variable view-count buffering state machine with retry-cap + backoff + capacity eviction (`viewCountBuffer`, `viewCountRetryCount`, `viewCountFlushTimer`, `consecutiveFlushFailures`, `isFlushing`, `:17-64`). With R11C11 it now ALSO exports a process-lifecycle hook (`flushBufferedSharedGroupViewCounts`, `:196`) consumed by `instrumentation.ts`. A pure data-access layer should not own a write-behind buffer with its own failure-handling state machine, nor a shutdown drain hook. Every edit to the buffer logic risks the DAL queries beside it (merge-conflict surface), and the buffer's correctness (the C2-F01 atomic-swap dance documented at `:13-16`) is invisible to anyone reading the file for query logic.
-- **Concrete failure scenario:** Two parallel review-fix cycles touch `data.ts` — one tuning the view-count backoff, one adding a query column to `getImage()`. Non-trivial rebase conflict in a 1670-line file that mixes both concerns. Onboarding dev cannot locate the buffer because the filename promises "data access."
-- **Remediation (medium effort, defer-able):** Split into `data/queries.ts` (DAL), `data/privacy.ts` (field selection + guards), `data/view-buffer.ts` (the buffer + its lifecycle hook — which then self-registers under R12-ARCH-01). This is the prior AGG-M17 with a corrected magnitude and a now-concrete trigger (the buffer grew an exported lifecycle hook).
-- **Severity:** MEDIUM | **Confidence:** HIGH
+**Coupling graph (core):** `process-image` ⟸ `image-queue` ⟸ `actions/images`; `data` independent. **No cycles.** This is the right shape and a notable strength for a codebase this size.
 
 ---
 
-## Structural-MINOR Findings
+## NEW findings
 
-### R12-ARCH-06 (CARRY-OVER) — Single lib/ → app/ upward dependency persists
-- **Modules:** `apps/web/src/lib/api-auth.ts:1` (`import { isAdmin } from '@/app/actions/auth'`)
-- **Risk:** Still the only upward edge in the graph (verified: it is the sole `lib/ → app/` import at this HEAD). `lib/` is meant to be the lower layer; importing a server action from `app/` inverts the dependency and means any test of `api-auth` drags in the full server-action + cookie + DB stack.
-- **Remediation:** Extract `isAdmin()` into `lib/auth-check.ts` (or `lib/session.ts`); re-export from `app/actions/auth` for existing callers. Low effort, closes the layering inversion. (Same as AGG-M18.)
-- **Severity:** LOW | **Confidence:** HIGH
+### R13-ARCH-01 — Caption *stub* feeds a PUBLIC fallback under an "AI Florence-2" banner; no honesty guard  [LOW, NEW]
+**Files:** `lib/caption-generator.ts:44-65`, `lib/image-queue.ts:456-472`, `lib/photo-title.ts:102-114`, `lib/data.ts:268-269`, `db/schema.ts:82-85`, `lib/gallery-config-shared.ts:39,100,155`.
 
-### R12-ARCH-07 (NEW — trend note) — process-image.ts deferred split is accruing interest
-- **Modules:** `apps/web/src/lib/process-image.ts` (1694 lines, up from 1633 at cycle 10)
-- **Risk:** The god-module flagged every cycle keeps GROWING — +61 lines since cycle 10 (the `safeUnlink`/`safeCloseDirHandle` helpers, commit 3111cc7e). "Deferred" is not free: each cycle's point fixes land in the same monolith (encode + color-detect + GPS-strip + blur + verify + EXIF), widening the merge surface and the untestable-without-libvips footprint. The pattern is that the module is the path of least resistance for every new guard, so it monotonically accretes.
-- **Remediation:** Treat the extraction (prior rec #5: `pipeline/{decision,encode,verify,gps-strip}.ts`) as a scheduled debt paydown, not an open-ended "someday." Even extracting the two leaf concerns with no shared mutable state (GPS-strip is already a separate file `gps-exif-strip.ts` at 605 lines; blur generation and post-encode verification are the next cleanest cuts) would halt the growth.
-- **Severity:** LOW | **Confidence:** HIGH
+- `caption-generator.ts` is documented as a **STUB** for US-P52 "Auto alt-text via local Florence-2 ONNX," but the real model is `DEFERRED-FIX`. What actually runs is `generateCaptionStub` → a deterministic EXIF string: `"[stub-prefix]Photo taken with {camera_model}"` or `"[stub-prefix]Photo"`.
+- This output is **wired live**: `image-queue.ts:462-468` writes it to `images.alt_text_suggested` whenever the admin setting `auto_alt_text_enabled` is true (default `false`).
+- `alt_text_suggested` is in `publicSelectFields` (`data.ts:268-269`, deliberately public) AND is a **public fallback in the photo title/alt chain**: `photo-title.ts:102-114` → `title > tag-derived > alt_text_suggested > generic fallback`. So with the setting on, a tit/tag-less photo's public alt/title becomes `"Photo taken with Canon EOS R5"`.
 
-### R12-ARCH-08 (NEW) — geoip-lite loaded via two different mechanisms in two modules
-- **Modules:** `apps/web/src/instrumentation.ts:11-12` (`await import('geoip-lite')`), `apps/web/src/lib/analytics.ts:40` (`require('geoip-lite')`), memoized at `analytics.ts:33` (`let geoLookup`)
-- **Risk:** The optional dependency is pre-warmed in `instrumentation.ts` via dynamic ESM `import()` and consumed in `analytics.ts` via CJS `require()`. It works today because both resolve to the same Node module cache, so the pre-warm populates the cache `require()` later hits. But the "is geoip available?" decision and its graceful-fallback knowledge are duplicated across two modules and two loader idioms. A future bundler/ESM-interop change (or a switch of `analytics.ts` to `import()`) could desync them, and the pre-warm's benefit silently evaporates with no test catching it.
-- **Remediation:** Centralize geoip access in `analytics.ts` behind one loader (`ensureGeoip()`), and have `instrumentation.ts` call THAT to pre-warm, so a single module owns the optional-dependency contract. Low effort.
-- **Severity:** LOW | **Confidence:** MEDIUM
+**Architectural risk / consequence:** an admin who flips `auto_alt_text_enabled` expecting *vision-derived* captions (the module name, `US-P52`, and "Florence-2" comments all advertise that) instead silently ships EXIF-template strings to public SEO/a11y surfaces. The output is *truthful* but not what the feature promises — the same class of expectation gap the HDR pipeline closes with the `_PrivacySensitiveKeys` honesty invariant (`is_hdr` is admin-only "until the bytes fulfill it"). The caption path has **no equivalent guard**: nothing prevents the stub from masquerading as the shipped feature on a public surface.
 
-### R12-ARCH-09 (CARRY-OVER) — image-queue.ts and images.ts action remain oversized
-- **Modules:** `apps/web/src/lib/image-queue.ts` (868), `apps/web/src/app/actions/images.ts` (1164, `uploadImages` god-function)
-- **Risk:** Both flagged previously (AGG-M20). `image-queue.ts` additionally hosts `purgeExpiredSessions` and the cron (see R12-ARCH-03). `images.ts` `uploadImages` still bundles quota checks, per-file validation, GPS strip, HDR rejection, EXIF, DB insert, blur validation, and cleanup in one ~350-line function. No regression, but unchanged debt — extracting `checkUploadQuota()` / `validateAndSaveFile()` / `enqueueForProcessing()` / `buildInsertValues()` remains the cleanest improvement.
-- **Severity:** LOW (structural, deferred) | **Confidence:** HIGH
+**Direction:** either (a) keep the stub but rename the admin toggle to reflect reality (e.g. `exif_alt_text_fallback`) and drop the "Florence-2/AI" framing until real inference lands, or (b) gate the *public* consumption (photo-title fallback) behind a `caption_source==='model'` flag so stub output stays an admin-only suggestion, never a public default. Low effort either way.
+**Confidence:** High (the wiring is direct and verified end-to-end).
 
----
+### R13-ARCH-02 — "Deferred-feature scaffolding" is accumulating with no quarantine policy  [LOW, NEW framing]
+**Files:** `lib/storage/{index,local,types}.ts`, `lib/hdr-filenames.ts`, `lib/caption-generator.ts`.
 
-## Root Cause
+Three distinct *not-yet-real* feature stubs now coexist, each individually documented but with **no collective inventory or quarantine convention**:
+- `lib/storage/*` — S3/MinIO abstraction, **0 production importers** (only a JSDoc self-reference), carries a live `globalThis` singleton (`index.ts:35`). Pure dead weight.
+- `lib/hdr-filenames.ts` — `RESERVED — NOT WIRED` until WI-09.
+- `lib/caption-generator.ts` — STUB but *partially wired* (see R13-ARCH-01).
 
-The architecture's debt has a single throughline across 12 cycles: **fixes land where they are
-easiest to add, not where they belong.** The review-fix loop is excellent at closing point defects
-(the 18 commits since cycle 10 are all sound) but each fix is dropped into the nearest existing
-module, so the load-bearing files (`process-image.ts`, `data.ts`, `image-queue.ts`, `images.ts`)
-act as gravity wells that monotonically accrete responsibility. The R11C11 graceful-shutdown work
-is the first NEW lifecycle concern in many cycles, and it immediately exhibited the same pattern —
-rather than a registry, two specific drains were named inline; rather than its own scheduler, the
-cron already lived in the image queue, so the new shutdown reaches into the image queue too. The
-`storage/` module is the inverse symptom: an abstraction added ahead of need that was never pulled
-through, so it ossified into a façade. None of this threatens the single-instance product today;
-all of it raises the cost of the next structural change (a new buffer, a new sweep, a real storage
-backend, or — the documented non-goal — horizontal scale-out).
+**Risk / consequence:** these three behave differently (dead / reserved-inert / stub-live) but read the same to a future maintainer, so the *live* one (caption) is easy to mistake for inert, and the *dead* one (storage) keeps surfacing every cycle as a "should we delete this?" decision (re-litigated in cycles 10-12). Without a policy, the category grows each time a feature is scaffolded-then-deferred, and reviewers keep re-discovering it.
+
+**Direction:** adopt one convention — a `lib/deferred/` (or `lib/_unwired/`) directory + a one-line table in CLAUDE.md (module → state: dead/reserved/stub-live → exit trigger). Move `storage/*` and `hdr-filenames.ts` there now (subtraction-only, see R13-ARCH-10 step 3); leave `caption-generator` in place but fix R13-ARCH-01 first.
+**Confidence:** Medium (framing/policy call, not a defect).
 
 ---
 
-## Recommendations (prioritized)
+## Known-deferred — status + crisp paydown direction
 
-1. **R12-ARCH-01 — Add `lib/shutdown-hooks.ts` registry.** Low effort, high leverage; converts a
-   silent-omission failure class into a tested invariant. **Do now.**
-2. **R12-ARCH-02 — Register signal handlers before bootstrap; make the legacy-upload assertion
-   tolerant of incidental IO errors.** Low effort; removes a startup crash-loop and a shutdown
-   blind window. **Do now.**
-3. **R12-ARCH-04 — Decide the fate of `lib/storage/*`** (complete the wiring or quarantine/delete).
-   Low effort to quarantine; high effort to complete. **Decide now, even if the decision is "defer."**
-4. **R12-ARCH-03 — Extract `lib/maintenance-scheduler.ts`** so retention/session/audit sweeps are
-   not gated on image-queue bootstrap. Medium effort. **Schedule.**
-5. **R12-ARCH-05 / R12-ARCH-07 / R12-ARCH-09 — God-module paydown** (`data.ts` buffer split,
-   `process-image.ts` leaf-concern extraction, `uploadImages` helpers). Medium-high effort.
-   **Schedule as deliberate debt paydown to halt monotonic growth.**
-6. **R12-ARCH-06 — Move `isAdmin()` into `lib/`.** Low effort; closes the only layering inversion.
+### R13-ARCH-03 — `data.ts` god-module mixes read-layer with process-local buffer state  [LOW, deferred]
+**Files:** `lib/data.ts:11-196` (view-count buffer + timers + backoff), 43 exports, 22 importers.
+The single highest-fan-in module (22 importers) bundles: field-set/privacy definitions, cursor pagination, ~15 query fns, search, sitemap/map/feed queries, SEO settings — **and** a stateful shared-group view-count buffer with its own `setTimeout` flush, retry caps, and DB-outage backoff (`:11-196`). The buffer is cross-cutting glue (flushed from `instrumentation.ts` shutdown AND `db-actions.ts` pre-backup) that has **nothing to do with read-layer data access**.
+**Extraction seam (verified):** `bufferGroupViewCount` is called from exactly one site inside `data.ts` (`getSharedGroup:1275`); `flushBufferedSharedGroupViewCounts` has exactly two external importers (`instrumentation.ts:35`, `db-actions.ts:22`). → Lowest-risk first slice (see R13-ARCH-10).
+**Confidence:** High.
+
+### R13-ARCH-04 — Shutdown drain is hand-wired; no lifecycle registry  [LOW, deferred — R12-ARCH-01/02]
+**File:** `instrumentation.ts:34-41`. The drain explicitly lists `shutdownImageProcessingQueue()` + `flushBufferedSharedGroupViewCounts()`. Today that set is **complete** (verified: those are the only two `flush*/shutdown*` exports in `lib/`). The trap is purely extensibility: any *future* in-memory buffer (the upload tracker, analytics view batching, a rate-limit DB sync) must be manually remembered here or it silently won't drain on SIGTERM — a data-loss footgun that won't fail any test. The cheapest moment to install a registry is now, with exactly two participants.
+**Confidence:** High.
+
+### R13-ARCH-05 — `lib/storage/*` dead abstraction  [LOW, deferred — CLAUDE.md "NOT integrated"]
+3 files, ~13 KB, a `globalThis` singleton, **0 production importers**. CLAUDE.md explicitly says S3/MinIO is not integrated and must not be exposed. Pure subtraction candidate (quarantine or delete). Risk of removal: near-zero.
+
+### R13-ARCH-06 — `processImageFormats` / `uploadImages` god-functions  [LOW, deferred]
+`process-image.ts:990-1430` (~440 LOC fan-out) and `actions/images.ts` `uploadImages`. Large but cohesive and battle-tested; high-risk to split. Schedule deliberately AFTER the cheap wins; not this cycle.
+
+---
+
+## Layering-invariant enforcement assessment (prompt Q4)
+
+### R13-ARCH-09 — Invariants are ENFORCED by gates/guards, not just convention  [positive]
+Verified each claimed boundary has a *mechanical* enforcer, not documentation alone:
+
+| Invariant | Enforcer | Verdict |
+|-----------|----------|---------|
+| client `'use client'` ↛ `server-only`/`mysql2` | `__tests__/client-server-only-boundary.test.ts` (AST closure walk) | **Enforced** (gap below) |
+| public vs admin field sets | `_privacyGuard` + `_mapPrivacyGuard` compile-time (`data.ts:426-439`) + runtime row guard (`getMapImages:1601-1607`) + `privacy-fields.test.ts` fixture | **Strongly enforced** (4 layers) |
+| GPS only on map, per-topic opt-in | `publicMapSelectFields` + `innerJoin(map_visible=true)` + `isNotNull(lat/long)` + runtime throw | **Strongly enforced** |
+| color-primaries client-safe split | boundary test + convention | **Enforced** |
+| `api/admin/**` auth | `lint:api-auth` (CI-blocking) | **Enforced** |
+| mutating action same-origin | `lint:action-origin` (CI-blocking) | **Enforced** |
+| public mutating route rate-limit | `lint:public-route-rate-limit` (CI-blocking) | **Enforced** |
+| color setting → ETag invalidation | `_ColorKeysAreSettingKeys` compile-guard | **Partially** (R13-ARCH-08) |
+
+**Two residual gaps (both LOW, latent):**
+
+- **R13-ARCH-07:** the data/persistence layer carries **no `server-only` marker** (correctly — it's imported under `tsx` by backfill/seed scripts). The boundary test compensates by treating any `mysql2` import in a client closure as server-only-equivalent. This holds *today* because every data path reaches `mysql2` via `@/db`. A future data module that talks to the DB through an *indirection* not statically resolving to `mysql2` (e.g. a thin wrapper, or an ORM re-export) could leak into a client bundle while the test stays green. Direction: when convenient, add an explicit `server-only`-style sentinel the test can key on for `@/lib/data` / `@/lib/gallery-config`, independent of the driver specifier.
+- **R13-ARCH-08:** `_ColorKeysAreSettingKeys` (`settings-hash.ts:63-65`) proves every listed key is a real setting, but **cannot** catch a *new* byte-impacting setting the author forgot to list — a valid key is still a valid key. Consequence: a new color/quality/size setting that changes derivative bytes but is omitted from `COLOR_IMPACTING_KEYS` → stale serve-upload-path ETag until backfill. This is author-responsibility per CLAUDE.md; the only mechanical close would be a test asserting every `*_quality_*`/`*_chroma`/`image_sizes`-shaped key appears in the list, which is heuristic. Acceptable as-is; flagged so it isn't mistaken for fully guarded.
+
+---
+
+## R13-ARCH-10 — Prioritized debt-paydown order (lowest-risk first)
+
+For the orchestrator to schedule debt deliberately. Ordered by (risk ascending) then (value):
+
+1. **Install a shutdown/lifecycle registry — DO FIRST.** Add `lib/lifecycle.ts` exposing `onDrain(fn)` + `drainAll(timeoutMs)`; have `image-queue` and the view-count buffer self-register; `instrumentation.ts` calls `drainAll()`. *Why first:* purely additive, wraps the two existing calls, closes R13-ARCH-04 permanently at the cheapest possible moment (two participants), and is the prerequisite that makes step 2 safe. Risk: minimal.
+2. **Extract the shared-group view-count buffer out of `data.ts`** → `lib/shared-group-view-buffer.ts` (buffer state + timers + backoff + `bufferGroupViewCount` + `flush*`). `data.ts` imports `bufferGroupViewCount`; the new module self-registers with the step-1 registry; re-point the 2 external importers. *Why second:* verified clean seam (1 internal caller, 2 external), removes the worst cohesion violation in the highest-fan-in module, and pairs naturally with step 1. Risk: low (mechanical move + 3 import edits).
+3. **Quarantine `lib/storage/*` (and `hdr-filenames.ts`)** per R13-ARCH-02 → `lib/deferred/`. *Why third:* subtraction-only, 0 prod importers, deletes a stray `globalThis` singleton. Risk: near-zero.
+4. **Fix the caption honesty gap (R13-ARCH-01)** — rename the toggle / gate public consumption. Small, but do before any god-function surgery so the public surface is honest.
+5. **(Later, deliberate)** split `processImageFormats` (extract per-format encode strategy) and the `data.ts` query groups (listing vs detail vs feed/sitemap vs search). Higher risk; schedule when a feature forces a touch, not speculatively.
 
 ---
 
@@ -156,55 +128,23 @@ backend, or — the documented non-goal — horizontal scale-out).
 
 | Option | Pros | Cons |
 |--------|------|------|
-| Shutdown-hook registry (R12-ARCH-01) | Tested invariant, future buffers safe by construction | One more module; marginal indirection |
-| Handlers-first ordering (R12-ARCH-02) | No startup-window signal loss, no IO-fault crash-loop | Bootstrap errors now surface post-registration (acceptable) |
-| Extract maintenance scheduler (R12-ARCH-03) | Retention/security sweeps independent of image readiness | New module; must ensure single arm across restarts |
-| Complete storage abstraction | Real S3/MinIO path, testable with mocks | High effort; atomic-rename semantics differ per backend |
-| Quarantine/delete storage | Removes dead API + onboarding confusion now | Loses the head-start if S3 is later wanted (recoverable from git) |
-| Split data.ts | Smaller merge surface, clear ownership | Refactor risk on the privacy-guard + buffer correctness dance |
-| Leave god-modules | No refactor risk this cycle | Files keep growing; cost compounds every cycle |
+| Do the cheap extractions (steps 1-3) now | Closes the extensibility trap before a 3rd buffer lands; removes dead surface; near-zero risk | Spends a cycle on non-bug structural work |
+| Keep deferring all structure until a feature forces it | Zero churn; single-instance topology means none of this is *currently* breaking | Each new buffer re-rolls the shutdown footgun; storage/ keeps getting re-litigated every cycle; caption gap stays public |
+| Quarantine vs delete dead `storage/` | Quarantine preserves the design intent if S3 is ever wired | Delete is cleaner; quarantine still carries a globalThis singleton |
 
 ---
 
-## Consensus Addendum
-
-- **Antithesis (steelman):** For a single-admin, single-instance personal gallery, ALL of these are
-  non-problems. The shutdown path flushes everything that is actually buffered TODAY (verified), so
-  R12-ARCH-01 guards a buffer that does not exist. `image-queue.ts` owning the cron is pragmatic —
-  one timer, one place, unref'd and cleared on shutdown; splitting it adds a module for no runtime
-  benefit. The `storage/` façade is harmless inert code. The god-modules are stable, heavily tested
-  (2000+ tests), and "monolith you can read top-to-bottom" beats "ten files you must cross-reference"
-  for a solo maintainer. Premature decomposition would risk the carefully-tuned color pipeline for an
-  abstraction nobody is asking for. By this reading, the correct action for most findings is "note and
-  defer," which the prior cycles already did.
-- **Tradeoff tension:** The review-fix loop's strength (closing point defects cheaply) is exactly what
-  feeds the structural debt (defects land in gravity-well modules). You cannot have a high-velocity
-  defect-closing loop AND naturally-decomposing modules without spending explicit refactor cycles that
-  produce zero new behavior — which is hard to justify against the next functional finding every single
-  cycle. The honest tension: each individual deferral is correct; the sum of all deferrals is a 1694-line
-  file that grew again this cycle. The registry/handlers-ordering items (R12-ARCH-01/02) are the
-  resolution point because they are cheap AND prevent the next silent failure — they pay for themselves
-  the first time someone adds a buffer.
-- **Synthesis:** Do the two cheap, leverage-positive items now (shutdown registry, handler ordering),
-  make one explicit decision on `lib/storage` (even "quarantine"), and convert the perpetual "defer the
-  god-module split" into ONE scheduled paydown that extracts only leaf concerns with no shared mutable
-  state (view-buffer out of `data.ts`, verify/blur out of `process-image.ts`). That halts growth without
-  touching the color-pipeline core, preserving the steelman's "don't abstract the tuned pipeline
-  prematurely" while ending the monotonic accretion.
-
----
-
-## References (this cycle, file:line)
-
-- `apps/web/src/instrumentation.ts:3-6,28-36,57-72` — startup ordering + hardcoded shutdown flush set
-- `apps/web/src/lib/upload-paths.ts:82-103` — `assertNoLegacyPublicOriginalUploads` throws on non-ENOENT IO + failInProduction
-- `apps/web/src/lib/image-queue.ts:795-803` — hourly GC running session/bucket/audit/view-retention sweeps, armed only on bootstrap success
-- `apps/web/src/lib/image-queue.ts:619` — `purgeExpiredSessions` lives in the image-queue module
-- `apps/web/src/lib/data.ts:13-64,196` — 5-variable view-count buffer state machine + exported lifecycle drain hook
-- `apps/web/src/lib/data.ts:398-424` — privacy field selection + `PrivacySensitiveKeys` guard (1670-line god-module)
-- `apps/web/src/app/actions/public.ts:357-369` — image views written direct (fire-and-forget), NOT buffered (confirms shutdown set complete today)
-- `apps/web/src/lib/storage/index.ts:85-128` — `switchStorageBackend` dead branch (local→local only); module has 0 production importers
-- `apps/web/src/lib/api-auth.ts:1` — sole `lib/ → app/` upward dependency
-- `apps/web/src/lib/process-image.ts` — 1694 lines (was 1633 at cycle 10)
-- `apps/web/src/lib/analytics.ts:33,40` vs `instrumentation.ts:11-12` — geoip-lite via require() vs import() in two modules
-- `apps/web/src/lib/queue-shutdown.ts:26-36` — gcInterval + bootstrapRetryTimer cleared on drain (verified correct)
+## References (file:line — what it shows)
+- `lib/caption-generator.ts:44-65` — stub `generateCaption`, EXIF-template output, `autoAltTextEnabled` gate
+- `lib/image-queue.ts:456-472` — caption hook writes stub to `alt_text_suggested`
+- `lib/photo-title.ts:102-114` — public title/alt fallback consumes `alt_text_suggested`
+- `lib/data.ts:11-196` — view-count buffer (process-local state inside the read layer)
+- `lib/data.ts:268-269,398-439` — public field set + 4-layer privacy guards (`_privacyGuard`, `_mapPrivacyGuard`)
+- `lib/data.ts:1584-1614` — `getMapImages` query-level + runtime GPS guards
+- `instrumentation.ts:34-41` — hand-wired shutdown drain (no registry)
+- `lib/storage/index.ts:15,35` — dead abstraction, only self-referenced, globalThis singleton
+- `lib/queue-shutdown.ts:15-44` — PROGRESS: scheduler shutdown already extracted
+- `settings-hash.ts:42-65` — `COLOR_IMPACTING_KEYS` + the partial `_ColorKeysAreSettingKeys` guard
+- `lib/color-primaries.ts:1-16` — client-safe split rationale; `gallery-config-shared.ts:1-6` — "no db imports, client-safe"
+- `apps/web/package.json:22-24` — the three CI-blocking lint gates
+- `__tests__/client-server-only-boundary.test.ts:1-55` — AST boundary test + documented mysql2-heuristic gap

@@ -1,227 +1,200 @@
-# Perf-Reviewer — Cycle 12
+# Cycle-13 Performance Review — GalleryKit
 
-**HEAD:** 2a9976a1  
+**Reviewer:** PERF-REVIEWER agent  
+**Cycle:** 13  
 **Date:** 2026-06-27  
-**Angle:** performance, concurrency, CPU/memory/UI responsiveness, DB query efficiency, N+1 queries, connection pool pressure, event loop blocking, Sharp/libvips memory, React re-renders, bundle size, caching/ETag, semantic-search scan, image-queue concurrency, unbounded Maps/memory leaks.
+**Base commit:** HEAD (master)  
+**Scope:** Full-codebase performance, concurrency, and resource review
 
 ---
 
-## Status vs. Prior Cycles
+## Prior-Cycle Fix Verification
 
-**Cycle 10 baseline:** 0 CRITICAL / 0 HIGH / 22 MEDIUM / 47 LOW  
-**Cycle 11 findings:** 2 HIGH / 5 MEDIUM / 7 LOW  
-**Cycle 11 fixes confirmed in this HEAD:**
-- AGG-9.1 (geoip lazy-load): FIXED in b3c55036 — `instrumentation.ts` pre-warms `geoip-lite` at startup via `await import('geoip-lite')`.
-- R11-PERF-9.2 (no SIGTERM handler): FIXED in b3c55036 — `SIGTERM`/`SIGINT` graceful shutdown handler with 15 s race added to `instrumentation.ts`.
-- R11-PERF-9.3 (navigator.connection local ConnInfo): FIXED in 92ce7a9e — local `ConnInfo` interface replaces the `Navigator` augmentation.
+All cycle-12 perf/resource fixes were verified to have landed and held:
 
-**Cycle 11 findings still open:** see per-finding notes below.
+| Finding | Description | Status |
+|---------|-------------|--------|
+| AGG-R12-01 | Shutdown sentinel timer unref'd + cleared; SIGTERM handler added | CONFIRMED FIXED — `instrumentation.ts:25-31, 51, 73-80` |
+| AGG-R12-02 | `_verifyAvifNclx` partial 4096-byte head read | CONFIRMED FIXED — `process-image.ts:251-253`, Buffer.alloc(4096) |
+| AGG-R12-04 | DB init-race timer unref'd + cleared on every getConnection() call | CONFIRMED FIXED — `db/index.ts:94-111` |
+
+No regressions detected on prior-cycle work.
 
 ---
 
-## Cycle 12 Findings
+## New Findings
 
-### 1. Image Processing
+### PERF-13-01 — N+1 Correlated Subquery in `getTopics()`
+**Severity: MEDIUM**  
+**File:** `apps/web/src/lib/data.ts:460-495`
 
-#### R12-PERF-1.1 (carry-over R11-PERF-2.2) — `_verifyAvifNclx` reads full file into heap before 4 KB scan
-**File:** `apps/web/src/lib/process-image.ts:246–247`  
-**Severity:** MEDIUM (downgraded from HIGH — scan is now bounded; main remaining cost is heap alloc)  
-**Confidence:** High
+`getTopics()` selects all topic rows and then decorates each row with `last_image_updated_at` via a correlated subquery that fires once per topic:
 
-```ts
-const buffer = await fs.readFile(filePath);
-const { ok, message } = verifyAvifNclxInBuffer(buffer.subarray(0, 4096), …);
+```sql
+SELECT MAX(updated_at) FROM images WHERE topic = ? AND processed = true
 ```
 
-`verifyAvifNclxInBuffer` now correctly limits its scan to the first 4096 bytes (the NCLX `colr` box appears in the first few hundred bytes of a valid AVIF), but `fs.readFile(filePath)` still reads the entire file into the Node heap before the slice is taken. For a 7680-wide P3 AVIF the file can reach 40–80 MB; allocating that buffer and immediately discarding all but 4 KB wastes memory, especially when the queue is processing multiple large images concurrently.
+With N topics this becomes N+1 total queries (1 for the topic list, 1 per topic for the `MAX` lookup). The correlated subquery form is noted inline at data.ts:461-465 but the N+1 nature is not resolved.
 
-**Fix:** Use `fs.open()` + `filehandle.read(Buffer.alloc(4096), 0, 4096, 0)` to read only the first 4096 bytes, or `createReadStream({ end: 4095 })`. The `verifyAvifNclxInBuffer` function already accepts a pre-sliced Buffer, so only the call site in `_verifyAvifNclx` changes.
+**Impact:** Every home-page load (which calls `getTopicsCached()`) and every admin topic-listing call traverses N+1 round-trips. At even 20 topics this is 21 queries instead of 1. Latency is multiplied by N plus network RTT per query. Under the 10-connection pool, bursts of concurrent home-page requests race for connections during this fan-out.
 
-**Degradation scenario:** At `QUEUE_CONCURRENCY=2`, two 50 MP wide-gamut images finish encoding simultaneously and both call `_verifyAvifNclx`, allocating two ~80 MB Buffers that co-exist until GC. This doubles peak RSS momentarily and can trigger GC pauses that delay the queue tick, particularly visible on a host with constrained RSS (Docker default 512 MB containers).
+**Fix:** Rewrite as a single query with a LEFT JOIN + GROUP BY aggregation:
+
+```sql
+SELECT t.*, MAX(i.updated_at) AS last_image_updated_at
+FROM topics t
+LEFT JOIN images i ON i.topic = t.slug AND i.processed = true
+GROUP BY t.slug
+ORDER BY t.order ASC
+```
+
+Drizzle equivalent: `.leftJoin(images, and(eq(images.topic, topics.slug), eq(images.processed, true)))` + `groupBy(topics.slug)` + `max(images.updated_at)`. This brings N+1 down to a single query at the cost of a hash aggregate, which is negligible compared to N round-trips.
 
 ---
 
-### 2. React UI
+### PERF-13-02 — `COUNT(*) OVER()` Window Function Defeats LIMIT in Paginated Queries
+**Severity: MEDIUM**  
+**Files:** `apps/web/src/lib/data.ts` — `getImagesLitePage()` (~line 843), `getImagesForSmartCollection()` (~line 1368)
 
-#### R12-PERF-2.1 (carry-over R11-PERF-3.2) — `images.findIndex()` in photo-viewer not wrapped in `useMemo`
-**File:** `apps/web/src/components/photo-viewer.tsx:115`  
-**Severity:** LOW  
-**Confidence:** High
+Both paginated list functions include `COUNT(*) OVER()` as a window function to return total row count alongside the paged slice. MySQL must materialize the **full filtered result set** into a temporary work table before applying LIMIT — making page 2 fetch cost nearly identical to a full COUNT(*) query. The performance advantage of pagination (only transferring and sorting N rows) is largely negated.
 
-```ts
-const currentIndex = images.findIndex((img) => img.id === currentImageId);
-```
+**Impact:** For a gallery with thousands of images, fetching page 2 (rows 25-50) executes the same sort and materialization work as fetching all rows. Memory pressure scales with total matching rows, not page size. Under high concurrency this can cause multiple requests to simultaneously materialize large result sets.
 
-This runs a linear scan on every render of `PhotoViewer`. State changes that trigger re-renders without changing `images` or `currentImageId` — e.g. blur-placeholder load completion (`setImageLoaded`), lightbox toggle, info sheet open/close — all unnecessarily re-run the scan.
+**Fix — two options:**
+1. Run a separate `SELECT COUNT(*) FROM images WHERE ...` query in parallel with the page query. Two lightweight queries beat one expensive windowed scan.
+2. Switch to cursor-based pagination (pass the last-seen `(capture_date, id)` as a cursor). Eliminates total-count entirely; use "has more" from `LIMIT N+1`.
 
-**Fix:** `const currentIndex = useMemo(() => images.findIndex((img) => img.id === currentImageId), [images, currentImageId]);`
-
----
-
-### 3. Data Layer / Caching
-
-#### R12-PERF-3.1 (carry-over R11-PERF-4.2) — `getGalleryConfig()` pays a DB round-trip per image processed by background queue
-**File:** `apps/web/src/lib/gallery-config.ts:217`, `apps/web/src/lib/image-queue.ts:376,494`  
-**Severity:** LOW  
-**Confidence:** High
-
-`getGalleryConfig` is exported as `cache(_getGalleryConfig)` where `cache` is React's SSR request-scoped deduplication primitive. Outside of an SSR render tree (i.e., in background queue jobs), React's `cache()` creates a new scope per invocation — there is no cross-call deduplication. So every image processed by the queue reads config from the DB at lines 376 and 494.
-
-At default `QUEUE_CONCURRENCY=1` this is two queries per image (fetch at queue entry + fetch inside the format loop), which is acceptable. At higher concurrency or during backfill, every in-flight job independently reads config on every iteration.
-
-**Fix:** Cache the resolved config in a module-level variable with a short TTL (30–60 s) in `image-queue.ts`, or pass a pre-resolved config object into `processImageFormats` rather than re-fetching per image. The React `cache()` export remains correct for SSR; add a separate process-level TTL cache for the background-queue context.
-
-#### R12-PERF-3.2 (carry-over R11-PERF-4.1) — `getLatestImageUpdatedAt()` has no `cache()` / `…Cached` export
-**File:** `apps/web/src/lib/data.ts:488–495`  
-**Severity:** LOW  
-**Confidence:** Medium
-
-`getLatestImageUpdatedAt` is a bare `async function` export with no `cache()` wrapper. Currently called once from `sitemap.ts:42` so there is no duplication in the present call graph, but the pattern is inconsistent with every other hot function in `data.ts` that ships a `…Cached` variant. Any future caller that invokes it twice in the same SSR pass will double-count the DB hit without warning.
-
-**Fix:** Export `export const getLatestImageUpdatedAtCached = cache(getLatestImageUpdatedAt)` and use the cached variant from `sitemap.ts`.
+The separate-count approach requires the fewest call-site changes and is straightforward with `Promise.all`.
 
 ---
 
-### 4. DB Query Efficiency
+### PERF-13-03 — Leading-Wildcard `LIKE '%term%'` Forces Full Table Scan in `searchImages()`
+**Severity: MEDIUM**  
+**File:** `apps/web/src/lib/data.ts:1429-1515`
 
-#### R12-PERF-4.1 (carry-over AGG-M21) — N+1 await-in-loop UPDATEs in `bulkUpdateImages` alt-text copy path
-**File:** `apps/web/src/app/actions/images.ts:1021–1031`  
-**Severity:** LOW  
-**Confidence:** High
+`searchImages()` constructs `searchTerm = '%' + escaped + '%'` (line 1430) and passes it to `like()` on `images.title`, `images.description`, `images.camera_model`, `images.lens_model`, `images.topic`, `topics.label`, `tags.name`, and `topicAliases.alias`. A leading `%` wildcard prevents MySQL from using any B-tree index on those columns; the engine performs a full table scan for each OR branch.
 
-```ts
-for (const { id, caption } of toUpdate) {
-    await tx.update(images)
-        .set({ title: caption })
-        .where(eq(images.id, id));
-}
-```
+**Impact:** Search latency scales linearly with the number of images. At a few hundred images this is acceptable; at several thousand it becomes visibly slow and consumes a connection for the duration of the scan (blocking other queries in the 10-connection pool). The three-branch structure (main, tag, alias queries) means up to three concurrent full scans per search request.
 
-Per-row awaited UPDATE inside a transaction. With the batch cap of 100 images and each await serializing the Node event loop while waiting for the DB reply, the worst case is 100 sequential round-trips holding the DB connection for the entire transaction duration. In practice `toUpdate` is usually 0–5 rows, so practical impact is low.
+**Fix options (increasing complexity):**
+1. **Short-term / no-schema-change:** Add `FULLTEXT INDEX` on `(title, description)` in a new migration and use MySQL `MATCH ... AGAINST` for free-text fields. Suffix indexes on `camera_model`/`lens_model` can be replaced with prefix-only `LIKE 'term%'` when those fields are always searched by make/model prefix.
+2. **Medium-term:** Migrate to a full-text search approach (MySQL FULLTEXT or a lightweight external index). The semantic search embedding infrastructure already exists for image similarity; a parallel FTS index covers keyword search cleanly.
 
-**Fix:** Either `Promise.all(toUpdate.map(…))` to parallelize (MySQL still serializes server-side within the transaction but Node is free between round-trips), or use a `CASE WHEN id=? THEN ? … END` bulk expression to reduce to a single UPDATE statement.
-
-#### R12-PERF-4.2 (carry-over AGG-M22) — Sequential `await ensureTagRecord()` in tag-addition loop
-**File:** `apps/web/src/app/actions/images.ts:1036–1046`  
-**Severity:** LOW  
-**Confidence:** High
-
-```ts
-for (const name of addTagNames) {
-    const resolved = await ensureTagRecord(tx, cleanName, slug);
-    …
-}
-```
-
-Each tag name is resolved independently with a serialized await. Tag names are independent of each other; pre-loading existing tags with `SELECT … WHERE slug IN (…)` before the loop and then batching the INSERT IGNOREs would reduce the round-trip count from O(n_tags) to O(1 + n_new_tags). The transaction context makes `Promise.all` risky here, so the batch-preload approach is safer.
+At personal-gallery scale (hundreds of images) this is acceptable today, but it is the most common complaint in self-hosted gallery software at scale.
 
 ---
 
-### 5. Rate Limiting
+### PERF-13-04 — `getTopicBySlug()` Runs Two Serial DB Round-Trips When Direct Slug Is Not Found
+**Severity: LOW**  
+**File:** `apps/web/src/lib/data.ts:1284-1318`
 
-#### R12-PERF-5.1 (NEW) — `decrementRateLimit` wraps two queries in a DB transaction per rollback
-**File:** `apps/web/src/lib/rate-limit.ts:446–467`  
-**Severity:** LOW  
-**Confidence:** High
+`getTopicBySlug()` first does a direct `topics` lookup by slug, and if no match is found (or if the slug fails `isValidSlug()`), runs a second alias JOIN query. For valid-ASCII slugs that are not direct topic matches but ARE aliases, both queries execute serially. More importantly, for **non-existent slugs** (404 pages, bots probing invalid paths), both queries always fire.
 
-```ts
-await db.transaction(async (tx) => {
-    await tx.update(rateLimitBuckets)
-        .set({ count: sql`GREATEST(${rateLimitBuckets.count} - 1, 0)` })
-        .where(…);
-    await tx.delete(rateLimitBuckets).where(
-        and(…, sql`${rateLimitBuckets.count} <= 0`)
-    );
-});
+**Impact:** Every 404 on a topic URL causes two DB round-trips. Bot/crawler traffic hitting non-existent topic slugs at volume will double the DB load from these lookups.
+
+**Fix:** Merge both lookups into a single UNION query:
+
+```sql
+SELECT t.slug, t.label, t.order, t.image_filename
+FROM topics t WHERE t.slug = ?
+UNION
+SELECT t.slug, t.label, t.order, t.image_filename
+FROM topic_aliases ta JOIN topics t ON ta.topic_slug = t.slug
+WHERE ta.alias = ?
+LIMIT 1
 ```
 
-Every successful keyword search completion (`public.ts:36,72`), share creation, and user creation calls `decrementRateLimit`, which opens a DB transaction and sends two queries: one UPDATE then one DELETE for zero-count cleanup. The DELETE is eager inline garbage collection; the hourly `purgeOldBuckets` already handles expiry of old rows, so the inline zero-cleanup adds transaction overhead without a correctness benefit.
-
-**Degradation scenario:** On a gallery with moderate search traffic (30 searches/min rate-limit ceiling), this generates 60 DB queries in transactions where 30 would suffice, and each transaction holds a connection for two round-trips. The connection pool has 10 connections and queue limit 20; under sustained rollback load this marginally increases pool pressure alongside live render traffic.
-
-**Fix:** Remove the `db.transaction()` wrapper and drop the inline DELETE. Extend the existing `purgeOldBuckets` cleanup to also sweep `count <= 0` rows (or let normal bucket expiry handle it). This reduces `decrementRateLimit` to a single UPDATE with no transaction overhead.
+This collapses two round-trips into one regardless of whether the slug is a direct match, an alias, or a 404.
 
 ---
 
-### 6. Event Loop / Shutdown
+### PERF-13-05 — Duplicate `getGalleryConfig()` DB Calls from Fire-and-Forget IIFEs Outside React Request Context
+**Severity: LOW**  
+**File:** `apps/web/src/lib/image-queue.ts:383, 501`
 
-#### R12-PERF-6.1 (NEW) — Shutdown timeout `setTimeout` not `.unref()`'d; process waits 15 s after clean drain
-**File:** `apps/web/src/instrumentation.ts:21–26`  
-**Severity:** LOW  
-**Confidence:** High
+`getGalleryConfig` is wrapped with React `cache()` (`gallery-config.ts:217`), which provides per-request deduplication inside React SSR. However, the image processing queue runs as a Node.js background job with no React request context. Two code paths call `getGalleryConfig()` per processed image:
 
-```ts
-const shutdownTimeout = new Promise<void>((resolve) => {
-    setTimeout(() => {
-        console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
-        resolve();
-    }, 15_000);
-    // No .unref() on the timer
-});
+1. Line 383: the main processing path reads config (quality settings, sizes, etc.)
+2. Line 501: the embedding fire-and-forget IIFE independently calls `cfg = await getGalleryConfig()` to check `semanticSearchMode`
+
+Since neither IIFE shares a React request scope with the other, `cache()` does not deduplicate them. Every processed image causes at least 2 separate DB round-trips to read the same `admin_settings` row.
+
+**Impact:** Low but non-zero — each processed image consumes 2 extra DB connections from the shared 10-connection pool during `getGalleryConfig` calls. Under batch-upload concurrency (`QUEUE_CONCURRENCY > 1`) this multiplies.
+
+**Fix:** Pass the already-loaded config object as a parameter from the main processing path into the fire-and-forget hooks:
+
+```typescript
+// After the main processing path loads config at line 383:
+const resolvedSemanticMode = cfg.semanticSearchMode;
+// Pass resolvedSemanticMode into the embedding IIFE instead of re-calling getGalleryConfig()
 ```
 
-When all queue work and view-count flushes complete before the 15 s deadline, `Promise.race` resolves and `process.exitCode = 0` is set. The function returns, but the 15 s `setTimeout` is still registered in the event loop. Node cannot exit until the event loop is empty, so the process waits the full remaining timeout before the timer fires (resolving the now-abandoned promise) and the loop can drain.
-
-In the Docker Compose deployment, `StopTimeout` defaults to 10 s. If the queue drains in 2 s but the timer keeps the loop alive for 13 more seconds, Docker sends SIGKILL at the 10 s mark and the process exits with a non-zero code — indistinguishable to the orchestrator from a hung shutdown. Compare: `image-queue.ts` already uses `retryTimer.unref?.()` as the correct pattern.
-
-**Fix:**
-```ts
-const shutdownTimeout = new Promise<void>((resolve) => {
-    const t = setTimeout(() => {
-        console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
-        resolve();
-    }, 15_000);
-    t.unref();   // allow the event loop to drain if work finishes before the timeout
-});
-```
+Alternatively, add a short-lived module-level TTL cache (e.g., 5 seconds) in `gallery-config.ts` for the background-process case, since React `cache()` is a no-op outside React request trees.
 
 ---
 
-### 7. Semantic Search
+### PERF-13-06 — `NOT IN (up to 1000 IDs)` Predicate in Bootstrap Queue Scan
+**Severity: LOW**  
+**File:** `apps/web/src/lib/image-queue.ts:691-695`
 
-#### R12-PERF-7.1 (carry-over R11-PERF-7.1) — Brute-force O(n) embedding scan (deferred)
-**File:** `apps/web/src/app/api/search/semantic/route.ts:252–258`  
-**Severity:** MEDIUM  
-**Confidence:** High
+The bootstrap scan uses `notInArray(images.id, [...state.permanentlyFailedIds])` to exclude permanently-failed image IDs. `permanentlyFailedIds` is capped at `MAX_PERMANENTLY_FAILED_IDS = 1000` with FIFO eviction, so the IN-list can grow to 1000 elements.
 
-The route reads all `image_embeddings` rows for the active model version up to `SEMANTIC_SCAN_LIMIT=2000`, decodes each 2 KB MEDIUMBLOB, and computes dot-product similarity in JavaScript. At production scale (~445 embeddings × 512 floats), each query runs ~228 K floating-point MACs and decodes ~890 KB of Buffer. The route is rate-limited (30 req/min/IP) which bounds sustained load at personal-gallery scale.
+**Impact:** MySQL handles IN-lists of a few hundred integers efficiently (integer comparisons against a PK are fast). At 1000 elements the IN-list is at the upper edge of comfortable range. The condition is evaluated at bootstrap only (not on hot-path queries), so the practical impact is currently low. However, if `MAX_PERMANENTLY_FAILED_IDS` is ever raised, this could become a real scan penalty.
 
-**Degradation scenario:** At 2000 embeddings (the hard scan cap), each query decodes 4 MB of MEDIUMBLOB and runs ~1 M MACs. At 30 req/min this is 30 full scans per minute; on a single-CPU container this can produce measurable CPU spikes per query cluster.
-
-**Acknowledged deferral:** ANN index (FAISS, HNSW, or MySQL vector extension) would reduce query complexity. At personal-gallery scale (< 1000 photos) brute-force is adequate. Revisit at 1500+ embeddings.
-
-#### R12-PERF-7.2 (carry-over R11-PERF-7.2) — `topK` performs O(n log n) full sort for small k
-**File:** `apps/web/src/lib/clip-embeddings.ts:138–143`  
-**Severity:** LOW  
-**Confidence:** High
-
-```ts
-return matches
-    .filter(m => m.score >= threshold)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
-```
-
-After threshold filtering the surviving set is fully sorted. For n=2000 and k=20 (the default), a min-heap partial sort would be O(n log k) ≈ 5× fewer comparisons. Impact is negligible at current gallery sizes and is subsumed by the DB read cost; worth addressing only alongside R12-PERF-7.1.
+**Fix (low priority):** Consider adding a `permanently_failed TINYINT(1)` column to `images` and including it in the bootstrap WHERE clause. This eliminates the in-memory exclusion list entirely and removes the IN-list scaling concern.
 
 ---
 
-## Summary
+### PERF-13-07 — `topicViews` Analytics Index Missing `bot` Column, Inconsistent With `image_views`
+**Severity: LOW**  
+**File:** `apps/web/src/db/schema.ts:234-244`
 
-**Cycle 12 severity counts:** 0 CRITICAL / 0 HIGH / 2 MEDIUM / 6 LOW
+`image_views` has composite indexes `(bot, viewed_at, country_code)` and `(bot, viewed_at, referrer_host)` that efficiently support analytics queries with `WHERE bot = false AND viewed_at >= since`. The `bot` equality predicate is the leading column, enabling the index to narrow to the non-bot slice first before ranging on `viewed_at`.
 
-| ID | Sev | New/Carry | File | One-line description |
-|----|-----|-----------|------|----------------------|
-| R12-PERF-1.1 | MED | carry-over | process-image.ts:246 | `_verifyAvifNclx` reads full file then slices to 4 KB — allocates up to 80 MB unnecessarily |
-| R12-PERF-7.1 | MED | carry-over | api/search/semantic/route.ts:252 | Brute-force O(n=2000) embedding scan per semantic query (acknowledged deferral) |
-| R12-PERF-2.1 | LOW | carry-over | photo-viewer.tsx:115 | `images.findIndex()` O(n) linear scan on every render without `useMemo` |
-| R12-PERF-3.1 | LOW | carry-over | image-queue.ts:376,494 | `getGalleryConfig()` pays a full DB query per image processed (React `cache()` inactive in background) |
-| R12-PERF-3.2 | LOW | carry-over | data.ts:488 | `getLatestImageUpdatedAt` missing `cache()` / `…Cached` export |
-| R12-PERF-4.1 | LOW | carry-over | images.ts:1021 | N+1 await-in-loop UPDATE in `bulkUpdateImages` alt-text copy path |
-| R12-PERF-4.2 | LOW | carry-over | images.ts:1042 | Sequential `await ensureTagRecord()` in tag-addition loop |
-| R12-PERF-5.1 | LOW | **NEW** | rate-limit.ts:446 | `decrementRateLimit` wraps 2 queries in a DB transaction; 1 UPDATE + lazy GC suffices |
-| R12-PERF-6.1 | LOW | **NEW** | instrumentation.ts:21 | Shutdown timeout `setTimeout` not `.unref()`'d; process waits full 15 s after clean drain |
-| R12-PERF-7.2 | LOW | carry-over | clip-embeddings.ts:138 | `topK` does O(n log n) full sort; min-heap O(n log k) would be ~5× faster for k=20 |
+`topicViews` has only `(topic, viewed_at)` — no `bot` column in the index. The analytics query `getTopTopicsByViews()` filters `WHERE bot = false AND viewed_at >= since GROUP BY topic`. MySQL must scan all rows in the `(topic, viewed_at)` covering index across all topics and filter out bot rows post-range, rather than using an equality-first scan on `bot`.
 
-**New this cycle:** R12-PERF-5.1 (`decrementRateLimit` transaction overhead), R12-PERF-6.1 (shutdown timer `.unref()`).  
-**Confirmed fixed since cycle 11:** geoip pre-warm (AGG-9.1 → b3c55036), SIGTERM handler (R11-PERF-9.2 → b3c55036), navigator.connection ConnInfo interface (R11-PERF-9.3 → 92ce7a9e).
+**Impact:** Windowed topic analytics queries do more work than necessary. At typical analytics table sizes (bounded by `VIEW_RETENTION_DAYS`) this is acceptable, but it diverges from the well-optimized `image_views` index strategy without a documented reason.
+
+**Fix:** Add a migration with a composite index on `topicViews(bot, viewed_at, topic)` mirroring the `image_views` pattern. Update `schema.ts` to declare the new index and add the migration SQL to `drizzle/`.
+
+---
+
+## Architecture and Resource Notes (No New Action Required)
+
+The following areas were reviewed and found correct with no new findings:
+
+- **Rate-limit Maps** (`rate-limit.ts`): All in-memory maps use `createResetAtBoundedMap` / `createWindowBoundedMap` from `bounded-map.ts` with explicit size caps (OG: 2000, Share: 2000, Search: 2000, Semantic: 2000, Login: 5000). Prune callbacks are wired. No unbounded growth paths found.
+
+- **Connection pool** (`db/index.ts`): `POOL_CONNECTION_LIMIT=10`, `queueLimit=20`. The `getConnection()` wrapper correctly unref's and clears the init-race timer (AGG-R12-04 fix held). The `query()`/`execute()` wrappers acquire+release one connection per call — correct and consistent.
+
+- **View-count buffer** (`data.ts`): `MAX_VIEW_COUNT_BUFFER_SIZE=1000` and `MAX_VIEW_COUNT_RETRY_SIZE=500` with `VIEW_COUNT_MAX_RETRIES=3`. Backoff capped. No unbounded growth.
+
+- **`use-display-capability.ts`**: Snapshot memoization (`_cachedSnapshot`) correctly returns the same object reference until the underlying gamut/HDR values change. The `useSyncExternalStore` infinite-loop risk (React #185) is properly mitigated. Three `matchMedia()` calls per detect cycle are synchronous layout reads but bounded.
+
+- **`process-image.ts` WI-15 temp file cleanup**: The wide-gamut downscale intermediate (`*.wi15.tmp`) is cleaned in both the error path (`safeUnlink(tmpPath)` at line 1078) and the `finally` block (`safeUnlink(processingInputPath)` at line 1358-1364 when `processingInputPath !== inputPath`). No orphan temp file risk.
+
+- **`process-image.ts` per-size fresh-decode pattern**: Each unique output size re-opens the source file via a fresh `sharp(processingInputPath, ...)`. This is intentional (WI-14: cross-format isolation to eliminate shared-state contamination) and noted in CLAUDE.md. Hard-link dedup for same-effective-width sizes keeps I/O overhead minimal. Not a new finding.
+
+- **`_verifyAvifNclx` / `_verifyWebpIccChunk`**: Both use partial reads (4096/1024 bytes respectively) via `fs.open()` + `Buffer.alloc()`. The cycle-12 fix eliminated the full-file read. Verified correct.
+
+- **Semantic search brute-force scan**: O(n) cosine similarity bounded by `SEMANTIC_SCAN_LIMIT` (default 2000). Documented and accepted as a known limitation in CLAUDE.md (PERF-7.1, deferred).
+
+- **Analytics 'all' window temp-table aggregation**: Already documented at `analytics-data.ts:93-111` (PERF-R5C2-01, deferred pending EXPLAIN evidence). No change needed this cycle.
+
+- **`instrumentation.ts` shutdown sequence**: SIGTERM and SIGINT handlers correctly guard against duplicate signals with `shutdownInProgress` flag. `flushBufferedSharedGroupViewCounts` is included in the drain `Promise.all`. Exit code correctly reflects clean vs. forced drain. No new issues.
+
+---
+
+## Summary Table
+
+| ID | Severity | Component | Description |
+|----|----------|-----------|-------------|
+| PERF-13-01 | MEDIUM | `data.ts:getTopics()` | N+1 correlated subquery per topic row for `last_image_updated_at` |
+| PERF-13-02 | MEDIUM | `data.ts:getImagesLitePage()`, `getImagesForSmartCollection()` | `COUNT(*) OVER()` window function materializes full result before LIMIT |
+| PERF-13-03 | MEDIUM | `data.ts:searchImages()` | Leading-wildcard `LIKE '%term%'` on 6+ columns forces full table scan |
+| PERF-13-04 | LOW | `data.ts:getTopicBySlug()` | Two serial queries for valid-but-unmatched and non-existent slugs |
+| PERF-13-05 | LOW | `image-queue.ts` fire-and-forget IIFEs | Duplicate `getGalleryConfig()` DB calls outside React request context |
+| PERF-13-06 | LOW | `image-queue.ts` bootstrap | `NOT IN (1000 ids)` predicate; acceptable now but scaling risk if cap raised |
+| PERF-13-07 | LOW | `schema.ts:topicViews` | Missing `bot`-leading composite index, inconsistent with `image_views` |
+
+**Cycle-12 fixes verified held:** AGG-R12-01 (shutdown), AGG-R12-02 (_verifyAvifNclx partial read), AGG-R12-04 (DB init-race timer).
