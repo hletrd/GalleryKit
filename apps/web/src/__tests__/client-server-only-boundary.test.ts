@@ -257,13 +257,23 @@ function hasServerOnlyDriverImport(source: string): boolean {
  * Matching them here closes the gap so a future `'use client'` → `@/lib/clip-model`
  * value leak would still fail this test RED.
  *
+ * R14C14 / A14-01: `argon2` is the same case — a native Node addon, and
+ * `lib/password-hashing.ts` (the auth layer's one native-server surface) imports
+ * it but cannot carry `import 'server-only'` because tsx operator scripts
+ * (`scripts/migrate-admin-auth.ts`, `scripts/seed-admin.ts`) import it under the
+ * throwing `default` condition. Without `argon2` in this allowlist a future
+ * `'use client'` → `@/lib/password-hashing` value import would pass this fast
+ * guard GREEN and surface only as an opaque webpack native-binding error in a
+ * full `next build`. Pinned below by the password-hashing non-vacuous test.
+ *
  * Pattern anchors the package name to a quote so substrings like `sharp-extra` or
  * `@huggingface/transformers-extra` do not false-positive.
  */
 function hasNativeModuleImport(source: string): boolean {
     return (
         /\b(?:import|export)\b[^'"`;]*?['"`]sharp['"`]/.test(source) ||
-        /\b(?:import|export)\b[^'"`;]*?['"`]@huggingface\/transformers['"`]/.test(source)
+        /\b(?:import|export)\b[^'"`;]*?['"`]@huggingface\/transformers['"`]/.test(source) ||
+        /\b(?:import|export)\b[^'"`;]*?['"`]argon2['"`]/.test(source)
     );
 }
 
@@ -417,11 +427,40 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
         expect(hasNativeModuleImport("import { AutoModel } from '@huggingface/transformers';")).toBe(true);
         expect(hasNativeModuleImport("import type * as T from '@huggingface/transformers';")).toBe(true);
         expect(hasNativeModuleImport("export { AutoModel } from '@huggingface/transformers';")).toBe(true);
+        // R14C14 / A14-01: argon2 native addon.
+        expect(hasNativeModuleImport("import * as argon2 from 'argon2';")).toBe(true);
+        expect(hasNativeModuleImport('import argon2 from "argon2";')).toBe(true);
+        expect(hasNativeModuleImport("import { hash } from 'argon2';")).toBe(true);
         // Negative: must not false-positive on substrings or similar names.
         expect(hasNativeModuleImport("import x from 'sharp-extra';")).toBe(false);
         expect(hasNativeModuleImport("import x from '@huggingface/transformers-extra';")).toBe(false);
+        expect(hasNativeModuleImport("import x from 'argon2-browser';")).toBe(false);
         expect(hasNativeModuleImport("// uses sharp for image processing")).toBe(false);
         expect(hasNativeModuleImport("const s = 'sharp is a great library';")).toBe(false);
+    });
+
+    // R14C14 / A14-01: prove the argon2 detection is NON-VACUOUS — the auth layer's
+    // native-server surface `@/lib/password-hashing` is recognized as
+    // server-only-equivalent via its `argon2` import, so a future `'use client'` →
+    // `@/lib/password-hashing` value leak (e.g. to reuse PASSWORD_HASH_OPTIONS)
+    // would fail this boundary test RED rather than surfacing only in a full build.
+    it('@/lib/password-hashing.ts is recognized as server-only-equivalent via its argon2 import, and must NOT carry import "server-only" (A14-01)', () => {
+        const pw = resolveAliasedModule('@/lib/password-hashing');
+        expect(pw, '@/lib/password-hashing must resolve to an on-disk module').not.toBeNull();
+        const source = fs.readFileSync(pw!, 'utf8');
+        // Must NOT carry the server-only marker — tsx operator scripts
+        // (migrate-admin-auth.ts, seed-admin.ts) import it under the throwing
+        // `default` condition (same constraint as @/db and @/lib/clip-model).
+        expect(
+            hasServerOnlyImport(source),
+            'password-hashing.ts must NOT have import "server-only" — tsx scripts import it at runtime',
+        ).toBe(false);
+        // …but its native argon2 import makes it server-only-equivalent.
+        expect(
+            hasNativeModuleImport(source),
+            'password-hashing.ts must import argon2 so the boundary walk flags it',
+        ).toBe(true);
+        expect(reachesServerOnly(source)).toBe(true);
     });
 
     it('mysql2 driver-import detection is correctly anchored (AGG-C5-01)', () => {
