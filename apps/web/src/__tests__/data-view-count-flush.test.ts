@@ -199,6 +199,32 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         expect(fnBody!).toMatch(/if\s*\(\s*retries\s*>=\s*VIEW_COUNT_MAX_RETRIES\s*\)/);
         expect(fnBody!).toMatch(/Dropping increment for group/);
     });
+
+    // R15C15 TE-15-02 / TRC-15-01: lock the cycle-14 R14-01 shutdown in-flight
+    // await. Without these, a revert of the currentFlushPromise tracking passes
+    // every other test — the same uncovered-fix class as cycle-14 TE-02.
+    it('flushGroupViewCounts publishes currentFlushPromise before the buffer swap', () => {
+        const fnBody = extractFnBody(dataSource, 'async function flushGroupViewCounts');
+        expect(fnBody).toBeTruthy();
+        // The in-flight drain handle must be assigned a fresh Promise during the
+        // actual-drain path so the shutdown handler can await it.
+        expect(fnBody!).toMatch(/currentFlushPromise\s*=\s*new Promise/);
+        // …and it must be cleared in finally so a later shutdown never hangs.
+        expect(fnBody!).toMatch(/currentFlushPromise\s*=\s*null/);
+    });
+
+    it('flushBufferedSharedGroupViewCounts awaits the in-flight flush before the size===0 early return', () => {
+        const fnBody = extractFnBody(dataSource, 'export async function flushBufferedSharedGroupViewCounts');
+        expect(fnBody, 'flushBufferedSharedGroupViewCounts body must be findable').toBeTruthy();
+        const awaitIdx = fnBody!.search(/await\s+currentFlushPromise/);
+        const emptyCheckIdx = fnBody!.search(/viewCountBuffer\.size\s*===\s*0/);
+        expect(awaitIdx, 'must await currentFlushPromise').toBeGreaterThan(-1);
+        expect(emptyCheckIdx, 'must have a size===0 early-return check').toBeGreaterThan(-1);
+        // The in-flight await must come BEFORE the empty-buffer early return,
+        // otherwise SIGTERM mid-flush sees the swapped-empty buffer and exits,
+        // truncating the in-progress chunked DB writes.
+        expect(awaitIdx).toBeLessThan(emptyCheckIdx);
+    });
 });
 
 /**
