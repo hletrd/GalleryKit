@@ -120,5 +120,11 @@ EXPOSE 3000
 # Use entrypoint to handle permissions/user switching
 ENTRYPOINT ["entrypoint.sh"]
 
-# Start command
-CMD ["sh", "-c", "node apps/web/scripts/migrate.js && node apps/web/server.js"]
+# Start command.
+# `exec` replaces the shell with the node process AFTER migrate.js completes, so
+# `node server.js` becomes PID 1 and receives Docker's SIGTERM directly. Without
+# `exec`, the non-interactive `sh -c` stays PID 1 and does NOT forward SIGTERM to
+# its child, so the app's graceful-shutdown handler (instrumentation.ts) never
+# runs and the container is SIGKILLed at stop_grace_period (exit 137) on every
+# deploy — silently dropping the view-count buffer flush (R13C13 / AGG-R13-01).
+CMD ["sh", "-c", "node apps/web/scripts/migrate.js && exec node apps/web/server.js"]
