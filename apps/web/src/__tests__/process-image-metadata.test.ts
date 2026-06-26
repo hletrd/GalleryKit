@@ -163,4 +163,36 @@ describe('process-image metadata normalization', () => {
         expect(Buffer.byteLength(exif.camera_model!, 'utf8')).toBeLessThanOrEqual(255);
         expect(exif.camera_model).not.toContain('�');
     });
+
+    // R15C15 DBG-15-01: a `0/0` GPS rational decodes (via exif-reader's rational
+    // division) to NaN. The `<`/`>` range guard is all-false for NaN, so without
+    // the finite-check NaN reaches the DB insert as a bare `NaN` token →
+    // ER_BAD_FIELD_ERROR → the valid photo is silently rejected at upload.
+    it('returns NULL coordinates for NaN GPS rationals (no NaN in DB insert)', () => {
+        const exif = extractExifForDb({
+            gps: {
+                GPSLatitude: [NaN, 30, 0],
+                GPSLatitudeRef: 'N',
+                GPSLongitude: [10, NaN, 0],
+                GPSLongitudeRef: 'E',
+            },
+        });
+
+        expect(exif.latitude).toBeNull();
+        expect(exif.longitude).toBeNull();
+    });
+
+    it('keeps valid GPS coordinates intact', () => {
+        const exif = extractExifForDb({
+            gps: {
+                GPSLatitude: [37, 30, 0],
+                GPSLatitudeRef: 'N',
+                GPSLongitude: [127, 0, 0],
+                GPSLongitudeRef: 'E',
+            },
+        });
+
+        expect(exif.latitude).toBeCloseTo(37.5, 4);
+        expect(exif.longitude).toBeCloseTo(127, 4);
+    });
 });

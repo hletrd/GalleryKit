@@ -1445,12 +1445,20 @@ export function extractExifForDb(exifData: ExifDataRaw) {
     if (gpsParams) {
         const convertDMSToDD = (dms: number[], ref: string, maxDegrees: number) => {
             if (!dms || dms.length < 3) return null;
+            // R15C15 DBG-15-01: a `0/0` GPS rational (placeholder some cameras
+            // write when there is no satellite fix) decodes to NaN. The `<`/`>`
+            // range guard below is ALL false for NaN, so without this finite
+            // check a NaN propagates into the `db.insert(images)` text-protocol
+            // serialization as a bare `NaN` token → MySQL ER_BAD_FIELD_ERROR →
+            // a valid photo is silently rejected at upload. Mirror the
+            // `cleanNumber` finite-guard; "unknown coordinate" must be SQL NULL.
+            if (![dms[0], dms[1], dms[2]].every(Number.isFinite)) return null;
             if (dms[0] < 0 || dms[0] > maxDegrees || dms[1] < 0 || dms[1] >= 60 || dms[2] < 0 || dms[2] >= 60) return null;
             let dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
             if (ref === 'S' || ref === 'W') {
                 dd = dd * -1;
             }
-            if (Math.abs(dd) > maxDegrees) return null;
+            if (!Number.isFinite(dd) || Math.abs(dd) > maxDegrees) return null;
             return dd;
         };
 
