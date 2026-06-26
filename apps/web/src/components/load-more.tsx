@@ -145,7 +145,7 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
             {hasMore && (
                 <div ref={setSentinelRef} className="flex justify-center py-8">
                     <Button type="button" variant="outline" onClick={loadMore} disabled={loading} className="min-h-11">
-                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
                         {loading ? t('home.loadingMore') : t('home.loadMore')}
                     </Button>
                 </div>
