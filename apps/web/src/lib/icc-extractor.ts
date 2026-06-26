@@ -83,6 +83,16 @@ export function extractIccProfileName(
             if (descType === 'mluc') {
                 // Multi-localized Unicode: type/reserved, record count, record
                 // size, then records. Text is UTF-16BE per ICC, not UTF-16LE.
+                // R14C14 / R14-02: the shared outer guard above only ensures
+                // dataSize >= 12, but the mluc header reads readUInt32BE(
+                // dataOffset + 12), which needs dataOffset + 16 <= iccLen. A
+                // malformed mluc desc with dataSize 12-15 at buffer-end would
+                // otherwise throw a RangeError (caught by the outer try/catch
+                // → null). Break cleanly instead — a valid mluc header is 16
+                // bytes (type+reserved+count+recordsize) before the records.
+                // (Do NOT widen the shared outer guard to < 16; it is also used
+                // by the `desc` branch, which is valid with dataSize >= 12.)
+                if (dataSize < 16) break;
                 const numRecords = Math.min(icc.readUInt32BE(dataOffset + 8), 100);
                 const recordSize = icc.readUInt32BE(dataOffset + 12);
                 if (recordSize < 12) break;
