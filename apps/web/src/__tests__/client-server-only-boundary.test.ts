@@ -277,8 +277,33 @@ function hasNativeModuleImport(source: string): boolean {
     );
 }
 
+/**
+ * R15C15 / A15-01: Next.js server-runtime modules `next/headers`, `next/cache`,
+ * and `next-intl/server` cannot run in a client bundle — importing any of them
+ * from a `'use client'` closure throws/no-ops at build, exactly like
+ * `import 'server-only'`. The five-specifier denylist above (server-only / mysql2
+ * / sharp / transformers / argon2) did NOT recognize them, so a future
+ * `'use client'` value-import of `@/lib/revalidation` (next/cache),
+ * `@/lib/csp-nonce` (next/headers), or `@/lib/action-guards` (next/headers +
+ * next-intl/server) would pass this fast guard GREEN and surface only as an
+ * opaque `next build` error. Anchor each specifier to a quote so `next/headers`
+ * matches but `next-intl` (the client entry) and `next/navigation` do not.
+ */
+function hasNextServerRuntimeImport(source: string): boolean {
+    return (
+        /\b(?:import|export)\b[^'"`;]*?['"`]next\/headers['"`]/.test(source) ||
+        /\b(?:import|export)\b[^'"`;]*?['"`]next\/cache['"`]/.test(source) ||
+        /\b(?:import|export)\b[^'"`;]*?['"`]next-intl\/server['"`]/.test(source)
+    );
+}
+
 function reachesServerOnly(source: string): boolean {
-    return hasServerOnlyImport(source) || hasServerOnlyDriverImport(source) || hasNativeModuleImport(source);
+    return (
+        hasServerOnlyImport(source) ||
+        hasServerOnlyDriverImport(source) ||
+        hasNativeModuleImport(source) ||
+        hasNextServerRuntimeImport(source)
+    );
 }
 
 function isUseClient(source: string): boolean {
@@ -459,6 +484,30 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
         expect(
             hasNativeModuleImport(source),
             'password-hashing.ts must import argon2 so the boundary walk flags it',
+        ).toBe(true);
+        expect(reachesServerOnly(source)).toBe(true);
+    });
+
+    // R15C15 / A15-01: prove the next/* server-runtime detection is anchored
+    // and NON-VACUOUS via a real on-disk module.
+    it('next/* server-runtime detection is correctly anchored (A15-01)', () => {
+        // Positive: the three server-runtime entries.
+        expect(hasNextServerRuntimeImport("import { revalidatePath } from 'next/cache';")).toBe(true);
+        expect(hasNextServerRuntimeImport('import { headers } from "next/headers";')).toBe(true);
+        expect(hasNextServerRuntimeImport("import { getTranslations } from 'next-intl/server';")).toBe(true);
+        // Negative: client-safe Next entries must NOT match.
+        expect(hasNextServerRuntimeImport("import { useRouter } from 'next/navigation';")).toBe(false);
+        expect(hasNextServerRuntimeImport("import { useTranslations } from 'next-intl';")).toBe(false);
+        expect(hasNextServerRuntimeImport("import Link from 'next/link';")).toBe(false);
+    });
+
+    it('@/lib/revalidation.ts is recognized as server-only-equivalent via its next/cache import (A15-01)', () => {
+        const mod = resolveAliasedModule('@/lib/revalidation');
+        expect(mod, '@/lib/revalidation must resolve to an on-disk module').not.toBeNull();
+        const source = fs.readFileSync(mod!, 'utf8');
+        expect(
+            hasNextServerRuntimeImport(source),
+            'revalidation.ts must import next/cache so the boundary walk flags it',
         ).toBe(true);
         expect(reachesServerOnly(source)).toBe(true);
     });

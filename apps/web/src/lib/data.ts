@@ -1486,6 +1486,18 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         capture_date: images.capture_date, created_at: images.created_at,
     };
 
+    // R15C15 / A15-02: searchImages serves the ANONYMOUS public search surface
+    // (searchImagesAction). searchFields was the one public image-row select set
+    // with no compile-time privacy guard — a future "search by GPS / show ISO"
+    // feature adding a PII column here would ship to unauthenticated callers with
+    // zero tsc/test signal. Mirror the publicSelectFields / timelineSelectFields
+    // guards so any privacy-sensitive key in searchFields is a compile error.
+    type _SearchSensitive = Extract<keyof typeof searchFields, _PrivacySensitiveKeys>;
+    const _searchPrivacyGuard: _SearchSensitive extends never
+        ? true
+        : ['ERROR: privacy-sensitive field found in searchFields', _SearchSensitive] = true;
+    void _searchPrivacyGuard;
+
     // Derive GROUP BY columns from searchFields values so they cannot drift.
     // Object.values preserves insertion order in ES6+ for string keys.
     const searchGroupByColumns = Object.values(searchFields);
