@@ -85,8 +85,16 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
         // R10-C3-TRC-H6: On timeout, ALSO clear the stored init promise so the
         // next getConnection() attempt on this underlying connection re-runs
         // the init query instead of racing against an already-lost race.
+        // R12C12 AGG-R12-04: capture the timer so it is cleared once the race
+        // settles. The init promise is retained on the underlying connection
+        // symbol even after it resolves, so `if (initPromise)` is true on EVERY
+        // getConnection() for a reused connection — without clearing/unref'ing,
+        // a fresh 10s timer accrued per query under steady load. `.unref()` so a
+        // pending timer never alone keeps the event loop alive.
+        let initTimer: ReturnType<typeof setTimeout> | undefined;
         const initTimeout = new Promise<void>((_, reject) => {
-            setTimeout(() => reject(new Error('DB connection init query timed out after 10s')), 10_000);
+            initTimer = setTimeout(() => reject(new Error('DB connection init query timed out after 10s')), 10_000);
+            initTimer.unref?.();
         });
         try {
             await Promise.race([initPromise, initTimeout]);
@@ -99,6 +107,8 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
                 underlying[connectionInitSymbol] = undefined;
             }
             throw err;
+        } finally {
+            if (initTimer) clearTimeout(initTimer);
         }
     }
     return connection;
