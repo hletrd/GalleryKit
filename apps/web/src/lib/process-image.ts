@@ -242,14 +242,25 @@ async function _verifyAvifNclx(
     expectedPrimaries: number,
     expectedTransfer: number,
 ): Promise<void> {
+    // R12C12 AGG-R12-02: read only the first 4 KB instead of the whole file.
+    // The verifier only inspects buffer[0..4096] for the NCLX `colr` box, but the
+    // old fs.readFile(filePath) loaded the ENTIRE AVIF into memory first — the
+    // largest derivative (7680px) is multiple MB, and under peak fan-out
+    // (QUEUE_CONCURRENCY × 3 formats in parallel) that transiently allocated
+    // concurrency×filesize of throwaway buffer. Mirrors `_verifyWebpIccChunk`.
+    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
     try {
-        const buffer = await fs.readFile(filePath);
-        const { ok, message } = verifyAvifNclxInBuffer(buffer.subarray(0, 4096), expectedPrimaries, expectedTransfer);
+        handle = await fs.open(filePath, 'r');
+        const head = Buffer.alloc(4096);
+        const { bytesRead } = await handle.read(head, 0, 4096, 0);
+        const { ok, message } = verifyAvifNclxInBuffer(head.subarray(0, bytesRead), expectedPrimaries, expectedTransfer);
         if (!ok) {
             console.warn(`[verify-avif] ${message} in ${path.basename(filePath)}`);
         }
     } catch (e) {
         console.warn(`[verify-avif] failed to read ${path.basename(filePath)}:`, e);
+    } finally {
+        await handle?.close().catch(() => { /* best-effort fd release */ });
     }
 }
 
