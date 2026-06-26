@@ -10,8 +10,14 @@ const SECURITY_PRIORITY_KEYS = ['ip', 'userAgent', 'action', 'userId', 'targetTy
 /**
  * Reorder metadata object so security-relevant fields appear first.
  * This maximizes the chance that critical forensic fields survive truncation.
+ *
+ * R12C12 AGG-R12-05: exported so the ordering contract is locked by
+ * `__tests__/audit-prioritize-security-fields.test.ts`. This is intentionally
+ * defensive — most current callers pass these keys as dedicated `logAuditEvent`
+ * parameters (stored as columns), but any caller that DOES put `userAgent`/`ip`
+ * inside `metadata` benefits from the reorder under 4 KB truncation.
  */
-function prioritizeSecurityFields(metadata: Record<string, unknown>): Record<string, unknown> {
+export function prioritizeSecurityFields(metadata: Record<string, unknown>): Record<string, unknown> {
     const prioritized: Record<string, unknown> = {};
     // Copy priority keys first (only if present)
     for (const key of SECURITY_PRIORITY_KEYS) {
