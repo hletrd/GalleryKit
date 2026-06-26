@@ -206,11 +206,15 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
     });
 
     describe('hasData short-circuit (existing pip contract)', () => {
-        it('returns null when no color signals are present', () => {
+        it('returns null when no color signals are present, with admin-only fields isAdmin-gated (C14-02)', () => {
             // Lock the early return so a refactor cannot silently render
-            // an empty pip on photos with no color metadata.
+            // an empty pip on photos with no color metadata, AND lock the
+            // C14-02 defense-in-depth gating: the admin-only `transfer_function`
+            // / `color_pipeline_decision` terms must be wrapped in `isAdmin &&`
+            // (matching the sibling color-details-section.tsx), so `hasData` is
+            // driven only by the public `color_primaries` for non-admin viewers.
             expect(PIP_BODY).toMatch(
-                /const\s+hasData\s*=\s*Boolean\s*\(\s*image\.color_primaries\s*\|\|\s*image\.transfer_function\s*\|\|\s*image\.color_pipeline_decision\s*\)/,
+                /const\s+hasData\s*=\s*Boolean\s*\(\s*image\.color_primaries\s*\|\|\s*\(\s*isAdmin\s*&&\s*image\.transfer_function\s*\)\s*\|\|\s*\(\s*isAdmin\s*&&\s*image\.color_pipeline_decision\s*\)\s*\)/,
             );
             expect(PIP_BODY).toMatch(/if\s*\(\s*!hasData\s*\)\s*return\s+null/);
         });

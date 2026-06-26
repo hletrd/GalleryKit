@@ -41,7 +41,13 @@ interface LightboxColorPipProps {
  * (≥ 44 px per WCAG 2.5.5 / Apple HIG) is met without padding inflation.
  */
 export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef, isAdmin = false, forceSrgbDerivatives = false }: LightboxColorPipProps) {
-    const hasData = Boolean(image.color_primaries || image.transfer_function || image.color_pipeline_decision);
+    // C14-02: gate admin-only `transfer_function`/`color_pipeline_decision` on
+    // `isAdmin` to match the AGG-M3 convention in the sibling
+    // color-details-section.tsx. No-op for current behavior (both undefined for
+    // public viewers; `color_primaries` is public and already drives the pip);
+    // closes a defense-in-depth trap for a future call site passing admin-fetched
+    // data with `isAdmin={false}`.
+    const hasData = Boolean(image.color_primaries || (isAdmin && image.transfer_function) || (isAdmin && image.color_pipeline_decision));
     // R28-UX-LOW-2: transient checkmark feedback on copy. Mirrors the sidebar
     // ColorDetailsSection so both copy buttons feel identical to the
     // photographer regardless of which surface they used.
@@ -74,7 +80,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // image.transfer_function and image.is_hdr are admin-only via privacy
     // field separation in data.ts, so this row stays hidden for public
     // viewers either way.
-    const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
+    const isHdr = isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg');
 
     // R9-LOW: copy a JSON snapshot of the audit-grade color metadata to the
     // clipboard from the lightbox expanded panel, same as the sidebar
@@ -170,13 +176,13 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             <span className="font-medium">{humanizeColorPrimariesOrLabel(image.color_primaries, t)}</span>
                         </div>
                     )}
-                    {image.transfer_function && (
+                    {isAdmin && image.transfer_function && (
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.transferFunction')}</span>
                             <span className="font-medium">{transfer || t('viewer.colorUnknown')}</span>
                         </div>
                     )}
-                    {image.color_pipeline_decision && (
+                    {isAdmin && image.color_pipeline_decision && (
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.colorPipelineDecision')}</span>
                             <span className="font-medium flex items-center gap-1">
