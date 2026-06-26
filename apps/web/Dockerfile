@@ -88,6 +88,19 @@ ENV UPLOAD_ORIGINAL_ROOT="/app/data/uploads/original"
 # bind mount persists across deploys) and loaded at runtime by the CLIP encoder.
 # See "CLIP semantic search" ops note in CLAUDE.md for the seed procedure.
 ENV CLIP_MODELS_ROOT="/app/data/models/clip"
+# R14C14 / C14-01: take ownership of POSIX signal handling. Next's standalone
+# server (start-server.js) installs its OWN SIGTERM handler that calls
+# process.exit(143) unless NEXT_MANUAL_SIG_HANDLE is set. With the cycle-13
+# `exec` fix node IS PID 1 and DOES receive Docker's SIGTERM — but that SIGTERM
+# would then fire BOTH Next's handler AND the app's gracefulShutdown
+# (instrumentation.ts), racing to process.exit(): whichever wins truncates the
+# other, nondeterministically cutting off the view-count buffer flush and
+# clobbering the deliberate 0/1 exit code with 143. Setting this makes the app's
+# instrumentation handler the sole shutdown owner, so the flush + exit code are
+# honored deterministically. (Trade-off: Next's in-flight-HTTP server.close()
+# drain is also suppressed; consistent with the app's "flush then exit promptly"
+# design — the deploy recreates the container regardless.)
+ENV NEXT_MANUAL_SIG_HANDLE=true
 
 # Copy necessary files from apps/web (public is mounted at runtime)
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
