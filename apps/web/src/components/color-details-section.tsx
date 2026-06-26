@@ -230,7 +230,14 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     if (!hasColorDetails) return null;
 
     const primariesHuman = humanizeColorPrimaries(image.color_primaries);
-    const iccName = image.icc_profile_name || '';
+    // R15C15 SEC-15-01 / Critic-F2: icc_profile_name is an admin-only field
+    // (omitted from publicSelectFields). Gate the derived value on isAdmin to
+    // mirror the AGG-M3 convention used by transfer_function / matrix /
+    // color_space / has_gain_map below — so a future call site passing
+    // admin-fetched data with isAdmin={false} cannot leak the ICC profile name
+    // (custom-monitor profiles routinely embed identifying strings). The
+    // existing `{iccName && …}` guards at the render sites then short-circuit.
+    const iccName = isAdmin ? (image.icc_profile_name || '') : '';
     const primariesMatchIcc = primariesMatchIccName(primariesHuman, iccName);
 
     const colorDetailsId = `color-details-${image.id}`;
@@ -270,15 +277,18 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
         // useful for fingerprinting the deployment). The audit-grade
         // metadata users actually want — ICC, primaries, transfer, matrix,
         // decision, HDR flag, gain map, source bit depth — is unaffected.
+        // R15C15 SEC-15-01: gate every admin-only field on isAdmin so the
+        // clipboard payload matches the visible (isAdmin-gated) rows. Only
+        // color_primaries and avif_10bit are public.
         const data = {
-            iccProfileName: image.icc_profile_name ?? null,
+            iccProfileName: isAdmin ? (image.icc_profile_name ?? null) : null,
             primaries: image.color_primaries ?? null,
-            transfer: image.transfer_function ?? null,
-            matrix: image.matrix_coefficients ?? null,
-            decision: image.color_pipeline_decision ?? null,
-            isHdr: image.is_hdr ?? null,
-            hasGainMap: image.has_gain_map ?? null,
-            sourceBitDepth: image.bit_depth ?? null,
+            transfer: isAdmin ? (image.transfer_function ?? null) : null,
+            matrix: isAdmin ? (image.matrix_coefficients ?? null) : null,
+            decision: isAdmin ? (image.color_pipeline_decision ?? null) : null,
+            isHdr: isAdmin ? (image.is_hdr ?? null) : null,
+            hasGainMap: isAdmin ? (image.has_gain_map ?? null) : null,
+            sourceBitDepth: isAdmin ? (image.bit_depth ?? null) : null,
             avif10bit: image.avif_10bit ?? null,
         };
         try {
@@ -466,7 +476,9 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                         panel. The EXIF grid still shows source bit depth for the
                         camera-capture audit lens; here it sits beside the delivered
                         ceiling. */}
-                    {image.bit_depth != null && image.bit_depth > 0 && (
+                    {/* R15C15 SEC-15-01: bit_depth is admin-only — gate on isAdmin
+                        to match the transfer_function / matrix / color_space siblings. */}
+                    {isAdmin && image.bit_depth != null && image.bit_depth > 0 && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
                             <p className="font-medium">{image.bit_depth}-bit</p>

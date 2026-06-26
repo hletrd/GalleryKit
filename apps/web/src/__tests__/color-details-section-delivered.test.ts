@@ -29,6 +29,21 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
             // Format: {image.bit_depth}-bit
             expect(SOURCE).toMatch(/\{image\.bit_depth\}-bit/);
         });
+
+        it('R15C15 SEC-15-01: gates the source-bit-depth row on isAdmin (admin-only field)', () => {
+            // bit_depth is admin-only (omitted from publicSelectFields). The
+            // render gate must lead with `isAdmin &&` to mirror the
+            // transfer_function / matrix / color_space siblings — defense in
+            // depth so admin-fetched data passed with isAdmin={false} cannot leak.
+            expect(SOURCE).toMatch(/isAdmin\s*&&\s*image\.bit_depth\s*!=\s*null\s*&&\s*image\.bit_depth\s*>\s*0/);
+        });
+
+        it('R15C15 SEC-15-01: gates the derived iccName on isAdmin (admin-only field)', () => {
+            // icc_profile_name is admin-only; the derived value feeding the ICC
+            // rows must be empty for non-admins so the `{iccName && …}` render
+            // guards short-circuit.
+            expect(SOURCE).toMatch(/const iccName = isAdmin \? \(image\.icc_profile_name \|\| ''\) : ''/);
+        });
     });
 
     describe('Delivered bit depth row (P3-5)', () => {

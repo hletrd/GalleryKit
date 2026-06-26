@@ -89,15 +89,18 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
         // R10-L16: pipeline_version is internal deploy metadata; omit it from
         // the user-facing clipboard JSON. See color-details-section.tsx for
         // the matching change in the sidebar copy button.
+        // R15C15 SEC-15-01: gate admin-only fields on isAdmin so the clipboard
+        // payload matches the visible (isAdmin-gated) pip rows. Only
+        // color_primaries and avif_10bit are public.
         const data = {
-            iccProfileName: image.icc_profile_name ?? null,
+            iccProfileName: isAdmin ? (image.icc_profile_name ?? null) : null,
             primaries: image.color_primaries ?? null,
-            transfer: image.transfer_function ?? null,
-            matrix: image.matrix_coefficients ?? null,
-            decision: image.color_pipeline_decision ?? null,
-            isHdr: image.is_hdr ?? null,
-            hasGainMap: image.has_gain_map ?? null,
-            sourceBitDepth: image.bit_depth ?? null,
+            transfer: isAdmin ? (image.transfer_function ?? null) : null,
+            matrix: isAdmin ? (image.matrix_coefficients ?? null) : null,
+            decision: isAdmin ? (image.color_pipeline_decision ?? null) : null,
+            isHdr: isAdmin ? (image.is_hdr ?? null) : null,
+            hasGainMap: isAdmin ? (image.has_gain_map ?? null) : null,
+            sourceBitDepth: isAdmin ? (image.bit_depth ?? null) : null,
             avif10bit: image.avif_10bit ?? null,
         };
         try {

@@ -439,7 +439,8 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                     <p className="font-medium">{image.flash}</p>
                                 </div>
                             )}
-                            {hasExifData(image.bit_depth) && (
+                            {/* R15C15 SEC-15-01: bit_depth is admin-only — gate on isAdmin. */}
+                            {isAdmin && hasExifData(image.bit_depth) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
                                     <p className="font-medium">{image.bit_depth}-bit</p>
