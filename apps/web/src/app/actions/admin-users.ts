@@ -36,14 +36,17 @@ function checkUserCreateRateLimit(ip: string): boolean {
         userCreateRateLimit.set(ip, { count: 1, resetAt: now + USER_CREATE_WINDOW_MS });
         return false;
     }
-    entry.count++;
-    return entry.count > USER_CREATE_MAX_ATTEMPTS;
+    // R15C15 CR-15-01: BoundedMap.get() returns a shallow copy; write back via
+    // .set() so the in-memory counter actually advances (mirrors public.ts).
+    const next = { count: entry.count + 1, resetAt: entry.resetAt };
+    userCreateRateLimit.set(ip, next);
+    return next.count > USER_CREATE_MAX_ATTEMPTS;
 }
 
 function rollbackUserCreateRateLimitAttempt(ip: string) {
     const currentEntry = userCreateRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        userCreateRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else if (currentEntry) {
         userCreateRateLimit.delete(ip);
     }

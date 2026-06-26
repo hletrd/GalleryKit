@@ -44,19 +44,25 @@ function checkShareRateLimit(ip: string, scope: ShareRateLimitScope): boolean {
     const entry = shareWriteRateLimit.get(key);
     if (!entry || entry.resetAt <= now) {
         shareWriteRateLimit.set(key, { count: 1, resetAt: now + SHARE_RATE_LIMIT_WINDOW_MS });
-    } else {
-        entry.count++;
+        return false;
     }
+    // R15C15 CR-15-01: BoundedMap.get() returns a SHALLOW COPY, so mutating
+    // `entry.count++` updated the discarded copy and the stored counter never
+    // advanced (the in-memory fast path was dead — the DB layer below still
+    // enforced the limit). Write back through .set() like the public.ts
+    // reference pattern so the in-memory counter accumulates within the window.
+    const next = { count: entry.count + 1, resetAt: entry.resetAt };
+    shareWriteRateLimit.set(key, next);
     // Return true if OVER the limit (rate-limited)
-    const currentEntry = shareWriteRateLimit.get(key)!;
-    return currentEntry.count > SHARE_WRITE_MAX_PER_WINDOW;
+    return next.count > SHARE_WRITE_MAX_PER_WINDOW;
 }
 
 function rollbackShareRateLimit(ip: string, scope: ShareRateLimitScope) {
     const key = getShareRateLimitKey(ip, scope);
     const currentEntry = shareWriteRateLimit.get(key);
     if (currentEntry && currentEntry.count > 1) {
-        currentEntry.count--;
+        // R15C15 CR-15-01: write back through .set() — get() is a shallow copy.
+        shareWriteRateLimit.set(key, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
         return;
     }
     shareWriteRateLimit.delete(key);

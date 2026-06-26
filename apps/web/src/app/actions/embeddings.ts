@@ -36,10 +36,14 @@ function preIncrementBackfillAttempt(key: string, now: number): boolean {
     const entry = backfillRateLimit.get(key);
     if (!entry || entry.resetAt <= now) {
         backfillRateLimit.set(key, { count: 1, resetAt: now + BACKFILL_WINDOW_MS });
-    } else {
-        entry.count++;
+        return false;
     }
-    return (backfillRateLimit.get(key)?.count ?? 0) > 1;
+    // R15C15 CR-15-01: BoundedMap.get() returns a shallow copy, so `entry.count++`
+    // mutated the discarded copy and this limit never advanced past 1. There is
+    // no DB-backed fallback here (admin-gated action), so write back via .set().
+    const next = { count: entry.count + 1, resetAt: entry.resetAt };
+    backfillRateLimit.set(key, next);
+    return next.count > 1;
 }
 
 export type BackfillEmbeddingsResult =
