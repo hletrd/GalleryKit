@@ -156,9 +156,10 @@ export type ProcessingQueueState = {
     lastErrors: Map<number, string>;
     /** C1F-DB-02: IDs of images that have permanently failed processing (MAX_RETRIES exceeded).
      *  These are excluded from bootstrap re-scans to prevent infinite re-enqueue loops.
-     *  A Set with no eviction — at personal-gallery scale the number of permanently-
-     *  failed images is negligible. If it grows large, the bootstrap scan itself is
-     *  the problem (not the Set size). */
+     *  A Set bounded by MAX_PERMANENTLY_FAILED_IDS (1000) with insertion-order (FIFO)
+     *  eviction of the oldest entry once the cap is exceeded (see the add-site below).
+     *  At personal-gallery scale the number of permanently-failed images is negligible,
+     *  so the cap is rarely approached. */
     permanentlyFailedIds: Set<number>;
     bootstrapped: boolean;
     shuttingDown: boolean;
@@ -178,11 +179,17 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
     // AGG-R11C11-L1: runtime shape validation — if a test or future code path
     // sets the global symbol to a non-object value, re-initialize instead of
     // crashing. Mirrors the defensive pattern in admin-backfill-runner.ts.
+    // R12C12 AGG-R12-11: a bare `'queue' in existing` key-presence check let a
+    // malformed `{queue: null, enqueued: …, bootstrapped: …}` global through and
+    // returned corrupt state (later `state.queue.add()` TypeErrors). Validate the
+    // VALUE types of the load-bearing fields, not just key presence.
     if (
         existing
         && typeof existing === 'object'
         && 'queue' in existing
-        && 'enqueued' in existing
+        && existing.queue
+        && typeof existing.queue.add === 'function'
+        && existing.enqueued instanceof Set
         && 'bootstrapped' in existing
     ) {
         return existing;
