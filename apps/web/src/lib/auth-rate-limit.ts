@@ -111,7 +111,11 @@ export function getPasswordChangeRateLimitEntry(ip: string, now: number): Window
         entry.count = 0;
     }
 
-    return entry;
+    // Return a shallow copy so callers cannot mutate the stored bucket, matching
+    // getLoginRateLimitEntry / getAccountLoginRateLimitEntry's documented copy
+    // contract (R13C13 / AGG-R13-05). BoundedMap.get() already copies, so this is
+    // defensive symmetry against a future backing-store swap.
+    return { ...entry };
 }
 
 export async function clearSuccessfulPasswordAttempts(ip: string, bucketStart?: number) {
