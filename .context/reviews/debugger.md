@@ -1,10 +1,11 @@
-# Cycle 14 Debugger Review
+# Cycle 15 Debugger Review
 
 **Date:** 2026-06-27
-**HEAD**: 80145992 (cycle-13 aggregate baseline)
-**Reviewer:** debugger agent (Sonnet 4.6)
-**Scope**: Full latent-bug sweep — async/queue code, data layer, server actions, lib/* utilities, instrumentation.ts, scripts/migrate.js
-**Prior state**: All gates GREEN after cycle 13 (eslint, tsc, vitest 2071 pass/4 skip, lint:api-auth/action-origin/public-route-rate-limit)
+**HEAD:** 2f886351 (cycle-14 fixes landed; all six gates GREEN at baseline)
+**Reviewer:** debugger agent (Opus 4.8 1M)
+**Scope:** Full latent-bug sweep of the rich bug-surface targets — binary metadata parsers (color-detection NCLX/ISOBMFF walker, icc-extractor, icc-chromaticity, gain-map-detection, gps-exif-strip byte surgery), the Sharp pipeline (process-image: downscale math, 10-bit fallback, fresh-instance-per-format), number/rational math (decimalToRational, EXIF coercion), rate-limit / bounded-map eviction, the view-count buffer swap/flush (incl. the cycle-14 `currentFlushPromise` change), CSV/Unicode/OG sanitizers, retention/date math (view-retention, audit-log sweep, exif-datetime), and every `* bsize` / `* 1024` arithmetic site flagged in the brief.
+
+**One-line summary:** One confirmed NEW MEDIUM bug — a malformed/placeholder EXIF GPS rational (`0/0` → NaN) bypasses `convertDMSToDD`'s range guard and propagates NaN into the `images` INSERT, which mysql2's text protocol serializes as a bare `NaN` token → `ER_BAD_FIELD_ERROR` → the entire (valid) photo upload is rejected; everything else on the audited surface is well-hardened and the cycle-14 fixes are regression-free.
 
 ---
 
@@ -12,182 +13,164 @@
 
 | ID | File:Line | Severity | Confidence | Summary |
 |----|-----------|----------|------------|---------|
-| R14-01 | `lib/data.ts:196-207` | MEDIUM | High | `flushBufferedSharedGroupViewCounts` returns early on empty buffer without checking `isFlushing` — in-flight DB writes silently dropped on SIGTERM during an active flush |
-| R14-02 | `lib/icc-extractor.ts:~95` | LOW | High | `mluc` bounds guard is `dataSize < 12` but `readUInt32BE(dataOffset+12)` needs 4 more bytes past that offset; requires `dataSize >= 16`; RangeError caught by outer try/catch |
-| TRC-13-04 | `lib/process-image.ts:1414-1421` | LOW | High | `decimalToRational` with subnormal inputs produces `"1/Infinity"`. Carry-over, confirmed unreachable with real EXIF exposure times |
-| TRC-13-05 | `lib/bounded-map.ts:114-117` | LOW | Medium | `entries()` returns raw Map iterator. Carry-over, confirmed zero production callers |
+| **DBG-15-01** | `lib/process-image.ts:1446-1455` | **MEDIUM** | **High** | `convertDMSToDD` range guard (`<`/`>` comparisons) silently passes `NaN`; a `0/0` GPS rational → `latitude/longitude = NaN` → `db.insert(images)` emits a bare `NaN` SQL token → `ER_BAD_FIELD_ERROR: Unknown column 'NaN'` → valid photo rejected at upload. Affects BOTH upload paths (browser + Lightroom). |
+| DBG-15-02 | `lib/color-detection.ts:249`, `lib/gain-map-detection.ts:72` | INFO | High | 64-bit ISOBMFF box-size `Number(readBigUInt64BE())` omits the `> Number.MAX_SAFE_INTEGER` guard that `gps-exif-strip.ts:395` and the iloc `readSized` apply. Harmless today (subsequent `pos+size > buffer.length` bounds check breaks), but inconsistent with the repo's own defensive pattern. |
+| DBG-15-03 | `lib/validation.ts:58` (`UNICODE_FORMAT_CHARS`) | INFO | High | Sanitizer set omits U+2028/U+2029 (line/paragraph separators) and U+061C (ALM). The canonical Trojan-Source reordering set IS covered (U+202A-202E, U+2066-2069); these survive both admin validation reject and the CSV/OG strip. Not exploitable (spreadsheets don't split CSV rows on U+2028; ALM is implicit-only). Defense-in-depth note. |
+
+Cycle-14 fixes re-verified individually correct (see "Cycle-14 Regression Check" below). Deferred carry-overs re-confirmed unchanged.
 
 ---
 
-## Findings
+## DBG-15-01 — NaN GPS coordinate aborts a valid photo upload (MEDIUM, High confidence)
 
-### R14-01 — `flushBufferedSharedGroupViewCounts` does not wait for an in-flight flush (MEDIUM)
+**File:** `apps/web/src/lib/process-image.ts:1446-1455` (`convertDMSToDD`, inside `extractExifForDb`)
 
-**File**: `apps/web/src/lib/data.ts:196-207`
-
-```typescript
-export async function flushBufferedSharedGroupViewCounts() {
-    if (viewCountFlushTimer) {
-        clearTimeout(viewCountFlushTimer);
-        viewCountFlushTimer = null;
-    }
-
-    if (viewCountBuffer.size === 0) {
-        return;   // ← returns here without checking isFlushing
-    }
-
-    await flushGroupViewCounts();
-}
+```ts
+const convertDMSToDD = (dms: number[], ref: string, maxDegrees: number) => {
+    if (!dms || dms.length < 3) return null;
+    if (dms[0] < 0 || dms[0] > maxDegrees || dms[1] < 0 || dms[1] >= 60 || dms[2] < 0 || dms[2] >= 60) return null;
+    let dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
+    if (ref === 'S' || ref === 'W') dd = dd * -1;
+    if (Math.abs(dd) > maxDegrees) return null;   // ← also false for NaN
+    return dd;                                     // ← returns NaN
+};
 ```
 
-**Root cause**: `flushGroupViewCounts()` (lines 94-101) performs an atomic buffer swap BEFORE writing to the DB:
+### Triggering input (concrete)
+An uploaded photo whose EXIF GPS IFD carries a **zero-denominator rational** in any DMS component, e.g.:
+- `GPSLatitude = [0/0, 30/1, 0/1]` (a single corrupt degree rational), or
+- `GPSLatitude = [0/0, 0/0, 0/0]` (a full placeholder GPS IFD — some cameras/phones write a zeroed GPS IFD stub when there is no satellite fix).
 
-```typescript
-isFlushing = true;
-const batch = viewCountBuffer;
-viewCountBuffer = new Map();   // ← buffer is now empty; DB writes begin for `batch`
+`exif-reader@2.0.3` computes RATIONAL tags by division (`index.js:167` `readUInt32(...) / readUInt32(...)`), so a `0/0` rational decodes to `0/0 = NaN` (verified: `Number.isFinite(0/0) === false`). The DMS array therefore contains a `NaN` element.
+
+This only matters when GPS is NOT stripped, which is the **default**: `strip_gps_on_upload` defaults to `'false'` (`gallery-config-shared.ts:96`). When the toggle is on, `images.ts:316-317` / `lr/upload/route.ts:317-318` null the coordinates and the bug is masked.
+
+### Why the current guard does not catch it
+The only finite-validation is the range comparison. Every comparison against `NaN` is `false`:
+- `NaN < 0` → false, `NaN > 90` → false (degree check passes)
+- the valid minute/second elements pass their own checks
+- `dd = NaN + 30/60 + 0 = NaN`
+- `Math.abs(NaN) > 90` → false (final guard passes)
+
+So `convertDMSToDD` **returns `NaN`** instead of `null`. (`Infinity` from an `x/0` rational IS caught, because `Infinity > maxDegrees` is true — only the `0/0 → NaN` path slips through.)
+
+### Failure (verified end-to-end)
+1. `latitude`/`longitude` (`process-image.ts:1473-1474`) = `NaN`, returned from `extractExifForDb`.
+2. Spread into `insertValues` (`images.ts:358`, `lr/upload/route.ts:366`) → `db.insert(images).values({ …, latitude: NaN, … })`.
+3. Drizzle's mysql2 driver uses the **text protocol** (`drizzle-orm/mysql2/session.cjs:74,100,113` → `client.query(rawQuery, params)`), and mysql2@3.22.5 serializes `NaN` to a **bare token** (verified: `conn.format('INSERT INTO t VALUES (?)', [NaN]) === "INSERT INTO t VALUES (NaN)"`).
+4. The emitted SQL is `INSERT INTO images (…, latitude, …) VALUES (…, NaN, …)`. MySQL parses bare `NaN` as an identifier → **`ER_BAD_FIELD_ERROR: Unknown column 'NaN' in 'field list'`** — the INSERT throws.
+5. The per-file `try/catch` (`images.ts:481-498`, and the LR route's equivalent) logs the error, deletes the saved original, and pushes the file to `failedFiles`.
+
+**Net effect:** a perfectly valid, fully-decodable photo is **silently rejected at upload** with no actionable reason surfaced to the admin — purely because of corrupt/placeholder GPS metadata that should have been coerced to `NULL`. The `latitude`/`longitude` columns are `double` (`schema.ts:43-44`), so the intended representation of "unknown coordinate" is `NULL`, exactly what every sibling numeric field already does.
+
+### Why this is a clean, isolated gap
+Every other numeric EXIF field in `extractExifForDb` is finite-guarded:
+- `iso` / `f_number` / `focal_length` → `cleanNumber` (`process-image.ts:1423-1428`) which returns `null` on `!Number.isFinite(n)`.
+- `exposure_time` → `normalizeExposureTime`, which even has an explicit anti-`NaN`/`Infinity` array guard (line 1407, "C8R-C8-02: guard against NaN/Infinity … to prevent nonsensical strings like `NaN/1`").
+- `exposure_compensation` / `flash` → explicit `Number.isFinite` checks (lines 1508, 1526).
+
+Only `latitude`/`longitude` (which bypass `cleanNumber` and go through `convertDMSToDD`) lack the guard. The exact same defensive thinking that produced C8R-C8-02 was simply not applied to the GPS conversion. This is the same class as the cycle-14 bavail-mock NaN bug (`undefined * 1024 = NaN`, `NaN < x = false`) — a `NaN` silently surviving relational comparisons.
+
+### Reproduction
+1. Set `strip_gps_on_upload = false` (default).
+2. Upload a JPEG/HEIF whose `GPSLatitude` or `GPSLongitude` degree rational is `0/0` (any zero-denominator component). A minimal repro can be constructed by patching an EXIF GPS IFD's degree numerator+denominator to `0,0`.
+3. Observe: the upload lands in the "failed" bucket; server log shows `Failed to process file …: Error: Unknown column 'NaN' in 'field list'`.
+
+### Fix (one line; mirror `cleanNumber`)
+Add a finite check before the final return (and/or up front on the components):
+
+```ts
+const convertDMSToDD = (dms: number[], ref: string, maxDegrees: number) => {
+    if (!dms || dms.length < 3) return null;
+    if (![dms[0], dms[1], dms[2]].every(Number.isFinite)) return null;   // ← NEW
+    if (dms[0] < 0 || dms[0] > maxDegrees || dms[1] < 0 || dms[1] >= 60 || dms[2] < 0 || dms[2] >= 60) return null;
+    let dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
+    if (ref === 'S' || ref === 'W') dd = dd * -1;
+    if (!Number.isFinite(dd) || Math.abs(dd) > maxDegrees) return null;
+    return dd;
+};
 ```
 
-When SIGTERM fires while `isFlushing = true`, the sequence is:
-1. `flushGroupViewCounts` sets `isFlushing = true`, swaps `viewCountBuffer` to an empty new Map, begins DB writes for the old batch.
-2. `gracefulShutdown` (instrumentation.ts) calls `flushBufferedSharedGroupViewCounts()`.
-3. `viewCountBuffer.size === 0` is true (the new empty Map) → early return immediately.
-4. `Promise.all([shutdownImageProcessingQueue(), flushBufferedSharedGroupViewCounts()])` resolves with `completed = true`.
-5. `process.exit(0)` is called — the in-flight `flushGroupViewCounts` DB writes are killed mid-execution.
+A regression test belongs in `__tests__/process-image-metadata.test.ts`: feed `extractExifForDb({ gps: { GPSLatitude: [NaN, 30, 0], GPSLatitudeRef: 'N', … } })` and assert `latitude === null` (today it is `NaN`). The existing GPS tests only exercise valid rationals (`37/1 30/1 15/1`), so the gate is currently blind to this.
 
-**Trigger**: SIGTERM received during the ~5–50 ms window while `isFlushing = true` (i.e., after the atomic swap but before `isFlushing` is reset to false in the finally block at line 141). This window is short per event but will occur in production across enough deployments.
+### Verification
+`Number.isFinite(0/0) === false`; `NaN < 0 === false`, `NaN > 90 === false`, `Math.abs(NaN) > 90 === false` (run). `mysql2.format('… VALUES (?)', [NaN]) === "… VALUES (NaN)"` (run). drizzle `client.query` text-protocol path confirmed in `session.cjs`. `strip_gps_on_upload` default `'false'` confirmed.
 
-**Impact**: View counts from the swapped batch that were being written to the DB are lost. This is best-effort-by-design per CLAUDE.md ("view_count is best-effort approximate analytics…do not treat it as billing/audit-grade state"), so data loss is acceptable per spec. However the SIGTERM path was specifically hardened in cycles 11-13 to drain in-flight state; not waiting for an in-progress flush is inconsistent with that hardening intent.
-
-**Fix** — expose the in-flight flush promise at module scope (minimal diff):
-
-```typescript
-// NEW: track the in-flight flush so shutdown can await it
-let currentFlushPromise: Promise<void> | null = null;
-
-async function flushGroupViewCounts() {
-    viewCountFlushTimer = null;
-    if (isFlushing) { ... return; }
-    isFlushing = true;
-    const batch = viewCountBuffer;
-    viewCountBuffer = new Map();
-
-    // wrap the body in a tracked promise
-    const p = (async () => {
-        try { /* existing chunk-write loop unchanged */ }
-        finally {
-            isFlushing = false;
-            currentFlushPromise = null;
-            /* existing timer re-arm and eviction code unchanged */
-        }
-    })();
-    currentFlushPromise = p;
-    await p;
-}
-
-export async function flushBufferedSharedGroupViewCounts() {
-    if (viewCountFlushTimer) {
-        clearTimeout(viewCountFlushTimer);
-        viewCountFlushTimer = null;
-    }
-
-    // Wait for any in-flight flush to complete before inspecting the buffer.
-    if (currentFlushPromise) {
-        await currentFlushPromise;
-    }
-
-    if (viewCountBuffer.size === 0) {
-        return;
-    }
-
-    await flushGroupViewCounts();
-}
-```
-
-**Verification**: mock the DB chunk-write to sleep 500 ms; send SIGTERM mid-sleep; confirm the shutdown log shows the sentinel fires only AFTER the mock write returns.
-
-**Similar pattern**: `shutdownImageProcessingQueue` in queue-shutdown.ts correctly drains via `queue.onIdle()` before returning — same pattern should apply here.
+**Similar issues:** both ingest paths share `extractExifForDb` (browser `app/actions/images.ts:312`; Lightroom `app/api/admin/lr/upload/route.ts:315`), so the single fix covers both. The backfill path does NOT re-extract EXIF, so it is unaffected.
 
 ---
 
-### R14-02 — ICC extractor `mluc` bounds guard off by 4 bytes (LOW)
+## DBG-15-02 — 64-bit ISOBMFF box size missing MAX_SAFE_INTEGER guard (INFO)
 
-**File**: `apps/web/src/lib/icc-extractor.ts` (~line 95, `mluc` branch)
+**Files:** `lib/color-detection.ts:249`, `lib/gain-map-detection.ts:72`
 
-**Root cause**: The outer guard before `mluc` processing is:
-```typescript
-if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
-```
-Then inside the `mluc` branch:
-```typescript
-const numRecords = Math.min(icc.readUInt32BE(dataOffset + 8), 100);  // reads bytes [+8,+12) — within guard ✓
-const recordSize = icc.readUInt32BE(dataOffset + 12);                 // reads bytes [+12,+16) — NOT within guard ✗
+```ts
+size = Number(buffer.readBigUInt64BE(pos + 8));   // no `big > Number.MAX_SAFE_INTEGER` guard
 ```
 
-`readUInt32BE(dataOffset + 12)` needs `dataOffset + 16 <= iccLen`. The guard only ensures `dataOffset + 12 <= iccLen` (via `dataOffset + dataSize <= iccLen` + `dataSize >= 12`). With a pathologically small `mluc` tag where `dataSize = 12` and `iccLen = dataOffset + 12`, Node.js throws `RangeError: The value of "offset" is out of range`.
-
-**Trigger**: Malformed ICC profile where the `mluc` tag's declared `dataSize = 12`. No valid `mluc` tag has fewer than 16 bytes (header + reserved + numRecords + recordSize). Only adversarially crafted or severely corrupted ICC data triggers this.
-
-**Impact**: The outer `try { ... } catch { /* ICC parsing is best-effort */ }` catches the `RangeError` and returns `null` for the profile name. No crash, no data corruption, no security impact — correct best-effort fallback.
-
-**Fix** (one character change):
-```typescript
-// Before:
-if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
-// After:
-if (dataOffset + 12 > iccLen || dataSize < 16 || dataOffset + dataSize > iccLen) break;
-```
-
-The `desc` path only reads up to `dataOffset + 12` so is unaffected by this guard tightening.
+`gps-exif-strip.ts:395` and the iloc `readSized` (`gps-exif-strip.ts:471-473`) both guard `big > BigInt(Number.MAX_SAFE_INTEGER)` before `Number(...)`; these two walkers do not. **No bug today** — a 64-bit size large enough to lose precision is necessarily `> buffer.length` (the header read is capped at 1 MB), so the immediate `if (size < headerSize || pos + size > buffer.length) break;` rejects it. Flagged only as a defensive-consistency gap (the repo's documented style prefers an explicit bound over relying on a downstream check). No action required unless aligning the four walkers.
 
 ---
 
-## Cycle-13 Commit Verification
+## DBG-15-03 — Unicode sanitizer omits U+2028/U+2029/U+061C (INFO)
 
-All five main cycle-13 commits verified correct:
+**File:** `lib/validation.ts:58` (`UNICODE_FORMAT_CHARS`), consumed by CSV (`csv-escape.ts`), OG (`og-sanitize.ts`), and every admin-string validator.
+
+The set covers the canonical Trojan-Source reordering controls (U+202A-202E, U+2066-2069) and the zero-width/invisible block (U+200B-200F, U+2060, U+FEFF, U+180E, U+FFF9-FFFB), but NOT U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, or U+061C ARABIC LETTER MARK. These survive both the admin-write rejection and the CSV/OG strip. **Not exploitable:** CSV row-splitting is CR/LF only (the `[\r\n]+` collapse + quote-wrap already neutralize injection, and spreadsheets do not split rows on U+2028); ALM is an implicit bidi control that does not enable the explicit-override reordering attack. Recorded as a defense-in-depth completeness note for whenever the character set is next revised.
+
+---
+
+## Cycle-14 Regression Check (the brief's "regressions introduced by recent fixes")
+
+All ten cycle-14 commits (`712def6f`…`2f886351`) audited; none introduced a regression.
 
 | Commit | Change | Verdict |
 |--------|--------|---------|
-| `7d1b3727` | `exec node server.js` in Dockerfile CMD | Correct — PID-1 signal delivery fixed |
-| `552df92c` | `stats.bavail` instead of `stats.bfree` | Correct — available-to-unprivileged-user disk check |
-| `f70d6579` | `getPasswordChangeRateLimitEntry` returns `{...entry}` copy | Correct — shallow-copy contract restored; matches `getLoginRateLimitEntry` and `getAccountLoginRateLimitEntry` |
-| `8613e36f` | `hasColorDetails` and `transfer_function` gated on `isAdmin` | Correct — admin-only fields no longer leak to public color-details surface |
-| `85f580ea` | Feed query uses `null` not `adminUsers.username` | Correct — `uploaded_by` PII removed from public Atom feed |
+| `712def6f` | `ENV NEXT_MANUAL_SIG_HANDLE=true` (Dockerfile:103) | Correct. Next's competing `start-server.js` SIGTERM handler is now skipped; `instrumentation.ts` `gracefulShutdown` is the sole owner and ends with `process.exit(exitCode)` (0 clean / 1 truncated) — deterministic. SIGINT path symmetric; double-signal guarded by `shutdownInProgress`. |
+| `b04bb98d` | LR-upload `bfree`→`bavail` (`lr/upload/route.ts:185`) | Correct. Now mirrors `images.ts:211`. Both disk pre-checks consistent. |
+| `ff69b2ef` | bavail regression-gate repair + below-threshold negative test | Correct (the broken `undefined * 1024 = NaN` mock is now real). |
+| `51497c4b` | `currentFlushPromise` await before shutdown buffer check (`data.ts:70,101-104,205-206,222-230`) | **Correct, and I specifically re-audited the microtask ordering.** The drain publishes `currentFlushPromise` before the swap; the finally re-arms a timer (≥ `BASE_FLUSH_INTERVAL_MS` = 5000 ms, never 0 — `getNextFlushInterval`) THEN nulls the promise + `resolveDrain()`; the shutdown flush awaits, then cancels the re-armed timer (lines 227-230) and drains any post-swap increments. The re-armed timer cannot fire before the awaiting continuation (microtask precedes the ≥5 s macrotask). No truncation, no lost drain. |
+| `26069844` | lightbox-color-pip admin fields gated on `isAdmin` | Correct; mirrors `color-details-section.tsx`. |
+| `cf7f4330` | icc-extractor `mluc` `dataSize < 16` guard (`icc-extractor.ts:95`) | Correct, and localized to the `mluc` branch (the shared outer `< 12` guard is untouched, so small valid `desc` profiles still parse). The read at `dataOffset+12` now has its 4 bytes guaranteed. |
+| `58d7e83d`,`c6e98915`,`750833b0`,`2f886351` | test/a11y/SW-stamp | Non-runtime; no behavior change. |
 
 ---
 
-## Deferred Carry-Overs (confirmed, no change)
+## Areas inspected — NO new issues (hardened)
 
-**TRC-13-04 — `decimalToRational` subnormal** (`process-image.ts:1414-1421`, LOW):
-`val = 5e-324` → `Math.round(1/val) = Infinity` → produces `"1/Infinity"`. Confirmed unreachable: real EXIF exposure times are always in the range `[1/32000 s, 30 s]`, never near `Number.MIN_VALUE`. No fix needed.
-
-**TRC-13-05 — `BoundedMap.entries()` raw iterator** (`bounded-map.ts:114-117`, LOW):
-Returns the Map's live iterator without a snapshot copy. Confirmed zero production callers of `entries()` across all of `src/` and `scripts/`. The safe alternative `windowedEntries()` (lines 119-125) is used exclusively in the one call site that needs iteration. No fix needed until a new `entries()` caller is added.
+- **`gps-exif-strip.ts`** — JPEG/TIFF/ISOBMFF/WebP byte surgery: every walker is bounds-checked; the HEIF Exif extent end (`start + 4 + (length - 4)` = `start + length`) is correct; the `tiffStart += 6` "Exif\0\0" bump cannot read OOB (a pathological overshoot lands in the `tiffEnd - tiffStart < 8 → null` guard); the post-EOI-trailer rejection, ExtendedXMP reconstruction, and TIFF GPS-IFD zeroing are all sound. WebP padding `next <= offset` is dead-but-harmless.
+- **`icc-extractor.ts`** — `mluc` record walk bounds (`recOffset+12`, `strEnd > dataOffset+dataSize`) correct; odd `recLen` UTF-16BE decode is graceful (TextDecoder, no throw); outer `try/catch` is the correct best-effort fallback.
+- **`icc-chromaticity.ts`** — `invert3x3` guards `|det| < 1e-12` and `Number.isFinite(det)`; `xyzToXy` guards `|sum| < 1e-9`; `readS15Fixed16`/`readXyzTag`/`readChadMatrix` bounds-check every offset; tag-table walk capped at 100 tags / 4 KB.
+- **`color-detection.ts`** — NCLX `colr` walker `limit = min(end, offset+1MB, buffer.length)`, `size < headerSize || pos+size > buffer.length` break, FullBox `meta` content-offset handling all correct.
+- **`gain-map-detection.ts`** — `iinf`/`iref`/`infe` parsing bounds-checked; `readNullTerminatedAscii` clamps to buffer; refCount loop bounded (1024); heuristics 1+2 correct.
+- **`process-image.ts`** — wide-gamut downscale: `WIDE_GAMUT_MAX_SOURCE_PIXELS` is validated to `[10M,200M]` (config) so the `?? 50_000_000` zero-coercion path is unreachable; `Math.sqrt(cap/basePixels)` + `Math.max(1, round(...))` safe; 10-bit AVIF `base.clone()` fallback correct (explicit `bitdepth:8`, idempotent re-apply of toColorspace/withIccProfile); atomic base-rename fallback chain sound. `decimalToRational` subnormal is the known DEFERRED carry-over (real exposure times never approach `Number.MIN_VALUE`).
+- **`data.ts` view-count buffer** — atomic Map swap, chunked drain, retry-count cap (`MAX_VIEW_COUNT_RETRY_SIZE`), FIFO buffer-cap enforcement, backoff (≥5 s, capped 5 min) all correct.
+- **`bounded-map.ts`** — `enforceHardCap` on `set`, collect-then-delete `prune`, shallow-copy `get`. Sound. (`entries()` raw-iterator is the known DEFERRED zero-caller carry-over.)
+- **`view-retention.ts` / `audit.ts`** — both have the negative/non-finite guard (`Number.isFinite && > 0` → else default), chunked DELETE, iteration cap. No future-cutoff regression.
+- **`exif-datetime.ts` / `parseExifDateTime`** — calendar validation via `Date.UTC` round-trip rejects Feb-30 etc.; timezone handled by storing camera-local components verbatim and rendering with `timeZone: 'UTC'`. No off-by-TZ.
+- **`csv-escape.ts` / `og-sanitize.ts`** — C0/C1 strip, derived global UNICODE regex (no shared lastIndex), formula-prefix guard tolerant of leading whitespace. (See DBG-15-03 for the U+2028/2029 completeness note.)
+- **`analytics.ts`** — `extractTldPlusOne` strips all trailing dots; `sanitizeReferrerHost` rejects non-http(s), private hosts (IPv6-bracket-aware), length-capped. URL parsing in try/catch.
+- **`smart-collections.ts`** — `isScalarValue` (`Number.isFinite`) enforcement, depth/IN-count caps, LIKE escaping, parameterized binding throughout. `feed.xml` reduces are `entries.length > 0`-guarded; all `JSON.parse` sites are try/caught.
+- **`instrumentation.ts`** — graceful shutdown sole-owner correctness confirmed (see cycle-14 table).
+- **`image-queue.ts`** — claim/release, FIFO map pruning, permanently-failed cap, runtime-shape validation of the global state all sound. (Bootstrap re-enqueue is the known DEFERRED design-tradeoff carry-over.)
 
 ---
 
-## Areas Inspected (no new issues found)
+## Deferred carry-overs — re-confirmed, no change
 
-- `lib/queue-shutdown.ts` — `drainProcessingQueueForShutdown` correctly clears `gcInterval` and `bootstrapRetryTimer` before `queue.onIdle()` drain. No resource leak.
-- `lib/icc-chromaticity.ts` — `chad` matrix inversion has `|det| < 1e-12` guard, `Number.isFinite(det)` check, `invert3x3` returns null on singular matrix; `xyzToXy` guards `|sum| < 1e-9`. All bounds correct.
-- `lib/gain-map-detection.ts` — ISOBMFF walker bounded at MAX_DEPTH=5 / MAX_SCAN_BYTES=1MB; `Number(readBigUInt64BE)` is safe for buffers well under `Number.MAX_SAFE_INTEGER`; `readBoxHeader` handles `size = 0` and extended 64-bit sizes correctly.
-- `lib/color-detection.ts` — NCLX `colr` box walker: `limit = Math.min(end, offset + MAX_SCAN_BYTES, buffer.length)` correct; 64-bit extended-size `Number(BigInt(...))` conversion is safe for practical 1 MB scan windows.
-- `lib/auth-rate-limit.ts` — All three `get*RateLimitEntry` functions return `{...entry}` shallow copies; rollback decrements (`count - 1` then delete at 0) are correct; DB-backed `decrementRateLimit` called consistently.
-- `lib/rate-limit.ts` — `preIncrementOgAttempt`, `rollbackOgAttempt`, `getClientIp` all correct.
-- `lib/csv-escape.ts` — formula-injection prefix, C0/C1 strip, bidi/ZW strip, interlinear-anchor strip all correct and symmetrical with the validation layer.
-- `app/actions/tags.ts` — `getAdminTags` has `@action-origin-exempt: read-only admin getter` comment (line 18); all mutating exports use `requireSameOriginAdmin()`.
-- `app/actions/admin-backfill.ts` — `triggerBackfill` and `getBackfillStatus` both gate on `isAdmin()` then `requireSameOriginAdmin()`; mutex status correctly surfaces `lastError`.
-- `app/actions/public.ts` — `preIncrementLoadMoreAttempt` and `checkLoadMoreRateLimit` cover public load-more mutations; analytics read actions carry `@action-origin-exempt` comments.
-- `scripts/migrate.js` — `getAllJournalMigrations` SHA-256 hash check, `reconcileLegacySchema` idempotent CREATE/ALTER guards, `baselineAllJournalMigrations` INSERT IGNORE pattern, `runMigrations` post-condition assertion that throws on any missing hash. No silent-skip regression and no new schema columns missing from `reconcileLegacySchema`.
+- `decimalToRational` subnormal `"1/Infinity"` (`process-image.ts:1414-1421`) — unreachable with real EXIF exposure times.
+- `BoundedMap.entries()` raw iterator (`bounded-map.ts:115-117`) — zero production callers.
+- admin-token length-timing (`admin-tokens.ts`) — pre-hash length compare; deferred.
+- tracer bootstrap re-enqueue (`image-queue.ts:687`) — bounded (≤3/restart), removing the path disables legitimate transient-failure recovery; design decision.
 
 ---
 
 ## Summary
 
-**New confirmed findings**: 2
-- R14-01 (MEDIUM): `data.ts:196-207` — `flushBufferedSharedGroupViewCounts` early-return on empty buffer misses in-flight DB writes when `isFlushing = true`. View counts from the swapped batch are killed on SIGTERM. Fix: expose `currentFlushPromise` and await it before the size check.
-- R14-02 (LOW): `icc-extractor.ts:~95` — `mluc` guard is `dataSize < 12` but should be `dataSize < 16`; the read at `dataOffset+12` needs 4 bytes beyond offset 12. Caught by outer try/catch; no security or correctness impact.
+**New confirmed findings: 1 (MEDIUM) + 2 (INFO).**
+- **DBG-15-01 (MEDIUM, High):** `convertDMSToDD` (`process-image.ts:1446-1455`) lets a `0/0` GPS rational produce `NaN` (range guard uses NaN-blind `<`/`>` comparisons); the `NaN` reaches `db.insert(images)`, mysql2 text-protocol emits a bare `NaN` token, MySQL throws `Unknown column 'NaN'`, and the valid photo upload is rejected. Default config (`strip_gps_on_upload=false`) and both ingest paths are affected. Fix: one `Number.isFinite` guard mirroring the sibling `cleanNumber`. Verified end-to-end (exif-reader division, NaN comparison semantics, mysql2 serialization, drizzle text protocol, default config).
+- **DBG-15-02 (INFO):** two ISOBMFF walkers omit the MAX_SAFE_INTEGER guard the other two apply — harmless today.
+- **DBG-15-03 (INFO):** Unicode sanitizer omits U+2028/U+2029/U+061C — non-exploitable defense-in-depth gap.
 
-**Cycle-13 regressions**: None detected. All 5 commits verified correct.
-**Deferred carry-overs**: 2 confirmed low/theoretical — no change in disposition.
-**Build gates**: Not re-run (read-only investigation); all were GREEN at HEAD 80145992.
+**Cycle-14 regressions:** none. All ten commits verified correct; the `currentFlushPromise` microtask ordering specifically re-audited.
+**Build gates:** GREEN at baseline (not re-run — read-only investigation).

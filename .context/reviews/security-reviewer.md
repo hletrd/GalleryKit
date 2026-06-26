@@ -1,39 +1,47 @@
-# Security Review — GalleryKit Cycle 14 (R14C14)
+# Security Review — GalleryKit Cycle 15 (R15C15)
 
-**HEAD:** 39cfa889 · **Agent:** security-reviewer (opus) · **Risk level: LOW** (mature, heavily-hardened; no exploitable defect this cycle).
+**HEAD:** 2f886351 · **Agent:** security-reviewer (opus) · **Risk level: LOW** (mature, heavily-hardened; no exploitable defect this cycle).
+
+**One-line summary:** No new exploitable vulnerability; the cycle-13/14 `isAdmin` defense-in-depth sweep on the color-audit components is incomplete — two admin-only fields (`icc_profile_name`, `bit_depth`) render without the `isAdmin` gate every sibling field carries (LOW, latent — the authoritative data-layer omission still protects them).
 
 ## Summary
 | Severity | Count | Notes |
 |----------|-------|-------|
-| CRITICAL | 0 | `npm audit --omit=dev` → 0 vulnerabilities |
+| CRITICAL | 0 | — |
 | HIGH | 0 | — |
 | MEDIUM | 0 | — |
-| LOW (new) | 1 | SEC-14-01 — `bfree`→`bavail` parity gap on the LR-upload sibling + co-located raw-fs-error path disclosure |
-| Confirmed-deferred | 3 | SEC-13-02, SEC-13-03, TRC-13-05 — all re-verified, zero production callers |
+| LOW (new) | 1 | SEC-15-01 — un-mirrored `isAdmin` gate on `icc_profile_name` + `bit_depth` color-audit rows |
+| Confirmed-deferred | 3 | SEC-14-02 (LR `err.message`), SEC-13-02 (`hasTrustedSameOriginWithOptions`), SEC-13-03 (GET rate-limit CI gate) |
+
+---
 
 ## LOW — new this cycle
 
-### SEC-14-01 — `bfree` vs `bavail` disk pre-check diverges between the two upload ingress paths — HIGH confidence
-**File:** `apps/web/src/app/api/admin/lr/upload/route.ts:180`
-**Category:** OWASP A09-adjacent (operational reliability) + minor A01 info-disclosure.
-The cycle-13 fix corrected the browser path (`images.ts:211` → `bavail`) but missed the structurally identical LR-route sibling. Exactly two `statfs` call sites exist and they now disagree. On a near-full disk (only root-reserved blocks remaining) the LR upload passes the 1 GiB pre-check then fails at `fs.writeFile` with `ENOSPC`.
-**Secondary (same branch):** `lr/upload/route.ts:272-273` returns the raw `err.message` to the client on the failure path, which for a Node fs error includes the absolute upload-directory path. Recipient is an authenticated admin/token holder, so impact is minimal, but it is inconsistent with the route's generic DB-error arm (line 409) and the browser path.
-**Fix:** line 180 `stats.bfree` → `stats.bavail`; optionally replace the raw `err.message` return with a generic message + server-side log.
+### SEC-15-01 — `isAdmin` defense-in-depth gate missing on two admin-only color-audit rows (un-mirrored cycle-13/14 sibling) — HIGH confidence, LOW severity, latent
+**Files:**
+- `color-details-section.tsx:233` (`const iccName = image.icc_profile_name || ''`), rendered at `:369` and `:383` guarded only by `{iccName && …}` — no `isAdmin &&`.
+- `color-details-section.tsx:469` source bit-depth row: `{image.bit_depth != null && image.bit_depth > 0 && (…)}` — no `isAdmin &&`.
+- `info-bottom-sheet.tsx:442` (`bit_depth` row, nullness-only).
+- `lightbox-color-pip.tsx:93-100` + `color-details-section.tsx:274,281` — copy-to-clipboard snapshot folds `iccProfileName`/`sourceBitDepth`/`matrix`/`hasGainMap` ungated.
 
-## Confirmed-deferred (re-verified, no change in exposure)
-- **SEC-13-02 / AGG-R12-09** — `hasTrustedSameOriginWithOptions` exported (`request-origin.ts:109`). Zero production callers; `hasTrustedSameOrigin` (fail-closed) is the only path used; `lint:action-origin` + `lint:api-auth` fence every mutating surface; test-locked. Deferred.
-- **SEC-13-03** — expensive public GET routes (`api/og/route.tsx`, `api/og/photo/[id]`, `api/search/similar/[id]`) rate-limited at runtime (`preIncrement*`) but `lint:public-route-rate-limit` only scans POST/PUT/PATCH/DELETE. Runtime posture correct; CI guard narrower. Deferred.
-- **TRC-13-05 / AGG-R12-10** — `BoundedMap.entries()` raw iterator (`bounded-map.ts:116`). Zero callers. Deferred.
+**Category:** OWASP A01 (Broken Access Control) / A04 (Insecure Design — inconsistent enforcement), adjacent.
+
+Both fields are admin-only (`data.ts` `PrivacySensitiveKeys` includes `bit_depth` + `icc_profile_name`; omitted from `publicSelectFields`, enforced by `_SensitiveKeysInPublic`). That data-layer omission is the authoritative control and is sound, so **not exploitable today**. The cycle-13/14 work added a SECOND defense-in-depth layer: gate every admin-only color field render on `isAdmin` explicitly so a future call site passing admin-fetched data with `isAdmin={false}` cannot leak. That sweep gated `transfer_function` (:402), `color_pipeline_decision` (:408), `matrix_coefficients` (:449), `color_space` (:458), `was_downscaled` (:479), `has_gain_map` (:582), `isHdr` badge (:558) — but missed `icc_profile_name` and `bit_depth`, the two older rows.
+
+**Latent scenario:** a future refactor rendering `<ColorDetailsSection>`/`<LightboxColorPip>` from an admin listing query in a context where `isAdmin` is independently `false` (e.g. a shared-link/embed surface) would surface the ICC profile name (custom-monitor profiles routinely embed person/date/serial strings) and source bit depth to anonymous viewers while the gated siblings stay hidden — a silent, field-specific leak. Blast radius minor (low-sensitivity workflow metadata).
+
+**Test note:** `color-details-section-delivered.test.ts:24` currently pins the un-gated bit-depth form — the fix must update that assertion and add an `isAdmin`-gating lock for both fields.
+
+**Fix:** `iccName = isAdmin ? (image.icc_profile_name || '') : ''`; gate the `:469`/`info-bottom-sheet.tsx:442` bit-depth rows on `isAdmin &&`; gate the clipboard snapshot keys. (2-agent agreement: critic Finding 2.)
+
+---
+
+## Confirmed-deferred (re-verified this cycle, no change in exposure)
+- **SEC-14-02 — LR-upload raw `err.message` disclosure** (`lr/upload/route.ts` post-`saveOriginalAndGetMetadata` catch). Recipient is an authenticated admin / valid PAT holder; ENOSPC pre-empted by the `bavail` 507 pre-check. Admin-only, minimal. Optional cleanup; deferred as cycle 14.
+- **SEC-13-02 — `hasTrustedSameOriginWithOptions` exported** (`request-origin.ts:109`). Zero production callers; test-locked. Deferred.
+- **SEC-13-03 — expensive public GET routes** (OG x2, semantic similar) rate-limited at runtime (charged-404) but `lint:public-route-rate-limit` scans only POST/PUT/PATCH/DELETE. Runtime posture correct; CI guard narrower. Deferred.
 
 ## Surfaces audited and sound (no findings)
-- **Authn/Authz:** Argon2id (m=64 MiB, t=3, p=4); module-init dummy-hash timing equalization; HMAC-SHA256 sessions with `timingSafeEqual` after length-guard; session fixation prevented (transactional insert-then-delete); full rotation on password change; `SESSION_SECRET` refuses DB fallback in production; `withAdminAuth` enforces same-origin + `isAdmin()` on both admin API routes; `requireSameOriginAdmin()` on every mutating action (grep-confirmed); both CI auth gates back this.
-- **Admin PATs:** 256-bit token, SHA-256 digest only stored, constant-time compare, fail-closed on missing table, expiry honored, per-user scope, edge-rate-limited.
-- **Injection:** all raw SQL uses Drizzle parameterized `sql` templates; smart-collections uses strict column allowlist + parameterized values + LIKE-wildcard escaping + IN-length caps.
-- **XSS/JSON-LD:** `safe-json-ld.ts` escapes `<`,`>`,U+2028/2029; nonce-based prod CSP, no `unsafe-inline`; EXIF strings pass `sanitizeForOg`; admin strings reject bidi/zero-width.
-- **SSRF/open-redirect:** OG routes pin internal fetch to `siteConfig.url` and fail closed (404) when unset; login/logout redirect only to fixed locale-validated `/admin*` paths.
-- **Path traversal/upload:** `db/download` uses filename validation + `path.resolve` containment + `lstat` symlink rejection + realpath TOCTOU close; uploads use `crypto.randomUUID` filenames; Sharp `limitInputPixels`; nginx 404s `/uploads/original/`.
-- **GPS/PII:** `gps-exif-strip.ts` bounds-checked fail-closed walkers; `publicSelectFields` derived-by-omission with compile-time `_SensitiveKeysInPublic` guard; Atom-feed username disclosure (SEC-13-01) confirmed fixed (`data.ts:798` literal NULL).
-- **Rate-limit/IP trust:** pre-increment-before-verify (TOCTOU-safe), DB-backed login bucket, nginx overwrites XFF/X-Real-IP with `$remote_addr`.
-- **Deps:** `npm audit --omit=dev` → 0 vulnerabilities.
+Argon2id (m=64 MiB,t=3,p=4) + dummy-hash timing equalization; HMAC-SHA256 sessions with `timingSafeEqual` + length guard; dual per-IP+per-account login rate limiting (pre-increment-before-Argon2 TOCTOU fix); `proxy.ts` admin guard; all 30+ mutating actions store `requireSameOriginAdmin()` + `isAdmin()` (grep-confirmed); Drizzle parameterization + smart-collections allowlist compiler (depth cap, scalar enforcement, LIKE escaping, MAX_IN_VALUES); `admin-tokens` SHA-256 + constant-time; CSV `escapeCsvField` (C0/C1 + bidi/zero-width + formula prefix); 8 `dangerouslySetInnerHTML` via `safeJsonLd`; nonce CSP no `unsafe-inline`; both OG routes fail-closed SSRF; `serve-upload.ts` + db/download path-traversal (allowlist + SAFE_SEGMENT + realpath + lstat); `publicSelectFields` derive-by-omission + compile guards; Atom feed constant-NULL author; admin PATs 256-bit/hashed/scoped; CLIP production gating + heal; mysqldump argv arrays + `MYSQL_PWD`; `getClientIp` XFF only under `TRUST_PROXY`; deps clean (no new deps cycles 13-14).
 
-**Bottom line:** No new exploitable vulnerability. One LOW availability/correctness parity gap (SEC-14-01). All deferred security items re-confirmed zero-caller/latent.
+**Bottom line:** No new exploitable vulnerability. One LOW latent defense-in-depth inconsistency (SEC-15-01) worth closing cheaply. All prior deferred items re-confirmed zero-caller/admin-only/latent.

@@ -1,29 +1,26 @@
-# Document-Specialist Review — Cycle 14 (R14C14)
+# Document-Specialist Review — Cycle 15 (R15C15)
 
-**Agent:** document-specialist (sonnet) · **HEAD:** 39cfa889 · **Verdict: CLAUDE.md is accurate.** 41/41 spot-checked claims MATCH; 0 WRONG, 0 DRIFT, 1 informational LOW observation.
+**Agent:** document-specialist (sonnet) · **HEAD:** 2f886351 · **Verdict:** Four stale line-citations + one wrong exact byte value in CLAUDE.md; all architectural invariants, counts, names, and defaults verified correct.
 
-## Cycle-13 fix verification (all FIXED)
-| Finding | Claim before C13 | Now | Code | Status |
-|---|---|---|---|---|
-| DOC-13-01 | LR header `X-Admin-Token` | `X-GalleryKit-Token` | `api-auth.ts:14` `TOKEN_HEADER='x-gallerykit-token'` | FIXED |
-| DOC-13-02 | "32-char hex" | `gk_<base64url(32)>` 46 chars, SHA-256 | `admin-tokens.ts:19-22,48-52` | FIXED |
-| SEC-13-01 | feed `adminUsers.username` | `author_name: sql\`NULL\`` | `data.ts:792-798` | FIXED |
-| DOC-13-03 | `process-image.ts:1131-1135` | `:1088-1089` + `:1157` | confirmed | FIXED |
-| DOC-13-04 | `settings-hash.ts:41-53` | `:42-54` | confirmed | FIXED |
-| DOC-13-05 | `FLUSH_CHUNK_SIZE = 20` | `= 5` | `data.ts:66,147` | FIXED |
+## FINDING 1 — Wrong byte value for `NEXT_UPLOAD_BODY_MAX_BYTES` default — LOW, High conf
+CLAUDE.md "Optional Operational Variables" table claims default `279620608`. Actual (`upload-limits.ts:1-6`): `max(200 MiB, 250 MiB) + 16 MiB = 266 MiB = 278921216` bytes — derived dynamically, not the stale literal. The "~266 MiB" descriptor in the same cell is correct.
+**Fix:** replace `279620608` with `278921216` (keep "~266 MiB").
 
-## Spot-check (41 claims, all MATCH) — highlights
-`IMAGE_PIPELINE_VERSION=7` (`gallery-config-shared.ts:21`); `NEXT_UPLOAD_BODY_MAX_BYTES=278921216` (`upload-limits.ts:6`); 9 `COLOR_IMPACTING_KEYS` (`settings-hash.ts:42-54`); `HASH_LENGTH=8`/`CACHE_TTL_MS=5000`; Argon2id m=65536/t=3/p=4; login 5/15-min (per-IP + per-account); `PASSWORD_CHANGE_MAX_ATTEMPTS=10`; `SEMANTIC_SCAN_LIMIT=2000`/`TOP_K_MAX=50`/`DEFAULT=20`; SW `HEAD_REVALIDATE_TIMEOUT_MS=300`, HTML 24h/50-entry, image 50 MB LRU; nginx 2M/64K/250M/216M/216M; `UPLOAD_MAX_TOTAL_BYTES=2 GiB`/`FILES=100`/`MAX_UPLOAD_FILE_BYTES=200 MiB`; pool 10/queue 20/keepalive; `OG_PHOTO_MAX_BYTES=1 MB`; `AUDIT_LOG_RETENTION_DAYS=90`; `VIEW_RETENTION_DAYS=395`; `BACKFILL_CONCURRENCY=2` (sidecar)/`ADMIN_BACKFILL_CONCURRENCY=1` (in-app, cap=2); `QUEUE_CONCURRENCY=1`; image_sizes default `[640,1536,2048,4096,5120,7680]`; `MAX_IMAGE_SIZE_COUNT=8`; quality webp90/avif85/jpeg90; `avif_effort=6`; `wide_gamut_max_source_pixels=50_000_000`; force_srgb/allow_hdr default false; `semantic_search_mode='disabled'`; `MAX_BLUR_DATA_URL_LENGTH=4096`; `stop_grace_period: 30s`; full NCLX primaries/transfer/matrix code maps; ISOBMFF walker depth 5 / 1 MB; `IMAGE_MAX_INPUT_PIXELS=268435456`/`_TOPIC=67108864`.
+## FINDING 2 — Stale line cite for fresh-decode-per-format comment — LOW, High conf
+CLAUDE.md `process-image.ts` row cites `process-image.ts:1131-1135` for the WI-14 fresh-decode-per-format note. Actual location is **line 1157**; lines 1131-1145 are the C4F-11 hard-link dedup block (unrelated). Cycle 13/14 growth shifted it down.
+**Fix:** `process-image.ts:1131-1135` → `process-image.ts:1157`.
 
-## LOW observation (informational, no action)
-`SHARP_CONCURRENCY` env-var row accurately describes behavior when SET (`Math.min(env, max(1,cpu-1))`) but omits that the DEFAULT (env absent) is the more conservative `Math.max(1, Math.floor((cpu-1)/3))` divide-by-3 fan-out cap (`process-image.ts:36-48`). The Default column lists "—" (honest, computed value), so this is incompleteness, not error. No correction required.
+## FINDING 3 — Off-by-one cite for ProPhoto → gamma18 path — LOW, High conf
+CLAUDE.md cites `lib/color-detection.ts:99-107` for the ProPhoto gamma18 path. The ProPhoto-specific return is at **line 108** (one line outside the range); line 100 returns gamma18 only for generic `'gamma 1.8'` strings.
+**Fix:** `lib/color-detection.ts:99-107` → `:99-108` (or `line 108`).
 
-## Summary
-| Category | Count |
-|---|---|
-| Claims spot-checked | 41 |
-| MATCH | 41 |
-| WRONG / DRIFT | 0 |
-| LOW informational | 1 |
+## FINDING 4 — settings-hash.ts cite off by one at both ends — LOW, cosmetic
+CLAUDE.md cites `settings-hash.ts:41-53` for `COLOR_IMPACTING_KEYS`. Actual array spans **lines 42-54** (declaration at 42, `] as const;` at 54). Count (9) and all key names correct.
+**Fix:** `settings-hash.ts:41-53` → `:42-54`.
 
-**Cycle-14 verdict:** CLAUDE.md is accurate; all cycle-13 doc fixes confirmed in place; no new mismatches across env-var defaults, line citations, pipeline constants, rate-limit params, NCLX tables, pool config, SW sizing, upload limits.
+## All other checkable claims VERIFIED correct
+`IMAGE_PIPELINE_VERSION=7`; 9 COLOR_IMPACTING_KEYS + names; 10 `cache()` fns (9 `*Cached` + `getSeoSettings`); NCLX primaries/transfer/matrix maps; 7 COLOR_PIPELINE_DECISIONS; 6 advisory-lock names; nginx body caps (2M/64K/250M/216M/216M/2M); Argon2id params (65536/3/4); backfill cap formula (=2); `POOL_CONNECTION_LIMIT=10`; `HEAD_REVALIDATE_TIMEOUT_MS=300`; `OG_PHOTO_MAX_BYTES=1MiB`; blur@16px; `MAX_BLUR_DATA_URL_LENGTH=4096`; `SEMANTIC_SCAN_LIMIT=2000`/`SEMANTIC_TOP_K_MAX=50`/default 20; `IMAGE_MAX_INPUT_PIXELS` defaults; upload limits; retention defaults; `TRUSTED_PROXY_HOPS=1`; backfill concurrency defaults; quality/chroma/effort defaults; `x-gk-admin-render:1`; Node `>=24`; Next `^16.2.9`, React `^19.2.5`, TS `^6`, Sharp `^0.34.5`; WIDE_GAMUT_PRIMARIES set.
+
+**AGENTS.md vs CLAUDE.md:** no contradictions.
+
+**Net:** 4 navigational line-cite drifts + 1 wrong byte literal, all LOW. On-disk doc is otherwise well-maintained.

@@ -1,38 +1,31 @@
-# Architect Review — Cycle 14 (R14C14)
+# Architect Review — GalleryKit Cycle 15 (HEAD 2f886351)
 
-**Agent:** architect (opus) · **HEAD:** 39cfa889 · **Angle:** coupling/layering, client/server boundary, config drift, dead-code wiring, missing seams that let a known bug class recur.
+**Agent:** architect (opus) · **Angle:** coupling/layering, client/server boundary, public/admin field-omission seam, config drift, invariant-guard completeness.
 
-**Bottom line:** Cycle-13's `exec`/SIGTERM fix is correctly in place and the shutdown drain is complete (only one module-level buffer exists and it is flushed). No CRITICAL/HIGH/MEDIUM new architectural risk. Two new cheap seam-completeness issues (LOW), one INFO config asymmetry, plus updated-priority notes on already-deferred structural debt.
+**One-line summary:** Structure is sound and well-hardened; no CRIT/HIGH/MED architectural debt beyond the already-deferred set. The only new signal is a cluster of **three latent guard-gaps** where a correctness invariant is enforced by an *enumeration* (boundary-test signal list, per-field-set privacy guards, a Dockerfile ENV) that a future change can silently step outside — same structural class as "fix one sibling, miss the next."
 
-## Severity table
-| ID | Sev | Type | File(s) | Confidence |
-|----|-----|------|---------|------------|
-| A14-01 | LOW | Missing seam / boundary completeness | `src/__tests__/client-server-only-boundary.test.ts:263-268`, `src/lib/password-hashing.ts:1`, `scripts/migrate-admin-auth.ts:10` | High |
-| A14-02 | LOW/INFO | Dead-code accidental-wiring guard | `src/lib/storage/*`, only importer `src/__tests__/storage-local.test.ts:10` | High |
-| A14-03 | INFO | Config asymmetry (defense-in-depth) | `apps/web/nginx/default.conf:163-165` | High |
+## ACTIONABLE-NOW
 
-## A14-01 — LOW — `argon2` native import invisible to the client→server-only boundary guard
-`src/lib/password-hashing.ts:1` does `import * as argon2 from 'argon2'`. The boundary test's native-module allowlist (`hasNativeModuleImport`, `client-server-only-boundary.test.ts:263-268`) recognizes only `sharp`/`@huggingface/transformers`; `mysql2` is handled separately. `argon2` is in neither list and not in `serverExternalPackages`. `password-hashing.ts` is in exactly the bucket the boundary test treats as server-only-equivalent (operator tsx scripts `migrate-admin-auth.ts:10` / `seed-admin.ts` import it, so it cannot carry `import 'server-only'`), yet its native-addon signal was never added.
-**Failure:** a future `'use client'` component value-importing `@/lib/password-hashing` (e.g. to reuse `PASSWORD_HASH_OPTIONS`) pulls native `argon2` into the browser bundle; the fast boundary test passes GREEN and the regression only surfaces as an opaque webpack native-binding error in full `next build`.
-**Fix (test-only, cheap):** add `argon2` to the `hasNativeModuleImport` alternation + a pin asserting `password-hashing.ts` is recognized server-only-equivalent (mirrors the `@/db`/`clip-model.ts` pins).
+### A15-01 — Client→server-only boundary test is blind to Next's server-runtime modules — HIGH conf, LOW sev (latent)
+**Module:** `__tests__/client-server-only-boundary.test.ts` (`reachesServerOnly`, `hasNativeModuleImport`, `hasServerOnlyDriverImport`). The test detects a server-only module in a `'use client'` closure by an enumerated denylist (`server-only`, `mysql2`, `sharp`, `@huggingface/transformers`, `argon2`) but does NOT recognize `next/headers`, `next/cache`, `next-intl/server` — yet importing any of those in a client bundle fails at build, exactly like `server-only`. Three real lib modules sit entirely outside the net: `lib/revalidation.ts:1` (`next/cache`), `lib/csp-nonce.ts:1` (`next/headers`), `lib/action-guards.ts:1-2` (`next/headers` + `next-intl/server`). A future `'use client'` value-import of any of these passes the boundary test GREEN and breaks only as an opaque `next build` error — the exact bug the test exists for. Latent (no client value-importer today). The argon2-added-in-cycle-14-because-missed history proves the enumeration is structurally incomplete.
+**Fix (cheap):** add a `hasNextServerRuntimeImport` clause matching `next/headers`, `next/cache`, `next-intl/server`; pin with a non-vacuous test (e.g. `revalidation.ts` is server-only-equivalent).
 
-## A14-02 — LOW/INFO — `lib/storage` quarantine relies on discipline, not an automated guard
-`src/lib/storage/{index,local,types}.ts` has zero production importers (only `storage-local.test.ts:10`). `index.ts` exports a working `getStorage()` returning `LocalStorageBackend`, so a future action doing `import { getStorage } from '@/lib/storage'` would compile and "work", silently establishing a second, unaudited write path parallel to `uploadImages`/`process-image` (diverging on path-traversal/symlink hardening, ETag/settings-hash invalidation, GPS-strip). CLAUDE.md quarantines it by prose only; nothing in CI fails.
-**Fix (cheap point-guard):** a fixture asserting no file outside `src/lib/storage/` and `src/__tests__/` statically imports `@/lib/storage` (re-use the AST-import-scan helpers from `client-server-only-boundary.test.ts`). Re-open/delete criterion: storage backend intentionally wired into the upload/serve pipeline. **This is an UPDATE to the deferred "lib/storage quarantine" item — add the cheap guard now, NOT the integration.**
+### A15-02 — `searchFields` is the one public image-row field-set with no compile-time privacy guard — HIGH conf, LOW sev
+**Module:** `data.ts:1481` (`searchFields`), wired to anonymous public `searchImagesAction` (`public.ts:294`). Every other image-row select set is guarded (`publicSelectFields`/`publicMapSelectFields` derive-by-omission + `Extract<…,PrivacySensitiveKeys> extends never` guards; `timelineSelectFields` likewise). `searchFields` is a hand-written literal with no guard. Clean today (no PII columns), but it's the kind of literal a "search by GPS / show ISO" feature would extend directly — a PII column landing there has zero compile/test signal.
+**Fix (cheap, ~3 lines):** add `type _SearchSensitive = Extract<keyof typeof searchFields, PrivacySensitiveKeys>;` + the `extends never` guard, mirroring the timeline guard.
 
-## A14-03 — INFO — nginx `/uploads/original/` 404 is non-locale-only
-`nginx/default.conf:163` `location ^~ /uploads/original/ { return 404; }` is a literal prefix; `/{locale}/uploads/original/...` falls through to `location /` and is proxied to Next. No leak: `serveUploadFile` rejects any `topLevelDir` not in `{jpeg,webp,avif}` (`serve-upload.ts:138-140`) + realpath containment. Recorded so the asymmetry isn't mistaken for a gap; optional one-liner adds the `(?:/[a-z]{2})?` locale prefix for edge symmetry.
+### A15-03 — Graceful-shutdown correctness hinges on a Dockerfile-only ENV with no guard — MEDIUM conf, LOW sev
+**Modules:** `Dockerfile:103` (`ENV NEXT_MANUAL_SIG_HANDLE=true`) ↔ `instrumentation.ts:72`. The cycle-14 fix lives entirely in one Dockerfile ENV line; the app cannot set it (Next reads it at boot before `register()`). The invariant "this must be set or graceful shutdown silently breaks" is invisible to code and untested. A future k8s/Helm manifest or non-Docker `next start` reintroduces the exact race just fixed.
+**Fix (cheap, borderline by-design):** a fixture test asserting `Dockerfile` contains `NEXT_MANUAL_SIG_HANDLE=true` (matches existing pin style: sw-template-contract, nginx body-size assertions).
 
-## Updated-priority notes on already-DEFERRED structural debt
-- **`lib/storage/*` quarantine:** promote to "add the A14-02 cheap import-guard now" (independent of the integration).
-- **Shutdown-hook registry:** urgency DOWNGRADE confirmed — `viewCountBuffer` (`data.ts:17`) is the only module-level durable-ish buffer and it IS flushed (`instrumentation.ts:35-39`). Other in-memory Maps are ephemeral rate/quota state, correctly not flushed. Registry remains a clarity refactor, not a correctness need. (NOTE: the cycle-14 R14-01 flush-race and C14-01 Next-handler findings are about the flush MECHANISM, not a missing sibling buffer.)
-- **`data.ts`/`processImageFormats`/`uploadImages` god-modules:** unchanged; repo defers by policy.
-- **Single-web-instance topology (BY DESIGN):** not re-litigated.
+## VERIFIED-CLEAN (checked this cycle)
+- COLOR_IMPACTING_KEYS complete (9 keys; `strip_gps_on_upload` correctly excluded — scrubs original only; non-byte settings excluded). `_ColorKeysAreSettingKeys` guard holds.
+- Public/admin field-omission seam airtight (3 compile-time guards + frozen-key runtime fixtures), except `searchFields` (A15-02).
+- Config layering clean + unidirectional (`gallery-config-shared` → `gallery-config` → `image-queue`; no back-edges).
+- Migration monotonicity holds (idx 18-23 strictly ascending, max `1782000000000`; a `Date.now()`-stamped entry advances).
+- Shutdown coordination: single registry, Next's competing handler neutralized, drain+flush in one bounded 15s `Promise.race`; `flushGroupViewCounts` is a self-contained module-local state machine — no new cross-module coupling.
 
-## Verified-CLEAN (probed this cycle)
-- Docker SIGTERM/`exec` correct post-cycle-13 (`Dockerfile:130`, `entrypoint.sh:39`); `stop_grace_period 30s` > 15 s shutdown sentinel.
-- Client/server boundary: only client imports of `@/lib/data` (`home-client.tsx:13`, `load-more.tsx:6`) are `import type` (erased); enforced by the AST closure-walk test (modulo A14-01).
-- `'use server'` grep hits in `csv-escape.ts`/`bulk-edit-types.ts` are comments only.
-- Cache-policy 3-way alignment; nginx body caps vs CLAUDE.md aligned; COLOR_IMPACTING_KEYS=9.
-- Removed paid-downloads (migration 0023): `reconcileLegacySchema` actively drops `entitlements` + `images.license_tier`, locked by tests. Exemplary.
-- Suppression hygiene: one well-commented geoip-lite dynamic-require `eslint-disable` only.
+## BY-DESIGN / DEFERRED (re-confirmed)
+God-modules (`data.ts` 1705 lines, `process-image.ts`, `uploadImages`); `lib/storage/` quarantine (now defended by cycle-14 `storage-quarantine.test.ts`); single-web-instance process-local state (advisory-lock-fenced where it matters); shutdown-hook registry consolidation; view-buffer extraction; per-process rate-limit buckets weakening under scale-out — all documented BY-DESIGN/deferred.
+
+**Net:** a mature, well-defended structure. The three actionable findings are all LOW-severity guard-hardening on invariants that are correct today but enforced by enumerations a future edit can step around — each fixable in a few lines, each matching an existing repo pattern.

@@ -1,181 +1,131 @@
-# Designer Review — Cycle 14
+# Designer Review — Cycle 15
 
 **Reviewer:** Designer (UI/UX + Accessibility)
 **Date:** 2026-06-27
-**Scope:** Static TSX/ARIA analysis of `apps/web/src/components/` and `apps/web/src/app/[locale]/` route UIs
-**Prior context read:** `.context/reviews/_aggregate.md` (cycle 13), `.context/plans/cycle-13-plan.md`
-**i18n parity check:** Python key-diff across `en.json` / `ko.json` — **0 keys missing in either file** (765 total each, all namespaces present in both)
+**Scope:** Static TSX/ARIA analysis of `apps/web/src/components/` and `apps/web/src/app/[locale]/` route UIs. Focus: WCAG 2.2, keyboard/focus management, reduced motion, icon semantics, `focus-visible` consistency, i18n parity, form UX.
 
 ---
 
-## Severity Summary
+## Findings
 
-| ID | File : Line | Severity | WCAG / Category | Status |
-|----|-------------|----------|-----------------|--------|
-| DES-14-01 | `tag-input.tsx:184` | LOW | 2.4.11 Focus Appearance | **NEW** |
-| DES-14-02 | `load-more.tsx:148` | LOW | 4.1.2 Name, Role, Value | **NEW** |
-| DES-14-03 | `photo-viewer.tsx:731`, `lightbox.tsx:671` | LOW (confidence: Medium) | 1.3.3 Sensory Characteristics | **NEW** |
-| DES-13-02 | `search.tsx:352` | MEDIUM | 4.1.2 Name, Role, Value | DEFERRED (still present) |
-| DES-13-03 | `color-details-section.tsx:332` | LOW | 2.3.3 Animation from Interactions | DEFERRED (still present) |
-| DES-13-04 | `nav-client.tsx:158` | LOW | 4.1.2 Name, Role, Value | DEFERRED (still present) |
-| DES-13-05 | `home-client.tsx:412` | LOW | 1.1.1 Non-text Content | DEFERRED (still present) |
-| DES-13-06 | `info-bottom-sheet.tsx` | LOW | 4.1.2 Name, Role, Value | DEFERRED (still present) |
+### HIGH — LightboxColorPip excluded from `controlVisibilityProps` (WCAG 4.1.2, 2.1.1)
 
-**CRIT/HIGH new findings: 0**
+**File:** `apps/web/src/components/lightbox.tsx` line 654
+
+`lightbox.tsx` defines `controlVisibilityProps` at line 368:
+
+```ts
+const controlVisibilityProps = controlsVisible
+  ? {}
+  : { tabIndex: -1, 'aria-hidden': true as const };
+```
+
+This is spread onto all five overlay interactive elements: close (~549), fullscreen (~569), slideshow (~593), prev (~616), next (~636). However `<LightboxColorPip>` at line 654 does **not** receive `...controlVisibilityProps`:
+
+```tsx
+<LightboxColorPip
+    image={image}
+    t={t}
+    open={colorPipOpen}
+    onToggle={() => setColorPipOpen(prev => !prev)}
+    imageSizes={imageSizes}
+    cycleModeRef={colorPipCycleModeRef}
+    isAdmin={isAdmin}
+    forceSrgbDerivatives={forceSrgbDerivatives}
+/>
+```
+
+`LightboxColorPip` renders interactive toggle and cycle buttons. When `controlsVisible` is `false` (controls faded to `opacity: 0` via the CSS transition on the overlay `div` at line 542), the pip's buttons retain their default `tabIndex` and have no `aria-hidden` on the subtree. A keyboard user Tabbing through the lightbox lands on invisible, unannounced controls. This is a real keyboard trap in the hidden state.
+
+**Fix:** Either pass `controlVisibilityProps` as a prop into `LightboxColorPip` and apply it to the outermost interactive element, or add a forwarded `inert` / `aria-hidden` + `tabIndex` guard to the pip's container div driven by the same `controlsVisible` value.
 
 ---
 
-## NEW Findings
+### MED — `focus:ring-2` on Dialog and Sheet close buttons affects all overlays (WCAG 2.4.7 consistency)
 
-### DES-14-01 — Remove-tag button: `focus:ring` instead of `focus-visible:ring`
+**Files:**
+- `apps/web/src/components/ui/dialog.tsx` line 82
+- `apps/web/src/components/ui/sheet.tsx` line 84
 
-**File:** `apps/web/src/components/tag-input.tsx:184`
+Both shared primitives style their close `<button>` elements with bare `focus:ring-2`:
 
-**Selector / className fragment:**
 ```
-focus:ring-2 focus:ring-ring focus:ring-offset-2
+focus:ring-ring ... focus:ring-2 focus:ring-offset-2 focus:outline-hidden
 ```
 
-**WCAG:** 2.4.11 Focus Appearance (AA, WCAG 2.2)
+Every other interactive element in the codebase uses `focus-visible:ring-2`. The bare `focus:` pseudo-class fires on **mouse click** as well as keyboard focus — clicking to dismiss any dialog or sheet produces a focus-ring flash before the overlay closes. This is visually inconsistent and unexpected for pointer users.
 
-**User-impact scenario:** Keyboard navigation is not impaired — the ring IS visible on keyboard focus. However, the ring also appears on mouse click, creating unexpected visual noise that makes the interaction feel unintentional. The rest of the codebase uses `focus-visible:ring-*` uniformly (lightbox-color-pip.tsx:196, color-details-section.tsx:330, upload-dropzone.tsx:413, etc.), so this is a style-consistency defect as well as a minor UX regression.
+Because these are shared primitives, this affects every overlay in the application: image edit dialog, bulk-delete confirm, tag/group share dialog, admin create/edit dialogs, database-backup sheet, and so on.
 
-**Fix:**
-```tsx
-// tag-input.tsx:184 — change:
-focus:ring-2 focus:ring-ring focus:ring-offset-2
-// to:
-focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
-```
-No new i18n keys needed.
-
-**Confidence:** High (reproducible pattern mismatch)
+**Fix:** In both files replace `focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-hidden` with `focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden`.
 
 ---
 
-### DES-14-02 — Load-more spinner icon not `aria-hidden`
+### LOW — `focus:ring-2` on two additional non-primitive elements
 
-**File:** `apps/web/src/components/load-more.tsx:148`
+**Files:**
+- `apps/web/src/components/upload-dropzone.tsx` line 370 — native `<select>` for topic assignment
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx` line 333 — alias delete `<button>`
 
-**Code:**
-```tsx
-{loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-{loading ? t('home.loadingMore') : t('home.loadMore')}
-```
+Both use `focus:ring-2 focus:ring-ring focus:ring-offset-2` without the `focus-visible:` qualifier, producing ring flashes on mouse click.
 
-**WCAG:** 4.1.2 Name, Role, Value (AA)
-
-**User-impact scenario:** When loading is in progress the Button text changes to the "Loading…" translation, which already announces the state to screen readers. The Lucide `<Loader2>` icon is purely decorative in this context — but without `aria-hidden="true"` some screen readers (JAWS, NVDA in browse mode) may pause on the unlabeled element, producing a brief blank announcement before the text. The sibling pattern at `search.tsx:377` already uses `role="status" aria-label={t('common.loading')}` on its spinner; at minimum `aria-hidden="true"` should be added here for consistency.
-
-**Fix:**
-```tsx
-// load-more.tsx:148 — add aria-hidden:
-{loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
-```
-No new i18n keys needed.
-
-**Confidence:** High (well-established AT behavior; pattern established in search.tsx)
+**Fix:** Replace `focus:ring-2 focus:ring-ring focus:ring-offset-2` with `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` in both elements.
 
 ---
 
-### DES-14-03 — Position counter live region announces "2 / 10" rather than descriptive text
-
-**File:** `apps/web/src/components/photo-viewer.tsx:731`, `apps/web/src/components/lightbox.tsx:671`
-
-**Code (photo-viewer):**
-```tsx
-<div
-  role="status"
-  aria-live="polite"
-  aria-label={t('aria.photoPosition', { current: currentIndex + 1, total: images.length })}
-  className="absolute bottom-2 left-1/2 ...">
-  {currentIndex + 1} / {images.length}
-</div>
-```
-
-**WCAG:** 1.3.3 Sensory Characteristics (AA)
-
-**User-impact scenario:** `aria-label` defines the accessible *name* of the live region (read on explicit virtual-cursor navigation). Live region *updates* are driven by text content changes — so when the user navigates photos the announcement is the inner text: `"2 / 10"`. VoiceOver reads this as "2 slash 10"; NVDA reads "2 / 10" without vocalising the slash, which is understandable but context-free. The fully descriptive `aria-label` ("Photo 2 of 10") is never heard as a live announcement.
-
-**Fix (preferred):** Replace the single text node with a sr-only span carrying the full translation and an `aria-hidden` span for the visual "2 / 10":
-```tsx
-<div role="status" aria-live="polite" className="absolute bottom-2 ...">
-  <span className="sr-only">
-    {t('aria.photoPosition', { current: currentIndex + 1, total: images.length })}
-  </span>
-  <span aria-hidden="true">{currentIndex + 1} / {images.length}</span>
-</div>
-```
-Apply the same pattern to `lightbox.tsx:671`. No new i18n keys needed — `aria.photoPosition` already exists in both `en.json` and `ko.json`.
-
-**Confidence:** Medium — "2 / 10" is contextually clear in a photo gallery; this is a precision/polish issue, not a hard blocker.
-
----
-
-## Confirmed-Deferred Findings
-
-All five items deferred from cycles 12–13 remain unchanged in the codebase. Recorded here for continuity; none re-opened.
-
-### DES-13-02 — Combobox `aria-expanded` tracks result count, not popup visibility
-
-**File:** `apps/web/src/components/search.tsx:352`
-**Code:** `aria-expanded={results.length > 0}` (on the combobox `<input>`)
-**Status:** Still present. The correct value must track whether the listbox popup is rendered, not whether it has content. A completed search with zero results should have `aria-expanded={false}` while the `aria-controls` target is absent. The `isOpen` state variable (line 307, on the surrounding dialog) is a different boolean; the combobox needs its own popup-visibility state. Deferred.
-
-### DES-13-03 — ChevronDown rotation not gated on `prefers-reduced-motion`
-
-**File:** `apps/web/src/components/color-details-section.tsx:332`
-**Code:** `` className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} ``
-**Status:** Still present. No `motion-reduce:transition-none` prefix. Minor animation; deferred.
-
-### DES-13-04 — Theme toggle: static `aria-label`, no `aria-pressed` for current state
-
-**File:** `apps/web/src/components/nav-client.tsx:158–164`
-**Code:** `aria-label={t('aria.toggleTheme')}` + `title={t(\`theme.${theme}\`)}`
-**Status:** `title` communicates the current theme for pointer users. Screen readers do not reliably announce `title` on buttons. A dynamic label ("Switch to dark mode", current state: light) or `aria-pressed` would correctly communicate state. Deferred pending new i18n keys for per-state labels.
-
-### DES-13-05 — P3 gamut badge `aria-hidden` without sr-only equivalent on masonry card
-
-**File:** `apps/web/src/components/home-client.tsx:412–413`
-**Code:** `<div className="gamut-p3-badge ..." aria-hidden="true">`
-**Status:** The P3 badge is visually present on wide-gamut photos but invisible to screen readers. Deferred pending sr-only text addition (requires new i18n key for badge accessible label).
-
-### DES-13-06 — Bottom sheet drag handle `aria-expanded` is binary for a 3-state component
+### LOW — No `aria-live` region for bottom sheet state transitions
 
 **File:** `apps/web/src/components/info-bottom-sheet.tsx`
-**Code:** `aria-expanded={sheetState === 'expanded'}` (drag handle button)
-**Status:** Sheet states are `'collapsed'`, `'peek'`, `'expanded'`. The "peek" state reads as `false`. Deferred pending design decision on intermediate-state representation (requires new i18n keys for per-state labels or an `aria-valuenow` pattern).
+
+The bottom sheet cycles between `collapsed`, `peek`, and `expanded`. Transitions are triggered by swipe gestures, drag handle taps, and Escape. Sighted users see the sheet animate. AT users do not get an announcement when the state changes — the content visible in the viewport changes substantially between peek (title, camera, date only) and expanded (full EXIF, histogram, download), but there is no live-region signal for this change.
+
+Focus correctly moves to `closeButtonRef` on open (via `FocusTrap initialFocus`), but nothing announces whether the sheet is currently collapsed, peeked, or expanded after a gesture.
+
+**Fix:** Add a visually-hidden `aria-live="polite"` region below the drag handle that announces the new state when `sheetState` changes. Example:
+
+```tsx
+<div aria-live="polite" className="sr-only">
+  {sheetState === 'expanded' ? t('aria.sheetExpanded')
+   : sheetState === 'peek' ? t('aria.sheetPeek')
+   : t('aria.sheetCollapsed')}
+</div>
+```
+
+Add keys `aria.sheetExpanded`, `aria.sheetPeek`, `aria.sheetCollapsed` to both `en.json` and `ko.json`.
 
 ---
 
-## Scope Completions — No Issues Found
+## Confirmed Non-Issues (investigated in cycle 15)
 
-The following areas were inspected and found clean:
+**Lucide React icon `aria-hidden` — handled automatically.** Lucide React v0.562.0 (pinned `^0.562.0`) injects `aria-hidden="true"` on every SVG wrapper when the icon has no children and no a11y props (`aria-*`, `role`, `title`):
 
-- **`lightbox.tsx`:** FocusTrap, `aria-modal`, `aria-hidden` on auto-hidden controls, `controlVisibilityProps` pattern, Ken Burns gated on `shouldReduceMotion`, play/pause `aria-pressed`, position counter `role="status"` structure — all correct.
-- **`search.tsx`:** FocusTrap, `role="combobox"`, `aria-controls` conditional on popup DOM presence, `aria-activedescendant`, `role="listbox"` / `role="option"`, `aria-live` status region — all correct except the deferred DES-13-02.
-- **`info-bottom-sheet.tsx`:** FocusTrap, `role="dialog" aria-modal`, close button `min-h-11 min-w-11`, download dropdown `min-h-11 py-2` — all correct except the deferred DES-13-06.
-- **`photo-viewer.tsx`:** AGG-R13-03 fix confirmed at line 575 (`sr-only md:not-sr-only`, `id="photo-viewer-shortcuts"` correctly in-tree on mobile and referenced by `aria-describedby` at line 557).
-- **`tag-input.tsx`:** ARIA combobox pattern (`role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls`, `aria-activedescendant`) correct. `min-h-11` on all option rows. DES-14-01 is the sole defect.
-- **`tag-filter.tsx`:** `role="group"` with `aria-label`, `aria-pressed` on all pills, `min-h-11 min-w-11` — correct.
-- **`image-manager.tsx`:** Checkbox labels `min-h-11 min-w-11`, action buttons `h-11 w-11`, processing overlay `role="status" aria-live` — correct.
-- **`bulk-edit-dialog.tsx`:** `SelectTrigger h-11`, `role="alert"` on validation error, `aria-label` on all form fields — correct.
-- **`upload-dropzone.tsx`:** Dropzone `role="button"`, `aria-disabled`, `role="progressbar"` with `aria-valuemin/max/now`, native select `h-11`, tags `role="group" aria-labelledby` — correct.
-- **`lightbox-color-pip.tsx`:** `aria-expanded`, tooltip trigger `min-h-11 min-w-11 focus-visible:*`, copy button `min-h-11 min-w-11 focus-visible:*` — correct.
-- **`color-details-section.tsx`:** `aria-expanded`, `aria-controls`, accordion trigger `min-h-[44px] focus-visible:*`, tooltip trigger `min-h-[44px] min-w-[44px] focus-visible:*`, HDR badge `role="img"` — correct except deferred DES-13-03.
-- **`on-this-day-widget.tsx`:** `<aside aria-label>`, photo links `min-h-[44px]` — correct.
-- **`home-client.tsx`:** Back-to-top `aria-hidden`/`tabIndex={-1}` when hidden, sr-only heading — correct except deferred DES-13-05.
-- **`admin-nav.tsx`:** `aria-current="page"`, `min-h-11` on all nav links — correct.
-- **`nav-client.tsx`:** `aria-label` on `<nav>`, `aria-expanded/controls` on mobile toggle, `aria-current` on active links — correct except deferred DES-13-04.
-- **`admin-user-manager.tsx`:** Contextual `aria-label` on delete button, `aria-invalid/describedby/role="alert"` on password error — correct.
-- **Admin route pages:** No sub-44px touch targets found; all `SelectTrigger` elements at `h-11`; `role="group" aria-label` on filter groups.
-- **i18n parity:** 765 keys in both `en.json` and `ko.json`; zero keys present in one file but absent from the other. `lrToken.*` namespace confirmed in both files.
+```js
+// lucide-react/dist/cjs/lucide-react.js
+...!children && !hasA11yProp(rest) && { "aria-hidden": "true" },
+```
+
+All plain icon usages in the codebase (e.g. `<X className="h-4 w-4" />`, `<Calendar className="w-3 h-3" />`, `<ChevronDown className="h-4 w-4" />`) satisfy both conditions. The explicit `aria-hidden="true"` in `wide-gamut-hint.tsx` line 205 is redundant but harmless. This is not a finding for this cycle.
+
+**i18n key parity — complete.** `en.json` and `ko.json` have identical key sets (verified programmatically). The ICU plural asymmetry (English `{count, plural, one {…} other {…}}`; Korean flat `{count}장`) is intentional per DOC-R5C3-07.
+
+**Tag input combobox ARIA — fully implemented.** `tag-input.tsx` correctly uses `role="combobox"`, `aria-expanded`, `aria-controls`, `aria-activedescendant`, `role="listbox"`, `role="option"`, and `aria-selected`. IME composition is guarded via `isImeComposingReactEvent`. Remove-tag buttons meet the 44 px touch target floor (`min-h-11 min-w-11`).
+
+**Tag filter chips — correct pattern.** `role="group" aria-label` on the container; `aria-pressed` on each chip button.
+
+**Reduced-motion support — consistent.** `lightbox.tsx` reads `matchMedia('(prefers-reduced-motion: reduce)')` with a change listener. `photo-viewer.tsx` uses Framer Motion `useReducedMotion()`. `home-client.tsx` checks the MQ before scroll restoration. `image-zoom.tsx` checks before pan animation.
+
+**Focus management on lightbox/dialog — correct.** `FocusTrap` (lazy-focus-trap) wraps lightbox, info-bottom-sheet, and admin dialogs. `photo-viewer.tsx` tracks `previouslyFocusedElement` via ref and restores focus on lightbox close. Escape key handlers are wired in both lightbox and bottom sheet.
+
+**Photo navigation live region — correct.** `photo-navigation.tsx` has an `aria-live="polite"` region announcing navigation status; prev/next buttons have `aria-label`.
+
+**Similar photos disclosure — correct.** `similar-photos.tsx` uses `aria-expanded` + `aria-controls`, and has a `role="status" aria-live="polite"` loading state region.
 
 ---
 
-## Notes for Planner
+## Deferred (pre-existing, not re-reported per cycle-15 scope)
 
-- **DES-14-01** and **DES-14-02** are single-line mechanical fixes with no design decisions and no new i18n keys. Both can be batched into one micro-commit.
-- **DES-14-03** is a two-span refactor at two call sites (`photo-viewer.tsx:731` and `lightbox.tsx:671`). No new i18n keys needed; `aria.photoPosition` already exists correctly in both locale files. Low priority given contextual clarity of "2 / 10".
-- **DES-13-04, DES-13-05, DES-13-06** all require new i18n keys before they can be fixed. Keep deferred until the planner decides to add the keys.
-- **DES-13-02** (combobox `aria-expanded`) requires only a new boolean state variable in `search.tsx`. No i18n keys needed. MEDIUM effort relative to the deferred group.
+- Position counter `aria-label` on `role="status"` live region (lightbox ~666, photo-viewer ~731) — AT announces text content not `aria-label`.
+- Theme toggle state-in-label.
+- Bottom sheet `aria-expanded` 3-state representation.
+- P3 `sr-only` badge.
+- Combobox `aria-expanded` during loading state (search.tsx).
