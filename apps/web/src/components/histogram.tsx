@@ -438,13 +438,31 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
     // R9-M9: higher-resolution histogram on desktop viewports.
     const [canvasDims, setCanvasDims] = useState({ width: 240, height: 120 });
     useEffect(() => {
-        function updateDims() {
+        // R15C15 PERF-15-02: rAF-debounce the resize handler and only commit a
+        // new dims object when the breakpoint actually crosses. The previous
+        // version called setCanvasDims with a fresh object literal on every
+        // resize pixel, so React's Object.is check saw a change each event and
+        // forced a full canvas redraw per pixel while the panel was open.
+        // Mirrors the rAF-debounced useColumnCount in home-client.tsx.
+        let rafId: number | null = null;
+        function applyDims() {
             const isDesktop = window.innerWidth >= 768;
-            setCanvasDims(isDesktop ? { width: 320, height: 160 } : { width: 240, height: 120 });
+            const next = isDesktop ? { width: 320, height: 160 } : { width: 240, height: 120 };
+            setCanvasDims((prev) => (prev.width === next.width && prev.height === next.height ? prev : next));
         }
-        updateDims();
-        window.addEventListener('resize', updateDims);
-        return () => window.removeEventListener('resize', updateDims);
+        function onResize() {
+            if (rafId !== null) return;
+            rafId = window.requestAnimationFrame(() => {
+                rafId = null;
+                applyDims();
+            });
+        }
+        applyDims();
+        window.addEventListener('resize', onResize);
+        return () => {
+            if (rafId !== null) window.cancelAnimationFrame(rafId);
+            window.removeEventListener('resize', onResize);
+        };
     }, []);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
