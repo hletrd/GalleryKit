@@ -156,7 +156,7 @@ git values must be treated as compromised and must not be reused.
 | `bit_depth` | Sharp `metadata.depth` mapped to bits | source bit depth, not delivered |
 | `color_pipeline_decision` | Resolver enum (`p3-from-displayp3`, `p3-from-adobergb`, etc.) | admin-only |
 | `color_primaries` | NCLX > ICC chromaticity > ICC name | public |
-| `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma24 / gamma26 / gamma28 / gamma18 / linear / unknown) | admin-only — `gamma24` (NCLX 14/15, BT.1886) and `gamma26` (NCLX 17, DCI-P3) are emitted for real files; `gamma28` (NCLX 5 = BT.470BG, PAL·SECAM gamma 2.8 — AGG-R7C2-01) corrects the prior gamma22/"System M" mislabel (System M is code 4); `gamma18` comes from ICC name heuristics (ProPhoto path via `lib/color-detection.ts:99-107`, AGG-D3) |
+| `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma24 / gamma26 / gamma28 / gamma18 / linear / unknown) | admin-only — `gamma24` (NCLX 14/15, BT.1886) and `gamma26` (NCLX 17, DCI-P3) are emitted for real files; `gamma28` (NCLX 5 = BT.470BG, PAL·SECAM gamma 2.8 — AGG-R7C2-01) corrects the prior gamma22/"System M" mislabel (System M is code 4); `gamma18` comes from ICC name heuristics (ProPhoto path via `lib/color-detection.ts:99-108`, AGG-D3) |
 | `matrix_coefficients` | NCLX | admin-only |
 | `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — the public HDR badge is now gated on `isAdmin && isHdr` EXPLICITLY at the render point (AGG-M3), not on field-nullness coincidence; locked by `color-details-section-delivered` / `lightbox-color-pip-hdr` tests |
 | `has_gain_map` | Apple HDR gain map detection in HEIF `iinf`/`iref` (P4-A1) | admin-only |
