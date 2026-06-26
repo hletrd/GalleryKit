@@ -63,6 +63,12 @@ function bufferGroupViewCount(groupId: number) {
 
 let isFlushing = false;
 
+// R14C14 / R14-01: handle to the in-flight drain. flushGroupViewCounts swaps
+// viewCountBuffer to a fresh empty Map BEFORE its DB writes complete, so the
+// shutdown path (flushBufferedSharedGroupViewCounts) must await THIS promise
+// instead of observing the post-swap empty buffer and exiting mid-write.
+let currentFlushPromise: Promise<void> | null = null;
+
 const FLUSH_CHUNK_SIZE = 5; // Process view-count updates in chunks to limit concurrent DB promises
 
 async function flushGroupViewCounts() {
@@ -92,6 +98,10 @@ async function flushGroupViewCounts() {
         return; // Prevent concurrent flush
     }
     isFlushing = true;
+    // R14C14 / R14-01: publish a handle to this drain so the shutdown flush can
+    // await it. Resolved in the finally below once the drain has fully settled.
+    let resolveDrain!: () => void;
+    currentFlushPromise = new Promise<void>((resolve) => { resolveDrain = resolve; });
     // C2-F01: swap the Map reference atomically so new increments during the
     // flush go to a fresh Map. The old Map is drained chunk-by-chunk below.
     // This prevents losing buffered increments if the process crashes between
@@ -190,10 +200,30 @@ async function flushGroupViewCounts() {
                 viewCountRetryCount.delete(key);
             }
         }
+        // R14C14 / R14-01: this drain has fully settled (buffer re-armed, retry
+        // counts pruned) — release awaiters (the shutdown flush below).
+        currentFlushPromise = null;
+        resolveDrain();
     }
 }
 
 export async function flushBufferedSharedGroupViewCounts() {
+    if (viewCountFlushTimer) {
+        clearTimeout(viewCountFlushTimer);
+        viewCountFlushTimer = null;
+    }
+
+    // R14C14 / R14-01: if a flush is already draining, await it first. The drain
+    // swapped viewCountBuffer to a fresh empty Map BEFORE its DB writes complete,
+    // so checking size === 0 here would observe the empty buffer and return —
+    // letting the shutdown caller process.exit() and truncate those in-flight
+    // writes. Await the in-flight drain, then flush any post-swap / re-buffered
+    // increments below.
+    if (currentFlushPromise) {
+        await currentFlushPromise.catch(() => {});
+    }
+    // The awaited drain may have re-armed a follow-up timer for post-swap
+    // increments; cancel it so this synchronous flush owns the final drain.
     if (viewCountFlushTimer) {
         clearTimeout(viewCountFlushTimer);
         viewCountFlushTimer = null;
