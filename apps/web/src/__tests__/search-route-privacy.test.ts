@@ -16,31 +16,23 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { adminSelectFieldKeys, publicSelectFieldKeys } from '@/lib/data';
 
-// Mirrors `PrivacySensitiveKeys` in src/lib/data.ts. `processed` is intentionally
-// EXCLUDED: it is the public-query status filter (`eq(images.processed, true)`),
-// not a PII projection, and legitimately appears in these routes' WHERE clauses.
-const PII_COLUMNS = [
-    'latitude',
-    'longitude',
-    'filename_original',
-    'user_filename',
-    'original_format',
-    'original_file_size',
-    'color_pipeline_decision',
-    'is_hdr',
-    'has_gain_map',
-    'was_downscaled',
-    'transfer_function',
-    'matrix_coefficients',
-    'bit_depth',
-    'uploaded_by',
-    'processing_error',
-    'failed_at',
-    'color_space',
-    'icc_profile_name',
-    'pipeline_version',
-] as const;
+// R18C18 A2 / MAJOR-3: DERIVE the denylist from the canonical privacy split
+// instead of hand-maintaining a frozen mirror of `PrivacySensitiveKeys`.
+//
+// The admin-only column set is exactly `adminSelectFieldKeys \ publicSelectFieldKeys`
+// (the same derivation `privacy-fields.test.ts` symmetric-guards). Computing it
+// here means a NEW admin-only column added to `adminSelectFields` becomes a
+// denied column in this scan AUTOMATICALLY — closing the drift-vector-1 gap
+// where the previously-frozen 19-entry array would silently miss a 21st PII
+// column. `processed` is EXCLUDED: it is the public-query status filter
+// (`eq(images.processed, true)`), not a PII projection, and legitimately
+// appears in these routes' WHERE clauses.
+const publicKeySet = new Set<string>(publicSelectFieldKeys);
+const PII_COLUMNS = [...adminSelectFieldKeys].filter(
+    (key) => !publicKeySet.has(key) && key !== 'processed',
+);
 
 const ROUTES: ReadonlyArray<readonly [name: string, relPath: string]> = [
     ['search/semantic', '../app/api/search/semantic/route.ts'],
@@ -48,6 +40,17 @@ const ROUTES: ReadonlyArray<readonly [name: string, relPath: string]> = [
 ];
 
 describe('public search routes do not reference PII image columns (R16C16 A16-01)', () => {
+    it('derived PII_COLUMNS denylist is non-vacuous and tracks the privacy split (R18C18 A2)', () => {
+        // Guard against the derivation silently collapsing to [] (which would make
+        // the per-route scan vacuous). The known core PII columns must be present.
+        expect(PII_COLUMNS.length).toBeGreaterThanOrEqual(15);
+        for (const core of ['latitude', 'longitude', 'filename_original', 'user_filename', 'uploaded_by']) {
+            expect(PII_COLUMNS).toContain(core);
+        }
+        // `processed` is the public status filter — it must NOT be in the denylist.
+        expect(PII_COLUMNS).not.toContain('processed');
+    });
+
     it.each(ROUTES)('%s route selects no privacy-sensitive images column', (_name, relPath) => {
         const src = readFileSync(resolve(__dirname, relPath), 'utf8');
         const leaked = PII_COLUMNS.filter((col) =>
