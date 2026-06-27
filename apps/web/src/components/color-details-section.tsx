@@ -8,39 +8,13 @@ import { isP3Pipeline, type ColorPipelineDecision } from '@/lib/color-pipeline-d
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { ImageDetail } from '@/lib/image-types';
 
-/**
- * humanizeColorPrimaries: returns Latinate names (BT.709, Display P3, DCI-P3,
- * Rec. 2020, Adobe RGB, ProPhoto RGB) that are universally recognizable
- * across locales. Convention (per cycle-3 RPF C3-D2): primaries names stay
- * un-translated; only transfer functions get translated via
- * humanizeTransferFunction(value, t). Photographers across en/ko locales
- * read the same Latinate technical names that match camera vendor docs and
- * browser CSS spec.
- */
-export function humanizeColorPrimaries(value: string | null | undefined): string | null {
-    switch (value) {
-        case 'bt709': return 'BT.709';
-        case 'p3-d65': return 'Display P3';
-        case 'dci-p3': return 'DCI-P3';
-        case 'bt2020': return 'Rec. 2020';
-        case 'adobergb': return 'Adobe RGB';
-        case 'prophoto': return 'ProPhoto RGB';
-        default: return null;
-    }
-}
-
-/**
- * R15-L1 / R12-L4: never-null variant for UI surfaces that always need a
- * string to render. Returns the localized `viewer.colorUnknown` literal on
- * any unrecognized value. Callers that want the discriminated branch (e.g.
- * gate the wide-gamut hint on null) keep using `humanizeColorPrimaries`.
- */
-export function humanizeColorPrimariesOrLabel(
-    value: string | null | undefined,
-    t: (key: string) => string,
-): string {
-    return humanizeColorPrimaries(value) || t('viewer.colorUnknown');
-}
+// R19C19 CQ19-04: the pure primaries-label helpers moved to `lib/color-label.ts`
+// so `wide-gamut-hint.tsx` (which needs only the label, not this accordion) no
+// longer cross-imports a sibling component. Imported here for this module's own
+// use (line ~204) and re-exported for the consumers that already depend on this
+// module (lightbox-color-pip, info-bottom-sheet).
+import { humanizeColorPrimaries, humanizeColorPrimariesOrLabel } from '@/lib/color-label';
+export { humanizeColorPrimaries, humanizeColorPrimariesOrLabel };
 
 /**
  * R9-H1: Strict allowlist for P3 ICC profile names. Substring matching

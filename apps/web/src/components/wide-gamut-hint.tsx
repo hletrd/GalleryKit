@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { isWideGamutPrimary, getGamutFamily } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
-import { humanizeColorPrimariesOrLabel } from '@/components/color-details-section';
+import { humanizeColorPrimariesOrLabel } from '@/lib/color-label';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
