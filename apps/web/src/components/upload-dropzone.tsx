@@ -469,7 +469,7 @@ export function UploadDropzone({
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="absolute top-1 right-1 h-11 w-11 z-10 bg-background/50 hover:bg-destructive hover:text-white rounded-full sm:opacity-0 sm:group-hover:opacity-100 opacity-100 focus:opacity-100 transition-opacity"
+                                        className="absolute top-1 right-1 h-11 w-11 z-10 bg-background/50 hover:bg-destructive hover:text-white rounded-full sm:opacity-0 sm:group-hover:opacity-100 opacity-100 focus-visible:opacity-100 transition-opacity"
                                         aria-label={t('aria.removeFile')}
                                         onClick={() => removeFile(i)}
                                     >

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
@@ -85,7 +85,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // R9-LOW: copy a JSON snapshot of the audit-grade color metadata to the
     // clipboard from the lightbox expanded panel, same as the sidebar
     // ColorDetailsSection copy button.
-    async function copyColorMetadata() {
+    const copyColorMetadata = useCallback(async () => {
         // R10-L16: pipeline_version is internal deploy metadata; omit it from
         // the user-facing clipboard JSON. See color-details-section.tsx for
         // the matching change in the sidebar copy button.
@@ -131,7 +131,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
         } catch {
             toast.error(t('viewer.copyFailed'));
         }
-    }
+    }, [isAdmin, image, t]);
 
     // P4-C1 / R4-M2: lightbox histogram. Mounted only when the panel is
     // open so the worker spawn / pixel decode does not happen for the
@@ -158,7 +158,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
             <button
                 type="button"
                 onClick={onToggle}
-                className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400 transition-colors"
+                className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
                 aria-expanded={open}
                 aria-label={`${t('aria.toggleColorPip')}: ${[
                     primaries || t('viewer.colorUnknown'),

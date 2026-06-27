@@ -344,7 +344,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         <div
             ref={containerRef}
             className={cn(
-                'overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400',
+                'overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 cursorClass,
                 className
             )}

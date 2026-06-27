@@ -269,12 +269,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                         {isNonTrivialColor && (
                             <span className="inline-flex items-center gap-1">
                                 {image.color_primaries && humanizeColorPrimaries(image.color_primaries) && (
-                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
+                                    <span className="inline-block px-1.5 py-0.5 text-xs font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
                                         {humanizeColorPrimaries(image.color_primaries)}
                                     </span>
                                 )}
                                 {isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg') && (
-                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded shadow-sm">
+                                    <span className="inline-block px-1.5 py-0.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded shadow-sm">
                                         HDR
                                     </span>
                                 )}

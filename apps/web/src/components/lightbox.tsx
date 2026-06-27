@@ -614,7 +614,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {prevId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="group pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -624,7 +624,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         aria-keyshortcuts="ArrowLeft"
                         title={`${t('aria.previousImage')} (←)`}
                     >
-                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
+                        {/* R19C19 D19-01: ring paints on the visible pill, not the full-height invisible hitbox */}
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70 group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2">
                             <ChevronLeft className="h-6 w-6" />
                         </span>
                     </button>
@@ -634,7 +635,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {nextId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="group pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -644,7 +645,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         aria-keyshortcuts="ArrowRight"
                         title={`${t('aria.nextImage')} (→)`}
                     >
-                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
+                        {/* R19C19 D19-01: ring paints on the visible pill, not the full-height invisible hitbox */}
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70 group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2">
                             <ChevronRight className="h-6 w-6" />
                         </span>
                     </button>
