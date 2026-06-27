@@ -52,6 +52,7 @@ import {
 } from '@/lib/clip-embeddings';
 import { embedTextStub } from '@/lib/clip-inference';
 import { embedTextReal } from '@/lib/clip-model';
+import { searchEnrichmentSelectFields } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { countCodePoints } from '@/lib/utils';
@@ -290,23 +291,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         const resultIds = results.map(r => r.imageId);
         const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
         try {
-            const imageRows = await db.select({
-                id: images.id,
-                title: images.title,
-                description: images.description,
-                filename_jpeg: images.filename_jpeg,
-                width: images.width,
-                height: images.height,
-                topic: images.topic,
-                topic_label: topics.label,
-                camera_model: images.camera_model,
-                // AGG-C10-11a: include lens_model + capture_date so semantic result
-                // cards render the same subtitle as keyword-search cards. Both are
-                // public (already returned by keyword search) and NOT in
-                // _PrivacySensitiveKeys (no GPS/PII).
-                lens_model: images.lens_model,
-                capture_date: images.capture_date,
-            })
+            // R19C19 A2/MAJOR-1: shared compile-guarded enrichment select (see
+            // `searchEnrichmentSelectFields` in lib/data.ts) — replaces the
+            // formerly hand-copied inline select so a PII column is a tsc error,
+            // not just a denylist-test catch. Kept in sync with the similar route.
+            const imageRows = await db.select(searchEnrichmentSelectFields)
             .from(images)
             .leftJoin(topics, eq(images.topic, topics.slug))
             .where(and(
@@ -330,8 +319,12 @@ export async function POST(request: NextRequest): Promise<Response> {
                     capture_date: row.capture_date,
                 }))
                 .sort((a, b) => b.score - a.score);
-        } catch {
-            // Fallback to empty results if image enrichment query fails
+        } catch (e) {
+            // R19C19 MINOR-1: log before falling back so a transient enrichment
+            // DB failure is diagnosable. Without this, the caller receives a 200
+            // with an empty `results` array — indistinguishable from "no matches"
+            // — after the rate-limit budget was already consumed.
+            console.error('[search/semantic] result enrichment query failed', e);
             enrichedResults = [];
         }
     }
