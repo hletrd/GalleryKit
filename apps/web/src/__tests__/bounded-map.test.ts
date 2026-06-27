@@ -230,3 +230,40 @@ describe('BoundedMap overwrite semantics', () => {
         expect(map.has('y')).toBe(true);
     });
 });
+
+describe('BoundedMap copy-on-read semantics (R19C19 CQ19-02)', () => {
+    it('entries() yields shallow copies — mutating a yielded value does not corrupt internal state', () => {
+        const map = new BoundedMap<string, { resetAt: number; count: number }>(
+            10,
+            (entry, t) => entry.resetAt <= t,
+        );
+        map.set('a', { resetAt: 1000, count: 1 });
+        for (const [, value] of map.entries()) {
+            value.count = 999; // attempt to corrupt internal state
+        }
+        expect(map.get('a')?.count).toBe(1);
+    });
+
+    it('[Symbol.iterator] yields shallow copies too', () => {
+        const map = new BoundedMap<string, { resetAt: number; count: number }>(
+            10,
+            (entry, t) => entry.resetAt <= t,
+        );
+        map.set('a', { resetAt: 1000, count: 5 });
+        for (const [, value] of map) {
+            value.count = -1;
+        }
+        expect(map.get('a')?.count).toBe(5);
+    });
+
+    it('get() returns a shallow copy (mutation does not leak back into the map)', () => {
+        const map = new BoundedMap<string, { resetAt: number; count: number }>(
+            10,
+            (entry, t) => entry.resetAt <= t,
+        );
+        map.set('a', { resetAt: 1000, count: 7 });
+        const got = map.get('a')!;
+        got.count = 42;
+        expect(map.get('a')?.count).toBe(7);
+    });
+});

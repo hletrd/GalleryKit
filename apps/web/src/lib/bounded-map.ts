@@ -55,18 +55,22 @@ export class BoundedMap<K, V> {
         return this.map.size;
     }
 
-    get(key: K): V | undefined {
-        const value = this.map.get(key);
-        // Return a shallow copy for object values to prevent external mutation
-        // of the internal Map state (same pattern as auth-rate-limit.ts).
-        // AGG-R11C11-L3: This is a SHALLOW copy — nested objects within the
-        // returned value are still references to the original. Callers must not
-        // mutate nested properties; if deep immutability is required, use
-        // structuredClone() on the return value.
+    /**
+     * Shallow-copy object values so external callers cannot mutate internal Map
+     * state (same pattern as auth-rate-limit.ts). AGG-R11C11-L3: SHALLOW only —
+     * nested objects remain references; use structuredClone() for deep needs.
+     */
+    private copyValue(value: V): V {
         if (value !== undefined && typeof value === 'object' && value !== null) {
             return { ...value } as V;
         }
         return value;
+    }
+
+    get(key: K): V | undefined {
+        const value = this.map.get(key);
+        if (value === undefined) return value;
+        return this.copyValue(value);
     }
 
     has(key: K): boolean {
@@ -114,18 +118,21 @@ export class BoundedMap<K, V> {
     /**
      * Iterate over entries for external consumers that need full access.
      *
-     * R16C16 CR-16-02 WARNING: unlike `get()` (which returns a shallow COPY of
-     * the value to protect internal state), `entries()` yields the LIVE internal
-     * value references. Callers MUST NOT mutate a yielded value in place — doing
-     * so corrupts the stored entry without going through `set()`. Treat yielded
-     * values as read-only; clone before mutating if needed.
+     * R19C19 CQ19-02: yields SHALLOW COPIES of object values, matching `get()`,
+     * so a caller mutating a yielded value cannot corrupt internal Map state
+     * (the prior R16C16 behavior yielded LIVE references — an asymmetry vs
+     * `get()` and a latent mutation hazard). Internal pruning/eviction iterate
+     * `this.map` directly, so they are unaffected by this copy. As with `get()`,
+     * the copy is shallow — nested objects remain references.
      */
-    entries(): IterableIterator<[K, V]> {
-        return this.map.entries();
+    *entries(): IterableIterator<[K, V]> {
+        for (const [key, value] of this.map) {
+            yield [key, this.copyValue(value)];
+        }
     }
 
     [Symbol.iterator](): IterableIterator<[K, V]> {
-        return this.map[Symbol.iterator]();
+        return this.entries();
     }
 
     /**
