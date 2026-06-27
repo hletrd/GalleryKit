@@ -200,7 +200,7 @@ export default function WideGamutHint({ colorPrimaries, t, persistDismissal = fa
                 type="button"
                 onClick={handleDismiss}
                 aria-label={t('viewer.wideGamutHintDismiss')}
-                className="shrink-0 -mr-1 -my-1 min-h-11 min-w-11 inline-flex items-center justify-center rounded text-amber-800/70 hover:text-amber-800 dark:text-amber-100/80 dark:hover:text-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                className="shrink-0 -mr-1 -my-1 min-h-11 min-w-11 inline-flex items-center justify-center rounded text-amber-800/70 hover:text-amber-800 dark:text-amber-100/80 dark:hover:text-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
             >
                 <X className="h-4 w-4" aria-hidden="true" />
             </button>

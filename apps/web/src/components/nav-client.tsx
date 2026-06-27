@@ -154,7 +154,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
                     <button
                         onClick={() => setTheme(nextTheme((theme ?? 'system') as StoredTheme))}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         aria-label={t('aria.toggleTheme')}
                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
                     >
@@ -165,7 +165,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     </button>
                     <button
                         onClick={handleLocaleSwitch}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         aria-label={t('aria.switchLocale', { language: LOCALE_DISPLAY_NAMES[otherLocale] ?? otherLocale })}
                     >
                         {otherLocale.toUpperCase()}
