@@ -469,7 +469,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         window.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' });
                     }}
                 className={cn(
-                    "fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] right-6 z-40 p-3 min-h-11 min-w-11 bg-primary text-primary-foreground rounded-full shadow-lg transition-opacity hover:bg-primary/90",
+                    "fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] right-6 z-40 p-3 min-h-11 min-w-11 bg-primary text-primary-foreground rounded-full shadow-lg transition-opacity hover:bg-primary/90 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     showBackToTop ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                 )}
                 aria-label={t('home.backToTop')}
