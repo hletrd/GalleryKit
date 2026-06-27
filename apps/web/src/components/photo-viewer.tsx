@@ -884,7 +884,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <p className="font-medium">{image.flash}</p>
                                         </div>
                                     )}
-                                    {hasExifData(image.bit_depth) && (
+                                    {/* R16C16 DES-16-02: bit_depth is admin-only (_PrivacySensitiveKeys,
+                                        null publicly). Gate on isAdmin to match the sibling renders at
+                                        info-bottom-sheet.tsx + color-details-section.tsx (R15C15 SEC-15-01). */}
+                                    {isAdmin && hasExifData(image.bit_depth) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
                                             <p className="font-medium">{image.bit_depth}-bit</p>
@@ -952,7 +955,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <DropdownMenuTrigger asChild>
                                                 <Button className="w-full gap-2 min-h-11">
                                                     <Download className="h-4 w-4" />
-                                                    {isP3Pipeline(image.color_pipeline_decision)
+                                                    {/* R16C16 C16-F2: color_pipeline_decision is admin-only;
+                                                        gate the read on isAdmin for symmetry with the other
+                                                        isP3Pipeline call sites (behaviour unchanged — null → false → plain JPEG label publicly). */}
+                                                    {isAdmin && isP3Pipeline(image.color_pipeline_decision)
                                                         ? t('viewer.downloadP3Jpeg')
                                                         : t('viewer.downloadJpeg')}
                                                     <ChevronDown className="h-4 w-4 ml-auto" />

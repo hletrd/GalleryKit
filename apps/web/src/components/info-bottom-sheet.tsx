@@ -496,7 +496,8 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                 <DropdownMenuTrigger asChild>
                                                     <Button className="w-full gap-2 min-h-11">
                                                         <Download className="h-4 w-4" />
-                                                        {isP3Pipeline(image.color_pipeline_decision)
+                                                        {/* R16C16 C16-F2: color_pipeline_decision is admin-only — gate for symmetry. */}
+                                                        {isAdmin && isP3Pipeline(image.color_pipeline_decision)
                                                             ? t('viewer.downloadP3Jpeg')
                                                             : t('viewer.downloadJpeg')}
                                                         <ChevronDown className="h-4 w-4 ml-auto" />

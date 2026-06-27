@@ -32,3 +32,20 @@ describe('photo-viewer download dropdown (P3-1)', () => {
         expect(source).not.toContain('hdrDownloadHref');
     });
 });
+
+describe('photo-viewer admin-only field gating (R16C16 DES-16-02 / C16-F2)', () => {
+    it('gates the source bit_depth render on isAdmin', async () => {
+        const source = await fs.readFile(PHOTO_VIEWER_PATH, 'utf-8');
+        // bit_depth is admin-only (_PrivacySensitiveKeys). The render MUST carry
+        // isAdmin && so it matches the sibling renders fixed in R15C15 SEC-15-01.
+        expect(source).toMatch(/isAdmin\s*&&\s*hasExifData\(image\.bit_depth\)/);
+        // No ungated JSX-open form `{hasExifData(image.bit_depth) &&` may remain.
+        expect(source).not.toMatch(/\{\s*hasExifData\(image\.bit_depth\)\s*&&/);
+    });
+
+    it('gates the isP3Pipeline download label on isAdmin', async () => {
+        const source = await fs.readFile(PHOTO_VIEWER_PATH, 'utf-8');
+        // color_pipeline_decision is admin-only; the download label read must be gated.
+        expect(source).toMatch(/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/);
+    });
+});
