@@ -507,7 +507,16 @@ export async function uploadImages(formData: FormData) {
             } catch (e) {
                 // Log full error server-side; only return filename to client (no internal details)
                 console.error(`Failed to process file ${file.name}:`, e);
-                // Clean up saved original file if it was written but DB insert failed
+                // Clean up saved original file if it was written but DB insert failed.
+                // R18C18 MINOR-1 (cross-ref the quota-claim invariant at the SELECT
+                // settle above, :264-265): this `await` sits AFTER the synchronous
+                // claim but is the ONLY post-claim await not paired with a settle.
+                // It is safe ONLY because `deleteOriginalUploadFile` NEVER rejects —
+                // both `fs.unlink` calls swallow errors via `.catch(() => {})`
+                // (upload-paths.ts). If that contract ever changes to propagate
+                // errors, this throw would escape the per-file catch to the outer
+                // finally-only try and leak the claim (the DBG-17-1 class). Keep
+                // `deleteOriginalUploadFile` non-throwing, or add a settle here.
                 if (savedOriginalFilename) {
                     await deleteOriginalUploadFile(savedOriginalFilename);
                 }
