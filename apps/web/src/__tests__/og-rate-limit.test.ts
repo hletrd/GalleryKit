@@ -5,6 +5,7 @@ import {
     ogRateLimit,
     preIncrementOgAttempt,
     pruneOgRateLimit,
+    rollbackOgAttempt,
     resetOgRateLimitForTests,
 } from '@/lib/rate-limit';
 
@@ -56,5 +57,56 @@ describe('pruneOgRateLimit (AGG8F-01 / plan-233)', () => {
 
         expect(ogRateLimit.has(expiredIp)).toBe(false);
         expect(ogRateLimit.has(liveIp)).toBe(true);
+    });
+});
+
+// R19C19 test FINDING-1: rollbackSemanticAttempt has five behavioral tests but
+// its OG twin rollbackOgAttempt — the decrement-vs-delete branch used by the
+// photo OG route on a pre-DB syntactic rejection (og-photo-fallback.test.ts) —
+// had none. These exercise both branches directly.
+describe('rollbackOgAttempt (R19C19 FINDING-1)', () => {
+    it('decrements a pre-incremented counter when count > 1', () => {
+        const ip = '203.0.113.20';
+        const now = 1_000_000;
+        preIncrementOgAttempt(ip, now); // count 1
+        preIncrementOgAttempt(ip, now); // count 2
+        rollbackOgAttempt(ip);
+        expect(ogRateLimit.get(ip)?.count).toBe(1);
+        expect(ogRateLimit.has(ip)).toBe(true);
+    });
+
+    it('deletes the entry when rolling back from count 1', () => {
+        const ip = '203.0.113.21';
+        const now = 1_000_000;
+        preIncrementOgAttempt(ip, now); // count 1
+        rollbackOgAttempt(ip);
+        expect(ogRateLimit.has(ip)).toBe(false);
+    });
+
+    it('rolls back multiple attempts down to deletion', () => {
+        const ip = '203.0.113.22';
+        const now = 1_000_000;
+        for (let i = 0; i < 3; i++) preIncrementOgAttempt(ip, now); // count 3
+        rollbackOgAttempt(ip); // 2
+        rollbackOgAttempt(ip); // 1
+        expect(ogRateLimit.get(ip)?.count).toBe(1);
+        rollbackOgAttempt(ip); // deletes
+        expect(ogRateLimit.has(ip)).toBe(false);
+    });
+
+    it('is a no-op when the IP has no entry (does not throw or create one)', () => {
+        const ip = '203.0.113.23';
+        expect(() => rollbackOgAttempt(ip)).not.toThrow();
+        expect(ogRateLimit.has(ip)).toBe(false);
+    });
+
+    it('preserves resetAt when decrementing (rollback does not extend the window)', () => {
+        const ip = '203.0.113.24';
+        const now = 4_000_000;
+        preIncrementOgAttempt(ip, now);
+        preIncrementOgAttempt(ip, now);
+        const resetAt = ogRateLimit.get(ip)?.resetAt;
+        rollbackOgAttempt(ip);
+        expect(ogRateLimit.get(ip)?.resetAt).toBe(resetAt);
     });
 });
