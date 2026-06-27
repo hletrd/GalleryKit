@@ -376,11 +376,16 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // C2-A5 / C2-A6: SDR JPEG chroma + wide-gamut max source pixels
             let sdrJpegChroma: JpegChromaSubsampling | undefined = job.sdrJpegChroma;
             let wideGamutMaxSourcePixels: number | undefined = job.wideGamutMaxSourcePixels;
+            // R16C16 PERF-16-01: reuse the bootstrap config read for the embedding
+            // semantic-mode decision so a bootstrap/legacy job does not issue a
+            // second SELECT admin_settings inside the fire-and-forget IIFE below.
+            let resolvedSemanticMode: 'disabled' | 'stub' | 'production' | null = null;
             if (!quality && !imageSizes) {
                 // Bootstrap / legacy re-enqueue path: the job carries none of the
                 // processing settings, so load them all from current config.
                 try {
                     const config = await getGalleryConfig();
+                    resolvedSemanticMode = config.semanticSearchMode;
                     quality = {
                         webp: config.imageQualityWebp,
                         avif: config.imageQualityAvif,
@@ -496,12 +501,17 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             //   stub rows, so no schema migration is needed for that future encoder
             //   to tell stub vectors apart from production ones.
             void (async () => {
-                let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
-                try {
-                    const cfg = await getGalleryConfig();
-                    semanticMode = cfg.semanticSearchMode;
-                } catch {
-                    // DB unavailable — skip silently
+                // PERF-16-01: reuse the bootstrap config read when it already
+                // resolved the mode (legacy/bootstrap jobs); only normal jobs —
+                // which skip the bootstrap read — fetch the mode here.
+                let semanticMode: 'disabled' | 'stub' | 'production' = resolvedSemanticMode ?? 'disabled';
+                if (resolvedSemanticMode === null) {
+                    try {
+                        const cfg = await getGalleryConfig();
+                        semanticMode = cfg.semanticSearchMode;
+                    } catch {
+                        // DB unavailable — skip silently
+                    }
                 }
                 if (semanticMode === 'disabled') return;
                 try {
