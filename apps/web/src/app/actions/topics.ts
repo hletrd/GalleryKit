@@ -309,6 +309,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                             const ast = parseSmartCollectionQuery(collection.query_json);
                             remapped = remapTopicSlugInQuery(ast, cleanCurrentSlug, slug);
                         } catch {
+                            // R18C18 CR-18 (LOW): a corrupt query_json silently retains
+                            // the now-deleted old slug → the collection produces zero
+                            // results with no operator signal. Log at debug level so a
+                            // post-rename "empty smart collection" is diagnosable; the
+                            // skip-and-continue behavior is unchanged.
+                            console.debug(
+                                `[updateTopic] smart_collection ${collection.id} has unparseable query_json — skipping slug remap`,
+                            );
                             continue;
                         }
                         if (remapped.changed) {
