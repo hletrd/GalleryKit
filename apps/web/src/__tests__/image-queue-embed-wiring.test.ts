@@ -20,4 +20,25 @@ describe('upload embedding hook wiring', () => {
     expect(src).not.toContain("buf.toString('base64')");
     expect(src).toContain('embeddingToBuffer');
   });
+  it('reuses the upload-time semanticSearchMode snapshot before fetching config (R17C17 PERF-17-04)', () => {
+    // Normal upload jobs carry quality+imageSizes so they skip the bootstrap
+    // config-load gate; without the job snapshot the embedding IIFE issued a
+    // redundant per-image SELECT admin_settings. The IIFE must prefer the job
+    // snapshot and only fetch when BOTH the bootstrap resolve and the snapshot
+    // are absent.
+    expect(src).toContain('job.semanticSearchMode');
+    expect(src).toMatch(
+      /resolvedSemanticMode\s*\?\?\s*job\.semanticSearchMode\s*\?\?\s*'disabled'/,
+    );
+    expect(src).toMatch(
+      /resolvedSemanticMode === null && job\.semanticSearchMode === undefined/,
+    );
+  });
+});
+
+describe('upload enqueue snapshots semanticSearchMode (R17C17 PERF-17-04)', () => {
+  const actionSrc = readFileSync(join(process.cwd(), 'src/app/actions/images.ts'), 'utf8');
+  it('passes uploadConfig.semanticSearchMode on the upload enqueue', () => {
+    expect(actionSrc).toContain('semanticSearchMode: uploadConfig.semanticSearchMode');
+  });
 });

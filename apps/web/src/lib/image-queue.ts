@@ -133,6 +133,12 @@ export type ImageProcessingJob = {
     sdrJpegChroma?: JpegChromaSubsampling;
     wideGamutMaxSourcePixels?: number;
     autoAltTextEnabled?: boolean;
+    // R17C17 PERF-17-04: snapshot the semantic-search mode at upload time (same
+    // intent as the 6 settings above). Normal upload jobs carry quality+imageSizes
+    // so they skip the bootstrap config-load gate below — without this snapshot the
+    // fire-and-forget embedding IIFE issued a redundant SELECT admin_settings per
+    // processed image (React cache() is request-scoped, a no-op in the queue worker).
+    semanticSearchMode?: 'disabled' | 'stub' | 'production';
     // R6-H1: full color signals for bootstrap NCLX preservation. ProcessImageFormats
     // consumes colorPrimaries; the remaining fields future-proof the bootstrap.
     colorSignals?: {
@@ -507,8 +513,14 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // PERF-16-01: reuse the bootstrap config read when it already
                 // resolved the mode (legacy/bootstrap jobs); only normal jobs —
                 // which skip the bootstrap read — fetch the mode here.
-                let semanticMode: 'disabled' | 'stub' | 'production' = resolvedSemanticMode ?? 'disabled';
-                if (resolvedSemanticMode === null) {
+                // R17C17 PERF-17-04: prefer the bootstrap config resolve, then the
+                // upload-time job snapshot, before issuing a per-image SELECT.
+                // Bootstrap/re-enqueue jobs set resolvedSemanticMode; normal upload
+                // jobs carry job.semanticSearchMode. Only a job lacking BOTH (a
+                // legacy snapshot-less upload job) falls through to the fetch.
+                let semanticMode: 'disabled' | 'stub' | 'production' =
+                    resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled';
+                if (resolvedSemanticMode === null && job.semanticSearchMode === undefined) {
                     try {
                         const cfg = await getGalleryConfig();
                         semanticMode = cfg.semanticSearchMode;
