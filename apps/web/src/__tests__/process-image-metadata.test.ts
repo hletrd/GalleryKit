@@ -182,6 +182,34 @@ describe('process-image metadata normalization', () => {
         expect(exif.longitude).toBeNull();
     });
 
+    // R16C16 TE-16-05: complete the convertDMSToDD edge coverage — Infinity
+    // (from a rational like 1/0) and out-of-range coordinates must also resolve
+    // to NULL, not reach the DB insert.
+    it('returns NULL coordinates for Infinity GPS rationals', () => {
+        const exif = extractExifForDb({
+            gps: {
+                GPSLatitude: [Infinity, 0, 0],
+                GPSLatitudeRef: 'N',
+                GPSLongitude: [10, 20, 30],
+                GPSLongitudeRef: 'E',
+            },
+        });
+        expect(exif.latitude).toBeNull();
+    });
+
+    it('returns NULL for out-of-range latitude (> 90) and longitude (> 180)', () => {
+        const exif = extractExifForDb({
+            gps: {
+                GPSLatitude: [91, 0, 0],
+                GPSLatitudeRef: 'N',
+                GPSLongitude: [181, 0, 0],
+                GPSLongitudeRef: 'E',
+            },
+        });
+        expect(exif.latitude).toBeNull();
+        expect(exif.longitude).toBeNull();
+    });
+
     it('keeps valid GPS coordinates intact', () => {
         const exif = extractExifForDb({
             gps: {

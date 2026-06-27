@@ -28,6 +28,13 @@ describe('escapeCsvField', () => {
         expect(escapeCsvField('a\x7Fb\x9Fc')).toBe('"abc"');
     });
 
+    // R16C16 TE-16-03: U+FFF9-FFFB (interlinear annotation anchors) are part of
+    // UNICODE_FORMAT_CHARS; a regex drift dropping them would silently let them
+    // through. Lock the strip on the CSV surface.
+    it('strips U+FFF9-FFFB interlinear annotation anchors', () => {
+        expect(escapeCsvField('a￹b￺c￻d')).toBe('"abcd"');
+    });
+
     it('collapses CRLF into a single space (not two spaces) — C6R-RPL-06 fix', () => {
         expect(escapeCsvField('title\r\nfoo')).toBe('"title foo"');
     });

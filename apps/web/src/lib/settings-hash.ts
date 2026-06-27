@@ -39,7 +39,10 @@ import { inArray } from 'drizzle-orm';
 import type { GalleryConfig } from './gallery-config';
 import type { GallerySettingKey } from './gallery-config-shared';
 
-const COLOR_IMPACTING_KEYS = [
+// R16C16 TE-16-04: exported so a unit test can pin the exhaustive membership
+// (the compile-time guard below only validates each entry IS a setting key, not
+// that the list is complete — see the NOTE on _ColorKeysAreSettingKeys).
+export const COLOR_IMPACTING_KEYS = [
     'wide_gamut_jpeg_chroma',
     'sdr_jpeg_chroma',
     'avif_effort',

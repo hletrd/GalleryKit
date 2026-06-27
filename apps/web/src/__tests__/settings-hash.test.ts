@@ -14,7 +14,29 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { _buildHashForTesting, getColorSettingsHash } from '@/lib/settings-hash';
+import { _buildHashForTesting, getColorSettingsHash, COLOR_IMPACTING_KEYS } from '@/lib/settings-hash';
+
+describe('COLOR_IMPACTING_KEYS exhaustiveness (R16C16 TE-16-04)', () => {
+    it('contains exactly the 9 documented byte-impacting keys', () => {
+        // CLAUDE.md ETag section: 9 COLOR_IMPACTING_KEYS (5 color + 3 quality +
+        // image_sizes). The compile-time guard only checks each entry is a valid
+        // setting key, not completeness; this pins the exact set so a forgotten
+        // new byte-impacting key (which would silently fail serve-upload ETag
+        // invalidation) is caught at npm test.
+        const expected = [
+            'avif_effort',
+            'force_srgb_derivatives',
+            'image_quality_avif',
+            'image_quality_jpeg',
+            'image_quality_webp',
+            'image_sizes',
+            'sdr_jpeg_chroma',
+            'wide_gamut_jpeg_chroma',
+            'wide_gamut_max_source_pixels',
+        ];
+        expect([...COLOR_IMPACTING_KEYS].sort()).toEqual(expected);
+    });
+});
 
 describe('color settings hash (P4-E2)', () => {
     it('returns 8 lowercase hex characters', () => {
