@@ -1,61 +1,67 @@
-# Run-18 Cycle-18 Convergence — Aggregated Review
+# Run-19 Cycle-19 — Aggregated Review
 
 **Date:** 2026-06-27
-**HEAD:** a9702716 (cycle-17 fixes landed)
+**HEAD:** 5c559a0f (cycle-18 fixes landed)
 **Agents:** 11/11 completed (code-reviewer, security-reviewer, perf-reviewer [via general-purpose], critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer)
 **Agent Failures:** 0
-**Baseline gates (verifier-confirmed):** eslint clean (exit 0), tsc clean (exit 0), vitest 2119 pass / 4 skip, 3 security lint gates OK. (test-engineer added +8 focus-visible tests → 2127 during its pass.)
+**Baseline gates (verifier-confirmed):** eslint exit 0, tsc exit 0, vitest 2134 pass / 4 skip (234 files), lint:api-auth / lint:action-origin / lint:public-route-rate-limit all exit 0.
 
 ---
 
-## Convergence Summary
+## Convergence summary
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| CRITICAL | 0 | No exploitable vulnerabilities. `npm audit --omit=dev` 0 vulns (security-reviewer re-ran). |
+| CRITICAL | 0 | No exploitable vulnerabilities. `npm audit --omit=dev` 0 vulns. |
 | HIGH | 0 | None runtime. |
-| MEDIUM | 0 | No new live runtime defects. All cycle-17 fixes verified correct. |
-| LOW (actionable) | ~6 | **D18-01/CR-18-1 (2-agent HEADLINE)** nav-client theme+locale buttons missing focus-visible rings (sibling of cycle-17 hamburger fix); wide-gamut-hint `focus:`→`focus-visible:outline-none`; smart-collection remap silent-skip log; D18-02 hardcoded blue outline vs ring-ring token; D18-06 masonry hover not reduced-motion-gated; perf LOW items (MQL allocs, histogram worker). |
-| STRUCTURAL | 3 | **MAJOR-1/A4** upload-tracker claim has no single settle point (5+ hand-placed settles + comment); **MAJOR-3/A2/SEC-LOW-1** search-route enrichment selects outside compile-guard + duplicated across 2 routes + PII_COLUMNS denylist hand-maintained + CLAUDE.md checklist omits it; **MAJOR-2/A1** topics.slug mutable-natural-key rename fan-out, no ON UPDATE CASCADE, data-loss history. |
-| DOC | 6 | M-A settings-hash.ts:41-53→45-57; M-B process-image.ts:1131-1135 (hard-link dedup, WI-14 is ~1157-1167); M-C color-detection.ts:99-107→ProPhoto at 108; M-D NEXT_UPLOAD_BODY_MAX_BYTES 279620608→278921216; M-E image_views(image_id,viewed_at) index missing from Database Indexes; SEC-LOW-2 LR token header X-Admin-Token→X-GalleryKit-Token + gk_base64url(32) not 32-hex. |
-| FALSE-POSITIVE | 1 | CR-18 images.ts:512 `deleteOriginalUploadFile` "unguarded await leaks claim" — REFUTED by 4 agents (critic/tracer/verifier/debugger): the helper swallows both unlinks (`.catch(()=>{})`, upload-paths.ts:75-81), so it cannot throw. Latent-only (if helper changes). |
+| MEDIUM | ~5 | Search-enrichment compile-guard gap (A2/MAJOR-1, **3-agent**); focus-visible enforcement-harness gap (MAJOR-2 + 4 designer findings); OG sequential 60s worst-case (CQ19-01); upload single-settle restructure (A3); getImagesForSmartCollection COUNT(*) OVER() per page (PERF, scale). |
+| LOW (actionable) | ~14 | MINOR-1 search-enrichment failure swallowed no-log (**critic, HIGH**); F1 view-retention parseInt('1e3')→1-day silent (debugger); F2 GPS-strip oversized-box bypass (debugger, **privacy**); D19-01 lightbox focus-ring on invisible hitbox (designer HIGH); D19-07 skip-link focus:→focus-visible: (designer HIGH); D19-08 blue-outline→ring-ring token ×3 (designer); D19-09 upload-dropzone focus:→focus-visible:; D19-05 text-[10px] badges; MINOR-2 windowless settle; CQ19-02 BoundedMap entries() live-ref; CQ19-03 useCallback; CQ19-04 cross-sibling import; SEC-19-01 IPv6 /64; test FINDING-1 rollbackOgAttempt untested. |
+| STRUCTURAL/DEFER | 6 | A1 topics.slug cascade migration; A4 restore-maintenance flag scale-out fence; A5 storage dead-module whitelist/delete; A6 view-buffer extraction; D19-04 dl/dt/dd EXIF semantics; test FINDING-2 lr-upload functional harness. |
+| DOC | 0 | document-specialist: all 29 checked items MATCH. CLAUDE.md accurate. |
+| FALSE-POSITIVE | 1 | deleteOriginalUploadFile "unguarded await leaks claim" — all agents correctly skipped (helper swallows both unlinks). |
 
-**Verdict:** Mature, well-hardened. ZERO new live runtime defects this cycle. All cycle-17 fixes verified individually correct (verifier 6/6 gates green + 4 fixes confirmed + 3 test gates non-vacuous). The signal this cycle is: (1) ONE clear a11y missed-sibling (nav theme/locale focus rings, 2-agent), (2) THREE recurring STRUCTURAL roots the point-patches keep treating symptomatically (upload-tracker single-settle, search-route shared guarded select, topic-slug cascade), and (3) a batch of doc-drift line refs.
+**Verdict:** Mature, well-hardened. Zero new live runtime defects. The signal this cycle: (1) THREE cheap correctness/privacy/observability fixes (search-enrichment no-log, view-retention parseInt, GPS-strip oversized-box bypass), (2) a cluster of concrete a11y focus-visible misses (designer, the recurring "miss the next sibling" theme), (3) the top structural item (A2 search-enrichment compile-guard extract, 3-agent agreement, safe + deletes a net-test), and (4) the recurring structural roots (A3 quota single-settle, MAJOR-2 focus scanner, A1 slug cascade) that prior cycles keep netting symptomatically.
+
+---
+
+## Cross-agent agreement (higher signal)
+- **Search-route enrichment selects outside the privacy compile-guard, duplicated ×2 (A2/MAJOR-1)** — **3 agents** (architect A2, critic MAJOR-1, tracer F2-STRUCT-01). Security drift now monitored by a denylist test but NOT structurally closed. Unanimous: extract one compile-guarded `searchEnrichmentSelectFields` const, import in both routes, retire the denylist. Low-risk (column set unchanged).
+- **Search enrichment failure swallowed → empty 200 no log (MINOR-1)** — critic HIGH; reinforced by the duplication smell. Trivial observability fix.
+- **Focus-visible "fix one sibling, miss the next" (MAJOR-2)** — critic (harness gap) + designer (4 concrete live misses D19-01/07/08/09). Strong combined signal.
+- **Upload quota single-settle point (A3 + MINOR-2)** — **2 agents** (architect A3 generator-framing, critic MINOR-2 window-blind residual).
+- **deleteOriginalUploadFile** — all agents correctly skipped (FALSE POSITIVE).
 
 ---
 
 ## Lead triage (what to implement vs defer this cycle)
 
 ### IMPLEMENT (high-value, low-risk, actionable now)
-1. **CR-18-1 / D18-01 (2-agent, HIGH signal) — nav-client.tsx theme toggle (155-165) + locale switch (166-172) focus-visible rings.** Direct sibling of the cycle-17 hamburger fix. Clear WCAG 2.4.7 gap, trivially safe. Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. + extend the focus-visible test fixture.
-2. **A2 / MAJOR-3 / SEC-LOW-1 (4-agent) — shared compile-guarded `searchEnrichmentSelectFields`.** Extract the enrichment column object from `data.ts` with an `Extract<keyof, _PrivacySensitiveKeys>` compile guard; import in both `api/search/semantic/route.ts` and `api/search/similar/[id]/route.ts`. Collapses 3 near-copies to 1, deletes the hand-maintained denylist drift class. No live leak today → drift-prevention. Low-risk (column set unchanged). Also derive PII_COLUMNS from SENSITIVE_KEYS and update CLAUDE.md checklist.
-3. **A1 tactical net (architect, recommended 2 cycles running) — schema-derived FK registry test** for topics.slug. Assert the FK set referencing topics.slug == the set updateTopic re-points. Lands the cheap net; DEFER the cascade migration restructure.
-4. **Doc M-A..M-E + SEC-LOW-2** — all doc-only, trivial CLAUDE.md edits.
-5. **Polish** — wide-gamut-hint.tsx:203 `focus:`→`focus-visible:outline-none`; smart-collection remap debug log (topics.ts:309-316).
+1. **MINOR-1 (critic, HIGH)** — add `console.error('search enrichment failed', e)` to both `api/search/semantic/route.ts:333-336` and `similar/[id]/route.ts:234-237`. Observability; trivial.
+2. **F1 (debugger)** — `lib/view-retention.ts:43` replace `Number.parseInt(env,10)` with `Number(env)` so `1e3` → 1000 not 1. Prevents silent near-emptying of view tables. Correctness/data-loss prevention.
+3. **F2 (debugger, privacy)** — `lib/gps-exif-strip.ts` ISOBMFF walker: an oversized/64-bit box early-exit currently returns `{stripped:false}`, which does NOT trigger the metadata-free re-encode fallback → GPS survives. Treat the anomalous early-exit as a signal to fall back (return null / re-encode). Privacy — not deferrable.
+4. **A2 / MAJOR-1 (3-agent)** — extract compile-guarded `searchEnrichmentSelectFields` in `data.ts`; both search routes import it. Deletes duplication + adds tsc-time PII guard. Low-risk (same columns).
+5. **D19-07 (designer, HIGH)** — skip link `focus:not-sr-only` → `focus-visible:not-sr-only` (`app/[locale]/layout.tsx:125`, `not-found.tsx:21`).
+6. **D19-01 (designer, HIGH)** — `lightbox.tsx:613` move focus ring from invisible full-height hitbox to the visible circular affordance via `group` + `group-focus-visible:ring-*`.
+7. **D19-08 (designer, MED)** — hardcoded `focus-visible:outline-blue-500` → `ring-ring` token in `image-zoom.tsx:347`, `lightbox-color-pip.tsx:161`, `login-form.tsx:84` (also closes deferred D18-02 siblings).
+8. **D19-09 + D19-05 (designer, LOW)** — upload-dropzone remove button `focus:`→`focus-visible:` (`upload-dropzone.tsx:472`); `text-[10px]`→`text-xs` badges (`info-bottom-sheet.tsx:272,277`).
+9. **CQ19-04 (code-reviewer, LOW)** — extract `humanizeColorPrimariesOrLabel` to `lib/color-label.ts`; import in color-details-section + wide-gamut-hint.
+10. **CQ19-03 (code-reviewer, LOW)** — wrap `copyColorMetadata` in `useCallback` (`lightbox-color-pip.tsx:88`).
+11. **Test FINDING-1 (test-engineer, MED)** — add behavioral tests for `rollbackOgAttempt` (`rate-limit.ts:261-270`), paralleling the existing 5 `rollbackSemanticAttempt` tests.
+12. **CQ19-02 (code-reviewer, MED)** — `BoundedMap.entries()` yield shallow-copied values to match `get()` semantics (latent mutation hazard; no live caller).
 
-### EVALUATE-THEN-IMPLEMENT-OR-DEFER (correctness-sensitive)
-6. **MAJOR-1 / A4 — upload-tracker single settling finally.** Architecturally valuable (kills the recurring leak class) BUT subtle: a blanket `finally{settle(0,0)}` is WRONG for any throw AFTER files are committed (under-count). In practice the per-file loop is fully inner-try/catch'd so no committed-then-throw path exists, making 0/0 safe today — but the refactor must preserve that invariant. If a clean, correct implementation is achievable, implement; else defer with the verifier-suggested cross-reference comment on `deleteOriginalUploadFile`. Instance severity LOW (self-healing, not attacker-triggerable).
+### EVALUATE-THEN-IMPLEMENT-OR-DEFER
+- **A3 / MINOR-2 — upload quota single-settle.** Architect's `claimSettled` try/finally is the structural fix; correctness-sensitive on the hot upload path. Implement the smaller, well-contained MINOR-2 (window-identity-blind settle) if it can be done cleanly; evaluate the full try/finally restructure (defer if risk outweighs the LOW self-healing instance impact).
+- **CQ19-01 — OG 60s worst-case.** Bound the cold/broken path (cap retried sizes or add an aggregate deadline). Medium value; implement if low-risk.
 
-### DEFER (structural migration / scale-gated / acceptable)
-- **MAJOR-2 / A1 restructure** — topics.slug surrogate-PK + onUpdate:cascade migration. Deliberate migration; defer with exit criterion (land the tactical registry test now instead).
-- **PERF-18-01** getTopics N correlated MAX(updated_at) subqueries (MEDIUM, scale-gated, already R18-M1 in code, ISR-cached). **PERF-18-02** COUNT(*) OVER() (MEDIUM, scale-gated <2000 imgs). **PERF-18-03** getTopicBySlug 2 round trips (LOW). **PERF-18-05/06/07** MQL allocs / histogram worker recreate (LOW micro). All defer.
-- **D18-02** blue-outline→ring-ring token unification (repo-wide consistency, not a hard WCAG fail in modes used). **D18-06** masonry hover reduced-motion (AAA). Defer/optional.
-- **CR-18 images.ts:512** — FALSE POSITIVE (refuted), no action (or fold into MAJOR-1 cross-ref comment).
-
----
-
-## Cross-agent agreement (higher signal)
-- **nav-client theme/locale focus-visible rings missing** — **2 agents** (code-reviewer CR-18-1 conf-HIGH, designer D18-01 HIGH). Clear actionable WCAG sibling.
-- **Search-route enrichment selects outside privacy compile-guard (A2)** — **4 agents** (architect A2, critic MAJOR-3, security LOW-1, tracer Flow-4 structural smell). No live leak; unanimous structural concern.
-- **Upload-tracker single-settle-point (A4/MAJOR-1)** — **2 agents** (critic MAJOR-1, architect A4). Recurring-root framing.
-- **topics.slug rename fan-out (A1/MAJOR-2)** — **2 agents** (architect A1, critic MAJOR-2). Data-loss history; defer restructure, land tactical net.
-- **images.ts:512 deleteOriginalUploadFile** — **4 agents REFUTED** as live bug (critic/tracer/verifier/debugger). FALSE POSITIVE.
-
-## Positive signals (verified converged)
-- All 4 cycle-17 fixes verified correct (DBG-17-1 topic-SELECT settle, PERF-17-04 semantic snapshot, 4 focus rings, 3 non-vacuous test gates) — verifier 6/6 gates + tracer 4/4 flows CLEARED + debugger 0 new bugs.
-- Privacy guard triple defense intact; security 0 findings, 0 npm-audit vulns.
-- Topic-slug rename re-points all 4 stores in one transaction before delete (tracer Flow-2 CLEARED at instance level).
-- `deleteOriginalUploadFile` swallow-errors contract makes the only remaining post-claim await safe.
+### DEFER (structural migration / scale-gated / acceptable) — see plan deferred list
+- **MAJOR-2 general focus-visible scanner** — meaningful new test infra; risk of regex churn (touch-target audit took many cycles). Fix concrete designer findings now; defer the scanner with exit criterion.
+- **A1 topics.slug onUpdate:cascade / surrogate PK migration** — deliberate migration; FK-registry net adequate. Exit: 4th FK child or routine renames.
+- **A4 restore-maintenance DB-backed flag / startup fence** — scale-out only; single-replica deployment is the current fence. Exit: any multi-replica deploy.
+- **A5 storage dead-module whitelist-or-delete** — no live importer. Exit: first importer.
+- **A6 view-buffer extraction from data.ts** — cohesion only. Exit: next behavioral change.
+- **D19-04 EXIF dl/dt/dd semantics** — AA 1.3.1; markup refactor risk. **D19-02/03/06 reduced-motion** — global catch-all already covers; AAA.
+- **SEC-19-01 IPv6 /64** — defense-in-depth; account bucket covers worst case. **SEC-19-02** token pre-DB throttle — marginal.
+- **PERF-C19-01..05** — scale-gated / micro. **Test FINDING-2** lr-upload functional harness — larger; FINDING-3/4 minor.
 
 ## AGENT FAILURES
-None. All 11 agents completed and their per-agent file is fresh (cycle-18).
+None. All 11 agents completed and their per-agent file is fresh (cycle-19).

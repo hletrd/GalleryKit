@@ -1,31 +1,23 @@
-# Security Review Report — Cycle 18
+# Security Review — GalleryKit (Cycle 19)
 
-**Scope:** all server actions, all API routes, auth/session primitives, SQL-construction surfaces, input/output rendering (JSON-LD, OG, CSV), file upload + path serving, CSP/middleware, dependency audit.
+**Risk Level: LOW.** Critical 0 · High 0 · Medium 0 · Low 2 · Info 1.
+`npm audit --omit=dev` → 0 vulnerabilities. lint:api-auth / lint:action-origin / lint:public-route-rate-limit all pass. No hardcoded secrets; `.env*` gitignored.
 
-**Risk Level: LOW** — 0 CRITICAL / 0 HIGH / 0 MEDIUM. Two LOW/informational items. Validated from code, not comments.
+## LOW
 
-## OWASP Top 10 — all PASS
-A01 Broken Access Control (withAdminAuth + isAdmin server-side + requireSameOriginAdmin, lint-gate enforced); A02 Crypto (Argon2id 64MiB/t3/p4, HMAC-SHA256 + timingSafeEqual, SESSION_SECRET mandatory ≥32 in prod); A03 Injection (Drizzle params, smart-collection allowlists + scalar enforcement, LIKE escaping, safeJsonLd, spawn array-args); A04 Insecure Design; A05 Misconfig (strong CSP nonce, no unsafe-inline/eval in prod, object-src none, base-uri self, nosniff, no-store admin/API); A06 (`npm audit --omit=dev`: **0 vulnerabilities**); A07 Auth (dual-bucket per-IP+per-account rate limit, dummy-hash timing equalization, generic error, 24h token age bound); A08 Integrity (DB restore header validation + advisory lock + --one-database, backup realpath containment); A09 Logging (logAuditEvent, password-redacted mysqldump stderr); A10 SSRF (OG self-fetch pins origin to trusted siteConfig.url, fail-closed, 10s timeout + 1MB cap).
+### SEC-19-01 — Per-IP rate-limit buckets key on the full IP; IPv6 /64 rotation evades them
+Category A04 Insecure Design / rate-limit evasion (DoS). `apps/web/src/lib/rate-limit.ts:112-130` (`normalizeIp` returns full address) and every per-IP bucket (`getClientIp` :149-180; `preIncrementOgAttempt` :236-244; semantic/search/load-more/view buckets in `app/actions/public.ts`). An attacker controlling an IPv6 /64 (2^64 addresses) gets a fresh bucket per source address → bypass of DoS limits on expensive endpoints (POST /api/search/semantic = CLIP embed + up to SEMANTIC_SCAN_LIMIT=2000-row vector scan; searchImagesAction LIKE scans). Same-origin gate is not a control vs scripted attackers (Origin/Referer attacker-controllable outside a browser). Mitigations (why LOW): login brute-force bounded by account-scoped bucket `acct:<sha256>` which IP rotation does NOT evade; per-request work hard-capped. Confidence High (gap) / Med (impact). Fix: aggregate IPv6 to /64 prefix before keying buckets; keep IPv4 per-address.
 
-## Priority-area verification
-- **Public search routes (semantic, similar/[id]) — architect PII flag CLEARED.** Both enrichment selects return only `id, title, description, filename_jpeg, width, height, topic, topics.label, camera_model, lens_model, capture_date` — none in `_PrivacySensitiveKeys`. No GPS/filename PII reaches the response. Both enforce same-origin, restore-maint gate, body/Content-Type/chunked guards, rate-limit pre-increment + rollback.
-- **Admin API routes** wrap withAdminAuth (`lint:api-auth` passes).
-- **LR PAT token** — `gk_`+base64url(32 bytes); only SHA-256 digest persisted; verifyToken well-formed-gated, parameterized lookup, timingSafeEqual, expiry-enforced, fail-closed.
-- **File upload security** — lr/upload mirrors browser path (filename sanitize, slug, sanitizeAdminString + code-point caps, restore-maint, contract lock, bavail disk pre-check, GPS strip DB+on-disk, HDR gating, idempotent quota settle).
-- **Path traversal** — serve-upload + db/download use segment allowlist + realpath containment + lstat symlink reject (TOCTOU closed).
-- **Cycle-17 changes** — semantic-mode snapshot is a pure config hoist (no security impact); upload-tracker settle-on-throw prevents a quota-claim leak DoS (correct, no new surface).
+### SEC-19-02 — Token-auth path verifies tokens against DB with no pre-DB IP rate limit (marginal)
+Category A04 / unauthenticated DB-load amplification. `apps/web/src/lib/api-auth.ts:63-67` (token branch calls `verifyToken` before any rate-limit gate) → `apps/web/src/lib/admin-tokens.ts:136-159` (one indexed SELECT per well-formed token). Only unauthenticated-reachable /api/admin/* surface. Not brute-force (256-bit token; isWellFormedToken rejects malformed at zero DB cost; expensive multipart parse gated behind auth). DB-load amplification only. Confidence High (un-throttled) / Low (practical DoS). Needs-manual-validation against prod volume. Fix (optional): lightweight per-IP pre-increment in withAdminAuth before verifyToken when allowTokenScope set.
+
+## Informational
+SEC-19-INFO — CSP `style-src 'unsafe-inline'` (`lib/content-security-policy.ts:108` prod / :85 dev). script-src nonce-based with no unsafe-inline/eval. Common Next.js/Tailwind requirement; far lower impact than script. Not a vuln.
+
+## Confirmed-clean (verified)
+Auth wrapper, server-action CSRF (lint green), OG SSRF fail-closed host-pinned, file serving allowlist+symlink reject+realpath containment, LR token model (256-bit/SHA-256/constant-time/scope+expiry), privacy split compile-guards, injection prevention (Drizzle params + smart-collections allowlist compiler + LIKE escaping), DB restore scanner+lock+caps, output encoding (safe-json-ld/atom/CSV), session/login (HMAC+timingSafeEqual+Argon2 timing equalization+dual rate limit+session-fixation), proxy spoofing (TRUST_PROXY right-anchored XFF).
 
 ## Findings
-
-### LOW-1 — Enrichment selects in search routes lack a compile-time PII guard (defense-in-depth)
-`api/search/semantic/route.ts:293-315`; `api/search/similar/[id]/route.ts:194-216`
-**No live leak today** (columns verified public). Unlike publicSelectFields/searchFields, these hand-written object-literals have no `Extract<keyof, PrivacySensitiveKeys>` compile guard. A future edit adding e.g. `latitude` ships to anonymous callers with zero tsc/test signal (a runtime test exists since bdf6fcdb; a compile twin would catch at tsc). Fix = mirror `_searchPrivacyGuard` or build from a shared guarded const. Confidence High that current code is clean. (Same root as architect A2 / critic MAJOR-3.)
-
-### LOW-2 — CLAUDE.md doc drift on LR token header + format
-CLAUDE.md says "32-char random hex" in `X-Admin-Token`. Code uses `X-GalleryKit-Token` (`TOKEN_HEADER='x-gallerykit-token'`) and `gk_`+base64url(32 bytes). Implementation is STRONGER than documented; doc-only fix.
-
-## Checklist (all ✓)
-No hardcoded secrets; inputs validated; injection prevented; authZ verified; session crypto verified; SSRF fail-closed; XSS (CSP nonce + safeJsonLd + Unicode strip); path traversal closed; rate limiting verified; dependencies 0 vulns.
-
-**`npm audit --omit=dev`: found 0 vulnerabilities.**
-**Lint gates api-auth / action-origin / public-route-rate-limit: all PASS.**
+- SEC-19-01 | LOW | High(gap)/Med(impact) | rate-limit.ts:112-130 — IPv6 /64 rate-limit evasion
+- SEC-19-02 | LOW(marginal) | Low | api-auth.ts:63-67 → admin-tokens.ts:136-159 — token verify DB lookup un-throttled pre-DB
+- SEC-19-INFO | INFO | — | content-security-policy.ts:108 — style-src unsafe-inline (note)

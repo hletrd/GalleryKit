@@ -1,3 +1,328 @@
+# GalleryKit Designer/A11y Review — Cycle 19
+
+**Date:** 2026-06-27  
+**Reviewer:** Designer agent (oh-my-claudecode:designer)  
+**Scope:** `apps/web/src/components/` and `apps/web/src/app/[locale]/` (public + admin)  
+**Method:** Static source review — class selectors, ARIA attributes, CSS patterns, semantic structure
+
+---
+
+## Status of Known-Deferred Items
+
+- **D18-02** (blue-outline → ring-ring token): Partially deferred. Three new sibling instances identified as D19-08 in components not previously audited (`image-zoom.tsx`, `lightbox-color-pip.tsx`, `login-form.tsx`).
+- **D18-06** (masonry hover reduced-motion): Confirmed fully resolved. `globals.css` carries dual coverage: catch-all `transition-duration: 0.01ms !important` plus explicit `group-hover:scale-105` suppression via `transform: none !important` under `@media (prefers-reduced-motion: reduce)`. No re-raise needed.
+
+---
+
+## Executive Summary
+
+Nine findings remain, none critical. The codebase is in strong shape: 44px touch-target enforcement (blocking test), focus-visible ring adoption across components, and reduced-motion infrastructure (global CSS catch-all, component-level `matchMedia` checks, and `motion-reduce:` Tailwind utilities) are all genuinely thorough. The two HIGH findings are both focus-indicator precision issues: the skip link surface appearing on mouse clicks, and lightbox nav rings painting on an invisible full-height hitbox rather than the visible circular affordance. The remaining MEDIUM findings are semantic HTML structure (EXIF data needs `<dl>/<dt>/<dd>`) and a design-system token escape in three components. LOW findings are mostly future-fragility risks from relying on the global reduced-motion catch-all instead of explicit overrides.
+
+---
+
+## Finding D19-01 — HIGH
+
+### Lightbox prev/next: focus ring paints on invisible hitbox, not visible circular affordance
+
+**File:** `apps/web/src/components/lightbox.tsx` L613–651  
+**WCAG:** 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA, WCAG 2.2)
+
+The outer `<button>` spans the full height of the lightbox (`h-full w-16`) and is invisible to sighted users. The `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` class is applied to this invisible boundary, not on the inner circular `<span className="flex h-11 w-11 ... rounded-full bg-black/50">` that users actually see. A keyboard user navigating to prev/next sees a ring painted against the viewport edge, completely disconnected from the circular control affordance.
+
+WCAG 2.4.11 requires the focus indicator to enclose the component's visible perimeter. The visual component here is the 44×44 circle; the outer button ghost is not a visual component.
+
+**Fix:** Use `group` on the outer button with `focus-visible:outline-none`, and `group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2` on the inner `<span>`:
+
+```tsx
+<button
+  className="pointer-events-auto absolute left-0 top-0 h-full w-16
+    flex items-center justify-center group focus-visible:outline-none"
+  ...
+>
+  <span className="flex h-11 w-11 items-center justify-center
+    rounded-full bg-black/50 hover:bg-black/70
+    group-focus-visible:ring-2 group-focus-visible:ring-ring
+    group-focus-visible:ring-offset-2">
+    <ChevronLeft className="h-6 w-6" />
+  </span>
+</button>
+```
+
+**Confidence:** High
+
+---
+
+## Finding D19-07 — HIGH
+
+### Skip link uses `focus:` not `focus-visible:` — appears on mouse click
+
+**Files:**
+- `apps/web/src/app/[locale]/layout.tsx` L125
+- `apps/web/src/app/[locale]/not-found.tsx` L21  
+**WCAG:** 2.4.1 Bypass Blocks (A)
+
+```tsx
+<a
+  href="#main-content"
+  className="sr-only focus:not-sr-only focus:absolute focus:top-4
+    focus:left-4 focus:z-50 focus:px-4 focus:py-2
+    focus:bg-primary focus:text-primary-foreground focus:rounded-md"
+>
+```
+
+`focus:` maps to `:focus`, which fires on both keyboard navigation and mouse clicks. A user who mouse-clicks anywhere that causes the skip link to gain `:focus` (programmatic focus, or an accidental click) will see it jump into view. The standard convention since `:focus-visible` is broadly supported is to gate skip-link visibility on `focus-visible:` so it only surfaces for keyboard users.
+
+The identical pattern appears in both `layout.tsx` and `not-found.tsx`.
+
+**Fix:** Replace all `focus:` prefixes with `focus-visible:` in both files:
+```tsx
+className="sr-only focus-visible:not-sr-only focus-visible:absolute
+  focus-visible:top-4 focus-visible:left-4 focus-visible:z-50
+  focus-visible:px-4 focus-visible:py-2 focus-visible:bg-primary
+  focus-visible:text-primary-foreground focus-visible:rounded-md"
+```
+
+**Confidence:** High
+
+---
+
+## Finding D19-08 — MEDIUM
+
+### Three components use hardcoded `outline-blue-500/400` instead of `ring-ring` design-system token
+
+**Files:**
+- `apps/web/src/components/image-zoom.tsx` L347
+- `apps/web/src/components/lightbox-color-pip.tsx` L161
+- `apps/web/src/app/[locale]/admin/login-form.tsx` L84  
+**WCAG:** 2.4.7 Focus Visible (AA)  
+**Context:** New siblings of deferred D18-02; these locations were not previously audited.
+
+All three use:
+```tsx
+focus-visible:outline focus-visible:outline-2
+focus-visible:outline-offset-2
+focus-visible:outline-blue-500
+dark:focus-visible:outline-blue-400
+```
+
+The established codebase pattern is `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`, which resolves through the `--ring` CSS variable and adapts to all themes (light, dark, OLED) and future rebranding. The hard-coded blue escapes this:
+
+- The image-zoom zoom-toggle button (`image-zoom.tsx:347`) is a primary photo-viewer interaction.
+- The lightbox color-pip open button (`lightbox-color-pip.tsx:161`) is overlaid on black — blue outline may be acceptable there but is inconsistent.
+- The password-visibility toggle in the login form (`login-form.tsx:84`) is especially user-visible.
+
+**Fix for all three:**
+```tsx
+focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+```
+Remove `focus-visible:outline`, `focus-visible:outline-2`, and `focus-visible:outline-offset-2` — the `ring` utilities already produce the correct inset/offset ring without requiring `outline`.
+
+**Confidence:** High
+
+---
+
+## Finding D19-04 — MEDIUM
+
+### EXIF data key-value pairs lack `<dl>/<dt>/<dd>` semantics
+
+**Files:**
+- `apps/web/src/components/photo-viewer.tsx` L792–916
+- `apps/web/src/components/info-bottom-sheet.tsx` L346–467  
+**WCAG:** 1.3.1 Info and Relationships (A)
+
+Both the photo-viewer info panel and the mobile bottom sheet EXIF grid render metadata as:
+```tsx
+<div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
+  <div>
+    <p className="text-xs text-muted-foreground uppercase tracking-wide">Aperture</p>
+    <p className="font-medium">f/2.8</p>
+  </div>
+  ...
+</div>
+```
+
+WCAG 1.3.1 requires that label-value relationships conveyed visually be programmatically determinable. A `<dl>/<dt>/<dd>` structure (definition list) satisfies this; adjacent `<p>` elements in a `<div>` do not. Screen readers traversing the grid will announce each item without identifying its term-definition relationship.
+
+**Fix:** Convert to `<dl>/<dt>/<dd>`. The visual output is identical:
+```tsx
+<dl className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
+  <div>
+    <dt className="text-xs text-muted-foreground uppercase tracking-wide">
+      {t('exif.aperture')}
+    </dt>
+    <dd className="font-medium mt-0.5">f/2.8</dd>
+  </div>
+  ...
+</dl>
+```
+
+Apply to both the photo-viewer info panel and the bottom sheet EXIF grid identically.
+
+**Confidence:** High
+
+---
+
+## Finding D19-05 — MEDIUM
+
+### P3 gamut and HDR peek chips use 10px text — WCAG 1.4.4
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx` L272, L277  
+**WCAG:** 1.4.4 Resize Text (AA)
+
+```tsx
+<span className="... text-[10px] font-bold bg-purple-200 text-purple-900
+  dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
+  P3
+</span>
+<span className="... text-[10px] font-bold
+  bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 ...">
+  HDR
+</span>
+```
+
+10px is below the practical legibility floor for most body text (12–14px is standard minimum). At 10px, the 200% resize requirement of WCAG 1.4.4 only brings the text to 20px, and many users configure their browser minimum font size above that. The labels carry meaningful semantic content (gamut and HDR capability status), not merely decoration. The peek-state is also the first and only visible state of these badges when the sheet is collapsed — the user can not expand to see a larger version.
+
+**Fix:** Raise to `text-xs` (12px Tailwind default) or `text-[11px]` as a compromise. The peek row has sufficient horizontal room:
+```tsx
+<span className="text-xs font-semibold px-2 py-0.5 ...">P3</span>
+<span className="text-xs font-semibold px-2 py-0.5 ...">HDR</span>
+```
+
+**Confidence:** High
+
+---
+
+## Finding D19-02 — LOW
+
+### Bottom sheet slide transition relies on global CSS catch-all for reduced-motion, not an explicit override
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx` L203  
+**WCAG:** 2.3.3 Animation from Interactions (AAA)
+
+```tsx
+className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl
+  shadow-2xl transition-transform duration-300 ease-out"
+```
+
+The `globals.css` global `transition-duration: 0.01ms !important` catch-all effectively snaps this transition for reduced-motion users — the current behavior is correct. The concern is fragility: `lightbox.tsx` and `photo-viewer.tsx` both explicitly test `prefersReducedMotion` for their motion decisions, while the bottom sheet relies solely on the global catch-all. If the global rule is ever scoped (for instance, to stop it from interfering with a specific animation library), the bottom sheet regresses silently.
+
+**Fix:** Add an explicit `motion-reduce:` modifier, which documents intent at the callsite:
+```tsx
+className="... transition-transform duration-300 ease-out
+  motion-reduce:transition-none"
+```
+
+**Confidence:** Medium (currently correct; risk is silent future regression)
+
+---
+
+## Finding D19-03 — LOW
+
+### Photo-viewer layout transitions rely on global CSS catch-all rather than explicit overrides
+
+**File:** `apps/web/src/components/photo-viewer.tsx` L663, L743  
+**WCAG:** 2.3.3 Animation from Interactions (AAA)
+
+Same fragility as D19-02. The grid layout switch at L663 uses `transition-all duration-500 ease-in-out` and the info sidebar at L743 uses `transition-[opacity,transform] duration-500 ease-in-out` — both rely on the global CSS catch-all. The component already imports and uses `prefersReducedMotion` (from framer-motion) for its animated content.
+
+**Fix:** Add explicit `motion-reduce:` modifiers:
+```tsx
+// L663:
+className={cn(
+  "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
+  "motion-reduce:transition-none",
+  showInfo ? "..." : "..."
+)}
+
+// L743:
+className={cn(
+  "... transition-[opacity,transform] duration-500 ease-in-out ...",
+  "motion-reduce:transition-none"
+)}
+```
+
+**Confidence:** Medium (currently correct; risk is silent future regression)
+
+---
+
+## Finding D19-06 — LOW
+
+### HDR badge gradient may have variable contrast across its width
+
+**File:** `apps/web/src/components/info-bottom-sheet.tsx` L277–279  
+**WCAG:** 1.4.3 Contrast Minimum (AA)
+
+```tsx
+<span className="... bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 ...">
+  HDR
+</span>
+```
+
+Estimated contrasts against amber-950 (#451A03): amber-300 (#FCD34D) ≈ 7.2:1 (passes AAA), orange-400 (#FB923C) ≈ 4.8:1 (passes AA). Given the badge is 3 characters wide the contrast gradient is minimal; both ends pass AA. This finding is informational — no code change required unless visual verification reveals that the rendered gradient washes the text at the lighter end.
+
+**Note:** If simplification is desired, a solid `bg-amber-300 text-amber-950` removes the gradient complexity while maintaining identical contrast.
+
+**Confidence:** Low (likely acceptable as-is)
+
+---
+
+## Finding D19-09 — LOW
+
+### Upload remove button uses `focus:opacity-100` instead of `focus-visible:opacity-100`
+
+**File:** `apps/web/src/components/upload-dropzone.tsx` L472  
+**WCAG:** Convention consistency
+
+```tsx
+className="... sm:opacity-0 sm:group-hover:opacity-100 opacity-100
+  focus:opacity-100 transition-opacity"
+```
+
+`focus:` fires on `:focus`, which includes mouse-click focus. On `sm:` breakpoints where the button starts hidden (opacity-0), a mouse click triggers the action handler and the button becomes briefly visible before the image is removed. Real harm is negligible (the button disappears immediately after the click), but this is inconsistent with the `focus-visible:` convention used everywhere else in the codebase.
+
+**Fix:**
+```tsx
+focus-visible:opacity-100
+```
+
+**Confidence:** High (fix is unambiguously correct); Low (current code causes no observable user harm)
+
+---
+
+## Observations (No Code Change Required)
+
+**Reduced-motion coverage — comprehensive.** The `globals.css` dual-layer approach (catch-all `transition-duration: 0.01ms !important` + explicit `group-hover:scale-105` `transform: none !important`) correctly handles all photo card hover animations. `similar-photos.tsx:132` and `skeleton.tsx` use `motion-reduce:animate-none` correctly. `image-zoom.tsx` checks `prefers-reduced-motion` via `matchMedia` and responds to `change` events — correct.
+
+**Windows High Contrast Mode.** The `globals.css` `@media (forced-colors: active)` rule for masonry card text overlays is well-considered. The masonry card text forced-color overrides (`CanvasText`/`Canvas`) correctly prevent white-on-light failures under light WHCM themes.
+
+**Search dialog ARIA.** `role="combobox"` on the input, `role="listbox"` on results container, `role="option"` on each result item, `aria-live="polite"` for result count announcements — all correct.
+
+**Login form.** Well-structured: persistent visible `<label>` elements, `autoComplete="username"/"current-password"`, password toggle with `aria-pressed` and context-sensitive `aria-label`, `role="alert"` on inline error, `h-11` submit button. Only the focus ring token escape (D19-08) is an issue.
+
+**Back-to-top button (home-client.tsx).** Checks `prefers-reduced-motion` before smooth scroll. `aria-hidden={true}` + `tabIndex={-1}` when hidden. Touch target `min-h-11 min-w-11` passes.
+
+**Skip-link target.** The `<main id="main-content">` target exists in both `app/[locale]/(public)/layout.tsx` and `app/[locale]/admin/layout.tsx` with `tabIndex={-1}` and `focus:outline-none`. The target is correct; only the skip link trigger class is the issue (D19-07).
+
+**Empty alt text in nav avatar** (`nav-client.tsx:136` `alt=""`). Correct — the adjacent text label provides the accessible name; the avatar image is decorative in context.
+
+---
+
+## Summary Table
+
+| ID | Severity | Confidence | File:Line | Criterion |
+|----|----------|------------|-----------|-----------|
+| D19-01 | HIGH | High | `lightbox.tsx:613` | WCAG 2.4.7, 2.4.11 |
+| D19-07 | HIGH | High | `layout.tsx:125`, `not-found.tsx:21` | WCAG 2.4.1 |
+| D19-08 | MEDIUM | High | `image-zoom.tsx:347`, `lightbox-color-pip.tsx:161`, `login-form.tsx:84` | WCAG 2.4.7 |
+| D19-04 | MEDIUM | High | `photo-viewer.tsx:792`, `info-bottom-sheet.tsx:346` | WCAG 1.3.1 |
+| D19-05 | MEDIUM | High | `info-bottom-sheet.tsx:272,277` | WCAG 1.4.4 |
+| D19-02 | LOW | Medium | `info-bottom-sheet.tsx:203` | WCAG 2.3.3 |
+| D19-03 | LOW | Medium | `photo-viewer.tsx:663,743` | WCAG 2.3.3 |
+| D19-06 | LOW | Low | `info-bottom-sheet.tsx:277` | WCAG 1.4.3 |
+| D19-09 | LOW | Low (harm) | `upload-dropzone.tsx:472` | Convention |
+
+---
+
 # GalleryKit Designer/A11y Review — Cycle 18
 
 **HEAD:** bcd67b12 (post Cycle 17 convergence)

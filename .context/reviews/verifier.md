@@ -1,30 +1,29 @@
-# Verifier Report — Cycle 18 / HEAD a9702716
+# Verifier Report — Cycle 19 / HEAD 5c559a0f
 
-**Status: PASS. Confidence: high. Blockers: 0.**
+**Status: PASS · Confidence: high · Blockers: 0.**
 
-## Gate Results
-| Gate | Command | Result | Count |
-|------|---------|--------|-------|
-| ESLint | `npm run lint --workspace=apps/web` | PASS | 0 errors |
-| TypeScript | `npm run typecheck --workspace=apps/web` | PASS | 0 errors; 7 JS scripts checked |
-| Vitest | `npm test --workspace=apps/web` | PASS | 2119 pass / 4 skip (232 files pass / 2 skip) |
-| lint:api-auth | `npm run lint:api-auth --workspace=apps/web` | PASS | 2 admin route files |
-| lint:action-origin | `npm run lint:action-origin --workspace=apps/web` | PASS | all OK / 1 exempt |
-| lint:public-route-rate-limit | `npm run lint:public-route-rate-limit --workspace=apps/web` | PASS | 6 public route files |
-| Build | — | SKIPPED (to save time; all source-level gates clean) | — |
+## Gate evidence
 
-## Acceptance criteria (all VERIFIED)
-1. **All baseline gates pass** — 6/6.
-2a. **DBG-17-1** topic SELECT settle-on-throw — `images.ts:267-279` try/catch+settle+rethrow; empty-row path settles (:277). Only other inter-claim awaits: disk-check (guarded) + `deleteOriginalUploadFile` (:512, CANNOT throw — `upload-paths.ts:75-81` swallows both unlinks). No unguarded await between claim and settle.
-2b. **PERF-17-04** — `image-queue.ts:521-522` `resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled'`; bootstrap path sets resolvedSemanticMode (:397); normal jobs carry snapshot (images.ts:497); legacy fall through to guarded SELECT.
-2c. **Focus-visible rings** — nav-client.tsx:96 hamburger ring-2 ring-ring offset-2; lightbox-color-pip.tsx:219 + :301 ring-2 ring-white (were ring-1 ring-white/50); wide-gamut-hint.tsx:203 ring-2 ring-amber-600 (was /40). All ≥2px, fully opaque.
-3a. **GAP-1** non-vacuous — topics-actions.test.ts:382 real query_json string → write-back reached → asserts remapped AST value 'new-slug'.
-3b. **GAP-2** non-vacuous — photo-viewer-no-hdr-download.test.ts:53-68 asserts compound `isAdmin && isP3Pipeline(...)` + absence of ungated form.
-3c. **GAP-3** non-vacuous — semantic-scan-limit-source.test.ts: import + `.limit(SEMANTIC_SCAN_LIMIT)` assertions.
-4. **Privacy guard** — data.ts:366-393 publicSelectFields omits all 20 SENSITIVE_KEYS; data.ts:463-464 `_SensitiveKeysInPublic` compile guard; privacy-fields.test.ts symmetric test (`adminOnlyKeys === SENSITIVE_KEYS`) passing. `avif_10bit` intentionally public.
+| Check | Result | Output |
+|-------|--------|--------|
+| Tests (`npm test --workspace=apps/web`) | PASS exit 0 | 2134 passed, 4 skipped; 234 test files passed, 2 skipped |
+| Types (`npm run typecheck --workspace=apps/web`) | PASS exit 0 | tsc 0 errors, 7 JS scripts checked |
+| ESLint (`npm run lint --workspace=apps/web`) | PASS exit 0 | no errors |
+| lint:api-auth | PASS exit 0 | 2 routes OK (db/download, lr/upload) |
+| lint:action-origin | PASS exit 0 | 46 entries OK or SKIP-exempt; all mutating actions enforced |
+| lint:public-route-rate-limit | PASS exit 0 | 6 routes OK |
 
-## Residual / non-blocking
-- **Defensive note** — if `deleteOriginalUploadFile` ever rethrows, the :512 per-file-catch await would escape without settling. Currently cannot throw. Suggest a cross-reference comment at :511 (or the single-settle finally refactor).
-- **Doc drift (M-1..M-4 from cycle-17 + new M-A..M-E)** — settings-hash line ref, topic-rename table, upload-TOCTOU absent from Race Conditions, image_views index missing. Low-risk, doc-only.
+## Acceptance criteria — all VERIFIED
+1. All 6 gates green — exit 0 with clean output.
+2. nav-client.tsx theme+locale focus-visible rings (CR-18-1/D18-01) — lines 96, 157, 168 each carry `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`.
+3. search-route-privacy.test.ts denylist derived from canonical split (A2) — reads `adminSelectFieldKeys`/`publicSelectFieldKeys` from live Object.keys(); guards non-vacuousness (PII_COLUMNS.length >= 15); scans actual route source per-column; would fail if a PII column were added to adminSelectFields then referenced in either route.
+4. topic-slug-fk-registry.test.ts (A1) — parses real schema.ts FK refs to topics.slug (topic_aliases, images, topic_views); asserts equality with KNOWN_SLUG_FK_TABLES; verifies delete-after-update ordering; fails on new FK child.
+5. upload quota-claim settled on topic-exists throw (CR-17-1) — images.ts:267-275 try/catch calls settleUploadTrackerClaim(...,0,0) then re-throws; test asserts exactly 4 zero-success rollback calls + catch-then-rethrow pattern.
+6. semantic-mode snapshotted at upload time (PERF-17-04) — image-queue.ts:141 job interface field; :397 resolved at snapshot; :519-530 legacy-job fallback `job.semanticSearchMode ?? 'disabled'`.
+7. Cycle-17/18 tests non-vacuous — all three read actual source (not mocks), enforce minimum cardinalities, structural assertions that fail on regression.
 
-**Recommendation: APPROVE.** All 6 gates green with fresh evidence; all 4 cycle-17 fixes verified from code; all 3 test gates confirmed non-vacuous; privacy guard structurally sound + runtime-verified.
+## Recommendation
+APPROVE — all 6 gates pass with fresh evidence (2134 tests passing), cycle-17/18 fixes present and correct, new tests demonstrably non-vacuous. No gate failure, no vacuous test, no implementation/claim mismatch.
+
+## Findings
+- None.

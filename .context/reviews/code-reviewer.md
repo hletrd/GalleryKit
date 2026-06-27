@@ -1,49 +1,30 @@
-# Code Review — Cycle 18
+# Code Review — Cycle 19 (GalleryKit)
 
-**Angle:** code quality / logic / SOLID / maintainability
-**HEAD:** a9702716 (cycle-17 fixes landed)
+**Files reviewed:** nav-client.tsx, wide-gamut-hint.tsx, lightbox-color-pip.tsx, settings-hash.ts, image-queue.ts, bounded-map.ts, og-photo-fetch.ts, actions/images.ts, actions/topics.ts, admin-backfill-runner.ts, photo-viewer.tsx (sweep), data.ts + process-image.ts (targeted).
 
-**Files Reviewed (8):** images.ts, image-queue.ts, topics.ts, nav-client.tsx, lightbox-color-pip.tsx, wide-gamut-hint.tsx, upload-tracker.ts, smart-collections.ts
+CRITICAL: 0 · HIGH: 0 · MEDIUM: 2 · LOW: 2 · Recommendation: COMMENT.
 
-**Severity tally:** CRITICAL 0, HIGH 0, MEDIUM 0, LOW 4, VERY-LOW 1.
+## MEDIUM
 
----
+### CQ19-01 — Sequential await with 10s timeout per size in OG fetch → 60s worst-case (HIGH conf)
+`apps/web/src/lib/og-photo-fetch.ts:87-91`. `pickFirstAvailablePhotoBuffer` iterates up to 6 sizes sequentially, each `tryFetchPhotoBuffer` gated by `AbortSignal.timeout(10000)` (line 53). Worst case 6×10=60s before falling back to default OG image. On a fresh install (backfill not run) or broken `IMAGE_BASE_URL`, every size 404s/times out; social crawlers (Twitter ~5-10s, LinkedIn ~3s) drop the photo card silently. Warm path (640px present) is instant — issue is cold/broken path only. Fix: limit retry to the two smallest sizes, or add an aggregate outer `AbortSignal.timeout`, or treat a 404 on the smallest size as definitive (derivatives share one encoder run).
 
-## [LOW, conf HIGH] Unguarded `deleteOriginalUploadFile` in per-file catch can escape to the outer try, leaking the quota claim
-`apps/web/src/app/actions/images.ts:512`
+### CQ19-02 — BoundedMap.entries() yields live internal refs while get() shallow-copies (MED conf)
+`apps/web/src/lib/bounded-map.ts:~138`. `get()` returns `{ ...value }`; `entries()`/`[Symbol.iterator]` delegate to the internal Map returning live refs. A caller mutating a value from `entries()` corrupts internal eviction state (`resetAt`/`windowStart`/`count`). No current mutating caller in rate-limit.ts/auth-rate-limit.ts — latent. A WARNING comment exists but is not in the public TS interface. Fix: yield `[key, { ...value }]`, or rename `_entriesUnsafe()`.
 
-The per-file catch (507-527) calls `await deleteOriginalUploadFile(savedOriginalFilename)` at :512 without its own try/catch. If it threw (EPERM, I/O), the exception propagates to the outer try (:175) whose `finally` (:581) only releases `uploadContractLock` — never `settleUploadTrackerClaim`. The pre-claimed quota (:226-228) would leak for the upload window.
+## LOW
 
-NOTE: cross-agent (critic/tracer/verifier/debugger) REFUTED this as a *live* bug because `deleteOriginalUploadFile` swallows both unlink errors (`.catch(()=>{})`, upload-paths.ts:75-81) and therefore never throws. So it is a latent risk only (if that helper changes). Fix = wrap in try/catch, or (better) adopt a single settling `finally`.
+### CQ19-03 — copyColorMetadata not useCallback (HIGH conf)
+`apps/web/src/components/lightbox-color-pip.tsx:88`. Bare async fn in render body passed as DOM `onClick` (line 299). No re-render cost (DOM element), but inconsistent with memoized siblings. Fix: wrap in `useCallback`.
 
-## [LOW, conf HIGH] Theme toggle and locale switch buttons in nav missing `focus-visible` ring — sibling of cycle-17 a11y fix
-`apps/web/src/components/nav-client.tsx:155-172`
+### CQ19-04 — Cross-sibling import of humanizeColorPrimariesOrLabel (MED conf)
+`apps/web/src/components/wide-gamut-hint.tsx:7` imports `humanizeColorPrimariesOrLabel` from `@/components/color-details-section` (peer-component, not lib). Pure presentation logic; refactor of color-details-section would silently break it and force-bundle the full component. Fix: extract to `apps/web/src/lib/color-label.ts`, import in both.
 
-Cycle-17 added `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the mobile hamburger (:96). The two sibling buttons in `#primary-nav-controls` — theme toggle (155-165) and locale switch (166-172) — have only hover styles, no focus-visible ring. Keyboard Tab focus has no visible indicator. WCAG 2.4.7. Fix = add the same ring classes. (Also flagged by designer D18-01, HIGH — 2-agent agreement.)
+## Positive
+admin-backfill-runner connection lifecycle exemplary; images.ts quota claim settled on every error path; image-queue bootstrap pagination branches correct; settings-hash inflight singleton correct; photo-viewer memoizes derived values + imageLoaded reset defense; no hardcoded secrets / empty catches / `as any` / `@ts-ignore`.
 
-## [LOW, conf LOW] Upload-quota settle-on-throw invariant relies entirely on manual discipline
-`apps/web/src/app/actions/images.ts` (outer try ~175-581)
-
-Claim at 226-228; settlements at 6 sites (244, 249, 273, 277, 533, 555). Outer `finally` (:581) never settles. The documented invariant is enforced only by review discipline; a future `await` added without a paired settle silently leaks. Suggested: RAII-style closure / single settling finally. (See critic MAJOR-1, architect A4.)
-
-## [LOW, conf LOW] Smart-collection remap silently skips corrupt `query_json` rows without any log
-`apps/web/src/app/actions/topics.ts:309-316`
-
-`catch { continue }` with no log. A corrupt row silently retains the old slug after rename → zero-result collection, non-obvious to diagnose. Fix = add `console.debug`/`console.warn` before `continue`.
-
-## [VERY LOW, conf LOW] `wide-gamut-hint.tsx:203` uses `focus:outline-none` instead of `focus-visible:outline-none`
-`apps/web/src/components/wide-gamut-hint.tsx:203`
-
-Inconsistent with the codebase pattern (`focus-visible:outline-none` used in lightbox-color-pip.tsx:219,301). Functional impact ~zero on modern browsers; consistency fix only.
-
----
-
-## Positive observations
-- Cycle-17 settle-on-throw core fix (topic-exists SELECT 267-274) is correct; the two paths (catch+settle+throw, and `if(!topicRow){settle;return}`) are mutually exclusive — no double-settle.
-- `settleUploadTrackerClaim` math robust (`Math.max(0, count + (success - claimed))`, null-guarded).
-- `semanticSearchMode` three-tier resolution logically sound.
-- `remapTopicSlugInQuery` pure + stack-safe (MAX_DEPTH=4).
-- lightbox-color-pip focus coverage complete; copy button `min-h-11 min-w-11` meets 44px.
-- WideGamutHint localStorage expiry validated (`Number.isFinite`).
-
-**Recommendation:** COMMENT. Two actionable items before next cycle: nav-client focus rings (sibling of cycle-17); optional images.ts:512 guard / single-settle refactor.
+## Findings
+- CQ19-01 | MEDIUM | HIGH | og-photo-fetch.ts:87-91 — sequential 6×10s = 60s worst-case OG latency
+- CQ19-02 | MEDIUM | MED | bounded-map.ts:~138 — entries() live refs vs get() copy asymmetry
+- CQ19-03 | LOW | HIGH | lightbox-color-pip.tsx:88 — copyColorMetadata not useCallback
+- CQ19-04 | LOW | MED | wide-gamut-hint.tsx:7 — cross-sibling import should live in lib/

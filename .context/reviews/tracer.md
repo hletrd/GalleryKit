@@ -1,8 +1,7 @@
-# Tracer Report — Cycle 18
+# Tracer Review — Cycle 19
 
-**Date:** 2026-06-27
-**HEAD:** master (post-cycle-17 fixes)
-**Analyst:** Tracer agent (oh-my-claudecode:tracer)
+Generated: 2026-06-27
+Reviewer: oh-my-claudecode:tracer
 
 ---
 
@@ -10,333 +9,331 @@
 
 ### Observation
 
-Four flows were nominated for evidence-driven causal tracing after cycle 17 identified one headline defect (DBG-17-1, now fixed) in the upload quota tracker. The task is to find any NEW uncovered path in Flow 1, and to fully clear or confirm Flows 2-4 which the cycle-17 aggregate marked as important-to-verify.
+Four high-risk data/control flows in the GalleryKit codebase were traced end-to-end with competing causal hypotheses. Evidence was collected from:
+
+- `apps/web/src/app/actions/images.ts` (upload action, quota claim, enqueue)
+- `apps/web/src/lib/upload-tracker.ts` (settleUploadTrackerClaim)
+- `apps/web/src/lib/image-queue.ts` (background processing, mark-processed, cleanup)
+- `apps/web/src/lib/data.ts` (publicSelectFields, searchImages, all public query functions, lines 1-1723)
+- `apps/web/src/app/actions/topics.ts` (rename transaction fan-out)
+- `apps/web/src/db/schema.ts` (all FK relationships)
+- `apps/web/src/lib/serve-upload.ts` (ETag formula)
+- `apps/web/src/lib/settings-hash.ts` (COLOR_IMPACTING_KEYS, hash computation)
+
+Known false positive excluded per user instruction: `images.ts deleteOriginalUploadFile 'unguarded await leaks claim'` — refuted (swallows errors, confirmed in cycle 18 at `upload-paths.ts:76-79`).
 
 ---
 
-## FLOW 1 — Upload Quota Tracker Claim Lifecycle
+## Flow 1: Upload Quota Claim Lifecycle
 
-### Observation
+### Framing
 
-Cycle-17 fix (CR-17-1) wrapped the topic SELECT (`images.ts:266-279`) in try/catch+settle. The question: is there any await/return path AFTER the claim (`images.ts:226-228`) and AFTER the topic SELECT settle that escapes without rolling back the claim?
+Does every error path between the synchronous claim and the end of `uploadImages` settle the claim exactly once? Is there any double-settle or unrecovered leak?
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | All await paths after the claim are covered — no new uncovered path exists beyond cycle-17 fix | High | Strong (source of all callees verified) | `deleteOriginalUploadFile` is hardened; per-file try/catch wraps all remaining awaits |
-| 2 | The per-file catch block's `deleteOriginalUploadFile` can throw and leak the claim | Low | Strong (function source confirmed) | Right shape for a leak, but implementation is hardened to always resolve |
-| 3 | A post-loop path exists where `totalFailures === 0 && successCount === 0` bypasses both settles | Low | Moderate (edge-case analysis) | Possible if `files` is empty, but line 555 settle is still reached |
+| 1 | All error paths settle exactly once — no leak, no double-settle | High | Strong | Verified settle sites at every early-exit and post-loop branch |
+| 2 | A throw between per-file loop end and settle bypasses settlement | Low | Weak | No intermediate throwing code between loop and settle branches observed |
+| 3 | Double-settle on a retry or concurrent path | Very low | Weak | settleUploadTrackerClaim is not idempotent but no double-call path found |
 
-### Evidence For (Hypothesis 1 — CLEARED)
+### Evidence For
 
-Claim site: `apps/web/src/app/actions/images.ts:226-228`
+**Hypothesis 1 (all paths settle exactly once):**
 
-Settle points confirmed downstream of the claim:
+`apps/web/src/lib/upload-tracker.ts:19-33` — `settleUploadTrackerClaim` adjusts the in-memory tracker by `(successCount - claimedCount)` and `(uploadedBytes - claimedBytes)`. Idempotent in the sense of being a no-op when the key is absent, but NOT idempotent on repeated calls for the same key — double-settling would mis-adjust the counters.
 
-- **Line 244**: disk check insufficient space → `settleUploadTrackerClaim(…, 0, 0)` then `return`. COVERED.
-- **Line 249**: disk check `catch` → `settleUploadTrackerClaim(…, 0, 0)` then `return`. COVERED.
-- **Line 273**: topic SELECT `catch` → `settleUploadTrackerClaim(…, 0, 0)` then `throw err` (cycle-17 CR-17-1 fix). COVERED.
-- **Line 277**: `!topicRow` guard → `settleUploadTrackerClaim(…, 0, 0)` then `return`. COVERED.
-- **Line 533**: `totalFailures > 0 && successCount === 0` after per-file loop → settle. COVERED.
-- **Line 555**: main success/partial path after per-file loop → settle. COVERED.
+`apps/web/src/app/actions/images.ts:170-228` — claim is placed synchronously BEFORE any `await`, eliminating the TOCTOU race window (CR-16-01 fix).
 
-The per-file loop (lines 294-525) wraps EACH file in its own `try/catch` (try at line 297, catch at line 507). Every exception thrown inside a file's processing is caught per-file and does not propagate to the outer `try` (line 175) whose `finally` (line 561) only releases the contract lock, never settles.
+Settle sites downstream of the claim (`images.ts`):
 
-The per-file catch block at line 507 contains only:
-- `console.error(…)` — never throws
-- `await deleteOriginalUploadFile(savedOriginalFilename)` at line 512 — HARDENED
-- `instanceof` checks and array pushes — never throw
+| Line | Path | Args |
+|------|------|------|
+| 244 | disk check — insufficient space | `(0, 0)` |
+| 249 | disk check — `statfs` throw | `(0, 0)` |
+| 273 | topic SELECT — DB throw (CR-17-1 fix) | `(0, 0)` |
+| 277 | topic SELECT — row missing | `(0, 0)` |
+| ~540-555 | all-failed path (zero successes) | `(0, 0)` |
+| ~564 | success / partial-success path | `(actualSuccessCount, actualBytes)` |
 
-`deleteOriginalUploadFile` source at `apps/web/src/lib/upload-paths.ts:75-80`:
+`apps/web/src/app/actions/images.ts:590-592` — outer `finally` releases only `uploadContractLock`; settlement is explicitly absent (intentional: settle already fired on one of the above paths).
 
-```ts
-export async function deleteOriginalUploadFile(filename: string) {
-    await Promise.all([
-        fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, filename)).catch(() => {}),
-        fs.unlink(path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename)).catch(() => {}),
-    ]);
-}
-```
+Per-file catch block at `images.ts:507-533` — does NOT settle. Safe because `deleteOriginalUploadFile` (`upload-paths.ts:76-79`) swallows both `fs.unlink` rejections via `.catch(() => {})` and always resolves. This is the KNOWN FALSE POSITIVE confirmed in cycle 18.
 
-Both `fs.unlink` calls swallow their own errors via `.catch(() => {})`. `Promise.all` receives only resolved promises. The function ALWAYS resolves and CANNOT throw. Hypothesis 2 is disconfirmed by direct source inspection.
+**Background queue is orthogonal.** Quota settlement happens in the server action before the queue job runs. `image-queue.ts:447-467` (conditional `UPDATE WHERE processed = false` + delete-during-processing cleanup via `deleteImageVariants(..., [])`) is a separate correctness domain that does not touch quota tracking.
 
 ### Evidence Against / Gaps
 
-**Hypothesis 3 (empty `files` edge case):** If `files` is empty, the per-file loop runs 0 times, `totalFailures === 0 && successCount === 0`, so the early-exit settle at line 533 is skipped. However, execution falls through to line 555 (the unconditional settle at the success path), which still fires. Claim is settled. CLEARED.
+**Hypothesis 2:** No code between end of per-file loop and the all-failed/success branches was observed to throw. The only async operations in that region are the settle calls themselves, which are synchronous mutations of an in-memory Map.
 
-**Post-loop `continue` coverage:** Every `continue` path inside the per-file `try` block pushes to `failedFiles` (lines 302, 314, 333, 348, 357) or `rawRejectedFiles` (per-file catch line 519), or reaches `successCount++` (line 504). No code path exits the per-file loop without incrementing one counter, so `totalFailures + successCount > 0` after any non-empty loop.
+**Hypothesis 3:** `settleUploadTrackerClaim` is called exactly once per upload action invocation. No retry loop or concurrent path was found that would cause a second call for the same key within the same action execution.
+
+**Residual fragility (not a defect):** The per-file catch block depends on `deleteOriginalUploadFile` permanently remaining non-throwing. This invariant is enforced only by the code comment at `images.ts:511-519` and the implementation at `upload-paths.ts:76-79`. No automated test pins the "must never throw" contract.
 
 ### Rebuttal Round
 
-**Best challenge to Hypothesis 1:** Could `deleteOriginalUploadFile` inside the per-file catch block at line 512 throw if the underlying `fs.unlink` receives an unexpected argument type or if `path.join` throws?
+**Best challenge:** The outer `finally` (lines 590-592) does not settle. If a future refactor adds an async step between the per-file loop and the settle calls that can throw, and that throw propagates past the per-file catch, the claim would leak.
 
-**Answer:** `path.join` is synchronous and only throws on non-string/buffer arguments. `savedOriginalFilename` is typed `string | null` and the call is guarded by `if (savedOriginalFilename)`, so `path.join` always receives a string. `fs.unlink` errors are swallowed by `.catch(() => {})`. The function cannot throw. CLEARED.
+**Why the leader stands:** No such code exists today. The settle branches (all-failed at ~540 and success at ~564) are the only code between the loop and the outer finally, and both are synchronous Map mutations that cannot throw.
 
-### Convergence / Separation Notes
+### Verdict: CLEARED
 
-All three hypotheses converge: the claim lifecycle has no uncovered path beyond the cycle-17 fix. Hypothesis 2 and 3 are disconfirmed by source evidence; Hypothesis 1 stands.
-
-### Current Best Explanation
-
-**FLOW 1 is CLEARED.** The cycle-17 CR-17-1 fix (topic SELECT try/catch+settle) was the last uncovered await between the claim and the loop. No additional uncovered path exists. The per-file loop's catch block is hardened against throws (`deleteOriginalUploadFile` never throws), and post-loop settle coverage is exhaustive.
-
-### Critical Unknown
-
-None — all callees verified to source.
-
-### Discriminating Probe
-
-Not needed for the current state. Future guard: any new `await` added between the claim (line 226) and the loop entry (line 294) must be wrapped in `try/catch` that calls `settleUploadTrackerClaim(…, 0, 0)` before re-throwing, matching the pattern at lines 267-275.
-
-### Uncertainty Notes
-
-None material.
+**Informational finding:**
+- ID: TRC19-F1-FRAG-01
+- Severity: INFORMATIONAL
+- Confidence: HIGH
+- Location: `apps/web/src/app/actions/images.ts:511-519` (comment) + `apps/web/src/lib/upload-paths.ts:76-79`
+- Issue: Per-file catch block invariant ("settle not called here because deleteOriginalUploadFile never rejects") enforced only by a code comment, not an automated test. A future change making `deleteOriginalUploadFile` reject would silently break the invariant.
 
 ---
 
-## FLOW 2 — Topic-slug rename fan-out
+## Flow 2: Public Request Privacy — publicSelectFields / searchFields
 
-### Observation
+### Framing
 
-The topic-slug rename uses delete-old-row + insert-new-row (not `ON UPDATE CASCADE`). Four stores reference `topics.slug`. The question: are all four re-pointed BEFORE the delete, and is the `contains` predicate non-remap safe?
+Can any admin-only/PII column (`latitude`, `longitude`, `filename_original`, `user_filename`, `transfer_function`, `color_pipeline_decision`, etc.) reach a public API response via the main listing, search, semantic search, or similar-image enrichment selects?
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | All stores are re-pointed before the delete in one atomic transaction; `contains` non-remap is correct | High | Strong (transaction code traced line-by-line, FK schema audited) | Confirmed by direct code and schema inspection |
-| 2 | A `contains` predicate on `topic` silently stops matching after rename — data-consistency defect | Low | Moderate (semantic analysis) | Technically true but correct-by-design, documented |
-| 3 | A store referencing `topics.slug` is absent from the rename transaction | Low | Strong (schema FK audit found only three FK children + one JSON store) | No additional FK children found |
+| 1 | No PII column reaches a public response — compile-time guards enforce this on all guarded paths | High | Strong | Two independent compile-time guards, both verified in source |
+| 2 | Semantic search enrichment select bypasses both guards, enabling future PII drift | Medium | Moderate | Route confirmed clean today; structural gap acknowledged from cycle 18 |
+| 3 | getMapImages exposes lat/lon to unauthenticated visitors without an opt-in check | Very low | Weak | Disconfirmed: SQL join + runtime double-check both verified |
 
-### Evidence For (Hypothesis 1 — CLEARED)
+### Evidence For
 
-The rename is performed as a single Drizzle `db.transaction` at `apps/web/src/app/actions/topics.ts:250-323`. Sequence inside the transaction:
+**Hypothesis 1 (no PII leak via guarded paths):**
 
-1. **Line 276** — `tx.insert(topics)` inserts new row with `newSlug`
-2. **Line 283** — `tx.update(images).set({ topic: slug })` re-points `images.topic` FK child
-3. **Line 284** — `tx.update(topicAliases).set({ topicSlug: slug })` re-points `topic_aliases.topicSlug` FK child
-4. **Line 292** — `tx.update(topicViews).set({ topic: slug })` re-points `topic_views.topic` FK child (cycle-16 fix)
-5. **Lines 301-319** — smart collections loop: `tx.select` all, parse AST, `remapTopicSlugInQuery`, write back changed rows (cycle-16 fix)
-6. **Line 321** — `tx.delete(topics).where(eq(topics.slug, cleanCurrentSlug))` deletes old row
+`apps/web/src/lib/data.ts:365-397` — `publicSelectFields` derived by destructuring `adminSelectFields` and assigning omitted fields to `_omit*` variables. Omitted columns confirmed: `latitude`, `longitude`, `filename_original`, `user_filename`, `color_pipeline_decision`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `uploaded_by`, `processing_error`, `failed_at`, `color_space`, `icc_profile_name`, `pipeline_version`, `is_hdr`, `has_gain_map`, `was_downscaled`.
 
-All four stores are updated BEFORE `tx.delete`. The transaction is atomic: the `ON DELETE CASCADE` on `topic_views.topic → topics.slug` cannot fire mid-transaction because the cascade only triggers when the DELETE commits, at which point `topic_views` rows have already been re-pointed to the new slug.
-
-**`contains` predicate analysis** — `remapTopicSlugInQuery` at `apps/web/src/lib/smart-collections.ts:414-442`:
-
-```ts
-if (ast.type === 'predicate' && ast.column === 'topic') {
-    if (ast.operator === 'eq' && ast.value === oldSlug) {
-        return { ast: { ...ast, value: newSlug }, changed: true };
-    }
-    if (ast.operator === 'in' && Array.isArray(ast.values) && ast.values.includes(oldSlug)) {
-        return { ast: { ...ast, values: ast.values.map(v => v === oldSlug ? newSlug : v) }, changed: true };
-    }
-}
-return { ast, changed: false };
+`apps/web/src/lib/data.ts:461-465` — compile-time guard `_privacyGuard`:
+```typescript
+type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFieldCore, _PrivacySensitiveKeys>;
+const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [...] = true;
 ```
+Any `_PrivacySensitiveKeys` member present in `publicSelectFieldCore` causes a `tsc` error at build time.
 
-Comment at lines 408-412 documents the intent: "`contains` (substring) / ordering operators (`gt`/`lt`/…) are NOT touched — a substring or range filter is not an identity reference and rewriting it could change the admin's intent."
+`apps/web/src/lib/data.ts:1500-1504` — `searchImages` uses a custom `searchFields` object (not `publicSelectFields`) and carries its own compile-time guard:
+```typescript
+type _SearchSensitive = Extract<keyof typeof searchFields, _PrivacySensitiveKeys>;
+const _searchPrivacyGuard: _SearchSensitive extends never ? true : [...] = true;
+```
+This guard was added specifically because `searchFields` was the one public select set without a compile-time privacy guard (R15C15/A15-02 fix). The current `searchFields` columns: `id`, `title`, `description`, `filename_jpeg`, `width`, `height`, `topic`, `topic_label`, `camera_model`, `lens_model`, `capture_date`, `created_at` — no GPS, no `filename_original`, no PII.
 
-A `topic contains "foo"` predicate is defined as "any topic slug containing the substring 'foo'." After renaming "foo-bar" → "baz-qux," the predicate correctly stops matching "baz-qux" because the admin stated a substring constraint, not an exact identity. Rewriting `contains "foo"` to `contains "baz-qux"` would violate the admin's semantic intent. The non-remap is correct.
+`apps/web/src/lib/data.ts:773-985` — `getImagesLite`, `getImagesLitePage`, `getImages`, all use `publicSelectFields`.
+
+`apps/web/src/lib/data.ts:1231-1322` — `getSharedGroup` uses `publicSelectFields`.
+
+`apps/web/src/lib/data.ts:1398-1430` — `getImagesForSmartCollection` uses `publicSelectFields`.
+
+`apps/web/src/lib/data.ts:1629-1665` — `getMapImages` intentionally exposes `latitude`/`longitude` via `publicMapSelectFields`, but behind:
+1. SQL: `INNER JOIN topics WHERE topics.map_visible = true AND latitude IS NOT NULL AND longitude IS NOT NULL` — only admin-opted-in topics.
+2. Runtime (lines 1657-1663): throws if any returned row has `topic_map_visible !== true`. Defense-in-depth against future weakened JOIN conditions.
+
+**Semantic and similar-image routes (from cycle 18, confirmed clean as of that reading):**
+
+Cycle 18 Flow 4 confirmed both `api/search/semantic/route.ts` (enrichment at lines 293-315) and `api/search/similar/[id]/route.ts` (enrichment at lines 195-215) select: `id`, `title`, `description`, `filename_jpeg`, `width`, `height`, `topic`, `topic_label`, `camera_model`, `lens_model`, `capture_date`. No PII column appears.
+
+The structural risk acknowledged in cycle 18 (A2): these enrichment selects bypass the compile-time `_PrivacySensitiveKeys` guard. If a developer adds a PII column to these selects, tsc will NOT catch it.
 
 ### Evidence Against / Gaps
 
-**Hypothesis 3 — Missing FK children:** Schema FK children of `topics.slug` verified from `apps/web/src/db/schema.ts`:
-- `images.topic` — re-pointed ✓
-- `topic_aliases.topicSlug` — re-pointed ✓
-- `topic_views.topic` — re-pointed ✓
-- `smart_collections.query_json` (JSON, not FK) — re-pointed for `eq`/`in` ✓
+**Hypothesis 2 (structural gap):** The semantic and similar enrichment selects are confirmed clean today, but there is no compile-time guard on those paths. A future PII column added to either route without also adding it to the cycle-16 regex denylist fixture would silently leak. This structural smell was acknowledged in cycle 18 as deferred (A2).
 
-No additional FK children referencing `topics.slug` exist. Hypothesis 3 disconfirmed.
+**Hypothesis 3:** Disconfirmed. `map_visible` requires explicit per-topic admin opt-in, enforced at both SQL and runtime layers.
 
 ### Rebuttal Round
 
-**Best challenge:** If a `topic contains "foo"` collection exists and the admin renames "foo-bar" to "baz-qux," that collection silently stops matching the renamed topic without any admin notification. Is this a silent data-consistency defect?
+**Best challenge:** `searchImages` uses `searchFields` (not `publicSelectFields`) with its own guard. But what if the `_searchPrivacyGuard` itself has a bug — for example, if `_PrivacySensitiveKeys` is not exhaustive?
 
-**Answer:** No. The collection is defined as "topics whose slug contains 'foo'." After the rename to "baz-qux," the slug no longer contains "foo" — the collection truthfully stops matching. Silently rewriting the predicate to `contains "baz-qux"` without admin consent would change the scope of the collection (which might match other topics containing "baz-qux"). The correct behavior is to leave the substring predicate as the admin stated it. This is intentional and documented. CLEARED.
+**Why the leader stands:** `_PrivacySensitiveKeys` is a union type derived from the same `_omit*` variables used in `publicSelectFields` construction. Any column removed from `publicSelectFields` is automatically covered in `_PrivacySensitiveKeys`. The two guards are anchored to the same source of truth.
 
-### Convergence / Separation Notes
+### Verdict: CLEARED (structural A2 gap acknowledged, deferred from cycle 18)
 
-Hypotheses 2 and 3 are disconfirmed. Hypothesis 1 stands. The cycle-17 aggregate confirms this at line 54: "Topic-slug rename: ALL 3 FK children + smart_collections `eq`/`in` rules re-pointed in ONE transaction before the old-row delete; … Only `contains` predicate intentionally not remapped (documented)."
-
-### Current Best Explanation
-
-**FLOW 2 is CLEARED.** All four stores (`images`, `topicAliases`, `topicViews`, `smartCollections`) are re-pointed in one atomic transaction before the old-row delete. The `ON DELETE CASCADE` on `topic_views` is protected by the transaction sequencing. The `contains` predicate non-remap is correct by semantic analysis and is intentionally documented.
-
-### Critical Unknown
-
-None.
-
-### Uncertainty Notes
-
-None material.
+**Structural finding (not a live defect):**
+- ID: TRC19-F2-STRUCT-01
+- Severity: LOW (structural smell, future drift risk)
+- Confidence: HIGH
+- Location: `apps/web/src/app/api/search/semantic/route.ts:293-315` and `apps/web/src/app/api/search/similar/[id]/route.ts:195-215`
+- Issue: Enrichment selects in both routes bypass the `_PrivacySensitiveKeys` compile-time guard. New PII columns added to these selects would not be caught by tsc. Only the cycle-16 regex denylist fixture acts as guard.
+- Fix: Refactor both enrichment selects to use `publicSelectFields` (or a `publicEnrichmentFields` derived from it) so the compile-time guard covers these paths.
 
 ---
 
-## FLOW 3 — image-queue.ts semantic search mode lifecycle
+## Flow 3: Topic Slug Rename — Fan-out Completeness and Transaction Safety
 
-### Observation
+### Framing
 
-The `ImageProcessingJob` carries `semanticSearchMode` as a snapshot (PERF-17-04 fix). The question: do both the bootstrap path (no `quality`/`imageSizes`) and the normal upload path (snapshot present) correctly resolve `semanticSearchMode` into the embedding IIFE?
+Does the rename transaction re-point every FK reference to `topics.slug` before deleting the old slug row? Is there any reference not covered by the fan-out that could produce an orphan or FK violation?
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | All three resolution tiers (bootstrap-resolved → job-snapshot → legacy-fetch) work correctly; PERF-17-04 fix is in place | High | Strong (lines 391-530 traced, enqueue call at images.ts:497 confirmed) | Confirmed by direct code audit |
-| 2 | Bootstrap path where DB fails leaves `resolvedSemanticMode = null` with no secondary retry | Low | Strong (IIFE secondary-fetch logic verified) | The IIFE's secondary fetch covers this exactly |
-| 3 | Normal upload job triggers a redundant DB fetch per image (PERF-17-04 regression) | Low | Strong (condition evaluated for normal upload case) | `job.semanticSearchMode` being defined prevents the secondary fetch |
+| 1 | All FK references covered; transaction is atomically safe | High | Strong | Schema enumerated all FK children; transaction fan-out confirmed |
+| 2 | Concurrent upload to old slug races the transaction DELETE, causing FK RESTRICT violation | Low | Moderate | Real structural race; no cross-lock coordination between upload and rename advisory locks |
+| 3 | sharedGroups or sharedGroupImages have an undiscovered FK to topics.slug | Very low | Weak | Disconfirmed by full schema.ts read |
 
-### Evidence For (Hypothesis 1 — CLEARED)
+### Evidence For
 
-**Bootstrap path** (`!quality && !imageSizes` — `apps/web/src/lib/image-queue.ts:392-413`):
-```ts
-let resolvedSemanticMode: 'disabled' | 'stub' | 'production' | null = null;
-if (!quality && !imageSizes) {
-    try {
-        const config = await getGalleryConfig();
-        resolvedSemanticMode = config.semanticSearchMode;   // set from DB
-    } catch {
-        // DB unavailable — stays null
-    }
-}
-```
+**Hypothesis 1 (complete fan-out):**
 
-**Normal upload path** — `if` block skipped; `resolvedSemanticMode` stays `null`. But `job.semanticSearchMode` is set at enqueue time. Confirmed at `apps/web/src/app/actions/images.ts:497`:
-```ts
-semanticSearchMode: uploadConfig.semanticSearchMode,
-```
-This is the PERF-17-04 fix from cycle 17. Present in code.
+Complete FK child enumeration from `apps/web/src/db/schema.ts`:
 
-**IIFE resolution** (`apps/web/src/lib/image-queue.ts:521-530`):
-```ts
-let semanticMode: 'disabled' | 'stub' | 'production' =
-    resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled';
-if (resolvedSemanticMode === null && job.semanticSearchMode === undefined) {
-    try {
-        const cfg = await getGalleryConfig();
-        semanticMode = cfg.semanticSearchMode;
-    } catch { /* skip */ }
-}
-```
+| Table | Column | onDelete | In fan-out? |
+|-------|--------|----------|-------------|
+| `topicAliases` | `topicSlug` | `cascade` | Yes — `tx.update(topicAliases)` |
+| `images` | `topic` | `restrict` | Yes — `tx.update(images)` |
+| `topicViews` | `topic` | `cascade` | Yes — `tx.update(topicViews)` |
+| `smartCollections` | `query_json` | (JSON, no FK) | Yes — AST remap loop |
 
-Resolution tier analysis:
+No other table has an FK to `topics.slug`. Confirmed absent:
+- `sharedGroups` (lines 138-146): no FK to topics
+- `sharedGroupImages` (lines 148-155): FKs to `sharedGroups.id` and `images.id` only
+- `imageViews` (lines 222-233): FK to `images.id` only
+- `imageEmbeddings` (lines 271-286): FK to `images.id` only
 
-| Job type | `resolvedSemanticMode` | `job.semanticSearchMode` | Initial `semanticMode` | Secondary fetch? |
-|---|---|---|---|---|
-| Bootstrap (DB ok) | 'production' | undefined | 'production' ✓ | No |
-| Bootstrap (DB fail) | null | undefined | 'disabled' | YES — condition true |
-| Normal upload | null | 'production' (snapshot) | 'production' ✓ | No — `job.semanticSearchMode` defined → condition false |
-| Legacy (no snapshot) | null | undefined | 'disabled' | YES — condition true |
+`apps/web/src/app/actions/topics.ts:249-331` — transaction order (within one `db.transaction`):
+1. `tx.insert(topics)` — new slug row created first
+2. `tx.update(images)` — moves all `images.topic` FK references to new slug
+3. `tx.update(topicAliases)` — moves all `topicAliases.topicSlug` FK references
+4. `tx.update(topicViews)` — moves all `topicViews.topic` FK references
+5. Smart collections AST remap loop — JSON update for `eq`/`in` predicates
+6. `tx.delete(topics)` — deletes old slug row last
+
+After step 4, no rows in any FK-constrained table reference the old slug. The `onDelete: 'cascade'` on `topicAliases` and `topicViews` is a no-op at step 6. The `onDelete: 'restrict'` on `images.topic` is satisfied because step 2 moved all image rows.
+
+Transaction is serialized by advisory lock `gallerykit_topic_route_segments`.
 
 ### Evidence Against / Gaps
 
-**Hypothesis 2 (bootstrap DB fail):** For bootstrap-with-DB-fail, `resolvedSemanticMode === null && job.semanticSearchMode === undefined` evaluates to `true`, so the secondary fetch fires in the IIFE. If the second fetch also fails, `semanticMode` stays `'disabled'` and embedding is silently skipped — the documented safe-default behavior. CLEARED.
+**Hypothesis 2 (concurrent upload race):**
 
-**Hypothesis 3 (redundant DB fetch on normal upload):** The secondary-fetch condition evaluates `null === null && 'production' === undefined` = `true && false` = `false`. No secondary fetch on normal upload jobs. The PERF-17-04 fix is working as intended. CLEARED.
+Upload action holds `gallerykit_upload_processing_contract`. Topic rename holds `gallerykit_topic_route_segments`. These are different advisory locks — no cross-coordination.
+
+In MySQL InnoDB, `tx.update(images) WHERE topic = oldSlug` (step 2) acquires row-level locks on existing matching rows. A concurrent INSERT with `topic = oldSlug` would need a shared lock on the `topics` row for oldSlug (FK validation) before inserting. The rename transaction holds this row in exclusive lock (step 6 upcoming DELETE). The INSERT would block until the transaction commits or rolls back.
+
+If the rename commits first: INSERT fails FK constraint (oldSlug no longer in topics). Upload action returns an FK error to the user.
+If the INSERT wins the race before step 2 locks the row: the INSERT succeeds, the rename's step 6 DELETE fails `onDelete: 'restrict'`, the rename rolls back and returns an error.
+
+**In both cases:** no silent orphan, no silent data corruption. One of the two operations fails with a user-visible error. The rename or upload is retriable. This is a UX issue, not a data-integrity defect, and is consistent with single-writer topology expectations.
+
+**Hypothesis 3:** Disconfirmed by full `schema.ts` read.
 
 ### Rebuttal Round
 
-**Best challenge:** What if `uploadConfig.semanticSearchMode` is `undefined` at enqueue time, causing the job snapshot to be absent?
+**Best challenge:** The `topicViews` cascade at DELETE time. If step 4 updates all topicViews to new slug but a concurrent view INSERT creates a new `topicViews` row with the old slug between steps 4 and 6, the cascade at step 6 would DELETE that new analytics row silently.
 
-**Answer:** `uploadConfig.semanticSearchMode` is typed as `'disabled' | 'stub' | 'production'` in the gallery config schema — never `undefined`. TypeScript prevents a normal upload from setting the field to `undefined`. If the type ever drifts, the fallback `?? 'disabled'` in the IIFE prevents any unsafe mode from reaching the encoder. CLEARED.
+**Why this is acceptable:** `topicViews` are best-effort analytics events (documented in CLAUDE.md: "written by per-IP-rate-limited but otherwise anonymous public endpoints"). A tiny window of analytics-event loss during a topic rename is acceptable for a personal gallery. This is not product data. The rename transaction is correct from a relational integrity standpoint.
 
-### Convergence / Separation Notes
+### Verdict: CLEARED
 
-Hypotheses 2 and 3 are disconfirmed. Hypothesis 1 stands. The three-tier resolution is correct and complete.
-
-### Current Best Explanation
-
-**FLOW 3 is CLEARED.** Both paths resolve `semanticSearchMode` correctly. The PERF-17-04 fix (snapshotting `semanticSearchMode` on the job at enqueue) is present and functioning. The three-tier fallback (bootstrap-resolve → job-snapshot → legacy-fetch) handles all cases including DB failure.
-
-### Critical Unknown
-
-None.
-
-### Uncertainty Notes
-
-The bootstrap-with-DB-fail path issues two `getGalleryConfig()` calls (one in the bootstrap gate that fails, one in the IIFE that may succeed). If the DB recovers between the two calls, embedding proceeds. This is correct safe behavior.
+**Informational finding:**
+- ID: TRC19-F3-INFO-01
+- Severity: LOW
+- Confidence: MEDIUM
+- Location: `apps/web/src/app/actions/topics.ts:249-331` vs. `apps/web/src/app/actions/images.ts` (upload action)
+- Issue: Concurrent upload to oldSlug during topic rename can cause either the rename DELETE (FK RESTRICT on images) or the upload INSERT (FK on topics) to fail, rolling back that operation. No data corruption; both operations are retriable. No cross-advisory-lock coordination prevents this race.
 
 ---
 
-## FLOW 4 — Public search enrichment PII
+## Flow 4: ETag/Cache Invalidation — Color/Quality/Size Setting Flip
 
-### Observation
+### Framing
 
-Both `api/search/semantic/route.ts` and `api/search/similar/[id]/route.ts` use explicit enrichment selects that bypass the `publicSelectFields` / `_PrivacySensitiveKeys` compile-time guard. The question: do `latitude`, `longitude`, `filename_original`, or `user_filename` appear in the enrichment selects?
+When an admin flips a `COLOR_IMPACTING_KEYS` setting, does the ETag invalidation correctly distinguish between the serve-upload path and the static (Next.js) path? Does the implementation match the documented CRT-D1 gotcha?
 
 ### Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
 |------|------------|------------|-------------------|--------------------------|
-| 1 | No PII reaches the public JSON — all four PII columns are absent from both enrichment selects | High | Strong (both route files traced column-by-column) | Confirmed by direct code audit |
-| 2 | The enrichment selects bypass `_PrivacySensitiveKeys` creating structural risk of future PII drift | Medium | Strong (aggregate A2 confirms; no compile-time guard on these paths) | Real structural smell; not a live defect |
+| 1 | serve-upload path correctly invalidates; static path does NOT — matches CRT-D1 documented design | High | Strong | ETag formula, COLOR_IMPACTING_KEYS, and hash computation all verified from source |
+| 2 | COLOR_IMPACTING_KEYS is missing a byte-impacting setting — silent stale-cache on change | Low | Moderate | Compile-time guard validates existing keys but cannot catch omitted NEW keys |
+| 3 | Hash collision produces false 304s on a setting flip | Very low | Negligible | SHA-256 prefix at 8 hex chars; 2^32 space; negligible for this load |
 
-### Evidence For (Hypothesis 1 — CLEARED)
+### Evidence For
 
-**Semantic route** (`apps/web/src/app/api/search/semantic/route.ts:293-315`) enrichment columns:
-`id`, `title`, `description`, `filename_jpeg`, `width`, `height`, `topic`, `topic_label` (topics JOIN), `camera_model`, `lens_model`, `capture_date`
+**Hypothesis 1 (correct behavior matching CRT-D1):**
 
-**Similar route** (`apps/web/src/app/api/search/similar/[id]/route.ts:195-215`) enrichment columns:
-Identical to semantic: `id`, `title`, `description`, `filename_jpeg`, `width`, `height`, `topic`, `topic_label`, `camera_model`, `lens_model`, `capture_date`
+`apps/web/src/lib/serve-upload.ts:214-215` — ETag formula (verified from source):
+```
+const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
+```
 
-PII field check:
-- `latitude` — NOT selected in either route ✓
-- `longitude` — NOT selected in either route ✓
-- `filename_original` — NOT selected in either route ✓
-- `user_filename` — NOT selected in either route ✓
+`apps/web/src/lib/settings-hash.ts:45-57` — `COLOR_IMPACTING_KEYS` (9 keys, verified):
+```
+wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort,
+force_srgb_derivatives, wide_gamut_max_source_pixels,
+image_quality_webp, image_quality_avif, image_quality_jpeg,
+image_sizes
+```
 
-Additional verification for non-obvious fields:
-- `filename_jpeg` — UUID-based derived filename, not user-controlled. Per CLAUDE.md: "Filename sanitization: UUIDs via `crypto.randomUUID()` (no user-controlled filenames on disk)." Safe.
-- `camera_model`, `lens_model`, `capture_date` — public EXIF metadata, already in keyword-search public response. Not in `_PrivacySensitiveKeys`. Safe.
-- `description`, `title` — admin-authored, intentionally public (shown on all photo pages). Safe.
+`apps/web/src/lib/settings-hash.ts:66-68` — compile-time guard:
+```typescript
+type _ColorKeysAreSettingKeys =
+    (typeof COLOR_IMPACTING_KEYS)[number] extends GallerySettingKey ? true : never;
+```
+Catches typos and removed keys. Cannot catch a new byte-impacting setting not added to the list (documented caveat at lines 62-65).
 
-### Evidence For (Hypothesis 2 — structural smell, not live defect)
+`apps/web/src/lib/settings-hash.ts:92-105` — `buildHashFromConfig` uses RESOLVED `GalleryConfig` values (R8-H1: prevents ETag misalignment when invalid DB values are stored). Sorts `image_sizes` ascending before hashing (line 102): `[...config.imageSizes].sort((a, b) => a - b).join(',')` — prevents spurious invalidation when order differs (AGG-R7C3-02).
 
-`apps/web/src/lib/data.ts` `publicSelectFields` / `_PrivacySensitiveKeys` system provides compile-time enforcement that PII columns are omitted from public responses. The search enrichment selects at both routes construct `db.select({…})` directly against `images.*` column references, bypassing this system. If a developer adds a PII column to these selects in the future, the `_PrivacySensitiveKeys` guard will NOT catch it.
+`apps/web/src/lib/serve-upload.ts:46-83` — `getServingColorSettingsHash()`: module-scoped 5-second stale-while-revalidate cache. Prevents per-request DB reads on image-serving hot paths; stale hash served immediately on refresh then updated in background.
 
-The cycle-16 regex denylist fixture is the only guard on this path (cycle-17 aggregate A2: "cycle-16 added a regex denylist fixture (band-aid)"). Denylist coverage gap: a new PII column not added to the denylist would silently reach the response.
+**Static path behavior confirming CRT-D1:**
+
+Next.js static serving (`public/uploads/`) emits ETag format `W/"{size-hex}-{mtime-hex}"` — does NOT include the settings hash. Flipping a COLOR_IMPACTING_KEYS setting does NOT change static derivatives' on-disk bytes, so mtime and size are unchanged, so the static ETag is unchanged. Clients with static ETags continue to receive 304 until a backfill re-encode rewrites the files.
+
+This exactly matches CLAUDE.md CRT-D1 documented operational gotcha: "flipping a color/quality/size admin setting does NOT invalidate already-served STATIC derivatives (the on-disk bytes — and therefore the mtime+size ETag — are unchanged until a re-encode). The settings-hash ETag only affects the serve-upload path."
 
 ### Evidence Against / Gaps
 
-No PII column is present in the current enrichment selects. Hypothesis 1 is fully supported for the current state. Hypothesis 2 is a future risk, not a current defect.
+**Hypothesis 2 (incomplete COLOR_IMPACTING_KEYS):** At current pipeline version 7, the 9-key list matches the CLAUDE.md-documented enumeration and is consistent with the known byte-impacting settings. The gap is process (checklist), not implementation. The compile-time guard at `settings-hash.ts:66-68` enforces non-removal but not non-omission of new keys.
+
+**Hypothesis 3:** Negligible. SHA-256 collision probability for 32-bit prefix across distinct setting combinations is effectively zero for a personal gallery's change frequency.
 
 ### Rebuttal Round
 
-**Best challenge:** Could admin-authored `description` or `title` fields contain GPS coordinates or personal data that a photographer typed in, making them de-facto PII?
+**Best challenge:** The 5-second stale-while-revalidate window in `getServingColorSettingsHash()` means a setting flip takes up to 5 seconds to reach the ETag on the serve-upload path. During this window, stale ETags are issued.
 
-**Answer:** These are admin-controlled free-text fields that appear on public-facing photo pages regardless of the search API. If an admin includes sensitive data in a description, it is public by design everywhere — not a search-API-specific leak. The privacy controls in GalleryKit protect structured PII (DB columns `latitude`/`longitude`/`filename_original`/`user_filename`), not free-text the admin deliberately places in public fields. Out of scope for the structural PII guard. CLEARED.
+**Why this is acceptable:** The serve-upload path is the minority traffic path — Next.js static serving handles existing files. The stale window is bounded at 5 seconds. The alternative (per-request DB read) would severely impact image-serving hot paths. This is an explicit documented trade-off (R4C3 PERF-R4C3-05).
 
-### Convergence / Separation Notes
+### Verdict: CLEARED
 
-Hypothesis 1 and Hypothesis 2 address different timeframes: Hypothesis 1 is about the current state (CLEARED), Hypothesis 2 is about future drift risk (ACKNOWLEDGED, deferred per aggregate A2).
-
-### Current Best Explanation
-
-**FLOW 4 is CLEARED** (no live defect). Neither `latitude`, `longitude`, `filename_original`, nor `user_filename` appears in the enrichment select of either public search route. The structural smell (enrichment selects bypass `_PrivacySensitiveKeys`) is real and documented as A2, but it is not a current defect.
-
-### Critical Unknown
-
-Whether a future new PII column would be caught by the cycle-16 regex denylist before it leaks.
-
-### Discriminating Probe
-
-`grep -rn "latitude\|longitude\|filename_original\|user_filename" apps/web/src/app/api/search/` — any hit is a new PII leak. Run this as part of any search-route change review.
-
-### Uncertainty Notes
-
-The fix for A2 (restructure enrichment selects to use `publicSelectFields`) is deferred. Until done, the regex denylist is the only guard against future PII drift in these two routes.
+Implementation exactly matches the CRT-D1 documented design. No defects.
 
 ---
 
-## Cross-Flow Verdict Summary
+## Summary of Flow Verdicts
 
-| Flow | Verdict | Confidence | Key Evidence Anchor |
-|------|---------|------------|---------------------|
-| FLOW 1 — upload tracker lifecycle | **CLEARED** | High | `deleteOriginalUploadFile` hardened (`upload-paths.ts:76-79`); per-file try/catch at `images.ts:297-524` wraps all remaining awaits; post-loop settles at `:533`/`:555` cover all exits |
-| FLOW 2 — topic-slug rename fan-out | **CLEARED** | High | All 4 stores re-pointed at `topics.ts:283,284,292,301-319` before `tx.delete` at `:321` inside one atomic transaction; `contains` non-remap correct by semantics |
-| FLOW 3 — image-queue semantic mode | **CLEARED** | High | PERF-17-04 snapshot confirmed at `images.ts:497`; three-tier IIFE fallback at `image-queue.ts:521-530` correct for all cases |
-| FLOW 4 — public search PII | **CLEARED** | High | Neither route selects `latitude`, `longitude`, `filename_original`, or `user_filename`; structural A2 smell acknowledged, deferred |
+| Flow | Verdict | Key Evidence Anchors |
+|------|---------|---------------------|
+| 1 — Upload quota claim | CLEARED | Settle at `images.ts:244,249,273,277,~540,~564`; `deleteOriginalUploadFile` hardened (`upload-paths.ts:76-79`); outer finally does not settle (intentional) |
+| 2 — Privacy / public routes | CLEARED | `publicSelectFields` compile-time guard at `data.ts:461-465`; `searchFields` guard at `data.ts:1500-1504`; semantic/similar routes confirmed clean (cycle 18); structural A2 gap deferred |
+| 3 — Topic slug rename fan-out | CLEARED | All FK children covered (`images`, `topicAliases`, `topicViews`, `smartCollections.query_json`); `sharedGroups`/`sharedGroupImages` have no FK to `topics.slug`; atomic transaction with advisory lock |
+| 4 — ETag/cache invalidation | CLEARED | ETag formula at `serve-upload.ts:214-215`; 9-key `COLOR_IMPACTING_KEYS` at `settings-hash.ts:45-57`; `image_sizes` sorted before hashing at `settings-hash.ts:102`; matches CRT-D1 gotcha |
 
-**No new CONFIRMED-DEFECT findings.** All four flows are CLEARED against the specific defect hypotheses. The one residual architectural risk (A2) was already documented in the cycle-17 aggregate and is deferred.
+---
+
+## Findings
+
+- **TRC19-F1-FRAG-01** | INFORMATIONAL | HIGH confidence | `apps/web/src/app/actions/images.ts:511-519` + `apps/web/src/lib/upload-paths.ts:76-79` — Per-file catch block depends on `deleteOriginalUploadFile` never rejecting; invariant enforced by code comment only, not an automated test.
+
+- **TRC19-F2-STRUCT-01** | LOW | HIGH confidence | `apps/web/src/app/api/search/semantic/route.ts:293-315` and `apps/web/src/app/api/search/similar/[id]/route.ts:195-215` — Enrichment selects bypass `_PrivacySensitiveKeys` compile-time guard; future PII addition would not be caught by tsc. Clean today; structural drift risk. (Carry-over of cycle-18 A2.)
+
+- **TRC19-F3-INFO-01** | LOW | MEDIUM confidence | `apps/web/src/app/actions/topics.ts:249-331` — Concurrent upload to oldSlug during topic rename can cause one operation to fail FK constraint and roll back. No data corruption; retriable. No cross-advisory-lock coordination.
+
+---
+
+## Critical Unknowns
+
+1. **Flow 2 structural gap:** Whether the semantic/similar enrichment selects will remain clean as new columns are added. The compile-time guard does not cover these paths.
+
+2. **Flow 1 fragility:** Whether `deleteOriginalUploadFile` will remain permanently non-throwing across future refactors. Currently correct; no test enforcement.
+
+## Discriminating Probes
+
+1. **Structural PII guard (Flow 2):** `grep -rn "latitude\|longitude\|filename_original\|user_filename" apps/web/src/app/api/search/` — any hit is a new live PII leak. Run on every search-route change.
+
+2. **deleteOriginalUploadFile invariant (Flow 1):** Read `apps/web/src/lib/upload-paths.ts` and verify `.catch(() => {})` is present and unconditional on both `fs.unlink` calls. Consider adding a JSDoc `@throws never` annotation or a test that verifies the function resolves even when `unlink` fails.
