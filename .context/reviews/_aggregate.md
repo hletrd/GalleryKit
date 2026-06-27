@@ -1,10 +1,10 @@
-# Run-17 Cycle-17 Convergence — Aggregated Review
+# Run-18 Cycle-18 Convergence — Aggregated Review
 
 **Date:** 2026-06-27
-**HEAD:** 7b5c1943
+**HEAD:** a9702716 (cycle-17 fixes landed)
 **Agents:** 11/11 completed (code-reviewer, security-reviewer, perf-reviewer [via general-purpose], critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer)
 **Agent Failures:** 0
-**Baseline gates:** eslint clean (exit 0), tsc clean (exit 0), vitest 2112 pass / 4 skip (verifier-confirmed; test-engineer added +4 → 2116 during its pass), 3 security lint gates OK.
+**Baseline gates (verifier-confirmed):** eslint clean (exit 0), tsc clean (exit 0), vitest 2119 pass / 4 skip, 3 security lint gates OK. (test-engineer added +8 focus-visible tests → 2127 during its pass.)
 
 ---
 
@@ -12,53 +12,50 @@
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| CRITICAL | 0 | No exploitable vulnerabilities. `npm audit` 0 vulns (security-reviewer re-ran). |
-| HIGH | 0 | None runtime. (PERF-17-01 was labeled HIGH but is mis-attributed + scale-gated — see below.) |
-| MEDIUM | 1 | **DBG-17-1 / CR-17-1 (HEADLINE, 5-agent)** — upload-tracker quota claim leaks when the topic-exists `db.select` (`images.ts:256-259`) throws. The CR-16-01 TOCTOU fix moved the claim (`:226-228`) BEFORE that un-`catch`-guarded `await`; the outer `try` (`:175`) is `finally`-only (`:561`, releases the contract lock, never settles). A transient DB error there inflates that admin+IP window by `+files.length`/`+totalSize` with zero files stored → false `uploadLimitReached`/`cumulativeUploadSizeExceeded` until the ≤1 h window expires. The disk pre-check (`:233-251`) got try/catch+settle; its sibling topic SELECT below it did not. Classic "fix one sibling, miss the next" — inside the very fix meant to harden the tracker. |
-| LOW | ~6 | A11y focus-visible "missed siblings" of cycle-16 back-to-top fix (designer M-01/M-02/L-01); PERF-17-04 (per-image redundant `getGalleryConfig()` on NORMAL upload jobs — bootstrap path fixed in PERF-16-01, normal path missed); DBG-17-2 (upload-tracker under-count when window resets between claim+settle — pre-existing, needs-repro); security LOW parity nits (semantic query max-codepoint cap, similar-404 refund, `'unknown'` rate-limit bucket). |
-| TEST-GATE | 3 | **GAP-1** smart_collections remap integration gate VACUOUS — `topics-actions.test.ts` mock returns rows without `query_json` so the loop `continue`s every iteration; reverting the whole smart_collections re-point passes all tests (verifier + test-engineer, **2-agent**). **GAP-2** `info-bottom-sheet.tsx:500` isAdmin gate UNTESTED — `photo-viewer-no-hdr-download.test.ts` only scans photo-viewer (verifier + test-engineer, **2-agent**). **GAP-3** `SEMANTIC_SCAN_LIMIT` `.limit()` unpinned in semantic route. (test-engineer AUTHORED fixes for all 3 during its pass — must verify non-vacuous before keeping.) |
-| DOC | 4 | M-1 CLAUDE.md L290 `settings-hash.ts:42-54` → actual `45-57`; M-2 topic-rename description (L373) omits `topic_views` + `smart_collections` re-points added cycle-16; M-3 upload TOCTOU fix absent from Race Condition Protections; M-4 `image_views(image_id, viewed_at)` index (migration 0010) missing from Database Indexes. |
-| ARCH/DEFER | — | A1 (STRUCTURAL HIGH) `topics.slug` rename fan-out has no single source of truth / no `ON UPDATE CASCADE` — recurring missed-sibling root; A2 (STRUCTURAL MED-HIGH) public `api/search/**` enrichment selects PII outside the compile-guarded privacy system (cycle-16 regex fixture is a denylist band-aid); PERF-17-01/02/03/06/07 (scale-gated/mis-attributed); critic M2 (smart-collection `contains`/range topic predicate not remapped — documented), M3 (rename lock window lengthened); designer blue-outline→`ring-ring` token unification (repo-wide consistency, not a hard WCAG fail in modes actually used). |
-| FALSE-POSITIVE | 1 | PERF-17-05 (`home-client.tsx:53` "RAF not cancelled") — line 52 ALREADY calls `cancelAnimationFrame(rafId)` before rescheduling. Not a defect. |
+| CRITICAL | 0 | No exploitable vulnerabilities. `npm audit --omit=dev` 0 vulns (security-reviewer re-ran). |
+| HIGH | 0 | None runtime. |
+| MEDIUM | 0 | No new live runtime defects. All cycle-17 fixes verified correct. |
+| LOW (actionable) | ~6 | **D18-01/CR-18-1 (2-agent HEADLINE)** nav-client theme+locale buttons missing focus-visible rings (sibling of cycle-17 hamburger fix); wide-gamut-hint `focus:`→`focus-visible:outline-none`; smart-collection remap silent-skip log; D18-02 hardcoded blue outline vs ring-ring token; D18-06 masonry hover not reduced-motion-gated; perf LOW items (MQL allocs, histogram worker). |
+| STRUCTURAL | 3 | **MAJOR-1/A4** upload-tracker claim has no single settle point (5+ hand-placed settles + comment); **MAJOR-3/A2/SEC-LOW-1** search-route enrichment selects outside compile-guard + duplicated across 2 routes + PII_COLUMNS denylist hand-maintained + CLAUDE.md checklist omits it; **MAJOR-2/A1** topics.slug mutable-natural-key rename fan-out, no ON UPDATE CASCADE, data-loss history. |
+| DOC | 6 | M-A settings-hash.ts:41-53→45-57; M-B process-image.ts:1131-1135 (hard-link dedup, WI-14 is ~1157-1167); M-C color-detection.ts:99-107→ProPhoto at 108; M-D NEXT_UPLOAD_BODY_MAX_BYTES 279620608→278921216; M-E image_views(image_id,viewed_at) index missing from Database Indexes; SEC-LOW-2 LR token header X-Admin-Token→X-GalleryKit-Token + gk_base64url(32) not 32-hex. |
+| FALSE-POSITIVE | 1 | CR-18 images.ts:512 `deleteOriginalUploadFile` "unguarded await leaks claim" — REFUTED by 4 agents (critic/tracer/verifier/debugger): the helper swallows both unlinks (`.catch(()=>{})`, upload-paths.ts:75-81), so it cannot throw. Latent-only (if helper changes). |
 
-**Verdict:** Mature, well-hardened codebase. All cycle-16 fixes verified individually correct (verifier 10/12 fully; 2 had vacuous/missing gates now patched by test-engineer). This cycle's signal: ONE genuine availability bug (DBG-17-1, a new missed-sibling INSIDE the CR-16-01 fix — flagged by 5 agents independently), TWO vacuous/missing test gates from cycle-16 (GAP-1/GAP-2), ONE real per-image config-read inefficiency (PERF-17-04, missed sibling of PERF-16-01), and several a11y focus-indicator siblings the cycle-16 back-to-top fix didn't sweep.
+**Verdict:** Mature, well-hardened. ZERO new live runtime defects this cycle. All cycle-17 fixes verified individually correct (verifier 6/6 gates green + 4 fixes confirmed + 3 test gates non-vacuous). The signal this cycle is: (1) ONE clear a11y missed-sibling (nav theme/locale focus rings, 2-agent), (2) THREE recurring STRUCTURAL roots the point-patches keep treating symptomatically (upload-tracker single-settle, search-route shared guarded select, topic-slug cascade), and (3) a batch of doc-drift line refs.
 
 ---
 
-## Lead verification (read against installed code before planning)
+## Lead triage (what to implement vs defer this cycle)
 
-1. **DBG-17-1 / CR-17-1 — CONFIRMED (MEDIUM, availability, 5-agent: code-reviewer/critic/verifier-implicit/tracer/debugger).** `images.ts:226-228` claim; `:233-251` disk check has try/catch+settle; `:256-259` topic SELECT has NO try/catch; outer `try` `:175` → `} finally {` `:561-563` releases `uploadContractLock` only. A throw at :256 escapes past finally without settling → claim leaks until window expiry (`upload-tracker.ts` WINDOW_MS = 1 h). Self-healing + not attacker-triggerable → severity MEDIUM/LOW. **Fix:** wrap :256-259 in try/catch that calls `settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0)` then re-throws (preserve the existing 500 propagation; zero files committed at that point so 0/0 settle is exact). NOT deferrable (the disk-check sibling proves the correct pattern is already established right above it).
-2. **GAP-1 — CONFIRMED (test-gate, 2-agent).** `topics-actions.test.ts` `txSelect` mock returns `{slug, image_filename, map_visible}` (no `query_json`); `topics.ts` smart_collections loop `if (typeof collection.query_json !== 'string') continue` → never reaches `tx.update(smartCollections)`. Reverting the entire loop passes all tests. test-engineer added a `mockReturnValueOnce` scenario asserting the remapped AST is written.
-3. **GAP-2 — CONFIRMED (test-gate, 2-agent).** `info-bottom-sheet.tsx:500` `isAdmin && isP3Pipeline(...)` untested; removing the gate from info-bottom-sheet alone passes all tests. test-engineer extended `photo-viewer-no-hdr-download.test.ts` with a `BOTTOM_SHEET_PATH` read + regex.
-4. **GAP-3 — CONFIRMED (test-gate).** Semantic route `.limit(SEMANTIC_SCAN_LIMIT)` unpinned; removing it → unbounded scan, all tests pass. test-engineer added `semantic-scan-limit-source.test.ts`.
-5. **PERF-17-04 — CONFIRMED (LOW-MED perf).** `image-queue.ts:385-407` resolves `resolvedSemanticMode` only on the bootstrap path (`!quality && !imageSizes`); normal jobs (carry quality+sizes) leave it `null` → embedding IIFE (`:511-514`) calls `getGalleryConfig()` per image (cache() is request-scoped, no-op in queue worker) → 1 redundant `SELECT admin_settings` per processed image when semantic search is on (it IS, in production). **Fix:** snapshot `semanticSearchMode` into `ImageProcessingJob` at enqueue (consistent with quality/sizes/chroma which are already snapshotted); read `job.semanticSearchMode` in the IIFE; bootstrap path keeps its config-derived resolve.
-6. **Designer a11y — CONFIRMED genuine gaps (LOW-MED).** `nav-client.tsx:94` mobile hamburger has `hover:bg-accent` but ZERO `focus-visible:*` → no keyboard focus indicator (WCAG 2.4.7). `lightbox-color-pip.tsx` tooltip (`:219`) + copy (`:301`) buttons use `focus-visible:ring-1 focus-visible:ring-white/50` → 1px @ 50% opacity, below WCAG 2.4.11 Focus Appearance (≥2px, ≥3:1). `wide-gamut-hint.tsx:203` `ring-amber-500/40` is 2px-OK but 40% amber-on-amber blends. These are real missed siblings of the cycle-16 focus-visible sweep.
-7. **PERF-17-01 — DOWNGRADED (defer).** perf-reviewer cited `data.ts:840` as `getAdminImagesLite`; it is actually `getImagesForFeed` (Atom feed). It orders by `updated_at` BUT has `GROUP BY images.id` for `tag_names` — by perf-reviewer's OWN PERF-17-02 logic, a `(processed, updated_at)` index cannot eliminate the filesort when GROUP BY is on a different column. `getAdminImagesLite` (`:963`) actually orders by `capture_date` (covered by the existing topic index). Index value is marginal here; prior cycles already deferred `(processed, updated_at)` (PERF-15-01/16-03). Defer.
-8. **PERF-17-05 — FALSE POSITIVE.** `home-client.tsx:51-57` `handleResize` calls `cancelAnimationFrame(rafId)` at :52 before `requestAnimationFrame` at :53. No accumulation. Cleanup at :63 also cancels. Not a defect.
-9. **Doc M-1..M-4 — CONFIRMED.** settings-hash export at `:45-57` (doc says 42-54); topic-rename now re-points 4 stores (doc names 0); upload-TOCTOU not in Race Conditions; `idx_image_views_image_id_viewed_at` (`schema.ts:229`, migration 0010) not in the Database Indexes list.
-10. **Architect A1/A2 — CONFIRMED (structural, defer the restructure).** A1: `topics.slug` is referenced by 3 FK children (`topic_aliases`/`images`/`topic_views`) + 1 JSON store (`smart_collections`); none have `ON UPDATE CASCADE`; the delete+insert rename re-points each by hand → the recurring missed-sibling root. Structural fix (FK `onUpdate:'cascade'` + in-place `UPDATE`) is a deliberate migration. A2: `api/search/semantic` + `similar/[id]` enrichment selects sit outside `_PrivacySensitiveKeys`; cycle-16 added a regex denylist fixture (band-aid). Both are real architecture smells; neither is a live bug (security-reviewer: 0 leak). Defer the restructure with the tactical guards already in place.
+### IMPLEMENT (high-value, low-risk, actionable now)
+1. **CR-18-1 / D18-01 (2-agent, HIGH signal) — nav-client.tsx theme toggle (155-165) + locale switch (166-172) focus-visible rings.** Direct sibling of the cycle-17 hamburger fix. Clear WCAG 2.4.7 gap, trivially safe. Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. + extend the focus-visible test fixture.
+2. **A2 / MAJOR-3 / SEC-LOW-1 (4-agent) — shared compile-guarded `searchEnrichmentSelectFields`.** Extract the enrichment column object from `data.ts` with an `Extract<keyof, _PrivacySensitiveKeys>` compile guard; import in both `api/search/semantic/route.ts` and `api/search/similar/[id]/route.ts`. Collapses 3 near-copies to 1, deletes the hand-maintained denylist drift class. No live leak today → drift-prevention. Low-risk (column set unchanged). Also derive PII_COLUMNS from SENSITIVE_KEYS and update CLAUDE.md checklist.
+3. **A1 tactical net (architect, recommended 2 cycles running) — schema-derived FK registry test** for topics.slug. Assert the FK set referencing topics.slug == the set updateTopic re-points. Lands the cheap net; DEFER the cascade migration restructure.
+4. **Doc M-A..M-E + SEC-LOW-2** — all doc-only, trivial CLAUDE.md edits.
+5. **Polish** — wide-gamut-hint.tsx:203 `focus:`→`focus-visible:outline-none`; smart-collection remap debug log (topics.ts:309-316).
+
+### EVALUATE-THEN-IMPLEMENT-OR-DEFER (correctness-sensitive)
+6. **MAJOR-1 / A4 — upload-tracker single settling finally.** Architecturally valuable (kills the recurring leak class) BUT subtle: a blanket `finally{settle(0,0)}` is WRONG for any throw AFTER files are committed (under-count). In practice the per-file loop is fully inner-try/catch'd so no committed-then-throw path exists, making 0/0 safe today — but the refactor must preserve that invariant. If a clean, correct implementation is achievable, implement; else defer with the verifier-suggested cross-reference comment on `deleteOriginalUploadFile`. Instance severity LOW (self-healing, not attacker-triggerable).
+
+### DEFER (structural migration / scale-gated / acceptable)
+- **MAJOR-2 / A1 restructure** — topics.slug surrogate-PK + onUpdate:cascade migration. Deliberate migration; defer with exit criterion (land the tactical registry test now instead).
+- **PERF-18-01** getTopics N correlated MAX(updated_at) subqueries (MEDIUM, scale-gated, already R18-M1 in code, ISR-cached). **PERF-18-02** COUNT(*) OVER() (MEDIUM, scale-gated <2000 imgs). **PERF-18-03** getTopicBySlug 2 round trips (LOW). **PERF-18-05/06/07** MQL allocs / histogram worker recreate (LOW micro). All defer.
+- **D18-02** blue-outline→ring-ring token unification (repo-wide consistency, not a hard WCAG fail in modes used). **D18-06** masonry hover reduced-motion (AAA). Defer/optional.
+- **CR-18 images.ts:512** — FALSE POSITIVE (refuted), no action (or fold into MAJOR-1 cross-ref comment).
 
 ---
 
 ## Cross-agent agreement (higher signal)
-
-- **DBG-17-1 (upload-tracker throw-path claim leak)** — **5 agents** (code-reviewer LOW, critic MAJOR, verifier-implicit, tracer CONFIRMED DEFECT, debugger DBG-17-1). Unanimous headline.
-- **GAP-1 (smart_collections remap vacuous gate)** — **2 agents** (verifier, test-engineer).
-- **GAP-2 (info-bottom-sheet isAdmin untested)** — **2 agents** (verifier, test-engineer).
-- **A1 (topic-slug rename no single source of truth)** — architect (structural framing of the same root tracer/critic/debugger cleared at the instance level).
-
----
+- **nav-client theme/locale focus-visible rings missing** — **2 agents** (code-reviewer CR-18-1 conf-HIGH, designer D18-01 HIGH). Clear actionable WCAG sibling.
+- **Search-route enrichment selects outside privacy compile-guard (A2)** — **4 agents** (architect A2, critic MAJOR-3, security LOW-1, tracer Flow-4 structural smell). No live leak; unanimous structural concern.
+- **Upload-tracker single-settle-point (A4/MAJOR-1)** — **2 agents** (critic MAJOR-1, architect A4). Recurring-root framing.
+- **topics.slug rename fan-out (A1/MAJOR-2)** — **2 agents** (architect A1, critic MAJOR-2). Data-loss history; defer restructure, land tactical net.
+- **images.ts:512 deleteOriginalUploadFile** — **4 agents REFUTED** as live bug (critic/tracer/verifier/debugger). FALSE POSITIVE.
 
 ## Positive signals (verified converged)
-
-- Topic-slug rename: ALL 3 FK children + smart_collections `eq`/`in` rules re-pointed in ONE transaction before the old-row delete; mid-rename collision → ER_DUP_ENTRY → rollback (tracer/critic/debugger CLEARED). Only `contains` predicate intentionally not remapped (documented).
-- Numeric guards: og-photo-fetch `Number.isFinite(len)` fix correct; every other parseInt/Number→comparison site pre-guarded; GPS clamps ±90/±180, Infinity→NULL (tracer Flow 3 CLEARED).
-- Migration 0024_drop_reactions: monotonic `when`, flips journalCovered=false on baselined prod → reconcile runs the guarded drop; post-condition catches silent skips; baselined-not-run on all paths (tracer/debugger/architect CLEARED).
-- Color admin-only fields: triple defense (publicSelectFields omits all 10, getImage never fetches them for viewer, every render site gates isAdmin) — no public DOM leak (tracer Flow 5, security-reviewer).
-- Security: 0 new findings, 0 npm-audit vulns, every mutating action authZ-gated, SSRF/path-traversal/redirect/header/CSP/CSV/Unicode swept; LR PAT timing-safe; OG SSRF fail-closed (security-reviewer).
-- All cycle-16 fixes verified correct (verifier 10/12 fully + 2 gates now patched).
-
----
+- All 4 cycle-17 fixes verified correct (DBG-17-1 topic-SELECT settle, PERF-17-04 semantic snapshot, 4 focus rings, 3 non-vacuous test gates) — verifier 6/6 gates + tracer 4/4 flows CLEARED + debugger 0 new bugs.
+- Privacy guard triple defense intact; security 0 findings, 0 npm-audit vulns.
+- Topic-slug rename re-points all 4 stores in one transaction before delete (tracer Flow-2 CLEARED at instance level).
+- `deleteOriginalUploadFile` swallow-errors contract makes the only remaining post-claim await safe.
 
 ## AGENT FAILURES
-None. All 11 agents completed and wrote their per-agent file.
+None. All 11 agents completed and their per-agent file is fresh (cycle-18).

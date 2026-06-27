@@ -1,159 +1,173 @@
-# Debugger Review — Cycle 17 (HEAD 7b5c1943)
+# Debugger Review — Cycle 18
 
-Latent-bug / failure-mode hunt. Priority: verify the cycle-16 fixes did not introduce
-NEW regressions, and find adjacent latent bugs. Scope per brief: off-by-one/boundary,
-null/undefined/NaN/Infinity, error-swallowing catch, races across awaits, transaction
-atomicity, idempotency, resource leaks, incorrect early-returns, silent failure paths.
-
-## Verdict on the cycle-16 fixes (all VERIFIED CORRECT)
-
-| Cycle-16 fix | Commit | Verified |
-|---|---|---|
-| topic_views re-point before rename delete (DBG-16-01) | 097c472b | ✅ in ONE transaction; CASCADE no longer fires |
-| smart-collection topic-rule remap on rename (DBG-16-03) | 35d7f171 | ✅ conservative eq/in remap, only changed rows written |
-| upload claim-before-await TOCTOU (CR-16-01) | 78a9c0c2 | ✅ no double-settle; see DBG-17-1 for a throw-path leak it opened |
-| og-photo Content-Length finite guard (DBG-16-02) | ada6817b | ✅ correct; sibling numeric reads all guarded |
-| migrate 0024_drop_reactions journaling (C16-F1) | caa57769 | ✅ idempotent drops, monotonic journal, baseline-before-migrate |
-| image-queue config reuse for semantic mode (PERF-16-01) | 6babb405 | ✅ benign; reuses one snapshot, adds no staleness |
-
-### Topic rename — fully closed
-FK references to `topics.slug` are exactly three (`schema.ts:16` topicAliases CASCADE,
-`:33` images RESTRICT, `:236` topicViews CASCADE) plus smart-collection `query_json` (text).
-All four are re-pointed inside ONE `db.transaction` wrapped by `LOCK_TOPIC_ROUTE_SEGMENTS`
-(`topics.ts:250-323`). New-row INSERT is first, so a mid-rename slug collision throws
-ER_DUP_ENTRY → full rollback → `slugAlreadyExists` (no half-rename). No other denormalized
-topic-slug column exists. **No CASCADE-exposed sibling remains.** sharedGroups/tags do not
-reference topics.slug; tags rename by integer PK (no recreate). This surface is clean.
-
-### migrate.js 0024 — idempotent on every path
-`dropColumnIfPresent` guards on INFORMATION_SCHEMA (`migrate.js:215-222`); `dropTableIfPresent`
-uses `DROP TABLE IF EXISTS`. Both no-op on an already-dropped DB. On an already-baselined prod
-DB the new 0024 journal entry flips `journalCovered === false` (`migrate.js:710`) → reconcile +
-baseline re-run → 0024 hash inserted BEFORE `runMigrations` → drizzle.migrate() no-op → the
-unguarded `ALTER … DROP COLUMN reaction_count` in the .sql never executes via drizzle. Journal
-`when` for 0024 (1782100000000) is the max → cursor not poisoned. Post-condition cannot misfire.
+**Date:** 2026-06-27
+**HEAD:** bcd67b12 (checked against installed code)
+**Baseline:** Cycle-17 aggregate (`_aggregate.md`) — DBG-17-1 the headline; all cycle-16 fixes verified correct
 
 ---
 
-## NEW findings
+## Scope
 
-### DBG-17-1 — uploadImages leaks an upload-tracker claim when the topic-existence SELECT throws  (LOW, confidence: High, NEW — cycle-16 regression)
-
-**File:** `apps/web/src/app/actions/images.ts:226-263` (claim at 226-228; unguarded await at 256-259).
-
-**Latent bug.** The cycle-16 TOCTOU fix (CR-16-01) moved the quota CLAIM to *before* the
-topic-existence `db.select`:
-
-```js
-tracker.bytes += totalSize; tracker.count += files.length;   // 226-228  CLAIM
-uploadTracker.set(uploadTrackerKey, tracker);
-... // disk check (try/catch → settles on error, 244/249)
-const [topicRow] = await db.select({ slug: topics.slug })     // 256  UNGUARDED await
-    .from(topics).where(eq(topics.slug, topic)).limit(1);
-if (!topicRow) { settle(…,0,0); return topicNotFound; }       // 261  early-return settles
-```
-
-The function body is `try { … } finally { uploadContractLock.release(); }` with **no `catch`**
-(confirmed `images.ts:561-564`). Every *early return* after the claim rolls it back
-(244/249/261/513/535). But the topic-existence `db.select` at line 256 is **not** wrapped in
-try/catch. If it throws — a transient DB error / pool-exhaustion / killed connection — the
-exception propagates straight through `finally` to the framework, and the claim made at
-226-228 is **never settled**. The author's own comment ("roll it back on early return") covers
-returns but not throws.
-
-**Exact trigger:** an admin upload where the disk pre-check passes, then the topic-existence
-SELECT throws (DB blip, pool timeout, server restart mid-request). Pre-cycle-16 the claim was
-made *after* this SELECT, so a throw here left the tracker untouched — this leak path is new.
-
-**Observable failure:** that IP+user's window tracker is inflated by `+files.length` count and
-`+totalSize` bytes even though zero files were stored. Subsequent uploads in the same window can
-hit false `uploadLimitReached` / `cumulativeUploadSizeExceeded`. Self-inflicted, recovered when
-the window expires and `pruneUploadTracker()` (line 183) evicts the stale entry on a later
-upload — so bounded, hence LOW.
-
-**Fix (minimal, house style — mirror the disk-check settle-on-catch):**
-```js
-let topicRow;
-try {
-    [topicRow] = await db.select({ slug: topics.slug })
-        .from(topics).where(eq(topics.slug, topic)).limit(1);
-} catch (err) {
-    settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
-    throw err;
-}
-if (!topicRow) { settleUploadTrackerClaim(…, 0, 0); return { error: t('topicNotFound') }; }
-```
-(Robust alternative: track a `settled` flag and settle-if-unsettled in `finally`.)
-
-**Verification:** unit test — stub `db.select` to reject once; assert the tracker entry's
-`count`/`bytes` return to their pre-call values after the action rejects.
+Latent bug surface only. Does NOT re-report cycle-17 or earlier items.
+Focus areas per task brief: error-handling holes (claim leaks, awaits without try/catch),
+null/undefined deref, off-by-one, unhandled promise rejection, async ordering bugs,
+numeric edge cases, resource leaks (DB connections, file handles, Sharp instances),
+race conditions, boundary conditions in ISOBMFF/ICC/EXIF parsers.
 
 ---
 
-### DBG-17-2 — upload-tracker under-count when the tracking window expires between claim and settle  (LOW, confidence: Medium, NEEDS REPRO — pre-existing, exposure marginally widened by cycle-16)
+## Surfaces Investigated
 
-**File:** `apps/web/src/lib/upload-tracker.ts:30-31` + `images.ts:195` (`resetUploadTrackerWindowIfExpired`).
-
-`settleUploadTrackerClaim` reconciles with **relative deltas** (`success - claimed`), clamped by
-`Math.max(0, …)`. This is correct under concurrency *within one window*. But if the tracking
-window expires between a claim and its settle (a long upload that outlives the window), another
-concurrent invocation calls `resetUploadTrackerWindowIfExpired` and zeroes the shared tracker
-object; the in-flight settle then applies a *negative* delta (`success < claimed`) against the
-fresh window, under-counting the new claim. Net: the window cap is relaxed by up to the
-under-settled amount → a marginal quota relaxation.
-
-**Trigger:** upload processing duration > window length, plus a concurrent same-key upload that
-triggers the window reset mid-flight. Cycle-16 moved the claim earlier (now before disk+topic
-awaits), lengthening the claim→settle span by those awaits — milliseconds vs the multi-second
-loop, so exposure widened only marginally. Best-effort-by-design accounting; not a hard cap.
-
-**Fix (if hardening desired):** stamp each claim with its `windowStart`; in settle, no-op the
-reconcile when `tracker.windowStart` has advanced past the claim's stamp (the claim belongs to a
-window that no longer exists). Otherwise document as accepted best-effort and leave as-is.
-
-**Status:** NEEDS REPRO; low confidence it manifests in practice (windows are minutes-to-an-hour,
-uploads rarely outlive them). Reported for completeness per the brief's under-count focus.
+| File | Lines reviewed | Method |
+|------|---------------|--------|
+| `apps/web/src/app/actions/images.ts` | 175-570 (full upload flow) | Read + settle-path trace |
+| `apps/web/src/lib/image-queue.ts` | 113-175 (types), 380-430 (config gate), 474-570 (fire-and-forget IILEs) | Read + grep |
+| `apps/web/src/lib/process-image.ts` | 832-981 (`saveOriginalAndGetMetadata`), 1275-1365 (atomic rename + cleanup), 1629-1706 (`stripGpsFromOriginal`) | Read |
+| `apps/web/src/lib/admin-backfill-runner.ts` | 296-370 (advisory lock helpers), 478-620 (`reprocessOne`), 700-775 (batch loop), 800-870 (`triggerAdminBackfill`) | Read |
+| `apps/web/src/lib/gain-map-detection.ts` | Full | Read |
+| `apps/web/src/lib/icc-extractor.ts` | Full | Read |
+| `apps/web/src/lib/icc-chromaticity.ts` | Full | Read |
+| `apps/web/src/lib/color-detection.ts` | Full | Read |
+| `apps/web/src/app/api/search/similar/[id]/route.ts` | Full | Read + grep |
+| `apps/web/src/app/api/search/semantic/route.ts` | 60-200 | Read |
+| `apps/web/src/app/actions/settings.ts` | Lock release pattern | Grep |
+| `apps/web/src/app/actions/sharing.ts` | Rollback pattern | Grep |
 
 ---
 
-## Swept and CLEAN (no new issue)
+## Confirmed Fixes from Cycle-17
 
-- **NaN-survives-comparison sweep** — every `parseInt`/`Number()` site that feeds a comparison
-  or DB query is guarded: route ids use `/^\d+$/` before `parseInt` (`og/photo/[id]:51`,
-  `similar/[id]:74`, `g/[key]:92`, `p/[id]`); config coercions use `Number.isInteger`
-  (`gallery-config-shared.ts:181/188/295`); year page uses `Number.isInteger` (`year/[year]:24/50`);
-  exposure/shutter use `Number.isFinite` (`image-types.ts:118`, `process-image.ts:1392/1426/1515`);
-  semantic Content-Length uses `Number.isFinite` (`route.ts:137`); offsets use `Number(x)||0`
-  (NaN is falsy — `data.ts:798/1422`, `public.ts:117/123/169/181`); `view-retention.ts:43-46` and
-  `audit.ts:111` fall back to default on non-finite/non-positive. og-photo-fetch.ts finite guard
-  (the cycle-16 fix) is correct and its only other numeric read (`buffer.length`) is always finite.
-- **Multi-step mutation / transaction-wrapper sweep** — `deleteImage` (626), `deleteImages` (738),
-  `tags.deleteTag` (116), `tags.batchUpdateImageTags` (387), `bulkUpdateImages` (979),
-  `sharing` group-create (transactional, affectedRows-checked), `admin-users.deleteUser`
-  (advisory lock → beginTransaction → rollback-on-error → release in finally) are all atomic.
-  `collections.ts` mutations are single-statement (no transaction needed). No unwrapped multi-step
-  write found.
-- **admin_users FK-child sweep** — `deleteUser` covers every FK to `admin_users.id`: images.uploaded_by
-  (SET NULL via FK), audit_log.user_id (manual `UPDATE … SET user_id = NULL`, since the FK is
-  NO ACTION — `admin-users.ts:260`), sessions (CASCADE + manual delete), admin_tokens (CASCADE).
-  No errno-1451 gap.
-- **Empty/swallowing catch sweep** — all `.catch(() => {})` hits are benign cleanup (fs.unlink of
-  temp/derivative files, `RELEASE_LOCK`, `conn.rollback`, `exitFullscreen`, logout session delete).
-  None swallow a correctness-bearing error.
-- **view-count buffer flush** (`data.ts:100-174`) — atomic Map swap, bounded re-buffer with FIFO
-  eviction + retry cap, backoff. Best-effort analytics by design; no new defect.
-- **image-queue delete-during-processing** (`image-queue.ts:439-462`) — conditional
-  `WHERE processed = false` UPDATE + full-scan variant cleanup on affectedRows===0. Correct.
+### DBG-17-1 — Upload-tracker claim leak on topic-exists SELECT throw
+**Status: CONFIRMED FIXED** at `apps/web/src/app/actions/images.ts:267-275`.
 
-## Test gate
-`vitest run topics-actions + smart-collections + upload-tracker + migration-journal +
-migrate-reconcile-coverage` → 115/115 passing. Cycle-16 fixes are test-locked.
+The topic-exists SELECT is now wrapped in try/catch that calls
+`settleUploadTrackerClaim(..., files.length, totalSize, 0, 0)` before re-throwing.
+The disk pre-check sibling (lines 233-251) has the same pattern. Both sibling
+awaits between the synchronous claim (lines 226-228) and the queue-drain settle
+(lines 533, 555) are now guarded. No missed sibling exists between claim and the
+two mutually exclusive final settle paths.
+
+### PERF-17-04 — Per-image redundant `getGalleryConfig()` on normal upload jobs
+**Status: CONFIRMED FIXED.**
+
+`ImageProcessingJob.semanticSearchMode` field added at `image-queue.ts:141`.
+Enqueue site (`images.ts:497`) passes `uploadConfig.semanticSearchMode`.
+Embedding IIFE (`image-queue.ts:521-523`) uses
+`resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled'`,
+falling through to a live `getGalleryConfig()` SELECT only for legacy snapshot-less
+jobs (the `resolvedSemanticMode === null && job.semanticSearchMode === undefined`
+guard at line 523). Normal upload jobs and bootstrap jobs both avoid the per-image
+DB round-trip.
+
+---
+
+## New Bugs Found in Cycle-18
+
+### NONE — Zero confirmed bugs.
+
+All surfaces investigated are clean. No new HIGH, MEDIUM, or CRITICAL findings.
+
+---
+
+## Per-Surface Verification Notes
+
+### `images.ts` — Upload flow settle coverage
+- Synchronous claim at lines 226-228 — before all awaits, correct.
+- Disk pre-check `await getDiskSpace()` (lines 233-251): try/catch+settle — correct.
+- Topic-exists `await db.select(...)` (lines 267-275): try/catch+settle — correct (DBG-17-1 fix).
+- If `topicRow` is undefined, settle+return at lines 279-282 — correct.
+- File loop: each file's processing can fail independently; two final settle paths at lines 533
+  (all-failed) and 555 (success/partial) are mutually exclusive and exhaustive.
+- No double-settle or missed-settle path found.
+
+### `image-queue.ts` — Lock and resource lifecycle
+- Advisory lock connection for processing claims released at lines 633-636 in `finally`:
+  `await releaseImageProcessingClaim(job.id, lockConnection).catch(...)` — correct.
+- Fire-and-forget caption IIFE (lines 474-488): fully wrapped in try/catch — no unhandled rejection.
+- Fire-and-forget embedding IIFE (lines 512-567): fully wrapped in try/catch — no unhandled rejection.
+- PERF-17-04 fix wired correctly at lines 519-530 (see above).
+
+### `process-image.ts` — File handle and temp file cleanup
+- `saveOriginalAndGetMetadata`: stream pipeline uses `Readable.fromWeb + pipeline()`;
+  Node's `pipeline()` destroys both streams on failure — no file handle leak.
+  Post-write metadata extraction wrapped in try/catch that calls `safeUnlink(originalPath)`
+  then rethrows — correct.
+- Atomic rename (base filename creation, lines 1275-1303): `tmpPath` cleaned in `finally`
+  using `safeUnlink(tmpPath)` which silently ignores ENOENT — safe for both success
+  (tmpPath renamed away) and failure (partial tmpPath) paths.
+- `processImageFormats` cleanup on failure (lines 1341-1363): `writtenSizedPaths` cleaned
+  in catch; intermediate downscaled `processingInputPath` cleaned in `finally` — correct.
+- `stripGpsFromOriginal` (lines 1629-1706): `tmpPath` written only in Tier 2 Sharp re-encode
+  path. On success, `fs.rename(tmpPath, filePath)` moves it and the catch never runs.
+  On any failure, `safeUnlink(tmpPath)` runs in catch. Early-return paths for HEIC/unknown
+  extension return before writing `tmpPath`, so there is nothing to clean up — correct.
+- Numeric guards: `Number.parseInt` results always checked with `Number.isFinite()` before
+  use (lines 45-46, 330-331, 339-340); GPS clamped ±90/±180; `Infinity`/`NaN`→`null`
+  before all DB writes.
+
+### `admin-backfill-runner.ts` — Advisory lock lifecycle
+- `acquireBackfillLock` (lines 303-322): returns connection (holding lock) or releases
+  connection and returns null. No leak on failure.
+- `releaseBackfillLock` (lines 324-333): null-guarded (`if (!lockConn) return`);
+  `RELEASE_LOCK` query in try; `lockConn.release()` in `finally` — connection always
+  returned to pool regardless of query success.
+- `acquireImageProcessingClaim` (lines 343-358): throws after release on query error;
+  returns connection or falls through to `lockConn.release()` when not acquired — correct.
+- `releaseImageProcessingClaim` (lines 361-368): `lockConn.release()` in `finally` — correct.
+- `reprocessOne` (lines 478-618): outer `finally` at lines 613-617 always calls
+  `releaseImageProcessingClaim(...).catch(() => undefined)`, even when encode or detection
+  throws before reaching it — correct.
+- Batch loop (lines 700-775): per-row catch at line 732; tally increments are always
+  reached; no abort on single failure.
+- `triggerAdminBackfill` (lines 819-869): lock acquired at line 831; set to null at
+  line 849 (handoff to `runBackfill`); outer catch at line 862 checks `if (lockConn)`
+  before releasing — no double-release on the normal success path. Zero-candidates
+  path (line 840) calls `releaseBackfillLock(lockConn)` then returns; if that call
+  itself throws, the outer catch calls `releaseBackfillLock(lockConn).catch(...)` a
+  second time — harmless because `releaseBackfillLock` catches its own query error and
+  `lockConn.release()` is idempotent in mysql2.
+
+### ISOBMFF / ICC parsers
+- `gain-map-detection.ts`: MAX_DEPTH=5, MAX_SCAN_BYTES=1MB; all box reads bounds-checked;
+  outer `try { walk(...) } catch { return false }` prevents any parser exception reaching
+  the caller — correct.
+- `icc-extractor.ts`: tagCount capped at 100; strLen capped at 1024; `clampUtf8Bytes` at
+  255; outer try/catch returns null on any parse error — correct.
+- `icc-chromaticity.ts`: `Math.abs(det) < 1e-12` guard before matrix inversion;
+  `Math.abs(sum) < 1e-9` guard in `xyzToXy`; all XYZ reads guarded with
+  `!Number.isFinite(x)` — correct.
+- `color-detection.ts`: per-field guards on every NCLX-mapped value; ICC chromaticity
+  upgrades primaries only at HIGH or MEDIUM confidence — correct.
+
+### API search routes
+- `apps/web/src/app/api/search/similar/[id]/route.ts`: `parseInt(idStr, 10)` followed
+  by `!Number.isFinite(id) || id <= 0` at lines 77-80; rate limit pre-incremented at
+  line 86; `rollbackSemanticAttempt` called on every early-return path before the
+  expensive scan (lines 105, 125, 132, 137, 152); catch at line 234 is post-scan
+  enrichment fallback (not a failed-request abort — correct to not refund the rate
+  limit there since the scan succeeded).
+- `apps/web/src/app/api/search/semantic/route.ts`: `Number.isFinite()` validation on
+  `topKRaw` and `contentLength`; `SEMANTIC_SCAN_LIMIT` applied as `.limit()` in the
+  DB query — correct.
+
+### Sharing / settings
+- `apps/web/src/app/actions/settings.ts`: `uploadContractLock` released in `finally` — correct.
+- `apps/web/src/app/actions/sharing.ts`: `rollbackShareRateLimitFull` called on every
+  error path; `decrementRateLimit` wrapped with `.catch()` to avoid masking original
+  errors — correct.
+
+---
 
 ## Summary
-- The data-loss surface the prior cycle opened (topic rename CASCADE) is fully closed; no adjacent
-  CASCADE-exposed sibling remains. All six cycle-16 fixes verified correct.
-- **1 NEW confirmed latent bug** (DBG-17-1, LOW): a cycle-16-introduced claim-leak on the
-  topic-existence SELECT throw path — over-counts the offending admin's own quota window.
-- **1 NEW needs-repro** (DBG-17-2, LOW): pre-existing best-effort under-count on window-expiry-
-  during-claim, marginally widened by cycle-16's earlier claim.
-- No new MEDIUM+ correctness/data-loss bug found this cycle.
+
+**Cycle-18 new confirmed bugs: 0.**
+
+The codebase is clean on all investigated surfaces. The cycle-17 headline bug
+(DBG-17-1) and the cycle-17 perf finding (PERF-17-04) are both correctly fixed
+and properly wired end-to-end. All advisory lock connections are released in
+`finally` blocks. All temp file cleanup paths are ENOENT-safe. All numeric guards
+use `Number.isFinite()` before DB writes. All rate limit rollback patterns in the
+semantic search routes are comprehensive. The ISOBMFF/ICC parsers are bounded and
+exception-safe.
+
+No new items are proposed for the cycle-18 plan.

@@ -1,162 +1,85 @@
-# Test Engineer Review — Cycle 17 (HEAD 7b5c1943)
+# Test Engineer Review — Cycle 18
 
-Date: 2026-06-27
-Baseline: 2112 tests / 231 test files passing before this cycle.
-After: 2116 tests / 232 test files passing.
+**Date:** 2026-06-27
+**Baseline:** 2119 pass / 4 skip (end of cycle 17)
+**Final:** 2127 pass / 4 skip (+8 new tests)
+**Test Health:** HEALTHY
 
 ---
 
 ## Summary
 
-**3 gaps found. 4 tests written. All gaps closed.**
-
-| Gap | Severity | Location | Status |
-|-----|----------|----------|--------|
-| DBG-16-03: `updateTopic` smart-collections write-back never exercised | HIGH | `topics-actions.test.ts:285` (old mock) | CLOSED |
-| DES-16-02/C16-F2: `info-bottom-sheet.tsx` `isAdmin &&` gate not pinned | MEDIUM | `photo-viewer-no-hdr-download.test.ts` (missing) | CLOSED |
-| `SEMANTIC_SCAN_LIMIT` hard cap not source-contract locked | MEDIUM | `semantic-search-route.test.ts:241` (comment-only) | CLOSED |
+Cycle 18 focused on:
+1. Verifying that all cycle-17 test-gate fixes (GAP-1, GAP-2, GAP-3) are genuinely non-vacuous.
+2. Confirming the two newly-added source-contract tests from cycle-17 (DBG-17-1 and PERF-17-04) guard real behavior.
+3. Identifying and filling the one genuine unprotected gap: the four focus-visible ring improvements made by the cycle-17 designer had no regression tests.
 
 ---
 
-## Cycle-16 Fix Assessment
+## Existing Gate Verification
 
-### DBG-16-01 — topic_views re-pointing before rename delete
-**PINNED. Non-vacuous.**
+### GAP-1 — Smart-collection topic-predicate rename (`topics-actions.test.ts:346-424`)
 
-`topics-actions.test.ts:330` asserts:
-```
-expect(steps).toEqual(['insert-topic', 'update-images', 'update-aliases', 'update-views', 'delete-topic'])
-```
-Removing the `tx.update(topicViews)` call causes `'update-views'` to disappear from the steps array
-and the assertion fails immediately. The ordering constraint (update-views before delete-topic,
-preventing ON DELETE CASCADE from wiping analytics history) is enforced.
+Non-vacuous. The test builds a real `query_json` containing `{type:'predicate', column:'topic', operator:'eq', value:'old-topic'}`, passes it through the rename loop, and asserts the write-back updates the slug to `'new-topic'`. A mock that returns empty `query_json` would cause the assertions to fail because the update call would never fire.
 
-### DBG-16-03 — smart-collection rules re-pointed on slug rename
-**WAS UNPINNED. NOW CLOSED.**
+### GAP-2 — `isAdmin && isP3Pipeline()` gate in `info-bottom-sheet.tsx` (`photo-viewer-no-hdr-download.test.ts:53-66`)
 
-Root cause of the gap: the rename test at line 285 used `vi.fn().mockReturnValue(makeSelectChain([{slug, image_filename, map_visible}]))` — `mockReturnValue` (not `mockReturnValueOnce`), which means EVERY call to `txSelect` inside the transaction returned the same topic-shaped row. When the smart-collections scan ran (`await tx.select({id, query_json}).from(smartCollections)`), it also received `[{slug, image_filename, map_visible: true}]`. `typeof collection.query_json` was `'undefined'` ≠ `'string'`, so the guard `if (typeof collection.query_json !== 'string') continue;` fired on every iteration. The entire `for` loop body — including `remapTopicSlugInQuery` and `tx.update(smartCollections)` — was NEVER reached. Deleting the entire loop from `apps/web/src/app/actions/topics.ts` would not fail any prior test.
+Non-vacuous. The test reads `info-bottom-sheet.tsx` source and asserts the compound guard `isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)` is present AND that `isP3Pipeline` does not appear ungated (without the `isAdmin &&` prefix). Removing the `isAdmin &&` prefix would break the negative assertion.
 
-Note: `smart-collections.test.ts` covers `remapTopicSlugInQuery` in isolation (pure function, no DB). Those tests are non-vacuous. The gap was specifically the integration wiring: `updateTopic → tx.select(smartCollections) → tx.update(smartCollections)` on changed rows.
+### GAP-3 — `SEMANTIC_SCAN_LIMIT` `.limit()` call (`semantic-scan-limit-source.test.ts`)
 
-New test added to `topics-actions.test.ts`:
-- Uses `mockReturnValueOnce` twice: first call returns the topic row; second returns `[{id: 99, query_json: '{"type":"predicate","column":"topic","operator":"eq","value":"old-topic"}'}]`.
-- Captures payloads passed to `tx.update(smartCollections).set(...)` via a custom `txUpdate` mock that checks `table.id === 'smart_collections.id'`.
-- Asserts `collectionUpdates.length === 1` and `JSON.parse(collectionUpdates[0].query_json).value === 'new-topic'`.
-- Reverting the for-loop or removing the `tx.update(smartCollections)` call leaves `collectionUpdates` empty → assertion fails.
+Non-vacuous. The test asserts `.limit(SEMANTIC_SCAN_LIMIT)` appears in the semantic search route source. Removing the `.limit()` call or hardcoding a literal would fail the assertion.
 
-### CR-16-01 — upload-tracker TOCTOU claim-before-await + rollback
-**PINNED. Non-vacuous.**
+### DBG-17-1 — Upload-tracker settle-on-throw for topic-SELECT (`images-action-toctou-claim.test.ts`)
 
-`images-action-toctou-claim.test.ts` uses `indexOf` ordering comparisons:
-- `tracker.bytes += totalSize` index < `await ensureUploadDirectories()` index.
-- `tracker.count += files.length` index < `db.select({ slug: topics.slug })` index.
-- Exactly 3 occurrences of `settleUploadTrackerClaim(..., 0, 0)` for the rollback paths.
+Non-vacuous. The test checks that exactly 4 `settleUploadTrackerClaim` rollback calls exist in `images.ts` (disk-insufficient, disk-check catch, topic-query catch, topic-not-found) and that the topic-SELECT catch block specifically calls settle with `(0, 0)` and re-throws. Removing the catch block around the topic SELECT would reduce the rollback count from 4 to 3, failing the count assertion.
 
-Moving any claim after its `await` fails the `toBeLessThan` assertion. Removing a rollback call fails the count check.
+### PERF-17-04 — `semanticSearchMode` job snapshot (`image-queue-embed-wiring.test.ts`)
 
-### DES-16-02 / C16-F2 — `isAdmin` gate in photo-viewer.tsx
-**PINNED. Non-vacuous.**
-
-`photo-viewer-no-hdr-download.test.ts:41,49` asserts:
-- `/isAdmin\s*&&\s*hasExifData\(image\.bit_depth\)/` present in photo-viewer.tsx.
-- `/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/` present in photo-viewer.tsx.
-- `/\{\s*hasExifData\(image\.bit_depth\)\s*&&/` NOT present (no ungated form).
-
-### DES-16-02 / C16-F2 — `isAdmin` gate in info-bottom-sheet.tsx
-**WAS UNPINNED. NOW CLOSED.**
-
-The same C16-F2 commit added `{isAdmin && isP3Pipeline(image.color_pipeline_decision)}` to BOTH `photo-viewer.tsx` (pinned) AND `info-bottom-sheet.tsx:500`. Only the photo-viewer site was covered. Removing `isAdmin &&` from `info-bottom-sheet.tsx:500` would expose `color_pipeline_decision` (an admin-only `_PrivacySensitiveKeys` field) to public mobile users without failing any prior test.
-
-The existing `is-p3-pipeline.test.ts` only checks that `isP3Pipeline(` exists and is imported — it does NOT assert the `isAdmin &&` prefix in info-bottom-sheet.tsx.
-
-New test added to `photo-viewer-no-hdr-download.test.ts` in a new describe block:
-- Asserts `/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/` in info-bottom-sheet.tsx.
-- Negative: no ungated `{isP3Pipeline(image.color_pipeline_decision) &&` form.
-
-### TE-16-01 — BoundedMap immutable increment
-**PINNED. Non-vacuous.**
-
-`bounded-map-rate-limit-increment.test.ts` scans `sharing.ts`, `admin-users.ts`, `embeddings.ts`:
-- Each matches `count:\s*entry\.count\s*\+\s*1` (immutable update).
-- Each must NOT match `entry\.count\+\+` or `entry\.count\+=`.
-
-Reverting any file to `entry.count++` fails both positive and negative assertions.
-
-### TE-16-03 — GPS Infinity/range guard (ad4e130d)
-**PINNED. Non-vacuous.**
-
-`process-image-metadata.test.ts` behavioral assertions:
-- `Infinity` GPS rationals → asserts returned coordinates are `null`.
-- Out-of-range lat > 90 / lon > 180 → asserts `null`.
-- Valid GPS → asserts non-null.
-
-Removing any guard produces a null/non-null mismatch, not a silent pass.
-
-### TE-16-04 — COLOR_IMPACTING_KEYS set (ad4e130d)
-**PINNED. Non-vacuous.**
-
-`settings-hash.test.ts` asserts `[...COLOR_IMPACTING_KEYS].sort()` deep-equals the exact 9-element sorted array. Adding or removing any key fails the exact-match assertion.
-
-### TE-16-05 — CSV interlinear strip (ad4e130d)
-**PINNED. Non-vacuous.**
-
-`csv-escape.test.ts` asserts `escapeCsvField('a￺ b￻ c￼ d') === '"abcd"'`. Behavioral assertion on the exact output string.
-
-### C16-F1 — migration 0024 reconcile tripwire
-**PINNED.**
-
-`migrate-reconcile-coverage.test.ts` includes DROP tripwire for migration 0024 (`image_reactions` / `reaction_count`), parallel to the existing 0023 tripwire.
-
-### DBG-16-02 — OG photo finite Content-Length guard
-**PINNED.**
-
-`og-photo-fallback.test.ts` source-contract asserts `/Number\.isFinite\(len\)\s*&&\s*len\s*>\s*OG_PHOTO_MAX_BYTES/`. Removing the `Number.isFinite` guard changes the comparison semantics silently.
+Non-vacuous. The test asserts `resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled'` appears in `image-queue.ts`. This pattern is the only way the queue worker avoids a per-image `SELECT admin_settings`. Changing the fallback chain or removing `job.semanticSearchMode` from the expression would fail the regex match.
 
 ---
 
-## Additional Surfaces Swept
+## Tests Written
 
-### SEMANTIC_SCAN_LIMIT hard cap — WAS UNPINNED. NOW CLOSED.
+### `apps/web/src/__tests__/focus-visible-rings-cycle17.test.ts` — 8 tests added
 
-`semantic-search-route.test.ts:241` had a comment describing the DB scan limit but NO assertion on the limit value. Mocking the DB call without checking the `.limit(SEMANTIC_SCAN_LIMIT)` argument meant that removing the call from the route allowed an unbounded vector scan but all tests still passed.
+**Gap addressed:** The cycle-17 designer pass upgraded four focus-visible rings from non-compliant to WCAG 2.4.11-compliant values. None of those changes had regression protection — a future CSS cleanup could silently revert them.
 
-New file `semantic-scan-limit-source.test.ts`:
-- Asserts `SEMANTIC_SCAN_LIMIT` is imported from `@/lib/clip-embeddings` (not inlined as a magic number).
-- Asserts `.limit(\s*SEMANTIC_SCAN_LIMIT\s*)` is present in the route source.
+**Components covered:**
 
-### migrate.js reconcile + baseline
-**Well covered.** `migrate-reconcile-coverage.test.ts` (237 lines) covers schema mirrors, index mirrors, and DROP tripwires. No gap.
+| Component | Element | Before (cycle-17) | After (cycle-17) |
+|---|---|---|---|
+| `lightbox-color-pip.tsx` | DCI-P3 tooltip trigger | `ring-1 ring-white/50` | `ring-2 ring-white` |
+| `lightbox-color-pip.tsx` | copy-metadata button | `ring-1 ring-white/50` | `ring-2 ring-white` |
+| `nav-client.tsx` | mobile hamburger toggle | no focus ring | `ring-2 ring-ring ring-offset-2` |
+| `wide-gamut-hint.tsx` | dismiss button | `ring-amber-500/40` | `ring-amber-600` |
 
-### Color pipeline decision matrix
-**Well covered.** `color-pipeline-decision.test.ts` + `process-image-color-roundtrip.test.ts` exercise all 6 source ICC families with real Sharp invocations. `force_srgb_derivatives` path covered. Non-vacuous.
+**Non-vacuousness:** For `lightbox-color-pip.tsx`, positive assertions (`focus-visible:ring-2`, `focus-visible:ring-white`) plus negative assertions (`ring-1` absent, `ring-white/50` absent) plus a whole-file belt-and-braces. For `nav-client.tsx`, three separate assertions (`ring-2`, `ring-ring`, `ring-offset-2`). For `wide-gamut-hint.tsx`, positive (`ring-amber-600`) plus negative (`ring-amber-500` absent). Reverting any of the four ring changes causes at least 2 test failures.
 
-### remapTopicSlugInQuery (smart-collections pure function)
-**Well covered in isolation.** `smart-collections.test.ts` covers eq/in/nested and/or rewrite, non-matching slug, non-topic predicates, contains (not rewritten). Integration wiring was the gap; closed above.
-
-### Rate-limit BoundedMap eviction
-`bounded-map.test.ts` covers oldest-entry eviction when `maxSize` is exceeded. `auth-rate-limit.test.ts` covers per-IP/per-account functional behavior. `bounded-map-rate-limit-increment.test.ts` locks the immutable increment pattern. Non-vacuous.
-
-### View-retention GC
-`view-retention.test.ts` covers chunked DELETE logic, negative-days guard, and non-finite guard. Non-vacuous.
-
-### CSV escape
-`csv-escape.test.ts` covers formula injection, C0/C1 strip, bidi override strip, zero-width strip, and interlinear anchors (TE-16-05). Non-vacuous.
-
-### blur-data-url
-`blur-data-url.test.ts` covers `isSafeBlurDataUrl` (MIME whitelist, base64 check, length cap). `process-image-blur-wiring.test.ts` and `images-action-blur-wiring.test.ts` lock the pipeline. Non-vacuous.
-
-### useDisplayCapability / display gamut detection
-No behavior tests — requires a browser environment. The hook is tested via import-presence checks only. The conservative `'srgb'` fallback is the safe path; P3 badges are the only affected surface. Risk: LOW.
+**Anchor precision notes:**
+- `viewer.copyColorMetadata` is used as anchor for the copy button (not bare `copyColorMetadata` which matches the function definition at line 88 before the button element at line 302).
+- The dismiss button anchor searches _forward_ (`idx` to `idx + 400`) because the JSX attribute order places `className` after `aria-label` for that element.
 
 ---
 
-## Tests Written This Cycle
+## Coverage Gaps Remaining
 
-| File | Tests Added | Pins |
-|------|-------------|------|
-| `src/__tests__/topics-actions.test.ts` | 1 | DBG-16-03: smart-collection write-back integration wiring |
-| `src/__tests__/photo-viewer-no-hdr-download.test.ts` | 1 | DES-16-02/C16-F2: info-bottom-sheet `isAdmin &&` gate |
-| `src/__tests__/semantic-scan-limit-source.test.ts` (new file) | 2 | SEMANTIC_SCAN_LIMIT import + `.limit(...)` call site |
+### Medium Risk
+
+**M-1: `images.ts` — behavioral test for topic-SELECT throw path**
+`images-action-toctou-claim.test.ts` is a source-contract test (reads the file as text). There is no behavioral integration test that calls `uploadImages()` with a mock DB that throws on the topic SELECT and asserts: (a) the upload-tracker claim is settled to `(0, 0)` and (b) the error re-propagates. The source-contract test prevents silent regression in the current structure, but a refactor could evade it. A mock-based behavioral test would require a substantial Drizzle mock harness.
+
+**M-2: `wide-gamut-hint.tsx` — render-condition integration**
+The component's visibility logic (`showHint = isWideGamut && displayCapability !== 'p3'`) has no unit test. `use-display-capability.test.ts` covers the hook's Firefox-fallback path independently, but the integration between the hook result and the hint's render decision is untested. A refactor moving the condition could change display semantics silently.
+
+### Low Risk
+
+**L-1: `lightbox-color-pip.tsx` — histogram AVIF-priority branch**
+The priority chain (AVIF if P3 display + canvas-P3 → sized JPEG → fallback base JPEG) has no unit test. The branch is visually obvious on a P3 display and adjacent logic is covered in other tests.
+
+**L-2: `nav-client.tsx` — theme and locale-switch buttons missing focus-visible rings**
+The theme toggle (line 155-165) and locale-switch button (line 166-172) have no `focus-visible` class. These were not changed in cycle-17 and have no test coverage of that absence. A WCAG 2.4.11 audit pass should add rings and corresponding tests. Risk: Low for regression (no change made), Medium for compliance.
 
 ---
 
@@ -164,19 +87,9 @@ No behavior tests — requires a browser environment. The hook is tested via imp
 
 ```
 npm test --workspace=apps/web -- --run
-Test Files  232 passed | 2 skipped (234)
-     Tests  2116 passed | 4 skipped (2120)
-  Duration  ~18.6s
+Test Files  233 passed | 2 skipped (235)
+Tests       2127 passed | 4 skipped (2131)
+Duration    17.45s
 ```
 
-Baseline before this cycle: 2112 tests / 231 files. Net: +4 tests / +1 file.
-
----
-
-## Unpinned Cycle-16 Fixes
-
-**None remain unpinned.** Every fix in the cycle-16 priority list is now either:
-- Already pinned by existing tests (DBG-16-01, CR-16-01, DES-16-02/photo-viewer, TE-16-01 through TE-16-05, C16-F1, DBG-16-02), or
-- Pinned by tests added this cycle (DBG-16-03, DES-16-02/info-bottom-sheet).
-
-The separately identified SEMANTIC_SCAN_LIMIT gap is also now pinned.
+The 4 skipped tests require CLIP model weights on disk (`clip-offline-load.test.ts`, `clip-semantic-integration.test.ts`) — expected in the development environment.
