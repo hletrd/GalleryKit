@@ -34,6 +34,19 @@ export const OG_PHOTO_MAX_BYTES = 1024 * 1024;
 const OG_PHOTO_FETCH_TIMEOUT_MS = 10000;
 
 /**
+ * R19C19 CQ19-01: overall budget across the whole ascending-size fetch chain.
+ * Without it, a cold/broken path (fresh install before backfill, or a broken
+ * IMAGE_BASE_URL) where every configured size HANGS would spend
+ * N × OG_PHOTO_FETCH_TIMEOUT_MS (up to ~60 s at 6 sizes) before falling back to
+ * the site-default OG card — well past social-crawler deadlines (Twitter/X
+ * ~5-10 s, LinkedIn ~3 s), silently dropping the photo card. The loop stops
+ * starting new attempts once this budget is exhausted. The warm path (first
+ * size resolves immediately) is unaffected; fast 404s (missing derivative)
+ * were never the problem since they return immediately.
+ */
+const OG_PHOTO_TOTAL_BUDGET_MS = 10000;
+
+/**
  * Try fetching one sized JPEG derivative for the OG image. Returns the
  * buffered photo on success, or null on any of:
  *   - HTTP non-2xx (e.g. 404 because the derivative is not yet on disk),
@@ -85,7 +98,12 @@ export async function pickFirstAvailablePhotoBuffer(
     imageSizes: number[],
 ): Promise<{ buffer: Buffer; size: number } | null> {
     const sortedSizes = [...imageSizes].sort((a, b) => a - b);
+    const deadline = Date.now() + OG_PHOTO_TOTAL_BUDGET_MS;
     for (const size of sortedSizes) {
+        // R19C19 CQ19-01: stop starting new attempts once the overall budget is
+        // spent so a hung cold/broken path can't accumulate N×10 s before the
+        // caller falls back to the site-default OG card.
+        if (Date.now() >= deadline) break;
         const buffer = await tryFetchPhotoBuffer(origin, baseFilename, size);
         if (buffer) return { buffer, size };
     }
