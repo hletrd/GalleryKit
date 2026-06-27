@@ -111,7 +111,15 @@ export class BoundedMap<K, V> {
         return this.map.keys();
     }
 
-    /** Iterate over entries for external consumers that need full access. */
+    /**
+     * Iterate over entries for external consumers that need full access.
+     *
+     * R16C16 CR-16-02 WARNING: unlike `get()` (which returns a shallow COPY of
+     * the value to protect internal state), `entries()` yields the LIVE internal
+     * value references. Callers MUST NOT mutate a yielded value in place — doing
+     * so corrupts the stored entry without going through `set()`. Treat yielded
+     * values as read-only; clone before mutating if needed.
+     */
     entries(): IterableIterator<[K, V]> {
         return this.map.entries();
     }

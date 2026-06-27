@@ -200,6 +200,9 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         // use multiple libvips workers. Default to one foreground-friendly
         // job per web process; operators can raise QUEUE_CONCURRENCY after
         // sizing it together with SHARP_CONCURRENCY.
+        // R16C16 CR-16-03: `|| 1` deliberately coerces 0, NaN, and unset to 1 —
+        // a 0-concurrency PQueue would never drain (every upload would hang
+        // unprocessed), so there is no valid 0 value to honor here.
         queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 }),
         enqueued: new Set<number>(),
         retryCounts: new Map<number, number>(),
