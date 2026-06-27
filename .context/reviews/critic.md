@@ -1,115 +1,79 @@
-# Critic Review — Run-16 Cycle-16
+# Critic Review — Cycle 17 (HEAD 7b5c1943)
 
-**Date:** 2026-06-27
-**HEAD:** 1f5fb245
-**Reviewer:** critic (Opus, read-only)
-**Scope:** Whole-repo, prioritizing the quality + completeness of the 13 cycle-15 fixes (commits `0118824a`..`27b023ae`), hunting un-mirrored siblings ("fix one sibling, miss the next").
+Mode: THOROUGH → escalated to ADVERSARIAL on the upload-TOCTOU fix (a regression was found in the very fix meant to harden the tracker, which triggers the "assume more hidden problems" sweep).
 
----
+Scope: completeness/correctness of the cycle-16 fixes plus a broad adversarial sweep for the repo's signature "fix one sibling, miss the next" / "structurally-ineffective-on-prod" bug classes. Static review only — vitest/typecheck were not re-run (baseline reported green ~2088).
 
-## Summary Table
-
-| ID | Severity (impact) | Confidence | Area | One-liner |
-|----|----|----|----|----|
-| **C16-F1** | LOW impact / **MAJOR fix-efficacy** | HIGH | migration/reconcile parity | **Headline.** Task-4 reactions drop lives ONLY in `reconcileLegacySchema`, which is unreachable on an already-baselined production DB → the fix is a no-op on the exact DB it claims to clean. |
-| C16-F2 | LOW | HIGH | admin-only field gating | Residual (pre-existing) inconsistency: `isP3Pipeline(image.color_pipeline_decision)` download-label is bare at `info-bottom-sheet.tsx:499` + `photo-viewer.tsx:955` but `isAdmin &&`-gated at `color-details-section.tsx:534` + `lightbox-color-pip.tsx:264`. |
-| C16-F3 | INFO | HIGH | doc-vs-code drift | `migration-journal.test.ts:29-36` comment asserts reconcile "actually cleans up a legacy-migrated DB" — true only for not-yet-baselined DBs; misleading for production. Tied to F1. |
-| C16-F4 | INFO | HIGH | dead artifact | Orphaned `drizzle/0014_drop_reactions.sql` uses `DROP COLUMN IF EXISTS` — invalid on MySQL 8.0; doubly inert. Resurrecting it (vs a new guarded migration) would throw. |
-
-**Verdict: ACCEPT-WITH-RESERVATIONS.** This is a genuinely strong convergence cycle. 9 of 10 substantive fixes are complete, correctly sibling-swept, and — notably — the four new test gates are *non-vacuous* (they fail on revert), directly retiring the recurring "test passes even if reverted" weakness from cycles 14-15. The single reservation is F1: Task 4's reactions cleanup is placed on a code path that does not execute for a baselined production, so it does not achieve its stated goal there. Impact is LOW (dead, feature-removed schema), but the fix is effectively inert on its target.
+## Pre-commitment predictions vs. actual
+- topic-slug rename misses a table/JSON-blob → **Mostly DISPROVEN.** All 3 FK children (`topicAliases`, `images`, `topicViews`) and the `smart_collections.query_json` JSON blob are re-pointed. The AST grammar is exactly `Predicate | AndGroup | OrGroup` (no `not` node), so `remapTopicSlugInQuery` is grammar-complete. The only deliberate gap is `contains` (MINOR).
+- upload TOCTOU rollback misses an early-exit/throw path → **CONFIRMED.** The claim was moved before an un-`catch`-guarded `await`; a throw there leaks the claim (MAJOR).
+- bit_depth / isP3Pipeline gating misses a component → **DISPROVEN.** All 4 components gate consistently AND the data layer omits every admin-only color column from `publicSelectFields` (primary defense intact).
+- 0024 migration doesn't fire on baselined prod / non-monotonic `when` → **DISPROVEN.** Logic is sound on fresh, baselined, and partial paths; post-condition catches silent skips.
+- fix #5 (og finite / queue reuse / BoundedMap) has a missed sibling → **DISPROVEN.** og + semantic are the only Content-Length pre-checks and both are finite-guarded.
 
 ---
 
-## Pre-commitment Predictions vs. Found
+## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-| Prediction | Outcome |
-|---|---|
-| Touch-target scanner fixed one tag-class, missed a sibling | **Not this cycle** — cycle-15 made no touch-target changes; focus-ring sweep (Task 5) is complete (remaining `focus:outline-none` are skip-link landmark targets, correct). |
-| Unicode/bidi sanitization missed a new field | Not applicable this cycle. |
-| Rate-limit fast-path fixed in some sites, missed a sibling | **Investigated thoroughly → Task 2 is COMPLETE.** All BoundedMap consumers verified; `upload-tracker` uses a plain `Map` (mutate-then-`set` is correct); embeddings has no rollback sibling. |
-| Admin-only gating missed a render point (clipboard/feed/OG/JSON-LD) | **Task 3 clipboard + render gating is thorough** (whole `copyData` gated, not just the 2 named fields). Found ONE residual *pre-existing* inconsistency (F2). Feeds/OG/JSON-LD render no color metadata → no leak surface. |
-| A test passes even if the fix is reverted | **Reversed expectation — the new gates are non-vacuous.** Strong positive signal. |
-| (Emergent) Schema-drop placed on the wrong migration layer | **F1 — the real find.** |
+The cycle-16 batch is high quality. Four of the five fix areas are complete and correct (topic-slug repoint, color gating, migration 0024, fix #5). One fix — the upload-TOCTOU hardening (CR-16-01) — introduced a new exception-leak path that is the textbook "the fix handled the return paths but missed the throw path" regression this loop is supposed to hunt. It is MAJOR (self-healing, single-admin blast radius) not CRITICAL, but it should be closed in cycle-17 along with a real (non-source-string) test.
 
 ---
 
 ## MAJOR Findings
 
-### C16-F1 — Task-4 reactions drop is unreachable on a baselined production DB (fix is inert on its stated target)
+### M1 — Upload TOCTOU fix (CR-16-01) leaks the claim on a throw from the topic-exists query
+**File:** `apps/web/src/app/actions/images.ts` — claim at lines ~227-230; un-guarded `await db.select(...).from(topics)` at lines ~255-257; outer `try` at line 175 has a **`finally`-only** block (no `catch`) at ~line 561.
+**Confidence:** HIGH (code path); severity calibration borderline MAJOR/MINOR.
 
-**Evidence (control flow):**
-- `scripts/migrate.js:636-637` adds `dropTableIfPresent('image_reactions')` + `dropColumnIfPresent(images,'reaction_count')` — but **only inside `reconcileLegacySchema`**.
-- `migrate.js:707-713` (`prepareLegacyDatabaseIfNeeded`): for a DB that already has every journal hash recorded, `journalCovered === true` → **`return` at line 712, WITHOUT calling `reconcileLegacySchema`**.
-- `migrate.js:723-742` (`runMigrations`) post-condition THROWS unless every journal hash is present. Therefore **every successful deploy ends with the DB fully baselined** (`journalCovered === true`). Production has deployed per-cycle for ~14 cycles since the migrate.js baseline fix.
-- Net: `reconcileLegacySchema` runs **at most once per DB lifetime** (the first pre-baseline deploy) and **never again**. Any later edit to it — including this reactions drop — is dead code for an already-running production.
-- `drizzle/0007_image_reactions.sql` (journaled idx 7) CREATEs `image_reactions` + `images.reaction_count`. The only DROP is the **orphaned, non-journaled** `0014_drop_reactions.sql`. So the dead schema exists precisely on legacy DBs that ran 0007 (incl. production) — and those are exactly the baselined DBs where reconcile no longer runs.
+**Critique.** Cycle-16 moved the quota CLAIM (`tracker.bytes += totalSize; tracker.count += files.length; uploadTracker.set(...)`) to BEFORE the first `await`, to close a check-then-claim concurrency race. It then added rollbacks (`settleUploadTrackerClaim(..., 0, 0)`) to the **three early-`return` paths** that follow the claim: disk-insufficient, disk-check `catch`, and topic-not-found. But the claim is now also made before the topic-exists `db.select(...).from(topics)` at line ~257, which is wrapped only by the function's outer `try { … } finally { await uploadContractLock.release(); }` — there is **no `catch`**. If that query throws (pool exhaustion, deadlock, lock-wait timeout, transient connection drop on the single MySQL writer), the exception propagates out of `uploadImages`, the `finally` releases the contract lock, and **the claim is never rolled back**. The pre-cycle-16 code claimed AFTER this query, so this throw-leak did not exist before — the fix introduced it.
 
-**Scenario where it bites:** Production (ran 0007, fully baselined). Cycle-15 deploys. `prepareLegacyDatabaseIfNeeded` sees `journalCovered=true` → returns early → reconcile skipped → `image_reactions` table + `reaction_count INT NOT NULL DEFAULT 0` persist forever. The plan's stated target — *"On any legacy-migrated DB (incl. production)... persist forever"* — is **not** cleaned.
+**Failure scenario.** An admin batch-uploads 60 of 100 files; the topic-exists query throws on a momentary DB blip; they get a 500. The 60-file / N-byte claim now sits in the in-memory `uploadTracker` for that `${userId}:${ip}` key. `UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000` (one HOUR, `upload-tracker-state.ts:8`), so for up to an hour every retry sees inflated `count`/`bytes` and is falsely rejected with `uploadLimitReached` / `cumulativeUploadSizeExceeded`. Silent — the admin won't connect the throttle to the earlier 500. Self-heals at window expiry.
 
-**Why the entitlements precedent worked and reactions doesn't (the un-mirrored half):** The entitlements removal used a **dual** mechanism — a *journaled* migration `0023_remove_paid_downloads.sql` (a NEW hash → `journalCovered=false` at its deploy → forces reconcile to run) **plus** the reconcile mirror. The reactions fix copied **only the reconcile-mirror half** and the plan *explicitly declined* the journaled-migration half ("Leave the orphaned .sql file"). The journaled half is the one that reaches a baselined production.
+**Why MAJOR not CRITICAL (Realist Check).** No data loss / no security impact; affects only the one admin's own window; requires a transient throw specifically on the topic query; self-heals in ≤1 h. **Mitigated by:** small uploads rarely approach the 100-file / 2 GiB caps, and admins are few/trusted. It is nonetheless a genuine integrity hole in the exact subsystem the fix claims to harden, with zero test coverage.
 
-**Remedy:** Add a real journaled migration per CLAUDE.md "Adding a new migration" — e.g. `drizzle/0024_drop_reactions.sql` with a monotonic `_journal.json` `when`, mirrored in `reconcileLegacySchema` (already done) and `schema.ts`. Use guarded DDL: `DROP TABLE IF EXISTS image_reactions;` is fine, but the column drop must NOT use `DROP COLUMN IF EXISTS` (unsupported on MySQL 8.0 — see F4); follow the 0023 pattern (bare `ALTER TABLE images DROP COLUMN reaction_count`, which is safe because it runs exactly once via drizzle and the column always exists at that point on a legacy DB) OR an `information_schema`-guarded drop. A new journal hash makes the next deploy run it on baselined production.
+**Fix.** Either (a) wrap the topic-exists query in a `try { … } catch { settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0); throw; }` (or return the localized error), or (b) cleanest: add a single `catch` to the outer `try` that rolls back any outstanding claim before re-throwing, or move the claim into a `try/finally` whose `finally` settles when no successful settle ran. Add the rollback to the disk-check pattern's sibling so the topic query matches.
 
-**Severity note (Realist Check):** Real-world impact is LOW — the schema is feature-dead (no app reference), no data risk, ~4 bytes/row for the int column, silent. I keep the *finding* at MAJOR because the fix does not do what it claims on production; the *consequence* is LOW. Not downgraded to a no-op because it directly defeats the fix's purpose and the same reconcile-only anti-pattern will silently defeat any future schema cleanup placed the same way.
+**Test gap (part of this finding).** `apps/web/src/__tests__/images-action-toctou-claim.test.ts` is pure source-string assertion (`indexOf` ordering + a regex that asserts exactly **3** rollback calls). It cannot exercise the throw path and in fact cements the incompleteness — its own comment says "rolls the claim back on every awaited early-return path," but a throw is not an early-return and is uncovered. There is no concurrency/integration test that invokes `uploadImages` with a mocked-throwing topic query to prove the claim is released.
 
 ---
 
-## MINOR / LOW Findings
+## MINOR Findings
 
-### C16-F2 — Residual `isP3Pipeline(color_pipeline_decision)` gating inconsistency (pre-existing, not cycle-15-scoped)
+### m1 — Smart-collection rename re-point silently skips `contains` topic predicates with no admin-facing signal
+**File:** `apps/web/src/lib/smart-collections.ts` `remapTopicSlugInQuery` (handles `eq` + `in` only); `topics.ts` rename loop ~lines 295-318.
+**Confidence:** HIGH (behavior); the *severity* is a judgment call.
 
-`color_pipeline_decision` is admin-only. The cycle-15 SEC-15-01 sweep gated `icc_profile_name`/`bit_depth`, but the delivered-gamut consumers of `color_pipeline_decision` remain inconsistent:
-- **Gated** `isAdmin && ... isP3Pipeline(decision)`: `color-details-section.tsx:534`, `lightbox-color-pip.tsx:264` (AVIF gamut chip).
-- **Bare** `isP3Pipeline(image.color_pipeline_decision)`: `info-bottom-sheet.tsx:499`, `photo-viewer.tsx:955` (download-button label: "Download P3 JPEG" vs "Download JPEG").
+The smart-collection validator legitimately permits `topic` with `eq`, `in`, AND `contains` (`ContainsPredicate.column = Exclude<AllowedColumn,'tag'>` includes `topic`; `ScalarPredicate` also admits `gt/gte/lt/lte`). The re-point deliberately rewrites only the exact-identity operators (`eq`, `in`) and skips `contains` (and ordering ops). That is a defensible design choice — substring/range are not identity — and it is documented in the function's JSDoc. BUT: a smart collection built as `topic contains "summer-wedding"` will silently lose that topic's photos after the topic is renamed to `summer-celebration`, and **nothing warns the admin**. This is the precise "operators beyond equality… handled or silently skipped" question the cycle posed.
+**Fix.** Either surface a one-line warning in the rename action's result when a `contains`/range topic predicate references the old slug (so the admin can fix the rule), or add an explicit CLAUDE.md note documenting that renaming a topic does not migrate `contains`/range smart-collection rules. No code-behavior change required.
 
-**Scenario:** (a) No live leak — for public viewers `decision` is null (data-layer omission) → `isP3Pipeline(null)=false` → "Download JPEG". (b) Defense-in-depth gap: an admin-fetched row passed with `isAdmin=false` (the exact trap the cycle-15 sweep was closing) leaks P3-ness via the label at 499/955 but not at 534/264. (c) Minor UX inaccuracy: a public viewer of a wide-gamut photo whose JPEG *is* P3 (4:4:4) still sees "Download JPEG".
+### m2 — Topic-rename transaction now also scans `smart_collections` and updates `topic_views` in-line, lengthening the single-writer lock window
+**File:** `apps/web/src/app/actions/topics.ts` rename transaction (~lines 250-320).
+**Confidence:** MEDIUM.
 
-**Remedy:** Pick ONE policy for delivered-gamut P3-ness and apply to all four sites — either derive the label from a public signal (`color_primaries`/`avif_10bit`), or `isAdmin &&`-gate all four. Confidence HIGH that the inconsistency exists; severity LOW (no real leak; delivered P3-ness is public-adjacent).
-
-### C16-F3 — `migration-journal.test.ts:29-36` comment is misleading (tied to F1)
-
-The comment states reconcile "is the mechanism that actually cleans up a legacy-migrated DB." That is true only for a DB not yet baselined; for a baselined production reconcile never runs (F1). The comment should state the limitation, and the test should not be read as evidence the cleanup happens. The test only *allows* the orphan (file→tag direction not asserted) — it provides zero lock that the drop ever executes. Acceptable as an orphan-allowance test, but it shouldn't carry a correctness claim it doesn't verify.
-
-### C16-F4 — Orphaned `0014_drop_reactions.sql` is doubly inert (INFO)
-
-`drizzle/0014_drop_reactions.sql` uses `ALTER TABLE images DROP COLUMN IF EXISTS reaction_count`. MySQL 8.0 does **not** support `DROP COLUMN IF EXISTS` (MariaDB-only; the `0023` migration comment documents exactly this). So even if someone "fixed" the orphan by journaling it, it would throw a syntax error. The proper fix is a fresh guarded migration (F1 remedy), not resurrecting 0014. Recommend deleting the misleading orphan file to avoid a future contributor trying to journal it.
+The recreate transaction now additionally runs a full `SELECT … FROM smart_collections` (no WHERE) + per-row updates AND `UPDATE topic_views SET topic=? WHERE topic=?`. For a high-traffic topic `topic_views` can hold up to `VIEW_RETENTION_DAYS` (395 d) of rows, so the rename holds row/gap locks longer on the single MySQL writer documented in CLAUDE.md. This mirrors the pre-existing `UPDATE images.topic` in the same transaction (same order of magnitude), and renames are rare admin operations, so this is a low-priority observation rather than a defect — but it is a real increase in lock duration introduced this cycle. No action required beyond awareness; if it ever matters, the `topic_views` re-point could be chunked/issued post-commit with its own retry, since it is analytics (best-effort) rather than referential-integrity-critical.
 
 ---
 
-## What's Missing / Gaps
+## What's Missing (gaps / unhandled paths)
+- **Throw-after-claim rollback** for the upload tracker (M1) — neither the code nor any test covers it.
+- **Real-DB / concurrency coverage of the rename re-points.** `topics-actions.test.ts` asserts step ORDERING on a mocked `tx` (`['insert-topic','update-images','update-aliases','update-views','delete-topic']`) — it proves the UPDATE is *called* in order but not that its WHERE clause is correct or that CASCADE is actually prevented. The pure `remapTopicSlugInQuery` helper is well unit-tested; the wiring is mock-only. This is consistent with the repo's no-live-MySQL unit style, so it is a note, not a hard finding.
+- **No admin-facing signal** for the deliberate `contains`/range smart-collection skip (m1).
 
-- **No regression lock that the reactions schema is actually dropped.** F1's reconcile edit has no test that exercises a legacy-with-reactions DB → drop. (The repo's source-scan style can't easily test live DDL; this is an inherent gap, but the misleading comment in F3 makes it worse.)
-- **Generalization risk:** F1 reveals that `reconcileLegacySchema` is a "runs-once" bootstrap, NOT an "every-deploy convergence" pass. Any future schema cleanup added there alone (without a journaled migration) will silently fail to reach already-running installs. Worth a one-line CLAUDE.md note under the Migration Runbook: *"reconcileLegacySchema runs only until a DB is fully baselined; schema CHANGES for existing installs require a journaled migration, not a reconcile-only edit."*
-
----
+## Verified-COMPLETE (no finding — recorded so cycle-18 doesn't re-open)
+- **Topic-slug repoint completeness:** the only stores of a topic slug are the 3 FK children (`topic_aliases.topic_slug`, `images.topic`, `topic_views.topic`) and `smart_collections.query_json`; all are re-pointed. No `admin_settings`/`site-config`/featured-topic slug storage exists. FK ordering is correct (insert-new before child updates; child re-points before the CASCADE delete). Rename branch is correctly guarded by `if (slug !== cleanCurrentSlug)`, so no same-slug duplicate-PK path.
+- **Color admin-gating (DES-16-02 / C16-F2):** photo-viewer, info-bottom-sheet, color-details-section, and lightbox-color-pip all gate `bit_depth` / `isP3Pipeline(color_pipeline_decision)` on `isAdmin`. Primary defense intact: `publicSelectFields` omits `bit_depth, color_pipeline_decision, transfer_function, matrix_coefficients, is_hdr, has_gain_map, color_space, icc_profile_name, pipeline_version` (data.ts:366-391), enforced by the `_SensitiveKeysInPublic` compile guard (data.ts:461-464). The ungated `!isP3Pipeline(decision)` in the delivered-bit-depth blocks derives a label from PUBLIC fields (`color_primaries` + `avif_10bit`) with a public fallback, so it is not a leak and is consistent across both render sites.
+- **Migration 0024_drop_reactions (C16-F1):** journal `when=1782100000000` is the new max (> 0023's 1782000000000). On baselined prod the new hash flips `journalCovered=false` → `reconcileLegacySchema` runs the guarded `dropTableIfPresent('image_reactions')` + `dropColumnIfPresent(images, reaction_count)` (migrate.js:638-639) → `baselineAllJournalMigrations` inserts the 0024 row → `drizzle.migrate()` is a verified no-op → post-condition (`migrate.js` runMigrations) throws if any journal hash is missing. The bare/unguarded `ALTER TABLE images DROP COLUMN reaction_count` in the .sql is "baselined-not-run" on ALL paths (fresh DBs also go through reconcile+baseline per COR-R4C1-12, not per-file migrate), so it never executes. 0007 still adds the column/table on the theoretical drizzle-apply path. Correct and complete — this closes cycle-15's structurally-ineffective reactions drop exactly the way the prompt framed it.
+- **fix #5:** og-photo-fetch `Number.isFinite(len) && len > OG_PHOTO_MAX_BYTES` is correct; the only other Content-Length pre-check (semantic-search-route) is already finite-guarded — no missed sibling. Queue config-reuse correctly reuses `resolvedSemanticMode` for bootstrap jobs and re-fetches only when `null` (normal jobs); the `?? 'disabled'` + `=== null` re-fetch gate avoids a double SELECT without changing semantics. BoundedMap `entries()` warning is doc-only; the upload tracker is a plain `Map` (not BoundedMap), so the live-ref caveat does not apply to it, and every persisting mutation is followed by `.set()`.
+- **Doc route fix (DOC-16-01/02):** both occurrences corrected to `/c/[slug]` (repo tree + `smart_collections` bullet), with an explicit "`/s/[key]` is shared-links, NOT smart collections" note. Actual routes confirm `c/`, `g/`, `s/` all exist under `(public)`.
 
 ## Multi-Perspective Notes
-
-- **Executor:** Tasks 1-3, 5-10, 12-14 are followable and complete; the new test gates are exemplary (non-vacuous, positional assertions). Only Task 4 would leave an executor believing production was cleaned when it wasn't.
-- **Stakeholder (operator):** The reactions cleanup was sold as removing dead production schema; it doesn't. Low practical cost, but the convergence claim "drop dead image_reactions schema" is inaccurate for the live deployment.
-- **Skeptic:** The strongest counter-argument to F1 is "maybe production isn't baselined, so reconcile runs." Refuted: the `runMigrations` post-condition throws unless fully baselined, so any successful prior deploy guarantees `journalCovered=true`. The fix can only fire on a never-yet-deployed legacy DB.
-
----
-
-## Positive Signals (agreements — these are correct and complete)
-
-- **Task 1 (GPS NaN):** Complete. Both ingest paths share `extractExifForDb` (`images.ts:312`, `lr/upload/route.ts:315`). All other numeric columns already finite-guarded (`cleanNumber`, the C8R-C8-02 rational guard, `exposure_compensation`'s own check). Test is non-vacuous (`[NaN,30,0]`/`[10,NaN,0]` → `toBeNull`). No admin edit path writes lat/long.
-- **Task 2 (BoundedMap fast path):** Complete and correctly scoped. Verified every BoundedMap consumer: the 3 fixed sites + `public.ts`/`rate-limit.ts`/`auth-rate-limit.ts` (all already `.set()` back) + `upload-tracker` (plain `Map`, mutate-then-`set` correct) + embeddings (no rollback sibling). No missed sibling.
-- **Task 3 (admin field gating):** Thorough. `color-details-section` + `lightbox-color-pip` clipboard gate the ENTIRE admin payload (not just icc/bit_depth); `bit_depth` render gated in both `color-details-section:481` and `info-bottom-sheet:443`; `iccName` gated at source (`:240`).
-- **Task 5 (focus-visible):** Complete. Whole-repo grep finds no leftover `focus:ring` on interactive elements; remaining `focus:outline-none` are `<main tabIndex={-1}>` skip-link targets (correct — no ring on programmatic focus).
-- **Tasks 6/7/8/12 (test gates):** All NON-VACUOUS — `lr` `.not.toMatch(/stats\.bfree\b/)`; flush test asserts `awaitIdx < emptyCheckIdx` positionally; action-origin scanner truly adds `revalidatePath`/`revalidateTag` to `MUTATING_FUNCTION_NAMES` with failing fixtures; sigterm test pins both handlers + `ENV NEXT_MANUAL_SIG_HANDLE=true`. This retires the cycle-14/15 "uncovered fix" theme.
-- **Task 10 (histogram rAF):** Correct — rAF debounce + no-op dims guard + cancel/removeListener on unmount.
-- **Task 13 (tag-input NFKC):** Complete sibling sweep — `filteredTags`, `showCreateOption` exact-match, and `hasSelectedTag` all normalize both sides.
-
----
+- **Executor:** M1's inline comment ("The two awaited validations that follow the claim roll it back on early return") frames the contract as *return*-only; an engineer extending this block would replicate the same throw-blind assumption. Strengthen the comment to name the throw path.
+- **Stakeholder:** the rename data-loss fix (topic_views CASCADE) is the highest-value item in the batch — it prevented silent loss of up to 395 days of per-topic analytics. Correct and well-targeted.
+- **Skeptic:** strongest argument against the `contains` skip (m1) is "silent membership change on rename"; the counter ("substring ≠ identity") is sound, which is why m1 is MINOR and recommends a signal rather than a behavior change.
 
 ## Verdict Justification
-
-**ACCEPT-WITH-RESERVATIONS.** Operated in THOROUGH mode throughout; no escalation to ADVERSARIAL warranted — the cycle is high quality and the un-mirrored-sibling hunt came back almost entirely clean (Tasks 2, 3, 5 fully swept; test gates non-vacuous). The sole reservation, F1, is a real fix-efficacy defect (HIGH confidence, LOW user-impact) that should be reclassified from "done" to "incomplete": add a journaled `0024_drop_reactions.sql` so the cleanup reaches baselined production, matching the entitlements/0023 precedent the plan cited but only half-implemented. F2 is a pre-existing residual worth folding into the next admin-gating pass. F3/F4 are documentation/dead-artifact hygiene.
-
-**To upgrade to ACCEPT:** land the journaled reactions-drop migration (F1) and either unify or publicly-source the `isP3Pipeline` download-label gating (F2).
+ACCEPT-WITH-RESERVATIONS: four of five fix areas are complete and correct, and the migration/doc/color/og items fully close their findings. The single reservation is M1 — a real, newly-introduced claim-leak on the topic-query throw path, plus its source-string-only test that cannot catch a regression. It is MAJOR (self-healing, single-admin, no data/security loss; Realist Check kept it at MAJOR rather than CRITICAL but did not downgrade to MINOR because it directly defeats the fix's stated purpose and has zero behavioral test). To upgrade to ACCEPT: add the throw-path rollback (or an outer `catch`) and a test that proves the claim is released when the topic-exists query rejects. m1/m2 are optional polish.
 
 ## Open Questions (unscored)
-
-- Does any other `reconcileLegacySchema`-only edit (past cycles) suffer the same never-runs-on-baselined-prod fate? (e.g. were the entitlements drops *also* relying on reconcile, and only saved by the journaled 0023? — looks like 0023 carried them, but worth a sweep of reconcile-only ALTERs.)
-- Should the orphaned `0014_drop_reactions.sql` be deleted outright to prevent a future contributor from journaling its MySQL-8-invalid `DROP COLUMN IF EXISTS`?
+- Does `updateTopic` trigger revalidation of `getSmartCollectionBySlugCached` consumers after a rename re-points a collection's `query_json`? (React `cache()` is per-request so cross-request staleness is unlikely, but worth a glance if smart-collection pages are ever ISR-cached.)
+- Should the `topic_views` re-point be issued post-commit (analytics is best-effort) to shorten the rename's write-lock on the single MySQL writer? — design question, not a defect.

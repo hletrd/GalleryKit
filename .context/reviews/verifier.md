@@ -1,80 +1,89 @@
-# Cycle-15 Verification Report
+# Verifier Report — Cycle 17 / HEAD 7b5c1943
 
-**Verifier:** oh-my-claudecode:verifier agent (independent pass)
-**HEAD verified:** 1f5fb245
 **Date:** 2026-06-27
-**Plan source:** `.context/plans/cycle-15-plan.md` (claimed HEAD 2f886351 at plan time; plan committed to HEAD 1f5fb245 by deploy)
+**Verifier:** Cycle-17 Verifier subagent (a85c860ee9ebaa5d2)
+**Scope:** 8 cycle-16 commits (097c472b, 78a9c0c2, 41e85994, caa57769, d39e9863, bdf6fcdb, ada6817b, ad4e130d)
+**Test run:** `npm test --workspace=apps/web` — 2112 passed, 4 skipped (233 test files)
 
 ---
 
-## Gate Results
+## Per-Fix Verdict Table
 
-| Gate | Command | Result | Output |
-|------|---------|--------|--------|
-| ESLint | `npm run lint --workspace=apps/web` | **PASS** | Clean — no errors, no warnings |
-| TypeScript | `npm run typecheck --workspace=apps/web` | **PASS** | `typecheck:app` (tsc + next typegen) + `typecheck:scripts` — exit 0 |
-| Vitest | `npm test --workspace=apps/web` | **PASS** | 228 files passed / 2 skipped; **2088 tests passed / 4 skipped** — matches plan claim exactly |
-| API auth lint | `npm run lint:api-auth --workspace=apps/web` | **PASS** | OK: `api/admin/db/download/route.ts`, `api/admin/lr/upload/route.ts` |
-| Action-origin lint | `npm run lint:action-origin --workspace=apps/web` | **PASS** | All mutating server actions enforce same-origin provenance |
-| Public route rate-limit lint | `npm run lint:public-route-rate-limit --workspace=apps/web` | **PASS** | All 6 public API route files OK |
-| Build | `npm run build --workspace=apps/web` | **SKIPPED** (time) | Plan claims compiled successfully; sw.js stamp `6a29b1d0-p7` present from build |
-
-All 6 runnable gates GREEN.
-
----
-
-## Fix-by-Fix Verification
-
-| # | Task | Status | Evidence | Hollow-test risk |
-|---|------|--------|----------|-----------------|
-| 1 | GPS NaN guard in `convertDMSToDD` (DBG-15-01) | **VERIFIED** | `process-image.ts:1455` has `![dms[0],dms[1],dms[2]].every(Number.isFinite) return null`; `:1461` has `!Number.isFinite(dd)` final guard. Test `process-image-metadata.test.ts:171-176` feeds `[NaN,30,0]` / `[10,NaN,0]` and asserts null. | **None** — even if first guard were reverted, `dd = NaN + ...` → `!Number.isFinite(NaN)` at second guard catches it, but revert of BOTH guards would produce `NaN` in db insert, so functional test locks behavior correctly. |
-| 2 | BoundedMap `.set()` fix in sharing/admin-users/embeddings (CR-15-01) | **VERIFIED** | `sharing.ts:54` `const next = { count: entry.count + 1, ... }; map.set(key, next)`. `admin-users.ts:41` same pattern. `embeddings.ts:44` same. Rollback via `.set()` present in sharing.ts:65. | **No dedicated test** — see Gaps section. Fix verified by code inspection and structural identity to `public.ts` reference pattern. |
-| 3 | `icc_profile_name` + `bit_depth` `isAdmin` gating (SEC-15-01) | **VERIFIED** | `color-details-section.tsx:240` `isAdmin ? (image.icc_profile_name \|\| '') : ''`. `:284/291` clipboard keys gated. `:481` `isAdmin && image.bit_depth != null`. `info-bottom-sheet.tsx:442-443` `isAdmin && hasExifData(image.bit_depth)`. `lightbox-color-pip.tsx:96/103` clipboard keys gated on `isAdmin`. | N/A (source-locked via code review) |
-| 4 | Reactions-drop in `reconcileLegacySchema` (Critic-F1) | **VERIFIED** | `migrate.js:636-637` has `dropTableIfPresent(connection, 'image_reactions')` and `dropColumnIfPresent(connection, dbName, 'images', 'reaction_count')` with R15C15 comment. `migration-journal.test.ts:29-36` comment updated to state reconcile is the authoritative cleanup path. | N/A |
-| 5 | `focus-visible:ring` alignment (DES-15-01) | **VERIFIED** | `ui/dialog.tsx:82` `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` — no bare `focus:ring`. `ui/sheet.tsx:84` same. `upload-dropzone.tsx:370/413` same. `app/[locale]/admin/(protected)/categories/topic-manager.tsx:333` `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. Grep of `components/` shows no remaining bare `focus:ring` (non-focus-visible) hits. | N/A |
-| 6 | LR `bavail` source-lock test (TE-15-01) | **VERIFIED** | `lr-upload-hdr-gate.test.ts:212` `expect(LR_SRC).toMatch(/stats\.bavail\b/)`. `:213` `expect(LR_SRC).not.toMatch(/stats\.bfree\b/)`. | **Not hollow** — reverting `route.ts:185` to `bfree` removes `stats.bavail` from the source file (assertion 1 FAILS) and introduces `stats.bfree` (assertion 2 FAILS). Both assertions anchor the contract. |
-| 7 | `currentFlushPromise` shutdown-drain test (TE-15-02) | **VERIFIED** | `data-view-count-flush.test.ts:206-230` — two `it()` cases: (a) asserts `flushGroupViewCounts` body matches `/currentFlushPromise\s*=\s*new Promise/` and `/currentFlushPromise\s*=\s*null/`; (b) asserts `flushBufferedSharedGroupViewCounts` body contains `await currentFlushPromise` at a lower index than the `viewCountBuffer.size === 0` early-return. Ordering assertion enforces the draining-before-exit invariant. | **Not hollow** — removing the in-flight-await from `data.ts` removes the `new Promise` assignment and the `await`, failing all three sub-assertions plus the ordering check. |
-| 8 | Action-origin scanner: `revalidatePath`/`revalidateTag` (TE-15-03) | **VERIFIED** | `check-action-origin.ts:201-202` adds `'revalidatePath'` and `'revalidateTag'` to `MUTATING_FUNCTION_NAMES`. `check-action-origin.test.ts:134-151` has fixture cases asserting raw `revalidatePath`/`revalidateTag` before the origin check are flagged. `lint:action-origin` passes on the real tree. | **Not hollow** — removing entries from `MUTATING_FUNCTION_NAMES` causes the fixture cases to return no findings → test assertions `expect(findings).toHaveLength(1)` FAIL. |
-| 9 | Boundary test `next/*` detection + `searchFields` guard (A15-01/A15-02) | **VERIFIED** | `client-server-only-boundary.test.ts:281-305` adds `hasNextServerRuntimeImport()` checking `next/headers`, `next/cache`, `next-intl/server`; wired into `reachesServerOnly()`. Test at `:495-501` verifies positive and negative cases. `data.ts:1500-1503` adds `type _SearchSensitive = Extract<keyof typeof searchFields, _PrivacySensitiveKeys>` + `_searchPrivacyGuard` compile guard. | **Not hollow** — removing `hasNextServerRuntimeImport` call from `reachesServerOnly` would cause the `@/lib/revalidation.ts` case at `:504` to return `false`, failing the assertion. The `_searchPrivacyGuard` is a compile-time `tsc` lock. |
-| 10 | Histogram rAF debounce (PERF-15-02) | **VERIFIED** | `histogram.tsx:441-464` — `rafId` declared; `onResize` handler does `cancelAnimationFrame(rafId)` then `rafId = requestAnimationFrame(() => { ... updateDims ... })`. Cleanup removes listener and cancels pending rAF. | N/A |
-| 11 | Bootstrap `getGalleryConfig()` hoist | **CORRECTLY DEFERRED** | Deferred on inspection (see plan). No code change expected. |
-| 12 | SIGTERM/`NEXT_MANUAL_SIG_HANDLE` invariant test (TE-15-04) | **VERIFIED** | `instrumentation-sigterm.test.ts` EXISTS. Three `it()` assertions: SIGTERM handler wired to `gracefulShutdown('SIGTERM')`, SIGINT wired to `gracefulShutdown('SIGINT')`, `Dockerfile` contains `ENV NEXT_MANUAL_SIG_HANDLE=true`. | **Not hollow** — removing either handler from `instrumentation.ts` or the env from `Dockerfile` causes the corresponding source-scan assertion to FAIL. |
-| 13 | CR-LOW cleanups bundle | **VERIFIED** | `auth.ts:~199` `console.error('Failed to reset account-scoped login rate limit:', err)` (was `console.debug`). `lightbox-color-pip.tsx:109-122` `document.execCommand('copy')` fallback path present. `tag-input.tsx:56-63` both sides of filter comparison normalized via `normalizeTagInputValue()`. `load-more.tsx:81-85` `'error' \|\| 'invalid'` both trigger `toast.error(t('home.loadMoreFailed'))`. `data.ts:141-146` `viewCountRetryCount.delete(groupId)` in capacity-drop path. | N/A |
-| 14 | CLAUDE.md doc-cite corrections (DOC-15-01..04) | **VERIFIED** | `NEXT_UPLOAD_BODY_MAX_BYTES` default → `278921216` present. `settings-hash.ts:42-54` present in CLAUDE.md. `color-detection.ts:99-108` present. `process-image.ts:1157` present (citation reformatted to "`:1088-1089` removes the shared `image` var; the per-path WI-14 note is at `:1157`"). Line 1157 in `process-image.ts` confirmed as the `// WI-14 / R8-R8: fresh sharp instance per format for ALL paths` comment. | N/A |
-| 15 | SW version restamp | **VERIFIED** | `sw.js:26` `SW_VERSION = '6a29b1d0-p7'` — stamped from current HEAD short-SHA. | N/A |
+| # | Commit(s) | Fix | Gate Verdict | Evidence |
+|---|-----------|-----|-------------|---------|
+| 1a | 097c472b | topic_views re-point before slug rename/delete | CONFIRMED | `topics-actions.test.ts`: steps array must contain `'update-views'` in order; reverting the `tx.update(topicViews)` call removes it, test fails |
+| 1b | 35d7f171 | smart_collections predicate remap on slug rename | **VACUOUS GATE** | `topics-actions.test.ts` mock returns rows with no `query_json`; all rows hit `continue` and `tx.update(smartCollections)` is never asserted; reverting the loop passes all tests |
+| 2 | 78a9c0c2 | upload-tracker claim-before-await TOCTOU fix | CONFIRMED | `images-action-toctou-claim.test.ts`: source-order guards `claimIdx < diskAwaitIdx` and `claimIdx < topicQueryIdx` fail on revert; rollback-count assertion (exactly 3) also gates |
+| 3 | 41e85994 | isAdmin gating for bit_depth / isP3Pipeline in photo-viewer | CONFIRMED (photo-viewer); PARTIAL (info-bottom-sheet) | `photo-viewer-no-hdr-download.test.ts`: regex `/isAdmin\s*&&\s*hasExifData\(image\.bit_depth\)/` and `/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/` verified at lines 890/961; `info-bottom-sheet.tsx` line 500 has the same gate but no test scans it |
+| 4 | caa57769 | `0024_drop_reactions` journal + reconcile DDL | CONFIRMED | `migrate-reconcile-coverage.test.ts`: requires `dropTableIfPresent(connection, 'image_reactions')` and `dropColumnIfPresent(connection, dbName, 'images', 'reaction_count')` in comment-stripped migrate.js source; verified at lines 638-639 |
+| 5 | d39e9863 | BoundedMap immutable-increment (`.set()` not `++`) | CONFIRMED | `bounded-map-rate-limit-increment.test.ts`: positive pattern `count: entry.count + 1` required in sharing.ts, admin-users.ts, embeddings.ts; `entry.count++` and `entry.count +=` forbidden; revert fails negative assertions |
+| 6 | bdf6fcdb | search-route PII guard | CONFIRMED | `search-route-privacy.test.ts`: any `images.<pii-col>` reference in semantic/route.ts or similar/[id]/route.ts fails; covers 17 PII columns including latitude, longitude, bit_depth, color_pipeline_decision |
+| 7 | ada6817b | `Number.isFinite(len)` guard in og-photo-fetch | CONFIRMED | `og-photo-fallback.test.ts` line 92: regex `/Number\.isFinite\(len\)\s*&&\s*len\s*>\s*OG_PHOTO_MAX_BYTES/` fails without the guard; runtime test at line 138-150 covers oversize rejection path |
+| 8a | ad4e130d | GPS Infinity + out-of-range → null | CONFIRMED | `process-image-metadata.test.ts` lines 188-225: `expect(exif.latitude).toBeNull()` for Infinity and >90/180° inputs; out-of-range guard in process-image.ts line 1461 is the unique gate for range check; Infinity is double-covered (lines 1455 + 1461) |
+| 8b | ad4e130d | CSV interlinear strip (U+FFF9-FFFB) | CONFIRMED | `csv-escape.test.ts` line 35: `expect(escapeCsvField('a￹b￺c￻d')).toBe('"abcd"')` fails if `￹-￻` removed from `UNICODE_FORMAT_CHARS` in validation.ts |
+| 8c | ad4e130d | COLOR_IMPACTING_KEYS exhaustiveness | CONFIRMED | `settings-hash.test.ts` line 37: `expect([...COLOR_IMPACTING_KEYS].sort()).toEqual(expected)` pins exactly the 9 documented keys; any add or remove fails |
 
 ---
 
-## Gaps
+## Gaps Found
 
-### Gap 1 — No unit test locks the BoundedMap counter accumulation in sharing/admin-users/embeddings
+### GAP-1 — VACUOUS GATE: smart_collections re-point integration (35d7f171)
+**Risk: MEDIUM**
+
+The `topics-actions.test.ts` mock for `tx.select({…}).from(smartCollections)` returns `[{ slug: 'old-topic', image_filename: 'old-topic.webp', map_visible: true }]` — a row with no `query_json` property. The production code at `topics.ts` (the loop on lines ~301-318) has:
+
+```ts
+if (typeof collection.query_json !== 'string') continue;
+```
+
+Because the mock row has `query_json: undefined`, every iteration hits `continue` and `tx.update(smartCollections)` is never called. The test has no assertion that verifies the update occurred.
+
+The `smart-collections.test.ts` (`remapTopicSlugInQuery`) IS non-vacuous for the helper function in isolation, but it does not verify that `updateTopic` in `topics.ts` actually calls it.
+
+**Impact:** Reverting the smart_collections loop from `topics.ts` would pass the full test suite. This means the integration (that a topic slug rename actually rewrites stored smart-collection query ASTs) is untested.
+
+**Suggested fix:** Add one test scenario to `topics-actions.test.ts` where the mock `txSelect` for `.from(smartCollections)` returns a row with a valid `query_json` string containing the old topic slug in a `eq`/`in` predicate, and assert that `tx.update(smartCollections)` is called with the remapped JSON.
+
+### GAP-2 — PARTIAL GATE: info-bottom-sheet.tsx isAdmin gating (41e85994)
 **Risk: LOW**
-The Task 2 fix (CR-15-01) replaces `entry.count++` (mutating a discard copy) with `map.set(key, { count: entry.count + 1, ... })` in three files. This is correct and structurally identical to the `public.ts` reference pattern. However, there is no dedicated unit test that:
-- Creates a `BoundedMap`
-- Calls `checkShareRateLimit` / `checkUserCreateRateLimit` / `preIncrementBackfillAttempt` N times
-- Asserts the counter actually reaches the MAX limit
 
-The only coverage is indirect: `public.ts` has tests that exercise its identical pattern, and `lint:action-origin` confirms the actions are structurally correct. A future copy-paste regression in these three files (reverting to `entry.count++`) would be caught only by a sharp code reviewer, not a test.
-**Suggestion:** Add a unit test in `sharing.test.ts` (or a new `rate-limit-bounded-map.test.ts`) that calls `checkShareRateLimit` in a loop past MAX and asserts it returns `true` (rate-limited) at the expected threshold.
+`photo-viewer-no-hdr-download.test.ts` (lines 36-51) scans only `apps/web/src/components/photo-viewer.tsx`. The same commit also gates `isP3Pipeline(image.color_pipeline_decision)` behind `isAdmin &&` in `apps/web/src/components/info-bottom-sheet.tsx` (line 500), but no test scans that file. The `bit_depth` isAdmin gate in `info-bottom-sheet.tsx` (line 443) is also unscanned.
 
-### Gap 2 — Residual `console.debug` for audit event failure in auth.ts
-**Risk: INFO**
-`auth.ts` line ~200 still has `await logAuditEvent(...).catch(console.debug)`. The Task 13 plan targeted line 194 (the account-scoped rate-limit reset catch), which is now correctly `console.error`. The audit-event `.catch(console.debug)` is a separate line and was NOT part of the plan's scope. Audit-event failure being silenced to `debug` level is a minor logging-quality gap but not a correctness issue.
-**Suggestion:** Replace with `.catch(console.warn)` in a follow-up LOW cleanup pass.
+**Impact:** Reverting the isAdmin gating in `info-bottom-sheet.tsx` alone would pass all tests.
 
-### Gap 3 — Plan cites wrong topic-manager.tsx path
-**Risk: INFO (documentation only)**
-The plan document states `apps/web/src/components/topic-manager.tsx:333` but the actual file is `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`. The fix IS present at the correct location (`focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` at line 333 of the actual file). No functional impact; plan path is inaccurate.
+**Suggested fix:** Extend the source-contract test to also scan `BOTTOM_SHEET_PATH = 'src/components/info-bottom-sheet.tsx'` with the same two regex patterns.
 
 ---
 
-## Verdict
+## Evidence Table
 
-**Status: PASS**
-**Confidence: high**
-**Blockers: 0**
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| Tests | PASS | `npm test --workspace=apps/web` | 2112 passed, 4 skipped (233 files) |
+| Build | not re-run (no source change in this verification pass) | — | — |
+| Type check | not re-run | — | — |
+| Key fix 1a (topic_views order) | CONFIRMED | code reasoning + test read | `steps` array gate non-vacuous |
+| Key fix 1b (smart_collections integration) | VACUOUS | code reasoning | mock always skips loop |
+| Key fix 2 (TOCTOU) | CONFIRMED | `images-action-toctou-claim.test.ts` | source-order + rollback-count |
+| Key fix 3 (isAdmin gating photo-viewer) | CONFIRMED | grep + test read | lines 890/961 match regex |
+| Key fix 3 (isAdmin gating info-bottom-sheet) | PARTIAL | grep | line 500 present, no test gate |
+| Key fix 4 (migrate reconcile) | CONFIRMED | `migrate-reconcile-coverage.test.ts` | lines 638-639 match required patterns |
+| Key fix 5 (BoundedMap immutable) | CONFIRMED | `bounded-map-rate-limit-increment.test.ts` | positive + negative assertions |
+| Key fix 6 (search PII) | CONFIRMED | `search-route-privacy.test.ts` | 17-column scan of two route files |
+| Key fix 7 (Number.isFinite) | CONFIRMED | `og-photo-fallback.test.ts` | regex + runtime test |
+| Key fix 8a (GPS Infinity/range) | CONFIRMED | `process-image-metadata.test.ts` | lines 188-225 |
+| Key fix 8b (CSV interlinear) | CONFIRMED | `csv-escape.test.ts` line 35 | live-char assertion |
+| Key fix 8c (COLOR_IMPACTING_KEYS) | CONFIRMED | `settings-hash.test.ts` line 37 | exact 9-element set |
 
-All 7 runnable gates are GREEN. All 14 implemented tasks are verified present in the installed code and structurally correct. The 4 new TEST-GATE tests (Tasks 6, 7, 8, 12) are not hollow — each would independently fail if its corresponding fix were reverted. The 2088/4 test count matches the plan claim exactly. Gap 1 (no BoundedMap accumulation unit test) is LOW risk and is not a blocker given the DB-backed second layer in sharing/admin-users and the structural identity to the tested `public.ts` pattern. No new correctness or security risks found.
+---
 
-**RECOMMENDATION: APPROVE**
-All cycle-15 fixes are correctly installed, all gates are green, and the test-gate locks are non-hollow; deploy is safe.
+## Overall Verdict
+
+**PASS with two flagged gaps.**
+
+All 2112 tests pass. Nine of the ten sub-fixes have non-vacuous test gates. Two gaps require action before the cycle can be considered fully covered:
+
+1. **GAP-1 (MEDIUM):** The smart_collections re-point integration has a vacuous gate; add a test with a `query_json`-bearing mock row to `topics-actions.test.ts`.
+2. **GAP-2 (LOW):** The `info-bottom-sheet.tsx` isAdmin gating is unscanned; extend the photo-viewer source-contract test to also scan that file.
+
+These gaps do not block shipping the current fixes, but GAP-1 means a future refactor could silently drop the smart-collection predicate remap without any test failure.

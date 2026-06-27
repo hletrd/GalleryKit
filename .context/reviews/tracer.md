@@ -1,391 +1,277 @@
-# Trace Report — GalleryKit Cycle 16
+# Tracer Report — Cycle 17 (HEAD 7b5c1943)
 
-**Agent:** Tracer · **HEAD:** 1f5fb245 · **Date:** 2026-06-27
-
----
-
-## Framing
-
-Six candidate flows were traced end-to-end. The repo's two recurring bug classes drove the selection:
-
-- *NaN survives a relational comparison* (cycle-14 bavail mock, cycle-15 GPS NaN)
-- *Fix one sibling, miss the next* (recurring: touch-target scanner, advisory-lock placement, color-key omissions)
-
-Each flow was treated as a distinct trace with competing hypotheses before synthesis.
+Evidence-driven causal tracing of five suspicious data/control flows. Two signature
+bug classes watched for: (A) "NaN survives a comparison"; (B) "fix one sibling,
+miss the next". All paths traced to file:line.
 
 ---
 
-## Flow 1 — EXIF Numeric Ingest: NaN-Class Hazard
+## Flow 1 — Topic slug rename: does any slug reference orphan / CASCADE-delete?
 
 ### Observation
+`updateTopic` renames a topic by RECREATE: insert new `topics` row, re-point FK
+children, then delete the old row (`topics.ts:249-323`).
 
-`extractExifForDb` (process-image.ts:1430) writes `iso`, `f_number`, `focal_length`, `exposure_time`, `latitude`, `longitude`, `exposure_compensation`, and `flash` to MySQL. Prior cycles found NaN surviving into GPS columns. Whether the remaining numeric fields carry a similar residual risk is the question.
+### Hypothesis
+A table/column/JSON storing the topic slug is missed in the re-point pass, so the
+old-row delete either orphans it or CASCADE-wipes it.
 
-### Hypothesis Table
+### Trace (waypoints)
+Every place a topic slug is stored, and its rename handling:
+| Store | FK onDelete | Re-pointed at | Status |
+|-------|-------------|---------------|--------|
+| `images.topic` | RESTRICT (`schema.ts:33`) | `topics.ts:283` `tx.update(images).set({topic:slug})` | ✓ before delete |
+| `topic_aliases.topic_slug` | CASCADE (`schema.ts:16`) | `topics.ts:284` | ✓ before delete |
+| `topic_views.topic` | CASCADE (`schema.ts:236`) | `topics.ts:292` (DBG-16-01) | ✓ before delete |
+| `smart_collections.query_json` | none (JSON) | `topics.ts:301-319` remap eq/in (DBG-16-03) | ✓ exact-identity only |
+| old-row delete | — | `topics.ts:321-322` | runs last, inside same tx |
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | All numeric EXIF paths properly sanitize via `cleanNumber` / `normalizeExposureTime` / explicit `isFinite` guards | High | Strong (direct code read) | No counter-evidence found |
-| 2 | `iso` column receives a float from `cleanNumber` creating a silent DB type mismatch | Medium | Moderate (schema + code) | `cleanNumber` returns `number`, `iso` schema is `int("iso")` |
-| 3 | `cleanString(val)` in the `normalizeExposureTime` fallback path coerces unsafe values into varchar | Low | Moderate | `cleanMetadataString` calls `String(value)` before stripping |
+- The three FK children are the COMPLETE set: confirmed against both `schema.ts`
+  (`references(() => topics.slug)` at lines 16, 33, 236) and the independent
+  `reconcileLegacySchema` FK list in `migrate.js:611,616,562`. No fourth FK exists.
+- `images.topic` is RESTRICT, so the old-row delete at line 321 would THROW if any
+  image still pointed at the old slug — it is re-pointed first (283), so the delete
+  is legal and the CASCADE on aliases/views never fires (they were already moved).
+- `remapTopicSlugInQuery` (`smart-collections.ts:414-442`) rewrites only `topic eq
+  <old>` and `topic in [...]` predicates; malformed `query_json` is `continue`d
+  (`topics.ts:311`), only changed rows are written back (314-318).
 
-### Evidence For / Against
+### Evidence For (cleared)
+- All three FK children re-pointed inside one `db.transaction` BEFORE the delete.
+- Smart-collection exact-identity topic refs remapped in the same transaction.
+- No admin_settings / gallery-config key stores a topic slug (grep of
+  `gallery-config-shared.ts` / `gallery-config.ts` for featured/default/topic = empty).
+  Sitemap/Atom feeds read the live `topics` table at query time, so they reflect the
+  new slug automatically (no stored slug).
 
-**H1 (all guards in place):**
+### Evidence Against / Gaps
+- `smart_collections` `contains` (substring) and ordering (`gt`/`lt`) topic predicates
+  are DELIBERATELY not remapped (`smart-collections.ts:409-412` doc). A `topic
+  contains <oldslug-substr>` filter silently stops matching after a rename. Documented
+  intentional (a substring filter is not an identity reference), not a defect.
+- `audit_log.target_id` historical rows keep the old slug; correctly NOT re-pointed
+  (audit history must be immutable).
 
-- `cleanNumber` (process-image.ts:1423–1425): `const n = Number(v); return !Number.isFinite(n) ? null : n;` — NaN or Infinity returns null, binding as SQL NULL.
-- `normalizeExposureTime` (process-image.ts:1382–1411): the array branch at line 1407 guards `val[1] !== 0 && Number.isFinite(val[0]) && Number.isFinite(val[1])` before returning the rational string. Non-finite or zero-denominator inputs fall through to `cleanString(val)`.
-- `convertDMSToDD` GPS guard: fixed in cycle-15 at process-image.ts:1455 with an explicit `Number.isFinite` check.
-- `exposure_compensation` (process-image.ts:1512–1519): `!Number.isFinite(val)` → null.
-- `flash` (process-image.ts:1530–1542): `!Number.isFinite(val)` → null.
-- All six numeric DB columns pass through these guards before the DB write.
-
-**H2 (iso float→int mismatch):**
-
-- `iso: int("iso")` in schema.ts:39.
-- `cleanNumber` returns `number` (TypeScript), which could be `100.5` if exif-reader emits a malformed rational for ISO.
-- MySQL `INT` silently truncates float on write; mysql2 does not raise an error.
-- No evidence of exif-reader returning non-integer ISO in practice. Risk is theoretical and non-breaking — MySQL truncation is safe.
-
-**H3 (cleanString coercion):**
-
-- `cleanMetadataString` (process-image.ts:648–656) calls `String(value)` on any type, then strips Unicode formatting chars, NUL bytes, and trims.
-- `String(NaN) = "NaN"`, which is valid varchar. Stored in `exposure_time` if `normalizeExposureTime` falls through with a pathological `[NaN, NaN]` input — visible but not a relational-comparison hazard because `exposure_time` is never used in a numeric inequality in the application.
-
-### Rebuttal Round
-
-Strongest challenge: *Could `normalizeExposureTime` receive `[NaN, NaN]` from exif-reader, bypass the guards, and return a non-null string?*
-
-Counter: The array branch at line 1407 tests `Number.isFinite(val[0]) && Number.isFinite(val[1])`. `Number.isFinite(NaN)` is `false`. The guard catches this case and falls through to `cleanString([NaN, NaN])`, which produces the string `"NaN,NaN"` via `String([NaN, NaN])`. This is stored as a varchar string, not a number — it cannot participate in a relational comparison hazard.
-
-### Current Best Explanation
-
-All numeric EXIF paths are correctly guarded. The NaN-survives-relational-comparison class that affected GPS in cycle-15 has no analogous survivor in the remaining EXIF fields. The only residual is the theoretical `iso float→int` silent MySQL truncation (not a hazard) and the `exposure_time` receiving `"NaN,NaN"` from a pathological EXIF array — a display oddity, not a relational hazard.
-
-**Severity: no confirmed defect. Minor observation: `iso` float→int coercion is unguarded at the type level but MySQL-silent.**
-
-### Critical Unknown
-
-Whether exif-reader ever emits a non-integer rational for the ISO field in real HEIC/AVIF files.
-
-### Discriminating Probe
-
-Log `typeof exifResult.ISOSpeedRatings, exifResult.ISOSpeedRatings` on a sample iPhone HEIC upload; if array or float, add `Math.round` before passing to `cleanNumber`.
+### Verdict: **CLEARED** (high confidence)
+No orphan / no CASCADE data-loss on rename. The `contains`-predicate non-remap is a
+documented intentional limitation, not a bug.
 
 ---
 
-## Flow 2 — Image-Processing Queue: Claim → Conditional UPDATE → Orphan Cleanup
+## Flow 2 — Upload quota tracker: phantom claim or quota bypass?
 
 ### Observation
+`uploadImages` pre-claims quota (`tracker.bytes += totalSize; tracker.count +=
+files.length`, `images.ts:226-228`) BEFORE any await, then settles the claim against
+actual successes on every exit (`settleUploadTrackerClaim`).
 
-`image-queue.ts` acquires a per-image MySQL advisory lock before processing, does a conditional `WHERE processed = false` UPDATE after encoding, and calls `deleteImageVariants(dir, filename, [])` when `affectedRows === 0` (delete-during-processing race). The in-app runner (`admin-backfill-runner.ts`) and the sidecar (`backfill-color-pipeline.ts`) both re-encode `processed=TRUE` images. Whether the two locks interact correctly with the queue is the question.
+### Hypothesis
+A path between claim and settle leaves a phantom claim (over-count → legit upload
+rejected) OR under-counts (bypass).
 
-### Hypothesis Table
+### Trace — every exit after the claim (line 228)
+| Exit | Settled? | Line |
+|------|----------|------|
+| disk pre-check `< 1GB` | ✓ settle(…,0,0) | 244 |
+| disk `statfs`/`ensureDirs` throw | ✓ try/catch → settle(…,0,0) | 247-250 |
+| topic not found (`!topicRow`) | ✓ settle(…,0,0) | 261 |
+| all-failed (`successCount===0`) | ✓ settle(…,0,0) | 513 |
+| success / partial path | ✓ settle(…,success,bytes) | 535 |
+| per-file throw | caught per-file (try 281-504), loop continues | — |
+| **topic-exists `db.select` THROWS** | **✗ no try/catch** | **256-259** |
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Lock scoping and row-set partitioning prevent queue/sidecar races | High | Strong (direct code + explicit comments) | Different predicates (`processed=false` vs `processed=true`) |
-| 2 | Sidecar lacks per-image lock; `retryFailedImage` + sidecar could race | Low | Strong disconfirmation | `retryFailedImage` requires `processed=false`, sidecar requires `processed=true` |
-| 3 | `deleteImageVariants([], ...)` with full scan catches non-default-size variants | High | Strong | Empty array argument triggers full directory scan |
+- Claim is made synchronously after all SYNC quota checks (R16C16 CR-16-01), closing
+  the check-then-claim TOCTOU. Concurrent same-key uploads can't bypass (claim before
+  first await). Settle math (`upload-tracker.ts:30-31`) reconciles DOWN by the failed
+  portion → no under-count / bypass on any path.
+- The disk-check block (`images.ts:233-251`) is wrapped in try/catch that settles on
+  throw. The very next awaited statement — the topic-exists `db.select`
+  (`images.ts:256`) — is **NOT** wrapped. If it rejects (pool timeout, conn reset,
+  server restart mid-deploy), the exception escapes `uploadImages`; the only enclosing
+  handler is the contract-lock `finally` (`images.ts:561-563`) which releases the lock
+  but does **not** settle the tracker. The claim (`count += files.length`,
+  `bytes += totalSize`) persists.
 
-### Evidence For / Against
+### Evidence For (defect exists)
+- No try/catch around `images.ts:256-259`; `db.select` can reject; the escaping
+  rejection bypasses every `settleUploadTrackerClaim` call.
+- Textbook "fix one sibling, miss the next": the disk check immediately above got
+  try/catch+settle; the topic select immediately below did not.
 
-**H1 (partitioning prevents races):**
+### Evidence Against (severity-limiting)
+- The phantom claim is per-`userId:ip` and self-heals: window auto-resets after 1 h
+  (`resetUploadTrackerWindowIfExpired`, `upload-tracker-state.ts:62-68`), prune drops
+  it after 2 h (`pruneUploadTracker:39`). Bounded blast radius (one admin+IP, ≤1 h).
+- Requires a DB error precisely on the topic-exists SELECT — uncommon, infra-driven,
+  not attacker-triggerable (the topic value is already validated).
 
-- Queue worker: `WHERE id = job.id AND processed = false` (image-queue.ts:339, 435). Only claims un-processed rows.
-- Sidecar: `WHERE processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < IMAGE_PIPELINE_VERSION)`. Only claims already-processed rows.
-- `retryFailedImage` (images.ts:1127): `WHERE id = id AND processed = false AND processing_error IS NOT NULL`. Only operates on failed (never-successfully-processed) images. These are a subset of `processed=false` — the sidecar never touches this set.
-- Advisory lock registry (advisory-locks.ts:40–44): `getImageProcessingLockName(jobId)` = `gallerykit:image-processing:{jobId}`. Shared by queue worker and in-app runner. Sidecar explicitly documents it does NOT acquire this lock (backfill-color-pipeline.ts:37–38).
-
-**H2 (retryFailedImage + sidecar race):**
-
-- `retryFailedImage` requires `processed = false`. Sidecar requires `processed = TRUE`. These predicates are mutually exclusive at the DB level. An image cannot simultaneously satisfy both. No race window exists.
-
-**H3 (full-scan deleteImageVariants):**
-
-- `deleteImageVariants(dir, filename, [])` with the empty array triggers a full directory scan for any file matching the base filename prefix. This catches variants at non-default sizes written before the delete-during-processing race is detected.
-
-### Rebuttal Round
-
-Strongest challenge: *The sidecar's batch UPDATE (backfill-color-pipeline.ts:423) uses `WHERE id = ${item.id}` with no `processed=TRUE` guard. Could a future application path that resets `processed=true→false` cause the sidecar to overwrite queue-worker results?*
-
-Counter: No current application code path resets `processed=true→false`. The queue worker only sets `processed=true` (never reverses it). `retryFailedImage` only selects `processed=false AND processing_error IS NOT NULL` rows. DB restore is guarded by `gallerykit_db_restore`. This is a future-proofing concern, not a current defect.
-
-### Current Best Explanation
-
-Queue/backfill races are prevented by row-set partitioning and by the per-image advisory lock shared between the queue worker and in-app backfill runner. The sidecar's missing per-image lock is safe because its candidate set (`processed=true`) and the queue/retryFailed candidate sets (`processed=false`) are disjoint.
-
-**Severity: no confirmed defect.**
-
-### Critical Unknown
-
-Whether a future feature adds an admin "requeue" path that resets `processed=true→false` without acquiring the per-image advisory lock.
-
-### Discriminating Probe
-
-`grep -rn "processed.*=.*false\|SET processed\|update.*processed" apps/web/src/` for any new write path that could reverse the `processed=true` invariant.
+### Verdict: **CONFIRMED DEFECT (low severity)**
+Phantom upload-quota claim leaks when the topic-exists `db.select` at
+**`apps/web/src/app/actions/images.ts:256`** throws. Over-counts the per-window quota
+(can reject later legit uploads from the same admin+IP) until the 1 h window resets.
+No under-count / bypass on any path. Fix: wrap 256-259 in try/catch and
+`settleUploadTrackerClaim(…,0,0)` on error before rethrow/return, mirroring the
+disk-check block at 247-251.
 
 ---
 
-## Flow 3 — Shared-Group View-Count Buffer: SIGTERM Flush
+## Flow 3 — Numeric guards: does a NaN/Infinity slip a size/limit/coord comparison?
 
 ### Observation
+Multiple `Number()/parseInt/parseFloat` results feed `> MAX` / `< MIN` / range
+comparisons.
 
-`viewCountBuffer` (data.ts) accumulates increments in a module-level `Map`. A periodic timer calls `flushGroupViewCounts`. On SIGTERM, `instrumentation.ts` calls `flushBufferedSharedGroupViewCounts`. Whether the flush correctly drains all buffered counts before process exit is the question.
-
-### Hypothesis Table
-
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | `flushBufferedSharedGroupViewCounts` correctly awaits an in-progress flush before draining | High | Strong (direct code read) | `currentFlushPromise` pattern is correctly sequenced |
-| 2 | SIGTERM handler does not await the flush before calling `process.exit` | Low | Strong disconfirmation | instrumentation.ts:36–42 shows `await Promise.race([Promise.all([..., flushBufferedSharedGroupViewCounts()]), timeout])` |
-| 3 | A double-flush path produces stale or duplicated DB increments | Low | Strong disconfirmation | Timer re-arm and cancellation logic examined; `isFlushing` guard prevents re-entry |
+### Trace — every coercion-into-comparison site
+| Site | Guard | Verdict |
+|------|-------|---------|
+| `og-photo-fetch.ts:62-63` Content-Length | `Number.isFinite(len) && len > MAX` (DBG-16-02) | ✓ guarded |
+| `search/semantic/route.ts:136-143` Content-Length | `!Number.isFinite(n) \|\| n < 0` then `> MAX` | ✓ guarded |
+| `search/semantic/route.ts:88-91` `clampSemanticTopK` | `typeof !== 'number'` reject + `Number.isFinite` | ✓ guarded |
+| `search/similar/[id]/route.ts:74-79` id | regex `^\d+$` then `Number.isFinite(id) \|\| id<=0` | ✓ guarded |
+| `image-types.ts:118-119` exposure normalize | `if (!Number.isFinite(val)) return String(...)` | ✓ guarded |
+| `process-image.ts:1455,1461,1466-77` GPS DMS→DD | per-component `Number.isFinite` + range (`Math.abs(dd) > maxDegrees`→null) | ✓ guarded (lat ±90, lon ±180, Inf→null) |
+| `gallery-config-shared.ts:181,189,229,296` | `Number.isInteger(n) && n>=… && n<=…` | ✓ guarded |
+| `data.ts:798,1422` cursor offset | `Math.floor(Number(x)) \|\| 0` (NaN falsy→0) | ✓ safe |
+| `exif-datetime.ts:39-45` date parts | regex pre-match + `isValidExifDateTimeParts` | ✓ guarded |
+| `validation.ts:181` `safeInsertId` | BigInt range check before `Number()` | ✓ guarded |
 
 ### Evidence For / Against
+- The previously-flagged `og-photo-fetch.ts` NaN slip (DBG-16-02) is FIXED at line 63
+  (`Number.isFinite(len) && len > OG_PHOTO_MAX_BYTES`); the post-buffer cap (66) is a
+  second backstop.
+- GPS: `convertDMSToDD` rejects non-finite components, out-of-range DMS, and final
+  `!Number.isFinite(dd) || Math.abs(dd) > maxDegrees` → null. Infinity and >90/>180
+  both → SQL NULL. Locked by the R16C16 GPS Infinity/range test.
+- No site found where a bare `Number()` feeds `> MAX` without a finite guard.
 
-**H1 (correctly sequenced):**
-
-- `flushGroupViewCounts` (data.ts:74): sets `isFlushing = true`, sets `currentFlushPromise` at line 104, swaps buffer atomically at lines 110–111. In `finally`: `isFlushing = false` (line 156), then (after back-off/retry logic) `currentFlushPromise = null` (line 210), then `resolveDrain()` (line 211).
-- `flushBufferedSharedGroupViewCounts` (data.ts:215): cancels timer, awaits `currentFlushPromise.catch(() => {})`, cancels any re-armed timer, checks `viewCountBuffer.size > 0`, then calls `flushGroupViewCounts()` directly.
-- `currentFlushPromise = null` is set synchronously before `resolveDrain()` schedules the microtask resumption. The awaiting code therefore sees `null` when it resumes. No ordering hazard.
-- `isFlushing = false` is reset before `currentFlushPromise` is cleared, so `flushGroupViewCounts` called by `flushBufferedSharedGroupViewCounts` cannot hit the early-return guard unexpectedly.
-
-**H2 (SIGTERM handler):**
-
-- instrumentation.ts:36–42: `await Promise.race([Promise.all([shutdownImageProcessingQueue(), flushBufferedSharedGroupViewCounts()]).then(() => { completed = true; }), shutdownTimeout])`.
-- Both queue drain and view-count flush are awaited in parallel with a 15-second timeout.
-- `shutdownTimer.unref?.()` (line 31) prevents the timeout timer from keeping the event loop alive.
-- `process.exit(exitCode)` at line 65 is called after the `Promise.race` resolves.
-- H2 is **disconfirmed**.
-
-**H3 (double-flush):**
-
-- If the timer fires while `flushGroupViewCounts` is running, `isFlushing` is `true` and the timer callback returns immediately without a second flush.
-- After `resolveDrain()`, `flushBufferedSharedGroupViewCounts` resumes, cancels any re-armed timer, and calls `flushGroupViewCounts` only if `viewCountBuffer.size > 0`. Single additional drain, not a double-flush.
-- H3 is **disconfirmed**.
-
-### Rebuttal Round
-
-Strongest challenge: *If `flushGroupViewCounts` is mid-transaction when SIGTERM fires, the MySQL connection could be killed before the `UPDATE … SET view_count` commits, losing in-flight counts.*
-
-Counter: This describes the SIGKILL path (not SIGTERM). For SIGTERM, the flush is awaited within a 15-second grace period. A clean drain completes the DB write before `process.exit`. If SIGKILL arrives before the flush completes, buffered counts are lost. CLAUDE.md documents this as "best-effort approximate analytics" — SIGKILL-path loss is acceptable by design.
-
-### Current Best Explanation
-
-The SIGTERM flush is correctly wired: `flushBufferedSharedGroupViewCounts` is awaited inside a 15-second timeout before `process.exit`. Double-flush and re-entrancy are prevented by the `isFlushing` guard and `currentFlushPromise` sequencing. SIGKILL-path loss is documented and acceptable.
-
-**Severity: no confirmed defect.**
-
-### Critical Unknown
-
-The maximum expected flush duration for large `viewCountBuffer` sizes at production scale — relevant to assessing whether the 15-second timeout is sufficient during a traffic spike.
-
-### Discriminating Probe
-
-Add `console.time('[Shutdown] flush duration')` / `console.timeEnd` around `flushBufferedSharedGroupViewCounts()` in instrumentation.ts to characterize real flush latency in production.
+### Verdict: **CLEARED** (high confidence)
+Every size/limit/coordinate comparison is preceded by `Number.isFinite` /
+`Number.isInteger` / regex narrowing, or relies on the NaN-falsy `|| 0` idiom. No
+class-(A) slip remaining.
 
 ---
 
-## Flow 4 — Settings-Hash ETag Invalidation
+## Flow 4 — Migration: does 0024_drop_reactions trigger reconcile on a baselined
+prod DB, or no-op?
 
 ### Observation
+`prepareLegacyDatabaseIfNeeded` returns early when `journalCovered === true`
+(`migrate.js:710-715`); the executable drop of `image_reactions` lives in
+`reconcileLegacySchema` (`migrate.js:638-639`), which only runs when journalCovered
+is false.
 
-`settings-hash.ts` defines `COLOR_IMPACTING_KEYS` (9 keys). The `serve-upload.ts` ETag embeds a hash of these keys' current values. Whether all byte-impacting admin settings are in the set is the question — particularly whether `sdrJpegChroma` (added in a recent cycle) is actually wired to the encoder.
+### Hypothesis
+On an already-baselined prod DB the new entry is a no-op, so the dead reactions
+schema persists forever.
 
-### Hypothesis Table
+### Trace
+- `journalCovered = migrations.every(m => haveHashes.has(m.hash))` (`migrate.js:710`).
+- `0024_drop_reactions` is journal idx 24, `when = 1782100000000` (2026-06-22),
+  strictly greater than 0023's `1782000000000` (verified via `_journal.json` dump) —
+  monotonic at the top, so it does not poison the MAX(created_at) cursor.
+- Its hash = SHA256 of `drizzle/0024_drop_reactions.sql`. On a prod DB baselined at
+  cycle ≤16, that hash is NOT in `__drizzle_migrations` → `journalCovered === false`
+  → falls through to `reconcileLegacySchema` (`migrate.js:721`).
+- Reconcile runs `dropTableIfPresent('image_reactions')` +
+  `dropColumnIfPresent(…,'images','reaction_count')` (638-639), both
+  INFORMATION_SCHEMA-guarded idempotent (215-228). The table+column created by
+  `0007_image_reactions.sql` (verified present) are dropped here.
+- Then `baselineAllJournalMigrations` inserts the 0024 hash (722); `runMigrations`→
+  drizzle `migrate()` sees the hash present and the cursor at 0024's own `when`, so
+  `0024.sql`'s bare DDL is a verified no-op (baselined-not-run). Post-condition
+  (`runMigrations:735-745`) passes (all hashes recorded).
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | `COLOR_IMPACTING_KEYS` is complete; all 9 keys provably change derivative bytes | High | Strong (end-to-end code trace) | `sdrJpegChroma` confirmed wired at process-image.ts:1003 and 1098 |
-| 2 | `sdrJpegChroma` is in the hash but not actually passed to the encoder | Low | Strong disconfirmation | process-image.ts:1003, 1098 confirms it is a real encoder parameter |
-| 3 | Static-path ETag gap silently serves stale bytes after a settings change | High (for static path) | Strong (documented CRT-D1) | Known operational caveat, not a code bug |
+### Evidence For (cleared)
+- The new journal entry is precisely the missing TRIGGER that flips journalCovered to
+  false; the drop executor is reconcile, which now runs. Confirmed by reading the full
+  decision path, journal monotonicity, and 0007/0024 SQL contents.
 
-### Evidence For / Against
+### Evidence Against / Gaps
+- On the SECOND+ deploy after 0024 ships, journalCovered becomes true again (hash now
+  recorded) and reconcile is skipped — but the drop already ran on the first deploy
+  and is idempotent. No re-drop needed. No defect.
 
-**H1 (keys complete):**
-
-- `COLOR_IMPACTING_KEYS` (settings-hash.ts:42–54): `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`, `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `image_sizes` — 9 keys.
-- `sdrJpegChroma`: declared as a parameter to `processImageFormats` at process-image.ts:1003 and assigned to `effectiveSdrChroma` at line 1098: `const effectiveSdrChroma: JpegChromaSubsampling = sdrJpegChroma ?? '4:2:0'`. Applied to the SDR JPEG encode path (lines 1240–1255 region). Changing this setting changes JPEG chroma subsampling — changes bytes.
-- `wide_gamut_max_source_pixels`: controls downscale before the rgb16 pipeline at process-image.ts:1050–1054. A lower cap produces different output dimensions and pixel content — changes bytes.
-- `image_sizes`: sorted ascending before hashing so `[640, 1536]` and `[1536, 640]` hash identically (AGG-R7C3-02).
-- ETag formula in serve-upload.ts: `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`.
-- Compile-time guard `_ColorKeysAreSettingKeys` in settings-hash.ts catches typo'd or removed keys at `tsc`.
-
-**H2 (sdrJpegChroma not wired):**
-
-- Directly disconfirmed by process-image.ts:1003 (parameter declaration) and :1098 (assignment to `effectiveSdrChroma`).
-
-**H3 (static-path ETag gap):**
-
-- The static serving path (Next.js `public/` filesystem) uses `W/"{size-hex}-{mtime-hex}"` — no settings hash. A settings change does not invalidate cached static derivatives until the files are re-encoded (mtime change).
-- Documented as CRT-D1 in CLAUDE.md: "flipping a color/quality/size admin setting does NOT invalidate already-served STATIC derivatives … the static path serves the overwhelming majority of real traffic."
-- Not a code bug — a documented operational gotcha requiring a backfill re-encode after settings change.
-
-### Rebuttal Round
-
-Strongest challenge: *Could a new color/byte-impacting admin setting be added in the future and forgotten from `COLOR_IMPACTING_KEYS`?*
-
-Counter: The compile-time guard catches only key *removal* or *misspelling* — it cannot catch a new valid key that was never added. CLAUDE.md explicitly documents this gap: "it CANNOT catch a forgotten new byte-impacting key." This is a systemic gap but not a current defect.
-
-### Current Best Explanation
-
-`COLOR_IMPACTING_KEYS` is complete for the current admin setting surface. All 9 keys are confirmed wired to encoder parameters that change derivative bytes. The static-path ETag gap is documented and by design. No missing key defect.
-
-**Severity: no confirmed defect. Documented operational gap (CRT-D1) remains by design.**
-
-### Critical Unknown
-
-Whether a future byte-impacting admin setting will be added without a matching `COLOR_IMPACTING_KEYS` entry (compile-time guard cannot catch this case).
-
-### Discriminating Probe
-
-Add `// COLOR_IMPACTING_KEYS — add this key if it changes derivative bytes` as a required comment block next to every `admin_settings` key that is byte-impacting, so code reviewers have a visible checklist anchor during review.
+### Verdict: **CLEARED** (high confidence)
+Hypothesis REFUTED. `0024_drop_reactions` flips `journalCovered === false` on the
+first deploy of any already-baselined DB, forcing `reconcileLegacySchema` to execute
+the guarded `image_reactions` / `reaction_count` drop. It does NOT no-op on prod.
 
 ---
 
-## Flow 5 — Backfill Advisory Lock and Delete-During-Reencode Parity
+## Flow 5 — Color pipeline admin-only columns: leak to public DOM?
 
 ### Observation
+Ten color columns are admin-only (`color_pipeline_decision, is_hdr, has_gain_map,
+was_downscaled, transfer_function, matrix_coefficients, bit_depth, color_space,
+icc_profile_name, pipeline_version`); two are public (`color_primaries, avif_10bit`).
 
-Two backfill entry points exist: the sidecar `backfill-color-pipeline.ts` and the in-app `admin-backfill-runner.ts`. Both must update the same DB column set and handle delete-during-reencode identically. Whether the two implementations are in sync is the question.
+### Hypothesis
+An admin-only column reaches the public DOM.
 
-### Hypothesis Table
+### Trace — three independent layers
+1. **Data layer**: `publicSelectFields` (`data.ts:395`) is destructure-OMIT-derived
+   from `adminSelectFields`; all ten admin-only color keys are in the omit list
+   (`data.ts:373-391`). Compile-time guard `_privacyGuard`
+   (`_SensitiveKeysInPublic extends never`, `data.ts:463-465`) fails `tsc` if any
+   sensitive key reappears; runtime test `privacy-fields.test.ts` SENSITIVE_KEYS
+   fixture pins the same set (color_pipeline_decision/transfer_function/… at lines
+   14,16).
+2. **Fetch layer**: the ONLY viewer fetch, `getImage` (`data.ts:1004-1013`), spreads
+   `...publicSelectFields` with NO isAdmin branch. Grep confirms **zero** `.select`
+   spreads `adminSelectFields` anywhere in `src/` — the admin-only color columns are
+   never SELECTed for any UI surface (the only other selects of `transfer_function`
+   are `image-queue.ts:722` and `retryFailedImage` `images.ts:1124`, both internal
+   re-encode paths, not UI).
+3. **Render layer**: every admin-only render site gates on `isAdmin` —
+   `color-details-section.tsx:412` (transfer), `:459` (matrix), `:468` (color_space),
+   `:481` (bit_depth), `:491` (was_downscaled), `:570` (HDR badge), `:594` (gain map),
+   `:240` (icc name), `:284-291` (clipboard); mirrored in `lightbox-color-pip.tsx:50,
+   83,179,196,202,263-265` and `photo-viewer.tsx:890,902,961`. The public page
+   `p/[id]/page.tsx:148,283` resolves `isAdmin()` server-side and passes the real flag.
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Both paths update the same 10 columns, use the same backfill lock, and handle delete-mid-reencode identically | High | Strong (both code paths read line-by-line) | Column sets compared directly |
-| 2 | In-app runner per-image lock asymmetry vs sidecar could cause a concurrent-write race | Low | Strong disconfirmation | Sidecar processes `processed=true`; queue processes `processed=false` |
-| 3 | Detection-failure branch in sidecar leaves `pipeline_version` un-bumped (preventing future retry) | Low (by design) | Strong | This is the documented AGG2-01 behavior |
+### Evidence For (cleared)
+- Triple defense: omit (compile-guard + test) → not fetched (getImage uses
+  publicSelectFields) → isAdmin-gated at render. A public visitor's `image` object
+  literally lacks these keys (undefined), and the render condition would be false
+  anyway.
 
-### Evidence For / Against
+### Evidence Against / Gaps
+- Consequence of layer 2: because `getImage` uses `publicSelectFields` even for
+  logged-in admins, the admin-gated color/GPS rows on the PUBLIC `/p/[id]` page are
+  effectively dormant (data not fetched, so `isAdmin && image.transfer_function` is
+  `true && undefined`). No admin route renders `ColorDetailsSection` (grep of
+  `app/[locale]/admin` = empty). This is a design/honesty choice (WI-09-deferred
+  foundation columns), NOT a privacy leak. NEEDS-MANUAL-CHECK only if admins are
+  EXPECTED to see the color audit on the public photo page.
 
-**H1 (column parity):**
-
-- Sidecar `flushBatch` UPDATE (backfill-color-pipeline.ts:412–422): `pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit` — 10 columns.
-- In-app runner UPDATE (admin-backfill-runner.ts:562–571): same 10 columns.
-- Detection-failure branch (sidecar: backfill-color-pipeline.ts:427–433; runner: admin-backfill-runner.ts:597–602): both update only `was_downscaled` and `avif_10bit` without bumping `pipeline_version`. Identical behavior.
-- Delete-mid-reencode: both check `affectedRows === 0` and call `cleanupDeletedMidReencodeVariants`. Identical behavior.
-- Both use `LOCK_COLOR_PIPELINE_BACKFILL` from advisory-locks.ts (sidecar via import at line 56; runner via `acquireBackfillLock` at line 310).
-
-**H2 (per-image lock asymmetry):**
-
-- Sidecar comment (backfill-color-pipeline.ts:37–38): explicitly states it does not acquire per-image locks.
-- In-app runner `acquireImageProcessingClaim` (admin-backfill-runner.ts:343–358): acquires `gallerykit:image-processing:{id}` per row.
-- Row-set disjointness (`processed=true` for sidecar, `processed=false` for queue/retryFailed) makes this safe.
-
-**H3 (detection-failure branch):**
-
-- Leaving `pipeline_version` un-bumped on detection failure is intentional (AGG2-01 comment at sidecar:391–393). The row remains in the backfill candidate set for a later retry. Both implementations are consistent.
-
-### Rebuttal Round
-
-Strongest challenge: *The sidecar's batch `UPDATE … WHERE id = ${item.id}` (no `processed=TRUE` guard) could succeed against a row the queue worker is currently re-encoding if some future path resets `processed=true→false`.*
-
-Counter: No application-layer code path currently resets `processed=true→false`. This is a future-proofing concern. The `gallerykit_db_restore` advisory lock blocks all other operations during DB restore. The concern is real but not a current defect.
-
-### Current Best Explanation
-
-Both backfill paths are in complete column-set parity, use the same backfill advisory lock, and handle detection-failure and delete-mid-reencode identically. No fix-one-sibling-miss-the-next gap detected.
-
-**Severity: no confirmed defect.**
-
-### Critical Unknown
-
-Whether the in-app runner's per-image `acquireImageProcessingClaim` (which prevents a backfill + queue-worker race on retried images) is exercised in practice — and whether the `skippedLocked` counter is tested.
-
-### Discriminating Probe
-
-Add a unit test to `__tests__/admin-backfill-runner.test.ts` that mocks `acquireImageProcessingClaim` returning `null` (lock held) and verifies the runner increments `skippedLocked` rather than proceeding to encode.
+### Verdict: **CLEARED** (high confidence)
+No admin-only color column reaches the public DOM. Hypothesis REFUTED.
 
 ---
 
-## Flow 6 — Semantic Search Resolver Healing
+## Summary table
+| Flow | Verdict | Confidence |
+|------|---------|-----------|
+| 1 Topic slug rename | CLEARED (contains-predicate non-remap intentional) | High |
+| 2 Upload quota tracker | **CONFIRMED DEFECT (low sev)** — `images.ts:256` unguarded select | High (path), Low (impact) |
+| 3 Numeric guards | CLEARED | High |
+| 4 Migration 0024 reconcile trigger | CLEARED (hypothesis refuted) | High |
+| 5 Color admin-only → public DOM | CLEARED | High |
 
-### Observation
+## Critical Unknown
+Whether `db.select` at `apps/web/src/app/actions/images.ts:256` can realistically
+reject in production frequently enough to matter (infra-dependent), and whether the
+ColorDetailsSection admin audit on the public `/p/[id]` page is intended to be dormant
+(Flow 5 secondary note).
 
-`gallery-config.ts` heals a stored `'production'` value to `'disabled'` when `SEMANTIC_SEARCH_ALLOW_PRODUCTION !== 'true'`. Both semantic search routes must gate on the healed value. Whether every route reads through the healer without bypass is the question.
+## Discriminating Probe
+For Flow 2: add a unit test that stubs the topic-exists `db.select` to reject AFTER
+the claim, then assert `getUploadTracker().get(key)` still carries the inflated
+count/bytes (proves the leak); then wrap 256-259 in try/catch+settle and assert the
+tracker rolled back to 0. This single test confirms the defect and locks the fix.
 
-### Hypothesis Table
-
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | All routes read `getGalleryConfig()` which returns the healed value | High | Strong (direct code read) | Both route files confirmed |
-| 2 | A route reads `semanticSearchMode` from the DB row directly, bypassing the healer | Low | Strong disconfirmation | Neither route uses `db.select` on `admin_settings` directly |
-| 3 | Config-load failure path in the similar route returns the wrong mode, allowing production access | Low | Strong disconfirmation | similar/[id]/route.ts:97–103 initializes `semanticMode = 'disabled'` before try |
-
-### Evidence For / Against
-
-**H1 (healer respected):**
-
-- gallery-config.ts:141: `if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') { return 'disabled'; }`
-- `/api/search/semantic/route.ts:227`: `if (semanticMode !== 'stub' && semanticMode !== 'production') → 503`. With env flag absent, healer returns `'disabled'`, gate fires.
-- `/api/search/similar/[id]/route.ts:97–104`: `semanticMode = config.semanticSearchMode; if (semanticMode !== 'production') → 503` with rate-limit rollback. With healing, `'disabled' !== 'production'` → 503. Fail-closed.
-
-**H2 (bypass healer):**
-
-- Both routes import `getGalleryConfig` from `@/lib/gallery-config`. Neither queries `admin_settings` directly.
-
-**H3 (config-load failure):**
-
-- similar/[id]/route.ts:97–103: `let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled'; try { const config = await getGalleryConfig(); semanticMode = config.semanticSearchMode; } catch { /* fail closed */ }`. The catch keeps the safe `'disabled'` default.
-- H3 is **disconfirmed**.
-
-### Rebuttal Round
-
-Strongest challenge: *Could `getGalleryConfig()` have a cross-request in-process cache that serves a stale `'production'` mode after the env var is removed from a running process?*
-
-Counter: `getGalleryConfig` reads from the DB on each call; the resolver healing evaluation of `process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION']` happens at call time. The React `cache()` deduplication only applies within a single server-render request lifecycle (not across requests). No cross-request memoization was found in the gallery-config module.
-
-### Current Best Explanation
-
-The resolver healing is applied consistently on every `getGalleryConfig()` call. Both routes read through the healer. Fail-closed behavior is preserved even when config load throws.
-
-**Severity: no confirmed defect.**
-
-### Critical Unknown
-
-Whether `getGalleryConfig()` has any cross-request memoization that could carry a stale `'production'` mode across requests in a long-lived Node.js process.
-
-### Discriminating Probe
-
-`grep -n "cache\|memoize\|singleton\|_cached\|module.*config" apps/web/src/lib/gallery-config.ts` to confirm no cross-request memoization layer exists.
-
----
-
-## Cross-Flow Synthesis
-
-### Convergence / Separation Notes
-
-All six flows were traced independently. None converged to the same root cause. Each flow was found to be sound under the current codebase state.
-
-The two recurring bug classes were not found to have new instances in any of the six flows:
-
-- **NaN-survives-relational-comparison**: `cleanNumber`, `normalizeExposureTime`, and the cycle-15 GPS fix account for every numeric EXIF path. The only residual is the `iso float→int` silent MySQL truncation (not a relational hazard) and the `exposure_time` `"NaN,NaN"` varchar oddity (display-only, not queried numerically).
-- **Fix-one-sibling-miss-the-next**: `COLOR_IMPACTING_KEYS` contains `sdrJpegChroma` (confirmed wired end-to-end). Sidecar and in-app runner column sets are in parity. Advisory-lock asymmetry (per-image lock in runner, not in sidecar) is intentional and safe due to row-set disjointness.
-
-### Summary Table
-
-| Flow | Verdict | Severity | Key Evidence Location |
-|------|---------|----------|-----------------------|
-| 1. EXIF numeric NaN | SOUND | iso float→int coercion: VERY LOW | process-image.ts:1423–1425, :1407, :1455 |
-| 2. Queue claim/orphan | SOUND | none | image-queue.ts:339,435; admin-backfill-runner.ts:343–358; backfill-color-pipeline.ts:37–38 |
-| 3. View-count flush/SIGTERM | SOUND | none | instrumentation.ts:36–42; data.ts:68–215 |
-| 4. Settings-hash ETag | SOUND | static-path gap is documented CRT-D1 | settings-hash.ts:42–54; process-image.ts:1003,1098 |
-| 5. Backfill parity | SOUND | none | backfill-color-pipeline.ts:412–422; admin-backfill-runner.ts:562–571 |
-| 6. Semantic search healing | SOUND | none | gallery-config.ts:141; similar/[id]/route.ts:97–104 |
-
-### Observations for the Planner
-
-1. **No new defects found.** Cycle 16 enters the plan phase with all six traced flows clean.
-
-2. **Per-image lock coverage test gap** (Flow 5, LOW): `acquireImageProcessingClaim` lock-held path in the in-app runner has no unit-test coverage for the `skippedLocked` increment. Low effort to close.
-
-3. **`exposure_time` can receive `"NaN,NaN"` string** (Flow 1, VERY LOW): pathological `[NaN, NaN]` exif-reader output produces a visible artifact in the admin EXIF display. Not a relational hazard. Can be closed in `normalizeExposureTime` by returning `null` when the result does not match `/^\d+\/\d+$|^\d+(\.\d+)?$/`.
-
-4. **`COLOR_IMPACTING_KEYS` completeness is author-enforced with no checklist anchor** (Flow 4, LOW): the compile-time guard catches typos or removals but cannot catch forgotten new byte-impacting keys. Adding a `// COLOR_IMPACTING_KEYS — must include this key if it changes derivative bytes` comment annotation at each byte-impacting admin setting declaration would surface the obligation at the write site.
-
-5. **15-second SIGTERM timeout adequacy** (Flow 3, LOW): if `viewCountBuffer` is large during a high-traffic moment and the DB write is slow, the timeout fires and exits with code 1. Production monitoring should alert on container exit code 1 (distinct from code 0 clean shutdown).
-
----
-
-*Tracer agent — cycle 16 complete. Zero confirmed defects in the six traced flows.*
+## Uncertainty Notes
+- Flow 2 impact is bounded/self-healing (≤1 h) and not attacker-triggerable; severity
+  is LOW but the code path is unambiguous.
+- Flow 1 `contains`-predicate and Flow 5 dormant-admin-audit are documented/intentional
+  behaviors, surfaced for awareness, not filed as defects.

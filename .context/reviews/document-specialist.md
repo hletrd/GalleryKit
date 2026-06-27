@@ -1,100 +1,151 @@
-# Document-Specialist Review — Cycle 16 (R16C16)
+# Document-Specialist Review — Cycle 17 / HEAD 7b5c1943
 
-**Agent:** document-specialist (sonnet) · **HEAD:** 1f5fb245 · **Date:** 2026-06-27
+Generated: 2026-06-27
+
+---
 
 ## Summary
 
-Full systematic sweep of CLAUDE.md against the installed codebase. Cycle-15 DOC-15-01..04 fixes were verified as applied on disk (settings-hash.ts:42-54, process-image.ts:1157, etc.). One new concrete drift found; all other verified claims are correct.
+4 mismatches found (0 HIGH, 2 MEDIUM, 2 LOW). All cycle-16 doc fixes verified correct. No critical mismatch that would mislead an agent into a functional bug.
 
 ---
 
-## Confirmed Drifts
+## Cycle-16 Fix Verification (All Correct)
 
-### FINDING DOC-16-01 — Wrong public route for smart collections — MEDIUM
-
-**CLAUDE.md claim (line 148):**
-> "The public route `/s/[slug]` renders a smart collection the same way as a topic gallery."
-
-**Actual code:**
-- Smart collection page: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx` (uses `getSmartCollectionBySlugCached`)
-- `/s/[key]/` is the shared LINKS route: `apps/web/src/app/[locale]/(public)/s/[key]/`
-- `schema.ts:291` comment: "Public collections are reachable at `/[locale]/c/[slug]`"
-
-**Fix:** Replace `/s/[slug]` with `/c/[slug]` on CLAUDE.md line 148.
-
-**Severity:** MEDIUM — an operator or developer following this doc would look for the wrong URL, and a future agent implementing a feature referencing smart collections via a link would generate `/s/...` rather than `/c/...`.
+| Claim | Verdict |
+|---|---|
+| Smart collection route `/c/[slug]` (not `/s/[slug]`) | CORRECT — `app/[locale]/(public)/c/[slug]/page.tsx` exists and serves `getSmartCollectionBySlugCached` |
+| Repo tree has `c/[slug]/` and `s/[key]/` as separate entries | CORRECT — both appear at CLAUDE.md lines 29-31 |
+| `smart_collections.query_json` column at `schema.ts:297` | CORRECT — `schema.ts:297` is `query_json: text("query_json").notNull()` |
+| `IMAGE_PIPELINE_VERSION = 7` at `gallery-config-shared.ts:21` | CORRECT |
+| 9 `COLOR_IMPACTING_KEYS` | CORRECT — array at `settings-hash.ts:45-57` has exactly 9 entries |
+| 10 React `cache()` functions in `data.ts` | CORRECT — 9 `*Cached` exports + `getSeoSettings` |
+| Advisory lock names list | CORRECT — all 6 names match `advisory-locks.ts` exactly |
+| `ADMIN_BACKFILL_CONCURRENCY` cap math (`max(1, floor((10−5−1)/2)) = 2`) | CORRECT — matches `admin-backfill-runner.ts:122` comment and formula |
+| Nginx body-size caps (2M / 64K / 250M / 216M / 216M) | CORRECT — all confirmed in `nginx/default.conf` |
+| `SEMANTIC_SCAN_LIMIT=2000`, `SEMANTIC_TOP_K_MAX=50` | CORRECT — `clip-embeddings.ts:17-18` |
+| `VIEW_RETENTION_DAYS` default 395 | CORRECT — `view-retention.ts:29` |
+| `QUEUE_CONCURRENCY` default 1 | CORRECT — `image-queue.ts:206` |
 
 ---
 
-### FINDING DOC-16-02 — Repo structure tree omits `c/[slug]/` route — LOW
+## Mismatches
 
-**CLAUDE.md claim (lines ~29-35):**
+### M-1 — MEDIUM | `settings-hash.ts:42-54` line reference is wrong
+
+**CLAUDE.md location:** Line 290 (ETag / cache invalidation section)
+
+**Doc claim:**
+> "The settings hash (P4-E2) covers all **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:42-54`)"
+
+**Code reality (`settings-hash.ts`):**
 ```
-├── [locale]/
-│   │   │   │   ├── admin/    # Admin dashboard (protected routes)
-│   │   │   │   ├── p/[id]/   # Photo viewer page
-│   │   │   │   ├── g/[key]/  # Shared group pages
-│   │   │   │   └── s/[key]/  # Shared link pages
+44: // that the list is complete — see the NOTE on _ColorKeysAreSettingKeys).
+45: export const COLOR_IMPACTING_KEYS = [
+46:     'wide_gamut_jpeg_chroma',
+...
+54:     'image_quality_jpeg',
+55:     // R8-R6 comment
+56:     'image_sizes',
+57: ] as const;
 ```
 
-**Actual directory listing** of `apps/web/src/app/[locale]/(public)/`:
-`[topic]`, `c`, `g`, `map`, `p`, `s`, `timeline`, `uploads`, `year`
+The export starts at line 45 and closes at line 57 — not 42-54. The previous cycle corrected `41-53` to `42-54` but still lands 3 lines early because a comment block precedes the export declaration.
 
-The `c/[slug]/` (smart collections), `map/`, `timeline/`, and `year/` route directories are all absent from the tree. The tree is documented as abbreviated, but the `c/` omission is the most operationally misleading because CLAUDE.md explicitly documents smart collections without naming their URL route correctly (DOC-16-01 above).
+**Correct statement:** `settings-hash.ts:45-57`
 
-**Fix:** Add `├── c/[slug]/ # Smart collection pages` entry to the tree, correcting the `/s/[slug]` claim in the same edit.
+**Severity:** MEDIUM — a developer who jumps to these lines to verify the list lands inside the preceding comment, not at the array. Misleads during auditing but does not affect runtime behavior.
 
-**Severity:** LOW — the tree is known to be simplified, but in combination with DOC-16-01 the omission reinforces the wrong impression.
-
----
-
-## Cycle-15 Fixes — Verified Applied
-
-| Fix ID | CLAUDE.md claim | Verified |
-|--------|----------------|---------|
-| DOC-15-01 | `NEXT_UPLOAD_BODY_MAX_BYTES` default byte value corrected | ✓ |
-| DOC-15-02 | `process-image.ts:1157` cite for WI-14 note | ✓ (was :1131-1135) |
-| DOC-15-03 | `color-detection.ts:99-108` cite for ProPhoto→gamma18 | ✓ (was :99-107) |
-| DOC-15-04 | `settings-hash.ts:42-54` cite for COLOR_IMPACTING_KEYS | ✓ (was :41-53) |
+**Confidence:** HIGH
 
 ---
 
-## All Other Verified Claims (CORRECT on disk)
+### M-2 — MEDIUM | Topic slug rename "Race Condition Protections" entry omits cycle-16 additions
 
-| Claim | Code location | Result |
-|-------|--------------|--------|
-| `IMAGE_PIPELINE_VERSION=7` defined at `gallery-config-shared.ts:21` | line 21 | ✓ |
-| 9 `COLOR_IMPACTING_KEYS` at `settings-hash.ts:42-54` | lines 42-54 (9 keys) | ✓ |
-| `HASH_LENGTH=8` in `settings-hash.ts` | line 68 | ✓ |
-| Default image sizes `[640, 1536, 2048, 4096, 5120, 7680]` | `gallery-config-shared.ts:85` | ✓ |
-| 10 `cache()` fns (9 `*Cached` + `getSeoSettings`) | `data.ts:1380,1668-1681,1722` | ✓ |
-| Blur placeholder at `resize(16, …)` | `process-image.ts:905` | ✓ |
-| `MAX_BLUR_DATA_URL_LENGTH=4096` | `blur-data-url.ts:45` | ✓ |
-| `SEMANTIC_SCAN_LIMIT=2000` / `SEMANTIC_TOP_K_MAX=50` | `clip-embeddings.ts:17-18` | ✓ |
-| `OG_PHOTO_MAX_BYTES = 1024 * 1024` (1 MiB) | `og-photo-fetch.ts:31` | ✓ |
-| `HEAD_REVALIDATE_TIMEOUT_MS=300` | `sw.template.js:38` | ✓ |
-| 6 advisory-lock names | `advisory-locks.ts` | ✓ |
-| Argon2id memoryCost=65536, timeCost=3, parallelism=4 | `password-hashing.ts` | ✓ |
-| `POOL_CONNECTION_LIMIT=10`, queueLimit=20, enableKeepAlive=true | `db/index.ts:23,31-35` | ✓ |
-| Backfill cap formula → cap=2 at pool=10 | `admin-backfill-runner.ts:122-123` | ✓ |
-| nginx body caps: 2M/64K/250M/216M/216M/2M | `nginx/default.conf` | ✓ |
-| `process-image.ts:1088-1089` R8-R8 shared `image` var removal note | lines 1088-1089 | ✓ |
-| `process-image.ts:1157` WI-14 fresh-decode note | line 1157 | ✓ |
-| `smart_collections.query_json` column at `schema.ts:297` | line 297 | ✓ |
-| `avif_10bit` present in `publicSelectFields` | `data.ts:317` (not in omit list) | ✓ |
-| NCLX transfer map (all 10 entries: 1,4,5,11,13,14,15,16,17,18) | `color-detection.ts:178-213` | ✓ |
-| NCLX matrix map (0,1,8,9,10) | `color-detection.ts:215-221` | ✓ |
-| ProPhoto→gamma18 at `color-detection.ts:99-108` | line 108 | ✓ |
-| Admin token format `gk_<base64url(32 bytes)>` = 46 chars | `admin-tokens.ts:5,21-22` | ✓ |
-| Token header `X-GalleryKit-Token` / `x-gallerykit-token` in `api-auth.ts` | `api-auth.ts:14` | ✓ |
-| `image_views` indexes `(bot, viewed_at, country_code)` and `(bot, viewed_at, referrer_host)` from migration 0021 | `0021_analytics_breakdown_indexes.sql` | ✓ |
-| `x-gk-admin-render: 1` in `proxy.ts:129` | line 129 | ✓ |
-| `typecheck:app` + `typecheck:scripts` composition | `package.json:15,25-26` | ✓ |
-| `WIDE_GAMUT_PRIMARIES` set; `isWideGamutPrimary` helper | `color-primaries.ts` | ✓ |
-| Sharp `^0.34.5` | `package.json:65` | ✓ |
+**CLAUDE.md location:** Line 373 (Race Condition Protections section)
+
+**Doc claim:**
+> "**Topic slug rename**: Transaction wraps reference updates before PK rename"
+
+**Code reality (`topics.ts:283-305`):**
+```typescript
+// Cycle-16 added two more reference updates inside the same transaction:
+await tx.update(images).set({ topic: slug })...               // was already there
+await tx.update(topicAliases).set({ topicSlug: slug })...     // was already there
+// DBG-16-01: topic_views FK references old slug → CASCADE would wipe analytics
+await tx.update(topicViews).set({ topic: slug })...           // NEW in cycle 16
+// DBG-16-03: smart collection query_json with exact topic refs → silently stops matching
+for (const collection of collections) { /* rewrite query_json */ }  // NEW in cycle 16
+```
+
+The cycle-16 fix added `topic_views` re-pointing (to prevent CASCADE-wipe of up to 395 days of per-topic view history) and smart collection `query_json` rewriting (to prevent topic-filtered smart collections from silently breaking after a rename). The doc says "reference updates" (plural) but doesn't enumerate which tables — a developer reading this to understand the transaction scope would not know `topic_views` and `smart_collections` are updated.
+
+**Correct statement:** "Transaction re-points `images.topic`, `topicAliases.topicSlug`, `topic_views.topic`, and smart-collection `query_json` references, then deletes the old topic PK row and inserts a new one."
+
+**Severity:** MEDIUM — omission is factual: the doc doesn't say the transaction handles analytics and smart-collection references. A developer adding another FK child column referencing `topics.slug` would not know to add it to this transaction. The DBG-16-01 data-loss bug (wiping 13 months of per-topic view analytics on any rename) existed precisely because the doc/code didn't enumerate this FK child.
+
+**Confidence:** HIGH
 
 ---
 
-## Net Finding
+### M-3 — LOW | Upload TOCTOU fix (R16C16 CR-16-01) absent from Race Condition Protections
 
-One concrete route-name error (DOC-16-01, MEDIUM) + one tree omission (DOC-16-02, LOW). All other CLAUDE.md concrete claims — constants, defaults, line cites, lock names, nginx caps, formula, and behavioral descriptions — are verified correct at HEAD 1f5fb245.
+**CLAUDE.md location:** Lines 370-383 (Race Condition Protections section)
+
+**Doc claim:** The section lists `createTopic TOCTOU` (catches `ER_DUP_ENTRY`) but does not mention the upload quota TOCTOU.
+
+**Code reality (`images.ts:197-222`):**
+```typescript
+// R16C16 CR-16-01: close the check-then-claim TOCTOU. ALL quota + format
+// checks below are SYNCHRONOUS (no await), and the claim is made
+// immediately after them BEFORE the first await (disk + topic-exists).
+// Previously the count/byte checks were separated from the claim by two
+// awaits, so two concurrent same-key uploads could both pass the checks
+// before either claimed and jointly exceed the window limits.
+```
+
+The upload action had a race where two concurrent same-IP requests could both read the quota counter, both pass the limit check, and then both claim quota — jointly exceeding the per-window file-count and byte caps. Cycle 16 closed this by making all quota checks synchronous and claiming immediately before any `await`. This is a genuine race condition fix that belongs in the Race Condition Protections section alongside the existing `createTopic TOCTOU` entry.
+
+**Correct addition:** "**Upload quota claim TOCTOU**: All per-window quota checks are synchronous and the tracker claim is made before the first `await` so two concurrent same-IP uploads cannot both pass the count/byte ceiling and jointly exceed it (R16C16 CR-16-01 in `actions/images.ts`)."
+
+**Severity:** LOW — missing from the doc but not wrong. The code is correct; the doc just fails to enumerate this protection.
+
+**Confidence:** HIGH
+
+---
+
+### M-4 — LOW | `image_views(image_id, viewed_at)` index missing from Database Indexes list
+
+**CLAUDE.md location:** Lines 225-237 (Database Indexes section)
+
+**Doc claim:** Lists two `image_views` indexes (both from migration 0021):
+- `image_views(bot, viewed_at, country_code)` — analytics country breakdown
+- `image_views(bot, viewed_at, referrer_host)` — analytics referrer breakdown
+
+**Code reality (`schema.ts:229`, migration `0010_analytics_views.sql:12`):**
+```typescript
+idxImageViewsImageIdViewedAt: index('idx_image_views_image_id_viewed_at').on(table.imageId, table.viewed_at),
+```
+A third index on `(image_id, viewed_at)` has existed since the analytics tables were created in migration 0010. The Database Indexes section lists the 0021 additions but silently omits this original index.
+
+**Correct addition:** Add `- image_views(image_id, viewed_at)` — per-image view history lookup (migration 0010) to the list.
+
+**Severity:** LOW — no agent would make a wrong decision based on this omission. A developer adding a query against `image_views` might redundantly recreate this index thinking it doesn't exist, but the migration + schema are the ground truth.
+
+**Confidence:** HIGH
+
+---
+
+## Items Verified Clean (No Mismatch)
+
+- Smart collection `query_json` at schema.ts:297 is correct.
+- `image_reactions` / `reaction_count` are absent from both CLAUDE.md and schema.ts (0024 migration correctly handled; no stale reference in CLAUDE.md).
+- The `admin_tokens` description correctly uses `X-GalleryKit-Token` header and `gk_<base64url(32 random bytes)>` format, matching `api-auth.ts:14`.
+- `view-retention.ts` sweeps all three analytics tables (`imageViews`, `topicViews`, `sharedGroupViews`) as claimed in CLAUDE.md.
+- Batch delete transaction correctly described as `(imageTags + images atomic)` — matches `images.ts:739-745`.
+- `gallerykit_topic_route_segments` and `gallerykit_admin_delete` advisory locks exist in `advisory-locks.ts` as documented.
+- Smart collection table description uses `query_json` (not stale `rules` column name) after cycle-16 fix.
+- `LOCK_COLOR_PIPELINE_BACKFILL` constant is `'gallerykit_color_pipeline_backfill'` — matches CLAUDE.md.
+- "Public route freshness" (`revalidate = 0`) is set on `/c/[slug]` page — consistent with CLAUDE.md claim that "public pages" use it (though `/c/[slug]` is not enumerated by name).
+- `POOL_CONNECTION_LIMIT = 10` in `db/index.ts:23` matches the "10-connection pool" claim.
+

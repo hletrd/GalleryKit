@@ -1,173 +1,208 @@
-# UI/UX Static Review — GalleryKit Cycle 16 (DES-16)
+# GalleryKit Designer/A11y Review — Cycle 17
 
-**HEAD:** 1f5fb245
-**Agent:** oh-my-claudecode:designer (Sonnet)
-**Scope:** WCAG 2.2, touch targets, loading/error states, responsive dark/light tokens, i18n parity, perceived performance
-**Prior cycle fix exclusions:** DES-15-01 (dialog.tsx, sheet.tsx, upload-dropzone.tsx, topic-manager.tsx focus-visible) — verified fixed; DES-15-02 (LightboxColorPip controlVisibilityProps) — ruled NOT A DEFECT, not revisited.
-
----
-
-## Summary
-
-Two actionable findings this cycle. The PRIMARY finding is the one the task specification predicts: a `bit_depth` field rendered without an `isAdmin &&` guard in `photo-viewer.tsx` — the sibling location in `info-bottom-sheet.tsx` was patched in cycle-15 but this EXIF grid location was not listed as a fix target. The SECONDARY finding is a raw `<button>` in `home-client.tsx` missing the `focus-visible:ring-*` styling that every other interactive control in the codebase carries.
-
-All other swept areas — i18n, color contrast, touch targets, ARIA, focus-visible convention, prefers-reduced-motion, loading/error state accessibility — are clean.
+**HEAD:** 7b5c1943
+**Date:** 2026-06-27
+**Reviewer:** Designer agent (oh-my-claudecode:designer)
+**Live instance reached:** No — production returned 307 redirect; all findings are from static analysis.
 
 ---
 
-## Findings
+## Cycle-16 Verification
 
-### DES-16-01 — Back-to-top button missing focus-visible ring (MEDIUM)
+### (A) Back-to-top focus ring — CONFIRMED FIXED
 
-**File:** `apps/web/src/components/home-client.tsx:466-482`
-**WCAG:** 2.4.7 Focus Visible (Level AA) / 2.4.11 Focus Appearance (Level AA, WCAG 2.2)
-**Confidence:** HIGH
+`apps/web/src/components/home-client.tsx:472`
 
-**Evidence.** The back-to-top button is a raw `<button>` (not a shadcn `<Button>`) with this className:
+All three required properties present: `outline-none`, 2px `ring-ring` token, `ring-offset-2`. ARIA management also correct: `aria-hidden={showBackToTop ? undefined : true}` and `tabIndex={showBackToTop ? 0 : -1}`. CLOSED.
 
+### (B) bit\_depth isAdmin gating — CONFIRMED CONSISTENT
+
+`apps/web/src/components/color-details-section.tsx:481`
+`apps/web/src/components/lightbox-color-pip.tsx` (matching guard)
+
+Both surfaces gate `bit_depth`, `transfer_function`, `color_pipeline_decision`, `icc_profile_name`, `is_hdr`, and `has_gain_map` on `isAdmin`. No layout shift: guarded rows do not render for public users — they are not empty containers with conditional visibility. CLOSED.
+
+---
+
+## Findings Summary
+
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 0 |
+| HIGH     | 0 |
+| MEDIUM   | 3 |
+| LOW      | 2 |
+
+---
+
+## MEDIUM Findings
+
+### M-01 · lightbox-color-pip.tsx:219,301 — 1 px focus ring violates WCAG 2.4.11
+
+**File:** `apps/web/src/components/lightbox-color-pip.tsx` lines 219, 301
+**WCAG criterion:** 2.4.11 Focus Appearance (AA, WCAG 2.2) — minimum 2 px ring enclosing the component perimeter, 3:1 contrast ratio of ring color against adjacent colours.
+
+The DCI-P3 info tooltip button and the copy button inside the color pip panel share this pattern:
+
+```tsx
+className="... focus-visible:ring-1 focus-visible:ring-white/50"
 ```
-"fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] right-6 z-40 p-3
- min-h-11 min-w-11 bg-primary text-primary-foreground rounded-full shadow-lg
- transition-opacity hover:bg-primary/90"
-```
 
-No `focus-visible:ring-*`, no `focus-visible:outline-*`, no `outline-none`. The shadcn `Button` base class at `ui/button.tsx:8` includes `outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]`, which suppresses the native outline and replaces it with a consistent ring. This raw `<button>` gets neither — it relies on the browser default `:focus` outline (not `:focus-visible`), which:
+`ring-1` = 1 px. WCAG 2.4.11 requires at least 2 px. `white/50` = 50 % opacity white against a `bg-black/70` panel background — effective contrast is well below 3:1.
 
-1. Fires on mouse click in older Chrome/Safari (the button visually rings on every click, not only keyboard focus).
-2. The default browser outline may fail WCAG 2.4.11 minimum contrast requirements against `--primary` (HSL 240 5.9% 10%, approximately `#18181b`) on some themes/OSes.
-3. Is visually inconsistent with all other keyboard-navigable controls.
-
-The button is reachable by keyboard (`tabIndex={showBackToTop ? 0 : -1}`) so this is a live WCAG gap, not just a code style issue.
+**User impact:** Keyboard users navigating the lightbox color-pip panel cannot reliably see which inner tooltip button or copy button is focused. These are the only way to access color metadata details or copy color info via keyboard.
 
 **Fix:**
+```tsx
+// Replace: focus-visible:ring-1 focus-visible:ring-white/50
+// With:
+focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+```
 
+`ring-ring` is the design-system token that satisfies contrast in both light and dark modes. `ring-offset-2` separates the ring from the dark panel background for perceptual clarity.
+
+**Confidence:** High.
+
+---
+
+### M-02 · nav-client.tsx:94 — Mobile hamburger button missing focus-visible ring
+
+**File:** `apps/web/src/components/nav-client.tsx` lines 94–109
+**WCAG criterion:** 2.4.11 Focus Appearance (AA, WCAG 2.2), 2.4.7 Focus Visible (AA, WCAG 2.1)
+
+This is the primary navigation expansion control on mobile viewports. A keyboard user tabbing into the nav bar reaches this button — the only way to access topic links on mobile — and sees no focus indicator at all. The button has `hover:bg-accent` (pointer-device feedback only) but no `focus-visible:*` classes:
+
+```tsx
+<button
+    className={cn(
+        "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0",
+        // NO focus-visible classes
+    )}
+    aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
+    aria-expanded={isExpanded}
+>
+```
+
+**User impact:** Keyboard-primary users cannot tell when this control has focus. It is the only entry point to all topic navigation on narrow viewports.
+
+**Fix:**
 ```tsx
 className={cn(
-  "fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] right-6 z-40 p-3",
-  "min-h-11 min-w-11 bg-primary text-primary-foreground rounded-full shadow-lg",
-  "transition-opacity hover:bg-primary/90",
-  "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-  showBackToTop ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+    "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    isExpanded && "mt-1"
 )}
 ```
+
+**Confidence:** High.
 
 ---
 
-### DES-16-02 — `image.bit_depth` rendered without `isAdmin &&` guard (LOW / defense-in-depth)
+### M-03 · image-zoom.tsx:347 and login-form.tsx:84 — Hardcoded blue-500 outline departs from ring-ring token
 
-**File:** `apps/web/src/components/photo-viewer.tsx:887-892`
-**WCAG:** Not a direct WCAG criterion — defense-in-depth against the `_PrivacySensitiveKeys` invariant
-**Confidence:** HIGH
+**Files:**
+- `apps/web/src/components/image-zoom.tsx:347`
+- `apps/web/src/app/[locale]/admin/login-form.tsx:84`
 
-**Evidence.** The EXIF grid in `photo-viewer.tsx` renders source bit depth:
+**WCAG criterion:** 2.4.11 Focus Appearance (AA) — 3:1 contrast ratio of focus indicator.
+**UX heuristic:** Consistency (Nielsen #4) — focus indicators should follow the design system token so theme changes propagate correctly.
 
+Both controls use:
 ```tsx
-{hasExifData(image.bit_depth) && (
-    <div>
-        <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
-        <p className="font-medium">{image.bit_depth}-bit</p>
-    </div>
-)}
+focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400
 ```
 
-The symmetric fix locations from cycle-15 (R15C15 SEC-15-01) both carry `isAdmin &&`:
+`blue-500` on a white background passes 4.1:1 (AA), but `blue-400` on a light background is approximately 2.78:1 — below the 3:1 minimum for WCAG 2.4.11. The dark-mode variant `outline-blue-400` was likely intended for dark mode but dark mode inverts the background, making the contrast uncertain without runtime verification. More critically, both elements are inconsistent with the `ring-ring` CSS variable used on every other interactive control in the app.
 
-- `info-bottom-sheet.tsx:443`: `{isAdmin && hasExifData(image.bit_depth) && (`
-- `color-details-section.tsx:481`: `{isAdmin && image.bit_depth != null && image.bit_depth > 0 && (`
+**User impact:** On the image viewer zoom container (primary photo interaction), keyboard users get an off-token focus ring that may fail contrast in some theme states. On the login show/hide-password toggle, the mismatch is visible against the admin login card.
 
-`bit_depth` is confirmed admin-only in `data.ts:461` (`_PrivacySensitiveKeys`) and is excluded from `publicSelectFields` via `_omitBitDepthPublic`. So public routes return `undefined` for `bit_depth`, causing `hasExifData()` to return `false` — there is NO active data leak.
+**Fix (image-zoom.tsx):**
+```tsx
+// Replace:
+'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400'
+// With:
+'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+```
 
-However, this location violates the explicit pattern comment at `color-details-section.tsx:479-480`:
-> "R15C15 SEC-15-01: bit_depth is admin-only — gate on isAdmin to match the transfer_function / matrix / color_space siblings."
+**Fix (login-form.tsx show/hide button):**
+```tsx
+// Replace the focus-visible classes:
+className="... outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+```
+
+**Confidence:** High (token inconsistency confirmed). Contrast failure of `blue-400` in light mode is medium confidence pending verified compiled CSS variable value.
+
+---
+
+## LOW Findings
+
+### L-01 · wide-gamut-hint.tsx:203 — ring-amber-500/40 (40 % opacity) likely fails WCAG 2.4.11 contrast
+
+**File:** `apps/web/src/components/wide-gamut-hint.tsx:203`
+**WCAG criterion:** 2.4.11 Focus Appearance (AA) — 3:1 contrast ratio of focus indicator against adjacent colours.
+
+```tsx
+className="... focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+```
+
+Ring width is correct (2 px via `ring-2`). However, `amber-500` at 40 % opacity against the hint's amber-50/amber-100 background will produce a contrast ratio below 3:1 — the ring blends into the surrounding warm-yellow surface. A same-hue low-opacity ring against a same-hue background is the canonical WCAG 2.4.11 failure pattern.
 
 **Fix:**
-
 ```tsx
-{isAdmin && hasExifData(image.bit_depth) && (
-    <div>
-        <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
-        <p className="font-medium">{image.bit_depth}-bit</p>
-    </div>
-)}
+// Option A — use design-system token (safest):
+focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-amber-50
+
+// Option B — keep amber personality at full opacity with offset:
+focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2 focus-visible:ring-offset-amber-50
 ```
 
----
-
-## Cleared Areas
-
-### Focus-visible convention (full sweep)
-
-All shadcn `Button` variants — `default`, `sm`, `lg`, `icon`, `icon-sm`, `icon-lg` — carry `outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]` via the `buttonVariants` base class (`ui/button.tsx:8`). Size `sm` has `min-h-11` floor.
-
-Tag filter chip buttons in `tag-filter.tsx` use `Badge asChild` with Radix `Slot`. The Badge `badgeVariants` base class (`ui/badge.tsx:8`) carries `focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none` — these classes propagate to the inner `<button>` via Slot. CORRECT.
-
-Skip-link targets `<main id="main-content" tabIndex={-1} className="...focus:outline-none">` in both `app/[locale]/layout.tsx` and `app/[locale]/admin/layout.tsx` intentionally suppress the focus ring on the scroll-target container that only receives programmatic focus from the skip link. CORRECT.
-
-`lightbox-color-pip.tsx:161` uses `focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500` — a different visual style than the rest of the app (`ring-[3px]`). Meets WCAG 2.4.11 minimum (blue-500 `#3b82f6` on `bg-black/70` ≈ 5.9:1). Cosmetically inconsistent but not a defect.
-
-No `focus:ring-*` without `focus-visible:` found in any admin `(protected)/**` route file or any component in `components/`.
-
-### Touch targets
-
-All shadcn `Button` sizes confirmed at `min-h-11` (44 px) floor via `ui/button.tsx`. Dashboard pagination (`dashboard-client.tsx:107,139,146,154,161`) uses `size="sm"` which resolves to `min-h-11` — CORRECT. Back-to-top button `home-client.tsx:475` has `min-h-11 min-w-11` — touch target is 44 px; the issue is focus ring only (DES-16-01 above). No sub-44px interactive elements found in any admin page.
-
-### Color contrast (token audit)
-
-All token pairs documented in `globals.css` and verified:
-
-| Token | Light mode | Dark mode | OLED |
-|---|---|---|---|
-| `--muted-foreground` on `--background` | HSL(240 3.8% 40%) on white ≈ 5.9:1 AA | HSL(240 5% 64.9%) on `#09090b` ≈ 8.0:1 AAA | same as dark |
-| `--destructive-text` on `--card` | HSL(0 73.7% 41.8%) on white ≈ 5.9:1 AA | HSL(0 90.6% 70.8%) on `#09090b` ≈ 7.0:1 AA | same as dark |
-| `--foreground` on `--background` | ≈ 19:1 AAA | ≈ 19:1 AAA | ≈ 19:1 AAA |
-
-All token pairs exceed WCAG AA (4.5:1 small text). No new contrast defects. The prior F-11 fix (`--muted-foreground` bumped from 46.1% to 40% lightness) holds correctly.
-
-### i18n parity (EN / KO)
-
-Flat-key comparison of all nested keys in `messages/en.json` and `messages/ko.json`:
-
-- Keys in EN missing from KO: **0**
-- Keys in KO missing from EN: **0**
-
-Perfect parity. No new strings added without corresponding translations this cycle.
-
-### ARIA roles and labels
-
-- `lightbox.tsx`: `role="dialog" aria-modal="true" aria-label={t('aria.lightbox')}` + `aria-live="polite"` sr-only slide status div. CORRECT.
-- `search.tsx`: `role="dialog" aria-modal="true"`, `<Input role="combobox" aria-autocomplete="list" aria-controls aria-expanded aria-activedescendant>`, `aria-live="polite"` result count div, FocusTrap active when open. CORRECT.
-- `photo-navigation.tsx`: Prev/Next `h-12 w-12` (48 px), `aria-label` on both, sr-only `aria-live="polite"` nav status. CORRECT.
-- `nav-client.tsx`: Mobile toggle `min-w-[44px] min-h-[44px]`, `aria-expanded aria-controls aria-label`. CORRECT.
-- `upload-dropzone.tsx:407-413`: `role="button" aria-label aria-disabled tabIndex` for disabled state, `role="progressbar"` with `aria-valuenow/min/max/label`. CORRECT.
-- `optimistic-image.tsx:71,76`: Loading overlay `role="status" aria-live="polite" aria-label`, error div `role="status" aria-live="polite"`. CORRECT.
-- `login-form.tsx:98`: Error paragraph `role="alert" aria-live="assertive"`. CORRECT.
-- `settings-client.tsx:254,303`: Backfill warning `role="status"` live regions. CORRECT.
-
-### Loading, empty, and error states
-
-All loading states carry `role="status"` and `aria-live="polite"`. Error messages use `role="alert"`. The `photo-viewer-loading.tsx` skeleton uses `aria-hidden="true"` on decorative animated divs. The empty-state in `tokens-client.tsx:113` uses a decorative `h-8 w-8` icon (`Key`) in a non-interactive container — correct (decorative, no label needed). All states are complete and accessible.
-
-### prefers-reduced-motion
-
-- `photo-viewer.tsx:82` — `useReducedMotion()` from framer-motion. CORRECT.
-- `lightbox.tsx:93-109` — MQ listener with `addEventListener/removeEventListener`, applied to slide transition. CORRECT.
-- `image-zoom.tsx:46-58` — ref-based MQ snapshot updated on change, gates smooth-zoom animation. CORRECT.
-- `home-client.tsx:468` — one-shot snapshot in click handler for `window.scrollTo` behavior. CORRECT (acceptable for action-triggered, not ambient animation).
-
-**Informational (not a defect):** `optimistic-image.tsx:71-72`, `photo-viewer-loading.tsx:16,19`, `loading.tsx:25-27` all use `animate-spin` / `animate-pulse` without `motion-reduce:animate-none`. WCAG 2.3.3 (Animation from Interactions) is Level AAA. Loading spinners are arguably essential for communicating loading state, which creates an exemption even under AAA. Noted as informational, not blocking.
-
-### Perceived performance (LCP / CLS / INP)
-
-- `home-client.tsx:383`: `fetchPriority={isAboveFold ? "high" : "auto"}` on masonry images — above-fold LCP candidates are correctly prioritized.
-- Masonry cards use `aspectRatio` and `containIntrinsicSize` for CLS prevention. CORRECT.
-- No heavy synchronous handlers on scroll — masonry resize handler is `requestAnimationFrame`-debounced per CLAUDE.md comment.
+**Confidence:** Medium — contrast math depends on exact compiled amber values, but same-hue low-opacity is the textbook failure case.
 
 ---
 
-## Non-findings (explicitly ruled out)
+### L-02 · lightbox-color-pip.tsx:161 — Pip trigger uses hardcoded blue-500 focus outline
 
-- **DES-15-01** focus-visible fixes in `dialog.tsx`, `sheet.tsx`, `upload-dropzone.tsx`, `topic-manager.tsx` — verified landed and held.
-- **DES-15-02** `controlVisibilityProps` in lightbox — ruled NOT A DEFECT per cycle-15 resolution; not revisited.
-- **`focus:bg-accent`** in `ui/dropdown-menu.tsx:77,95,131,214` and `ui/select.tsx:112` — Radix UI roving-focus item-highlight classes for `data-[highlighted]` state in menu/listbox context, not element focus rings. Correct and appropriate.
-- **Duplicate `aria-label` + `<label htmlFor>` on search input** — shadcn Input convention; low impact; not blocking.
-- **`color-details-section.tsx:481`** `bit_depth` — correctly guarded `{isAdmin && image.bit_depth != null && ...}`. DES-16-02 targets only `photo-viewer.tsx:887`.
+**File:** `apps/web/src/components/lightbox-color-pip.tsx:161`
+
+Same token-inconsistency issue as M-03. The pip trigger button uses:
+```tsx
+focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400
+```
+
+Lower severity than M-03 because the pip is an admin-facing panel used infrequently, but it should be fixed in the same pass.
+
+**Fix:** Replace with `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`.
+
+**Confidence:** High.
+
+---
+
+## Confirmed Correctly Handled (no action needed)
+
+The following were audited in full and require no fix:
+
+- **tag-input.tsx raw `<input>` outline-none** — ACCEPTABLE. Wrapper `<div>` carries `focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2`. The ring IS visible on the container when the inner input is focused. ARIA combobox pattern (`aria-activedescendant` on input, `role="option"` on non-focusable divs) is correctly implemented.
+- **search.tsx input `h-8`** — ACCEPTABLE. The `<Input>` component base class includes `min-h-11` (44 px). CSS renders the element at 44 px because `min-height` overrides `height`. No 44 px violation.
+- **image-zoom.tsx role="button"** — `aria-label` dynamically set to `aria.zoomIn` / `aria.zoomOut`. `Enter` and `Space` key handlers present. Full-height container gives adequate tap target. ✓
+- **upload-dropzone.tsx role="button"** — `aria-label` present; `aria-disabled` + `tabIndex=-1` when disabled. ✓
+- **lightbox focus trap** — `<FocusTrap>` with `fallbackFocus` pointing to the close button ref; Escape layered (pip-close first, then lightbox-close when not in fullscreen); `previouslyFocusedRef.current?.focus()` on unmount. ✓
+- **info-bottom-sheet drag handle and close button** — both carry `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` and explicit `aria-label`. ✓
+- **photo-navigation prev/next buttons** — `aria-label` tokens `aria.previousPhoto` / `aria.nextPhoto`. ✓
+- **photo-viewer toolbar (back, info, share, pin)** — all have visible text labels; back button wraps a `<Link>` with visible topic text. ✓
+- **nav-client theme/locale toggles** — `aria-label` tokens `aria.toggleTheme` and `aria.switchLocale`. ✓
+- **admin icon buttons (topic-manager, tag-manager, tokens-client)** — all `size="icon"` Buttons carry explicit `aria-label`. ✓
+- **admin pagination (dashboard-client)** — both enabled and disabled states carry `aria-label`; disabled states use `<Button disabled>` (not `<Link>`) so they are correctly inert. ✓
+- **login form error feedback** — `role="alert" aria-live="assertive"` on the error paragraph. ✓
+- **login form show/hide password button** — 44 px (`w-11 h-11`), `aria-label` + `aria-pressed`. Focus ring issue logged under M-03 but ARIA semantics are correct. ✓
+
+---
+
+## Recommended Fix Order
+
+| Priority | Finding | File | Effort |
+|----------|---------|------|--------|
+| 1 | M-02: hamburger missing ring | nav-client.tsx:94 | 1 className line |
+| 2 | M-01: 1 px ring on pip inner buttons | lightbox-color-pip.tsx:219,301 | 2 className lines |
+| 3 | M-03 + L-02: blue outline to ring-ring | image-zoom.tsx:347, login-form.tsx:84, lightbox-color-pip.tsx:161 | 3 lines (same commit) |
+| 4 | L-01: amber ring opacity | wide-gamut-hint.tsx:203 | 1 className line |
+
+All four items fit in a single atomic commit. Estimated total diff: approximately 8 lines across 5 files. No test changes required — the existing touch-target-audit.test.ts does not scan for focus-visible token consistency.

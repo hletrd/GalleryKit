@@ -1,108 +1,159 @@
-# Debugger Review — Run-16 Cycle-16 (latent bug hunt)
+# Debugger Review — Cycle 17 (HEAD 7b5c1943)
 
-**Date:** 2026-06-27
-**HEAD:** 1f5fb245
-**Agent:** debugger (oh-my-claudecode)
-**Scope:** `src/lib/**` parsers / image pipeline / color+ICC+GPS byte walkers / validation / rate-limit / retention / bounded-map / settings-hash, plus `src/app/actions/**` and `src/app/api/**`. Checklist = the repo's six signature bug classes, swept across the whole tree (not just where each was last found).
+Latent-bug / failure-mode hunt. Priority: verify the cycle-16 fixes did not introduce
+NEW regressions, and find adjacent latent bugs. Scope per brief: off-by-one/boundary,
+null/undefined/NaN/Infinity, error-swallowing catch, races across awaits, transaction
+atomicity, idempotency, resource leaks, incorrect early-returns, silent failure paths.
 
-**Bottom line:** Mature, heavily-hardened codebase — the cycle-15 fixes (DBG-15-01 `convertDMSToDD` NaN guard, CR-15-01 BoundedMap shallow-copy ×3) are correctly in place, and the numeric/parser surface is otherwise finite-guarded and bounds-checked throughout. This pass found **one confirmed MEDIUM data-loss bug** (topic slug rename CASCADE-deletes the topic's analytics) plus two LOW residuals. The MEDIUM is a textbook "fix one sibling, miss the next" — the rename transaction was written before the analytics tables existed and re-points two of the three child tables that reference `topics.slug`, but not the third (which is `ON DELETE CASCADE`).
+## Verdict on the cycle-16 fixes (all VERIFIED CORRECT)
+
+| Cycle-16 fix | Commit | Verified |
+|---|---|---|
+| topic_views re-point before rename delete (DBG-16-01) | 097c472b | ✅ in ONE transaction; CASCADE no longer fires |
+| smart-collection topic-rule remap on rename (DBG-16-03) | 35d7f171 | ✅ conservative eq/in remap, only changed rows written |
+| upload claim-before-await TOCTOU (CR-16-01) | 78a9c0c2 | ✅ no double-settle; see DBG-17-1 for a throw-path leak it opened |
+| og-photo Content-Length finite guard (DBG-16-02) | ada6817b | ✅ correct; sibling numeric reads all guarded |
+| migrate 0024_drop_reactions journaling (C16-F1) | caa57769 | ✅ idempotent drops, monotonic journal, baseline-before-migrate |
+| image-queue config reuse for semantic mode (PERF-16-01) | 6babb405 | ✅ benign; reuses one snapshot, adds no staleness |
+
+### Topic rename — fully closed
+FK references to `topics.slug` are exactly three (`schema.ts:16` topicAliases CASCADE,
+`:33` images RESTRICT, `:236` topicViews CASCADE) plus smart-collection `query_json` (text).
+All four are re-pointed inside ONE `db.transaction` wrapped by `LOCK_TOPIC_ROUTE_SEGMENTS`
+(`topics.ts:250-323`). New-row INSERT is first, so a mid-rename slug collision throws
+ER_DUP_ENTRY → full rollback → `slugAlreadyExists` (no half-rename). No other denormalized
+topic-slug column exists. **No CASCADE-exposed sibling remains.** sharedGroups/tags do not
+reference topics.slug; tags rename by integer PK (no recreate). This surface is clean.
+
+### migrate.js 0024 — idempotent on every path
+`dropColumnIfPresent` guards on INFORMATION_SCHEMA (`migrate.js:215-222`); `dropTableIfPresent`
+uses `DROP TABLE IF EXISTS`. Both no-op on an already-dropped DB. On an already-baselined prod
+DB the new 0024 journal entry flips `journalCovered === false` (`migrate.js:710`) → reconcile +
+baseline re-run → 0024 hash inserted BEFORE `runMigrations` → drizzle.migrate() no-op → the
+unguarded `ALTER … DROP COLUMN reaction_count` in the .sql never executes via drizzle. Journal
+`when` for 0024 (1782100000000) is the max → cursor not poisoned. Post-condition cannot misfire.
 
 ---
 
-## CONFIRMED — MEDIUM (data loss)
+## NEW findings
 
-### DBG-16-01 — Renaming a topic's slug CASCADE-deletes that topic's entire `topic_views` analytics history
-**Bug classes:** 3 (fix one sibling, miss the next) + 5 (data loss via cascade on a delete-recreate path).
-**Confidence:** HIGH (traced through schema FK + transaction order). **Severity:** MEDIUM (permanent, silent data loss; analytics-grade not auth/billing-grade; admin-triggered, slug-change branch only).
+### DBG-17-1 — uploadImages leaks an upload-tracker claim when the topic-existence SELECT throws  (LOW, confidence: High, NEW — cycle-16 regression)
 
-**Symptom:** An admin renames a topic's slug (Settings → edit topic, change the slug). The rename reports success. The topic's complete view-analytics history (`topic_views` rows — country/referrer breakdown, top-topics ranking, year-in-review source, up to `VIEW_RETENTION_DAYS` = 395 days) is silently and permanently gone afterward.
+**File:** `apps/web/src/app/actions/images.ts:226-263` (claim at 226-228; unguarded await at 256-259).
 
-**Root cause — three tables reference `topics.slug`, the rename re-points only two:**
-- `apps/web/src/db/schema.ts:16` — `topicAliases.topicSlug` → `topics.slug`, `onDelete: 'cascade'`
-- `apps/web/src/db/schema.ts:33` — `images.topic` → `topics.slug`, `onDelete: 'restrict'`
-- `apps/web/src/db/schema.ts:236` — **`topicViews.topic` → `topics.slug`, `onDelete: 'cascade'`**
+**Latent bug.** The cycle-16 TOCTOU fix (CR-16-01) moved the quota CLAIM to *before* the
+topic-existence `db.select`:
 
-`updateTopic` implements a slug rename as a delete-and-recreate inside one transaction (`apps/web/src/app/actions/topics.ts:248-287`):
-1. `tx.insert(topics)` the new slug row (`:275`)
-2. `tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug))` (`:282`) — re-points `images`
-3. `tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug))` (`:283`) — re-points `topicAliases`
-4. `tx.delete(topics).where(eq(topics.slug, cleanCurrentSlug))` (`:285-286`) — deletes the OLD slug row
-
-`topic_views` rows are NEVER re-pointed (`grep topicViews apps/web/src/app/actions/topics.ts` → 0 hits). At step 4 they still carry `topic = 'oldslug'`, so the `ON DELETE CASCADE` on `topicViews.topic` fires and deletes every one of them. The author was demonstrably aware of the cascade-delete hazard — they re-point `topicAliases` (also `cascade`, line 283) precisely so it isn't cascade-deleted, and they re-point `images` (`restrict`, which would otherwise FK-error). `topicViews` (a US-P44 analytics table added after this rename logic) was the sibling missed.
-
-**Reproduction (minimal):**
-1. Create topic with slug `a`. Generate some public views of `/a` so `topic_views` accrues rows (`recordTopicView` in `app/actions/public.ts`).
-2. `SELECT COUNT(*) FROM topic_views WHERE topic='a'` → N (>0).
-3. Admin renames topic slug `a` → `b` (`updateTopic`, slug differs from current).
-4. `SELECT COUNT(*) FROM topic_views WHERE topic='a'` → 0, and `… WHERE topic='b'` → 0. The N rows are gone, not migrated.
-
-**Failure:** silent permanent loss of the topic's analytics; no error surfaces (the transaction commits successfully). Admin analytics (top-topics-by-views, referrer/country breakdowns) under-report for the renamed topic from then on.
-
-**Fix (minimal, mirrors the existing siblings):** re-point `topic_views` BEFORE the cascade-bearing delete. Add to `topics.ts` (import `topicViews` from `@/db`):
-```ts
-await tx.update(topicViews).set({ topic: slug }).where(eq(topicViews.topic, cleanCurrentSlug));
+```js
+tracker.bytes += totalSize; tracker.count += files.length;   // 226-228  CLAIM
+uploadTracker.set(uploadTrackerKey, tracker);
+... // disk check (try/catch → settles on error, 244/249)
+const [topicRow] = await db.select({ slug: topics.slug })     // 256  UNGUARDED await
+    .from(topics).where(eq(topics.slug, topic)).limit(1);
+if (!topicRow) { settle(…,0,0); return topicNotFound; }       // 261  early-return settles
 ```
-immediately after the `topicAliases` update (`:283`), before `tx.delete(topics)` (`:285`). This preserves the rows by carrying them to the new slug, exactly as `images` and `topicAliases` are already carried.
 
-**Verification:** after the fix, the repro's step-4 second query returns N (rows now under `topic='b'`). Lock with a rename test asserting `topic_views` survives a slug change (the existing rename test pins the inserted topic VALUES at `:256-259` but does not cover child-row preservation).
+The function body is `try { … } finally { uploadContractLock.release(); }` with **no `catch`**
+(confirmed `images.ts:561-564`). Every *early return* after the claim rolls it back
+(244/249/261/513/535). But the topic-existence `db.select` at line 256 is **not** wrapped in
+try/catch. If it throws — a transient DB error / pool-exhaustion / killed connection — the
+exception propagates straight through `finally` to the framework, and the claim made at
+226-228 is **never settled**. The author's own comment ("roll it back on early return") covers
+returns but not throws.
 
-**Note (separate, lower-severity sibling on the SAME rename):** smart-collection rules also reference the topic by slug — `smart-collections.ts:28` allows `'topic'` as a column and the rule value is the slug, matched against `images.topic`. After a rename, `images.topic` is updated to the new slug, so a stored rule `{column:'topic', operator:'eq', value:'oldslug'}` now matches zero images — the smart collection silently goes empty. Tracked below as DBG-16-03 (LOW); it is config breakage, not data loss, and the value lives in opaque JSON so there is no clean referential update.
+**Exact trigger:** an admin upload where the disk pre-check passes, then the topic-existence
+SELECT throws (DB blip, pool timeout, server restart mid-request). Pre-cycle-16 the claim was
+made *after* this SELECT, so a throw here left the tracker untouched — this leak path is new.
 
----
+**Observable failure:** that IP+user's window tracker is inflated by `+files.length` count and
+`+totalSize` bytes even though zero files were stored. Subsequent uploads in the same window can
+hit false `uploadLimitReached` / `cumulativeUploadSizeExceeded`. Self-inflicted, recovered when
+the window expires and `pruneUploadTracker()` (line 183) evicts the stale entry on a later
+upload — so bounded, hence LOW.
 
-## CONFIRMED — LOW
-
-### DBG-16-02 — `og-photo-fetch.ts` Content-Length size cap parsed without a finite guard (lone residual class-1 instance)
-**Bug classes:** 1 (NaN survives a relational comparison) + 3 (un-mirrored sibling of the correct guard in the semantic route).
-**Confidence:** HIGH (traced). **Severity:** LOW / effectively INFO — a downstream hard cap catches it, so there is no user impact today.
-
-`apps/web/src/lib/og-photo-fetch.ts:57`:
-```ts
-if (contentLength && parseInt(contentLength, 10) > OG_PHOTO_MAX_BYTES) return null;
+**Fix (minimal, house style — mirror the disk-check settle-on-catch):**
+```js
+let topicRow;
+try {
+    [topicRow] = await db.select({ slug: topics.slug })
+        .from(topics).where(eq(topics.slug, topic)).limit(1);
+} catch (err) {
+    settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+    throw err;
+}
+if (!topicRow) { settleUploadTrackerClaim(…, 0, 0); return { error: t('topicNotFound') }; }
 ```
-A malformed-but-present `Content-Length` (e.g. `"abc"`) makes `parseInt(...) → NaN`; `NaN > OG_PHOTO_MAX_BYTES` is `false`, so the pre-buffer reject is bypassed. The **post-buffer** hard cap one line down (`:59`, `if (photoBuffer.length > OG_PHOTO_MAX_BYTES) return null;`) still enforces the real limit, so nothing oversized is returned — the only cost is buffering a body the pre-check intended to short-circuit. This is the **sibling** of the correct pattern in `apps/web/src/app/api/search/semantic/route.ts:137` (`if (!Number.isFinite(contentLengthNum) || contentLengthNum < 0) … reject; if (contentLengthNum > MAX) … reject`), which finite-checks first. It is also the only remaining `parseInt`/`Number()`-into-`>`/`<` site in the tree lacking a `Number.isFinite` guard at a comparison (every other ID/route/config/retention site is guarded — see Verified-clean).
+(Robust alternative: track a `settled` flag and settle-if-unsettled in `finally`.)
 
-**Fix (parity):** `const len = Number(contentLength); if (Number.isFinite(len) && len > OG_PHOTO_MAX_BYTES) return null;`. Purely defense-in-depth; the post-buffer cap remains the real guarantee.
-
-### DBG-16-03 — Topic slug rename leaves smart-collection rules pointing at the old slug (silent empty collection)
-**Bug class:** 3 (fix one sibling, miss the next). **Confidence:** HIGH. **Severity:** LOW (config breakage, recoverable by editing the rule; not data loss).
-
-Same rename path as DBG-16-01. `smart_collections.rules` stores a topic predicate's value as the slug string (`smart-collections.ts:28,298` — `'topic'` is an allowed column; the value matches `images.topic`). The rename updates `images.topic` to the new slug but does not (and cannot cleanly — the value is opaque JSON) rewrite stored rules, so `{column:'topic',value:'oldslug'}` matches nothing afterward and the `/s/[slug]` smart-collection page renders empty with no warning. Lower priority than DBG-16-01 because no data is destroyed; the admin sees an empty collection and can re-author the rule. Recorded so it is not silently dropped; a robust fix would rewrite topic-slug literals in affected `rules` JSON during the rename (or warn the admin).
+**Verification:** unit test — stub `db.select` to reject once; assert the tracker entry's
+`count`/`bytes` return to their pre-call values after the action rejects.
 
 ---
 
-## Re-confirmed cycle-15 fixes (in place, correct)
-- **DBG-15-01** `convertDMSToDD` — `process-image.ts:1455` now finite-guards (`![dms[0],dms[1],dms[2]].every(Number.isFinite)`) and `:1461` (`!Number.isFinite(dd) || …`). A `0/0`→NaN GPS rational now returns `null` (SQL NULL), not a `NaN` that fails the DB insert. Verified.
-- **CR-15-01** BoundedMap shallow-copy — `sharing.ts:48-62`, `admin-users.ts:34-48`, `embeddings.ts:36-42` now use the `map.set(key, { count: entry.count+1, … })` write-back pattern. Verified.
+### DBG-17-2 — upload-tracker under-count when the tracking window expires between claim and settle  (LOW, confidence: Medium, NEEDS REPRO — pre-existing, exposure marginally widened by cycle-16)
 
-## Verified-clean (negative results — the checklist swept, no live bug)
-**Class 1 (NaN survives `<`/`>`):** every other numeric-into-comparison site is finite-guarded: `topics.ts:108,211` (`Number.isNaN(order)→0`), `session.ts:129` (`Number.isFinite`), `view-retention.ts:41,44` / `audit.ts:109,112` (`Number.isFinite && >0`), `gallery-config-shared.ts` (`Number.isInteger` on `image_sizes`/`avif_effort`/`wide_gamut_max_source_pixels`/slideshow), `exif-datetime.ts` + `process-image.ts:506` (`isValidExifDateTimeParts`), `process-image.ts:1477-1480` (`cleanNumber` finite), `:1516,1534` (exposure/flash finite), `:957` (`depth in DEPTH_TO_BITS`), `image-types.ts:119` (`Number.isFinite`), `clip-embeddings.ts` (`isScalarValue`/zero-norm guards), `smart-collections.ts:328` (`isScalarValue` rejects NaN/Inf), ID routes `similar/[id]:78`, `p/[id]:49,138`, `og/photo/[id]:56`, `g/[key]:92` (regex + `>0` / `Number.isInteger`), semantic `route.ts:137`. The statfs `bavail*bsize` checks (`images.ts:211`, `lr/upload/route.ts:185`) are real-kernel values, not NaN-reachable.
+**File:** `apps/web/src/lib/upload-tracker.ts:30-31` + `images.ts:195` (`resetUploadTrackerWindowIfExpired`).
 
-**Class 2 (mutate a shallow copy):** all `BoundedMap.get()` consumers write back via `.set()` or are pure reads — `rate-limit.ts` (og/share/semantic), `auth-rate-limit.ts` (login/account/password — `recordFailedLoginAttempt:50`, `auth.ts:128,133`), plus the three cycle-15 sites. The upload tracker (`upload-tracker-state.ts`) is a raw `Map` returning real references, so its `tracker.count +=` mutations (`images.ts:255-256`, `lr/upload/route.ts:236-237`) correctly persist. No iterate-and-mutate over `BoundedMap.entries()`/`.data`.
+`settleUploadTrackerClaim` reconciles with **relative deltas** (`success - claimed`), clamped by
+`Math.max(0, …)`. This is correct under concurrency *within one window*. But if the tracking
+window expires between a claim and its settle (a long upload that outlives the window), another
+concurrent invocation calls `resetUploadTrackerWindowIfExpired` and zeroes the shared tracker
+object; the in-flight settle then applies a *negative* delta (`success < claimed`) against the
+fresh window, under-counting the new claim. Net: the window cap is relaxed by up to the
+under-settled amount → a marginal quota relaxation.
 
-**Class 4 (parser off-by-one / boundary):** `icc-extractor.ts` (desc/mluc), `color-detection.ts:230-296` (NCLX ISOBMFF), `gain-map-detection.ts` (iinf/infe/iref), `gps-exif-strip.ts` (JPEG/TIFF/HEIF iloc/WebP byte surgery) are all bounds-checked on every read; every walker loop advances `pos` by `≥ headerSize ≥ 8` (no infinite loop), and `Number(readBigUInt64BE())` huge-size cases are caught by the downstream `pos+size > length` / `> MAX_SAFE_INTEGER` guards (the two MAX_SAFE_INTEGER omissions remain the harmless DBG-15-02 INFO). `base56.ts`, `blur-data-url.ts` (length-capped), `image-zoom-math.ts` (clamped, client-only) clean.
+**Trigger:** upload processing duration > window length, plus a concurrent same-key upload that
+triggers the window reset mid-flight. Cycle-16 moved the claim earlier (now before disk+topic
+awaits), lengthening the claim→settle span by those awaits — milliseconds vs the multi-second
+loop, so exposure widened only marginally. Best-effort-by-design accounting; not a hard cap.
 
-**Class 5 (swallowed error / partial write mid-transaction):** `stripGpsFromOriginal` writes tmp + atomic `rename`, unlinks tmp on throw (`process-image.ts:1630,1654-1655,1703-1706`). `deleteImage` transaction (`images.ts:620-624`) is atomic; all `images` child FKs are `ON DELETE CASCADE` (`imageTags`/`sharedGroupImages`/`image_views`/`image_embeddings`, schema `:126,150,223,272`), so the delete cannot FK-throw mid-transaction. The view-count flush shutdown drain (`data.ts:104,210-211,227-228`) correctly publishes/awaits `currentFlushPromise` before the `size===0` early-return. Topic slug rename transaction order is FK-correct (insert-new → repoint → delete-old) — its only defect is the missed `topicViews` re-point (DBG-16-01).
+**Fix (if hardening desired):** stamp each claim with its `windowStart`; in settle, no-op the
+reconcile when `tracker.windowStart` has advanced past the claim's stamp (the claim belongs to a
+window that no longer exists). Otherwise document as accepted best-effort and leave as-is.
 
-**Class 6 (race/TOCTOU beyond advisory locks):** upload-tracker pre-claim (TOCTOU parity images.ts/lr-upload), per-image processing advisory lock + conditional `WHERE processed=false`, restore/backfill/contract/topic-route/admin-delete advisory locks all present; the view-buffer/tracker process-locality is documented BY-DESIGN. No new unguarded race surfaced.
+**Status:** NEEDS REPRO; low confidence it manifests in practice (windows are minutes-to-an-hour,
+uploads rarely outlive them). Reported for completeness per the brief's under-count focus.
 
 ---
 
-## Bug-class summary
-| Class | Result |
-|---|---|
-| 1 NaN survives `<`/`>` | 1 residual (DBG-16-02, downstream-caught, LOW); all DB-reaching sites guarded |
-| 2 mutate shallow copy | clean (cycle-15 sites fixed; all consumers write-back) |
-| 3 fix-one-sibling-miss-next | **DBG-16-01 (MEDIUM, topicViews)** + DBG-16-03 (LOW, smart-collections) + DBG-16-02 |
-| 4 parser off-by-one | clean (all walkers bounds-checked) |
-| 5 swallowed error / partial write | clean (atomic tmp+rename, atomic txns, cascade-safe deletes) — except DBG-16-01's cascade-delete |
-| 6 race / TOCTOU | clean (locks + conditional updates in place) |
+## Swept and CLEAN (no new issue)
 
-## References
-- `apps/web/src/app/actions/topics.ts:248-287` — slug rename transaction (re-points images + topicAliases, MISSES topicViews) — DBG-16-01
-- `apps/web/src/db/schema.ts:236` — `topicViews.topic` `onDelete: 'cascade'` (the destroyed child) — DBG-16-01
-- `apps/web/src/db/schema.ts:16,33` — `topicAliases`/`images` FKs (the two that ARE re-pointed) — DBG-16-01
-- `apps/web/src/lib/og-photo-fetch.ts:57` — Content-Length `parseInt` without finite guard — DBG-16-02
-- `apps/web/src/app/api/search/semantic/route.ts:137` — the correct finite-guarded sibling — DBG-16-02
-- `apps/web/src/lib/smart-collections.ts:28,298` — topic predicate value is the slug — DBG-16-03
-- `apps/web/src/lib/process-image.ts:1455,1461` — cycle-15 GPS NaN fix (re-confirmed in place)
+- **NaN-survives-comparison sweep** — every `parseInt`/`Number()` site that feeds a comparison
+  or DB query is guarded: route ids use `/^\d+$/` before `parseInt` (`og/photo/[id]:51`,
+  `similar/[id]:74`, `g/[key]:92`, `p/[id]`); config coercions use `Number.isInteger`
+  (`gallery-config-shared.ts:181/188/295`); year page uses `Number.isInteger` (`year/[year]:24/50`);
+  exposure/shutter use `Number.isFinite` (`image-types.ts:118`, `process-image.ts:1392/1426/1515`);
+  semantic Content-Length uses `Number.isFinite` (`route.ts:137`); offsets use `Number(x)||0`
+  (NaN is falsy — `data.ts:798/1422`, `public.ts:117/123/169/181`); `view-retention.ts:43-46` and
+  `audit.ts:111` fall back to default on non-finite/non-positive. og-photo-fetch.ts finite guard
+  (the cycle-16 fix) is correct and its only other numeric read (`buffer.length`) is always finite.
+- **Multi-step mutation / transaction-wrapper sweep** — `deleteImage` (626), `deleteImages` (738),
+  `tags.deleteTag` (116), `tags.batchUpdateImageTags` (387), `bulkUpdateImages` (979),
+  `sharing` group-create (transactional, affectedRows-checked), `admin-users.deleteUser`
+  (advisory lock → beginTransaction → rollback-on-error → release in finally) are all atomic.
+  `collections.ts` mutations are single-statement (no transaction needed). No unwrapped multi-step
+  write found.
+- **admin_users FK-child sweep** — `deleteUser` covers every FK to `admin_users.id`: images.uploaded_by
+  (SET NULL via FK), audit_log.user_id (manual `UPDATE … SET user_id = NULL`, since the FK is
+  NO ACTION — `admin-users.ts:260`), sessions (CASCADE + manual delete), admin_tokens (CASCADE).
+  No errno-1451 gap.
+- **Empty/swallowing catch sweep** — all `.catch(() => {})` hits are benign cleanup (fs.unlink of
+  temp/derivative files, `RELEASE_LOCK`, `conn.rollback`, `exitFullscreen`, logout session delete).
+  None swallow a correctness-bearing error.
+- **view-count buffer flush** (`data.ts:100-174`) — atomic Map swap, bounded re-buffer with FIFO
+  eviction + retry cap, backoff. Best-effort analytics by design; no new defect.
+- **image-queue delete-during-processing** (`image-queue.ts:439-462`) — conditional
+  `WHERE processed = false` UPDATE + full-scan variant cleanup on affectedRows===0. Correct.
+
+## Test gate
+`vitest run topics-actions + smart-collections + upload-tracker + migration-journal +
+migrate-reconcile-coverage` → 115/115 passing. Cycle-16 fixes are test-locked.
+
+## Summary
+- The data-loss surface the prior cycle opened (topic rename CASCADE) is fully closed; no adjacent
+  CASCADE-exposed sibling remains. All six cycle-16 fixes verified correct.
+- **1 NEW confirmed latent bug** (DBG-17-1, LOW): a cycle-16-introduced claim-leak on the
+  topic-existence SELECT throw path — over-counts the offending admin's own quota window.
+- **1 NEW needs-repro** (DBG-17-2, LOW): pre-existing best-effort under-count on window-expiry-
+  during-claim, marginally widened by cycle-16's earlier claim.
+- No new MEDIUM+ correctness/data-loss bug found this cycle.
