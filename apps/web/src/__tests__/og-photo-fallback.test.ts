@@ -87,7 +87,9 @@ describe('lib/og-photo-fetch.ts R24-M1 contract (helper source)', () => {
 
     it('applies the byte cap to both Content-Length and buffered body', () => {
         expect(helperSource).toContain("contentLength = photoRes.headers.get('Content-Length')");
-        expect(helperSource).toContain('contentLength, 10) > OG_PHOTO_MAX_BYTES');
+        // R16C16 DBG-16-02: Content-Length pre-check is finite-guarded (a
+        // non-numeric header → NaN must not slip the comparison).
+        expect(helperSource).toMatch(/Number\.isFinite\(len\)\s*&&\s*len\s*>\s*OG_PHOTO_MAX_BYTES/);
         expect(helperSource).toContain('photoBuffer.length > OG_PHOTO_MAX_BYTES');
     });
 });

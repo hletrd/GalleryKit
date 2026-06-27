@@ -54,7 +54,14 @@ export async function tryFetchPhotoBuffer(
         });
         if (!photoRes.ok) return null;
         const contentLength = photoRes.headers.get('Content-Length');
-        if (contentLength && parseInt(contentLength, 10) > OG_PHOTO_MAX_BYTES) return null;
+        // R16C16 DBG-16-02: guard the finite-ness before comparing. A non-numeric
+        // header → NaN, and `NaN > MAX` is false, slipping the pre-check (the
+        // post-buffer cap below still catches it, but mirror the correct
+        // Number.isFinite guard used at search/semantic/route.ts).
+        if (contentLength) {
+            const len = Number(contentLength);
+            if (Number.isFinite(len) && len > OG_PHOTO_MAX_BYTES) return null;
+        }
         const photoBuffer = Buffer.from(await photoRes.arrayBuffer());
         if (photoBuffer.length > OG_PHOTO_MAX_BYTES) return null;
         return photoBuffer;
