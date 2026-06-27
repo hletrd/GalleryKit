@@ -216,7 +216,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                                                 // R16-L2: lift the tooltip-trigger hit zone to the 44 px floor
                                                 // (WCAG 2.5.5 / Apple HIG / Google) — icon stays compact at
                                                 // h-3 w-3, only the tappable region grows.
-                                                className="ml-0.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-white/60 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50"
+                                                className="ml-0.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-white/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                                                 aria-label={t('viewer.colorPipelineP3FromDcip3Tooltip')}
                                             >
                                                 <Info className="h-3 w-3" />
@@ -298,7 +298,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             type="button"
                             onClick={copyColorMetadata}
                             // R16-L2: 44 px touch-target floor for the copy button as well.
-                            className="inline-flex min-h-11 min-w-11 items-center gap-1.5 text-white/60 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 rounded px-1 py-1"
+                            className="inline-flex min-h-11 min-w-11 items-center gap-1.5 text-white/60 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white rounded px-1 py-1"
                             aria-label={t('viewer.copyColorMetadata')}
                             title={t('viewer.copyColorMetadata')}
                         >

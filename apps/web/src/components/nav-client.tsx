@@ -93,7 +93,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
                     className={cn(
-                        "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0",
+                        "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                         isExpanded && "mt-1"
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
