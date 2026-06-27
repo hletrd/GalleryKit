@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
@@ -85,7 +85,11 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // R9-LOW: copy a JSON snapshot of the audit-grade color metadata to the
     // clipboard from the lightbox expanded panel, same as the sidebar
     // ColorDetailsSection copy button.
-    const copyColorMetadata = useCallback(async () => {
+    // NOTE (R19C19 CQ19-03): kept as a plain function declaration, NOT
+    // useCallback — this component has a conditional early return above, so a
+    // hook here violates react-hooks/rules-of-hooks. The handler is attached to
+    // a DOM <button>, so a fresh reference per render carries no re-render cost.
+    async function copyColorMetadata() {
         // R10-L16: pipeline_version is internal deploy metadata; omit it from
         // the user-facing clipboard JSON. See color-details-section.tsx for
         // the matching change in the sidebar copy button.
@@ -131,7 +135,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
         } catch {
             toast.error(t('viewer.copyFailed'));
         }
-    }, [isAdmin, image, t]);
+    }
 
     // P4-C1 / R4-M2: lightbox histogram. Mounted only when the panel is
     // open so the worker spawn / pixel decode does not happen for the
