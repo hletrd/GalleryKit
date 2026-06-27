@@ -193,9 +193,39 @@ export async function uploadImages(formData: FormData) {
             uploadTracker.set(uploadTrackerKey, tracker);
         }
         resetUploadTrackerWindowIfExpired(tracker, now);
+
+        // R16C16 CR-16-01: close the check-then-claim TOCTOU. ALL quota + format
+        // checks below are SYNCHRONOUS (no await), and the claim is made
+        // immediately after them BEFORE the first await (disk + topic-exists).
+        // Previously the count/byte checks were separated from the claim by two
+        // awaits, so two concurrent same-key uploads could both pass the checks
+        // before either claimed and jointly exceed the window limits. The two
+        // awaited validations that follow the claim roll it back on early return.
+        const totalSize = files.reduce((sum, f) => sum + f.size, 0);
         if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
             return { error: t('uploadLimitReached') };
         }
+        // Validate total upload size (per-call limit)
+        if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+            return { error: t('totalUploadSizeExceeded') };
+        }
+        // Also enforce cumulative byte limit across per-file invocations
+        if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+            return { error: t('cumulativeUploadSizeExceeded') };
+        }
+        if (!topic) {
+            return { error: t('topicRequired') };
+        }
+        // Validate topic slug format
+        if (!isValidSlug(topic)) {
+            return { error: t('invalidTopicFormat') };
+        }
+
+        // CLAIM the quota now, synchronously, before any await — this is the
+        // point that makes the check+claim atomic against concurrent invocations.
+        tracker.bytes += totalSize;
+        tracker.count += files.length;
+        uploadTracker.set(uploadTrackerKey, tracker);
 
         // Disk space pre-check: require at least 1GB free before accepting uploads.
         // Ensure the upload tree exists first so fresh volumes do not map ENOENT
@@ -210,31 +240,14 @@ export async function uploadImages(formData: FormData) {
             // writeFile with a generic error (R13C13 / AGG-R13-04).
             const freeBytes = stats.bavail * stats.bsize;
             if (freeBytes < 1024 * 1024 * 1024) {
+                // Roll back the claim (no upload happened): settle with 0 success.
+                settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
                 return { error: t('insufficientDiskSpace') };
             }
         } catch (err) {
             console.error('Failed to inspect upload disk space', err);
+            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
             return { error: t('insufficientDiskSpace') };
-        }
-
-        // Validate total upload size (per-call limit)
-        const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-        if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-            return { error: t('totalUploadSizeExceeded') };
-        }
-
-        // Also enforce cumulative byte limit across per-file invocations
-        if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-            return { error: t('cumulativeUploadSizeExceeded') };
-        }
-
-        if (!topic) {
-            return { error: t('topicRequired') };
-        }
-
-        // Validate topic slug format
-        if (!isValidSlug(topic)) {
-            return { error: t('invalidTopicFormat') };
         }
 
         // C11-MED-01: verify the topic exists in the database before accepting
@@ -245,16 +258,9 @@ export async function uploadImages(formData: FormData) {
             .where(eq(topics.slug, topic))
             .limit(1);
         if (!topicRow) {
+            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
             return { error: t('topicNotFound') };
         }
-
-        // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
-        // the same IP could all read the same tracker state and bypass the limit.
-        // We optimistically claim the bytes now and adjust after processing.
-        // This is placed after all validation checks so no manual rollback is needed.
-        tracker.bytes += totalSize;
-        tracker.count += files.length;
-        uploadTracker.set(uploadTrackerKey, tracker);
 
         let successCount = 0;
         let uploadedBytes = 0;
