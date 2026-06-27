@@ -342,6 +342,92 @@ describe('topic actions', () => {
         }]);
     });
 
+    it('re-points smart-collection topic predicates to the new slug inside the rename transaction (DBG-16-03)', async () => {
+        // Gap identified in cycle-17 TE audit: the txSelect mock in the existing
+        // rename test returns objects without `query_json`, so the for-loop body
+        // `typeof collection.query_json !== 'string'` always triggers `continue`
+        // and the tx.update(smartCollections) write-back is NEVER reached.
+        // Removing the entire loop from topics.ts would not fail any prior test.
+        // This test puts a real query_json string through the loop and verifies
+        // the updated AST (with the new slug) is written back inside the transaction.
+        const collectionUpdates: Array<{ query_json: string }> = [];
+
+        executeMock.mockResolvedValueOnce([[], []]);
+        selectMock
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
+            .mockReturnValueOnce(makeSelectChain([]));
+
+        transactionMock.mockImplementation(async (callback: (tx: {
+            select: typeof selectMock;
+            insert: typeof insertMock;
+            update: typeof updateMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            // Use mockReturnValueOnce to return different results for the two
+            // tx.select() calls inside the rename transaction:
+            //   1st call: read the authoritative topic row (for the replacement insert)
+            //   2nd call: scan smart_collections for rules that reference the old slug
+            const txSelect = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{
+                    slug: 'old-topic',
+                    image_filename: 'old-topic.webp',
+                    map_visible: false,
+                }]))
+                .mockReturnValueOnce(makeSelectChain([{
+                    id: 99,
+                    // This is the key: a string query_json that references the old slug.
+                    // The existing rename test used an object without query_json, so
+                    // `typeof collection.query_json !== 'string'` was always true and
+                    // the write-back was never reached.
+                    query_json: JSON.stringify({
+                        type: 'predicate',
+                        column: 'topic',
+                        operator: 'eq',
+                        value: 'old-topic',
+                    }),
+                }]));
+
+            const txInsert = vi.fn(() => ({
+                values: vi.fn(() => Promise.resolve([{ insertId: 20 }])),
+            }));
+
+            // Capture smart-collection updates; delegate everything else to the
+            // standard makeUpdateChain helper.
+            const txUpdate = vi.fn((table: { topic?: string; id?: string }) => {
+                if (table.id === 'smart_collections.id') {
+                    return {
+                        set: vi.fn((payload: { query_json: string }) => {
+                            collectionUpdates.push({ query_json: payload.query_json });
+                            return { where: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+                        }),
+                    };
+                }
+                return makeUpdateChain([{ affectedRows: 1 }]);
+            });
+            const txDelete = vi.fn(() => makeWriteChain([{ affectedRows: 1 }]));
+
+            await callback({ select: txSelect, insert: txInsert, update: txUpdate, delete: txDelete });
+        });
+
+        const formData = new FormData();
+        formData.set('label', 'New Topic');
+        formData.set('slug', 'new-topic');
+        formData.set('order', '5');
+
+        await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
+
+        // DBG-16-03: exactly one collection write-back was issued with the new slug.
+        // A revert that removes the for-loop or the tx.update(smartCollections) call
+        // would leave collectionUpdates empty and this assertion would fail.
+        expect(collectionUpdates).toHaveLength(1);
+        expect(JSON.parse(collectionUpdates[0].query_json)).toEqual({
+            type: 'predicate',
+            column: 'topic',
+            operator: 'eq',
+            value: 'new-topic',
+        });
+    });
+
     it('carries map_visible while applying a newly uploaded image during a rename', async () => {
         const insertedPayloads: unknown[] = [];
 

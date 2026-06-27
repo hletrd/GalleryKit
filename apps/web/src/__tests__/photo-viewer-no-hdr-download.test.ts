@@ -49,3 +49,22 @@ describe('photo-viewer admin-only field gating (R16C16 DES-16-02 / C16-F2)', () 
         expect(source).toMatch(/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/);
     });
 });
+
+const INFO_BOTTOM_SHEET_PATH = '/Users/hletrd/flash-shared/gallery/apps/web/src/components/info-bottom-sheet.tsx';
+
+describe('info-bottom-sheet admin-only field gating (R16C16 DES-16-02 / C16-F2)', () => {
+    // Cycle-17 TE gap: DES-16-02 / C16-F2 added `{isAdmin && isP3Pipeline(...)}` to
+    // BOTH photo-viewer.tsx (pinned above) AND info-bottom-sheet.tsx. The mobile bottom
+    // sheet fix was NOT covered by any test — removing `isAdmin &&` from line 500 of
+    // info-bottom-sheet.tsx would expose the admin-only color_pipeline_decision field
+    // to public users on mobile without failing any prior test.
+    it('gates the isP3Pipeline label on isAdmin in info-bottom-sheet.tsx', async () => {
+        const source = await fs.readFile(INFO_BOTTOM_SHEET_PATH, 'utf-8');
+        // color_pipeline_decision is admin-only (_PrivacySensitiveKeys). The mobile
+        // bottom-sheet render MUST carry `isAdmin &&` to mirror the photo-viewer fix.
+        expect(source).toMatch(/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/);
+        // Also lock that there is no ungated `{isP3Pipeline(image.color_pipeline_decision) &&`
+        // form anywhere in the file.
+        expect(source).not.toMatch(/\{\s*isP3Pipeline\(image\.color_pipeline_decision\)\s*&&/);
+    });
+});
