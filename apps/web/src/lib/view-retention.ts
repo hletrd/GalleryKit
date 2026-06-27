@@ -40,7 +40,14 @@ function resolveRetentionMs(maxAgeMs?: number): number {
     if (maxAgeMs !== undefined) {
         return Number.isFinite(maxAgeMs) && maxAgeMs > 0 ? maxAgeMs : DEFAULT_VIEW_RETENTION_MS;
     }
-    const retentionDays = Number.parseInt(process.env.VIEW_RETENTION_DAYS ?? '', 10);
+    // R19C19 F1: parse with Number(), not Number.parseInt(..., 10). parseInt
+    // stops at the first non-digit, so VIEW_RETENTION_DAYS='1e3' silently became
+    // 1 (parseInt('1e3') === 1) — a 1-day retention that passes the `> 0` guard
+    // and near-empties all three view tables on the next hourly GC. Number('1e3')
+    // === 1000. NaN/'' (Number('') === 0) / negative inputs still fall through to
+    // the default via the finite-and-positive guard below — matching the rest of
+    // the config layer's coercion.
+    const retentionDays = Number(process.env.VIEW_RETENTION_DAYS ?? '');
     return Number.isFinite(retentionDays) && retentionDays > 0
         ? retentionDays * 24 * 60 * 60 * 1000
         : DEFAULT_VIEW_RETENTION_MS;

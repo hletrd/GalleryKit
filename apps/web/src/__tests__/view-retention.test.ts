@@ -74,6 +74,25 @@ describe('purgeOldViewEvents retention sweep (AGG-H2)', () => {
         expect(cutoff.getTime()).toBe(Date.now() - 30 * DAY_MS);
     });
 
+    it('parses scientific-notation env value as 1000 days, NOT 1 day (R19C19 F1)', async () => {
+        // Number.parseInt('1e3', 10) === 1 (stops at the 'e'), which would have
+        // silently produced a 1-day retention that passes the `> 0` guard and
+        // near-empties the view tables. Number('1e3') === 1000.
+        process.env.VIEW_RETENTION_DAYS = '1e3';
+        await purgeOldViewEvents();
+        const cutoff = cutoffsForThisSweep()[0];
+        expect(cutoff.getTime()).toBe(Date.now() - 1000 * DAY_MS);
+        // Explicitly assert it is NOT the parseInt-truncated 1-day cutoff.
+        expect(cutoff.getTime()).not.toBe(Date.now() - 1 * DAY_MS);
+    });
+
+    it('empty-string env value falls back to the default (Number of empty string is 0)', async () => {
+        process.env.VIEW_RETENTION_DAYS = '';
+        await purgeOldViewEvents();
+        const cutoff = cutoffsForThisSweep()[0];
+        expect(cutoff.getTime()).toBe(Date.now() - DEFAULT_DAYS * DAY_MS);
+    });
+
     it('NEGATIVE env value falls back to the default — cutoff stays in the PAST (COR-R4C6-10)', async () => {
         process.env.VIEW_RETENTION_DAYS = '-1';
         await purgeOldViewEvents();
