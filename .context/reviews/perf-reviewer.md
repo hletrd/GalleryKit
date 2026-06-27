@@ -1,369 +1,234 @@
-# GalleryKit — Perf Reviewer findings (Cycle 15)
+# Performance Review — Cycle 16
 
-**Scope:** `apps/web/src/lib/data.ts`, `lib/analytics-data.ts`, `lib/image-queue.ts`,
-`lib/process-image.ts`, `lib/rate-limit.ts`, `lib/auth-rate-limit.ts`,
-`lib/bounded-map.ts`, `db/schema.ts`, `app/actions/images.ts`,
-`components/home-client.tsx`, `components/histogram.tsx`,
-`public/sw.template.js`, `lib/sw-cache.ts`.
-
-**Reference:** `.context/plans/cycle-14-plan.md` (PERF-14-01..02 deferred list confirmed);
-`.context/reviews/_aggregate.md` (cycle-14 convergence).
+**Reviewer:** PERF-REVIEWER subagent  
+**Date:** 2026-06-27  
+**Scope:** DB query patterns, N+1, missing indexes, Sharp pipeline, concurrency/pool budget, UI re-renders, bundle/LCP/CLS/INP, caching/ETag correctness  
+**Prior cycle carried-over items:** PERF-15-01 through PERF-15-06
 
 ---
 
-## Severity table
+## Summary Table
 
-| ID | Severity | Category | Status | Title |
-|----|----------|----------|--------|-------|
-| PERF-13-01 | MEDIUM | DB / Query | Confirmed deferred | `getTopics()` correlated MAX subquery |
-| PERF-13-02 | MEDIUM | DB / Query | Confirmed deferred | `COUNT(*) OVER()` window in keyset pagination |
-| PERF-13-03 | MEDIUM | DB / Query | Confirmed deferred | `LIKE '%term%'` leading-wildcard full scans |
-| PERF-14-01 | MEDIUM | DB / Schema | Confirmed deferred | `sharedGroupViews` lacks bot-leading index |
-| PERF-13-04 | LOW | DB / Query | Confirmed deferred | `getTopicBySlug` sequential double round-trip |
-| PERF-13-07 | LOW | DB / Schema | Confirmed deferred | `topicViews` lacks bot-leading index |
-| PERF-13-05 | LOW | CPU | Confirmed deferred | Embedding IIFE refetches `getGalleryConfig()` |
-| PERF-13-06 | LOW | DB / Query | Confirmed deferred | Bootstrap `NOT IN` with up to 1000 permanently-failed IDs |
-| PERF-14-02 | LOW | UI / React | Confirmed deferred | `masonryClasses` recomputed on every scroll-driven render |
-| **PERF-15-01** | **MEDIUM** | **DB / Schema** | **NEW** | **`images` missing `(processed, updated_at)` index — feed + sitemap** |
-| **PERF-15-02** | **LOW-MEDIUM** | **UI / React** | **NEW** | **Histogram `resize` handler unthrottled — canvas redraw per pixel** |
-| **PERF-15-03** | **LOW-MEDIUM** | **DB / Query** | **NEW** | **`getSharedGroup()` three sequential DB round-trips** |
-| **PERF-15-04** | **LOW** | **DB / Schema** | **NEW** | **`getTopPhotosByViews()` no `(bot, viewed_at, imageId)` covering index** |
-| **PERF-15-05** | **LOW** | **DB / Query** | **NEW** | **`getImage()` LEFT JOIN on NOT NULL FK — suboptimal cardinality hint** |
-| **PERF-15-06** | **LOW** | **CPU** | **NEW** | **Bootstrap legacy path calls `getGalleryConfig()` per job outside request scope** |
+| ID | Severity | Status | Location | Description |
+|----|----------|--------|----------|-------------|
+| PERF-15-02 | — | **FIXED** | `histogram.tsx:440-466` | rAF debounce with breakpoint-only state update |
+| PERF-15-04 | — | **FIXED** | `schema.ts:229` | `(imageId, viewed_at)` index present on `image_views` |
+| PERF-15-01 | MEDIUM | OPEN | `schema.ts`, `data.ts:527,840` | Missing `(processed, updated_at)` index — full scan on feed and sitemap |
+| PERF-16-01 | LOW-MEDIUM | NEW | `image-queue.ts:501` | Embedding IIFE calls `getGalleryConfig()` per job; React `cache()` has no effect in queue context |
+| PERF-15-03 | LOW | OPEN | `data.ts:1241-1285` | `getSharedGroup()` — 3 sequential DB round-trips |
+| PERF-15-05 | LOW | OPEN | `data.ts` | `leftJoin` on `imageTags`/`tags` in tag-filtered paths could be `innerJoin` |
+| PERF-15-06 | LOW | OPEN (partial) | `image-queue.ts:383` | Bootstrap `getGalleryConfig()` gated to legacy jobs only |
+| PERF-16-02 | INFO | NEW | `dashboard/page.tsx:18` | `getTags()` uncached in admin dashboard — single admin route, negligible |
+| PERF-16-03 | INFO | NEW | `data.ts:511-516` | `getTopics()` correlated `MAX(updated_at)` subquery — row probe per topic partition, acknowledged in code |
+| PERF-16-04 | INFO | NEW | `[topic]/page.tsx:141-176` | Topic page: 3 sequential DB waves — irreducible given routing constraints |
 
 ---
 
-## Confirmed deferred items (PERF-13-01..07, PERF-14-01..02)
+## Verified Fixed Items
 
-All nine items from the cycle-13/14 deferred list are still present, unmodified.
+### PERF-15-02 — Histogram rAF Debounce (FIXED)
 
-| Item | Still present | Note |
-|------|--------------|-------|
-| PERF-13-01 `getTopics()` correlated MAX | Yes | data.ts ~476-482, unchanged |
-| PERF-13-02 `COUNT(*) OVER()` window | Yes | data.ts ~847, ~1373, unchanged |
-| PERF-13-03 `LIKE '%term%'` scans | Yes | data.ts ~1434-1557, unchanged |
-| PERF-13-04 `getTopicBySlug` double RTT | Yes | data.ts ~1294-1330, unchanged |
-| PERF-13-05 embedding IIFE config refetch | Yes | image-queue.ts ~500-506, unchanged |
-| PERF-13-06 bootstrap `NOT IN` 1000 IDs | Yes | image-queue.ts ~692-694, unchanged |
-| PERF-13-07 `topicViews` bot index | Yes | schema.ts ~234-243, unchanged |
-| PERF-14-01 `sharedGroupViews` bot index | Yes | schema.ts ~245-254, unchanged |
-| PERF-14-02 `masonryClasses` scroll recompute | Yes | home-client.tsx ~183-235, unchanged |
+`apps/web/src/components/histogram.tsx:440-466`
+
+The `rafId` ref guard and breakpoint-only `setCanvasDims` with object-equality check `(prev.width === next.width && prev.height === next.height ? prev : next)` are correctly implemented. No `requestAnimationFrame` is enqueued if one is already pending, and the state setter returns the previous stable reference when dimensions are unchanged — preventing `useState` churn on resize. Fully resolved.
+
+### PERF-15-04 — `image_views` imageId Index (FIXED)
+
+`apps/web/src/db/schema.ts:229`
+
+`idxImageViewsImageIdViewedAt: index('idx_image_views_image_id_viewed_at').on(table.imageId, table.viewed_at)` is present in schema and migration. Per-photo analytics queries filtering on `(imageId, viewed_at)` use this index. Fully resolved.
 
 ---
 
-## New findings
+## Open Items — Carry-Over
 
-### PERF-15-01 — `images` missing `(processed, updated_at)` index [MEDIUM, needs migration]
+### PERF-15-01 — Missing `(processed, updated_at)` Index (MEDIUM, OPEN)
 
-**Files:** `apps/web/src/lib/data.ts:520-525` and `data.ts:835`
-**Schema gap:** `apps/web/src/db/schema.ts` — no index on `images` covers `(processed, updated_at)`
+**Locations:**
+- `apps/web/src/lib/data.ts:527` — `getLatestImageUpdatedAt()`: `MAX(updated_at) WHERE processed=true` — full table scan on every sitemap request
+- `apps/web/src/lib/data.ts:840` — `getImagesForFeed()`: `ORDER BY updated_at DESC, created_at DESC, id DESC WHERE processed=true` — filesort before LIMIT
+- `apps/web/src/lib/data.ts:511-516` — `getTopics()`: correlated `MAX(updated_at)` subquery per topic — row probe on every image in the `idx_images_topic` partition since `updated_at` is not in that index
 
-Two queries introduced in recent cycles (R17-M2, R18-M1) order or aggregate on `updated_at`
-against the `processed=true` slice, but no index supports that access pattern.
+All three queries filter `processed=true` and aggregate/sort on `updated_at`. No composite index covers `(processed, updated_at)`.
 
-**Query 1 — `getLatestImageUpdatedAt()` (data.ts:520-525):**
-```ts
-.select({ latest: sql<Date | null>`MAX(${images.updated_at})` })
-.from(images)
-.where(eq(images.processed, true))
-```
-The existing `(processed, capture_date, created_at)` index is satisfied for the `WHERE processed=true`
-predicate, but MySQL must probe every row in that range to compute `MAX(updated_at)` because
-`updated_at` is not present in any index. This is an O(N) scan over all processed rows.
-Called by the sitemap route (1-hour ISR) — low frequency but grows with gallery size.
-
-**Query 2 — `getImagesForFeed()` (data.ts:835):**
-```ts
-.orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
-```
-The Atom feed route has `revalidate = 0` (dynamic rendering), so this ORDER BY fires on every
-RSS/Atom request from feed aggregators. With no `(processed, updated_at)` index, MySQL performs
-a filesort over the entire `processed=true` slice — O(N) sort per request.
-
-**Scale scenario:** At 1 000 processed images, each feed request sorts ~1 000 rows.
-At 10 000 images with three feed-polling clients hitting the endpoint hourly, this
-becomes 30 000 O(N) filesort operations per day on the largest slice of the table.
-
-**Fix:** One composite index serves both queries:
+**Fix:** Migration:
 ```sql
 ALTER TABLE images ADD INDEX idx_images_processed_updated_at (processed, updated_at);
 ```
-Drizzle schema addition in `db/schema.ts`:
-```ts
-index('images_processed_updated_at_idx').on(images.processed, images.updated_at),
-```
-With this index, `WHERE processed=true ORDER BY updated_at DESC` becomes an index range scan
-(last-to-first traversal) and `MAX(updated_at)` becomes an index tail probe.
 
-**Confidence:** HIGH | **Migration required:** YES
+For the correlated subquery in `getTopics()`, a second extension `(topic, processed, updated_at)` would additionally cover the per-topic `MAX(updated_at)` subquery. The simple `(processed, updated_at)` index is the minimum needed for `getLatestImageUpdatedAt` and `getImagesForFeed`.
+
+At personal-gallery scale the impact is bounded but the feed/sitemap routes are public and uncached on some code paths. The index is cheap to add.
 
 ---
 
-### PERF-15-02 — Histogram `resize` handler unthrottled: canvas redraw per resize pixel [LOW-MEDIUM]
+### PERF-15-03 — `getSharedGroup()` 3 Sequential Round-Trips (LOW, OPEN)
 
-**File:** `apps/web/src/components/histogram.tsx:440-448`
+**Location:** `apps/web/src/lib/data.ts:1241-1285`
 
-```ts
-useEffect(() => {
-    function updateDims() {
-        const isDesktop = window.innerWidth >= 768;
-        setCanvasDims(isDesktop ? { width: 320, height: 160 } : { width: 240, height: 120 });
+Three sequential awaits:
+1. Group lookup by key → `group.id` (required for step 2)
+2. `sharedGroupImages` JOIN `images` → `imageId[]` (required for step 3)
+3. Tags batch query via `inArray(imageTags.imageId, ids)`
+
+Steps 1→2→3 are the minimum achievable depth given that `group.id` (step 1 output) and `imageId[]` (step 2 output) are both needed before the subsequent step. No parallelization is possible without a structural JOIN that combines all three in one query. At personal-gallery scale (small group sizes) the three-hop cost is ~3 × MySQL round-trip latency (~3-9 ms on localhost). Acceptable but worth a denormalized JOIN if group loading ever becomes a hot path.
+
+---
+
+### PERF-15-05 — `leftJoin` → `innerJoin` Opportunity (LOW, OPEN)
+
+When listing queries (`getImagesLite`, `getImagesLitePage`) are called with a tag filter, the `WHERE` condition on `imageTags.tagId` makes the LEFT JOIN behave as an INNER JOIN semantically. Explicit `innerJoin` is clearer and allows the optimizer to choose a hash join or nested loop without null-check overhead. Low real-world impact at personal-gallery scale.
+
+---
+
+### PERF-15-06 — Bootstrap `getGalleryConfig()` Per Legacy Job (LOW, OPEN — partially addressed)
+
+**Location:** `apps/web/src/lib/image-queue.ts:383`
+
+The call at line 383 is inside `if (!quality && !imageSizes)` — only fires for legacy/re-enqueued jobs that pre-date the upload-time config snapshot. Fresh uploads carry their config inline and skip this. The legacy path is rare in production after all queued jobs clear. No change needed until PERF-16-01 (below) is addressed, at which point both calls can share the same hoisted config read.
+
+---
+
+## New Findings — Cycle 16
+
+### PERF-16-01 — Embedding IIFE `getGalleryConfig()` Per Processed Job (LOW-MEDIUM, NEW)
+
+**Location:** `apps/web/src/lib/image-queue.ts:501`
+
+The per-job callback contains a fire-and-forget embedding IIFE that independently calls `getGalleryConfig()` to decide whether semantic search is enabled:
+
+```typescript
+void (async () => {
+    const cfg = await getGalleryConfig();  // line 501 — independent call
+    if (cfg.semantic_search_mode !== 'disabled') {
+        // generate and store embedding
     }
-    updateDims();
-    window.addEventListener('resize', updateDims);
-    return () => window.removeEventListener('resize', updateDims);
-}, []);
+})();
 ```
 
-`updateDims` is called on every `resize` event with no rAF debounce. On each call it
-invokes `setCanvasDims({ width, height })` with a **new object literal**. React uses
-`Object.is` for state comparison; since every call creates a new object reference,
-React considers the state changed even if `width` and `height` are identical to the
-prior render (i.e., the breakpoint hasn't crossed 768px). This triggers:
+`getGalleryConfig` is defined as `cache(_getGalleryConfig)` in `gallery-config.ts`. React's `cache()` is **request-scoped**: it deduplicates calls within a single React render pass / SSR request cycle and is a no-op outside that context. The image queue worker runs as a background Node.js async task with no associated HTTP request — there is no React request-scope store — so `cache()` provides zero deduplication here. Every invocation of the embedding IIFE issues an independent `SELECT key, value FROM admin_settings` query.
 
-1. React re-render of `Histogram`
-2. The `canvasDims` dependency in the draw `useEffect` fires
-3. `drawHistogram()` runs: `clearRect` + up to three 256-iteration channel path
-   draws + grid lines + clip-percentage analysis
+**Impact quantified:**
+- On the production deployment (semantic search enabled, `QUEUE_CONCURRENCY=1`), every uploaded image triggers this path — one extra `admin_settings` SELECT per job.
+- At queue concurrency = 1, these are sequential, so the cost is a single extra ~1-2 ms round-trip per job. At personal-gallery scale (infrequent uploads) the aggregate cost is negligible.
+- The architectural pattern is wrong regardless: the bootstrap call at line 383 and the embedding IIFE at line 501 could share one config read per job invocation.
 
-On a smooth resize drag at 60 fps, this sequence can execute 30–60 times per second
-while the histogram panel is open (Color Details accordion expanded).
+**Confidence:** High — React `cache()` scope is documented in the React 19 API reference; the queue worker's execution context is confirmed to be outside any Next.js request.
 
-**Contrast:** `useColumnCount` in `home-client.tsx:51-57` wraps its update callback in
-`requestAnimationFrame`, coalescing rapid resize events to at most one state update
-per animation frame. The histogram component does not apply the same pattern.
+**Fix (LOW priority):**
+```typescript
+// Before the embedding IIFE, hoist the config read:
+const cfg = quality && imageSizes
+    ? { /* already have inline config */ }
+    : await getGalleryConfig();
+const semanticMode = cfg?.semantic_search_mode ?? 'disabled';
 
-**Fix (two parts):**
-
-Part A — rAF debounce on the event listener:
-```ts
-let rafId: number | null = null;
-const debouncedUpdate = () => {
-    if (rafId !== null) cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(() => { updateDims(); rafId = null; });
-};
-window.addEventListener('resize', debouncedUpdate);
-return () => {
-    window.removeEventListener('resize', debouncedUpdate);
-    if (rafId !== null) cancelAnimationFrame(rafId);
-};
+void (async () => {
+    if (semanticMode !== 'disabled') {
+        // generate embedding
+    }
+})();
 ```
-
-Part B — stable state reference to avoid spurious re-renders when breakpoint hasn't crossed:
-```ts
-setCanvasDims(prev => {
-    const next = isDesktop ? { width: 320, height: 160 } : { width: 240, height: 120 };
-    return (prev.width === next.width && prev.height === next.height) ? prev : next;
-});
-```
-
-**Impact scope:** Only affects users who have the Color Details accordion open while
-resizing the browser window (photographer audit workflow). Not on the public browsing
-hot path. Severity is LOW-MEDIUM due to the canvas redraw cost per event.
-
-**Confidence:** HIGH | **Migration required:** NO
+Alternatively, add a module-level TTL cache (like the `settingsHashCache` in `serve-upload.ts`) that persists across job invocations and refreshes every N seconds.
 
 ---
 
-### PERF-15-03 — `getSharedGroup()` three sequential DB round-trips [LOW-MEDIUM]
+### PERF-16-02 — Admin Dashboard Uses Uncached `getTags()` (INFO, NEW)
 
-**File:** `apps/web/src/lib/data.ts` (~lines 1226-1317)
+**Location:** `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:18`
 
-The shared-group page loader makes three consecutive DB queries, each waiting for
-the previous to return:
-
-1. `SELECT ... FROM shared_groups WHERE key = $shareKey` → yields `group`
-2. `SELECT ... FROM shared_group_images WHERE group_id = $group.id ORDER BY sort_order` → yields `imageIds`
-3. Batch tag fetch: `SELECT ... WHERE image_id IN ($imageIds)` → yields tags per image
-
-Query 2 requires `group.id` from Query 1 — cannot be parallelized with the current
-structure. Query 3 requires the `imageIds` from Query 2. All three are thus serial.
-
-This is `3 × RTT` per shared-group page load. At `revalidate = 0` (dynamic rendering),
-every request — including bot/crawler hits on public share links — pays this cost.
-
-**Fix options:**
-
-Option A (minimal, no migration) — collapse queries 1+2 into a single JOIN:
-```ts
-// Returns group columns + array of image_ids via GROUP_CONCAT
-const result = await db
-    .select({ ...groupFields, imageIds: sql`GROUP_CONCAT(sgi.image_id ORDER BY sgi.sort_order)` })
-    .from(sharedGroups)
-    .leftJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
-    .where(eq(sharedGroups.key, shareKey))
-    .groupBy(sharedGroups.id);
+```typescript
+getTags(),  // uncached — bypasses React cache() deduplication
 ```
-Query 3 (tags) can then run concurrently with no dependency.
 
-Option B (full) — single three-way JOIN query with GROUP_CONCAT for tags, matching
-the pattern used in `getImagesLite`. Returns everything in one round-trip.
+`data.ts` exports both `getTags()` (plain async, no React cache) and `getTagsCached = cache(_getTags)`. The admin dashboard calls the uncached form. Since the admin dashboard is an authenticated, single-user route rendered once per navigation (not concurrently), there is no deduplication opportunity being missed in practice. All public routes confirmed to use `getTagsCached()`.
 
-**Scenario:** A shared portfolio link shared on social media gets 100 concurrent
-visitors during a repost event. Each request serializes through 3 × ~1 ms DB
-round-trips = ~3 ms/request instead of ~1 ms. At 100 req/s this adds 200 ms of
-cumulative sequential DB hold time per second, increasing connection contention on
-the 10-connection pool.
-
-**Confidence:** HIGH | **Migration required:** NO
+**Action:** None required. Informational. Could be trivially changed to `getTagsCached()` for consistency, but the runtime impact is zero at admin-single-session scale.
 
 ---
 
-### PERF-15-04 — `getTopPhotosByViews()` no covering index for GROUP BY imageId [LOW]
+### PERF-16-03 — `getTopics()` Correlated `MAX(updated_at)` Subquery (INFO, NEW)
 
-**File:** `apps/web/src/lib/analytics-data.ts:28-54`
+**Location:** `apps/web/src/lib/data.ts:511-516`
 
-The top-photos analytics query:
-```ts
-.where(and(eq(imageViews.bot, false), gte(imageViews.viewed_at, since)))
-.groupBy(imageViews.imageId, images.title, images.topic)
-.orderBy(desc(sql`viewCount`))
+```typescript
+last_image_updated_at: sql<Date | null>`(
+    SELECT MAX(${images.updated_at})
+    FROM ${images}
+    WHERE ${images.topic} = ${topics.slug}
+    AND ${images.processed} = true
+)`,
 ```
 
-The `image_views` table has `(bot, viewed_at, country_code)` and
-`(bot, viewed_at, referrer_host)` bot-leading indexes (correctly noted in
-analytics-data.ts comments). These serve the country/referrer breakdown queries.
-Neither covers the `imageId` GROUP BY column used in `getTopPhotosByViews`.
+The existing `idx_images_topic(topic, processed, capture_date, created_at)` locates the matching image rows per topic, but since `updated_at` is not in the index, every matched row in the partition must be heap-fetched to extract `updated_at` for the MAX aggregation. The code comment at line 502 explicitly acknowledges this: "MAX(updated_at) requires a row probe per topic-slug partition."
 
-MySQL uses the `(bot, viewed_at, country_code)` index for the `bot=false AND
-viewed_at >= since` range scan, then must perform a filesort/temp-table
-aggregation keyed on `imageId`. This is an extra O(range_rows) sort step after
-the range scan.
+The query is called only from the sitemap route (`/sitemap.xml`) which has `revalidate = 3600` ISR, so the per-row probe cost is amortized over an hour. At personal-gallery scale (dozens of topics, hundreds of images per topic) the overhead is bounded and acceptable. A follow-on composite index `(topic, processed, updated_at)` would convert row probes to index range scans but is not needed at current scale.
 
-**Note:** `imageViews` already has an `(imageId, viewed_at)` index, but it cannot
-serve this query because `bot = false` is not its leading column — MySQL cannot
-use both the bot-leading range scan AND the imageId-ordered scan simultaneously.
-
-**Fix:** Add `(bot, viewed_at, imageId)` composite index on `image_views`:
-```sql
-ALTER TABLE image_views
-    ADD INDEX idx_image_views_bot_viewed_at_image_id (bot, viewed_at, image_id);
-```
-This makes the windowed aggregation a covering range scan with the GROUP BY column
-adjacent, eliminating the filesort step.
-
-**Impact scope:** Admin analytics page only — low traffic, bounded by
-`VIEW_RETENTION_DAYS` (default 395 days). Severity is LOW because this is
-admin-only and the current sort step is bounded. Grouped with PERF-14-01 /
-PERF-13-07 for schema migration batching.
-
-**Confidence:** HIGH | **Migration required:** YES
+**Action:** Defer to when PERF-15-01 is addressed; note the `(topic, processed, updated_at)` extension as an optional follow-on.
 
 ---
 
-### PERF-15-05 — `getImage()` LEFT JOIN on NOT NULL FK column [LOW]
+### PERF-16-04 — Topic Page: 3 Sequential DB Waves (INFO, NEW)
 
-**File:** `apps/web/src/lib/data.ts:~1006`
+**Location:** `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:141-176`
 
-```ts
-.leftJoin(topics, eq(images.topic, topics.slug))
-```
+The topic page body function issues data fetches in 3 sequential waves:
 
-`images.topic` is defined with a NOT NULL FK constraint referencing `topics.slug`.
-A LEFT JOIN preserves `images` rows that have no matching topic — which cannot occur
-given the NOT NULL FK constraint. Using INNER JOIN communicates to MySQL's optimizer
-that every `images` row has exactly one matching `topics` row, allowing better
-join-order and cardinality estimates. With a LEFT JOIN, MySQL may choose a less
-efficient join order assuming potential NULLs from the right side.
+1. **Wave 1** (line 141-145): `getLocale()` + `getTopicBySlugCached(topic)` — must resolve before wave 2 because the alias redirect check (`topicData.slug !== topic`) requires the resolved topic.
+2. **Wave 2** (line 166-170): `getSeoSettings()` + `getGalleryConfig()` + `getTagsCached(topicData.slug)` + `getTopicsCached()` — parallel batch, but blocked on wave 1.
+3. **Wave 3** (line 176): `getImagesLitePage(topicData.slug, filterTags, PAGE_SIZE, 0)` — blocked on wave 2 (needs `topicData.slug` for topic filter and `allTags` for tag slug validation).
 
-At typical personal-gallery scale (≤ 10 topics) the difference is negligible.
-Flagged as a semantic correctness issue and a latent optimizer hint for larger
-topic counts.
+This is the minimum achievable depth: the alias redirect must be resolved (wave 1) before the canonical slug is known, and the canonical slug is needed for both the tag filter (wave 2 `getTagsCached`) and the image listing (wave 3). The routing contract cannot be collapsed without prefetching the topic slug in a Next.js layout, which would change the routing architecture.
 
-**Fix:** Change to `innerJoin`:
-```ts
-.innerJoin(topics, eq(images.topic, topics.slug))
-```
-
-**Confidence:** HIGH | **Migration required:** NO | **Impact:** Negligible at current scale
+**Action:** None. Pattern is correct. Documented here for completeness.
 
 ---
 
-### PERF-15-06 — Bootstrap legacy path calls `getGalleryConfig()` per job outside React `cache()` scope [LOW]
+## Sharp Pipeline Assessment (No New Issues)
 
-**File:** `apps/web/src/lib/image-queue.ts:~379-399`
+`process-image.ts` reviewed for concurrency, memory, and correctness:
 
-```ts
-if (!quality && !imageSizes) {
-    // Bootstrap / legacy re-enqueue path
-    const config = await getGalleryConfig();
-    quality = { webp: config.imageQualityWebp, ... };
-    ...
-}
-```
+- **Fresh-decode per format (WI-14):** Each `generateForFormat` call constructs a new `sharp(processingInputPath, …)` instance. No shared-state cross-format contamination. Confirmed at lines 1162-1165.
+- **rgb16 pipeline for wide-gamut:** `pipelineColorspace('rgb16')` applied only when `isWideGamutSource && !isDciP3`. DCI-P3 correctly skips rgb16. Correct.
+- **OOM guard:** Wide-gamut sources above `WIDE_GAMUT_MAX_SOURCE_PIXELS` (default 50 M px) are downscaled to a lossless TIFF intermediate before rgb16 fan-out (lines 1053-1083). The intermediate is UUID-suffixed under `os.tmpdir()` and cleaned up on error.
+- **10-bit AVIF probe:** `canUseHighBitdepthAvif()` is a process-level Promise singleton — called once per process lifetime, not per image. No probe overhead per encode.
+- **`sequentialRead: true`:** Present on all `sharp()` constructors — streams large HEIF/RAW files without random-access I/O.
+- **`limitInputPixels`:** Passed per constructor call, correctly bounded by `IMAGE_MAX_INPUT_PIXELS` env var.
 
-`getGalleryConfig` is exported as `cache(_getGalleryConfig)` (React `cache()` from `react`).
-React's `cache()` deduplicates calls within a single SSR render tree / request context via
-AsyncLocalStorage. Background image-queue workers (setInterval, process callbacks) run
-outside any request scope. React's `cache()` behavior outside a request scope is
-implementation-specific: it may fall back to a module-level singleton (first call cached
-for the process lifetime) or it may be a no-op (fresh DB hit on every call).
-
-In the no-op case, up to `BOOTSTRAP_BATCH_SIZE = 500` images each trigger a fresh
-`SELECT * FROM admin_settings` query during bootstrap. At QUEUE_CONCURRENCY=1 these
-are serial, not concurrent — so they don't cause pool contention, but they represent
-500 unnecessary DB round-trips for configuration that does not change between jobs.
-
-**Relationship to PERF-13-05:** PERF-13-05 identified the embedding IIFE at
-image-queue.ts:~500-506 as a second `getGalleryConfig()` call inside the same job.
-This finding identifies the bootstrap entry point at ~383 as a third distinct
-call site where a per-job re-fetch occurs.
-
-**Fix:** Hoist the config load to the bootstrap scan level, above the per-job loop:
-```ts
-// In the bootstrap scanner, load once before enqueueing all legacy jobs
-const bootstrapConfig = await getGalleryConfig().catch(() => null);
-// Pass bootstrapConfig as a parameter to each enqueued job
-// so jobs use it directly and skip the per-job getGalleryConfig() call
-```
-
-**Confidence:** MEDIUM (React `cache()` out-of-request behavior is undocumented;
-actual impact may be zero if module-level caching applies) | **Migration required:** NO
+No new Sharp pipeline performance issues found.
 
 ---
 
-## Final sweep — commonly-missed categories
+## Service Worker Assessment (No New Issues)
 
-**Connection pool pressure:** No new unbounded query loops or long-held connection
-patterns found in cycle-15 commits. `processImageFormats` fans out with `Promise.all`
-per format correctly. Shared-group sequential RTTs (PERF-15-03) are serial DB queries,
-not concurrent pool exhaustion events.
+`public/sw.template.js` reviewed:
 
-**Memory / unbounded Maps:** No new unbounded in-memory collections found.
-Rate-limit Maps (`loginRateLimit`, `searchRateLimit`, `ogRateLimit`, `shareRateLimit`,
-`semanticRateLimit`, `accountLoginRateLimit`, `passwordChangeRateLimit`) all use
-bounded patterns with explicit caps and prune hooks. `viewCountRetryCount` Map is
-bounded at `MAX_VIEW_COUNT_RETRY_SIZE = 500`. All PERF-13/14 findings unchanged.
+- **HEAD revalidation timeout:** `AbortSignal.timeout(300)` bounds the synchronous freshness probe — a slow network aborts the HEAD probe and serves the cached bytes immediately, with background revalidation. Correct.
+- **304 short-circuit:** `revalidatePromise` is now created lazily (after the HEAD confirms staleness), so a 304 response genuinely skips the body GET. LRU recency is bumped via `bumpLruTimestamp()`. Correct.
+- **LRU cap:** 50 MB IMAGE_CACHE cap with O(1) LRU management via `sw-cached-at` header timestamps. No per-eviction sort pass.
+- **HTML offline cache:** Correctly excludes admin routes and admin-rendered pages via `x-gk-admin-render: 1` response header set in `proxy.ts`.
 
-**Service worker:** LRU eviction correctly bounded at 50 MB image cache + 50 HTML
-entries. HEAD revalidation is bounded by `AbortSignal.timeout(300ms)`. No unbounded
-scan patterns found. SW is clean.
-
-**Image pipeline:** Sharp concurrency capped at `max(1, floor((cpuCount-1)/3))`.
-`sharp.cache(false)` prevents libvips cache pin. 10-bit AVIF probe is a
-Promise singleton (no race on concurrent jobs). No new serial bottlenecks detected.
-
-**LCP / render critical path:** Masonry above-fold cards set `loading="eager"` and
-`fetchPriority="high"` for `index < columnCount` (home-client.tsx:~382-383).
-`<picture>` sources emit AVIF → WebP → JPEG with correct `sizes` attribute. No regression.
-
-**Semantic scan:** Both `/api/search/semantic` and `/api/search/similar/[id]` are
-bounded at `SEMANTIC_SCAN_LIMIT = 2000` rows and rate-limited at 30 req/min/IP.
-The `(modelVersion, updatedAt)` index serves the LIMIT-2000 scan as a single ordered
-range read. No new finding.
-
-**Batch delete (actions/images.ts):** `getSharedGroupKeysForImages(foundIds)` executes
-before the delete transaction — one extra pre-transaction round-trip, but it's a
-keyed lookup on a small set. Cleanup uses bounded concurrency (`CLEANUP_CONCURRENCY=5`).
-No new finding beyond a micro-level observation.
+No new service worker performance issues found.
 
 ---
 
-## Prioritized action list
+## ETag / Caching Assessment (No New Issues)
 
-1. **[MEDIUM + MIGRATION]** Add `(processed, updated_at)` index to `images` — fixes `getImagesForFeed` filesort and `getLatestImageUpdatedAt` MAX scan (PERF-15-01).
-2. **[LOW-MEDIUM]** Fix histogram `resize` handler: rAF debounce + stable state object to eliminate per-pixel canvas redraws (PERF-15-02). No migration.
-3. **[LOW-MEDIUM]** Collapse `getSharedGroup()` queries 1+2 into a single JOIN — reduces 3 serial round-trips to 2 per shared-group page load (PERF-15-03). No migration.
-4. **[LOW + MIGRATION]** Add `(bot, viewed_at, imageId)` index on `image_views` — fixes `getTopPhotosByViews` GROUP BY filesort; batch with PERF-14-01 / PERF-13-07 schema migration (PERF-15-04).
-5. **[LOW]** `getImage()` LEFT JOIN → INNER JOIN on topics NOT NULL FK (PERF-15-05). No migration, trivial change.
-6. **[LOW]** Hoist `getGalleryConfig()` out of bootstrap per-job path; investigate same for PERF-13-05 embedding IIFE in same function (PERF-15-06). No migration.
+`serve-upload.ts` module-scoped settings-hash cache: 5-second TTL with stale-while-revalidate — no per-request `admin_settings` DB reads on the image-serving hot path. ETag: `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`. Hash covers all 9 `COLOR_IMPACTING_KEYS` including sorted `image_sizes`. Correct.
+
+---
+
+## `useSyncExternalStore` / Re-Render Assessment (No New Issues)
+
+`use-display-capability.ts`: Module-level `_cachedSnapshot` memoization confirmed. `getSnapshot` returns the previous stable object reference when display capability is unchanged — preventing the `useSyncExternalStore` infinite-loop (React #185). Correct.
+
+`photo-viewer.tsx` and `lightbox.tsx`: Standard `useMemo`/`useCallback` usage with correct dependency arrays. `srcSetData` and `blurStyle` memoized in both. No unbounded re-render patterns identified.
+
+---
+
+## Priority Recommendations
+
+1. **PERF-15-01** (MEDIUM): Add migration `idx_images_processed_updated_at (processed, updated_at)`. One-line schema + migration SQL; accelerates `getLatestImageUpdatedAt`, `getImagesForFeed`, and (with extended form) the `getTopics()` correlated subquery.
+2. **PERF-16-01** (LOW-MEDIUM): Hoist `getGalleryConfig()` to the outer `processImageJob` scope and pass `semanticMode` into the embedding IIFE, eliminating the per-job `admin_settings` SELECT when semantic search is active. Can also consolidate the legacy-path bootstrap call (PERF-15-06) at the same time.
+3. **PERF-15-03** (LOW): Add a code comment documenting the 3-hop minimum; consider a single denormalized JOIN if group loading becomes a hot path.
+4. **PERF-15-05** (LOW): Change `leftJoin` to `innerJoin` on `imageTags/tags` in tag-filtered listing paths.

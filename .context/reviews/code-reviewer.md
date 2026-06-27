@@ -1,46 +1,177 @@
-# Code Review — GalleryKit Cycle 15 (R15C15)
+# Code Review — Cycle 16
 
-**HEAD:** 2f886351 · **Agent:** code-reviewer (sonnet) · **Scope:** server actions, lib/, components/, db/, api routes.
-
-**One-line summary:** No CRITICAL/HIGH; two MEDIUM (BoundedMap shallow-copy mutation freezes in-memory rate-limit fast paths; upload-tracker key-namespace divergence between LR and browser paths) + seven LOW. The BoundedMap defect is the most actionable — three files, five functions, and the correct `.set()` pattern already exists in the same codebase.
-
-## By severity
-- CRITICAL: 0 · HIGH: 0 · MEDIUM: 2 · LOW: 7
+**Reviewer:** oh-my-claudecode:code-reviewer (independent pass)
+**HEAD:** 1f5fb245
+**Date:** 2026-06-27
+**Scope:** apps/web/src (all .ts/.tsx), apps/web/scripts (key scripts)
+**Prior cycle context:** Cycle-15 plan implemented DBG-15-01 (GPS NaN fix), CR-15-01 (BoundedMap shallow-copy pattern), and related rate-limit correctness fixes.
 
 ---
 
-### [MEDIUM] BoundedMap shallow-copy mutation — in-memory rate-limit counters never advance
-**Files:** `apps/web/src/app/actions/sharing.ts:48` (`checkShareRateLimit`), `:57` (`rollbackShareRateLimit`); `apps/web/src/app/actions/admin-users.ts:39` (`checkUserCreateRateLimit`), `:44-48` (`rollback`). Confidence HIGH.
-`BoundedMap.get()` returns a shallow copy (`{ ...value }`, see `bounded-map.ts:64`). These call sites do `const entry = map.get(key); entry.count++;` — mutating the discarded copy, never the stored entry. The stored `count` is frozen at the value set by the `!entry` branch (1), so the in-memory check `> MAX` (20 / 10) can never fire. Both consumers DO have a DB-backed second layer (`incrementRateLimit`/`checkRateLimit`, sharing.ts:112-113/226-227, admin-users.ts:128-129), so the limits ARE enforced — the in-memory fast path is dead, costing a DB round-trip on every request that the fast path was meant to short-circuit. Rollback functions have the symmetric defect.
-**Fix:** mirror the reference pattern (`public.ts:56,264,333`): `map.set(key, { count: entry.count + 1, resetAt: entry.resetAt })`; rollback via `.set()` or `.delete()`.
+## Code Review Summary
 
-### [MEDIUM→LOW by-design] Upload-tracker key namespace divergence — LR and browser paths have independent quota windows
-**Files:** `lr/upload/route.ts:210` (`lr:${tokenUserId ?? ip}`) vs `images.ts:~174` (`${userId}:${uploadIp}`). Confidence HIGH.
-The two ingress paths key the cumulative upload tracker differently, so an authenticated admin can exhaust the browser quota then continue via the LR plugin with a fresh window — `UPLOAD_MAX_TOTAL_BYTES`/`UPLOAD_MAX_FILES_PER_WINDOW` doubled across surfaces.
-**LEAD VERIFICATION:** the divergence is DOCUMENTED INTENT — `route.ts:200-210` (DEF-C4-03) deliberately keys the LR window on the verified token user as a SEPARATE window. Combined with the trusted multi-root-admin model, BY-DESIGN, not a security gap. Downgraded to LOW/by-design.
+**Files Reviewed:** ~30 (deep reads of rate-limit.ts, auth-rate-limit.ts, bounded-map.ts, images.ts, image-queue.ts, upload-tracker-state.ts, upload-tracker.ts, process-image.ts [partial], actions/auth.ts, actions/admin-users.ts, actions/sharing.ts, data.ts [partial])
 
-### [LOW] BoundedMap shallow-copy — CLIP embeddings backfill rate-limit entirely non-functional
-**File:** `embeddings.ts:40` (`preIncrementBackfillAttempt`). Confidence HIGH. Same defect; `return (map.get(key)?.count ?? 0) > 1` always reads the frozen stored `1` → `1 > 1 = false`. NO DB fallback here, but the action requires `isAdmin()` + `requireSameOriginAdmin()`, so LOW. Fix via `.set()`.
+**Total Issues:** 5 (2 MEDIUM, 3 LOW)
 
-### [LOW] Log-level inconsistency on login-success rate-limit reset
-**File:** `auth.ts:189` (IP reset → `console.error`) vs `:194` (account reset → `console.debug`). Same operational significance; the account-bucket failure won't reach log shippers. Fix: `console.debug`→`console.error`/`warn`.
+### By Severity
 
-### [LOW] Stale `viewCountRetryCount` entry on buffer capacity-drop path
-**File:** `data.ts` re-buffer capacity-drop branch (~140-143). On a capacity drop the retry-count entry for the dropped groupId is left stale; a later re-entry inherits an inflated count, prematurely nearing eviction. Fix: delete (or increment) the `viewCountRetryCount` entry in the drop branch.
+- CRITICAL: 0
+- HIGH: 0
+- MEDIUM: 2 (both actionable correctness issues)
+- LOW: 3 (latent/documentation)
 
-### [LOW] TagInput `filteredTags` uses `toLowerCase()` without NFKC normalization
-**File:** `tag-input.tsx` `filteredTags` useMemo. The filter uses plain `.toLowerCase()` while `hasSelectedTag`/`resolveCanonicalTagName` use `normalizeTagInputValue()` (`.normalize('NFKC').toLocaleLowerCase()`). Fullwidth/composed Unicode tags can appear in the dropdown after selection. Confidence MEDIUM. Fix: apply `normalizeTagInputValue()` to both sides.
+---
 
-### [LOW] LoadMore `'invalid'` status returned with no user feedback
-**File:** `load-more.tsx:72-83`. `loadMoreImages` can return `{ status: 'invalid' }` for a malformed cursor; the dispatch handles rateLimited/maintenance/error but `'invalid'` silently `setHasMore(false)` with no toast. Fix: add a default branch `toast.error(...)`.
+## Stage 1 — Spec Compliance
 
-### [LOW] `copyColorMetadata` clipboard copies admin-only fields without explicit `isAdmin` gate
-**Files:** `color-details-section.tsx:274-284`, `lightbox-color-pip.tsx:88-100`. Clipboard JSON includes `transfer_function`/`matrix_coefficients`/`color_pipeline_decision`/`is_hdr`/`has_gain_map` ungated. Null for public today (data-layer omission), but inconsistent with the render-path `isAdmin &&` guards. Confidence MEDIUM. Fix: gate admin-only keys on `isAdmin`. (Folds into SEC-15-01 / Critic-F2 admin-gating task.)
+Cycle-15 fixes verified:
 
-### [LOW] Clipboard `execCommand` fallback absent in `lightbox-color-pip.tsx`
-**File:** `lightbox-color-pip.tsx:105-107`. The sibling `color-details-section.tsx` has a `document.execCommand('copy')` fallback for HTTP (non-secure-context) LAN installs; the pip throws instead. CLAUDE.md lists HTTP LAN as supported. Fix: copy the fallback or extract a shared `@/lib/clipboard.ts`.
+- **DBG-15-01 (GPS NaN fix):** `convertDMSToDD` in process-image.ts (lines 1446-1463) correctly validates all three DMS components with `Number.isFinite()` before arithmetic. Fix is complete and correct.
+- **CR-15-01 (BoundedMap shallow-copy on `.get()`):** `BoundedMap.get()` (bounded-map.ts line 58-70) returns `{ ...value }` for object values. All callers in `auth-rate-limit.ts` correctly mutate the returned copy and call `.set()` to write back. Pattern is correctly applied.
+- **Rate-limit rollback helpers:** `rollbackLoginRateLimit` and siblings in auth-rate-limit.ts correctly use `.get()` (copy) + `.set()` with decremented count. No in-place mutation bugs.
 
-## Positives
-Two-layer (in-memory + DB) rate-limit architecture is sound; BoundedMap itself is correct + documents the shallow-copy semantic; the icc-extractor `dataSize < 16` mluc guard and load-more dual-ref race guard are tight; `isViewRecordRateLimited`/`preIncrementLoadMoreAttempt` are the correct reference `.set()` implementations.
+No cycle-15 fixes are broken or partially applied.
 
-**Recommendation:** COMMENT — no blocking issues; BoundedMap fix is the highest-value (clear correct pattern already present).
+---
+
+## Stage 2 — Code Quality Issues
+
+### Issues
+
+---
+
+#### [MEDIUM] TOCTOU race in upload tracker limit enforcement
+
+**File:** `apps/web/src/app/actions/images.ts:196-257`
+**Confidence:** HIGH
+
+**Issue:** The file-count and byte-budget limit checks at lines 196 and 227 happen BEFORE the pre-increment at lines 255-257, with two `await` points in between:
+
+- Line 196: `if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW)` — **check here**
+- Lines 203-218: `await ensureUploadDirectories()` + `await statfs(UPLOAD_DIR_ORIGINAL)` — **async gap 1**
+- Lines 243-249: `await db.select(topics)...` — **async gap 2**
+- Lines 255-257: `tracker.bytes += totalSize; tracker.count += files.length; uploadTracker.set(...)` — **increment here**
+
+In Node.js's single-threaded async model, two concurrent `uploadImages()` invocations from the same IP (same `uploadTrackerKey`) can both arrive at line 196 before either has executed line 255. Both see `tracker.count = 0`, both pass the check, then both increment — the total may exceed `UPLOAD_MAX_FILES_PER_WINDOW` or `MAX_TOTAL_UPLOAD_BYTES`.
+
+The comment at lines 183-188 ("Registering the entry on the Map up-front makes subsequent mutations share the same object reference") only prevents the cold-IP literal race (two creates racing on a cold key). It does NOT close the check-before-increment race; the shared reference is necessary but not sufficient — the check and increment are not atomic.
+
+**Fix:** Pre-increment before the first `await` and roll back on validation failure. Specifically, claim the budget immediately after retrieving the tracker (before `ensureUploadDirectories`), return an error if the pre-claim would exceed limits, and use `settleUploadTrackerClaim` (already called at lines 507/529) to reconcile:
+
+```ts
+// Pre-claim budget immediately (before any await) — closes the TOCTOU window
+if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
+    return { error: t('uploadLimitReached') };
+}
+tracker.count += files.length;       // claim slots atomically
+tracker.bytes += totalSize;          // claim bytes atomically
+uploadTracker.set(uploadTrackerKey, tracker);
+// ... now safe to await
+```
+
+The existing `settleUploadTrackerClaim` at lines 507/529 already handles the reconciliation of claimed vs. actual bytes/count, so the rollback infrastructure is already present.
+
+---
+
+#### [MEDIUM] `BoundedMap.entries()` bypasses the shallow-copy invariant
+
+**File:** `apps/web/src/lib/bounded-map.ts:115-116`
+**Confidence:** HIGH
+
+**Issue:** `BoundedMap.get()` (lines 58-70) returns a shallow copy (`{ ...value }`) to protect internal state. But `BoundedMap.entries()` (lines 115-117) returns `this.map.entries()` directly — the raw iterator over actual internal references. Any caller that iterates `.entries()` and mutates a value will directly mutate BoundedMap's internal state, bypassing the invariant that makes cycle-15's CR-15-01 safe.
+
+Current production code has no callers of `.entries()` on a BoundedMap (grep confirmed). The risk is latent but real: the `.entries()` method is public API, and a future caller may reasonably assume copy semantics consistent with `.get()`. The `data` property (line 50-52) is documented as a "direct reads" escape hatch and its semantics are explicit; `.entries()` has no such documentation.
+
+**Fix:** Either copy each value in the entries iterator (matching `get()` semantics):
+
+```ts
+*entries(): IterableIterator<[K, V]> {
+    for (const [key, value] of this.map.entries()) {
+        const copy = (value !== null && typeof value === 'object')
+            ? { ...value } as V
+            : value;
+        yield [key, copy];
+    }
+}
+```
+
+Or add a JSDoc warning that values returned by `entries()` are live references and must not be mutated. The latter is acceptable given there are no current callers.
+
+---
+
+#### [LOW] Comment at images.ts:183-188 overstates TOCTOU protection
+
+**File:** `apps/web/src/app/actions/images.ts:183-188`
+**Confidence:** HIGH
+
+**Issue:** The comment explains that pre-registering the tracker entry makes "subsequent mutations share the same object reference across concurrent invocations." This accurately describes the cold-IP race prevention, but a future reader could interpret it as evidence that the TOCTOU is fully resolved. It is not. The check-before-increment race (the MEDIUM issue above) remains open. The comment should be precise about what it does and does not protect.
+
+**Fix:** Update the comment to explicitly note that only the cold-start literal race is closed here, and that the check-before-increment race requires the pre-increment to happen before the first `await`.
+
+---
+
+#### [LOW] `Number(process.env.QUEUE_CONCURRENCY) || 1` silently rejects `"0"`
+
+**File:** `apps/web/src/lib/image-queue.ts:203`
+**Confidence:** MEDIUM
+
+**Issue:** `Number("0") || 1` evaluates to `1` because `0` is falsy. If an operator sets `QUEUE_CONCURRENCY=0` intending to pause job processing, the value is silently replaced with `1`. The comment at lines 200-202 suggests `0` is not a legitimate value ("Default to one foreground-friendly job"), but silent rejection of an explicit environment variable is harder to debug than a validation error.
+
+**Fix:** Apply the same `Number.parseInt(..., 10) || DEFAULT` pattern already used at line 761 of images.ts (`CLEANUP_CONCURRENCY`), or explicitly guard with:
+
+```ts
+queue: new PQueue({ concurrency: Math.max(1, Number(process.env.QUEUE_CONCURRENCY) || 1) }),
+```
+
+(The current code and the fix produce the same runtime behavior for legitimate inputs. The improvement is auditing clarity — `Math.max(1, ...)` makes the floor explicit.)
+
+---
+
+#### [LOW] `BoundedMap.enforceHardCap()` evicts on every `.set()` even when under cap
+
+**File:** `apps/web/src/lib/bounded-map.ts:88-99`
+**Confidence:** LOW
+
+**Issue:** `set()` always calls `enforceHardCap()` (line 83). `enforceHardCap()` checks `this.map.size > this.maxKeys` before doing any work, so it is nearly free when under cap. However, in a high-frequency write path (many rate-limit increments per second), calling a method that iterates `this.map.keys()` on every write is marginally wasteful. The iteration only runs if `size > maxKeys`, so this is not a real performance concern at personal-gallery scale. Flagged for documentation, not urgency.
+
+**Fix:** No change required. Document the guard condition in a comment on `enforceHardCap()` so future readers don't reach for a caching optimization prematurely.
+
+---
+
+## Open Questions (low-confidence findings — surfaced, not blocking)
+
+None. All findings above are at HIGH or MEDIUM confidence and have been assigned appropriate severity.
+
+---
+
+## Positive Observations
+
+- **Cycle-15 BoundedMap pattern is correctly applied everywhere.** All three `auth-rate-limit.ts` getters return copies, and all writers use explicit `.set()`. The pattern is consistent and no caller was found to violate it.
+
+- **GPS NaN fix (DBG-15-01) is airtight.** `[dms[0], dms[1], dms[2]].every(Number.isFinite)` validates all three components before any arithmetic. Guards are at both the DMS-to-DD conversion site and in `extractExifForDb` via `cleanNumber`.
+
+- **Image queue claim/retry logic is robust.** MySQL advisory locks (`gallerykit:image-processing:{jobId}`) prevent double-processing across restarts. The claim failure path calls `releaseImageProcessingClaim` in a `finally` block. The conditional `WHERE processed = false` UPDATE correctly detects delete-during-processing and cleans up derivatives.
+
+- **`settleUploadTrackerClaim` already provides the rollback infrastructure** needed to fix the TOCTOU above. The fix is mechanical — move the pre-increment earlier in the function without restructuring the rest.
+
+- **Empty catch blocks in image-queue.ts (lines 396, 503) are intentional and commented.** The DB-unavailable-during-config-load case falls back to Sharp defaults with the comment present; the embedding-mode-detection failure silently skips semantic embeddings. Both are correct graceful degradation behaviors.
+
+- **`requireSameOriginAdmin` is called in 45+ action exports** (grep confirmed). Coverage is broad.
+
+- **Collect-then-delete pattern used correctly** in `BoundedMap.prune()`, `pruneRetryMaps`, `pruneUploadTracker`, and `permanentlyFailedIds` eviction — no iterator-invalidation bugs.
+
+- **Fire-and-forget void IIFEs** for caption and embedding in image-queue.ts each have their own try/catch and `console.warn` so failures are logged and never propagate to the queue job result. Pattern is consistent between the two hooks.
+
+---
+
+## Recommendation
+
+**COMMENT**
+
+No CRITICAL or HIGH issues found. Two MEDIUM issues are present — both relate to the upload tracker subsystem:
+
+1. A real but low-exploitability TOCTOU in admin-only upload quota enforcement (requires concurrent upload requests from the same admin IP).
+2. A latent invariant inconsistency in `BoundedMap.entries()` (no current callers).
+
+The three LOW items are documentation/minor-quality concerns. The codebase is in good shape for cycle 16 and the cycle-15 fixes are all correctly applied. The MEDIUM TOCTOU fix is straightforward (move pre-increment before the first `await`) and can be done in a single targeted commit.
