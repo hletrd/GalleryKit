@@ -19,7 +19,7 @@ class TopicHasImagesError extends Error {
     constructor() { super('Topic still has associated images'); this.name = 'TopicHasImagesError'; }
 }
 
-import { connection, db, images, topics, topicAliases, topicViews } from '@/db';
+import { connection, db, images, topics, topicAliases, topicViews, smartCollections } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
@@ -28,6 +28,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
+import { parseSmartCollectionQuery, remapTopicSlugInQuery } from '@/lib/smart-collections';
 import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -289,6 +290,33 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     // re-pointed; topicViews is the later-added third child that was
                     // missed ("fix one sibling, miss the next").
                     await tx.update(topicViews).set({ topic: slug }).where(eq(topicViews.topic, cleanCurrentSlug));
+
+                    // DBG-16-03 (R16C16): smart-collection rules that reference the
+                    // OLD slug by exact identity (`topic eq <old>` / `topic in […]`)
+                    // would silently stop matching after the rename. Re-point those
+                    // exact references inside the same transaction. Malformed
+                    // query_json is skipped defensively (it can only have come from
+                    // a pre-validation row); only rows whose AST actually changed
+                    // are written back.
+                    const collections = await tx.select({
+                        id: smartCollections.id,
+                        query_json: smartCollections.query_json,
+                    }).from(smartCollections);
+                    for (const collection of collections) {
+                        if (typeof collection.query_json !== 'string') continue;
+                        let remapped: { ast: unknown; changed: boolean };
+                        try {
+                            const ast = parseSmartCollectionQuery(collection.query_json);
+                            remapped = remapTopicSlugInQuery(ast, cleanCurrentSlug, slug);
+                        } catch {
+                            continue;
+                        }
+                        if (remapped.changed) {
+                            await tx.update(smartCollections)
+                                .set({ query_json: JSON.stringify(remapped.ast) })
+                                .where(eq(smartCollections.id, collection.id));
+                        }
+                    }
 
                     await tx.delete(topics)
                         .where(eq(topics.slug, cleanCurrentSlug));

@@ -397,6 +397,50 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
     throw new SmartCollectionQueryError(`Unknown AST node type: ${String(n.type)}`);
 }
 
+/**
+ * DBG-16-03 (R16C16): when a topic slug is renamed, smart-collection rules that
+ * reference the OLD slug by exact identity (`topic eq <old>` or `topic in […]`)
+ * would silently stop matching (images were re-pointed to the new slug), leaving
+ * the collection empty. This pure helper rewrites those exact-identity topic
+ * references from `oldSlug` → `newSlug`, returning the (possibly new) AST plus a
+ * `changed` flag so callers update only the rows that actually moved.
+ *
+ * Deliberately conservative: only `eq` and `in` (exact-identity) topic
+ * predicates are rewritten. `contains` (substring) / ordering operators
+ * (`gt`/`lt`/…) are NOT touched — a substring or range filter is not an identity
+ * reference and rewriting it could change the admin's intent. Non-topic
+ * predicates are returned unchanged.
+ */
+export function remapTopicSlugInQuery(
+    ast: SmartCollectionQuery,
+    oldSlug: string,
+    newSlug: string,
+): { ast: SmartCollectionQuery; changed: boolean } {
+    if (ast.type === 'and' || ast.type === 'or') {
+        let changed = false;
+        const children = ast.children.map((child) => {
+            const res = remapTopicSlugInQuery(child, oldSlug, newSlug);
+            if (res.changed) changed = true;
+            return res.ast;
+        });
+        return changed ? { ast: { type: ast.type, children } as AndGroup | OrGroup, changed: true } : { ast, changed: false };
+    }
+
+    // Predicate node.
+    if (ast.type === 'predicate' && ast.column === 'topic') {
+        if (ast.operator === 'eq' && ast.value === oldSlug) {
+            return { ast: { ...ast, value: newSlug }, changed: true };
+        }
+        if (ast.operator === 'in' && Array.isArray(ast.values) && ast.values.includes(oldSlug)) {
+            return {
+                ast: { ...ast, values: ast.values.map((v) => (v === oldSlug ? newSlug : v)) },
+                changed: true,
+            };
+        }
+    }
+    return { ast, changed: false };
+}
+
 // ── DB helpers (with I/O — not pure, kept separate from compiler) ─────────────
 
 export type SmartCollectionRow = {

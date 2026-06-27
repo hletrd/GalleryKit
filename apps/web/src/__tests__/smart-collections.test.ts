@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     compileSmartCollection,
     parseSmartCollectionQuery,
+    remapTopicSlugInQuery,
     SmartCollectionColumnError,
     SmartCollectionDepthError,
     SmartCollectionQueryError,
@@ -271,5 +272,56 @@ describe('validate/compile agreement (R4C7 COR-R4C7-03)', () => {
         }
         // Sanity: 8 direct columns × 8 operators + tag × 2 = 66 accepted shapes.
         expect(accepted).toBe(66);
+    });
+});
+
+describe('remapTopicSlugInQuery — topic slug rename (DBG-16-03)', () => {
+    it('rewrites a top-level topic eq predicate', () => {
+        const ast: SmartCollectionQuery = { type: 'predicate', column: 'topic', operator: 'eq', value: 'old' };
+        const res = remapTopicSlugInQuery(ast, 'old', 'new');
+        expect(res.changed).toBe(true);
+        expect(res.ast).toEqual({ type: 'predicate', column: 'topic', operator: 'eq', value: 'new' });
+    });
+
+    it('rewrites a topic in predicate, preserving other values', () => {
+        const ast = parseSmartCollectionQuery(
+            JSON.stringify({ type: 'predicate', column: 'topic', operator: 'in', values: ['old', 'keep'] }),
+        );
+        const res = remapTopicSlugInQuery(ast, 'old', 'new');
+        expect(res.changed).toBe(true);
+        expect(res.ast).toEqual({ type: 'predicate', column: 'topic', operator: 'in', values: ['new', 'keep'] });
+    });
+
+    it('rewrites topic refs nested inside and/or groups', () => {
+        const ast = parseSmartCollectionQuery(JSON.stringify({
+            type: 'and',
+            children: [
+                { type: 'predicate', column: 'topic', operator: 'eq', value: 'old' },
+                { type: 'or', children: [
+                    { type: 'predicate', column: 'camera_model', operator: 'eq', value: 'Leica' },
+                    { type: 'predicate', column: 'topic', operator: 'eq', value: 'old' },
+                ] },
+            ],
+        }));
+        const res = remapTopicSlugInQuery(ast, 'old', 'new');
+        expect(res.changed).toBe(true);
+        expect(JSON.stringify(res.ast)).not.toContain('"value":"old"');
+        expect((JSON.stringify(res.ast).match(/"value":"new"/g) || []).length).toBe(2);
+    });
+
+    it('leaves non-matching slugs and non-topic predicates unchanged', () => {
+        const ast: SmartCollectionQuery = { type: 'predicate', column: 'topic', operator: 'eq', value: 'other' };
+        expect(remapTopicSlugInQuery(ast, 'old', 'new').changed).toBe(false);
+        const camera: SmartCollectionQuery = { type: 'predicate', column: 'camera_model', operator: 'eq', value: 'old' };
+        expect(remapTopicSlugInQuery(camera, 'old', 'new').changed).toBe(false);
+    });
+
+    it('does NOT rewrite substring (contains) topic predicates — only exact identity', () => {
+        const ast = parseSmartCollectionQuery(
+            JSON.stringify({ type: 'predicate', column: 'topic', operator: 'contains', value: 'old' }),
+        );
+        const res = remapTopicSlugInQuery(ast, 'old', 'new');
+        expect(res.changed).toBe(false);
+        expect(res.ast).toEqual({ type: 'predicate', column: 'topic', operator: 'contains', value: 'old' });
     });
 });

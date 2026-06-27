@@ -53,8 +53,12 @@ function makeSelectChain<T>(result: T) {
     };
 
     return {
+        // `.from(x)` is awaitable directly (e.g. the DBG-16-03 smart-collections
+        // scan does `await tx.select({...}).from(smartCollections)` with no
+        // `.where()`), and still chains `.where().limit()` for filtered reads.
         from: vi.fn().mockReturnValue({
             where: vi.fn().mockReturnValue(query),
+            ...makeAwaitable(result),
         }),
     };
 }
