@@ -52,7 +52,7 @@ import {
 } from '@/lib/clip-embeddings';
 import { embedTextStub } from '@/lib/clip-inference';
 import { embedTextReal } from '@/lib/clip-model';
-import { searchEnrichmentSelectFields } from '@/lib/data';
+import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { countCodePoints } from '@/lib/utils';

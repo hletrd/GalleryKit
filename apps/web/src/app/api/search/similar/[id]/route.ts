@@ -41,7 +41,7 @@ import {
     PRODUCTION_MODEL_VERSION,
     PRODUCTION_COSINE_THRESHOLD,
 } from '@/lib/clip-embeddings';
-import { searchEnrichmentSelectFields } from '@/lib/data';
+import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
