@@ -253,10 +253,26 @@ export async function uploadImages(formData: FormData) {
         // C11-MED-01: verify the topic exists in the database before accepting
         // uploads. The schema now has an FK, but checking here keeps the error
         // localized and avoids saving files before a doomed INSERT.
-        const [topicRow] = await db.select({ slug: topics.slug })
-            .from(topics)
-            .where(eq(topics.slug, topic))
-            .limit(1);
+        //
+        // R17C17 CR-17-1 / DBG-17-1: the quota claim above is made synchronously
+        // BEFORE this awaited SELECT (the CR-16-01 TOCTOU fix). The outer `try`
+        // is `finally`-only (it releases the upload-contract lock, it does NOT
+        // settle the claim), so an UN-caught throw here (pool timeout, conn reset,
+        // restart mid-request) would leak the claim — inflating this admin+IP
+        // window by +files.length/+totalSize with zero files stored until the
+        // ~1 h tracking window expires. Mirror the disk pre-check's settle-on-throw.
+        // INVARIANT: any await added between the claim (above) and the final
+        // settle (success/all-failed paths below) MUST roll the claim back on throw.
+        let topicRow: { slug: string } | undefined;
+        try {
+            [topicRow] = await db.select({ slug: topics.slug })
+                .from(topics)
+                .where(eq(topics.slug, topic))
+                .limit(1);
+        } catch (err) {
+            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+            throw err;
+        }
         if (!topicRow) {
             settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
             return { error: t('topicNotFound') };
