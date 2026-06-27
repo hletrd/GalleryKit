@@ -1,0 +1,24 @@
+-- Migration 0024: drop the dead image reactions schema (R16C16 C16-F1).
+--
+-- The frontend reactions feature was removed in cycle 4; the cleanup SQL file
+-- 0014_drop_reactions.sql was ORPHANED (the 0014 journal slot is
+-- 0014_add_icc_profile_name), so drizzle never applied it. R15C15 added the
+-- guarded drop to migrate.js reconcileLegacySchema, but on an ALREADY-baselined
+-- production DB prepareLegacyDatabaseIfNeeded returns early (journalCovered ===
+-- true) and reconcile never re-runs — so the dead image_reactions table +
+-- images.reaction_count column persisted forever there.
+--
+-- This journaled entry is the missing TRIGGER: its presence flips
+-- journalCovered === false on the next deploy of any existing DB, so
+-- prepareLegacyDatabaseIfNeeded falls through to reconcileLegacySchema (which
+-- carries the INFORMATION_SCHEMA-guarded dropTableIfPresent / dropColumnIfPresent
+-- for reactions) before baselining. As with 0023_remove_paid_downloads, this
+-- .sql file is BASELINED-NOT-RUN on both the fresh-DB and the
+-- already-baselined-prod paths (drizzle.migrate() is a verified no-op after
+-- baselining — see migrate.js prepareLegacyDatabaseIfNeeded), so the bare DDL
+-- below never executes via drizzle.migrate(). It mirrors the 0023 convention for
+-- documentation parity; MySQL 8.0 has no DROP COLUMN IF EXISTS, so the column
+-- drop is unguarded here and the guarded drop lives in reconcileLegacySchema.
+DROP TABLE IF EXISTS `image_reactions`;
+--> statement-breakpoint
+ALTER TABLE `images` DROP COLUMN `reaction_count`;

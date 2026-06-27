@@ -26,14 +26,18 @@
  * land. Adding a new migration with a `when` <= the current global max would fail
  * assertion (1) here.
  *
- * ORPHAN SQL FILE: `drizzle/0014_drop_reactions.sql` has NO journal entry (the
- * 0014 slot is 0014_add_icc_profile_name), so drizzle never applies it. The
- * authoritative drop of the dead image_reactions table + images.reaction_count
- * column lives in migrate.js `reconcileLegacySchema` (R15C15 Critic-F1), mirroring
- * the entitlements/license_tier removal — that is the mechanism that actually
- * cleans up a legacy-migrated DB. The .sql file is retained as documentation but
- * is inert. The tag->file direction (every journal tag has a .sql) is asserted;
- * the file->tag direction is NOT, so this orphan is allowed.
+ * REACTIONS DROP (R16C16 C16-F1): the dead image_reactions table +
+ * images.reaction_count column are dropped by migrate.js `reconcileLegacySchema`
+ * (the INFORMATION_SCHEMA-guarded path), but on an ALREADY-baselined production
+ * DB `prepareLegacyDatabaseIfNeeded` returns early (journalCovered === true) and
+ * reconcile never re-runs — so R15C15's reconcile-only drop never fired there.
+ * The journaled `0024_drop_reactions` entry is the TRIGGER: its presence flips
+ * journalCovered === false on the next deploy of any existing DB, so reconcile
+ * runs (and drops reactions) before baselining. The .sql file is
+ * baselined-not-run, mirroring 0023_remove_paid_downloads. The old orphaned
+ * `drizzle/0014_drop_reactions.sql` (no journal entry, invalid MySQL `DROP COLUMN
+ * IF EXISTS`) was deleted as superseded. The tag->file direction (every journal
+ * tag has a .sql) is asserted; the file->tag direction is NOT.
  */
 
 import { describe, expect, it } from 'vitest';

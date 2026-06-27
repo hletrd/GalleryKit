@@ -206,3 +206,32 @@ describe('reconcileLegacySchema DROP tripwire — migration 0023 (FIND-R8C1-05)'
         ).toBe(true);
     });
 });
+
+/**
+ * R16C16 C16-F1 / TE-16-02: the dead reactions schema (image_reactions table +
+ * images.reaction_count column, from journaled 0007) is dropped ONLY by
+ * reconcileLegacySchema. The journaled 0024_drop_reactions entry re-triggers
+ * reconcile on a baselined DB, but reconcile is still the sole APPLIER (the .sql
+ * DROP is baselined-not-run). Same blind spot as 0023: a dropped column/table no
+ * longer appears in schema.ts, so a regression silently removing these calls
+ * would strand the dead reactions schema forever with no other signal.
+ */
+describe('reconcileLegacySchema DROP tripwire — migration 0024 reactions (R16C16 C16-F1)', () => {
+    it('drops the image_reactions table in reconcile (executable code, not a comment)', () => {
+        expect(
+            /dropTableIfPresent\(\s*connection\s*,\s*['"]image_reactions['"]\s*\)/.test(
+                MIGRATE_SRC_CODE,
+            ),
+            "reconcileLegacySchema must call dropTableIfPresent(connection, 'image_reactions') so a legacy DB drops the removed reactions table (migration 0024). The .sql DROP never runs on an existing DB.",
+        ).toBe(true);
+    });
+
+    it('drops the images.reaction_count column in reconcile (executable code, not a comment)', () => {
+        expect(
+            /dropColumnIfPresent\(\s*connection\s*,\s*dbName\s*,\s*['"]images['"]\s*,\s*['"]reaction_count['"]\s*\)/.test(
+                MIGRATE_SRC_CODE,
+            ),
+            "reconcileLegacySchema must call dropColumnIfPresent(connection, dbName, 'images', 'reaction_count') so a legacy DB drops the removed reactions column (migration 0024). The .sql DROP COLUMN never runs on an existing DB.",
+        ).toBe(true);
+    });
+});

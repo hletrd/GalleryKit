@@ -627,10 +627,12 @@ async function reconcileLegacySchema(connection, dbName) {
     // DROP TABLE entitlements also removes its FK to images(id).
     await dropTableIfPresent(connection, 'entitlements');
     await dropColumnIfPresent(connection, dbName, 'images', 'license_tier');
-    // R15C15 Critic-F1: reactions (created by 0007_image_reactions.sql, idx 7)
-    // were removed, but the cleanup file 0014_drop_reactions.sql is ORPHANED —
-    // it is not in _journal.json (the 0014 slot is 0014_add_icc_profile_name),
-    // so drizzle never applies it. Mirror the entitlements removal here so a
+    // R15C15 Critic-F1 / R16C16 C16-F1: reactions (created by
+    // 0007_image_reactions.sql, idx 7) were removed. reconcile is the sole
+    // APPLIER of the drop (the .sql DROP is baselined-not-run). On an
+    // already-baselined DB this reconcile only re-runs because the journaled
+    // 0024_drop_reactions entry flips journalCovered === false; that entry is the
+    // trigger, this is the executable drop. Mirror the entitlements removal so a
     // legacy-migrated DB that ran 0007 actually drops the dead image_reactions
     // table + images.reaction_count column. Idempotent.
     await dropTableIfPresent(connection, 'image_reactions');
