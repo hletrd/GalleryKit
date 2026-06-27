@@ -382,6 +382,16 @@ export function stripGpsFromIsobmffBuffer(input: Buffer): GpsStripResult | null 
 
     type Box = { type: string; dataStart: number; dataEnd: number };
 
+    // R19C19 F2 (PRIVACY): track whether the bounded walk ABORTED on a malformed
+    // box (truncated/oversized 64-bit size, or a size that runs past its parent).
+    // Without this, an anomalous container box that stops the walk BEFORE the
+    // iinf/infe Exif items are reached would fall through to the
+    // `exifItemIds.size === 0 → { stripped: false }` "file is clean" branch — so
+    // `stripGpsFromOriginal` would keep the ORIGINAL bytes and NOT take the
+    // metadata-free re-encode fallback, leaving GPS in place. A `false`
+    // "stripped" verdict must only be reported when the walk completed cleanly.
+    let walkAborted = false;
+
     function* walkChildren(start: number, end: number, depth: number): Generator<Box> {
         if (depth > MAX_DEPTH) return;
         let pos = start;
@@ -390,15 +400,15 @@ export function stripGpsFromIsobmffBuffer(input: Buffer): GpsStripResult | null 
             const type = buf.toString('ascii', pos + 4, pos + 8);
             let headerSize = 8;
             if (size === 1) {
-                if (pos + 16 > end) return;
+                if (pos + 16 > end) { walkAborted = true; return; }
                 const big = buf.readBigUInt64BE(pos + 8);
-                if (big > BigInt(Number.MAX_SAFE_INTEGER)) return;
+                if (big > BigInt(Number.MAX_SAFE_INTEGER)) { walkAborted = true; return; }
                 size = Number(big);
                 headerSize = 16;
             } else if (size === 0) {
                 size = end - pos;
             }
-            if (size < headerSize || pos + size > end) return;
+            if (size < headerSize || pos + size > end) { walkAborted = true; return; }
             yield { type, dataStart: pos + headerSize, dataEnd: pos + size };
             pos += size;
         }
@@ -449,6 +459,11 @@ export function stripGpsFromIsobmffBuffer(input: Buffer): GpsStripResult | null 
     }
 
     if (exifItemIds.size === 0 && xmpItemIds.size === 0) {
+        // R19C19 F2: if the walk aborted on a malformed box we may simply have
+        // never reached the Exif/XMP items — report a structural anomaly (null)
+        // so the caller re-encodes (stripping ALL metadata) rather than trusting
+        // a "no GPS present" verdict we did not actually establish.
+        if (walkAborted) return null;
         return { buffer: input, stripped: false };
     }
     if (!ilocBox) return null;
