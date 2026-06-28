@@ -37,7 +37,7 @@ export function AdminNav() {
                             // DES-R4C15-04: min-h-11 (44 px touch-target floor —
                             // links sit outside the audit's Button pattern domain,
                             // so the policy is honored here directly).
-                            "inline-flex min-h-11 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground",
+                            "inline-flex min-h-11 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             isActive ? "bg-accent text-foreground font-bold" : "text-foreground/70"
                         )}
                     >

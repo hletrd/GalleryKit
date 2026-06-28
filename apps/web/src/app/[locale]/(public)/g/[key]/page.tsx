@@ -137,7 +137,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return (
             <>
                 <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                    <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11">
+                    <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11 outline-none rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                     </Link>
                 </div>
@@ -169,7 +169,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         <div className="container mx-auto px-4 py-8">
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold">{t('title')}</h1>
-                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11">
+                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11 outline-none rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                     <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                 </Link>
             </div>

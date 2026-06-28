@@ -132,7 +132,7 @@ export default async function TimelinePage({
                                         key={year}
                                         href={localizePath(locale, `/timeline?year=${year}`)}
                                         className={
-                                            `h-11 min-w-[44px] px-4 inline-flex items-center justify-center rounded-lg text-sm font-medium transition-colors ` +
+                                            `h-11 min-w-[44px] px-4 inline-flex items-center justify-center rounded-lg text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ` +
                                             (isActive
                                                 ? 'bg-primary text-primary-foreground'
                                                 : 'bg-muted hover:bg-muted/80 text-foreground')
@@ -151,7 +151,7 @@ export default async function TimelinePage({
                         <div className="flex items-center gap-4">
                             <Link
                                 href={localizePath(locale, `/year/${selectedYear}`)}
-                                className="inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4"
+                                className="inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4 outline-none rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                             >
                                 {t('yearInReview', { year: selectedYear })}
                             </Link>

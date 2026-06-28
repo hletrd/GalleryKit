@@ -124,7 +124,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                                 href={href}
                                 aria-current={isActive ? "page" : undefined}
                                 className={cn(
-                                    "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 min-h-[44px] rounded-full whitespace-nowrap shrink-0",
+                                    "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 min-h-[44px] rounded-full whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                                     isActive
                                         ? "bg-foreground text-background font-semibold"
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
