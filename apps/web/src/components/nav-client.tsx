@@ -82,7 +82,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
             )}>
                 {/* Title */}
                 <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1")}>
-                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0 min-h-[44px]">
+                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0 min-h-[44px] rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         <span className="font-bold text-xl tracking-tight">{navTitle}</span>
                     </Link>
                 </div>

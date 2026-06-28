@@ -720,7 +720,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                     <button
                         type="button"
                         onClick={cycleMode}
-                        className="self-start min-h-11 min-w-11 text-xs px-2 py-2 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                        className="self-start min-h-11 min-w-11 text-xs px-2 py-2 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         aria-label={t('aria.cycleHistogram')}
                     >
                         {modeLabels[mode]}

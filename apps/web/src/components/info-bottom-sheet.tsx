@@ -457,7 +457,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                         href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="font-medium text-primary hover:underline flex items-center gap-1"
+                                        className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     >
                                         <MapPin className="h-3 w-3" />
                                         {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}

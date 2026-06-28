@@ -456,7 +456,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                     {currentTags && currentTags.length > 0 && (
                         <div className="flex flex-col items-center gap-2">
                             <p className="text-sm">{t('home.noResultsHint')}</p>
-                            <Link href={localizePath(locale, topicSlug ? `/${topicSlug}` : '/')} className="inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary">
+                            <Link href={localizePath(locale, topicSlug ? `/${topicSlug}` : '/')} className="inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                                 {t('home.clearFilter')}
                             </Link>
                         </div>

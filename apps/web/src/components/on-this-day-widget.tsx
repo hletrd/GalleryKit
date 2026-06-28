@@ -39,7 +39,7 @@ export async function OnThisDayWidget() {
                 <h2 className="text-base font-semibold">{t('title')}</h2>
                 <Link
                     href={localizePath(locale, '/timeline')}
-                    className="text-xs text-muted-foreground hover:text-primary transition-colors min-h-[44px] flex items-center"
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors min-h-[44px] flex items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                     {t('viewTimeline')}
                 </Link>
@@ -55,7 +55,7 @@ export async function OnThisDayWidget() {
                         <li key={photo.id}>
                             <Link
                                 href={localizePath(locale, `/p/${photo.id}`)}
-                                className="flex items-center gap-3 group min-h-[44px]"
+                                className="flex items-center gap-3 group min-h-[44px] rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 aria-label={t('viewPhotoAria', { title: displayTitle })}
                             >
                                 {/* Thumbnail */}

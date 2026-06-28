@@ -31,13 +31,13 @@ export default function Error({
                 <div className="flex flex-col gap-3 sm:flex-row">
                 <button
                     onClick={reset}
-                    className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+                    className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                     {t('error.tryAgain')}
                 </button>
                 <Link
                     href={localizePath(locale, '/')}
-                    className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"
+                    className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                     {t('error.backToGallery')}
                 </Link>

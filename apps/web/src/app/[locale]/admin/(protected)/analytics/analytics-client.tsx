@@ -65,7 +65,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                             key={w.value}
                             onClick={() => setWindow(w.value)}
                             aria-pressed={currentWindow === w.value}
-                            className={`min-h-11 min-w-11 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                            className={`min-h-11 min-w-11 rounded-md px-4 py-2 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                                 currentWindow === w.value
                                     ? 'bg-primary text-primary-foreground'
                                     : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -114,7 +114,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new window)`}
-                                                    className="text-primary underline-offset-4 hover:underline"
+                                                    className="text-primary underline-offset-4 hover:underline rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                                 >
                                                     {row.title || `${t.untitled} #${row.imageId}`}
                                                 </a>
@@ -224,7 +224,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     aria-label={`${row.shareKey} (opens in new window)`}
-                                                    className="font-mono text-primary underline-offset-4 hover:underline"
+                                                    className="font-mono text-primary underline-offset-4 hover:underline rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                                 >
                                                     {row.shareKey}
                                                 </a>
