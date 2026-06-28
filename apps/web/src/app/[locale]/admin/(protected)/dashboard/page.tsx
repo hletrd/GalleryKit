@@ -2,6 +2,7 @@ import { getAdminImagesLite, getTopics, getTags, getImageCount, getSeoSettings, 
 import { getGalleryConfig } from "@/lib/gallery-config";
 import { DashboardClient } from "./dashboard-client";
 import { MAX_TOTAL_UPLOAD_BYTES, MAX_UPLOAD_FILE_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from "@/lib/upload-limits";
+import { parsePageParam } from "@/lib/pagination";
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ const PAGE_SIZE = 50;
 
 export default async function AdminDashboard({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
     const { page: pageParam } = await searchParams;
-    const page = Math.min(Math.max(1, parseInt(pageParam || '1', 10) || 1), 1000);
+    const page = parsePageParam(pageParam, 1000);
     const offset = (page - 1) * PAGE_SIZE;
 
     const [images, topics, tags, totalCount, config, seo, failedImages] = await Promise.all([
