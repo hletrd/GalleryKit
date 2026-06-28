@@ -95,7 +95,7 @@ git values must be treated as compromised and must not be reused.
 | `TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops from the right of `X-Forwarded-For`; keep `1` for nginx-only |
 | `HEALTH_CHECK_DB` | — | Set to `true` to make `/api/health` probe DB readiness (default is liveness-only) |
 | `QUEUE_CONCURRENCY` | `1` | Background image-processing jobs concurrency in this web process |
-| `SHARP_CONCURRENCY` | — | Upper bound for Sharp/libvips threads (runtime caps at CPU parallelism - 1) |
+| `SHARP_CONCURRENCY` | `max(1, floor((cpuCount-1)/3))` | Upper bound for Sharp/libvips threads. When unset, defaults to `max(1, floor((cpuCount-1)/3))` (the `/3` accounts for the AVIF/WebP/JPEG format fan-out so one image stays near `cores-1` total threads). An explicit value is capped at `cpuCount-1` |
 | `IMAGE_MAX_INPUT_PIXELS` | `268435456` | Decompression bomb protection cap (default 256M pixels) |
 | `IMAGE_MAX_INPUT_PIXELS_TOPIC` | `67108864` | Separate cap for topic images (default 64M; smaller because topic images are 512x512) |
 | `UPLOAD_MAX_TOTAL_BYTES` | `2147483648` | Cumulative batch upload size cap (default 2 GiB) |
@@ -155,9 +155,9 @@ git values must be treated as compromised and must not be reused.
 
 | Column | Source | Notes |
 |--------|--------|-------|
-| `color_space` | EXIF `ColorSpace` tag value (`'sRGB'` / `'Uncalibrated'`) | NOT the ICC name |
-| `icc_profile_name` | ICC `desc` (v2) / `mluc` (v4 UTF-16BE) descriptor | locale-matched on `mluc` (P4-E1) |
-| `bit_depth` | Sharp `metadata.depth` mapped to bits | source bit depth, not delivered |
+| `color_space` | EXIF `ColorSpace` tag value (`'sRGB'` / `'Uncalibrated'`) | admin-only — NOT the ICC name |
+| `icc_profile_name` | ICC `desc` (v2) / `mluc` (v4 UTF-16BE) descriptor | admin-only — locale-matched on `mluc` (P4-E1) |
+| `bit_depth` | Sharp `metadata.depth` mapped to bits | admin-only — source bit depth, not delivered |
 | `color_pipeline_decision` | Resolver enum (`p3-from-displayp3`, `p3-from-adobergb`, etc.) | admin-only |
 | `color_primaries` | NCLX > ICC chromaticity > ICC name | public |
 | `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma24 / gamma26 / gamma28 / gamma18 / linear / unknown) | admin-only — `gamma24` (NCLX 14/15, BT.1886) and `gamma26` (NCLX 17, DCI-P3) are emitted for real files; `gamma28` (NCLX 5 = BT.470BG, PAL·SECAM gamma 2.8 — AGG-R7C2-01) corrects the prior gamma22/"System M" mislabel (System M is code 4); `gamma18` comes from ICC name heuristics (ProPhoto path via `lib/color-detection.ts:99-108`, AGG-D3) |
@@ -375,6 +375,7 @@ docker run --rm \
 
 - **Delete-while-processing**: Queue checks row exists before + conditional UPDATE after processing; orphaned files cleaned up
 - **Concurrent tag creation**: `INSERT IGNORE` + slug collision detection with warnings
+- **Topic route-segment serialization**: the `gallerykit_topic_route_segments` advisory lock (`withTopicRouteMutationLock`) wraps **`createTopic`, `updateTopic`, AND `createTopicAlias`** — not just renames — so a topic create, rename, or alias creation cannot race another into the same route segment. A `TopicRouteLockTimeoutError` can therefore surface on any of the three operations.
 - **Topic slug rename**: the rename is a delete+insert recreate; one transaction re-points EVERY store that references the old slug before deleting the old row — `images.topic`, `topicAliases.topicSlug`, `topic_views.topic` (the three FK children; `topic_views` was added R16C16 DBG-16-01 — missing it CASCADE-wiped up to `VIEW_RETENTION_DAYS` of analytics), and `smart_collections.query_json` eq/in topic predicates (R16C16 DBG-16-03; `contains`/range predicates are intentionally NOT remapped). No `ON UPDATE CASCADE` exists, so each child is re-pointed by hand — adding a new slug-referencing store requires extending this transaction.
 - **Upload quota TOCTOU**: per-window upload count/byte limits are checked SYNCHRONOUSLY then the claim is made before the first `await` (disk + topic-exists), so two concurrent same-key uploads cannot both pass before either claims (R16C16 CR-16-01). Every awaited early-return AND the topic-exists query's throw path rolls the claim back via `settleUploadTrackerClaim(..., 0, 0)` so a rejected/errored upload leaves no phantom claim (R17C17 CR-17-1).
 - **Batch delete**: Wrapped in DB transaction (imageTags + images atomic)
@@ -386,7 +387,7 @@ docker run --rm \
 - **Upload-processing contract changes**: MySQL advisory lock `gallerykit_upload_processing_contract` serializes uploads with `image_sizes` / `strip_gps_on_upload` changes so the first committed image cannot race a setting that is intended to lock once photos exist
 - **Per-image-processing claim**: MySQL advisory lock `gallerykit:image-processing:{jobId}` acquired before processing so two queue workers (e.g. across a restart boundary or a multi-process deployment) cannot both convert the same upload. Paired with a `WHERE processed = false` conditional UPDATE so the losing worker detects the already-processed state and cleans up its leftover variant files
 - **Concurrent backfill prevention**: MySQL advisory lock `gallerykit_color_pipeline_backfill` acquired on a dedicated connection for the whole color-pipeline backfill window. Two concurrent backfill invocations serialize cleanly rather than racing the same image rows.
-- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, backfill runs, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
+- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic create/rename/alias mutations, admin-user deletes, backfill runs, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
 
 ## Performance Optimizations
 
