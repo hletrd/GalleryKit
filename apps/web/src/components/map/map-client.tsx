@@ -128,7 +128,7 @@ export function MapClient({ markers, locale, openPhotoLabel, imageSizes }: MapCl
                         <button
                             type="button"
                             onClick={() => handleMarkerClick(marker.id)}
-                            className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left"
+                            className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                             aria-label={`${openPhotoLabel}: ${marker.title ?? marker.id}`}
                         >
                             <MarkerThumb marker={marker} imageSizes={imageSizes} />
