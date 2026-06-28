@@ -14,8 +14,21 @@ export const EMBEDDING_BYTES = EMBEDDING_DIM * 4; // 512 × 4-byte float32
 export const STUB_MODEL_VERSION = 'stub-sha256-v1';
 export const COSINE_THRESHOLD = 0.18;
 export const SEMANTIC_TOP_K_DEFAULT = 20;
-export const SEMANTIC_TOP_K_MAX = 50;
-export const SEMANTIC_SCAN_LIMIT = 2000;
+
+// R21C21 T4 (CRIT21-02): SEMANTIC_TOP_K_MAX and SEMANTIC_SCAN_LIMIT are
+// documented in CLAUDE.md ("Runtime limits") as env-tunable operational caps
+// that bound CPU/DB consumption on expensive natural-language queries. Wire the
+// env read so the docs match behaviour. Number() (not parseInt) per the cycle-20
+// env-parse sweep — the positive-integer guard rejects NaN/Infinity/≤0 and falls
+// back to the documented defaults (50 / 2000). On the client bundle the non-
+// NEXT_PUBLIC env is undefined and the fallback applies (harmless: these caps are
+// only consulted server-side in the search routes).
+function envPositiveInt(raw: string | undefined, fallback: number): number {
+    const n = Number(raw ?? '');
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
+export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);
 
 /**
  * Compute cosine similarity between two 512-dim Float32Arrays.
