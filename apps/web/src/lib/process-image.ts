@@ -331,10 +331,17 @@ async function _verifyWebpIccChunk(filePath: string): Promise<void> {
 // R20C20: Number(), not parseInt(..., 10). parseInt('256e6') === 256, which would
 // pass the `> 0` guard and set limitInputPixels to 256 px — rejecting EVERY upload
 // larger than ~16x16 as a decompression bomb. Number('256e6') === 268435456.
-const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
-const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
-    ? envMaxInputPixels
-    : 256 * 1024 * 1024;
+// R22C22 T5 (TEST21-01): exported (mirroring MAX_INPUT_PIXELS_TOPIC) so the
+// env-parse guard on the full-image decompression-bomb cap is directly
+// regression-testable. The internal `maxInputPixels` alias preserves the
+// existing per-constructor references below without churn.
+export const MAX_INPUT_PIXELS = (() => {
+    const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
+    return Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
+        ? envMaxInputPixels
+        : 256 * 1024 * 1024;
+})();
+const maxInputPixels = MAX_INPUT_PIXELS;
 // limitInputPixels is passed per-constructor call (Sharp 0.33+ API)
 
 // Topic images are resized to 512x512 and don't need the same pixel headroom.
