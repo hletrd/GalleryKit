@@ -46,7 +46,18 @@ export class BoundedMap<K, V> {
         this.isExpired = isExpired;
     }
 
-    /** Underlying Map reference for direct reads (e.g., `.get()`, `.has()`). */
+    /**
+     * Underlying Map reference for direct reads (e.g. `.size`, key iteration).
+     *
+     * R20C20 (CQ20-07): this is a LIVE reference — intentionally, so direct reads
+     * stay allocation-free. Unlike `get()` and `entries()` (which yield shallow
+     * COPIES since R19C19 CQ19-02), values reached through `.data` are the real
+     * internal objects. Callers MUST NOT mutate entry values obtained via `.data`;
+     * to update an entry, mutate a `get()` copy and write it back with `set()`.
+     * A future in-place-mutation consumer (e.g. migrating upload-tracker's
+     * window-reset onto BoundedMap) must NOT reach through `.data` to mutate, or it
+     * will silently bypass the copy-on-read contract the rest of the API upholds.
+     */
     get data(): Map<K, V> {
         return this.map;
     }
