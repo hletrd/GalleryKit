@@ -23,9 +23,18 @@ export const SEMANTIC_TOP_K_DEFAULT = 20;
 // back to the documented defaults (50 / 2000). On the client bundle the non-
 // NEXT_PUBLIC env is undefined and the fallback applies (harmless: these caps are
 // only consulted server-side in the search routes).
+//
+// R22C22 T4 (critic m1 + SEC-22-INFO): guard the FLOORED result, not the raw
+// value — a fractional input that floors below 1 (e.g. '0.5' → 0) must fall back
+// to the default rather than yield 0 (a 0 scan-limit would scan nothing). Also
+// apply a generous upper clamp so an operator misconfiguration can't request an
+// unbounded scan / top-k.
+const ENV_INT_MAX = 1_000_000;
 function envPositiveInt(raw: string | undefined, fallback: number): number {
     const n = Number(raw ?? '');
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    const i = Math.floor(n);
+    return i >= 1 ? Math.min(i, ENV_INT_MAX) : fallback;
 }
 export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
 export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);

@@ -60,4 +60,27 @@ describe('semantic limits env wiring (R21C21 T4)', () => {
             expect(m.SEMANTIC_TOP_K_MAX).toBe(50);
         },
     );
+
+    // R22C22 T4 (critic m1): a fractional value that floors below 1 must fall
+    // back, NOT yield 0 (a 0 scan-limit would scan nothing).
+    it.each(['0.5', '0.9', '0.001'])(
+        'falls back to the default when the value floors below 1 (%j)',
+        async (sub) => {
+            const m = await load({ SEMANTIC_SCAN_LIMIT: sub, SEMANTIC_TOP_K_MAX: sub });
+            expect(m.SEMANTIC_SCAN_LIMIT).toBe(2000);
+            expect(m.SEMANTIC_TOP_K_MAX).toBe(50);
+        },
+    );
+
+    // R22C22 T4 (SEC-22-INFO): generous upper clamp against operator misconfig.
+    it('clamps an unbounded override to ENV_INT_MAX (1_000_000)', async () => {
+        const m = await load({ SEMANTIC_SCAN_LIMIT: '5e9', SEMANTIC_TOP_K_MAX: '2000000' });
+        expect(m.SEMANTIC_SCAN_LIMIT).toBe(1_000_000);
+        expect(m.SEMANTIC_TOP_K_MAX).toBe(1_000_000);
+    });
+
+    it('keeps a value exactly at the clamp ceiling', async () => {
+        const m = await load({ SEMANTIC_SCAN_LIMIT: '1000000' });
+        expect(m.SEMANTIC_SCAN_LIMIT).toBe(1_000_000);
+    });
 });
