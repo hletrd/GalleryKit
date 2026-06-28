@@ -292,9 +292,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
         try {
             // R19C19 A2/MAJOR-1: shared compile-guarded enrichment select (see
-            // `searchEnrichmentSelectFields` in lib/data.ts) — replaces the
-            // formerly hand-copied inline select so a PII column is a tsc error,
-            // not just a denylist-test catch. Kept in sync with the similar route.
+            // `searchEnrichmentSelectFields` in lib/search-enrichment-fields.ts)
+            // — replaces the formerly hand-copied inline select so a PII column is
+            // a tsc error, not just a denylist-test catch. Kept in sync with the
+            // similar route.
             const imageRows = await db.select(searchEnrichmentSelectFields)
             .from(images)
             .leftJoin(topics, eq(images.topic, topics.slug))

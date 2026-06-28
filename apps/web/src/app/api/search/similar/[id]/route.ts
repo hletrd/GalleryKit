@@ -193,9 +193,10 @@ export async function GET(
         const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
         try {
             // R19C19 A2/MAJOR-1: shared compile-guarded enrichment select (see
-            // `searchEnrichmentSelectFields` in lib/data.ts) — replaces the
-            // formerly hand-copied inline select so a PII column is a tsc error.
-            // Kept in sync with the semantic route by sharing one definition.
+            // `searchEnrichmentSelectFields` in lib/search-enrichment-fields.ts)
+            // — replaces the formerly hand-copied inline select so a PII column is
+            // a tsc error. Kept in sync with the semantic route by sharing one
+            // definition.
             const imageRows = await db
                 .select(searchEnrichmentSelectFields)
                 .from(images)
