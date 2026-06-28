@@ -30,8 +30,15 @@
 /** Byte cap for a single OG-embedded photo (post-base64 stays under 2 MB). */
 export const OG_PHOTO_MAX_BYTES = 1024 * 1024;
 
-/** Per-attempt timeout for the internal photo fetch. */
-const OG_PHOTO_FETCH_TIMEOUT_MS = 10000;
+/**
+ * Per-attempt timeout for the internal photo fetch.
+ *
+ * R20C20 (PERF-C20-01): kept STRICTLY below OG_PHOTO_TOTAL_BUDGET_MS so a single
+ * hung connection cannot consume the entire chain budget. At 3500 ms a cold/broken
+ * path gets ~2 real fallback attempts within the 10 s total budget instead of one
+ * 10 s hang, while a warm path (first size present) still returns immediately.
+ */
+const OG_PHOTO_FETCH_TIMEOUT_MS = 3500;
 
 /**
  * R19C19 CQ19-01: overall budget across the whole ascending-size fetch chain.
@@ -44,7 +51,7 @@ const OG_PHOTO_FETCH_TIMEOUT_MS = 10000;
  * size resolves immediately) is unaffected; fast 404s (missing derivative)
  * were never the problem since they return immediately.
  */
-const OG_PHOTO_TOTAL_BUDGET_MS = 10000;
+export const OG_PHOTO_TOTAL_BUDGET_MS = 10000;
 
 /**
  * Try fetching one sized JPEG derivative for the OG image. Returns the

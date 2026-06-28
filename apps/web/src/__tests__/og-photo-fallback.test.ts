@@ -16,11 +16,11 @@
  * encoder atomic-rename fallback contract intact even if a future refactor
  * accidentally regresses to a single-shot fetch.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
+import { pickFirstAvailablePhotoBuffer, OG_PHOTO_TOTAL_BUDGET_MS } from '@/lib/og-photo-fetch';
 
 const ROUTE_PATH = resolve(
     __dirname,
@@ -80,9 +80,12 @@ describe('lib/og-photo-fetch.ts R24-M1 contract (helper source)', () => {
         expect(helperSource).toContain('sortedSizes = [...imageSizes].sort((a, b) => a - b)');
     });
 
-    it('carries the 10 s AbortSignal timeout per attempt', () => {
+    it('per-attempt AbortSignal timeout stays below the total chain budget (R20C20 PERF-C20-01)', () => {
         expect(helperSource).toContain('AbortSignal.timeout(OG_PHOTO_FETCH_TIMEOUT_MS)');
-        expect(helperSource).toContain('OG_PHOTO_FETCH_TIMEOUT_MS = 10000');
+        // R20C20: per-attempt timeout lowered to 3500 ms so one hung connection
+        // cannot consume the whole 10 s budget (it now leaves room for ~2 retries).
+        expect(helperSource).toContain('OG_PHOTO_FETCH_TIMEOUT_MS = 3500');
+        expect(OG_PHOTO_TOTAL_BUDGET_MS).toBeGreaterThan(3500);
     });
 
     it('applies the byte cap to both Content-Length and buffered body', () => {
@@ -157,6 +160,33 @@ describe('pickFirstAvailablePhotoBuffer runtime contract', () => {
             [640, 1536],
         );
         expect(result).toBeNull();
+    });
+
+    it('R20C20 (FINDING-1): stops starting attempts once the total budget is exhausted', async () => {
+        // The 4 tests above use synchronous mocks, so Date.now() never advances and
+        // the deadline check is never exercised — an inverted or deleted check stays
+        // green. Drive real elapsed time with fake timers: the first attempt consumes
+        // the entire budget, so the remaining 3 sizes must be skipped (not attempted).
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const calls: string[] = [];
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+            calls.push(typeof input === 'string' ? input : input.toString());
+            // First attempt is slow: it consumes the whole budget, then misses.
+            vi.setSystemTime(OG_PHOTO_TOTAL_BUDGET_MS + 1);
+            return new Response(null, { status: 404 });
+        }) as typeof fetch;
+        try {
+            const result = await pickFirstAvailablePhotoBuffer(
+                'http://localhost',
+                'abc.jpg',
+                [640, 1536, 2048, 4096],
+            );
+            expect(result).toBeNull();
+            expect(calls).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
 });
