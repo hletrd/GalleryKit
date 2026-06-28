@@ -594,6 +594,38 @@ describe('topic actions', () => {
         expect(updateMock).not.toHaveBeenCalled();
     });
 
+    it('parses a scientific-notation order with Number() in updateTopic in-place path (R21C21 T2 / DBG21-01)', async () => {
+        // GAP identified in cycle-22 TE audit: the T2 test (line 534) covered
+        // createTopic only. The comment said "Same fix lands in updateTopic" but
+        // no test called updateTopic with order='1e3'. This closes that gap.
+        //
+        // Discriminator: parseInt('1e3', 10) === 1, so reverting the
+        // Number(orderStr) call in updateTopic would store order=1, not 1000,
+        // and the expect.objectContaining({ order: 1000 }) assertion below fails.
+        //
+        // Uses the in-place update path (slug unchanged): just two db.select
+        // calls followed by a db.update — no rename transaction needed.
+        const setPayloads: unknown[] = [];
+        selectMock
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: 'cover.webp' }]))
+            .mockReturnValueOnce(makeSelectChain([{ slug: 'travel' }]));
+        updateMock.mockReturnValue({
+            set: vi.fn((payload: unknown) => {
+                setPayloads.push(payload);
+                return { where: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+            }),
+        });
+
+        const formData = new FormData();
+        formData.set('label', 'Travel');
+        formData.set('slug', 'travel'); // same slug → in-place update, no transaction
+        formData.set('order', '1e3');
+
+        await expect(updateTopic('travel', formData)).resolves.toEqual({ success: true });
+        expect(setPayloads).toHaveLength(1);
+        expect(setPayloads[0]).toEqual(expect.objectContaining({ order: 1000 }));
+    });
+
     it('rejects createTopicAlias when the alias matches a reserved locale segment', async () => {
         await expect(createTopicAlias('travel', 'ko')).resolves.toEqual({ error: 'reservedRouteSegment' });
         expect(selectMock).not.toHaveBeenCalled();
