@@ -1,0 +1,8 @@
+=== BASELINE Mon Jun 29 01:55:12 KST 2026 HEAD=993ed471 ===
+--- eslint ---
+lint exit: 0
+--- typecheck ---
+tc exit: 0
+--- vitest ---
+vitest exit: 0
+=== BASELINE DONE Mon Jun 29 01:55:47 KST 2026 ===

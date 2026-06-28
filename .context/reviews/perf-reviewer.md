@@ -1,100 +1,181 @@
-# Performance Review — Cycle 20
-**Date:** 2026-06-27
-**HEAD:** (post-cycle-19 fixes)
-**Findings:** 3 new (all LOW); 0 regressions; CQ19-01 verified; PERF-C19-01..05 re-confirmed deferred
+# Performance Review — Cycle 21
+**Date:** 2026-06-29
+**HEAD:** (post-cycle-20 fixes)
+**Findings:** 2 new (both LOW); 0 regressions; PERF-C20-01 verified fixed; PERF-C19-01..05 / PERF-C20-02/03 re-confirmed deferred
 
 ---
 
-## CQ19-01 Verification — CONFIRMED IMPLEMENTED
+## PERF-C20-01 Verification — CONFIRMED FIXED
 
-`lib/og-photo-fetch.ts` lines 34 and 47:
+`apps/web/src/lib/og-photo-fetch.ts:41,54`:
 
 ```ts
-const OG_PHOTO_FETCH_TIMEOUT_MS = 10000;   // line 34 — per-attempt abort
-const OG_PHOTO_TOTAL_BUDGET_MS = 10000;    // line 47 — overall chain deadline
+const OG_PHOTO_FETCH_TIMEOUT_MS = 3500;        // line 41 — per-attempt abort
+export const OG_PHOTO_TOTAL_BUDGET_MS = 10000;  // line 54 — overall chain deadline
 ```
 
-`pickFirstAvailablePhotoBuffer` (line 95) sets `deadline = Date.now() + OG_PHOTO_TOTAL_BUDGET_MS` before the loop and checks `if (Date.now() >= deadline) break;` (line 106) before each attempt. The 10 s total budget cap is in place and correct. The worst-case OG latency on a hung/cold/broken path is now bounded to approximately one per-attempt timeout (10 s), not 6 × 10 s = 60 s as before.
+The per-attempt timeout is now strictly less than the total budget (`3500 < 10000`). A cycle-20
+comment at line 36–40 documents the rationale: "at 3500 ms a cold/broken path gets ~2 real
+fallback attempts within the 10 s total budget instead of one 10 s hang." On a hung connection
+the first attempt burns at most 3.5 s; the deadline check at line 113 still has ~6.5 s left for
+1–2 additional size fallbacks. The warm path (first size resolves in < 1 s) is unaffected.
+
+The cycle-20 LOW recommendation is implemented correctly and in full.
 
 ---
 
-## PERF-C19-01..05 Re-evaluation — All Still Correctly Deferred
+## PERF-C19-01..05 / PERF-C20-02/03 Re-evaluation — All Still Correctly Deferred
 
 | ID | Item | Status |
 |----|------|--------|
-| PERF-C19-01 | `getImagesForSmartCollection` COUNT(*) OVER() per cursor page | Deferred (scale-gated: negligible < 2k rows/collection; exit criterion not met) |
-| PERF-C19-02 | Bootstrap `NOT IN (≤1000 failed IDs)` per 30 s | Deferred (bounded list, indexed PK scan; no measured impact) |
-| PERF-C19-03 | Serial smart-collection UPDATEs in held advisory lock | Deferred (admin-only, infrequent, non-blocking user path) |
-| PERF-C19-04 | Histogram 768-elem temp array per redraw (`[...r,...g,...b]`) | Deferred (single canvas worker; micro-cost; no user impact) |
-| PERF-C19-05 | `useDisplayCapability` 5 listeners × N consumers | Deferred (bounded, idempotent; listener count is tiny) |
+| PERF-C19-01 | `getImagesForSmartCollection` COUNT(*) OVER() per cursor page | Deferred — exit criterion unmet |
+| PERF-C19-02 | Bootstrap `NOT IN (≤1000 failed IDs)` per 30 s | Deferred — bounded, indexed PK scan |
+| PERF-C19-03 | Serial smart-collection UPDATEs in held advisory lock | Deferred — admin-only, infrequent |
+| PERF-C19-04 | Histogram 768-elem temp array per redraw | Deferred — single canvas worker, micro-cost |
+| PERF-C19-05 | `useDisplayCapability` 5 listeners × N consumers | Deferred — bounded, idempotent |
+| PERF-C20-02 | `getTopics()` N correlated subqueries per call | Deferred — < 50 topics, idx_images_topic hit |
+| PERF-C20-03 | Semantic search 2000×512-dim scoring synchronous on event loop | Deferred — hard-capped + rate-limited; 445 prod embeddings ≈ 228K ops |
 
-No exit criteria have been triggered for any of the five.
+No exit criteria triggered for any of the seven. No material regression from cycle-20 changes.
 
 ---
 
 ## New Findings
 
-### PERF-C20-01 — OG per-attempt timeout equals total budget (LOW)
+### PERF-C21-01 — `similar/[id]` route shares PERF-C20-03 scoring class and adds an extra mandatory DB round-trip (LOW)
 
-**File:** `apps/web/src/lib/og-photo-fetch.ts:34,47`
+**File:** `apps/web/src/app/api/search/similar/[id]/route.ts:116–172`
 
-`OG_PHOTO_FETCH_TIMEOUT_MS` and `OG_PHOTO_TOTAL_BUDGET_MS` are both `10000`. In the `pickFirstAvailablePhotoBuffer` loop, the deadline check runs BEFORE each attempt. When the first attempt hangs to its `AbortSignal.timeout` (10 s), the deadline expires at the same moment and subsequent sizes are never tried.
+The similar-photos route was absent from the cycle-20 perf review scope (it was added after PERF-C20-03
+was written). It shares the same synchronous scoring pattern as the semantic text-search route and
+adds one extra sequential DB query.
 
-Consequence: the ascending multi-size fallback chain only provides meaningful retry for fast-404 responses (missing derivatives during the backfill window). For a hung connection (broken `IMAGE_BASE_URL`, CDN timeout), the chain degenerates to a single 10 s attempt then falls back to the site-default OG card. This is not a bug — the 10 s cap correctly prevents the prior 60 s worst-case — but the fallback chain's multi-size resilience is only exercised for fast-failure scenarios, not hung ones.
+**Gate 6 (lines 116–140):** PK lookup for the target image's embedding before the full scan:
 
-**Fix if desired:** reduce `OG_PHOTO_FETCH_TIMEOUT_MS` to 3 000–4 000 ms. With a 10 s total budget and 3 s per-attempt, up to 3 sizes can be attempted within the budget on a hung path. The warm path (first size resolves in < 1 s) is unaffected.
-
-**Severity:** LOW — broken IMAGE_BASE_URL is an operator misconfiguration, not steady-state; the existing cap already prevents the 60 s regression CQ19-01 targeted.
-
----
-
-### PERF-C20-02 — `getTopics()` emits N correlated subqueries per call (LOW)
-
-**File:** `apps/web/src/lib/data.ts:511–517`
-
-`getTopics()` selects `last_image_updated_at` via a correlated subquery per topic row:
-
-```sql
-SELECT MAX(updated_at) FROM images WHERE topic = ? AND processed = true
+```ts
+const targetRows = await db
+    .select({ embedding: imageEmbeddings.embedding })
+    .from(imageEmbeddings)
+    .where(and(
+        eq(imageEmbeddings.imageId, id),
+        eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION),
+    ))
+    .limit(1);
 ```
 
-With N topics this issues N indexed range scans per call. The code comment (lines 498–503) already acknowledges the cost and notes it is "cheap at gallery scale" because the sitemap consumer carries `revalidate = 3600`. At < 50 topics with the `idx_images_topic` composite index the cost is negligible. The `getTopicsCached()` React `cache()` wrapper deduplicates within a single SSR render tree, but admin pages that call the function directly re-issue the N subqueries on each request.
+**Step 7 (lines 147–155):** second query fetches up to `SEMANTIC_SCAN_LIMIT` (2000) rows ordered
+by `updatedAt DESC`, covered by `idx_image_embeddings_model_version_updated`.
 
-**Fix if needed:** replace the correlated subquery with a single aggregation: `LEFT JOIN (SELECT topic, MAX(updated_at) AS last FROM images WHERE processed = true GROUP BY topic) AS img_last ON topics.slug = img_last.topic`. One DB round-trip instead of N.
+**Lines 162–170:** same synchronous dotProduct scoring loop as PERF-C20-03 (2000 × 512 ops).
 
-**Severity:** LOW — acknowledged in code, mitigated at current scale; escalate if topic count exceeds ~50 or admin-page latency is profiled as a bottleneck.
+The extra round-trip validates that the target has a production embedding before burning the scan
+budget — correct defensive design. The Gate 6 query hits the PK and is effectively instant (< 1 ms).
+The scoring loop is bounded by the same hard mitigations as PERF-C20-03:
+
+- Rate limit: **shared** `preIncrementSemanticAttempt` / `rollbackSemanticAttempt` budget (30/min/IP)
+  with the semantic text-search route — a burst of similar-photo requests exhausts the text-search
+  budget for the same IP and vice versa; intentional but undocumented
+- Hard scan cap: `SEMANTIC_SCAN_LIMIT = 2000`
+- Top-K cap: `SEMANTIC_TOP_K_DEFAULT` / `SEMANTIC_TOP_K_MAX`
+- `idx_image_embeddings_model_version_updated` composite index covers the scan plan
+
+At current corpus (445 production embeddings) the effective cost is ≈ 228K float ops per request,
+identical to PERF-C20-03. No current warrant for offloading to `worker_threads`.
+
+**Severity:** LOW — same exit criterion as PERF-C20-03: escalate when corpus approaches the 2000
+scan limit, OR when similar-photo + semantic text-search combined request rate from a single IP
+makes the shared rate-limit budget too tight.
 
 ---
 
-### PERF-C20-03 — Semantic search vector scan synchronous on main V8 event loop (LOW)
+### PERF-C21-02 — `handleLoadMore` O(N) array spread per batch (LOW / informational, no action)
 
-**File:** `apps/web/src/app/api/search/semantic/route.ts:~264–284`
+**File:** `apps/web/src/components/home-client.tsx:126–128`
 
-After fetching up to `SEMANTIC_SCAN_LIMIT` (default 2 000) embedding rows from MySQL, the similarity scoring loop runs synchronously on the Next.js request handler thread. `decodeEmbeddingColumn` deserializes a 2 048-byte MEDIUMBLOB (512 × float32) per row; the dot product runs 512 multiply-add operations. Total: 2 000 × 512 ≈ 1 M float operations per query, holding the event loop for roughly 5–20 ms under JIT.
+```ts
+setAllImages(prev => [...prev, ...newImages]);
+```
 
-Hard mitigations already in place:
-- Rate limit: 30 requests / min / IP (`preIncrementSemanticRateLimit`)
-- Hard scan cap: `SEMANTIC_SCAN_LIMIT = 2 000` (env-configurable, not user-controllable)
-- Top-K cap: `SEMANTIC_TOP_K_MAX = 50`
+Each load-more call copies the full existing array before appending the new batch. Over P pages of
+B images each, total allocation is B + 2B + … + PB = O(P²B). For 300 images at B=30/page:
+10 pages → 1650 total element copies — negligible compared to React reconciliation time.
 
-At current gallery scale (445 real embeddings in production) the effective cost is 445 × 512 ≈ 228 K ops per query — well within V8's float throughput. The concern only materialises if the embedding count approaches `SEMANTIC_SCAN_LIMIT`.
+V8 GC reclaims the replaced arrays within microseconds; this cost is dwarfed by the
+network + SQL latency of each load-more request (~100–500 ms). The pattern is idiomatic React
+state update and correct for the single-writer append-only case.
 
-**Fix if scale demands it:** offload the scoring loop to a Node.js `worker_threads` Worker, or adopt a vector index (pgvector, Qdrant). Neither is warranted at current corpus size.
+**No fix warranted.** This becomes meaningful only at gallery sizes in the tens of thousands with
+rapid pagination, which is outside the personal-gallery scope. Noted for completeness; do not act.
 
-**Severity:** LOW — rate-limited, hard-capped, within JIT-optimized V8 throughput at current corpus.
+**Severity:** LOW / informational — no realistic impact at gallery scale.
 
 ---
 
 ## Items Investigated and Confirmed Not New
 
-- **`getImagesLitePage` COUNT(*) OVER()** (`data.ts:882`): This is the "already-deferred COUNT(*) OVER() listing-count item" referenced explicitly in PERF-C19-01's defer note. Tracked and deferred before cycle 19. Admin dashboard offset-pagination only; scale-gated.
-- **`BoundedMap.enforceHardCap()` eviction loop** (`bounded-map.ts:92–103`): `excess = this.map.size - this.maxKeys` is 1 in the normal case, so the loop breaks after collecting one key (the oldest insertion-order entry). O(1) amortized. Not an O(N) concern.
-- **`getGalleryConfig()` on semantic route**: Wrapped in `React.cache()` (`lib/gallery-config.ts:217`). Deduped within the request tree. No performance concern.
-- **Sharp concurrency / per-format-fresh instances**: `sharp.concurrency = Math.max(1, floor((cpuCount-1) / 3))` correctly accounts for AVIF + WebP + JPEG parallel fan-out. `sharp.cache(false)` prevents libvips operation-cache RSS growth. Correct and well-tuned.
-- **Bootstrap NOT IN spread** (`image-queue.ts:717`): PERF-C19-02, already deferred. No change in exit criteria.
+### Env-parse correctness sweep (R20C20 fixes) — all confirmed
+
+All six env-parse sites switched from `parseInt(env, 10)` to `Number(env)` in cycle 20.
+Each carries a `// R20C20:` comment. Sites confirmed:
+
+- `process-image.ts:45,46` — `SHARP_CONCURRENCY`
+- `process-image.ts:331,343` — `IMAGE_MAX_INPUT_PIXELS` / `IMAGE_MAX_INPUT_PIXELS_TOPIC`
+- `rate-limit.ts:144` — `TRUSTED_PROXY_HOPS`
+- `actions/images.ts:796` — `IMAGE_CLEANUP_CONCURRENCY`
+- `audit.ts:111` — `AUDIT_LOG_RETENTION_DAYS`
+- `upload-limits.ts:11` — `parsePositiveIntEnv` helper (covers `UPLOAD_MAX_TOTAL_BYTES` + `UPLOAD_MAX_FILES_PER_WINDOW`)
+
+These were correctness fixes; all in place and confirmed.
+
+### Schema indexes — no gaps detected
+
+`db/schema.ts` reviewed in full. All query patterns are covered:
+
+- `imageEmbeddings`: `idx_image_embeddings_model_version_updated` composite `(model_version, updated_at)` (migration 0022) covers both the semantic and similar-photo scan (`WHERE model_version = ? ORDER BY updated_at DESC LIMIT N`).
+- `imageViews`: three-index design — `(imageId, viewed_at)` for per-photo analytics, `(bot, viewed_at, country_code)` and `(bot, viewed_at, referrer_host)` for breakdown queries.
+- `images`: `(processed, capture_date, created_at)` for homepage, `(processed, created_at)` for prev/next navigation, `(topic, processed, capture_date, created_at)` for topic galleries. All intact.
+- `sessions.expiresAt` index covers the hourly GC purge.
+- `auditLog`: `(created_at)`, `(userId, created_at)`, `(action, created_at)` cover the three access patterns.
+- `imageTags`: `imageIdTagIdUnique` serves imageId-filtered JOIN; `idxImageTagsTagId` serves tag-filtered JOIN.
+
+No missing or unused indexes detected.
+
+### Sharp pipeline — correct and unchanged
+
+`process-image.ts:36–57`: `sharp.concurrency = Math.max(1, floor((cpuCount-1) / 3))` correctly
+divides by the 3-format fan-out (AVIF + WebP + JPEG). `sharp.cache(false)` prevents libvips
+operation-cache RSS growth. Both unchanged from cycle-19 / WI-14. No regression.
+
+### `home-client.tsx` scroll listener — not a re-render hotspot
+
+`handleScroll` checks `scrollY > 600` and uses `setShowBackToTop(prev => prev === shouldShow ? prev : shouldShow)`.
+The functional update prevents a React re-render unless the boolean changes, meaning reconciliation
+fires at most twice per scroll session (threshold crossing in each direction). Passive listener
+on raw scroll events is correct. No concern.
+
+### `searchImages` parallelization — well-optimized
+
+Three-query (main + tag + topic-alias) pattern runs via `Promise.all` with short-circuit when
+the main query fills `effectiveLimit`. No N+1. No concern.
+
+### `getMapImages` — bounded and index-selective
+
+`MAP_MAX_MARKERS = 10000` hard cap. INNER JOIN on `topics.map_visible = true` is selective for a
+personal gallery with few GPS-opted topics; `idx_images_topic` covers the join. No concern.
 
 ---
 
 ## Overall Assessment
 
-After 20 cycles the performance surface is mature and well-covered. All three new findings are LOW severity and operationally bounded. The major performance investments from prior cycles are correctly in place: bounded-map rate limiting, OG total budget cap (CQ19-01), react-cache() SSR deduplication, cursor-based gallery pagination (no COUNT(*) on public listings), Sharp concurrency formula, per-format-fresh decode instances (WI-14), histogram worker offload, rAF-debounced masonry resize, semantic scan hard cap and rate limit, and minimal OG accessor (`getLatestImageForOgCached`). No regressions from cycle-19 fixes observed.
+Cycle 21 is a clean cycle. PERF-C20-01 (OG per-attempt timeout) landed correctly — the single
+actionable finding from cycle 20. The two new LOW findings are both informational: PERF-C21-01
+closes the scope gap on `similar/[id]` (same class as PERF-C20-03, same exit criterion, same
+in-place mitigations) and PERF-C21-02 is a normal React pattern that has no practical impact at
+gallery scale.
+
+The foundational performance investments remain intact and unregressed: React `cache()` SSR
+deduplication across 10 data-access functions; cursor-based gallery pagination with no public
+COUNT(*); Sharp concurrency formula tuned for 3-format parallel fan-out; per-format-fresh Sharp
+instances (WI-14); `sharp.cache(false)` RSS control; semantic scan hard-capped with composite
+index coverage; histogram worker offload; rAF-debounced masonry resize; OG fetch chain now
+correctly bounded per-attempt at 3.5 s.

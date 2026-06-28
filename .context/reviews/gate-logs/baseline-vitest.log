@@ -1,0 +1,13 @@
+
+> web@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.9 /Users/hletrd/flash-shared/gallery/apps/web
+
+
+ Test Files  238 passed | 2 skipped (240)
+      Tests  2168 passed | 4 skipped (2172)
+   Start at  01:55:31
+   Duration  16.38s (transform 5.67s, setup 0ms, import 57.90s, tests 11.99s, environment 11ms)
+

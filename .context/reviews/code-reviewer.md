@@ -1,191 +1,155 @@
-# Code Review — Cycle 20 | 2026-06-27
-
-**Agent:** code-reviewer
-**HEAD at review time:** 9af705f4 (branch: master)
-**Total findings:** 8 (0 CRITICAL, 0 HIGH, 2 MEDIUM, 6 LOW)
-
----
-
-## Stage 1 — Cycle-19 Fix Verification
-
-All 11 scheduled fixes verified as correctly implemented:
-
-| ID | File | Status |
-|----|------|--------|
-| F1 | `lib/view-retention.ts` | PASS — `Number()` replaces `parseInt`, guarded `> 0 && isFinite` |
-| F2 | `lib/gps-exif-strip.ts` | PASS — `walkAborted` flag set; null returned when both sets empty + aborted |
-| A2 | `lib/search-enrichment-fields.ts` | PASS — shared const with compile-time `Extract<…,PrivacySensitiveKeys>` guard |
-| CQ19-01 | `lib/og-photo-fetch.ts` | PASS — `OG_PHOTO_TOTAL_BUDGET_MS=10000`, `deadline` checked before each attempt |
-| CQ19-02 | `lib/bounded-map.ts` | PASS — `entries()` and `[Symbol.iterator]` both yield `copyValue()` shallow copies |
-| CQ19-03 | `components/lightbox-color-pip.tsx` | PASS — `copyColorMetadata` is a plain async function (not useCallback) per rules-of-hooks |
-| CQ19-04 | `lib/color-label.ts` | PASS — pure helpers extracted; `color-details-section.tsx` re-exports for compat |
-| FINDING-1 | `lib/rate-limit.ts` | PASS — `rollbackOgAttempt` implemented; rollback on syntactic-reject paths |
-| MINOR-1 | `api/search/semantic/route.ts`, `api/search/similar/[id]/route.ts` | PASS — `console.error` on enrichment failure |
-| D19-01 | `components/lightbox.tsx` | PASS — nav buttons use `group`/`group-focus-visible:ring-*`; action buttons use `focus-visible:ring-*` |
-| D19-08 | `components/image-zoom.tsx` | PASS — `focus-visible:ring-ring` token present |
+# Code Review — Cycle 21
+**Reviewer:** code-reviewer agent  
+**Date:** 2026-06-27  
+**HEAD:** 993ed471  
+**Scope:** `apps/web/src/` — actions/, lib/, components/, app/api/, db/  
+**Deferred items not re-reported:** A1, A3, A4, A5, A6+N2, N1, F3 (per cycle-20-deferred.md)
 
 ---
 
-## Stage 2 — New Issues (Cycle 20)
+## Summary
 
-### Issues
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 2 |
 
----
-
-**[MEDIUM] CQ20-01 — `audit.ts:111`: `Number.parseInt` for `AUDIT_LOG_RETENTION_DAYS` (same class as F1)**
-
-File: `apps/web/src/lib/audit.ts:111`
-Confidence: HIGH
-
-Issue: `Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10)` — the same pattern fixed for `VIEW_RETENTION_DAYS` in R19C19 (F1) is still present here. `parseInt('1e3', 10)` returns `1`, not `1000`. An operator setting `AUDIT_LOG_RETENTION_DAYS=1e3` (intending 1000 days) gets a 1-day retention window; every hourly GC sweep (`image-queue.ts:811,830`) would delete all audit log rows older than 24 hours, silently destroying the audit trail. The `> 0` guard cannot save it — `1` is positive.
-
-Fix:
-```typescript
-// Line 111 — replace:
-const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10);
-// with:
-const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '');
-```
-The `Number.isFinite(retentionDays) && retentionDays > 0` guard below already handles `NaN`/`Infinity`/`0`, so no other change is needed.
+**Verdict: APPROVE with observations.**  
+No CRITICAL or HIGH findings at HIGH confidence. Two LOW findings noted; both are best-effort analytics or dead code, neither a security risk or data-loss risk.
 
 ---
 
-**[MEDIUM] CQ20-02 — `process-image.ts:330`: `Number.parseInt` for `IMAGE_MAX_INPUT_PIXELS`**
+## Findings
 
-File: `apps/web/src/lib/process-image.ts:330`
-Confidence: HIGH
+### [LOW / HIGH confidence] C21-RVW-01 — Orphaned retry count after post-flush cap eviction
 
-Issue: `Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10)` — same pattern. `parseInt('2e8', 10)` returns `2`. If an operator sets `IMAGE_MAX_INPUT_PIXELS=2e8` (attempting 200 million pixels), `maxInputPixels` becomes `2`. Every Sharp constructor call uses `limitInputPixels: maxInputPixels`, so Sharp would reject ALL images as exceeding the 2-pixel decompression bomb cap, breaking every upload. The module-level constant is evaluated once at startup; no recovery without restart.
+**File:** `apps/web/src/lib/data.ts:163–170`
 
-Fix:
-```typescript
-// Line 330 — replace:
-const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
-// with:
-const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
-```
+**Issue:**  
+The post-flush cap enforcement while-loop (in the `finally` block of `flushGroupViewCounts`) evicts entries from `viewCountBuffer` but does NOT simultaneously delete the corresponding entry from `viewCountRetryCount`:
 
-Same fix needed at line 339 for `IMAGE_MAX_INPUT_PIXELS_TOPIC` (see CQ20-03).
-
----
-
-**[LOW] CQ20-03 — `process-image.ts:339`: `Number.parseInt` for `IMAGE_MAX_INPUT_PIXELS_TOPIC`**
-
-File: `apps/web/src/lib/process-image.ts:339`
-Confidence: HIGH
-
-Issue: Same class as CQ20-02. `parseInt('6.4e7', 10)` → `6`, not `64000000`. An operator writing `IMAGE_MAX_INPUT_PIXELS_TOPIC=6.4e7` would see all topic image uploads fail.
-
-Fix: Replace `Number.parseInt(…, 10)` with `Number(…)` at line 339.
-
----
-
-**[LOW] CQ20-04 — `process-image.ts:45`: `Number.parseInt` for `SHARP_CONCURRENCY`**
-
-File: `apps/web/src/lib/process-image.ts:45`
-Confidence: HIGH
-
-Issue: `parseInt('1e2', 10)` → `1`. An operator setting `SHARP_CONCURRENCY=1e2` (intending 100 threads) would silently run with 1 libvips thread instead. Performance-only impact; no correctness or security issue.
-
-Fix: Replace `Number.parseInt(…, 10)` with `Number(…)` at line 45.
-
----
-
-**[LOW] CQ20-05 — `images.ts:796`: `Number.parseInt` for `IMAGE_CLEANUP_CONCURRENCY`**
-
-File: `apps/web/src/app/actions/images.ts:796`
-Confidence: HIGH
-
-Issue: `Math.max(1, Number.parseInt(env, 10) || 5)`. If `IMAGE_CLEANUP_CONCURRENCY=1e3`, `parseInt` returns `1` (truthy), so the `|| 5` fallback is skipped and cleanup runs at concurrency 1 instead of 1000. Silent performance degradation; `IMAGE_CLEANUP_CONCURRENCY` is not documented in CLAUDE.md but is referenced in code comments.
-
-Fix: Replace `Number.parseInt(…, 10)` with `Number(…)` at line 796.
-
----
-
-**[LOW] CQ20-06 — `gps-exif-strip.ts:461-466`: `walkAborted` only checked when BOTH item sets are empty**
-
-File: `apps/web/src/lib/gps-exif-strip.ts:461-466`
-Confidence: MEDIUM
-
-Issue: The R19C19 F2 fix correctly handles the case where `walkAborted=true` AND both `exifItemIds` and `xmpItemIds` are empty (the walk ended before finding any items). However, if the inner `walkChildren` at depth 2 (iinf/infe processing) aborts AFTER registering some non-GPS Exif item IDs but before reaching a GPS-bearing Exif item, the code skips the `walkAborted` null check (because `exifItemIds.size > 0`) and proceeds to iloc parsing with an incomplete item set. In the crafted-file scenario: (1) a non-GPS Exif item is in the first valid `infe` entries, (2) a malformed `infe` box truncates the walk, (3) the GPS Exif item was after the malformed box — the GPS-bearing item is never discovered, the iloc-level strip finds nothing to strip for the GPS item, and the function returns `{ stripped: false }` (GPS survives).
-
-This requires a specially crafted HEIF with multiple Exif items in a specific order. Standard camera-produced HEIFs have a single Exif item (all EXIF data, including GPS, in one TIFF blob), so this is an adversarial-input scenario, not a real-world one.
-
-Fix: Move the `walkAborted` check before the per-set size check so ANY aborted walk returns null:
-```typescript
-// Lines 461-469 — replace:
-if (exifItemIds.size === 0 && xmpItemIds.size === 0) {
-    if (walkAborted) return null;
-    return { buffer: input, stripped: false };
+```js
+// data.ts lines 163–170 — MISSING retryCount cleanup
+while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE) {
+    const oldestKey = viewCountBuffer.keys().next().value;
+    if (oldestKey !== undefined) {
+        viewCountBuffer.delete(oldestKey);
+        // MISSING: viewCountRetryCount.delete(oldestKey);
+    } else {
+        break;
+    }
 }
-if (!ilocBox) return null;
-
-// with:
-if (walkAborted) return null;   // partial discovery may have missed GPS items
-if (exifItemIds.size === 0 && xmpItemIds.size === 0) {
-    return { buffer: input, stripped: false };
-}
-if (!ilocBox) return null;
 ```
 
-This trades a false positive (re-encoding a malformed-but-GPS-free file unnecessarily) for a false negative (keeping GPS on a malformed file). The re-encode is conservative and correct.
+**Failure scenario:**  
+1. Group A accumulates `retries = 2` in `viewCountRetryCount` across two failed flushes.  
+2. The post-flush cap enforcement evicts Group A from `viewCountBuffer` (too many entries). `viewCountRetryCount` still holds `retries = 2` for A.  
+3. Group A receives a new view increment and is re-buffered with `count = 1`.  
+4. During the next flush, the DB fails for Group A.  
+5. `retries = viewCountRetryCount.get(groupId) ?? 0` returns the stale `2`.  
+6. On the subsequent flush failure, `retries = 3 >= VIEW_COUNT_MAX_RETRIES = 3` → Group A is DROPPED with a warning, having only received ONE actual failure after re-entry instead of the expected three.
+
+**Impact:** Best-effort view-count analytics only. View counts may undercount for groups that experience cap-eviction followed by DB failures. No data-loss risk on durable data.
+
+**Fix:**  
+```js
+while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE) {
+    const oldestKey = viewCountBuffer.keys().next().value;
+    if (oldestKey !== undefined) {
+        viewCountBuffer.delete(oldestKey);
+        viewCountRetryCount.delete(oldestKey); // ADD THIS
+    } else {
+        break;
+    }
+}
+```
 
 ---
 
-**[LOW] CQ20-07 — `bounded-map.ts:50-52`: `.data` getter returns live `Map` reference inconsistent with `entries()`/`get()` copy semantics**
+### [LOW / LOW confidence] C21-RVW-02 — Dead condition in `isProtectedAdminRoute` outer `if`
 
-File: `apps/web/src/lib/bounded-map.ts:50-52`
-Confidence: HIGH
+**File:** `apps/web/src/proxy.ts:57`
 
-Issue: The `.data` getter returns `this.map` (the raw internal `Map`). R19C19 CQ19-02 fixed `entries()` and `get()` to return shallow copies so external callers cannot corrupt internal state. However, `.data` is documented as "Underlying Map reference for direct reads (e.g., `.get()`, `.has()`)" — a future caller following that suggestion and calling `.data.get(key)` would receive a live object reference, not a copy, contradicting the isolation guarantee. Currently no call site in `src/` uses `.data.get()` or `.data.set()`, so this is a latent hazard only.
+**Issue:**  
+The outer `if` in `isProtectedAdminRoute` includes `|| pathname === \`/${locale}/admin\`` (equality-match for the login page path). The inner `if` only triggers on `pathname.startsWith(\`/${locale}/admin/\`)` (with trailing slash), so the equality-match branch in the outer condition never contributes to a `return true` — a pathname of exactly `/${locale}/admin` enters the outer `if` but falls through the inner `if` to `return false`. The login page is intentionally NOT protected, so the behavior is correct, but the outer equality-check is dead code that may mislead future readers into believing login-page protection is needed.
 
-Fix: Either remove the `.data` getter entirely (breaking change only if tests use it — check `__tests__/bounded-map.test.ts`) or rename it to `dangerousInternalMap` and update its JSDoc to warn explicitly against mutation.
+```js
+// proxy.ts:57 — outer condition includes a branch that never fires
+if (pathname.startsWith(`/${locale}/admin/`) || pathname === `/${locale}/admin`) {
+    // This branch only reached when pathname === `/${locale}/admin`, but:
+    if (pathname.startsWith(`/${locale}/admin/`)) {
+        return true; // ← never reached via the outer equality-match branch
+    }
+}
+```
 
----
+**Impact:** No functional or security impact — the middleware correctly does not protect the login page. Low confidence because the comment above the inner `if` ("The login page is exactly /[locale]/admin") suggests the outer condition was intentionally written this way for documentation purposes, not by accident.
 
-**[LOW] CQ20-08 — `rate-limit.ts:144`: `Number.parseInt` for `TRUSTED_PROXY_HOPS`**
-
-File: `apps/web/src/lib/rate-limit.ts:144`
-Confidence: HIGH
-
-Issue: `parseInt('1e2', 10)` → `1` hop instead of 100. If the deployment has `TRUSTED_PROXY_HOPS=1e2` (highly unlikely in practice — nobody runs 100 proxy hops), client IP extraction would select the wrong X-Forwarded-For segment, potentially allowing IP spoofing against rate limits.
-
-Fix: Replace `Number.parseInt(value, 10)` with `Number(value)` at line 144. The `Number.isInteger(parsed) && parsed >= 1` guard below correctly handles floats.
-
----
-
-## Summary by File
-
-All `Number.parseInt(process.env.*, 10)` instances in the codebase after R19C19 fixed `view-retention.ts`:
-
-| File | Line | Env Var | Impact |
-|------|------|---------|--------|
-| `lib/audit.ts` | 111 | `AUDIT_LOG_RETENTION_DAYS` | Audit trail purged to 1 day — data loss |
-| `lib/process-image.ts` | 330 | `IMAGE_MAX_INPUT_PIXELS` | All uploads fail bomb check — service broken |
-| `lib/process-image.ts` | 339 | `IMAGE_MAX_INPUT_PIXELS_TOPIC` | All topic uploads fail — service broken |
-| `lib/process-image.ts` | 45 | `SHARP_CONCURRENCY` | Under-threaded encoding — performance only |
-| `actions/images.ts` | 796 | `IMAGE_CLEANUP_CONCURRENCY` | Slow cleanup — performance only |
-| `lib/rate-limit.ts` | 144 | `TRUSTED_PROXY_HOPS` | Wrong IP selection — security (theoretical) |
+**Fix (optional):** Simplify to the inner condition only:
+```js
+for (const locale of LOCALES) {
+    if (pathname.startsWith(`/${locale}/admin/`)) {
+        return true;
+    }
+}
+```
+Or add a comment clarifying that the outer equality-match is intentionally included for readability despite being unreachable by the inner guard.
 
 ---
 
-## Open Questions (low-confidence findings — surfaced, not blocking)
+## Open Questions (low-confidence concerns — not blocking)
 
-None identified. All findings above have HIGH confidence in the mechanism; severity assessments are where uncertainty lives (noted per-finding).
+None beyond C21-RVW-02 above.
+
+---
+
+## Areas Reviewed and Confirmed Clean
+
+The following areas were explicitly examined this cycle and found to have no new issues:
+
+| Area | Key confirmation |
+|------|-----------------|
+| `auth.ts` — login flow | Rate-limit pre-incremented before Argon2, dummy-hash for user-enumeration prevention, IP + account buckets, session creation in transaction, `timingSafeEqual` HMAC check |
+| `admin-users.ts:107–108` — username length | `.length` correct because `^[a-zA-Z0-9_-]+$` regex is applied first, guaranteeing ASCII-only input (AGG9R-03) |
+| `db-actions.ts` — mysqldump | `spawn()` with separate arg array (no shell injection), `MYSQL_PWD` env var, `sanitizeStderr`, advisory lock `gallerykit_db_restore`, `RELEASE_LOCK` in every finally |
+| `gps-exif-strip.ts:470` — walkAborted | Unconditional check before processing results (R20C20 T2 fix confirmed) |
+| `search/similar/[id]/route.ts` | Gate ordering correct, `rollbackSemanticAttempt` on every early return, `searchEnrichmentSelectFields` compile guard, `dotProduct` only reached in production mode |
+| `topics.ts` | Advisory lock pattern correct, `remapTopicSlugInQuery` inside transaction |
+| `collections.ts` | `requireSameOriginAdmin()` result stored + early return on all mutating exports |
+| `images.ts` | `collectImageCleanupFailures` wraps each op in try/catch (never throws), outer `Promise.all` safe; `CLEANUP_CONCURRENCY` uses `Number()` not `parseInt` |
+| `public.ts:375` | `topicSlug.length` correct (ASCII-only), `countCodePoints` used for search query |
+| `rate-limit.ts` / `auth-rate-limit.ts` | `GREATEST(count - 1, 0)` prevents negative decrements; rollback uses decrement not delete |
+| `clip-embeddings.ts` | Zero-vector protection in `normalizeEmbedding`, dimension mismatch throws, `topK` filter threshold correct |
+| `csv-escape.ts` | Formula injection prefix, bidi strip, zero-width strip — all defense-in-depth layers present |
+| `avif-support.ts` | `onload` + `onerror` both resolve Promise (no hang path) |
+| `data.ts` — drain Promise | `resolveDrain()` always called in `finally` block (no hanging Promise) |
+| `og-photo-fetch.ts` | Per-attempt + total-budget timeouts, byte cap, `Number.isFinite` guard on Content-Length |
+| `embeddings.ts:134` | `Promise.all` chunks wrapped in `try/catch` per-item — no unhandled rejection |
+| `upload-limits.ts` | `Number()` not `parseInt` (R20C20 fix confirmed), `Math.floor` + `isFinite` + `> 0` guard |
+| `bounded-map.ts` | Hard cap auto-enforced on `set()`, copy-on-read from `get()` / `entries()`, live `.data` reference documented with mutation warning |
+| `view-retention.ts` | Chunked DELETE with per-batch LIMIT — correctly bounded |
+| `proxy.ts` | Admin auth guard order correct, `x-gk-admin-render: 1` set after auth check |
 
 ---
 
 ## Positive Observations
 
-- **Cycle-19 fix quality is high.** All 11 scheduled fixes are correctly implemented. The `walkAborted` design (F2), the privacy type-guard in `search-enrichment-fields.ts` (A2), and the `OG_PHOTO_TOTAL_BUDGET_MS` deadline logic (CQ19-01) are correct and well-commented.
-- **Rate-limit rollback completeness.** The Pattern 2 rollback sites in `og/photo/[id]/route.tsx`, `search/semantic/route.ts`, and `search/similar/[id]/route.ts` are all correctly placed: rollback on pre-work gate failures, charged on post-work paths. The `semanticMode !== 'production'` gate in the similar route correctly rolls back since no expensive embedding scan has occurred yet.
-- **`bounded-map.ts` entries/iterator consistency.** CQ19-02 was correctly applied to both `entries()` and `[Symbol.iterator]()` so any `for...of` on a `BoundedMap` gets copied values.
-- **`color-label.ts` extraction (CQ19-04).** Pure functions isolated to `lib/` with proper re-export from `color-details-section.tsx` for backward compatibility. Clean separation.
-- **CQ19-03 revert rationale documented.** The JSDoc comment in `lightbox-color-pip.tsx:89-91` explains exactly WHY `useCallback` was reverted (conditional early return above violates rules-of-hooks), preventing future well-intentioned "cleanup" from reintroducing the violation.
-- **`session.ts:128`** `parseInt(timestamp, 10)` is safe in practice — session token timestamps are server-generated decimal integers, never written in scientific notation, and any tampered token fails HMAC before reaching the parseInt.
+1. **Deferred-item discipline.** The cycle-20 deferred list is clean: none of the A1/A3/A4/A5/A6+N2/N1/F3 items have regressed or grown in scope.
+
+2. **`viewCountRetryCount` multi-eviction-path coverage.** The code already handles three of the four cleanup paths correctly: (a) `viewCountRetryCount.clear()` when buffer empties, (b) `viewCountRetryCount.delete(groupId)` when the max-retry threshold is hit, (c) `viewCountRetryCount.delete(groupId)` when the at-capacity re-buffer is dropped, and (d) `viewCountRetryCount` hard-cap eviction when sustained outage keeps the buffer non-empty. Only the post-flush cap while-loop (finding C21-RVW-01) misses the parallel delete.
+
+3. **Promise error-handling consistency.** Every `Promise.all` over potentially-failing async ops uses an inner try/catch or `.catch()` so the outer `Promise.all` cannot produce unhandled rejections — a pattern applied uniformly across `images.ts`, `embeddings.ts`, and `data.ts`.
+
+4. **`Number()` vs `parseInt` rollout.** The R20C20 fix for scientific-notation env-var parsing (`Number()` + `Math.floor` + `isFinite` + `> 0`) is correctly applied across `upload-limits.ts`, `rate-limit.ts`, `view-retention.ts`, and `audit.ts`. The pattern is now consistent.
+
+5. **GREATEST guard in `decrementRateLimit`.** `GREATEST(count - 1, 0)` prevents the rate-limit counter from going negative during concurrent rollbacks — a sound defensive use of SQL's GREATEST that avoids a CAS loop.
+
+6. **OG-route fetch chain.** `og-photo-fetch.ts` correctly bounds both per-attempt timeout and total chain budget, uses `Number.isFinite` on the Content-Length header, and applies both pre-buffer and post-buffer byte-cap checks. This is defense-in-depth against slow-read and oversized-response scenarios.
 
 ---
 
 ## Recommendation
 
-**COMMENT** — No CRITICAL or HIGH issues at HIGH confidence. The 2 MEDIUM findings (CQ20-01, CQ20-02) are operational footguns triggered only by scientific-notation env var values; they are the same class as the F1 finding fixed in R19C19 and should be fixed in the next cycle using `Number()` in place of `Number.parseInt(..., 10)` across all 6 affected sites. No blocking defects in the cycle-19 fixes.
+**APPROVE.** No CRITICAL or HIGH findings. Two LOW findings documented above with concrete fixes. The single actionable fix (C21-RVW-01: add `viewCountRetryCount.delete(oldestKey)` at `data.ts:166`) is a one-line change and can be included at the implementer's discretion in the next cycle.

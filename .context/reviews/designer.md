@@ -1,601 +1,314 @@
-# GalleryKit Designer/A11y Review — Cycle 20
+# Designer Review — Cycle 21
 
-**Date:** 2026-06-27
-**HEAD:** 9af705f4
-**Reviewer:** Designer agent (oh-my-claudecode:designer)
-**Scope:** `apps/web/src/components/`, `apps/web/src/app/[locale]/(public)/`, `apps/web/src/app/[locale]/admin/`
-**Method:** Static source review — class selectors, ARIA attributes, semantic structure, token contracts
+**Reviewer:** oh-my-claudecode:designer
+**Date:** 2026-06-29
+**Cycle:** 21 (mature codebase — 20 prior cycles)
 
 ---
 
-## Cycle-19 Fix Verification
+## Cycle-20 Fix Verification
 
-All four cycle-19 scheduled fixes are confirmed landed:
+All D20 fixes verified against source before looking for new issues.
 
-| Finding | Status | Evidence |
-|---------|--------|----------|
-| D19-01 lightbox hitbox → group-focus-visible | FIXED | `lightbox.tsx:628,649` inner `<span>` carries `group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2`; outer button has `group outline-none` |
-| D19-07 skip link `focus:` → `focus-visible:` | FIXED | `layout.tsx:125` and `not-found.tsx:21` both use `focus-visible:not-sr-only focus-visible:absolute …` |
-| D19-08 blue outlines → ring-ring token | FIXED | `image-zoom.tsx:347` now `ring-2 ring-ring ring-offset-2`; `lightbox-color-pip.tsx:165` trigger button fixed; `login-form.tsx:84` fixed |
-| D19-09 upload remove button `focus:` → `focus-visible:` | FIXED | `upload-dropzone.tsx:472` now `focus-visible:opacity-100` |
-
----
-
-## MAJOR-2 Exit Criterion: MET
-
-The deferred MAJOR-2 finding stated the exit criterion as "A designer pass finds ≥3 fresh siblings in one cycle." This cycle found five `<Link>` elements across three previously-unaudited files with no `focus-visible:` styling (D20-01 × 2 locations, D20-03 × 2 links, D20-04 × 2 links). Three of these files are entirely new territory. The ≥3-sibling threshold is met. The general focus-visible scanner (blocked on the deferred work from cycle 19) should now be prioritised.
+| Finding | Status | Notes |
+|---------|--------|-------|
+| D20-01 nav-client topic pills | FIXED | `outline-none focus-visible:ring-ring focus-visible:ring-offset-2` present at ~L127 |
+| D20-01 admin-nav section link | FIXED | same token at ~L40 |
+| D20-02 lightbox-color-pip inner buttons | FULLY FIXED | Both L224 and L305 now carry `focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black`; cycle-20 pin test regex passes |
+| D20-03 timeline year scrubber + year-in-review | FIXED | both have `focus-visible:ring-ring focus-visible:ring-offset-2` |
+| D20-04 g/[key] back-links | FIXED | both branches have `outline-none rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
+| D20-05 group-hover:scale-105 (deferred) | STILL DEFERRED | globals.css catch-all suppresses the scale transform entirely under `prefers-reduced-motion`; exit criterion unchanged |
 
 ---
 
-## Finding D20-01 — MEDIUM
+## Systematic Inventory
 
-### Primary nav topic links and admin nav links still missing `focus-visible:` rings
+Scanned all `components/*.tsx` and `app/[locale]/**/*.tsx` (public + admin). Checked every `<Link>`, `<a>`, and raw `<button>` that is NOT wrapped by shadcn `<Button>` or `<Badge asChild>` (both provide built-in focus-visible rings via their className or Radix Slot). Shadcn `<Button asChild>` wrappers confirmed OK in: dashboard pagination, all admin back-button nav, photo-viewer back-to-topic, lightbox controls, tag-filter chips.
 
-**Files:**
-- `apps/web/src/components/nav-client.tsx` L122–145 (topic filter pills)
-- `apps/web/src/components/admin-nav.tsx` L32–46 (admin section nav)
+---
 
-**WCAG:** 2.4.7 Focus Visible (AA — technically passes via browser default), 2.4.11 Focus Appearance (AA, WCAG 2.2 — fails)
+## New Findings
 
-**Evidence:**
+### D21-01 — footer.tsx: both Links missing focus-visible ring
+**File:** `apps/web/src/components/footer.tsx` L43, L52
+**WCAG:** 2.4.7 Focus Visible (AA) / 2.4.11 Focus Appearance (AA in WCAG 2.2)
+**Severity:** HIGH
+**Elements:**
+- L43: GitHub social link — `className="flex min-h-11 items-center gap-2 hover:underline"` — no focus ring
+- L52: Admin login link — `className="inline-flex min-h-11 min-w-11 items-center justify-center text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"` — no focus ring
 
-`nav-client.tsx:127`:
-```tsx
-"transition-all duration-200 flex items-center gap-2 px-3 py-1.5 min-h-[44px] rounded-full whitespace-nowrap shrink-0"
-// no focus-visible: classes
+**Impact:** Keyboard-navigating users reach the footer (which appears on every public page) and receive no visible focus indicator on these two interactive links. The admin link is especially significant — it is the entry point for administrative access and may be the target of keyboard-only access flows.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to both links' `className`.
+
+---
+
+### D21-02 — s/[key]/page.tsx: "View Gallery" Link missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx` L105
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
 ```
-
-`admin-nav.tsx:40`:
-```tsx
-"inline-flex min-h-11 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground"
-// no focus-visible: classes
+className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11"
 ```
+No `outline-none focus-visible:ring-*` classes. The shared-link page is a public surface; this "View Gallery" back-link is the primary navigation escape.
 
-The immediately adjacent controls in `nav-client.tsx` — hamburger (L96), theme toggle (L157), locale switch (L168) — all received `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` in cycles 17–18. The `<Link>` sibling elements in the same nav bar were never updated. This is the recurring "fix one sibling, miss the next" failure mode predicted by the deferred MAJOR-2.
-
-WCAG 2.4.11 requires a focus indicator of at least 2 px that encloses the visible perimeter at ≥3:1 contrast. Browser-default outlines on `<a>`/`<Link>` elements do not reliably meet this on all browser/OS combinations (Safari produces a blue shadow glow, not a 2 px ring; Chrome on macOS uses a 3 px blue outline that fails against the `bg-foreground text-background` active pill variant on some display profiles).
-
-**User impact:** Keyboard users navigating through topics on every public page, and through admin sections, see either no ring or an inconsistent browser chrome ring while adjacent buttons produce the crisp design-system ring. The primary navigation is the highest-frequency keyboard-navigation target in the product.
-
-**Fix:**
-
-```tsx
-// nav-client.tsx L127 — add to cn() call:
-"outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-
-// admin-nav.tsx L40 — add to cn() call:
-"outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-```
-
-**Confidence:** High
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
 
 ---
 
-## Finding D20-02 — MEDIUM
-
-### lightbox-color-pip expanded panel: inner buttons use `ring-white` not `ring-ring`, missing `ring-offset-2`
-
-**File:** `apps/web/src/components/lightbox-color-pip.tsx` L223, L305
-**WCAG:** 2.4.11 Focus Appearance (AA, WCAG 2.2)
-
-The trigger button (L165) was correctly fixed in cycle 19. Two inner-panel buttons were not:
-
-```tsx
-// L223 — DCI-P3 info tooltip trigger inside expanded panel:
-className="ml-0.5 inline-flex min-h-11 min-w-11 items-center justify-center
-  rounded-full text-white/60 hover:text-white
-  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-  // ↑ ring-white, no ring-offset-2
-
-// L305 — copy-to-clipboard button:
-className="inline-flex min-h-11 min-w-11 items-center gap-1.5 text-white/60
-  hover:text-white transition-colors
-  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white rounded px-1 py-1"
-  // ↑ ring-white, no ring-offset-2
+### D21-03 — year/[year]/page.tsx: "Back to Timeline" Link missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx` L107
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
 ```
-
-Two distinct issues:
-
-1. **Missing `ring-offset-2`**: Without the 2 px offset gap, the ring is drawn flush against the button's own background. WCAG 2.4.11 criterion 2 requires the focus indicator to enclose the component perimeter; the ring must be visually separable from the control itself. The panel background is `bg-black/80` so `ring-white` is visible, but no offset means the ring merges with any dark edge on the button.
-
-2. **Token escape**: `ring-white` hardcodes white. While the panel is always `bg-black/80` (near-opaque black), if the panel ever gains a light-mode variant or the OLED theme changes the panel color, `ring-white` becomes invisible while `ring-ring` would still adapt. This is the same token-inconsistency class as D19-08 (now fixed on the trigger).
-
-**Fix:**
-```tsx
-// Both L223 and L305:
-"… focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 min-h-11"
 ```
+No focus ring. Note: the timeline year scrubber links were fixed in D20-03, but the year detail page back-link is a sibling that was missed — recurring "fix one page, miss the adjacent page" pattern.
 
-On the `bg-black/80` panel, `ring-ring` resolves to the `--ring` CSS variable. In light mode this is typically a dark/neutral color with `ring-offset-2` providing the white gap. If the white gap is undesirable on the dark panel, add `focus-visible:ring-offset-black` to override just the offset color:
-
-```tsx
-"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-  focus-visible:ring-offset-2 focus-visible:ring-offset-black"
-```
-
-This maintains token compliance while ensuring the offset color matches the panel surface.
-
-**Confidence:** High
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
 
 ---
 
-## Finding D20-03 — MEDIUM
-
-### Timeline year scrubber links and year-in-review link have no `focus-visible:` styling
-
-**File:** `apps/web/src/app/[locale]/(public)/timeline/page.tsx` L131–157
-**WCAG:** 2.4.7 Focus Visible (AA — technically passes via browser default), 2.4.11 Focus Appearance (AA, WCAG 2.2 — fails)
-
-The timeline page year scrubber is a `<nav>` containing pill-shaped `<Link>` elements for each year. The active variant uses `bg-primary text-primary-foreground` — a coloured surface that makes browser-default blue outlines inconsistent and low-contrast.
-
-```tsx
-// L131–143 — year scrubber:
-<Link
-    href={…}
-    className={
-        `h-11 min-w-[44px] px-4 inline-flex items-center justify-center rounded-lg text-sm font-medium transition-colors ` +
-        (isActive ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80 text-foreground')
-    }
-    aria-current={isActive ? 'page' : undefined}
->
-// No focus-visible: classes
-
-// L152–157 — year-in-review link:
-<Link
-    href={…}
-    className="inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground
-      hover:text-primary transition-colors underline underline-offset-4"
->
-// No focus-visible: classes
-```
-
-Touch target: PASS (h-11 / min-h-11). Focus indicator: FAIL at 2.4.11.
-
-**User impact:** A keyboard user navigating the timeline year scrubber — the only way to switch between years — sees browser chrome focus rings that are visually discordant with the design system and inconsistent across browsers. On Safari, the year scrubber is the most impacted because Safari's blue-glow outline is especially inconsistent against the `bg-primary` active pill.
-
-**Fix:**
-
-```tsx
-// Year scrubber — add to both branches of the ternary:
-`h-11 min-w-[44px] px-4 inline-flex items-center justify-center rounded-lg text-sm
- font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring
- focus-visible:ring-offset-2 ` +
-(isActive ? … : …)
-
-// Year-in-review link — add:
-"inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground
-  hover:text-primary transition-colors underline underline-offset-4
-  outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-```
-
-**Confidence:** High
-
----
-
-## Finding D20-04 — LOW
-
-### Shared group "View Gallery" back-links missing `focus-visible:` styling
-
-**File:** `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx` L140, L172
-**WCAG:** 2.4.11 Focus Appearance (AA, WCAG 2.2)
-
-Two instances of the "← View Gallery" `<Link>` are missing focus-visible styling:
-
-```tsx
-// L140 (selected-image branch):
-<Link href={…} className="text-sm text-muted-foreground hover:text-primary transition-colors
-  flex items-center gap-1 min-h-11">
-
-// L172 (grid branch):
-<Link href={…} className="text-sm text-muted-foreground hover:text-primary transition-colors
-  flex items-center gap-1 min-h-11">
-```
-
-The masonry grid `<Link>` at L186–189 in the same file correctly has `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`. The header back-link was not addressed.
-
-**Fix:**
-```tsx
-className="… outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-```
-
-**Confidence:** High
-
----
-
-## Finding D20-05 — LOW
-
-### Four new locations with hover-scale animations relying solely on the global reduced-motion catch-all
-
-**Files:**
-- `apps/web/src/components/on-this-day-widget.tsx` L72
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx` L190, L195
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx` L238, L243
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx` L229, L237
-
-**WCAG:** 2.3.3 Animation from Interactions (AAA)
-
-**Evidence (representative):**
-
-```tsx
-// on-this-day-widget.tsx:72
-className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-
-// year/[year]/page.tsx:190,195
-className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-// …
-<div className="… sm:opacity-0 sm:group-hover:opacity-100 … transition-opacity duration-300">
-
-// timeline/page.tsx:238,243 — identical pattern
-// g/[key]/page.tsx:229,237 — identical pattern
-```
-
-None of these four files contain `motion-reduce:transition-none`, `motion-reduce:scale-100`, or any `prefers-reduced-motion` check. They rely on the global CSS catch-all in `globals.css` (`transition-duration: 0.01ms !important`).
-
-This is the same class of fragility already documented in deferred items D19-02/D19-03 for `info-bottom-sheet.tsx` and `photo-viewer.tsx`. The global catch-all is correct today. The concern is that these are four **newly-audited locations** added since the catch-all was written, meaning the catch-all's coverage of new code cannot be verified by inspection alone.
-
-The `home-client.tsx` masonry grid (D18-06) was fixed with `motion-reduce:transition-none motion-reduce:group-hover:scale-100`. These four files should receive the same treatment.
-
-**Exit criterion for D19-02/D19-03 (deferred):** "If the global catch-all is ever removed/scoped, or a reduced-motion user reports motion." The exit criterion has not been met, but the four new instances in public route files increase the surface area to be monitored.
-
-**Fix (representative — apply to all four files/locations):**
-
-```tsx
-// image thumbnail:
-"w-full h-full object-cover group-hover:scale-105 transition-transform duration-300
-  motion-reduce:transition-none motion-reduce:scale-100"
-
-// hover overlay:
-"… sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-300
-  motion-reduce:transition-none"
-```
-
-**Confidence:** Medium (currently correct; risk is silent future regression across four new files)
-
----
-
-## Deferred Item Status (from cycle 19)
-
-| ID | Finding | Status |
-|----|---------|--------|
-| D19-04 | EXIF `<dl>/<dt>/<dd>` semantics | Still deferred. Exit criterion not met. |
-| D19-02/03/06 | Reduced-motion explicit overrides | Still deferred. D20-05 adds 4 new locations — monitor for exit criterion. |
-| MAJOR-2 | General focus-visible scanner | **EXIT CRITERION MET** — ≥3 fresh focus-visible sibling misses found this cycle. Promote. |
-
----
-
-## Observations (No Code Change Required)
-
-**Cycle-19 D18-03 (amber ring on wide-gamut-hint.tsx):** `focus-visible:ring-2 focus-visible:ring-amber-600` at L203. Deferred as LOW. Still present, not materially worse.
-
-**i18n parity:** 780 keys in both en.json and ko.json. Zero keys exclusively in either file. PASS.
-
-**on-this-day-widget.tsx ARIA structure:** `<aside aria-label={t('widgetLabel')}>` correct. `<ul role="list">` correct. Each `<Link>` carries `aria-label={t('viewPhotoAria', { title })}` and `min-h-[44px]` — touch target PASS. The only issue is the thumbnail hover scale (D20-05).
-
-**timeline/page.tsx year scrubber ARIA:** `<nav aria-label={t('yearScrubberLabel')}>` correct. `aria-current="page"` on active year. PASS for ARIA structure; only focus ring is missing (D20-03).
-
-**g/[key]/page.tsx photo grid links:** `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2` on masonry card links at L186-189. PASS for the grid cards; only the header back-link lacks a ring (D20-04).
-
-**lightbox-color-pip.tsx trigger button:** Correctly fixed in cycle 19 — `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` at L165. The INNER panel buttons are the new gap (D20-02).
-
-**admin pages (settings, categories, tags, tokens, users, db, analytics):** All icon `<Button size="icon">` elements carry `aria-label`. `<SelectTrigger className="h-11 …">` meets 44 px floor. `role="alert"` on error surfaces correct. `role="status"` on backfill progress correct. No new touch-target or ARIA violations found.
-
----
-
-## Summary Table
-
-| ID | Severity | Confidence | File:Line | WCAG Criterion |
-|----|----------|------------|-----------|----------------|
-| D20-01 | MEDIUM | High | `nav-client.tsx:122`, `admin-nav.tsx:40` | 2.4.11 Focus Appearance (AA) |
-| D20-02 | MEDIUM | High | `lightbox-color-pip.tsx:223,305` | 2.4.11 Focus Appearance (AA) |
-| D20-03 | MEDIUM | High | `timeline/page.tsx:131-157` | 2.4.11 Focus Appearance (AA) |
-| D20-04 | LOW | High | `g/[key]/page.tsx:140,172` | 2.4.11 Focus Appearance (AA) |
-| D20-05 | LOW | Medium | `on-this-day-widget.tsx:72`, `year/[year]/page.tsx:190,195`, `timeline/page.tsx:238,243`, `g/[key]/page.tsx:229,237` | 2.3.3 Animation from Interactions (AAA) |
-
-**Total new findings: 5** (3 MEDIUM, 2 LOW). Zero CRITICAL or HIGH. The product focus management infrastructure remains sound; all gaps are in navigation `<Link>` elements, which are systematically exempt from the existing `touch-target-audit.test.ts` scanner's focus-visible coverage. MAJOR-2 exit criterion is met — a focus-visible scanner analogous to the touch-target audit should now be scheduled.
-
----
-
-# GalleryKit Designer/A11y Review — Cycle 19
-
-**Date:** 2026-06-27
-**Reviewer:** Designer agent (oh-my-claudecode:designer)
-**Scope:** `apps/web/src/components/` and `apps/web/src/app/[locale]/` (public + admin)
-**Method:** Static source review — class selectors, ARIA attributes, CSS patterns, semantic structure
-
----
-
-## Status of Known-Deferred Items
-
-- **D18-02** (blue-outline → ring-ring token): Partially deferred. Three new sibling instances identified as D19-08 in components not previously audited (`image-zoom.tsx`, `lightbox-color-pip.tsx`, `login-form.tsx`).
-- **D18-06** (masonry hover reduced-motion): Confirmed fully resolved. `globals.css` carries dual coverage: catch-all `transition-duration: 0.01ms !important` plus explicit `group-hover:scale-105` suppression via `transform: none !important` under `@media (prefers-reduced-motion: reduce)`. No re-raise needed.
-
----
-
-## Executive Summary
-
-Nine findings remain, none critical. The codebase is in strong shape: 44px touch-target enforcement (blocking test), focus-visible ring adoption across components, and reduced-motion infrastructure (global CSS catch-all, component-level `matchMedia` checks, and `motion-reduce:` Tailwind utilities) are all genuinely thorough. The two HIGH findings are both focus-indicator precision issues: the skip link surface appearing on mouse clicks, and lightbox nav rings painting on an invisible full-height hitbox rather than the visible circular affordance. The remaining MEDIUM findings are semantic HTML structure (EXIF data needs `<dl>/<dt>/<dd>`) and a design-system token escape in three components. LOW findings are mostly future-fragility risks from relying on the global reduced-motion catch-all instead of explicit overrides.
-
----
-
-## Finding D19-01 — HIGH
-
-### Lightbox prev/next: focus ring paints on invisible hitbox, not visible circular affordance
-
-**File:** `apps/web/src/components/lightbox.tsx` L613–651
-**WCAG:** 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA, WCAG 2.2)
-
-The outer `<button>` spans the full height of the lightbox (`h-full w-16`) and is invisible to sighted users. The `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` class is applied to this invisible boundary, not on the inner circular `<span className="flex h-11 w-11 ... rounded-full bg-black/50">` that users actually see. A keyboard user navigating to prev/next sees a ring painted against the viewport edge, completely disconnected from the circular control affordance.
-
-WCAG 2.4.11 requires the focus indicator to enclose the component's visible perimeter. The visual component here is the 44×44 circle; the outer button ghost is not a visual component.
-
-**Fix:** Use `group` on the outer button with `focus-visible:outline-none`, and `group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2` on the inner `<span>`:
-
-```tsx
+### D21-04 — analytics-client.tsx: window-selector buttons missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` L64–78
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:** Raw `<button>` elements rendered in a `role="group"` for the analytics time-window selector (7d/30d/90d). The buttons carry `aria-pressed` (correct toggle semantics) and `min-h-11` (correct touch target) but no focus ring:
+```jsx
 <button
-  className="pointer-events-auto absolute left-0 top-0 h-full w-16
-    flex items-center justify-center group focus-visible:outline-none"
-  ...
->
-  <span className="flex h-11 w-11 items-center justify-center
-    rounded-full bg-black/50 hover:bg-black/70
-    group-focus-visible:ring-2 group-focus-visible:ring-ring
-    group-focus-visible:ring-offset-2">
-    <ChevronLeft className="h-6 w-6" />
-  </span>
-</button>
-```
-
-**Confidence:** High
-
----
-
-## Finding D19-07 — HIGH
-
-### Skip link uses `focus:` not `focus-visible:` — appears on mouse click
-
-**Files:**
-- `apps/web/src/app/[locale]/layout.tsx` L125
-- `apps/web/src/app/[locale]/not-found.tsx` L21
-**WCAG:** 2.4.1 Bypass Blocks (A)
-
-```tsx
-<a
-  href="#main-content"
-  className="sr-only focus:not-sr-only focus:absolute focus:top-4
-    focus:left-4 focus:z-50 focus:px-4 focus:py-2
-    focus:bg-primary focus:text-primary-foreground focus:rounded-md"
+  onClick={() => setWindow(w.value)}
+  aria-pressed={currentWindow === w.value}
+  className={`min-h-11 min-w-11 rounded-md px-4 py-2 text-sm font-medium transition-colors ${...}`}
 >
 ```
-
-`focus:` maps to `:focus`, which fires on both keyboard navigation and mouse clicks. A user who mouse-clicks anywhere that causes the skip link to gain `:focus` (programmatic focus, or an accidental click) will see it jump into view. The standard convention since `:focus-visible` is broadly supported is to gate skip-link visibility on `focus-visible:` so it only surfaces for keyboard users.
-
-The identical pattern appears in both `layout.tsx` and `not-found.tsx`.
-
-**Fix:** Replace all `focus:` prefixes with `focus-visible:` in both files:
-```tsx
-className="sr-only focus-visible:not-sr-only focus-visible:absolute
-  focus-visible:top-4 focus-visible:left-4 focus-visible:z-50
-  focus-visible:px-4 focus-visible:py-2 focus-visible:bg-primary
-  focus-visible:text-primary-foreground focus-visible:rounded-md"
-```
-
-**Confidence:** High
+**Fix:** Append `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the static part of the className string (outside the conditional).
 
 ---
 
-## Finding D19-08 — MEDIUM
-
-### Three components use hardcoded `outline-blue-500/400` instead of `ring-ring` design-system token
-
-**Files:**
-- `apps/web/src/components/image-zoom.tsx` L347
-- `apps/web/src/components/lightbox-color-pip.tsx` L161
-- `apps/web/src/app/[locale]/admin/login-form.tsx` L84
-**WCAG:** 2.4.7 Focus Visible (AA)
-**Context:** New siblings of deferred D18-02; these locations were not previously audited.
-
-All three use:
-```tsx
-focus-visible:outline focus-visible:outline-2
-focus-visible:outline-offset-2
-focus-visible:outline-blue-500
-dark:focus-visible:outline-blue-400
+### D21-05 — not-found.tsx: "Back Home" Link missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/not-found.tsx` L43
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
 ```
-
-The established codebase pattern is `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`, which resolves through the `--ring` CSS variable and adapts to all themes (light, dark, OLED) and future rebranding. The hard-coded blue escapes this:
-
-- The image-zoom zoom-toggle button (`image-zoom.tsx:347`) is a primary photo-viewer interaction.
-- The lightbox color-pip open button (`lightbox-color-pip.tsx:161`) is overlaid on black — blue outline may be acceptable there but is inconsistent.
-- The password-visibility toggle in the login form (`login-form.tsx:84`) is especially user-visible.
-
-**Fix for all three:**
-```tsx
-focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+className="inline-flex items-center min-h-11 text-primary hover:underline text-sm"
 ```
-Remove `focus-visible:outline`, `focus-visible:outline-2`, and `focus-visible:outline-offset-2` — the `ring` utilities already produce the correct inset/offset ring without requiring `outline`.
+The 404 page has a full nav shell (fixed in a prior cycle) but the primary recovery action link has no keyboard focus indicator. A keyboard user who lands on a 404 page cannot visibly navigate the recovery link.
 
-**Confidence:** High
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
 
 ---
 
-## Finding D19-04 — MEDIUM
-
-### EXIF data key-value pairs lack `<dl>/<dt>/<dd>` semantics
-
-**Files:**
-- `apps/web/src/components/photo-viewer.tsx` L792–916
-- `apps/web/src/components/info-bottom-sheet.tsx` L346–467
-**WCAG:** 1.3.1 Info and Relationships (A)
-
-Both the photo-viewer info panel and the mobile bottom sheet EXIF grid render metadata as:
-```tsx
-<div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
-  <div>
-    <p className="text-xs text-muted-foreground uppercase tracking-wide">Aperture</p>
-    <p className="font-medium">f/2.8</p>
-  </div>
-  ...
-</div>
+### D21-06 — error.tsx (public): "Try Again" button missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/error.tsx` L32
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
 ```
-
-WCAG 1.3.1 requires that label-value relationships conveyed visually be programmatically determinable. A `<dl>/<dt>/<dd>` structure (definition list) satisfies this; adjacent `<p>` elements in a `<div>` do not. Screen readers traversing the grid will announce each item without identifying its term-definition relationship.
-
-**Fix:** Convert to `<dl>/<dt>/<dd>`. The visual output is identical:
-```tsx
-<dl className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
-  <div>
-    <dt className="text-xs text-muted-foreground uppercase tracking-wide">
-      {t('exif.aperture')}
-    </dt>
-    <dd className="font-medium mt-0.5">f/2.8</dd>
-  </div>
-  ...
-</dl>
+className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
 ```
+Raw `<button>` (not shadcn Button) without `outline-none focus-visible:ring-*`. This is the error boundary recovery button shown when the React subtree throws.
 
-Apply to both the photo-viewer info panel and the bottom sheet EXIF grid identically.
-
-**Confidence:** High
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the className.
 
 ---
 
-## Finding D19-05 — MEDIUM
-
-### P3 gamut and HDR peek chips use 10px text — WCAG 1.4.4
-
-**File:** `apps/web/src/components/info-bottom-sheet.tsx` L272, L277
-**WCAG:** 1.4.4 Resize Text (AA)
-
-```tsx
-<span className="... text-[10px] font-bold bg-purple-200 text-purple-900
-  dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
-  P3
-</span>
-<span className="... text-[10px] font-bold
-  bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 ...">
-  HDR
-</span>
+### D21-07 — error.tsx (public): "Back to Gallery" Link missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/error.tsx` L38
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
 ```
-
-10px is below the practical legibility floor for most body text (12–14px is standard minimum). At 10px, the 200% resize requirement of WCAG 1.4.4 only brings the text to 20px, and many users configure their browser minimum font size above that. The labels carry meaningful semantic content (gamut and HDR capability status), not merely decoration. The peek-state is also the first and only visible state of these badges when the sheet is collapsed — the user can not expand to see a larger version.
-
-**Fix:** Raise to `text-xs` (12px Tailwind default) or `text-[11px]` as a compromise. The peek row has sufficient horizontal room:
-```tsx
-<span className="text-xs font-semibold px-2 py-0.5 ...">P3</span>
-<span className="text-xs font-semibold px-2 py-0.5 ...">HDR</span>
+className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"
 ```
+Sibling of D21-06 on the same error page. Both action buttons on the error boundary are keyboard-invisible.
 
-**Confidence:** High
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the className.
 
 ---
 
-## Finding D19-02 — LOW
+### D21-08 — on-this-day-widget.tsx: "View Timeline" and photo Links missing focus-visible ring
+**File:** `apps/web/src/components/on-this-day-widget.tsx` L40, L56
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Elements:**
+- L40 "View Timeline" link: `className="text-xs text-muted-foreground hover:text-primary transition-colors min-h-[44px] flex items-center"` — no focus ring
+- L56 per-photo Links: `className="flex items-center gap-3 group min-h-[44px]"` — no focus ring
 
-### Bottom sheet slide transition relies on global CSS catch-all for reduced-motion, not an explicit override
-
-**File:** `apps/web/src/components/info-bottom-sheet.tsx` L203
-**WCAG:** 2.3.3 Animation from Interactions (AAA)
-
-```tsx
-className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl
-  shadow-2xl transition-transform duration-300 ease-out"
-```
-
-The `globals.css` global `transition-duration: 0.01ms !important` catch-all effectively snaps this transition for reduced-motion users — the current behavior is correct. The concern is fragility: `lightbox.tsx` and `photo-viewer.tsx` both explicitly test `prefersReducedMotion` for their motion decisions, while the bottom sheet relies solely on the global catch-all. If the global rule is ever scoped (for instance, to stop it from interfering with a specific animation library), the bottom sheet regresses silently.
-
-**Fix:** Add an explicit `motion-reduce:` modifier, which documents intent at the callsite:
-```tsx
-className="... transition-transform duration-300 ease-out
-  motion-reduce:transition-none"
-```
-
-**Confidence:** Medium (currently correct; risk is silent future regression)
-
----
-
-## Finding D19-03 — LOW
-
-### Photo-viewer layout transitions rely on global CSS catch-all rather than explicit overrides
-
-**File:** `apps/web/src/components/photo-viewer.tsx` L663, L743
-**WCAG:** 2.3.3 Animation from Interactions (AAA)
-
-Same fragility as D19-02. The grid layout switch at L663 uses `transition-all duration-500 ease-in-out` and the info sidebar at L743 uses `transition-[opacity,transform] duration-500 ease-in-out` — both rely on the global CSS catch-all. The component already imports and uses `prefersReducedMotion` (from framer-motion) for its animated content.
-
-**Fix:** Add explicit `motion-reduce:` modifiers:
-```tsx
-// L663:
-className={cn(
-  "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
-  "motion-reduce:transition-none",
-  showInfo ? "..." : "..."
-)}
-
-// L743:
-className={cn(
-  "... transition-[opacity,transform] duration-500 ease-in-out ...",
-  "motion-reduce:transition-none"
-)}
-```
-
-**Confidence:** Medium (currently correct; risk is silent future regression)
-
----
-
-## Finding D19-06 — LOW
-
-### HDR badge gradient may have variable contrast across its width
-
-**File:** `apps/web/src/components/info-bottom-sheet.tsx` L277–279
-**WCAG:** 1.4.3 Contrast Minimum (AA)
-
-```tsx
-<span className="... bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 ...">
-  HDR
-</span>
-```
-
-Estimated contrasts against amber-950 (#451A03): amber-300 (#FCD34D) ≈ 7.2:1 (passes AAA), orange-400 (#FB923C) ≈ 4.8:1 (passes AA). Given the badge is 3 characters wide the contrast gradient is minimal; both ends pass AA. This finding is informational — no code change required unless visual verification reveals that the rendered gradient washes the text at the lighter end.
-
-**Note:** If simplification is desired, a solid `bg-amber-300 text-amber-950` removes the gradient complexity while maintaining identical contrast.
-
-**Confidence:** Low (likely acceptable as-is)
-
----
-
-## Finding D19-09 — LOW
-
-### Upload remove button uses `focus:opacity-100` instead of `focus-visible:opacity-100`
-
-**File:** `apps/web/src/components/upload-dropzone.tsx` L472
-**WCAG:** Convention consistency
-
-```tsx
-className="... sm:opacity-0 sm:group-hover:opacity-100 opacity-100
-  focus:opacity-100 transition-opacity"
-```
-
-`focus:` fires on `:focus`, which includes mouse-click focus. On `sm:` breakpoints where the button starts hidden (opacity-0), a mouse click triggers the action handler and the button becomes briefly visible before the image is removed. Real harm is negligible (the button disappears immediately after the click), but this is inconsistent with the `focus-visible:` convention used everywhere else in the codebase.
+The on-this-day widget is embedded in the public photo viewer page. Both links are navigable via keyboard but invisible during focus.
 
 **Fix:**
-```tsx
-focus-visible:opacity-100
-```
+- L40: Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to className
+- L56: Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md` to className
 
-**Confidence:** High (fix is unambiguously correct); Low (current code causes no observable user harm)
+---
+
+### D21-09 — home-client.tsx: "Clear filter" Link missing focus-visible ring
+**File:** `apps/web/src/components/home-client.tsx` L459
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
+```
+className="inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary"
+```
+The empty-state "Clear filter" link (shown when tag filters return no results) has no focus ring. Note: `topic-empty-state.tsx` L18 has an identical instance — see D21-11.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+
+---
+
+### D21-10 — admin/(protected)/error.tsx: both action elements missing focus-visible ring
+**File:** `apps/web/src/app/[locale]/admin/(protected)/error.tsx` L35, L41
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Elements:**
+- L35 `<button>`: `className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"` — no focus ring
+- L41 `<Link>`: `className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"` — no focus ring
+
+Exact duplicate pattern of D21-06/D21-07 on the admin subtree's error boundary page.
+
+**Fix:** Same as D21-06/D21-07 — add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to both.
+
+---
+
+### D21-11 — topic-empty-state.tsx: "Clear filter" Link missing focus-visible ring
+**File:** `apps/web/src/components/topic-empty-state.tsx` L18
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** HIGH
+**Element:**
+```
+className="inline-flex items-center min-h-11 px-2 underline hover:text-primary"
+```
+This is the topic-filter empty-state variant of D21-09. Both components render "Clear filter" links in empty states and both lack focus rings. Fix together.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+
+---
+
+### D21-12 — admin-header.tsx: admin logo Link missing focus-visible ring
+**File:** `apps/web/src/components/admin-header.tsx` L16
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** MED
+**Element:**
+```
+className="mr-6 flex items-center space-x-2 font-bold min-h-11"
+```
+The admin panel's header logo/brand link (navigates to dashboard) has no focus ring. Admin panel users frequently keyboard-navigate; the primary brand link being invisible on focus is inconsistent with the design system.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+
+---
+
+### D21-13 — nav-client.tsx: site logo/home Link missing focus-visible ring
+**File:** `apps/web/src/components/nav-client.tsx` L85
+**WCAG:** 2.4.7 / 2.4.11
+**Severity:** MED
+**Element:**
+```
+className="flex items-center space-x-2 shrink-0 min-h-[44px]"
+```
+The public nav's site name/logo Link (line 85, distinct from the topic pill links fixed in D20-01) has no focus-visible ring. Keyboard navigation starting at the top of any page will Tab to this link first.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+
+---
+
+## Structural Finding (Persistent)
+
+### MAJOR-2 — Focus-visible scanner: exit criterion reached cycle 20, action required cycle 21
+
+**Status:** Exit criterion MET in cycle 20 (≥3 fresh siblings found); cycle 21 found 13 new instances. After 5+ cycles of finding 3–13 new focus-visible gaps each cycle, the manual sweep model is not converging.
+
+**Root cause:** There are pin tests for components fixed in cycles 17–20 (`focus-visible-rings-cycle17.test.ts`, `focus-visible-rings-cycle19.test.ts`, `focus-visible-rings-cycle20.test.ts`) but NO proactive scanner that detects uncovered `<Link>` and `<a>` elements before they ship. Every cycle uncovers a new batch of siblings adjacent to previously-fixed elements.
+
+**Proposed scanner test** (`__tests__/focus-visible-links-scan.test.ts`):
+Walk all `.tsx` files under `components/` and `app/[locale]/`. For each file, extract raw `<Link` and `<a ` JSX openings (not inside `<Button asChild>`). Assert that any such element with a `className` containing an interactive signal (`hover:`, `underline`, `min-h-`, `text-primary`, `text-muted-foreground`) also contains `focus-visible:ring` within the same JSX opening tag block. Exempt by path + anchor-text with a mandatory comment. This scanner would have caught all 13 D21 findings automatically.
+
+**Alternative (simpler):** A grep-based count assertion: in the repo's `components/` and `app/[locale]/`, count `<Link` and `<a ` elements that have `hover:` in their className but NOT `focus-visible:ring`. Assert the count is zero (or equals a documented allowlist). A count increase fails CI.
+
+**Required this cycle:** build the scanner. MAJOR-2 will not converge via manual sweep alone.
+
+---
+
+## Confirmed OK
+
+| Component | Status |
+|-----------|--------|
+| `lightbox.tsx` close/nav/slideshow buttons | OK — explicit `focus-visible:ring-2 focus-visible:ring-ring` |
+| `lightbox-color-pip.tsx` all three buttons | OK — D20-02 fully fixed; trigger + tooltip + copy all confirmed |
+| `photo-navigation.tsx` prev/next | OK — `<Button size="icon">` provides ring |
+| `upload-dropzone.tsx` remove button | OK — `<Button variant="ghost" size="icon">` |
+| `tag-filter.tsx` tag chips | OK — `<Badge asChild><button>` via Radix Slot |
+| `color-details-section.tsx` all buttons | OK — explicit `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring` |
+| `search.tsx` combobox + result items | OK — combobox/listbox pattern; result `<Link>` items are `role="option"` managed via `aria-activedescendant`, not Tab-focused |
+| `wide-gamut-hint.tsx` dismiss button | OK — `ring-amber-600` (cycle-17 fix) |
+| `login-form.tsx` password toggle | OK — explicit ring |
+| Admin back-nav (tags, seo, settings, categories) | OK — all use `<Button asChild variant="ghost" size="icon">` |
+| `dashboard-client.tsx` pagination | OK — `<Button asChild>` |
+| `bulk-edit-dialog.tsx` | OK — uses shadcn Dialog/Button throughout |
+| `not-found.tsx` skip-to-content link | OK — `focus-visible:not-sr-only` pattern |
+| `similar-photos.tsx` expand toggle | OK — explicit `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
+| `home-client.tsx` back-to-top button | OK — explicit `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
+| `home-client.tsx` masonry card links | OK — parent div uses `focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2` |
+
+---
+
+## i18n Parity
+
+Flat-key diff between `messages/en.json` and `messages/ko.json`: zero gaps in either direction. Full parity confirmed via programmatic key enumeration.
+
+---
+
+## Reduced-motion
+
+`globals.css` L291: global `@media (prefers-reduced-motion: reduce)` catch-all suppresses `animation-duration`, `transition-duration`, and `scroll-behavior`. A secondary rule (AGG-M4) explicitly removes the CSS `group-hover:scale-*` transform (not just the transition) for vestibular safety, covering D20-05. Component-level handling verified in `lightbox.tsx`, `home-client.tsx` back-to-top, `image-zoom.tsx`. No new issues.
+
+---
+
+## Contrast
+
+Light mode `--muted-foreground` (240 3.8% 40%) on white: ~6.1:1 — WCAG AA pass.
+Dark mode `--muted-foreground` (240 5% 64.9%) on near-black (240 10% 3.9%): ~7.4:1 — WCAG AA pass.
+OLED `--muted-foreground` (same) on black: ~5.7:1 — WCAG AA pass.
+`--destructive-text` light on white: ~5.9:1 — WCAG AA pass.
+`--destructive-text` dark on near-black: ~7:1 — WCAG AA pass.
+No contrast regressions found.
+
+---
+
+## ARIA Audit
+
+- `search.tsx`: combobox + listbox pattern correct. `role="combobox"`, `aria-autocomplete="list"`, `aria-controls`, `aria-expanded`, `aria-activedescendant` all present and wired. `aria-live="polite"` result-count region present. `aria-haspopup="dialog"` on trigger is accurate.
+- `analytics-client.tsx` window selector: `role="group"` with `aria-label` on wrapper; individual buttons use `aria-pressed` — correct toggle-button semantics.
+- `lightbox.tsx`: `aria-modal="true"`, `aria-label` on dialog, focus trap managed by Radix Dialog.
+- `on-this-day-widget.tsx`: `<aside aria-label={t('widgetLabel')}>` landmark present.
+- `similar-photos.tsx`: disclosure button uses `aria-expanded` + `aria-controls`. Photo links have `aria-label` with photo title.
+- `not-found.tsx`: skip-link, `<main id="main-content" tabIndex={-1}>` focus target, correct heading hierarchy.
+- No new ARIA issues found.
 
 ---
 
 ## Summary Table
 
-| ID | Severity | Confidence | File:Line | Criterion |
-|----|----------|------------|-----------|-----------|
-| D19-01 | HIGH | High | `lightbox.tsx:613` | WCAG 2.4.7, 2.4.11 |
-| D19-07 | HIGH | High | `layout.tsx:125`, `not-found.tsx:21` | WCAG 2.4.1 |
-| D19-08 | MEDIUM | High | `image-zoom.tsx:347`, `lightbox-color-pip.tsx:161`, `login-form.tsx:84` | WCAG 2.4.7 |
-| D19-04 | MEDIUM | High | `photo-viewer.tsx:792`, `info-bottom-sheet.tsx:346` | WCAG 1.3.1 |
-| D19-05 | MEDIUM | High | `info-bottom-sheet.tsx:272,277` | WCAG 1.4.4 |
-| D19-02 | LOW | Medium | `info-bottom-sheet.tsx:203` | WCAG 2.3.3 |
-| D19-03 | LOW | Medium | `photo-viewer.tsx:663,743` | WCAG 2.3.3 |
-| D19-06 | LOW | Low | `info-bottom-sheet.tsx:277` | WCAG 1.4.3 |
-| D19-09 | LOW | Low (harm) | `upload-dropzone.tsx:472` | Convention |
+| ID | File | Location | Issue | Severity | WCAG |
+|----|------|----------|-------|----------|------|
+| D21-01 | `footer.tsx` | L43, L52 | GitHub + Admin links missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-02 | `s/[key]/page.tsx` | L105 | "View Gallery" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-03 | `year/[year]/page.tsx` | L107 | "Back to Timeline" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-04 | `analytics-client.tsx` | L64–78 | Window-selector buttons missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-05 | `not-found.tsx` | L43 | "Back Home" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-06 | `error.tsx` (public) | L32 | "Try Again" button missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-07 | `error.tsx` (public) | L38 | "Back to Gallery" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-08 | `on-this-day-widget.tsx` | L40, L56 | "View Timeline" + photo links missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-09 | `home-client.tsx` | L459 | "Clear filter" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-10 | `admin/(protected)/error.tsx` | L35, L41 | Error boundary actions missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-11 | `topic-empty-state.tsx` | L18 | "Clear filter" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
+| D21-12 | `admin-header.tsx` | L16 | Admin logo link missing focus-visible ring | MED | 2.4.7 / 2.4.11 |
+| D21-13 | `nav-client.tsx` | L85 | Site logo/home link missing focus-visible ring | MED | 2.4.7 / 2.4.11 |
+| MAJOR-2 | Structural | Repo-wide | No automated scanner for uncovered interactive `<Link>`/`<a>` elements — build required this cycle | SYSTEMIC | — |
+
+**Total new findings:** 13 (11 HIGH, 2 MED) + 1 systemic scanner gap requiring action.
+**Deferred from cycle-20 (still deferred):** D20-05 reduced-motion scale (global catch-all covers).
+**Confidence:** HIGH on all findings — direct source inspection of exact className strings.

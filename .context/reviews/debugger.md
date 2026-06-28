@@ -1,148 +1,178 @@
-# Debugger Review — Cycle 20
-**Date:** 2026-06-27
-**HEAD:** 9af705f4
-**Findings:** 4 (2 MEDIUM, 2 LOW)
+# Debugger Review — Cycle 21
+**Date:** 2026-06-29
+**HEAD:** 993ed471 (cycle-20 fixes landed)
+**Findings:** 2 (2 LOW)
 
 ---
 
 ## Methodology
 
+Cycle-20 baseline: F1 (`audit.ts` parseInt→Number), F2 (`process-image.ts` parseInt→Number ×2),
+F4 (`upload-limits.ts` parseInt→Number), F3 (`audit.ts` unbounded DELETE — deliberately deferred).
+All F1/F2/F4 confirmed fixed.
+
 Surfaces audited this cycle:
-- `parseInt` vs `Number()` pattern sweep across all of `lib/` (except files confirmed clean in cycle 19)
-- `lib/audit.ts` full read (retention parsing + DELETE chunking parity with view-retention)
-- `lib/process-image.ts:330-340` — `IMAGE_MAX_INPUT_PIXELS` / `IMAGE_MAX_INPUT_PIXELS_TOPIC` / `SHARP_CONCURRENCY` parsing
-- `lib/upload-limits.ts` — `parsePositiveIntEnv` helper
-- `lib/session.ts` — `parseInt(timestamp, 10)` in `verifySessionToken`
-- Cycle-19 F2 re-verification: `gps-exif-strip.ts` `walkAborted` guard + `stripGpsFromOriginal` Tier 2 caller path
-
-Deferred/known items from `cycle-19-deferred.md` and `_aggregate.md` consulted first. None of the findings below duplicate known items.
-
----
-
-## Finding F1 — `AUDIT_LOG_RETENTION_DAYS` parsed with `parseInt`, same class as cycle-19 F1
-
-**File:** `apps/web/src/lib/audit.ts:111`
-**Severity:** MEDIUM
-**Confidence:** High
-
-```ts
-const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10);
-effectiveMaxAgeMs = Number.isFinite(retentionDays) && retentionDays > 0
-    ? retentionDays * 24 * 60 * 60 * 1000
-    : DEFAULT_MAX_AGE_MS;
-```
-
-`Number.parseInt('1e3', 10)` stops at `'e'` and returns `1`, not `1000`. The guard `Number.isFinite(1) && 1 > 0` is true, so `effectiveMaxAgeMs = 86_400_000` ms = **1 day**. On the next hourly GC sweep (`image-queue.ts` calls `purgeOldAuditLog()`) the audit log is pruned to the last 24 hours, silently discarding months of admin-action history.
-
-Cycle-19 found and fixed the identical bug in `lib/view-retention.ts:50` (cycle-19 F1). That fix was NOT applied to `audit.ts`.
-
-**Trigger:** `AUDIT_LOG_RETENTION_DAYS=1e3` in `.env.local` (operator intending 1000-day retention).
-
-**Root cause:** `audit.ts` and `view-retention.ts` have parallel retention-guard logic. The cycle-19 fix was applied only to the specific file reported, not as a pattern sweep across the codebase.
-
-**Fix (one line):**
-```ts
-// audit.ts:111
-const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '');
-```
-`Number('1e3')` returns `1000`. The existing `Number.isFinite && > 0` guard still rejects NaN/negative/zero correctly.
+- Full `parseInt` sweep across remaining callsites (`actions/topics.ts`, route param guards,
+  dashboard page param, `session.ts` timestamp) — to close the "fix one sibling, miss the next"
+  pattern from cycle-19/20
+- `process-image.ts` atomic-rename / hard-link chain (lines 1270–1330)
+- `data.ts` viewCountFlushTimer timer lifecycle (3 creation sites)
+- `image-queue.ts` gcInterval + bootstrapRetryTimer unref / shutdown cleanup
+- `histogram.tsx` AbortController lifecycle
+- `data-timeline.ts` timezone-safety of `new Date(capture_date).getMonth()`
+- `analytics-data.ts` `windowStart` date arithmetic
+- `exif-datetime.ts` Date.UTC consistency
+- `on-this-day-widget.tsx` month/day sourcing vs MySQL MONTH()/DAY()
+- `admin-backfill-runner.ts` PoolConnection resource paths (acquireImageProcessingClaim,
+  releaseImageProcessingClaim, reprocessOne outer try/finally, acquireBackfillLock)
+- `bounded-map.ts` post CQ20-07 state
+- `og-photo-fetch.ts` post PERF-C20-01 state
 
 ---
 
-## Finding F2 — `IMAGE_MAX_INPUT_PIXELS` / `IMAGE_MAX_INPUT_PIXELS_TOPIC` parsed with `parseInt`
+## Finding DBG21-01 — `parseInt` survives in `actions/topics.ts` order field
 
-**File:** `apps/web/src/lib/process-image.ts:330, 339`
-**Severity:** MEDIUM
-**Confidence:** High
-
-```ts
-const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
-const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
-    ? envMaxInputPixels
-    : 256 * 1024 * 1024;
-```
-
-`Number.parseInt('256e6', 10)` stops at `'e'` and returns `256`. The guard `Number.isFinite(256) && 256 > 0` is true, so `maxInputPixels = 256`. Sharp's `limitInputPixels: 256` caps at **256 total pixels**. Every real photo exceeds this and throws `VipsError: Input image exceeds pixel limit`, causing all upload jobs to fail.
-
-`IMAGE_MAX_INPUT_PIXELS_TOPIC` at line 339 has the same pattern.
-
-CLAUDE.md documents the default as `268435456` (plain integer), so scientific notation is unlikely. However the env var description invites large values ("decompression bomb protection cap, default 256M pixels"); an operator reading "256M pixels" might naturalistically write `256e6`.
-
-**Fix (two lines):**
-```ts
-// process-image.ts:330
-const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
-// process-image.ts:339
-const envTopicPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '');
-```
-`SHARP_CONCURRENCY` at line 45 has the same `parseInt` but the impact is benign (parses as 1 = min threads).
-
----
-
-## Finding F3 — `purgeOldAuditLog` uses unbounded DELETE (no LIMIT chunking)
-
-**File:** `apps/web/src/lib/audit.ts:117`
+**File:** `apps/web/src/app/actions/topics.ts:108, 211`
 **Severity:** LOW
 **Confidence:** High
 
 ```ts
-await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
+// line 108 (createTopic) — same pattern at line 211 (updateTopic)
+let order = parseInt(orderStr, 10);
+if (Number.isNaN(order)) order = 0;
+order = Math.max(-1000, Math.min(1000, order));
 ```
 
-Single unbounded `DELETE FROM audit_log WHERE created_at < ?` with no `LIMIT`. By contrast, `purgeOldViewEvents` in `view-retention.ts:77-86` uses a `LIMIT 5000` batch loop bounded by `MAX_BATCHES_PER_TABLE = 200`, explicitly to avoid a long table lock on the single MySQL writer.
+`parseInt('1e3', 10)` stops at `'e'` and returns `1`, not `1000`. The `Number.isNaN(1)` guard
+passes, so `order = 1` instead of the operator-intended `1000`. The `Math.clamp(-1000, 1000)`
+keeps the value within range (1 is a valid sort order), so no exception is thrown — the topic
+is simply placed at position 1 instead of 1000. No data corruption; purely a sort-ordering
+semantic mismatch.
 
-The audit log is low-write-rate (admin actions only), so a multi-million-row backlog is unlikely in normal operation. The risk surface is an instance that ran with a misconfigured short retention (see F1) for a long time then had retention extended — the first correct sweep hits all accumulated rows in one lock.
+**Trigger:** Admin sets topic sort order to `1e3` via FormData (unlikely in UI — the UI likely
+sends a plain integer; the risk is an API caller or a future batch-import tool).
 
-**Fix:** Apply the same `LIMIT`-based chunking pattern from `view-retention.ts`. Not urgent; flagging for parity.
+**Root cause:** The cycle-20 env-parse sweep (`Number()` replacing `parseInt`) was limited to
+`process.env` sites. FormData string fields in server actions were not included in the sweep.
+
+**Fix (two lines, same pattern as cycle-20):**
+```ts
+// topics.ts:108
+let order = Number(orderStr);
+if (!Number.isFinite(order)) order = 0;
+order = Math.max(-1000, Math.min(1000, order));
+
+// topics.ts:211 — identical change
+```
+
+Note: `Number.isNaN` should become `!Number.isFinite` since `Number('abc')` returns `NaN`
+(handled by isNaN) but `Number('Infinity')` returns `Infinity` (not caught by isNaN but caught
+by !isFinite).
 
 ---
 
-## Finding F4 — `parsePositiveIntEnv` in `upload-limits.ts` uses `parseInt`
+## Finding DBG21-02 — Hard-link / copyFile same-inode corruption in atomic-rename fallback
 
-**File:** `apps/web/src/lib/upload-limits.ts:11`
-**Severity:** LOW
-**Confidence:** High
+**File:** `apps/web/src/lib/process-image.ts:1283–1308`
+**Severity:** VERY LOW (requires a broken-filesystem condition; not a routine path)
+**Confidence:** High (logic analysis)
 
 ```ts
-function parsePositiveIntEnv(name: string, fallback: number): number {
-    const rawValue = process.env[name]?.trim();
-    if (!rawValue) return fallback;
-    const parsed = Number.parseInt(rawValue, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+try {
+    await fs.link(outputPath, tmpPath);     // A: creates hard link — same inode as outputPath
+    await fs.rename(tmpPath, basePath);     // B: if this throws (e.g. EISDIR on basePath)…
+} catch {
+    // …src and dst now share the same inode (link succeeded, rename failed)
+    await fs.copyFile(outputPath, tmpPath)  // C: O_TRUNC flag zeroes the SHARED inode
+        .catch((err) => { ... });           //    → outputPath (the encoded sized variant) is NOW 0 bytes
+    await fs.rename(tmpPath, basePath);
+} finally {
+    await safeUnlink(tmpPath);
 }
 ```
 
-Used for `UPLOAD_MAX_TOTAL_BYTES`, `UPLOAD_MAX_FILES_PER_WINDOW`, and `NEXT_UPLOAD_BODY_MAX_BYTES`. If `UPLOAD_MAX_TOTAL_BYTES='2e9'` (2 billion bytes / 2 GiB), `parseInt('2e9', 10)` returns `2`. Guard passes (`isFinite(2) && 2 > 0`), so `MAX_TOTAL_UPLOAD_BYTES = 2 bytes`. Every upload batch is immediately rejected as exceeding quota.
+**Scenario:** Step A succeeds (hard link created: `tmpPath` and `outputPath` share one inode).
+Step B fails — requires either: the destination `basePath` to be an existing directory (EISDIR),
+or a filesystem-level fault (e.g., a writeback error on a degraded XFS/EXT4 volume). The catch
+block then calls `fs.copyFile(outputPath, tmpPath)`. On Linux, `copyFile` opens `tmpPath` with
+`O_WRONLY|O_CREAT|O_TRUNC` — because `tmpPath` and `outputPath` ARE the same inode, the
+`O_TRUNC` zeroes the shared inode, setting both the tmp file AND the encoder's output variant
+(`outputPath`) to 0 bytes.
 
-Lower severity than F2 because the error surfaces as a quota rejection rather than an opaque Sharp exception, and operators are likely to copy the documented plain-integer default (`2147483648`).
+**Blast radius:** Only `outputPath` (the largest configured image variant for the current
+format, e.g. `_5120.avif`) is affected. `verifyFile` checks `basePath` (also 0 bytes after the
+`rename` in the catch), finds it 0 bytes, throws a verification failure, and prevents the job
+from being marked `processed = true`. The queue retries the job and the retry re-encodes the
+file from the original, restoring `outputPath`. Meanwhile `outputPath` is 0 bytes on disk — a
+cold-cache request for that specific size during the retry window would return an empty
+AVIF/WebP/JPEG to the browser.
 
-**Fix (one line):**
+**Why very low:** The failure requires either EISDIR at `basePath` (impossible under normal
+operation — `basePath` is always a file path under `public/uploads/{format}/`) or a filesystem
+fault that rejects `rename` after `link` succeeded. Docker-deployed on a healthy Linux
+filesystem never hits this path in practice.
+
+**Fix (minimal, if desired):**
 ```ts
-const parsed = Number(rawValue);
+} catch {
+    // If link succeeded, tmpPath shares outputPath's inode.
+    // copyFile(outputPath, tmpPath) on a same-inode pair would O_TRUNC the
+    // shared inode. Use a distinct temp name to avoid this.
+    const safeTmp = `${tmpPath}.copy`;
+    await fs.copyFile(outputPath, safeTmp).catch((err) => { ... });
+    await fs.rename(safeTmp, basePath);
+} finally {
+    await safeUnlink(tmpPath);
+    await safeUnlink(`${tmpPath}.copy`); // clean up if rename above failed
+}
 ```
+
+Given the VERY LOW probability of the trigger condition, deferral is reasonable.
 
 ---
 
-## Cycle-19 Fixes Verified
+## Cycle-20 Fixes Verified
 
 | Fix | Location | Status |
 |-----|----------|--------|
-| F1 — view-retention `parseInt` to `Number()` | `lib/view-retention.ts:50` | Confirmed. `Number(process.env.VIEW_RETENTION_DAYS ?? '')` |
-| F2 — gps-exif-strip `walkAborted` returns null | `lib/gps-exif-strip.ts:393,405,411,466` | Confirmed. `walkAborted = true` on all three early-exit paths; `if (walkAborted) return null;` at line 466 fires before the clean-verdict return |
-| CQ19-01 — OG fetch total budget cap | `lib/og-photo-fetch.ts:47,101,106` | Confirmed. `OG_PHOTO_TOTAL_BUDGET_MS = 10_000`; `if (Date.now() >= deadline) break;` |
-
-**Cycle-19 F2 caller-path re-verification (`stripGpsFromOriginal`, `process-image.ts:1629-1714`):** `scrubbed = null` from `stripGpsFromIsobmffBuffer` correctly falls through to Tier 2 re-encode. Temp file lifecycle is clean: written to `tmpPath` then atomically renamed, or cleaned by `safeUnlink(tmpPath)` in the catch block. The HEIC/HEIF Tier 2 early-return path (no HEVC encoder) correctly returns before writing `tmpPath` — no orphan risk.
+| F1 — `AUDIT_LOG_RETENTION_DAYS` `Number()` | `lib/audit.ts:116` | Confirmed |
+| F2 — `IMAGE_MAX_INPUT_PIXELS` `Number()` ×2 | `lib/process-image.ts:331,343` | Confirmed |
+| F4 — `parsePositiveIntEnv` `Number()` | `lib/upload-limits.ts:11` | Confirmed |
+| F3 — unbounded DELETE deferred | `lib/audit.ts:122` | Still present; known deferred from cycle-20 |
+| PERF-C20-01 — OG per-attempt timeout | `lib/og-photo-fetch.ts:41` | Confirmed; `OG_PHOTO_FETCH_TIMEOUT_MS = 3500` |
+| CQ20-07 — BoundedMap `.data` live-ref doc | `lib/bounded-map.ts:50–59` | Confirmed; warning comment present |
 
 ---
 
-## Non-Findings (investigated, not bugs)
+## Non-Findings (investigated, clean)
 
-- **`session.ts:128 parseInt(timestamp, 10)`** — Safe. Timestamp is always `Date.now().toString()` (pure decimal integer string, never scientific notation). `parseInt("1719481234567", 10)` returns the correct value.
-- **`rate-limit.ts:144 Number.parseInt(value, 10)` for `TRUSTED_PROXY_HOPS`** — If `'1e3'` misparses as 1, impact is the safe default (1 hop = standard nginx forward). Benign.
-- **OG photo route `parseInt(id, 10)` (`api/og/photo/[id]/route.tsx:55`)** — Pre-guarded by `/^\d+$/` regex before `parseInt`; scientific notation rejected at the regex.
-- **`image-queue.ts:212 QUEUE_CONCURRENCY`** — Uses `Number(process.env.QUEUE_CONCURRENCY) || 1` — correct.
-- **`admin-backfill-runner.ts:665 ADMIN_BACKFILL_CONCURRENCY`** — Uses `Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1` — correct.
-- **`isLosslessWebpByChunk` zero-progress guard** — `if (next <= offset) return false` is dead code in JS (next >= offset + 8 always), but loop terminates safely via `while (offset + 8 <= buf.length)`. Harmless.
+- **`session.ts:128 parseInt(timestamp, 10)`** — Safe; timestamp is always `Date.now().toString()`,
+  a pure decimal string, never scientific notation.
+- **`app/[locale]/admin/(protected)/dashboard/page.tsx:12` `parseInt(pageParam || '1', 10) || 1`** —
+  Safe; `|| 1` fallback catches NaN, `Math.clamp(1, 1000)` bounds it.
+- **`app/api/search/similar/[id]/route.ts:75` `parseInt(idStr, 10)`** — Pre-guarded by `/^\d+$/`
+  regex; scientific notation rejected at the regex boundary.
+- **`app/[locale]/(public)/g/[key]/page.tsx:92` `parseInt(photoIdParam, 10)`** — Pre-guarded by
+  `photoIdParam && /^\d+$/.test(photoIdParam)`. Safe.
+- **`data.ts` viewCountFlushTimer unref** — All three setTimeout creation sites (lines 59, 95, 180)
+  call `.unref?.()` immediately after assignment. Clean.
+- **`image-queue.ts` gcInterval / bootstrapRetryTimer** — Both stored in state, both have
+  `.unref?.()`, both cleared in `shutdownQueue`. `retryTimer` at line 332 also has `.unref?.()`.
+  Clean.
+- **`histogram.tsx` AbortController** — Created at line 555, passed to `computeHistogramAsync`
+  as signal, aborted at line 590 in cleanup. No leak.
+- **`data-timeline.ts:241` `new Date(capture_date).getMonth()`** — `capture_date` is
+  `mode: 'string'` (Drizzle returns MySQL DATETIME as a string). `new Date('YYYY-MM-DD HH:mm:ss')`
+  parses as LOCAL time in Node.js; `.getMonth()` also returns local time — self-consistent.
+  Timezone-naive EXIF dates are an inherent semantic limitation, not a code bug.
+- **`analytics-data.ts:16-17` `d.setDate(d.getDate() - days)`** — `setDate` correctly handles
+  month/year boundary rollovers. Clean.
+- **`exif-datetime.ts:22,50`** — Uses `Date.UTC` with `getUTC*` consistently throughout. Clean.
+- **`on-this-day-widget.tsx:15-17`** — `new Date().getMonth()+1` / `getDate()` (local time)
+  feeds MySQL `MONTH()`/`DAY()` which operates on EXIF-local strings. Self-consistent pair.
+- **`admin-backfill-runner.ts` PoolConnection resource management** — All paths (acquire/release,
+  `acquireBackfillLock`, `releaseBackfillLock`, `reprocessOne` outer try/finally) correctly
+  release connections. No leak paths found.
 
 ---
 
@@ -150,7 +180,11 @@ const parsed = Number(rawValue);
 
 | ID | File:line | Finding | Severity |
 |----|-----------|---------|----------|
-| F1 | `audit.ts:111` | `parseInt` for `AUDIT_LOG_RETENTION_DAYS`; `'1e3'` gives 1-day retention, silently near-empties audit log on next hourly GC | MEDIUM |
-| F2 | `process-image.ts:330,339` | `parseInt` for `IMAGE_MAX_INPUT_PIXELS`; `'256e6'` gives 256-pixel bomb cap, rejects all uploads with opaque VipsError | MEDIUM |
-| F3 | `audit.ts:117` | Unbounded DELETE in `purgeOldAuditLog`; no LIMIT chunking unlike `purgeOldViewEvents` | LOW |
-| F4 | `upload-limits.ts:11` | `parseInt` in `parsePositiveIntEnv`; `'2e9'` gives 2-byte upload cap, blocks all uploads | LOW |
+| DBG21-01 | `apps/web/src/app/actions/topics.ts:108,211` | `parseInt(orderStr, 10)` on FormData order field; `'1e3'`→1 not 1000; wrong sort position, bounded, no data corruption | LOW |
+| DBG21-02 | `apps/web/src/lib/process-image.ts:1283-1308` | Hard-link + copyFile same-inode corruption in atomic-rename fallback; requires filesystem fault; transient 0-byte sized variant until retry | VERY LOW |
+| (known) | `apps/web/src/lib/audit.ts:122` | Unbounded DELETE — cycle-20 F3 deferred | known |
+
+Cycle-21 is clean of new MEDIUM+ findings. The only actionable item is DBG21-01: swap
+`parseInt(orderStr, 10)` to `Number(orderStr)` with a `!Number.isFinite` guard in
+`actions/topics.ts` at lines 108 and 211. DBG21-02 is flagged for completeness but
+recommended for deferral given its filesystem-fault-only trigger.
