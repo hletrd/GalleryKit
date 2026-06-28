@@ -1,149 +1,156 @@
-# Debugger Review — Cycle 19
-
+# Debugger Review — Cycle 20
 **Date:** 2026-06-27
-**Scope:** Latent bugs, failure modes, and regressions across six high-risk areas.
-**Method:** Static analysis — full source read of hot paths plus targeted grep across the codebase.
+**HEAD:** 9af705f4
+**Findings:** 4 (2 MEDIUM, 2 LOW)
 
 ---
 
-## Findings
+## Methodology
 
-### F1 — `parseInt` silently truncates scientific-notation env var (VIEW_RETENTION_DAYS)
+Surfaces audited this cycle:
+- `parseInt` vs `Number()` pattern sweep across all of `lib/` (except files confirmed clean in cycle 19)
+- `lib/audit.ts` full read (retention parsing + DELETE chunking parity with view-retention)
+- `lib/process-image.ts:330-340` — `IMAGE_MAX_INPUT_PIXELS` / `IMAGE_MAX_INPUT_PIXELS_TOPIC` / `SHARP_CONCURRENCY` parsing
+- `lib/upload-limits.ts` — `parsePositiveIntEnv` helper
+- `lib/session.ts` — `parseInt(timestamp, 10)` in `verifySessionToken`
+- Cycle-19 F2 re-verification: `gps-exif-strip.ts` `walkAborted` guard + `stripGpsFromOriginal` Tier 2 caller path
 
-**Severity:** LOW
-**Confidence:** MEDIUM
-**File:line:** `apps/web/src/lib/view-retention.ts:43`
+Deferred/known items from `cycle-19-deferred.md` and `_aggregate.md` consulted first. None of the findings below duplicate known items.
 
-**Root cause:**
-```typescript
-const retentionDays = Number.parseInt(process.env.VIEW_RETENTION_DAYS ?? '', 10);
-```
-`Number.parseInt` with radix 10 stops at the first non-decimal character, so `parseInt('1e3', 10)` returns `1` (not 1000). An operator setting `VIEW_RETENTION_DAYS=1e3` or `VIEW_RETENTION_DAYS=1e6` to express 1000 or 1000000 days gets 1-day retention instead.
+---
 
-**Observed failure:** Analytics view events are purged after 1 day instead of the intended 1000 days. The `> 0` guard passes (1 > 0 is true), so no fallback to the 395-day default is triggered. All three view tables (`image_views`, `topic_views`, `shared_group_views`) are swept to near-empty on the next hourly GC.
+## Finding F1 — `AUDIT_LOG_RETENTION_DAYS` parsed with `parseInt`, same class as cycle-19 F1
 
-**Trigger input:** `VIEW_RETENTION_DAYS=1e3` in `.env.local`.
+**File:** `apps/web/src/lib/audit.ts:111`
+**Severity:** MEDIUM
+**Confidence:** High
 
-**Similar pattern:** `apps/web/src/lib/process-image.ts:45` uses the same `Number.parseInt(..., 10)` for `SHARP_CONCURRENCY`. There the effect is conservative (1 thread instead of 1000 — just slow), but the pattern is inconsistent with the rest of the codebase which uses `Number(raw)` + `Number.isFinite()` for numeric env var coercion.
-
-**Fix:**
-```typescript
-// view-retention.ts:43
-const retentionDays = Number(process.env.VIEW_RETENTION_DAYS ?? '');
-return Number.isFinite(retentionDays) && retentionDays > 0
+```ts
+const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10);
+effectiveMaxAgeMs = Number.isFinite(retentionDays) && retentionDays > 0
     ? retentionDays * 24 * 60 * 60 * 1000
-    : DEFAULT_VIEW_RETENTION_MS;
+    : DEFAULT_MAX_AGE_MS;
 ```
-`Number('1e3')` returns 1000. This matches the pattern used in `gallery-config-shared.ts` (`Number.isFinite(n)`) and the rest of the config parsing layer. Same fix applies to `SHARP_CONCURRENCY` at `process-image.ts:45` (low urgency since under-counting threads is safe).
 
-**Verification:** Add a test: mock `VIEW_RETENTION_DAYS=1e3`, assert `resolveRetentionMs()` returns `1000 * 24 * 60 * 60 * 1000`, not `86400000` (1 day).
+`Number.parseInt('1e3', 10)` stops at `'e'` and returns `1`, not `1000`. The guard `Number.isFinite(1) && 1 > 0` is true, so `effectiveMaxAgeMs = 86_400_000` ms = **1 day**. On the next hourly GC sweep (`image-queue.ts` calls `purgeOldAuditLog()`) the audit log is pruned to the last 24 hours, silently discarding months of admin-action history.
+
+Cycle-19 found and fixed the identical bug in `lib/view-retention.ts:50` (cycle-19 F1). That fix was NOT applied to `audit.ts`.
+
+**Trigger:** `AUDIT_LOG_RETENTION_DAYS=1e3` in `.env.local` (operator intending 1000-day retention).
+
+**Root cause:** `audit.ts` and `view-retention.ts` have parallel retention-guard logic. The cycle-19 fix was applied only to the specific file reported, not as a pattern sweep across the codebase.
+
+**Fix (one line):**
+```ts
+// audit.ts:111
+const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '');
+```
+`Number('1e3')` returns `1000`. The existing `Number.isFinite && > 0` guard still rejects NaN/negative/zero correctly.
 
 ---
 
-### F2 — ISOBMFF walker stops silently on 64-bit extended-size box, leaving GPS intact
+## Finding F2 — `IMAGE_MAX_INPUT_PIXELS` / `IMAGE_MAX_INPUT_PIXELS_TOPIC` parsed with `parseInt`
 
+**File:** `apps/web/src/lib/process-image.ts:330, 339`
+**Severity:** MEDIUM
+**Confidence:** High
+
+```ts
+const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
+const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
+    ? envMaxInputPixels
+    : 256 * 1024 * 1024;
+```
+
+`Number.parseInt('256e6', 10)` stops at `'e'` and returns `256`. The guard `Number.isFinite(256) && 256 > 0` is true, so `maxInputPixels = 256`. Sharp's `limitInputPixels: 256` caps at **256 total pixels**. Every real photo exceeds this and throws `VipsError: Input image exceeds pixel limit`, causing all upload jobs to fail.
+
+`IMAGE_MAX_INPUT_PIXELS_TOPIC` at line 339 has the same pattern.
+
+CLAUDE.md documents the default as `268435456` (plain integer), so scientific notation is unlikely. However the env var description invites large values ("decompression bomb protection cap, default 256M pixels"); an operator reading "256M pixels" might naturalistically write `256e6`.
+
+**Fix (two lines):**
+```ts
+// process-image.ts:330
+const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
+// process-image.ts:339
+const envTopicPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '');
+```
+`SHARP_CONCURRENCY` at line 45 has the same `parseInt` but the impact is benign (parses as 1 = min threads).
+
+---
+
+## Finding F3 — `purgeOldAuditLog` uses unbounded DELETE (no LIMIT chunking)
+
+**File:** `apps/web/src/lib/audit.ts:117`
 **Severity:** LOW
-**Confidence:** LOW
-**File:line:** `apps/web/src/lib/gps-exif-strip.ts` — `walkChildren` generator (line ~395)
+**Confidence:** High
 
-**Root cause:** The bounded `walkChildren` generator checks for oversized 64-bit box sizes:
-```typescript
-if (big > BigInt(Number.MAX_SAFE_INTEGER)) {
-    return; // generator stops
+```ts
+await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
+```
+
+Single unbounded `DELETE FROM audit_log WHERE created_at < ?` with no `LIMIT`. By contrast, `purgeOldViewEvents` in `view-retention.ts:77-86` uses a `LIMIT 5000` batch loop bounded by `MAX_BATCHES_PER_TABLE = 200`, explicitly to avoid a long table lock on the single MySQL writer.
+
+The audit log is low-write-rate (admin actions only), so a multi-million-row backlog is unlikely in normal operation. The risk surface is an instance that ran with a misconfigured short retention (see F1) for a long time then had retention extended — the first correct sweep hits all accumulated rows in one lock.
+
+**Fix:** Apply the same `LIMIT`-based chunking pattern from `view-retention.ts`. Not urgent; flagging for parity.
+
+---
+
+## Finding F4 — `parsePositiveIntEnv` in `upload-limits.ts` uses `parseInt`
+
+**File:** `apps/web/src/lib/upload-limits.ts:11`
+**Severity:** LOW
+**Confidence:** High
+
+```ts
+function parsePositiveIntEnv(name: string, fallback: number): number {
+    const rawValue = process.env[name]?.trim();
+    if (!rawValue) return fallback;
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 ```
-When a crafted or malformed HEIF/AVIF box declares a 64-bit extended size above `Number.MAX_SAFE_INTEGER` (~9 PB), the generator exits. The outer `stripGpsFromIsobmffBuffer` receives no GPS-bearing boxes and returns `{ stripped: false }`.
 
-**Observed failure:** `strip_gps_on_upload` is a no-op for this file. GPS coordinates remain in the stored original. The function does NOT return `null` (which would trigger the fallback re-encode path in `process-image.ts`'s `stripGpsFromOriginal`); it returns `{ stripped: false }` — so the caller sees a successful non-strip and the original is preserved as-is with GPS data intact.
+Used for `UPLOAD_MAX_TOTAL_BYTES`, `UPLOAD_MAX_FILES_PER_WINDOW`, and `NEXT_UPLOAD_BODY_MAX_BYTES`. If `UPLOAD_MAX_TOTAL_BYTES='2e9'` (2 billion bytes / 2 GiB), `parseInt('2e9', 10)` returns `2`. Guard passes (`isFinite(2) && 2 > 0`), so `MAX_TOTAL_UPLOAD_BYTES = 2 bytes`. Every upload batch is immediately rejected as exceeding quota.
 
-**Trigger input:** A HEIF or AVIF file where a container box in the path to the GPS-bearing `iinf`/`iloc` box has `largesize > 2^53`. This is unlikely in genuine camera output but trivially constructable.
+Lower severity than F2 because the error surfaces as a quota rejection rather than an opaque Sharp exception, and operators are likely to copy the documented plain-integer default (`2147483648`).
 
-**Note:** This is a safe failure mode — no crash, no data corruption — but it is a silent privacy-affecting bypass of the GPS strip feature for specifically crafted files.
-
-**Fix:** After the `walkChildren` generator exits without stripping and GPS was not found, treat the oversized-box case as a fallback trigger (return `null` rather than `{ stripped: false }`) so `stripGpsFromOriginal` falls back to the metadata-free re-encode path. Alternatively, add a log warning at the oversized-box early-return so operators can detect the bypass.
-
----
-
-### F3 — AVIF 10-bit fallback uses mutated `base` instance after `toFile()` failure
-
-**Severity:** LOW
-**Confidence:** LOW
-**File:line:** `apps/web/src/lib/process-image.ts:1215`
-
-**Root cause:**
-```typescript
-// First attempt (mutates base in-place — Sharp returns `this` from each method):
-await base.toColorspace(avifIcc).withIccProfile(avifIcc).avif({...bitdepth:10}).toFile(outputPath);
-// Fallback after throw:
-await base.clone().toColorspace(avifIcc).withIccProfile(avifIcc).avif({...bitdepth:8}).toFile(outputPath);
+**Fix (one line):**
+```ts
+const parsed = Number(rawValue);
 ```
 
-`base` is a Sharp pipeline builder. Sharp methods return `this`, so the chain mutates `base` in-place: by the time the first `toFile()` throws, `base` already has `toColorspace`, `withIccProfile`, and `avif({bitdepth:10})` appended. The fallback calls `base.clone()` on this already-consumed instance, then appends the same operations AGAIN. The `bitdepth:8` override in the retry works because Sharp merges AVIF options on each `.avif()` call, with later values winning — this is explicitly acknowledged in the R4C8 COR-R4C8-06 comment.
+---
 
-**Observed failure:** No known bug today. The correctness depends on Sharp's internal option-merge semantics remaining stable across versions. If a Sharp update changed `.avif()` from merge-on-call to set-on-call, or changed how `toColorspace`/`withIccProfile` behaves when called twice on a clone, the fallback would produce wrong output (possibly double colorspace conversion or incorrect bitdepth).
+## Cycle-19 Fixes Verified
 
-**Trigger input:** A Sharp build where the 10-bit AVIF probe passes but specific image content causes per-image encode failure, triggering the fallback branch.
+| Fix | Location | Status |
+|-----|----------|--------|
+| F1 — view-retention `parseInt` to `Number()` | `lib/view-retention.ts:50` | Confirmed. `Number(process.env.VIEW_RETENTION_DAYS ?? '')` |
+| F2 — gps-exif-strip `walkAborted` returns null | `lib/gps-exif-strip.ts:393,405,411,466` | Confirmed. `walkAborted = true` on all three early-exit paths; `if (walkAborted) return null;` at line 466 fires before the clean-verdict return |
+| CQ19-01 — OG fetch total budget cap | `lib/og-photo-fetch.ts:47,101,106` | Confirmed. `OG_PHOTO_TOTAL_BUDGET_MS = 10_000`; `if (Date.now() >= deadline) break;` |
 
-**Fix (minimal):** Capture a factory function for the base operations so both attempts use a fresh instance:
-```typescript
-const mkBase = () => needsRgb16
-    ? sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
-        .pipelineColorspace('rgb16').resize({ width: resizeWidth })
-    : sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
-        .resize({ width: resizeWidth });
-
-await mkBase().toColorspace(avifIcc).withIccProfile(avifIcc).avif({...bitdepth:10}).toFile(outputPath);
-// fallback:
-await mkBase().toColorspace(avifIcc).withIccProfile(avifIcc).avif({...bitdepth:8}).toFile(outputPath);
-```
-This makes both attempts independent of Sharp's mutation semantics.
+**Cycle-19 F2 caller-path re-verification (`stripGpsFromOriginal`, `process-image.ts:1629-1714`):** `scrubbed = null` from `stripGpsFromIsobmffBuffer` correctly falls through to Tier 2 re-encode. Temp file lifecycle is clean: written to `tmpPath` then atomically renamed, or cleaned by `safeUnlink(tmpPath)` in the catch block. The HEIC/HEIF Tier 2 early-return path (no HEVC encoder) correctly returns before writing `tmpPath` — no orphan risk.
 
 ---
 
-## Areas Verified Clean
+## Non-Findings (investigated, not bugs)
 
-The following areas were fully analyzed with no bugs found.
-
-### Numeric / env-var parsing
-
-- `gallery-config-shared.ts` — all numeric settings use `Number.isFinite()` guards; `normalizeConfiguredImageSizes` returns null on invalid input; `VALIDATORS` enforces ranges at write time.
-- `gallery-config.ts` — `validatedNumber()` falls back to defaults on invalid DB values; full catch block returns all defaults on DB error.
-- `admin-backfill-runner.ts` — `resolveBackfillConcurrency(requested, poolLimit)` correctly handles NaN/0/negative; `Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1` at line 665 is safe (0-concurrency PQueue would hang; documented as intentional).
-- `rate-limit.ts` — `getTrustedProxyHopCount` uses `parseInt` with fallback on `< 1` or non-integer; `purgeOldBuckets` cutoff arithmetic is correct.
-- `image-queue.ts:212` — `Number(process.env.QUEUE_CONCURRENCY) || 1` correctly handles NaN/0/unset; `|| 1` fallback documented as intentional (0-concurrency PQueue would hang all uploads).
-
-### Image pipeline
-
-- `process-image.ts` — 10-bit AVIF probe is a Promise-singleton (`_highBitdepthAvifProbePromise`); race-free across concurrent AVIF encodes. WI-15 downscale intermediate is always cleaned up in the `finally` block at line 1358 (`if (processingInputPath !== inputPath) await safeUnlink(processingInputPath)`). The `writtenSizedPaths` cleanup on `catch` correctly removes partial files across all three formats. `avif10bit` shared closure variable is written only by the AVIF format path; no cross-format race.
-- `gps-exif-strip.ts` — JPEG/TIFF/WebP paths all have robust bounds checking: TIFF IFD walker limited by `MAX_IFD_CHAIN=8`, `MAX_IFD_ENTRIES=1024`, cycle detection via visited Set; JPEG post-EOI trailer check returns null on non-trivial trailers; WebP RIFF chunk walk retags XMP to JUNK. The ISOBMFF path has the silent-stop finding (F2) but is otherwise bounded correctly.
-- `color-detection.ts` — ISOBMFF `colr` box scanner depth-limited at `MAX_DEPTH=5`, scan-limited at 1 MB; bounded safe-integer check for 64-bit sizes present.
-
-### Concurrency
-
-- `image-queue.ts` — claim/mark logic correct; connection released in catch before rethrowing; `MAX_PERMANENTLY_FAILED_IDS=1000` with FIFO eviction via `Set.prototype.values().next().value` correct. Delete-during-processing race handled by `affectedRows === 0` → `deleteImageVariants(dir, fn, [])`. Bootstrap continuation logic correctly handles all four states (empty/continuation/partial/full). `quiesceImageProcessingQueueForRestore` correctly does `pause(); clear(); await onIdle()` to avoid deadlock.
-- `admin-backfill-runner.ts` — `resolveBackfillConcurrency` math verified at pool=10: `RESERVED = max(3, ceil(10/2)) = 5`, `cap = max(1, floor((10-5-1)/2)) = 2`. Detection failure path does NOT bump `pipeline_version`. Delete-mid-reencode `affectedRows=0` path cleans orphan files via full directory scan.
-- `bounded-map.ts` — FIFO eviction via insertion-order iteration is correct. `enforceHardCap()` called on every `set()` so growth is bounded even without `prune()`. `get()` returns shallow copies; `entries()` yields live references (documented at lines 116-125 with a WARNING comment). No production callers use `entries()` on a BoundedMap (confirmed by grep across all of `apps/web/src/` — zero hits). The asymmetry is a maintenance hazard, not an active bug.
-- `auth-rate-limit.ts` — account-scoped rate limit mirrors IP-scoped correctly; rollback functions use spread pattern; `prune*` delegates to `BoundedMap.prune()`.
-
-### Client
-
-- `use-display-capability.ts` — `_cachedSnapshot` module-level memoization is correct; `detect()` value-compares before creating a new object to prevent `useSyncExternalStore` infinite loop (React #185). SSR default `{ colorGamut: 'p3', isHdr: false }` correctly suppresses `WideGamutHint` on first paint.
-- `photo-viewer.tsx` — `blur_data_url` guarded by `isSafeBlurDataUrl()` before use as CSS `background-image`; validated at line 157.
-- `histogram.tsx` — Worker lifecycle correct: created in one `useEffect([])` with `terminate()` + null cleanup at unmount; image loading in a separate `useEffect([effectiveUrl, ...])` with `aborted` flag, `AbortController`, and `img.src = ''` cleanup. No worker leak on unmount.
-
-### JSON / date / locale parsing
-
-- `smart-collections.ts` — `parseSmartCollectionQuery` wraps `JSON.parse` in try/catch; `isScalarValue` rejects NaN; depth checked at `> MAX_DEPTH (4)`; `compileTagPredicate` uses parameterized binding (no string interpolation of untrusted values).
-- `clip-embeddings.ts` — `decodeEmbeddingColumn` handles raw 2048-byte Buffer, legacy base64 Buffer, and defensive string case; returns null for anything not yielding exactly `EMBEDDING_BYTES` bytes. `cosineSimilarity` has `EPSILON=1e-15` guard against NaN on zero vectors. `normalizeEmbedding` handles zero vector (norm=0 → returns unchanged, avoids NaN). `dotProduct` has no runtime unit-length assertion (documented as usage contract; not exploitable in current callers).
-- `view-retention.ts` — `resolveRetentionMs` correctly rejects `maxAgeMs <= 0` and non-finite values when called programmatically. The only issue is the `parseInt` env-var path (F1 above).
+- **`session.ts:128 parseInt(timestamp, 10)`** — Safe. Timestamp is always `Date.now().toString()` (pure decimal integer string, never scientific notation). `parseInt("1719481234567", 10)` returns the correct value.
+- **`rate-limit.ts:144 Number.parseInt(value, 10)` for `TRUSTED_PROXY_HOPS`** — If `'1e3'` misparses as 1, impact is the safe default (1 hop = standard nginx forward). Benign.
+- **OG photo route `parseInt(id, 10)` (`api/og/photo/[id]/route.tsx:55`)** — Pre-guarded by `/^\d+$/` regex before `parseInt`; scientific notation rejected at the regex.
+- **`image-queue.ts:212 QUEUE_CONCURRENCY`** — Uses `Number(process.env.QUEUE_CONCURRENCY) || 1` — correct.
+- **`admin-backfill-runner.ts:665 ADMIN_BACKFILL_CONCURRENCY`** — Uses `Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1` — correct.
+- **`isLosslessWebpByChunk` zero-progress guard** — `if (next <= offset) return false` is dead code in JS (next >= offset + 8 always), but loop terminates safely via `while (offset + 8 <= buf.length)`. Harmless.
 
 ---
 
-## References
+## Summary
 
-- `apps/web/src/lib/view-retention.ts:43` — `Number.parseInt` truncates scientific-notation input (F1)
-- `apps/web/src/lib/view-retention.ts:44-46` — return path multiplies integer-truncated value (F1)
-- `apps/web/src/lib/process-image.ts:45` — same `Number.parseInt(..., 10)` pattern for `SHARP_CONCURRENCY` (companion to F1; low-impact)
-- `apps/web/src/lib/gps-exif-strip.ts:~395` — `if (big > BigInt(Number.MAX_SAFE_INTEGER)) return;` in `walkChildren` generator (F2)
-- `apps/web/src/lib/process-image.ts:1204-1226` — AVIF 10-bit fallback using `base.clone()` after mutated-`base.toFile()` failure (F3)
-- `apps/web/src/lib/bounded-map.ts:123` — `entries()` yields live internal references (documented asymmetry vs `get()` shallow copies; no active callers)
+| ID | File:line | Finding | Severity |
+|----|-----------|---------|----------|
+| F1 | `audit.ts:111` | `parseInt` for `AUDIT_LOG_RETENTION_DAYS`; `'1e3'` gives 1-day retention, silently near-empties audit log on next hourly GC | MEDIUM |
+| F2 | `process-image.ts:330,339` | `parseInt` for `IMAGE_MAX_INPUT_PIXELS`; `'256e6'` gives 256-pixel bomb cap, rejects all uploads with opaque VipsError | MEDIUM |
+| F3 | `audit.ts:117` | Unbounded DELETE in `purgeOldAuditLog`; no LIMIT chunking unlike `purgeOldViewEvents` | LOW |
+| F4 | `upload-limits.ts:11` | `parseInt` in `parsePositiveIntEnv`; `'2e9'` gives 2-byte upload cap, blocks all uploads | LOW |
