@@ -119,7 +119,12 @@ export function formatShutterSpeed(exposureTime: string | null): string | null {
     if (!Number.isFinite(val)) return String(exposureTime);
     if (val < 1 && val > 0) {
         const denominator = Math.round(1 / val);
-        if (Math.abs(1 / denominator - val) < 0.00001) {
+        // R22C22 T3 (DBG22-02): a subnormal positive `val` (e.g. 5e-324) makes
+        // `1 / val` overflow to Infinity, `Math.round(Infinity)` Infinity, and
+        // `1 / Infinity` 0 — so `Math.abs(0 - val) < 0.00001` passes and we'd
+        // emit the literal string "1/Infinity". Guard the denominator finiteness
+        // so such values fall through to the `${exposureTime}s` fallback.
+        if (Number.isFinite(denominator) && Math.abs(1 / denominator - val) < 0.00001) {
             // Fractional shutter speeds use standard photography notation
             // without 's' suffix — the fraction inherently represents seconds.
             return `1/${denominator}`;
