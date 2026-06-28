@@ -12,33 +12,47 @@ import * as path from 'path';
  * plan COMMITTED the broad scanner for cycle 21; the designer + critic both
  * flagged the exit criterion as MET. This is that scanner.
  *
- * It walks every `.tsx`/`.jsx` under `components/` + the `app/[locale]/` route
- * tree, normalizes multi-line JSX openings to one logical line (brace/string
- * aware, mirroring `touch-target-audit.test.ts`), and flags any interactive
- * opening tag whose className contains a STANDALONE `hover:` token (the
- * designer's interactive signal) but lacks a focus indicator
+ * It walks every `.tsx`/`.jsx` under `components/` + the entire `app/` tree
+ * (including the non-locale root, R22C22 T1b), normalizes multi-line JSX
+ * openings to one logical line (brace/string aware, mirroring
+ * `touch-target-audit.test.ts`), and flags any interactive opening tag whose
+ * className contains a STANDALONE interactive-affordance signal — a `hover:`
+ * token OR a `cursor-pointer`/`cursor-help` token — but lacks a focus indicator
  * (`focus-visible:` / `focus:ring` / `focus-within:`). A NEW such element fails
  * the gate. Documented framework-managed exceptions live in `KNOWN_VIOLATIONS`.
  *
- * Why a `hover:`-gated heuristic (not "every interactive element"):
+ * Why these affordance signals (not "every interactive element"):
  *   - A standalone `hover:` token is the strongest signal that the element is a
  *     styled, pointer-affordance control whose keyboard users deserve a matching
  *     focus affordance (WCAG 2.4.7 / 2.4.11).
+ *   - A standalone `cursor-pointer`/`cursor-help` token is a SECOND such signal
+ *     (R22C22 T1b): the dev explicitly styled a pointer cursor on the control.
+ *     This catches keyboard-focusable controls with NO hover styling that the
+ *     hover-only heuristic missed — the histogram key-type tooltip-trigger
+ *     (D22-01) and the map popup button (D22-02).
  *   - `group-hover:` / `peer-hover:` are EXCLUDED (the `(?<![\w-])hover:`
  *     lookbehind): those style a child in response to a PARENT's hover, so the
  *     ring usually lives on the parent (`focus-within:` / `group-focus-visible:`).
+ *     `cursor-not-allowed` / `disabled:cursor-*` / `group-cursor-*` are likewise
+ *     EXCLUDED by the cursor token's `(?<![\w-])` lookbehind + `(pointer|help)`.
  *   - shadcn `<Button>` (capital B) is EXCLUDED — it bakes its own
  *     `focus-visible:ring` into the variant; only raw lowercase `<button>` is
  *     scanned.
  *   - `role="option"` elements (search combobox results managed via
  *     `aria-activedescendant`, not Tab focus) are EXCLUDED.
+ *
+ * Why the entire `app/` tree (R22C22 T1b / critic M1): the cycle-21 scanner
+ * walked only `app/[locale]/` and so MISSED `app/global-error.tsx`'s Try-again
+ * `<button>` — the Next.js root error boundary is framework-mandated to live
+ * OUTSIDE `[locale]`. `app/[locale]/` is a subtree of `app/`, so the collected
+ * file list is deduped via a Set to avoid double-scanning.
  */
 
 const srcRoot = path.resolve(__dirname, '..');
 const componentsDir = path.resolve(srcRoot, 'components');
-const localeDir = path.resolve(srcRoot, 'app', '[locale]');
+const appDir = path.resolve(srcRoot, 'app');
 
-const SCAN_ROOTS: ReadonlyArray<string> = [componentsDir, localeDir];
+const SCAN_ROOTS: ReadonlyArray<string> = [componentsDir, appDir];
 
 interface FoundIssue {
     file: string;
@@ -65,6 +79,11 @@ const INTERACTIVE_OPEN = /<(Link|a|button)\b/g;
 // Standalone hover: token — excludes group-hover:/peer-hover: via the char-class
 // lookbehind (the preceding char must NOT be a word char or hyphen).
 const HOVER_TOKEN = /(?<![\w-])hover:/;
+// R22C22 T1b: standalone cursor-pointer/cursor-help affordance token — a second
+// interactive signal alongside hover:. The `(?<![\w-])` lookbehind keeps
+// `group-cursor-*` / `disabled:cursor-*` from matching, and the `(pointer|help)`
+// + `\b` keep `cursor-not-allowed` / `cursor-pointer-foo` out.
+const CURSOR_TOKEN = /(?<![\w-])cursor-(pointer|help)\b/;
 const FOCUS_INDICATOR = /focus-visible:|focus:ring|focus-within:/;
 const ROLE_OPTION = /\brole=["']option["']/;
 const HAS_CLASSNAME = /\bclassName=/;
@@ -167,7 +186,7 @@ export function scanSource(relPath: string, source: string): FoundIssue[] {
         const line = lines[i];
         if (!perTag.test(line)) continue;
         if (!HAS_CLASSNAME.test(line)) continue;
-        if (!HOVER_TOKEN.test(line)) continue;
+        if (!HOVER_TOKEN.test(line) && !CURSOR_TOKEN.test(line)) continue;
         if (FOCUS_INDICATOR.test(line)) continue;
         if (ROLE_OPTION.test(line)) continue;
         // `group` parent whose focus ring is painted by a child via
@@ -192,10 +211,15 @@ function scanFile(absPath: string): FoundIssue[] {
 
 describe('focus-visible scanner (interactive Link/a/button with hover styling)', () => {
     it('every hover-styled interactive Link/a/button carries a focus indicator', () => {
-        const files: string[] = [];
+        // app/[locale]/ is a subtree of app/, so dedupe to avoid double-scanning
+        // any [locale] file (R22C22 T1b).
+        const fileSet = new Set<string>();
         for (const root of SCAN_ROOTS) {
-            files.push(...listFilesRecursive(root, (f) => /\.(tsx|jsx)$/.test(f)));
+            for (const f of listFilesRecursive(root, (f) => /\.(tsx|jsx)$/.test(f))) {
+                fileSet.add(f);
+            }
         }
+        const files = [...fileSet];
         const violationsByFile = new Map<string, FoundIssue[]>();
         for (const f of files) {
             const rel = relPathFromSrc(f);
@@ -258,5 +282,27 @@ describe('focus-visible scanner (interactive Link/a/button with hover styling)',
     it('still flags a group parent with no group-focus-visible child', () => {
         const groupNoChild = `<button className="group h-full w-16 outline-none hover:bg-black/20">\n  <span className="text-white">x</span>\n</button>`;
         expect(scanSource('fixture.tsx', groupNoChild)).toHaveLength(1);
+    });
+
+    // R22C22 T1b — cursor-pointer/cursor-help as a second affordance signal.
+    it('flags a cursor-pointer button with no focus indicator (no hover token)', () => {
+        const bad = `<button onClick={x} className="cursor-pointer text-left">y</button>`;
+        expect(scanSource('fixture.tsx', bad)).toHaveLength(1);
+    });
+    it('flags a cursor-help button with no focus indicator (no hover token)', () => {
+        const bad = `<button className="text-xs cursor-help underline">y</button>`;
+        expect(scanSource('fixture.tsx', bad)).toHaveLength(1);
+    });
+    it('passes a cursor-pointer button once a focus-visible ring is added', () => {
+        const good = `<button onClick={x} className="cursor-pointer focus-visible:ring-2 focus-visible:ring-ring">y</button>`;
+        expect(scanSource('fixture.tsx', good)).toHaveLength(0);
+    });
+    it('does not flag cursor-not-allowed (not an affordance signal)', () => {
+        const disabled = `<button disabled className="cursor-not-allowed opacity-50">y</button>`;
+        expect(scanSource('fixture.tsx', disabled)).toHaveLength(0);
+    });
+    it('does not flag a non-interactive tag (Label) carrying cursor-pointer', () => {
+        const label = `<Label htmlFor="x" className="cursor-pointer select-none">y</Label>`;
+        expect(scanSource('fixture.tsx', label)).toHaveLength(0);
     });
 });
