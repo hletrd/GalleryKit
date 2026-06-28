@@ -19,6 +19,10 @@ test
 .context/*
 !.context/reviews/
 !.context/reviews/**
+# Re-ignore transient gate/run logs under reviews — the `!.context/reviews/**`
+# negation above otherwise overrides the global `*.log` rule and tracks them.
+.context/reviews/**/*.log
+.context/reviews/gate-logs/
 .agent/
 apps/web/.context/
 apps/web/test-results/
