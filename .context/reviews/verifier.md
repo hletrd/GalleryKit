@@ -1,260 +1,122 @@
-# Verifier Report — Cycle 21
-Date: 2026-06-29
-HEAD: 993ed471
+# Cycle 22 Verifier Report
+
+**Date:** 2026-06-29  
+**Verifier:** oh-my-claudecode:verifier (Sonnet 4.6)  
+**Verdict:** PASS — 0 blockers
 
 ---
 
-## Authoritative Gate Baseline
+## 1. Quality Gates
 
-| Gate | Status | Detail |
-|------|--------|--------|
-| ESLint (`lint`) | PASS (exit 0) | No errors |
-| TypeScript (`typecheck`) | PASS (exit 0) | `typecheck:app` + `typecheck:scripts` — 0 errors |
-| Vitest (`test`) | PASS (exit 0) | **238 files passed / 2 skipped; 2168 tests passed / 4 skipped** (+2 files, +13 tests vs cycle-20 baseline) |
-| `lint:api-auth` | PASS (exit 0) | 2 files checked — all OK |
-| `lint:action-origin` | PASS (exit 0) | 41 exports checked (6 exempt) — all mutating actions enforce same-origin |
-| `lint:public-route-rate-limit` | PASS (exit 0) | 6 public route files checked — all OK or no mutating handlers |
+| Gate | Command | Exit Code | Summary |
+|------|---------|-----------|---------|
+| ESLint | `npm run lint --workspace=apps/web` | 0 | No lint errors (c22-baseline-lint.log) |
+| TypeScript | `npm run typecheck --workspace=apps/web` | 0 | 0 type errors; tsc + scripts (c22-baseline-typecheck.log) |
+| Vitest | `npm test --workspace=apps/web` | 0 | 241 passed, 2 skipped (243 files), 2195 tests (c22-baseline-vitest.log) |
+| lint:api-auth | `npm run lint:api-auth --workspace=apps/web` | **0** | 2 admin routes verified (run fresh) |
+| lint:action-origin | `npm run lint:action-origin --workspace=apps/web` | **0** | 42 exports checked; all OK/SKIP-exempt (run fresh) |
+| lint:public-route-rate-limit | `npm run lint:public-route-rate-limit --workspace=apps/web` | **0** | 6 route files checked; all OK (run fresh) |
 
-All 6 gates green at HEAD 993ed471.
-
----
-
-## Cycle-20 Fix Verification (T1–T7)
-
-### T1 — Env-parse scientific-notation sweep
-
-**Claimed:** All `parseInt(env, 10)` integer-env sites switched to `Number(env)`. Sites: `audit.ts`, `process-image.ts` (×2), `actions/images.ts`, `rate-limit.ts`, `upload-limits.ts`.
-
-**Evidence:**
-- `lib/audit.ts:116` — `Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '')` with R20C20 comment.
-- `lib/process-image.ts:46,334,344` — `Number(process.env.SHARP_CONCURRENCY)`, `Number(process.env.IMAGE_MAX_INPUT_PIXELS)`, `Number(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC)`.
-- `app/actions/images.ts:797` — `Math.max(1, Number(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '') || 5)`.
-- `lib/rate-limit.ts:147` — `Number(value)` with `Number.isInteger(parsed) && parsed >= 1` guard retained.
-- `lib/upload-limits.ts:15` — `Math.floor(Number(rawValue))` in `parsePositiveIntEnv` helper.
-- Full sweep via `grep -rn "parseInt.*process\.env"` across `src/` — **0 hits** (no remaining env-parsing parseInt calls outside comments).
-- New tests: `upload-limits-env.test.ts` (5 cases, including `'2e9'`→2_000_000_000), `audit-retention.test.ts` extended (`'1e3'`→1000 days at line 91), `rate-limit.test.ts` extended (`getTrustedProxyHopCount('1e1') === 10`).
-
-**Status: VERIFIED (high confidence)**
+All 6 gates green. The 3 security lints were run independently (not from the baseline logs).
 
 ---
 
-### T2 — gps-strip `walkAborted` honored on items-found path
+## 2. Cycle-21 Fix Verification (commits 0e475ba1 → a60baa8f)
 
-**Claimed:** `walkAborted` check moved to fire UNCONDITIONALLY (before empty-items branch), so a walk that found ≥1 Exif item then aborted on a later malformed box returns `null` instead of `{stripped:true}`.
+### T1 — Focus-visible scanner + 20 sibling fixes
 
-**Evidence:**
-- `lib/gps-exif-strip.ts:461-470` — R20C20 comment block explains the fix. `if (walkAborted) return null;` at line 470 fires BEFORE the `if (exifItemIds.size === 0 && xmpItemIds.size === 0)` branch — unconditional.
-- `__tests__/gps-exif-strip-isobmff.test.ts:105-127` — discriminator test: (a) container with one Exif infe + empty iloc + oversized trailing box → `toBeNull()`; (b) same container WITHOUT the malformed trailing box → `{stripped:false}`. The discriminator eliminates false tautology — the null comes from `walkAborted`, not from the Exif item or empty iloc.
+**Scanner test:**  
+`apps/web/src/__tests__/focus-visible-links-scan.test.ts` — EXISTS (262 lines, commit 842ffbfa).
 
-**Status: VERIFIED (high confidence)**
+`KNOWN_VIOLATIONS` map at line 55 has one entry: `'components/search.tsx': 0` (role=option exemption, value 0 = no uncovered violations). All other files default to 0. The test would fail if any `<Link>/<a>/<button>` with a standalone `hover:` token lacks a `focus-visible:`/`focus:ring`/`focus-within:` indicator. **Non-vacuous.**
 
----
+**Sibling fixes:**  
+Commit 0e475ba1 modified 15 files, adding `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to 20 elements across:
+- `components/` (admin-header, footer, histogram, home-client, info-bottom-sheet, nav-client, on-this-day-widget, photo-viewer, topic-empty-state)
+- `app/[locale]/` (error.tsx, not-found.tsx, analytics-client.tsx, s/[key]/page.tsx, year/[year]/page.tsx)
 
-### T3 — a11y focus-visible siblings (D20-01/02/03/04)
+### T2 — topics.ts uses Number() not parseInt()
 
-**Claimed:** Added `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to nav-client topic pills, admin-nav section links, timeline year-scrubber pills, g/[key] back-links, and fixed lightbox-color-pip inner buttons.
+`apps/web/src/app/actions/topics.ts`:
+- Line 111: `let order = Number(orderStr);` (comment: "R21C21 T2 (DBG21-01)")
+- Line 217: `let order = Number(orderStr);` (same comment)
 
-**Evidence:**
-- `components/nav-client.tsx:127` — `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` on topic pill Links.
-- `components/admin-nav.tsx:40` — `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` on section links.
-- `app/[locale]/(public)/timeline/page.tsx:135,154` — `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` on year-scrubber pills and year-in-review link.
-- `app/[locale]/(public)/g/[key]/page.tsx:140,172` — `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` on both back-link branches.
-- `components/lightbox-color-pip.tsx:223,305` — inner expanded-panel buttons now carry `focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black`.
-- `__tests__/focus-visible-rings-cycle20.test.ts` — 4 describe blocks pin all five controls.
+**VERIFIED** — both occurrences converted. parseInt('1e3', 10) === 1 (truncates); Number('1e3') === 1000 (correct).
 
-**D20-02 plan-to-code divergence (VER21-01):** The cycle-20 plan said "replace `ring-white` with `ring-ring ring-offset-2 ring-offset-black`" but the implementation kept `ring-white` and added the offset (`ring-white ring-offset-2 ring-offset-black`). The test is aligned with the implementation. WCAG 2.4.11 is satisfied (enclosing gap provided by the offset). This is not a defect — white against a `ring-offset-black` gap is actually higher-contrast on the dark lightbox overlay than the design-system `ring-ring` token would be. However, the plan's prescription was not followed exactly and the test description says "ring-white inner buttons now carry a ring offset," which matches code but diverges from the plan.
+### T3 — data.ts eviction deletes viewCountRetryCount
 
-**Status: VERIFIED (with D20-02 note above)**
+`apps/web/src/lib/data.ts` line ~172:
+```
+// R21C21 T3 (C21-RVW-01): also drop the evicted group's retry
+viewCountRetryCount.delete(oldestKey);
+```
+This runs inside the `while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE)` overflow loop, so an evicted group's stale retry count is cleaned up atomically with the buffer eviction. **VERIFIED** — the delete is present and in the correct location.
 
----
+### T4 — clip-embeddings.ts reads env vars for SEMANTIC_SCAN_LIMIT / SEMANTIC_TOP_K_MAX
 
-### T4 — A2 stale comments corrected
+`apps/web/src/lib/clip-embeddings.ts` lines 30–31:
+```ts
+export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
+export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);
+```
+Comment at line 18: "R21C21 T4 (CRIT21-02)". The semantic search route (`app/api/search/semantic/route.ts`) imports both constants from this module and applies them at lines 47–48 and 258. **VERIFIED** — env-wired with correct defaults matching CLAUDE.md.
 
-**Claimed:** Both search route files' enrichment-select comments corrected from "in lib/data.ts" to `lib/search-enrichment-fields.ts`.
+### T5 — process-image-max-input-pixels-env.test.ts
 
-**Evidence:**
-- `app/api/search/semantic/route.ts:295` — `searchEnrichmentSelectFields in lib/search-enrichment-fields.ts`.
-- `app/api/search/similar/[id]/route.ts:196` — same corrected comment.
-- Both files import from `'@/lib/search-enrichment-fields'` directly (lines 55 and 44 respectively).
+`apps/web/src/__tests__/process-image-max-input-pixels-env.test.ts` — EXISTS (commit 9c3cd64d... wait, commit 9d8cff7b).
 
-**Status: VERIFIED (high confidence)**
+Test suite: `describe('IMAGE_MAX_INPUT_PIXELS_TOPIC env parsing (R21C21 T5)')`. Non-vacuous assertions:
+- `expect(await loadTopicCap('64e6')).toBe(64_000_000)` — proves Number() parse (parseInt would return 64)
+- `expect(await loadTopicCap('33554432')).toBe(33_554_432)` — integer string passes through
+- `expect(await loadTopicCap(undefined)).toBe(DEFAULT_TOPIC_PIXELS)` — fallback to 67_108_864
 
----
+**VERIFIED** — would catch a revert to parseInt on the scientific-notation case.
 
-### T5 — OG cold-path per-attempt timeout lowered + deadline test
+### T6 — 4 CLAUDE.md doc edits (commit a60baa8f)
 
-**Claimed:** `OG_PHOTO_FETCH_TIMEOUT_MS` lowered to 3500 ms (below `OG_PHOTO_TOTAL_BUDGET_MS` = 10000 ms); fake-timers deadline test added.
+All four documented in the commit message, verified in CLAUDE.md:
 
-**Evidence:**
-- `lib/og-photo-fetch.ts:41` — `const OG_PHOTO_FETCH_TIMEOUT_MS = 3500;` with R20C20 comment.
-- `lib/og-photo-fetch.ts:54` — `export const OG_PHOTO_TOTAL_BUDGET_MS = 10000;`
-- `lib/og-photo-fetch.ts:108-120` — `deadline = Date.now() + OG_PHOTO_TOTAL_BUDGET_MS`; loop breaks on `Date.now() >= deadline`.
-- `__tests__/og-photo-fallback.test.ts:167-194` — R20C20 FINDING-1 test: `vi.useFakeTimers()`, starts at t=0, first mock fetch advances time to `OG_PHOTO_TOTAL_BUDGET_MS + 1`, asserts `calls.toHaveLength(1)` from 4 available sizes. If the deadline check were deleted or inverted, the loop would continue through all 4 sizes and the assertion would fail. Non-tautological.
-- `__tests__/og-photo-fallback.test.ts:88` — asserts `OG_PHOTO_TOTAL_BUDGET_MS > 3500` as a guard.
-
-**Status: VERIFIED (high confidence)**
-
----
-
-### T6 — bounded-map `.data` live-ref documentation
-
-**Claimed:** Either copy-on-read or a load-bearing doc comment warning on `.data`.
-
-**Evidence:**
-- `lib/bounded-map.ts:52-59` — R20C20 (CQ20-07) comment block: "this is a LIVE reference — intentionally … callers MUST NOT mutate entry values obtained via `.data`". Implementation chose doc warning (not copy-on-read).
-- The `get()` and `entries()` paths still use `copyValue()` (shallow copy), so external callers via the normal API are protected; only `.data` is the live-ref path.
-
-**Status: VERIFIED (high confidence)** — doc warning path chosen (acceptable per plan).
+| Edit | Location | Status |
+|------|----------|--------|
+| DOC21-G1: color_space/icc_profile_name/bit_depth labeled admin-only | CLAUDE.md lines 158–160 | VERIFIED — each row now reads `admin-only — ...` |
+| DOC21-G2: New Race-Condition-Protections bullet for gallerykit_topic_route_segments (all 3 ops) | CLAUDE.md line 378 | VERIFIED — "wraps createTopic, updateTopic, AND createTopicAlias" |
+| DOC21-M1: Advisory-lock scope note "topic create/rename/alias mutations" | CLAUDE.md line 390 | VERIFIED — "topic create/rename/alias mutations" replaces "topic renames" |
+| DOC21-G3: SHARP_CONCURRENCY formula documented | CLAUDE.md line 98 | VERIFIED — "max(1, floor((cpuCount-1)/3))" with explicit cpuCount-1 cap |
 
 ---
 
-### T7 — Doc-gap closures in CLAUDE.md
+## 3. Behavioral Spot-Checks (CLAUDE.md claims vs. code)
 
-**Claimed:** Key-Files rows for `og-photo-fetch.ts`, `color-label.ts`, `search-enrichment-fields.ts`; `has_gain_map` column updated with `infe`; `was_downscaled` column row added.
+| # | Claim | File:Line | Status |
+|---|-------|-----------|--------|
+| 1 | COLOR_IMPACTING_KEYS count = 9 | `apps/web/src/lib/settings-hash.ts:45–56` | **MATCH** — 9 keys: wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort, force_srgb_derivatives, wide_gamut_max_source_pixels, image_quality_webp, image_quality_avif, image_quality_jpeg, image_sizes |
+| 2 | settings-hash HASH_LENGTH = 8 | `apps/web/src/lib/settings-hash.ts:71` | **MATCH** — `const HASH_LENGTH = 8;` |
+| 3 | Login rate limit: 5 attempts / 15-min window, per-IP AND per-account | `apps/web/src/lib/rate-limit.ts:60–61` | **MATCH** — `LOGIN_MAX_ATTEMPTS = 5`, `LOGIN_WINDOW_MS = 15 * 60 * 1000`; both IP and `acct:` buckets incremented at `apps/web/src/app/actions/auth.ts:117–130` |
+| 4 | Per-account key: `acct:<sha256-prefix>` | `apps/web/src/lib/rate-limit.ts:99,136–140` | **MATCH** — `ACCOUNT_RATE_LIMIT_PREFIX = 'acct:'` + `createHash('sha256').update(...).digest('hex').slice(...)` |
+| 5 | IMAGE_PIPELINE_VERSION = 7 | `apps/web/src/lib/gallery-config-shared.ts:21` | **MATCH** — `export const IMAGE_PIPELINE_VERSION = 7;` |
+| 6 | publicSelectFields omits latitude/longitude/filename_original/user_filename | `apps/web/src/lib/data.ts:340–341, 364–370` | **MATCH** — explicitly destructured into `_omit*` variables and excluded from the public object |
+| 7 | SHARP_CONCURRENCY default: max(1, floor((cpuCount-1)/3)); explicit value capped at cpuCount-1 | `apps/web/src/lib/process-image.ts:44,48` | **MATCH** — `Math.max(1, Math.floor((cpuCount - 1) / 3))` and `Math.min(envConcurrency, Math.max(1, cpuCount - 1))` |
+| 8 | Advisory lock names: gallerykit_db_restore, gallerykit_upload_processing_contract, gallerykit_topic_route_segments, gallerykit_admin_delete | `apps/web/src/lib/advisory-locks.ts:19,22,25,34` | **MATCH** — all 4 exported string constants match CLAUDE.md |
 
-**Evidence:**
-- `CLAUDE.md:128` — `lib/og-photo-fetch.ts` row added with OG_PHOTO_FETCH_TIMEOUT_MS / OG_PHOTO_TOTAL_BUDGET_MS note.
-- `CLAUDE.md:129` — `lib/color-label.ts` row added.
-- `CLAUDE.md:130` — `lib/search-enrichment-fields.ts` row added.
-- `CLAUDE.md:166` — `has_gain_map` row now reads `iinf`/`infe`/`iref` (added `infe`).
-- `CLAUDE.md:167` — `was_downscaled` column row added with admin-only designation.
-
-**Status: VERIFIED (high confidence)**
-
----
-
-## Behavioral Claim Verification (CLAUDE.md vs Code)
-
-### Claim A — publicSelectFields omits every PII key; compile-time guard enforces it
-
-**Evidence:**
-- `lib/data.ts:463` — `type PrivacySensitiveKeys = 'latitude' | 'longitude' | … (20 keys)`.
-- `lib/data.ts:465` — `_SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>`.
-- `lib/data.ts:466` — `_privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: …'] = true`.
-- `typecheck` exits 0 — guard passes, no sensitive key in public fields.
-
-**Status: MATCH (high confidence)**
+No mismatches found.
 
 ---
 
-### Claim B — Advisory lock names match CLAUDE.md documentation (6 locks + per-image)
+## 4. Test Non-Vacuity Summary
 
-**Evidence in `lib/advisory-locks.ts`:**
-| CLAUDE.md name | Constant | Match |
-|---|---|---|
-| `gallerykit_db_restore` | `LOCK_DB_RESTORE` | ✓ |
-| `gallerykit_upload_processing_contract` | `LOCK_UPLOAD_PROCESSING_CONTRACT` | ✓ |
-| `gallerykit_topic_route_segments` | `LOCK_TOPIC_ROUTE_SEGMENTS` | ✓ |
-| `gallerykit_admin_delete` | `LOCK_ADMIN_DELETE` | ✓ |
-| `gallerykit_color_pipeline_backfill` | `LOCK_COLOR_PIPELINE_BACKFILL` | ✓ |
-| `gallerykit:image-processing:{jobId}` | `getImageProcessingLockName(jobId)` | ✓ |
-
-**Status: MATCH (high confidence)**
+| Test | Would Fail On Revert? | Evidence |
+|------|-----------------------|---------|
+| `focus-visible-links-scan.test.ts` | YES — hover-styled control without focus-visible token fails the gate | Lines 207–211: `issues.length > allowed` check |
+| `process-image-max-input-pixels-env.test.ts` | YES — `loadTopicCap('64e6')` returns 64 (wrong) with parseInt, 64_000_000 (correct) with Number() | Line 35: `expect(await loadTopicCap('64e6')).toBe(64_000_000)` |
 
 ---
 
-### Claim C — COLOR_IMPACTING_KEYS contains exactly 9 entries
+## 5. Gaps
 
-**Evidence:**
-`lib/settings-hash.ts:45-59` — array has 9 entries: `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`, `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `image_sizes`. Compile-time guard `_ColorKeysAreSettingKeys` passes at tsc exit 0.
-
-**Status: MATCH (high confidence)**
+None identified. All cycle-21 acceptance criteria are VERIFIED.
 
 ---
 
-### Claim D — ETag format W/"v{pipeline_version}-{mtimeMs}-{size}-{settingsHash}"
+## Verdict: PASS
 
-**Evidence:**
-`lib/serve-upload.ts:215` — `const etag = \`W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"\`;`
-
-Exactly matches CLAUDE.md description. `getServingColorSettingsHash()` called at line 214.
-
-**Status: MATCH (high confidence)**
-
----
-
-### Claim E — Rate-limit buckets use BoundedMap, not bare Map
-
-**Evidence:**
-- `lib/rate-limit.ts:77,89,105,107,317` — `ogRateLimit`, `shareRateLimit`, `loginRateLimit`, `searchRateLimit`, `semanticRateLimit` all created via `createResetAtBoundedMap` or `createWindowBoundedMap`.
-- `lib/auth-rate-limit.ts:19,105` — `accountLoginRateLimit`, `passwordChangeRateLimit` use `createWindowBoundedMap`.
-- No `new Map()` calls for rate-limit state. Oldest-entry eviction bounded by `MAX_KEYS` constants.
-
-**Status: MATCH (high confidence)**
-
----
-
-### Claim F — View-retention GC uses chunked DELETE with MAX_BATCHES cap
-
-**Evidence:**
-- `lib/view-retention.ts:37` — `MAX_BATCHES_PER_TABLE = 200`.
-- `lib/view-retention.ts:77-89` — loop `for (let i = 0; i < MAX_BATCHES_PER_TABLE; i++)` with `.limit(VIEW_PURGE_BATCH)` drizzle DELETE; breaks early when `affected < VIEW_PURGE_BATCH`.
-- Negative/non-finite `VIEW_RETENTION_DAYS` falls back to 395-day default via `Number.isFinite(retentionDays) && retentionDays > 0` guard at line 51.
-
-**Status: MATCH (high confidence)** — consistent with CLAUDE.md's "chunked DELETE" and "never a future cutoff" claims.
-
----
-
-### Claim G — OG home card points at /api/og/photo/<latestId>
-
-**Evidence:**
-- `app/[locale]/(public)/page.tsx:118` — `url: absoluteImageUrl('/api/og/photo/${latestImage.id}', seo.url)` on the default path.
-- Admin `seo.og_image_url` override branch at line 63 only fires when explicitly configured.
-
-**Status: MATCH (high confidence)**
-
----
-
-## Findings
-
-### VER21-01 (LOW, doc/plan divergence, not a code defect)
-**D20-02 lightbox ring-white kept vs. ring-ring replacement prescribed**
-
-Plan prescribed replacing `ring-white` with `ring-ring ring-offset-2 ring-offset-black` on `lightbox-color-pip.tsx` inner buttons. Implementation kept `ring-white` and added `ring-offset-2 ring-offset-black`. Both satisfy WCAG 2.4.11 (enclosing gap). White on `ring-offset-black` is higher-contrast than `ring-ring` on a dark overlay. The test (`focus-visible-rings-cycle20.test.ts:D20-02`) is aligned with the code. No behavioral defect. The plan's description diverges from the delivered implementation, but the spirit of the fix was fulfilled.
-
-**Confidence: high** — implementation is functionally correct, plan description is stale.
-
----
-
-### VER21-02 (LOW, expected-deferred state)
-**audit.ts DELETE remains unbounded (E2 DEFERRED)**
-
-`lib/audit.ts:117` still issues an unbounded `DELETE WHERE created_at < cutoff` with no LIMIT+loop pattern (unlike `view-retention.ts`). This was explicitly deferred in the cycle-20 plan. Expected state. The audit log is low-write-rate so lock-duration risk is small. Consistent with the deferred record.
-
-**Confidence: high** — this is a documented deferred item, not a regression.
-
----
-
-### VER21-03 (INFO, correct existing behavior)
-**Remaining `parseInt(str, 10)` calls in URL-parsing contexts are correct**
-
-7 `parseInt(str, 10)` calls remain in `topics.ts`, `session.ts`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `og/photo/[id]/route.tsx`, `dashboard/page.tsx`. All parse URL path segments or query parameters (not env vars). Scientific-notation strings don't appear in URL segments. These are correct uses of `parseInt` — the T1 sweep did not overreach.
-
-**Confidence: high** — no false negatives in T1.
-
----
-
-## Test Adequacy — New Tests (cycle-20 additions)
-
-| Test file | Added tests | Tautology risk | Assessment |
-|-----------|-------------|----------------|------------|
-| `upload-limits-env.test.ts` | 5 (new file) | None — dynamically reloads module per env config | Non-tautological |
-| `audit-retention.test.ts` | 1 (`'1e3'` case) | None — asserts cutoff = now − 1000 days, not 1 day | Non-tautological |
-| `rate-limit.test.ts` | 1 (TRUSTED_PROXY_HOPS 1e1) | None — asserts return value = 10, not 1 | Non-tautological |
-| `gps-exif-strip-isobmff.test.ts` | 1 (walkAborted items-found) | Mitigated — discriminator negative case proves causality | Non-tautological |
-| `og-photo-fallback.test.ts` | 1 (fake-timers deadline) | Mitigated — asserts 1 call not 4; would fail if check deleted | Non-tautological |
-| `focus-visible-rings-cycle20.test.ts` | 4 describe blocks (new file) | None — source-contract assertions | Non-tautological |
-
-**No tautological tests found in new cycle-20 additions.**
-
----
-
-## Verdict
-
-**Status: PASS**
-**Confidence: high**
-**Blockers: 0**
-
-All 6 gates green at HEAD 993ed471 (238 files / 2168 tests passed). All T1–T7 cycle-20 fixes are present in the code and behave as documented. All 7 behavioral CLAUDE.md claims MATCH the actual code with file:line evidence. No tautological tests found in new additions. Two findings identified: VER21-01 (plan-to-code divergence for D20-02, not a defect), VER21-02 (E2 audit DELETE unbounded, expected-deferred). No regression observed from cycle-20 changes.
-
-**Recommendation: APPROVE**
+All 6 quality gates green (exit 0). All cycle-21 fixes (T1–T6) are present and correct. All 8 behavioral claims MATCH the code. No blockers.

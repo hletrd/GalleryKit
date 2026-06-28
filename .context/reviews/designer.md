@@ -1,314 +1,163 @@
-# Designer Review — Cycle 21
+# Cycle 22 — Designer Review (UI/UX + WCAG 2.2 Accessibility)
 
-**Reviewer:** oh-my-claudecode:designer
-**Date:** 2026-06-29
-**Cycle:** 21 (mature codebase — 20 prior cycles)
-
----
-
-## Cycle-20 Fix Verification
-
-All D20 fixes verified against source before looking for new issues.
-
-| Finding | Status | Notes |
-|---------|--------|-------|
-| D20-01 nav-client topic pills | FIXED | `outline-none focus-visible:ring-ring focus-visible:ring-offset-2` present at ~L127 |
-| D20-01 admin-nav section link | FIXED | same token at ~L40 |
-| D20-02 lightbox-color-pip inner buttons | FULLY FIXED | Both L224 and L305 now carry `focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black`; cycle-20 pin test regex passes |
-| D20-03 timeline year scrubber + year-in-review | FIXED | both have `focus-visible:ring-ring focus-visible:ring-offset-2` |
-| D20-04 g/[key] back-links | FIXED | both branches have `outline-none rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
-| D20-05 group-hover:scale-105 (deferred) | STILL DEFERRED | globals.css catch-all suppresses the scale transform entirely under `prefers-reduced-motion`; exit criterion unchanged |
+**Date:** 2026-06-29  
+**Reviewer:** oh-my-claudecode:designer (Sonnet 4.6)  
+**Cycle:** 22  
+**Branch:** master (HEAD post-cycle-21 fixes, commit 0e475ba1+)
 
 ---
 
-## Systematic Inventory
+## Summary
 
-Scanned all `components/*.tsx` and `app/[locale]/**/*.tsx` (public + admin). Checked every `<Link>`, `<a>`, and raw `<button>` that is NOT wrapped by shadcn `<Button>` or `<Badge asChild>` (both provide built-in focus-visible rings via their className or Radix Slot). Shadcn `<Button asChild>` wrappers confirmed OK in: dashboard pagination, all admin back-button nav, photo-viewer back-to-topic, lightbox controls, tag-filter chips.
+Two real accessibility findings. Both are scanner blind spots — interactive `<button>` elements with no `hover:` styling (so the focus-visible scanner's heuristic skips them) that are also missing `focus-visible:ring`. No i18n parity failures. No reduced-motion regressions. No new touch-target violations. Skip link, focus traps, heading hierarchy, ARIA roles/labels, and form validation UX all remain correct.
+
+---
+
+## Cycle 21 Fix Verification
+
+All 13 cycle-21 findings (D21-01 through D21-13) confirmed fixed:
+
+| Finding | File | Status |
+|---------|------|--------|
+| D21-01 footer GitHub/Admin links | `components/footer.tsx:47,52` | confirmed — ring-ring ring-offset-2 present |
+| D21-02 s/[key] View Gallery | `app/[locale]/(public)/s/[key]/page.tsx:105` | confirmed |
+| D21-03 year/[year] back link | `app/[locale]/(public)/year/[year]/page.tsx:109` | confirmed |
+| D21-04 analytics window selectors + table links | `analytics-client.tsx:68,117,227` | confirmed |
+| D21-05 not-found Back Home | `app/[locale]/not-found.tsx:45` | confirmed |
+| D21-06/07 error.tsx retry+home | `app/[locale]/error.tsx:34,40` | confirmed |
+| D21-08 on-this-day-widget links | `components/on-this-day-widget.tsx:42,58` | confirmed |
+| D21-09 home-client clear-filter + back-to-top | `components/home-client.tsx:459,472` | confirmed |
+| D21-10 admin error.tsx | `app/[locale]/admin/(protected)/error.tsx:37,43` | confirmed |
+| D21-11 topic-empty-state | `components/topic-empty-state.tsx:18` | confirmed |
+| D21-12 admin-header logo | `components/admin-header.tsx:16` | confirmed |
+| D21-13 nav-client logo + controls | `components/nav-client.tsx:85,96,127,157,168` | confirmed |
 
 ---
 
 ## New Findings
 
-### D21-01 — footer.tsx: both Links missing focus-visible ring
-**File:** `apps/web/src/components/footer.tsx` L43, L52
-**WCAG:** 2.4.7 Focus Visible (AA) / 2.4.11 Focus Appearance (AA in WCAG 2.2)
-**Severity:** HIGH
-**Elements:**
-- L43: GitHub social link — `className="flex min-h-11 items-center gap-2 hover:underline"` — no focus ring
-- L52: Admin login link — `className="inline-flex min-h-11 min-w-11 items-center justify-center text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors"` — no focus ring
+### D22-01 — Histogram tooltip-trigger button missing focus ring (HIGH)
 
-**Impact:** Keyboard-navigating users reach the footer (which appears on every public page) and receive no visible focus indicator on these two interactive links. The admin link is especially significant — it is the entry point for administrative access and may be the target of keyboard-only access flows.
+**File:** `apps/web/src/components/histogram.tsx:707–712`  
+**Severity:** HIGH — keyboard users (Tab navigation) reach this button but see no focus indicator  
+**WCAG:** 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA)
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to both links' `className`.
+The histogram key-type label is a `<button>` wrapped by `<TooltipTrigger asChild>` from Radix UI. It has `cursor-help underline decoration-dotted underline-offset-2` styling but no `hover:` token and no `focus-visible:ring-*` class. Radix's `TooltipTrigger asChild` passes focus handling to the child element — the button IS keyboard-focusable (default browser focusability for `<button>`) — but when a user Tabs to it, focus is invisible.
 
----
-
-### D21-02 — s/[key]/page.tsx: "View Gallery" Link missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx` L105
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
+```tsx
+// histogram.tsx:706-713
+<TooltipTrigger asChild>
+    <button
+        type="button"
+        className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
+        // NO hover: token, NO focus-visible: token
+    >
+        {t(`viewer.keyType${keyType}`)}
+    </button>
+</TooltipTrigger>
 ```
-className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11"
-```
-No `outline-none focus-visible:ring-*` classes. The shared-link page is a public surface; this "View Gallery" back-link is the primary navigation escape.
 
 **Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
 
----
-
-### D21-03 — year/[year]/page.tsx: "Back to Timeline" Link missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx` L107
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 min-h-11"
-```
-No focus ring. Note: the timeline year scrubber links were fixed in D20-03, but the year detail page back-link is a sibling that was missed — recurring "fix one page, miss the adjacent page" pattern.
-
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+**Scanner note:** The focus-visible-links-scan.test.ts heuristic is `hover: present → require focus indicator`. This button has no `hover:` so the scanner never evaluates it. See Scanner Blind Spot Analysis below.
 
 ---
 
-### D21-04 — analytics-client.tsx: window-selector buttons missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx` L64–78
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:** Raw `<button>` elements rendered in a `role="group"` for the analytics time-window selector (7d/30d/90d). The buttons carry `aria-pressed` (correct toggle semantics) and `min-h-11` (correct touch target) but no focus ring:
-```jsx
+### D22-02 — Map popup button missing focus ring (MEDIUM)
+
+**File:** `apps/web/src/components/map/map-client.tsx:128–133`  
+**Severity:** MEDIUM — keyboard users who open a Leaflet popup reach this button without a visible focus indicator  
+**WCAG:** 2.4.7 Focus Visible (AA)
+
+The Leaflet popup renders a `<button>` that navigates to the photo detail page. The button has touch-target sizing (`min-h-[44px] min-w-[44px]`) and an `aria-label`, but has no `hover:` styling and no `focus-visible:ring-*`.
+
+```tsx
+// map-client.tsx:128-133
 <button
-  onClick={() => setWindow(w.value)}
-  aria-pressed={currentWindow === w.value}
-  className={`min-h-11 min-w-11 rounded-md px-4 py-2 text-sm font-medium transition-colors ${...}`}
+    type="button"
+    onClick={() => handleMarkerClick(marker.id)}
+    className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left"
+    aria-label={`${openPhotoLabel}: ${marker.title ?? marker.id}`}
+    // NO hover: token, NO focus-visible: token
 >
 ```
-**Fix:** Append `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the static part of the className string (outside the conditional).
+
+Leaflet maps are partially keyboard-navigable; once a popup is open, its contents are reachable by Tab. The button has no visible focus ring.
+
+**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md` to the className.
+
+**Scanner note:** Same blind spot — no `hover:` token on the button, so the scanner skips it.
 
 ---
 
-### D21-05 — not-found.tsx: "Back Home" Link missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/not-found.tsx` L43
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="inline-flex items-center min-h-11 text-primary hover:underline text-sm"
-```
-The 404 page has a full nav shell (fixed in a prior cycle) but the primary recovery action link has no keyboard focus indicator. A keyboard user who lands on a 404 page cannot visibly navigate the recovery link.
+## Scanner Blind Spot Analysis
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+The `focus-visible-links-scan.test.ts` scanner (added in cycle 21) correctly handles:
 
----
+- **`role="option"` exemption:** `<Link role="option">` in `search.tsx:74` is skipped — these are managed via `aria-activedescendant` on the parent combobox (`tag-input.tsx:197–202` pattern), not via DOM focus. The `KNOWN_VIOLATIONS: {'components/search.tsx': 0}` entry is correct.
+- **Group-hover parents:** Elements with `group-hover:` get a 12-line lookahead for a child `group-focus-visible:` ring. Confirmed working for lightbox nav arrow buttons (`lightbox.tsx:623–649`).
+- **Multi-line normalization:** Template-literal classNames and multi-line JSX are joined before scanning. Confirmed working — no false negatives from multi-line histogram buttons or home-client masonry links.
+- **shadcn `<Button>` exclusion:** Capital-B Button is skipped (ring baked into shadcn variants).
 
-### D21-06 — error.tsx (public): "Try Again" button missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/error.tsx` L32
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-```
-Raw `<button>` (not shadcn Button) without `outline-none focus-visible:ring-*`. This is the error boundary recovery button shown when the React subtree throws.
+**Confirmed blind spot:** The heuristic is `hover: present → require focus-visible:`. An interactive element with NO `hover:` styling (but still keyboard-focusable and needing a ring) is never evaluated. Both D22-01 (histogram tooltip trigger) and D22-02 (map popup button) fall into this gap.
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the className.
+**Recommendation for scanner improvement (D22-03):** Add a secondary scan pass that checks all native `<button>` elements lacking BOTH `hover:` and `focus-visible:` AND not wrapped by a known-exempt pattern (shadcn `<Button>`, `aria-hidden`, `disabled`, `tabIndex={-1}`). Scope the pass to the same `SCAN_ROOTS` as the existing scanner to avoid false positives from vendored code.
 
 ---
 
-### D21-07 — error.tsx (public): "Back to Gallery" Link missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/error.tsx` L38
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"
-```
-Sibling of D21-06 on the same error page. Both action buttons on the error boundary are keyboard-invisible.
+## Passing Checks (No Action Required)
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to the className.
+### i18n Parity (en.json vs ko.json)
 
----
+780 keys on each side — exact parity. No missing keys in either direction. The ICU plural vs. fixed-form asymmetry (English uses `{count, plural, ...}`; Korean uses `{count}장`) is intentional per the project convention (DOC-R5C3-07).
 
-### D21-08 — on-this-day-widget.tsx: "View Timeline" and photo Links missing focus-visible ring
-**File:** `apps/web/src/components/on-this-day-widget.tsx` L40, L56
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Elements:**
-- L40 "View Timeline" link: `className="text-xs text-muted-foreground hover:text-primary transition-colors min-h-[44px] flex items-center"` — no focus ring
-- L56 per-photo Links: `className="flex items-center gap-3 group min-h-[44px]"` — no focus ring
+### Reduced Motion
 
-The on-this-day widget is embedded in the public photo viewer page. Both links are navigable via keyboard but invisible during focus.
+`app/[locale]/globals.css:291` catch-all: `animation-duration: 0.01ms`, `transition-duration: 0.01ms` on `*`, plus explicit suppression of `group-hover:scale-105` transforms (WCAG 2.3.3, AGG-M4). Framer-motion in `photo-viewer.tsx:704–726` gates on `prefersReducedMotion` (sets `duration: 0` / `initial: false`). No regressions.
 
-**Fix:**
-- L40: Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to className
-- L56: Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md` to className
+### Heading Hierarchy
 
----
+- Home: `h1` (photo grid title) → `h2 sr-only` (photos section) → `h3` (photo card overlay titles). Valid.
+- Timeline: `h1` → `h2` per month with `id` for `aria-labelledby` on the enclosing `<section>`. Valid.
+- Admin: one `h1` per page, `h2` subsections. Valid.
 
-### D21-09 — home-client.tsx: "Clear filter" Link missing focus-visible ring
-**File:** `apps/web/src/components/home-client.tsx` L459
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary"
-```
-The empty-state "Clear filter" link (shown when tag filters return no results) has no focus ring. Note: `topic-empty-state.tsx` L18 has an identical instance — see D21-11.
+### Skip Link
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+`app/[locale]/layout.tsx:119–127` — skip link `href="#main-content"`. Both `(public)/layout.tsx:12` and `admin/layout.tsx:26` have matching `id="main-content" tabIndex={-1} className="... focus:outline-none"`. Correct.
 
----
+### Focus Traps
 
-### D21-10 — admin/(protected)/error.tsx: both action elements missing focus-visible ring
-**File:** `apps/web/src/app/[locale]/admin/(protected)/error.tsx` L35, L41
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Elements:**
-- L35 `<button>`: `className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"` — no focus ring
-- L41 `<Link>`: `className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"` — no focus ring
+Lightbox: `<FocusTrap>` (`lazy-focus-trap.tsx`) with `allowOutsideClick: true`, fallback to close button. On open: `closeButtonRef.current?.focus()`. On close: `previouslyFocusedRef.current.focus()`. WCAG 2.1 Modal Dialog pattern fulfilled.
 
-Exact duplicate pattern of D21-06/D21-07 on the admin subtree's error boundary page.
+### ARIA Labels and Roles
 
-**Fix:** Same as D21-06/D21-07 — add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` to both.
+Sampled controls (all pass):
+- Lightbox: `role="dialog"`, `aria-modal="true"`, `aria-label`, per-button `aria-label`+`aria-keyshortcuts`, slideshow `aria-pressed`, position counter `role="status" aria-live="polite"`.
+- Histogram cycle button: `aria-label={t('aria.cycleHistogram')}`.
+- Map popup button: `aria-label` present (D22-02 has correct ARIA, only missing visual ring).
+- Bulk-edit: `SelectTrigger` components all have `aria-label`.
+- Tag input: full combobox ARIA (`role="combobox"`, `aria-autocomplete`, `aria-expanded`, `aria-controls`, `aria-activedescendant`, `role="listbox"`, `role="option"`, `aria-selected`).
+
+### Form Validation UX
+
+- Password form: server error → shadcn `<Alert role="alert">` proactive announce; client mismatch → `<Alert>` summary + inline `<p id="confirmPassword-error">` + `aria-invalid="true"` + `aria-describedby` on the field.
+- Login form: `<p role="alert" aria-live="assertive">` for server errors. Correct.
+- Bulk-edit dialog: `<p role="alert">` for validation errors (`DES-R4C16-05`).
+
+### Touch Targets
+
+`touch-target-audit.test.ts` passes (32/32 tests). New map popup button uses `min-h-[44px] min-w-[44px]` (D22-02 is missing a focus ring, not a touch target problem). Histogram tooltip button is a small inline text element — acceptable as an information-only tooltip trigger, not a primary navigation control.
+
+### Windows High Contrast Mode
+
+`globals.css:330+` `@media (forced-colors: active)` block correctly pins `.masonry-card h3` and `.masonry-card p` to `Canvas`/`CanvasText` system pair and suppresses the gradient overlay. No regressions observed.
+
+### Dark Mode
+
+All components use CSS custom property tokens (`hsl(var(--...))`). Lightbox-color-pip inner buttons use `ring-white ring-offset-black` which is correct for the dark overlay context.
 
 ---
 
-### D21-11 — topic-empty-state.tsx: "Clear filter" Link missing focus-visible ring
-**File:** `apps/web/src/components/topic-empty-state.tsx` L18
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** HIGH
-**Element:**
-```
-className="inline-flex items-center min-h-11 px-2 underline hover:text-primary"
-```
-This is the topic-filter empty-state variant of D21-09. Both components render "Clear filter" links in empty states and both lack focus rings. Fix together.
+## Controls Explicitly Not Re-Reported
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
-
----
-
-### D21-12 — admin-header.tsx: admin logo Link missing focus-visible ring
-**File:** `apps/web/src/components/admin-header.tsx` L16
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** MED
-**Element:**
-```
-className="mr-6 flex items-center space-x-2 font-bold min-h-11"
-```
-The admin panel's header logo/brand link (navigates to dashboard) has no focus ring. Admin panel users frequently keyboard-navigate; the primary brand link being invisible on focus is inconsistent with the design system.
-
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
-
----
-
-### D21-13 — nav-client.tsx: site logo/home Link missing focus-visible ring
-**File:** `apps/web/src/components/nav-client.tsx` L85
-**WCAG:** 2.4.7 / 2.4.11
-**Severity:** MED
-**Element:**
-```
-className="flex items-center space-x-2 shrink-0 min-h-[44px]"
-```
-The public nav's site name/logo Link (line 85, distinct from the topic pill links fixed in D20-01) has no focus-visible ring. Keyboard navigation starting at the top of any page will Tab to this link first.
-
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
-
----
-
-## Structural Finding (Persistent)
-
-### MAJOR-2 — Focus-visible scanner: exit criterion reached cycle 20, action required cycle 21
-
-**Status:** Exit criterion MET in cycle 20 (≥3 fresh siblings found); cycle 21 found 13 new instances. After 5+ cycles of finding 3–13 new focus-visible gaps each cycle, the manual sweep model is not converging.
-
-**Root cause:** There are pin tests for components fixed in cycles 17–20 (`focus-visible-rings-cycle17.test.ts`, `focus-visible-rings-cycle19.test.ts`, `focus-visible-rings-cycle20.test.ts`) but NO proactive scanner that detects uncovered `<Link>` and `<a>` elements before they ship. Every cycle uncovers a new batch of siblings adjacent to previously-fixed elements.
-
-**Proposed scanner test** (`__tests__/focus-visible-links-scan.test.ts`):
-Walk all `.tsx` files under `components/` and `app/[locale]/`. For each file, extract raw `<Link` and `<a ` JSX openings (not inside `<Button asChild>`). Assert that any such element with a `className` containing an interactive signal (`hover:`, `underline`, `min-h-`, `text-primary`, `text-muted-foreground`) also contains `focus-visible:ring` within the same JSX opening tag block. Exempt by path + anchor-text with a mandatory comment. This scanner would have caught all 13 D21 findings automatically.
-
-**Alternative (simpler):** A grep-based count assertion: in the repo's `components/` and `app/[locale]/`, count `<Link` and `<a ` elements that have `hover:` in their className but NOT `focus-visible:ring`. Assert the count is zero (or equals a documented allowlist). A count increase fails CI.
-
-**Required this cycle:** build the scanner. MAJOR-2 will not converge via manual sweep alone.
-
----
-
-## Confirmed OK
-
-| Component | Status |
-|-----------|--------|
-| `lightbox.tsx` close/nav/slideshow buttons | OK — explicit `focus-visible:ring-2 focus-visible:ring-ring` |
-| `lightbox-color-pip.tsx` all three buttons | OK — D20-02 fully fixed; trigger + tooltip + copy all confirmed |
-| `photo-navigation.tsx` prev/next | OK — `<Button size="icon">` provides ring |
-| `upload-dropzone.tsx` remove button | OK — `<Button variant="ghost" size="icon">` |
-| `tag-filter.tsx` tag chips | OK — `<Badge asChild><button>` via Radix Slot |
-| `color-details-section.tsx` all buttons | OK — explicit `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring` |
-| `search.tsx` combobox + result items | OK — combobox/listbox pattern; result `<Link>` items are `role="option"` managed via `aria-activedescendant`, not Tab-focused |
-| `wide-gamut-hint.tsx` dismiss button | OK — `ring-amber-600` (cycle-17 fix) |
-| `login-form.tsx` password toggle | OK — explicit ring |
-| Admin back-nav (tags, seo, settings, categories) | OK — all use `<Button asChild variant="ghost" size="icon">` |
-| `dashboard-client.tsx` pagination | OK — `<Button asChild>` |
-| `bulk-edit-dialog.tsx` | OK — uses shadcn Dialog/Button throughout |
-| `not-found.tsx` skip-to-content link | OK — `focus-visible:not-sr-only` pattern |
-| `similar-photos.tsx` expand toggle | OK — explicit `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
-| `home-client.tsx` back-to-top button | OK — explicit `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` |
-| `home-client.tsx` masonry card links | OK — parent div uses `focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2` |
-
----
-
-## i18n Parity
-
-Flat-key diff between `messages/en.json` and `messages/ko.json`: zero gaps in either direction. Full parity confirmed via programmatic key enumeration.
-
----
-
-## Reduced-motion
-
-`globals.css` L291: global `@media (prefers-reduced-motion: reduce)` catch-all suppresses `animation-duration`, `transition-duration`, and `scroll-behavior`. A secondary rule (AGG-M4) explicitly removes the CSS `group-hover:scale-*` transform (not just the transition) for vestibular safety, covering D20-05. Component-level handling verified in `lightbox.tsx`, `home-client.tsx` back-to-top, `image-zoom.tsx`. No new issues.
-
----
-
-## Contrast
-
-Light mode `--muted-foreground` (240 3.8% 40%) on white: ~6.1:1 — WCAG AA pass.
-Dark mode `--muted-foreground` (240 5% 64.9%) on near-black (240 10% 3.9%): ~7.4:1 — WCAG AA pass.
-OLED `--muted-foreground` (same) on black: ~5.7:1 — WCAG AA pass.
-`--destructive-text` light on white: ~5.9:1 — WCAG AA pass.
-`--destructive-text` dark on near-black: ~7:1 — WCAG AA pass.
-No contrast regressions found.
-
----
-
-## ARIA Audit
-
-- `search.tsx`: combobox + listbox pattern correct. `role="combobox"`, `aria-autocomplete="list"`, `aria-controls`, `aria-expanded`, `aria-activedescendant` all present and wired. `aria-live="polite"` result-count region present. `aria-haspopup="dialog"` on trigger is accurate.
-- `analytics-client.tsx` window selector: `role="group"` with `aria-label` on wrapper; individual buttons use `aria-pressed` — correct toggle-button semantics.
-- `lightbox.tsx`: `aria-modal="true"`, `aria-label` on dialog, focus trap managed by Radix Dialog.
-- `on-this-day-widget.tsx`: `<aside aria-label={t('widgetLabel')}>` landmark present.
-- `similar-photos.tsx`: disclosure button uses `aria-expanded` + `aria-controls`. Photo links have `aria-label` with photo title.
-- `not-found.tsx`: skip-link, `<main id="main-content" tabIndex={-1}>` focus target, correct heading hierarchy.
-- No new ARIA issues found.
-
----
-
-## Summary Table
-
-| ID | File | Location | Issue | Severity | WCAG |
-|----|------|----------|-------|----------|------|
-| D21-01 | `footer.tsx` | L43, L52 | GitHub + Admin links missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-02 | `s/[key]/page.tsx` | L105 | "View Gallery" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-03 | `year/[year]/page.tsx` | L107 | "Back to Timeline" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-04 | `analytics-client.tsx` | L64–78 | Window-selector buttons missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-05 | `not-found.tsx` | L43 | "Back Home" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-06 | `error.tsx` (public) | L32 | "Try Again" button missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-07 | `error.tsx` (public) | L38 | "Back to Gallery" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-08 | `on-this-day-widget.tsx` | L40, L56 | "View Timeline" + photo links missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-09 | `home-client.tsx` | L459 | "Clear filter" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-10 | `admin/(protected)/error.tsx` | L35, L41 | Error boundary actions missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-11 | `topic-empty-state.tsx` | L18 | "Clear filter" link missing focus-visible ring | HIGH | 2.4.7 / 2.4.11 |
-| D21-12 | `admin-header.tsx` | L16 | Admin logo link missing focus-visible ring | MED | 2.4.7 / 2.4.11 |
-| D21-13 | `nav-client.tsx` | L85 | Site logo/home link missing focus-visible ring | MED | 2.4.7 / 2.4.11 |
-| MAJOR-2 | Structural | Repo-wide | No automated scanner for uncovered interactive `<Link>`/`<a>` elements — build required this cycle | SYSTEMIC | — |
-
-**Total new findings:** 13 (11 HIGH, 2 MED) + 1 systemic scanner gap requiring action.
-**Deferred from cycle-20 (still deferred):** D20-05 reduced-motion scale (global catch-all covers).
-**Confidence:** HIGH on all findings — direct source inspection of exact className strings.
+Per task instructions — confirmed fixed in cycle 21, not re-reported here: footer GitHub/Admin links, s/[key] View Gallery, year/[year] back link, analytics window selectors + table links, not-found Back Home, error.tsx retry+home (both locales), on-this-day-widget links, home-client clear-filter + back-to-top, topic-empty-state clear-filter, admin-header logo, nav-client logo + nav controls, histogram cycle button, info-bottom-sheet + photo-viewer GPS links.

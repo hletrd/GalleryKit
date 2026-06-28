@@ -1,155 +1,154 @@
-# Code Review — Cycle 21
-**Reviewer:** code-reviewer agent  
-**Date:** 2026-06-27  
-**HEAD:** 993ed471  
-**Scope:** `apps/web/src/` — actions/, lib/, components/, app/api/, db/  
-**Deferred items not re-reported:** A1, A3, A4, A5, A6+N2, N1, F3 (per cycle-20-deferred.md)
+# Code Review — Cycle 22
+
+**Date:** 2026-06-29
+**Reviewer:** oh-my-claudecode:code-reviewer (Sonnet 4.6)
+**Commit range:** HEAD since cycle-21 close (R21C21 T1–T6)
+**Prior aggregate:** `.context/reviews/archive/cycle-21/_aggregate.md`
+**Deferred list:** `.context/plans/cycle-21-deferred.md`
 
 ---
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 0 |
-| HIGH | 0 |
-| MEDIUM | 0 |
-| LOW | 2 |
-
-**Verdict: APPROVE with observations.**  
-No CRITICAL or HIGH findings at HIGH confidence. Two LOW findings noted; both are best-effort analytics or dead code, neither a security risk or data-loss risk.
+Cycle 22 delivers exactly six tasks from the cycle-21 plan (T1–T6): 20 focus-visible a11y fixes + a proactive scanner test, a `parseInt`→`Number` fix for topic display-order parsing, a one-line eviction fix for the view-count retry-count map, env-wiring of two CLIP semantic-search operational constants, a regression test for `IMAGE_MAX_INPUT_PIXELS_TOPIC` env-parse, and four CLAUDE.md doc-gap closures. After full code review — spanning all changed files, all new tests, all six deferred items, every empty-catch block, and every cross-cutting invariant (auth guard, rate-limit, privacy fence, ETag, touch-target) — **no new CRITICAL or HIGH findings were identified.** All cycle-21 deferred items are unchanged and their exit criteria remain unmet. The verdict is **APPROVE**.
 
 ---
 
-## Findings
+## Findings Table
 
-### [LOW / HIGH confidence] C21-RVW-01 — Orphaned retry count after post-flush cap eviction
+| ID | Sev | Conf | File:line | One-line |
+|----|-----|------|-----------|----------|
+| — | — | — | — | No new findings beyond known/deferred items |
 
-**File:** `apps/web/src/lib/data.ts:163–170`
-
-**Issue:**  
-The post-flush cap enforcement while-loop (in the `finally` block of `flushGroupViewCounts`) evicts entries from `viewCountBuffer` but does NOT simultaneously delete the corresponding entry from `viewCountRetryCount`:
-
-```js
-// data.ts lines 163–170 — MISSING retryCount cleanup
-while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE) {
-    const oldestKey = viewCountBuffer.keys().next().value;
-    if (oldestKey !== undefined) {
-        viewCountBuffer.delete(oldestKey);
-        // MISSING: viewCountRetryCount.delete(oldestKey);
-    } else {
-        break;
-    }
-}
-```
-
-**Failure scenario:**  
-1. Group A accumulates `retries = 2` in `viewCountRetryCount` across two failed flushes.  
-2. The post-flush cap enforcement evicts Group A from `viewCountBuffer` (too many entries). `viewCountRetryCount` still holds `retries = 2` for A.  
-3. Group A receives a new view increment and is re-buffered with `count = 1`.  
-4. During the next flush, the DB fails for Group A.  
-5. `retries = viewCountRetryCount.get(groupId) ?? 0` returns the stale `2`.  
-6. On the subsequent flush failure, `retries = 3 >= VIEW_COUNT_MAX_RETRIES = 3` → Group A is DROPPED with a warning, having only received ONE actual failure after re-entry instead of the expected three.
-
-**Impact:** Best-effort view-count analytics only. View counts may undercount for groups that experience cap-eviction followed by DB failures. No data-loss risk on durable data.
-
-**Fix:**  
-```js
-while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE) {
-    const oldestKey = viewCountBuffer.keys().next().value;
-    if (oldestKey !== undefined) {
-        viewCountBuffer.delete(oldestKey);
-        viewCountRetryCount.delete(oldestKey); // ADD THIS
-    } else {
-        break;
-    }
-}
-```
+No items to detail.
 
 ---
 
-### [LOW / LOW confidence] C21-RVW-02 — Dead condition in `isProtectedAdminRoute` outer `if`
+## Stage 1 — Spec Compliance
 
-**File:** `apps/web/src/proxy.ts:57`
+All six tasks from `cycle-21-plan.md` are implemented:
 
-**Issue:**  
-The outer `if` in `isProtectedAdminRoute` includes `|| pathname === \`/${locale}/admin\`` (equality-match for the login page path). The inner `if` only triggers on `pathname.startsWith(\`/${locale}/admin/\`)` (with trailing slash), so the equality-match branch in the outer condition never contributes to a `return true` — a pathname of exactly `/${locale}/admin` enters the outer `if` but falls through the inner `if` to `return false`. The login page is intentionally NOT protected, so the behavior is correct, but the outer equality-check is dead code that may mislead future readers into believing login-page protection is needed.
-
-```js
-// proxy.ts:57 — outer condition includes a branch that never fires
-if (pathname.startsWith(`/${locale}/admin/`) || pathname === `/${locale}/admin`) {
-    // This branch only reached when pathname === `/${locale}/admin`, but:
-    if (pathname.startsWith(`/${locale}/admin/`)) {
-        return true; // ← never reached via the outer equality-match branch
-    }
-}
-```
-
-**Impact:** No functional or security impact — the middleware correctly does not protect the login page. Low confidence because the comment above the inner `if` ("The login page is exactly /[locale]/admin") suggests the outer condition was intentionally written this way for documentation purposes, not by accident.
-
-**Fix (optional):** Simplify to the inner condition only:
-```js
-for (const locale of LOCALES) {
-    if (pathname.startsWith(`/${locale}/admin/`)) {
-        return true;
-    }
-}
-```
-Or add a comment clarifying that the outer equality-match is intentionally included for readability despite being unreachable by the inner guard.
+| Task | Plan intent | Implementation | Status |
+|------|-------------|----------------|--------|
+| T1a | Add `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 outline-none` to 13 named hover-styled Link/a/button siblings | 20 files changed (covers the named 13 plus 7 additional elements discovered during implementation) | PASS |
+| T1b | Add a proactive scanner test (`focus-visible-links-scan.test.ts`) so future additions don't regress | New scanner with 8 self-check tests; walks `components/` + `app/[locale]/`; correctly excludes `group-hover:`, `peer-hover:`, shadcn `<Button>`, `role="option"`, and `group`-parent / `group-focus-visible:` child pairs within 12-line window | PASS |
+| T2 | Replace `parseInt(orderStr, 10)` with `Number(orderStr)` + `!Number.isFinite` guard in `createTopic` and `updateTopic` to fix silent scientific-notation mis-parse | `topics.ts:108-112` and `214-218`; test cases added for `'1e3'`→1000 and `'abc'`→0 | PASS |
+| T3 | Add `viewCountRetryCount.delete(oldestKey)` alongside `viewCountBuffer.delete(oldestKey)` in the post-flush cap-eviction loop | `data.ts:163-176`; test pinned by regex assertion in `data-view-count-flush.test.ts:170` | PASS |
+| T4 | Wire `SEMANTIC_TOP_K_MAX` and `SEMANTIC_SCAN_LIMIT` to `process.env` via `envPositiveInt()` helper | `clip-embeddings.ts:26-31`; 5-case env test added (`clip-semantic-limits-env.test.ts`) | PASS |
+| T5 | Add regression test for `IMAGE_MAX_INPUT_PIXELS_TOPIC` env-parse | `process-image-max-input-pixels-env.test.ts`; 4 cases including scientific notation `'64e6'`→64_000_000, invalid inputs fallback | PASS |
+| T6 | Close 4 doc-code gaps in CLAUDE.md | CLAUDE.md updated (no code impact) | PASS |
 
 ---
 
-## Open Questions (low-confidence concerns — not blocking)
+## Stage 2 — Code Quality Review
 
-None beyond C21-RVW-02 above.
+### T1 — Focus-visible fixes (20 files)
+
+All 20 sites add the canonical `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` triplet. Verified:
+
+- **nav-client.tsx line 127**: The topic `<Link>` places `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` in the BASE argument of `cn()` before the conditional `hover:text-foreground hover:bg-muted/50`. The scanner normalizes the full `cn()` call to one logical line and sees the focus-visible token before the hover token — no false negative.
+- **lightbox.tsx group pattern**: The `<button className="group ...">` parent is handled by the scanner's `GROUP_PARENT` lookahead (finds `group-focus-visible:ring-2` on the child `<span>` within 12 lines). No regression from the T1 additions.
+- **scanner `GROUP_CHILD_WINDOW = 12`**: Sufficient for all group patterns in the codebase; the deepest observed gap is 2 lines (button open → span with group-focus-visible).
+- **scanner `INTERACTIVE_OPEN` regex** (`/<(Link|a|button)\b/g`): Correctly excludes uppercase `<Button>` (shadcn), `<span>`, `<div>`, and other non-interactive tags.
+- **`normalizeInteractiveTags`**: Multi-line tag normalization is correct. `findJsxTagEnd` tracks string depth and brace depth; the `prev !== '='` guard handles bare `=>` outside braces. The `=ARROW` post-replacement is belt-and-suspenders over the `prev !== '='` guard.
+- **No `<a>` elements without `href` with `hover:` styling** exist in the scanned directories. The scanner would flag such elements, but none are present.
+
+### T2 — topics.ts `Number()` fix
+
+Edge-case analysis:
+
+| Input | Old `parseInt(x, 10)` | New `Number(x)` | MySQL INT outcome |
+|-------|----------------------|-----------------|-------------------|
+| `'1e3'` | 1 (stops at `e`) | 1000 | 1 vs 1000 — **the intended fix** |
+| `'1.5'` | 1 | 1.5 → MySQL truncates to 1 | Same result, no regression |
+| `''` | NaN → 0 | 0 (finite) → 0 | Same result |
+| `'abc'` | NaN → 0 | NaN → 0 | Same result |
+| `'1e999'` | 1 (stops at `e`) | Infinity → `!Number.isFinite` → 0 | New correct rejection |
+| `'-Infinity'` | NaN (stops at `-`) | -Infinity → `!Number.isFinite` → 0 | New correct rejection |
+
+The `Number.isFinite` guard correctly handles Infinity, -Infinity, and NaN. The `Math.max(-1000, Math.min(1000, order))` clamp remains in place for valid values. No behavioral regression on any existing valid input.
+
+### T3 — viewCountRetryCount eviction fix
+
+The fix (`data.ts:175`, `viewCountRetryCount.delete(oldestKey)`) directly addresses C21-RVW-01: without this, an evicted group that is re-inserted inherits a stale retry count, potentially exhausting `VIEW_COUNT_MAX_RETRIES` after fewer real failures than intended. The fix is a single-line addition in the correct position — inside the `if (oldestKey !== undefined)` guard, after `viewCountBuffer.delete(oldestKey)`. The `while` loop is finite: each iteration reduces `viewCountBuffer.size` by 1, and the `break` on `oldestKey === undefined` is the safe exit. Test coverage is the regex assertion in `data-view-count-flush.test.ts:170`.
+
+### T4 — clip-embeddings.ts `envPositiveInt()` and env wiring
+
+The helper:
+
+```ts
+function envPositiveInt(raw: string | undefined, fallback: number): number {
+    const n = Number(raw ?? '');
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+```
+
+Correctly handles all rejection cases:
+- `undefined` → `Number('') = 0` → `0 > 0` false → fallback
+- `'0'` → `0 > 0` false → fallback (0 is invalid topK)
+- `'-5'` → `-5 > 0` false → fallback
+- `'Infinity'` → `Number.isFinite(Infinity) = false` → fallback
+- `'abc'` → `Number.isNaN` → `Number.isFinite(NaN) = false` → fallback
+- `'2.5'` → `Math.floor(2.5) = 2` → valid
+- `'4e3'` → `Number('4e3') = 4000` → valid
+
+The module-level constants (`SEMANTIC_TOP_K_MAX`, `SEMANTIC_SCAN_LIMIT`) are computed once at import time. The test uses `vi.resetModules()` + dynamic `import()` per case to force module re-evaluation with the new `process.env` value — a correct pattern for module-level constant testing.
+
+The interaction with `clampSemanticTopK` in the semantic search route is correct: `raw=0` (JSON number zero) → `Math.max(SEMANTIC_TOP_K_DEFAULT, Math.min(SEMANTIC_TOP_K_MAX, Math.max(1, 0)))` = `Math.max(20, Math.min(50, 1))` = 20. Zero topK is treated as "use default", not passed through. Intentional behavior per AGG-12.
+
+### T5 — IMAGE_MAX_INPUT_PIXELS_TOPIC test
+
+The test mock `vi.mock('sharp', () => ({ default: Object.assign(() => ({}), { cache: () => undefined, concurrency: () => 1 }) }))` correctly prevents Sharp's native binding from loading. The test only verifies `MAX_INPUT_PIXELS_TOPIC` (a numeric constant computed from env at module load), not any Sharp API behavior. The 4-case coverage is adequate: scientific notation, plain integer, unset default, and invalid fallback.
+
+### Deferred items — cycle-21
+
+All six deferred items are confirmed unchanged and their exit criteria remain unmet:
+
+| ID | Exit criterion check |
+|----|---------------------|
+| A1 (topics.slug mutable PK) | Still exactly 3 FK children + 1 JSON referrer; no new referrer added in cycle-22 |
+| A3 (upload quota settle) | `actions/images.ts` unchanged in cycle-22; still 6 settle sites |
+| A4 (restore-maintenance process-local) | `lib/restore-maintenance.ts` unchanged; single-instance topology still the fence |
+| A5 (`@/lib/storage` dead module) | `lib/storage/local.ts` unchanged; `storage-quarantine.test.ts` tripwire still active |
+| C21-RVW-02 (proxy.ts dead equality branch) | `proxy.ts` unchanged; behavior still correct, nit only |
+| TEST21-02 (`IMAGE_CLEANUP_CONCURRENCY` untested) | `actions/images.ts:797` unchanged; `|| 5` fallback still the guard |
+
+### Security — no regressions
+
+- **Auth guard**: No new admin routes or actions added; `lint:api-auth` and `lint:action-origin` gates cover all cycle-22 action files.
+- **Privacy fence**: `publicSelectFields` / `_PrivacySensitiveKeys` unchanged; no new columns added.
+- **Rate-limit**: No public mutating routes added; `lint:public-route-rate-limit` gate unchanged.
+- **Input sanitization**: `Number(orderStr)` in T2 is not less safe than `parseInt`; the `Math.max/min` clamp is unchanged.
+
+### Empty catch blocks — no new regressions
+
+All empty catch blocks verified against the prior cycle analysis. No new empty catches were introduced in cycle-22.
 
 ---
 
-## Areas Reviewed and Confirmed Clean
+## Open Questions (low-confidence, not blocking)
 
-The following areas were explicitly examined this cycle and found to have no new issues:
-
-| Area | Key confirmation |
-|------|-----------------|
-| `auth.ts` — login flow | Rate-limit pre-incremented before Argon2, dummy-hash for user-enumeration prevention, IP + account buckets, session creation in transaction, `timingSafeEqual` HMAC check |
-| `admin-users.ts:107–108` — username length | `.length` correct because `^[a-zA-Z0-9_-]+$` regex is applied first, guaranteeing ASCII-only input (AGG9R-03) |
-| `db-actions.ts` — mysqldump | `spawn()` with separate arg array (no shell injection), `MYSQL_PWD` env var, `sanitizeStderr`, advisory lock `gallerykit_db_restore`, `RELEASE_LOCK` in every finally |
-| `gps-exif-strip.ts:470` — walkAborted | Unconditional check before processing results (R20C20 T2 fix confirmed) |
-| `search/similar/[id]/route.ts` | Gate ordering correct, `rollbackSemanticAttempt` on every early return, `searchEnrichmentSelectFields` compile guard, `dotProduct` only reached in production mode |
-| `topics.ts` | Advisory lock pattern correct, `remapTopicSlugInQuery` inside transaction |
-| `collections.ts` | `requireSameOriginAdmin()` result stored + early return on all mutating exports |
-| `images.ts` | `collectImageCleanupFailures` wraps each op in try/catch (never throws), outer `Promise.all` safe; `CLEANUP_CONCURRENCY` uses `Number()` not `parseInt` |
-| `public.ts:375` | `topicSlug.length` correct (ASCII-only), `countCodePoints` used for search query |
-| `rate-limit.ts` / `auth-rate-limit.ts` | `GREATEST(count - 1, 0)` prevents negative decrements; rollback uses decrement not delete |
-| `clip-embeddings.ts` | Zero-vector protection in `normalizeEmbedding`, dimension mismatch throws, `topK` filter threshold correct |
-| `csv-escape.ts` | Formula injection prefix, bidi strip, zero-width strip — all defense-in-depth layers present |
-| `avif-support.ts` | `onload` + `onerror` both resolve Promise (no hang path) |
-| `data.ts` — drain Promise | `resolveDrain()` always called in `finally` block (no hanging Promise) |
-| `og-photo-fetch.ts` | Per-attempt + total-budget timeouts, byte cap, `Number.isFinite` guard on Content-Length |
-| `embeddings.ts:134` | `Promise.all` chunks wrapped in `try/catch` per-item — no unhandled rejection |
-| `upload-limits.ts` | `Number()` not `parseInt` (R20C20 fix confirmed), `Math.floor` + `isFinite` + `> 0` guard |
-| `bounded-map.ts` | Hard cap auto-enforced on `set()`, copy-on-read from `get()` / `entries()`, live `.data` reference documented with mutation warning |
-| `view-retention.ts` | Chunked DELETE with per-batch LIMIT — correctly bounded |
-| `proxy.ts` | Admin auth guard order correct, `x-gk-admin-render: 1` set after auth check |
+None.
 
 ---
 
 ## Positive Observations
 
-1. **Deferred-item discipline.** The cycle-20 deferred list is clean: none of the A1/A3/A4/A5/A6+N2/N1/F3 items have regressed or grown in scope.
-
-2. **`viewCountRetryCount` multi-eviction-path coverage.** The code already handles three of the four cleanup paths correctly: (a) `viewCountRetryCount.clear()` when buffer empties, (b) `viewCountRetryCount.delete(groupId)` when the max-retry threshold is hit, (c) `viewCountRetryCount.delete(groupId)` when the at-capacity re-buffer is dropped, and (d) `viewCountRetryCount` hard-cap eviction when sustained outage keeps the buffer non-empty. Only the post-flush cap while-loop (finding C21-RVW-01) misses the parallel delete.
-
-3. **Promise error-handling consistency.** Every `Promise.all` over potentially-failing async ops uses an inner try/catch or `.catch()` so the outer `Promise.all` cannot produce unhandled rejections — a pattern applied uniformly across `images.ts`, `embeddings.ts`, and `data.ts`.
-
-4. **`Number()` vs `parseInt` rollout.** The R20C20 fix for scientific-notation env-var parsing (`Number()` + `Math.floor` + `isFinite` + `> 0`) is correctly applied across `upload-limits.ts`, `rate-limit.ts`, `view-retention.ts`, and `audit.ts`. The pattern is now consistent.
-
-5. **GREATEST guard in `decrementRateLimit`.** `GREATEST(count - 1, 0)` prevents the rate-limit counter from going negative during concurrent rollbacks — a sound defensive use of SQL's GREATEST that avoids a CAS loop.
-
-6. **OG-route fetch chain.** `og-photo-fetch.ts` correctly bounds both per-attempt timeout and total chain budget, uses `Number.isFinite` on the Content-Length header, and applies both pre-buffer and post-buffer byte-cap checks. This is defense-in-depth against slow-read and oversized-response scenarios.
+- **T3 fix precision**: Single-line addition in exactly the right position, with an explanatory comment referencing the review finding (C21-RVW-01). Minimal diff, maximum correctness.
+- **`envPositiveInt()` helper design**: Centralized in `clip-embeddings.ts` (the only consumer), avoids a new utility module for a two-liner. `Math.floor()` instead of `parseInt` handles float inputs cleanly and consistently with the cycle-20 env-parse sweep.
+- **T1 scanner self-check tests**: The 8 inline self-check tests (`describe('self-check', ...)`) are a high-value addition — they document the scanner's intended boundary conditions and prevent the scanner itself from regressing silently.
+- **KNOWN_VIOLATIONS seeded to `{ 'components/search.tsx': 0 }`**: Explicit zero entry for the `role="option"` exemption case documents the design intent without accumulating a false violation debt.
+- **All cycle-22 tests use `vi.resetModules()`** correctly for module-level constant testing, avoiding the common pitfall of sharing a stale module singleton across env-variation cases.
 
 ---
 
-## Recommendation
+## Verdict
 
-**APPROVE.** No CRITICAL or HIGH findings. Two LOW findings documented above with concrete fixes. The single actionable fix (C21-RVW-01: add `viewCountRetryCount.delete(oldestKey)` at `data.ts:166`) is a one-line change and can be included at the implementer's discretion in the next cycle.
+**APPROVE**
+
+- CRITICAL: 0
+- HIGH: 0
+- MEDIUM: 0 (new; 0 scheduled from prior cycles)
+- LOW: 0 (new; all cycle-21 deferred items unchanged)
+
+All six cycle-21 plan tasks are correctly implemented and tested. No new issues beyond the confirmed-deferred list. The codebase is in a consistently high-quality state at HEAD.

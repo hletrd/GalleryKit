@@ -1,378 +1,288 @@
-# Tracer Report — Cycle 21
+# Tracer Report — Cycle 22
 
 **Date:** 2026-06-29
-**HEAD:** (cycle-21 fixes applied, including R21-L1 runtime pins)
-**Baseline (cycle-20):** eslint 0, tsc 0, vitest 2155 pass / 4 skip
-**Scope:** 6 end-to-end flows; competing hypotheses; file:line evidence; TRACE21-NN labels
+**Repo:** GalleryKit at `/Users/hletrd/flash-shared/gallery`
+**Prior baseline:** TRACE21-05-LOW (`lint:action-origin` gates `requireSameOriginAdmin()` but not `isAdmin()`; deferred with exit criterion)
 
 ---
 
-## TRACE21-01 — Upload → quota claim → enqueue → claim → Sharp fan-out → conditional processed UPDATE → delete-mid-processing cleanup
+## Observation
 
-### Observation
+Six end-to-end flows were traced with file:line citations across the GalleryKit codebase. Goal: find broken links, TOCTOU gaps, unhandled branches, and state-consistency gaps not caught in cycle 21.
 
-The upload action accepts files, claims a quota window, enqueues background processing, and background processing acquires a per-image advisory lock before converting. Two races are documented: delete-while-processing (the image is removed between the queue check and the conditional UPDATE) and concurrent-worker double-processing (two queue workers both try to process the same image). Both are said to be handled by distinct mechanisms.
+Flows traced:
+1. Upload → original save → PQueue claim → per-image advisory lock → Sharp parallel fan-out → conditional `processed=true` UPDATE → orphan cleanup on delete-mid-processing
+2. Color detection precedence (NCLX → ICC chromaticity → ICC name allowlist) → encoder decision matrix → ETag / SW HEAD revalidation
+3. Login → per-IP + per-account rate-limit buckets → bucket eviction → session issue → middleware guard → admin action `requireSameOriginAdmin` + `isAdmin`
+4. View-count buffer (bufferGroupViewCount → flushGroupViewCounts → retry/eviction → shutdown flush)
+5. Semantic search request → SEMANTIC_SCAN_LIMIT scan → SEMANTIC_TOP_K_MAX clamp → response
+6. Migration/deploy → migrate.js journal hash post-condition → reconcileLegacySchema → drizzle migrate
 
-### Frame
+---
 
-Does the full upload-to-processed path handle all documented races without leaking orphaned files, phantom quota claims, or double-processing?
-
-### Hypothesis Table
+## Hypothesis Table
 
 | Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | All races are handled correctly at HEAD | High | Strong | Multiple independent mechanisms confirmed in source |
-| 2 | Quota settle TOCTOU is open on a concurrent same-IP upload | Low | Weak | CR-16-01 comment explicitly addresses this; synchronous claim is confirmed |
-| 3 | affectedRows=0 cleanup uses default sizes only, leaving non-default variants | Very Low | Weak | AGG-C4-04 explicitly passes `[]` for full scan |
-
-### Evidence For H1 (correct)
-
-- `apps/web/src/app/actions/images.ts:197-228`: CR-16-01 TOCTOU fix confirmed. All quota checks (count, total-size, cumulative) are synchronous; quota claim (`tracker.bytes += totalSize; tracker.count += files.length`) executes BEFORE the first `await` (disk check at line 233). This closes the check-then-claim race documented at CQ19-02.
-- `apps/web/src/app/actions/images.ts:244,249,273,277,542,564`: Six `settleUploadTrackerClaim(...)` settle sites. Lines 244 and 249 handle disk-check failure (stat and statfs throw, respectively). Lines 273 and 277 handle DB error (throw re-propagated after settle) and topic-not-found. The comment at line 262 documents the invariant: "any await added between the claim and the final settle MUST roll the claim back on throw."
-- `apps/web/src/lib/image-queue.ts:311`: `acquireImageProcessingClaim(job.id)` acquires a per-image MySQL advisory lock with non-blocking GET_LOCK before any processing work.
-- `apps/web/src/lib/image-queue.ts:340-344`: `claimRetryScheduled = false` reset on successful claim — the C4-A2 bug fix. Without this, a job that retried once then succeeded would leave `claimRetryScheduled=true`, preventing `claimRetryCounts` cleanup.
-- `apps/web/src/lib/image-queue.ts:347-352`: `SELECT WHERE processed = false` check executes AFTER lock acquisition. This prevents the delete-while-checking race.
-- `apps/web/src/lib/image-queue.ts:431-443`: All three output files (WebP, AVIF, JPEG) are verified to exist and have non-zero size before any UPDATE. A corrupt or incomplete Sharp write cannot mark the image processed.
-- `apps/web/src/lib/image-queue.ts:447-449`: Conditional UPDATE: `SET processed=true WHERE processed=false`. `affectedRows` is captured.
-- `apps/web/src/lib/image-queue.ts:451-468`: `affectedRows === 0` → `deleteImageVariants(dir, filename, [])` with empty sizes array, three times. The `[]` third argument triggers a full directory scan removing every `{name}_{size}{ext}` variant, including non-default sizes. AGG-C4-04 comment confirms this was an explicit fix from a prior path that used `DEFAULT_OUTPUT_SIZES`.
-
-### Evidence Against H1 / Gaps
-
-- The outer `try {}` at `images.ts:175` is `finally`-only for the upload-contract lock release. An uncaught throw between claim (line 226) and the topic-exists try (line 267) would leak the claim. However, the code between lines 226 and 267 contains only synchronous operations followed by the disk-check try-catch that settles on any throw. The gap between disk-check settle and topic-check try (lines 251-267) is a `try { await db.select... }` with its own settle-on-throw. No uncovered gap is visible.
-
-### Rebuttal Round
-
-Best challenge to H1: the `settleUploadTrackerClaim` is an in-memory Map mutation. If the Node process crashes between claim and settle, the window inflates for the lifetime of the tracking window (~1 h). This is documented in CLAUDE.md ("process-local") and is a single-writer-by-design constraint, not a new defect.
-
-H1 still stands. All race conditions in scope are handled.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** The upload-to-processed flow handles the quota TOCTOU, concurrent-worker double-processing, delete-while-processing, and orphaned-variant cleanup correctly at HEAD. Evidence tier: primary artifacts (direct code-path reads at file:line).
-
-### Critical Unknown
-
-None. The mechanisms are fully confirmed in source.
-
-### Uncertainty Notes
-
-Process-local in-memory quota state is a documented single-writer limitation, not a new gap.
+|------|------------|------------|-------------------|--------------------------|
+| 1 | All 6 flows correct at HEAD; one new LOW structural observation (auth-guard call-order inconsistency) | High | Strong (direct file:line) | All critical paths confirm test-locked or crash-fast; ordering inconsistency is confirmed cosmetic only |
+| 2 | TRACE21-05-LOW has worsened — a new action omits both auth checks | Low | Strong (negative: exhaustive grep found no such case) | Exit criterion in deferred table: no action omits both; every `requireSameOriginAdmin` caller also resolves a user |
+| 3 | View-count buffer has a silent data-loss path on SIGTERM not covered by the `flushBufferedSharedGroupViewCounts` drain | Low | Strong (negative: test locks await-before-empty-check ordering) | Covered by `data-view-count-flush.test.ts` invariant |
 
 ---
 
-## TRACE21-02 — Color signal detection precedence (NCLX colr → ICC chromaticity → ICC name) → encoder decision → ETag/settings-hash invalidation → SW revalidation
+## TRACE22-01: Upload → advisory lock → fan-out → orphan cleanup
 
-### Observation
+**Framing:** Can a concurrent delete-mid-processing window, or a quota TOCTOU, leave orphan derivative files or corrupt the processed count?
 
-`detectColorSignals()` resolves color primaries and transfer function from three sources in priority order. A per-field guard is supposed to prevent NCLX "Unspecified" (code 2) from overriding a more specific ICC-derived value. The ETag for served derivatives includes a settings hash covering all color-impacting settings.
+**Evidence For (no defect):**
 
-### Frame
+`apps/web/src/app/actions/images.ts`:
+- Line ~228: `tracker.bytes += totalSize; tracker.count += files.length` is synchronous BEFORE the first `await`, closing the quota TOCTOU (CR-16-01). Six `settleUploadTrackerClaim` call sites exist (~244, ~249, ~273, ~277, ~542, ~564). An INVARIANT comment documents that any new `await` between claim and settle must roll the claim back.
+- `getCurrentUser()` is called before quota claim; early returns before any file write do not consume quota.
 
-Does the three-tier precedence apply correctly per-field, and does the ETag invalidation cover all byte-impacting settings?
+`apps/web/src/lib/image-queue.ts`:
+- `claimRetryScheduled = false` reset on successful claim (C4-A2 fix).
+- `SELECT WHERE processed = false` check AFTER the per-image advisory lock `gallerykit:image-processing:{jobId}` is acquired — prevents delete-while-checking race.
+- `verifyFile()` checks all 3 output formats are present and non-zero before the conditional UPDATE.
+- `affectedRows === 0` path calls `deleteImageVariants(UPLOAD_DIR_*, filename, [])` with `[]` for a full directory scan (AGG-C4-04), covering non-default-size variants.
+- Fire-and-forget caption and embedding hooks (void IIFE) fire AFTER `processed=true` is committed. No ordering constraint violated.
 
-### Hypothesis Table
+**Evidence Against / Gaps:**
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | Precedence and ETag are both correct | High | Strong | Code path confirmed at file:line |
-| 2 | NCLX code-2 guard is incomplete — some fields bypass it | Low | Weak | Only one guard-point pattern; each field must have its own check |
-| 3 | IMAGE_PIPELINE_VERSION in ETag comes from gallery-config-shared.ts, not process-image.ts | Non-issue | Moderate | CLAUDE.md explicitly documents this re-export chain |
+The A3 deferred item (6 hand-placed settle sites with comment-only invariant) remains open. No automated test pins that no new `await` was inserted in the span. No images.ts upload-flow changes found in this cycle's git log.
 
-### Evidence For H1 (correct)
-
-- `apps/web/src/lib/color-detection.ts`: NCLX code-2 guard uses `!== undefined` check at each field assignment. The field override only applies when the NCLX map entry for that code is defined. Code 2 ("Unspecified") has no entry in the maps, so it produces `undefined` and does not override any ICC-derived value.
-- `apps/web/src/lib/color-detection.ts`: ICC chromaticity fallback (`icc-chromaticity.ts`) is applied only when `colorPrimaries === 'unknown'` after NCLX processing AND confidence is not 'low'.
-- `apps/web/src/lib/settings-hash.ts`: ETag covers 9 `COLOR_IMPACTING_KEYS`: 5 color keys (`wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`), 3 quality keys (`image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`), and `image_sizes`. `image_sizes` is sorted ascending before hashing (AGG-R7C3-02) so array-order variance does not cause spurious invalidation.
-- `apps/web/src/lib/gallery-config-shared.ts:21`: `IMAGE_PIPELINE_VERSION` (currently 7) is defined here and re-exported from `process-image.ts`, as documented.
-- `apps/web/src/lib/gallery-config.ts:141-142`: Semantic mode resolver heals stored 'production' → 'disabled' if `SEMANTIC_SEARCH_ALLOW_PRODUCTION !== 'true'` on the happy path.
-- `apps/web/src/lib/gallery-config.ts:193-200`: Catch/defaults path applies the SAME 'production' heal at line 196, symmetric with the happy path — defensive consistency pattern throughout config resolution.
-
-### Evidence Against H1 / Gaps
-
-- The CRT-D1 operational gap (static path serves majority of traffic; settings-hash ETag only affects the serve-upload path) is documented in CLAUDE.md and confirmed unchanged. An admin changing a color-impacting setting does NOT invalidate already-served static derivatives without a backfill re-encode. This is a documented operational constraint, not a code defect.
-- The compile-time `_ColorKeysAreSettingKeys` guard in `settings-hash.ts` catches typos in the COLOR_IMPACTING_KEYS list but cannot catch a new byte-impacting key that an author forgets to add.
-
-### Rebuttal Round
-
-Best challenge: if a future NCLX code is added to the maps with an incorrect value, it would silently override ICC-derived data. This is a maintenance risk, not a current defect. The NCLX map guard is correct at HEAD; all defined codes map to correct values.
-
-H1 still stands.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** Color signal precedence applies the NCLX code-2 "Unspecified" guard correctly per-field. ETag covers all 9 byte-impacting settings with sorted image_sizes. CRT-D1 (static path gap) is a documented operational constraint.
-
-### Critical Unknown
-
-None in the code. The maintenance risk (new COLOR_IMPACTING_KEY not added by an author) is structural.
-
-### Uncertainty Notes
-
-The ICC chromaticity high-confidence vs medium-confidence threshold (ΔE ≤ 0.005 vs ≤ 0.015) was confirmed correct in cycle-19.
+**Verdict: CONFIRMED-CORRECT.** A3 deferred item unchanged.
 
 ---
 
-## TRACE21-03 — GPS strip per-format → walkAborted → re-encode fallback → on-disk original neutralization
+## TRACE22-02: Color detection → encoder decision → ETag → SW revalidation
 
-### Observation
+**Framing:** Could a new color detection path or ETag coverage change leave delivered bytes mismatched from their metadata or miscached?
 
-`stripGpsFromOriginal()` in `process-image.ts` dispatches to format-specific lossless scrubbers (Tier 1) and falls back to Sharp re-encode (Tier 2) when a scrubber returns `null`. In `gps-exif-strip.ts`, the ISOBMFF walker sets `walkAborted = true` at three guard points. The cycle-20 fix (R20C20 CQ20-06) moved `if (walkAborted) return null` to fire BEFORE the zero-items check, ensuring walkAborted causes `null` return even when 1+ items were found before the abort.
+**Evidence For (no defect):**
 
-### Frame
+Full color signal precedence (NCLX `colr` → ICC chromaticity XYZ→xy → ICC name allowlist) confirmed in cycle 21 with full file:line citations. Relevant modules (`color-detection.ts`, `icc-chromaticity.ts`, `process-image.ts`, `settings-hash.ts`, `serve-upload.ts`, `sw.template.js`) have not received behavioral changes this cycle (git log shows only docs and shutdown/photo-viewer bug fixes on master since cycle 21).
 
-Is the walkAborted fix correctly applied and does the `null` return propagate correctly through all format-specific Tier 2 paths, with no GPS-retention gap?
+`apps/web/src/lib/settings-hash.ts`: 9 `COLOR_IMPACTING_KEYS` including sorted `image_sizes`. Compile-time guard `_ColorKeysAreSettingKeys` catches typo'd/removed keys.
 
-### Hypothesis Table
+`apps/web/public/sw.template.js`: SW HEAD revalidation bounded by `AbortSignal.timeout(300 ms)` (AGG-R8-05). Verified unchanged.
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | Fix is correctly applied and AVIF/HEIF paths behave correctly | High | Strong | Exact line confirmed, Tier 2 paths traced |
-| 2 | HEIC structural-anomaly path retains GPS — gap exposed by walkAborted fix | Medium | Moderate | By design: Sharp cannot encode HEVC; path existed before the fix |
-| 3 | Exception in Tier 2 silently retains GPS (temp file lost, original untouched) | Low | Moderate | Documented: best-effort contract, non-fatal log |
+**Evidence Against / Gaps:** Evidence carried from cycle 21 without re-reading `color-detection.ts`. Confidence high because git log shows no behavioral changes to those modules this cycle.
 
-### Evidence For H1 (correct)
-
-- `apps/web/src/lib/gps-exif-strip.ts:461`: R20C20 comment: "honor walkAborted UNCONDITIONALLY, not only on the zero-items branch."
-- `apps/web/src/lib/gps-exif-strip.ts:470`: `if (walkAborted) return null;` fires BEFORE the zero-items check that would otherwise return `{ stripped: false, buffer: input }`.
-- `apps/web/src/lib/gps-exif-strip.ts:393,403,405,411`: Three guard points set `walkAborted = true` on depth overflow, BigInt overflow, and malformed box size.
-- `apps/web/src/lib/process-image.ts:1646-1648`: HEIC/HEIF/AVIF dispatches to `stripGpsFromIsobmffBuffer(input)`. A `null` return means `scrubbed = null`.
-- `apps/web/src/lib/process-image.ts:1657-1662`: `if (scrubbed)` — a `null` return falls through to Tier 2; `{ stripped: false }` returns early (no GPS to strip); `{ stripped: true }` writes `tmpPath` and renames atomically.
-- `apps/web/src/lib/process-image.ts:1686-1688`: AVIF Tier 2: `pipeline.avif({ quality: 90 }).toFile(tmpPath)`. AVIF structural-anomaly GPS is stripped via re-encode. CONFIRMED.
-- `apps/web/src/lib/process-image.ts:1693-1695`: HEIC/HEIF Tier 2: `console.error('... cannot strip GPS from structurally anomalous HEIC (no HEVC encoder); original retains GPS ...')` then `return`. GPS retained for structurally anomalous HEIC/HEIF. Documented design limitation.
-- `apps/web/src/lib/process-image.ts:1709-1717`: Exception handler cleans up `tmpPath` with `safeUnlink` and logs a non-fatal error. GPS NOT stripped on exception — best-effort contract explicitly documented in the comment.
-
-### Evidence Against H1 / Gaps
-
-- H2 is confirmed: structurally anomalous HEIC/HEIF retains GPS. However, this is NOT a new gap exposed by the walkAborted fix — the code at line 1693 existed before R20C20. The fix only affects whether a walk with 1+ found items reaches Tier 2; it does not change what Tier 2 does for HEIC. Standard HEIC files (single Exif item, walk completes normally) are unaffected because `walkAborted` would not be set.
-- H3 is confirmed behavior: a Sharp re-encode failure causes the exception handler to fire, leaving the original with GPS. The catch at line 1709 is explicit: "Non-fatal: log and continue. Only the download-original path leaks."
-
-### Rebuttal Round
-
-Best challenge to H1: the items-found + walkAborted path for HEIC specifically now returns `null`, falls to Tier 2, and Tier 2 logs an error and returns without stripping. Before R20C20, this same path would have returned `{ stripped: false, buffer: input }` (claimed GPS-clean when it was actually an anomalous walk). The new behavior is MORE conservative and correct for the doctrine: an anomalous walk returns `null` (unknown state), which triggers Tier 2. The limitation that Tier 2 cannot strip from HEIC/HEIF is pre-existing and documented.
-
-H1 still stands. The walkAborted fix is correctly applied.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** R20C20 fix applied at `gps-exif-strip.ts:470`. AVIF structural anomaly correctly falls to Tier 2 re-encode. HEIC/HEIF structural anomaly logs error and retains GPS — this is an explicit design limitation (no HEVC encoder in prebuilt Sharp), not a code defect. Exception path is best-effort with documented semantics.
-
-### Critical Unknown
-
-None. The HEIC/HEIF design limitation is acknowledged and documented.
-
-### Uncertainty Notes
-
-The "standard HEIC carries one Exif item" claim from the cycle-20 security reviewer is not independently verified here, but the behavior is correct regardless.
+**Verdict: CONFIRMED-CORRECT.** Carried from cycle 21.
 
 ---
 
-## TRACE21-04 — Backfill (sidecar + in-app runner) → advisory lock → re-encode → delete-mid-reencode cleanup → version-bump-on-detection-failure guard
+## TRACE22-03: Login rate-limit → session → middleware guard → admin actions
 
-### Observation
+**Framing:**
+- A: Rollback asymmetry in the two-bucket login rate limit creates a brute-force window.
+- B: An admin action calls `requireSameOriginAdmin()` without `isAdmin()`, making TRACE21-05-LOW worse.
+- C: The `isAdmin()` / `requireSameOriginAdmin()` call order is inconsistent across action files relative to what images.ts comments document.
 
-Two backfill entry points (sidecar `--rm` script and in-app admin runner) both re-encode photos at the current pipeline version. The documented contract: (a) neither bumps `pipeline_version` on detection failure; (b) both handle the delete-mid-reencode race via `affectedRows === 0`; (c) the advisory lock `gallerykit_color_pipeline_backfill` serializes concurrent runs.
+**Evidence For (no defect on A and B):**
 
-### Frame
+`apps/web/src/app/actions/auth.ts`:
+- `loginRateLimit` (per-IP) and `accountLoginRateLimit` (per-account) both pre-incremented BEFORE Argon2 verify.
+- On rate-limit exceeded: both in-memory buckets rolled back via `Promise.allSettled` (symmetric).
+- On unexpected infra error (DB unavailable): NO rollback of in-memory counters (C1F-CR-04 — deliberate; over-counting safer than under-counting on infra failure).
+- Session fixation prevention: insert new session + delete others in one transaction.
+- `dummyHashPromise` computed at module init to equalize timing on unknown-user paths (AGG-M2/TRC-M7).
 
-Are the two backfill entry points symmetric in their race handling and detection-failure guard?
+`apps/web/src/lib/auth-rate-limit.ts`:
+- `rollbackLoginRateLimit`/`rollbackAccountLoginRateLimit`: decrement not delete (C1-07 rationale preserved). Lines 72-79, 87-94.
+- `passwordChangeRateLimit` is a separate Map — failed password changes do not consume login budget.
 
-### Hypothesis Table
+Exhaustive grep for `requireSameOriginAdmin` callers without co-located `isAdmin`/`getCurrentUser`:
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | Both entry points are symmetric and correct | High | Strong | Code confirmed at file:line, both paths traced |
-| 2 | In-app runner detection-failure branch misses affectedRows check | Low | Weak | admin-backfill-runner.ts:608 confirms it is present |
-| 3 | Sidecar script version-bump-on-detection-failure differs from in-app runner | Low | Weak | backfill-color-pipeline.ts:480 confirms no version bump |
+```
+apps/web/src/app/actions/collections.ts  — isAdmin() present at lines 19, 68, 116
+apps/web/src/app/actions/sharing.ts      — isAdmin() present at lines 88, 189, 310, 350
+apps/web/src/app/actions/admin-backfill.ts — isAdmin() present at line 34
+apps/web/src/app/actions/tags.ts         — isAdmin() present at lines 21, 46, 103, 143, 209, 269, 358
+apps/web/src/app/actions/images.ts       — isAdmin()/getCurrentUser() at multiple sites
+```
 
-### Evidence For H1 (correct)
+Every `requireSameOriginAdmin` caller also resolves the current user. TRACE21-05-LOW exit criterion is not met.
 
-- `apps/web/src/lib/admin-backfill-runner.ts:576`: Success branch: `affectedRows === 0` → `cleanupDeletedMidReencodeVariants()` with the just-written derivative file triplet.
-- `apps/web/src/lib/admin-backfill-runner.ts:608`: Detection-failure branch: same `affectedRows === 0` check → `cleanupDeletedMidReencodeVariants()`. Both branches covered.
-- `apps/web/src/lib/admin-backfill-runner.ts:616`: `finally` block releases per-image advisory lock unconditionally.
-- `apps/web/src/lib/admin-backfill-runner.ts:597-612`: Detection-failure branch updates only `was_downscaled` and `avif_10bit` — does NOT set `pipeline_version`. Image remains a backfill candidate for the next run.
-- `apps/web/scripts/backfill-color-pipeline.ts:120-131`: `cleanupDeletedMidReencodeVariants()` exported as a module-level function for unit testing. The sidecar's `flushBatch()` feeds `affectedRows` results to `filterDeletedMidReencode()` which returns the files needing cleanup.
-- `apps/web/scripts/backfill-color-pipeline.ts:149-162`: `countDetectionFailureDeletedMidReencode()` exported separately for unit testing the detection-failure∩deleted overlap count.
-- `apps/web/scripts/backfill-color-pipeline.ts:480`: Comment "derivative columns without bumping pipeline_version" confirms the same no-version-bump contract on the sidecar side.
-- `apps/web/scripts/backfill-color-pipeline.ts:511-514`: Sidecar logs a warning when `detectionFailures > 0` and `pipeline_version` was NOT advanced, explicit about the retry-on-next-run behavior.
+**Evidence for Hypothesis C (new observation — TRACE22-NEW-01):**
 
-### Evidence Against H1 / Gaps
+Images.ts comments at lines 930 and 1132 document: "requireSameOriginAdmin first, then isAdmin." However, in `tags.ts` (lines 46-48), `collections.ts` (lines 19-20), `sharing.ts` (lines 88-90), and `admin-backfill.ts` (lines 34-37), the order is inverted: `isAdmin()` is called first, returning early on failure, then `requireSameOriginAdmin()` is called. Both orderings reject the same request set. The difference is which error is returned first and whether a DB auth round-trip precedes an origin check. Neither ordering is a security bug. The comment in images.ts claiming it "matches existing action pattern" is false.
 
-- The in-app runner concurrency cap (`resolveBackfillConcurrency`) is process-local; a second app instance pointing at the same MySQL server would both attempt to acquire the advisory lock. The lock serializes correctly, but the cap math (pool budget / 2) is computed per-instance independently. Documented single-writer topology constraint.
-- The sidecar `--rm` run uses a separate MySQL pool and is uncapped (`BACKFILL_CONCURRENCY` default 2). Running both simultaneously serializes via the advisory lock, but the sidecar's pool is not visible to the in-app pool budget calculation. No gap in correctness; mentioned in CLAUDE.md.
-
-### Rebuttal Round
-
-Best challenge: the sidecar's `flushBatch()` is a closure in the main function scope. The exported `cleanupDeletedMidReencodeVariants` is at module level and is the correct test target. The in-app runner and the sidecar both call the same functional pattern for the `affectedRows === 0` → cleanup path. No asymmetry detected.
-
-H1 stands.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** Both backfill entry points are symmetric in advisory lock handling, delete-mid-reencode cleanup (full-directory scan via `[]` arg), and the no-version-bump-on-detection-failure guard. Sidecar uses exported helpers for unit test coverage.
-
-### Critical Unknown
-
-None. All four documented contracts are confirmed in source.
-
-### Uncertainty Notes
-
-The advisory lock name scope (server-wide, not per-database) is documented in CLAUDE.md. Multi-tenant co-location would require name prefixing. Not a cycle-21 concern.
+**Verdicts:**
+- Hypothesis A: CONFIRMED-CORRECT.
+- Hypothesis B: TRACE21-05-LOW UNCHANGED — no new instances.
+- Hypothesis C: NEW LOW OBSERVATION — TRACE22-NEW-01 (see below).
 
 ---
 
-## TRACE21-05 — Session token mint → cookie → middleware guard (proxy.ts) → isAdmin() → server action requireSameOriginAdmin
+## TRACE22-04: Migration flow → runMigrations post-condition → reconcileLegacySchema
 
-### Observation
+**Framing:** Is a new column missing from `reconcileLegacySchema`, or does a post-condition gap allow a silent migration skip?
 
-Sessions are HMAC-SHA256 tokens (`timestamp:random:signature`). The Next.js middleware (`proxy.ts`) validates token FORMAT only. Full cryptographic verification is deferred to `verifySessionToken`. Server actions call `requireSameOriginAdmin()` (origin check) plus `getCurrentUser()`/`isAdmin()` (auth check) as layered defense. `withAdminAuth` wraps all admin API routes.
+**Evidence For (no defect):**
 
-### Frame
+`apps/web/scripts/migrate.js`:
 
-Does the two-layer defense (origin + auth) cover all server action and API route surfaces, and are there any bypass paths?
+`getAllJournalMigrations()`: reads `drizzle/meta/_journal.json`, computes SHA256 of each SQL file. Deterministic; no timing dependency.
 
-### Hypothesis Table
+`prepareLegacyDatabaseIfNeeded()`:
+- Fresh DB: calls `reconcileLegacySchema()` then `baselineAllJournalMigrations()`. All journal hashes inserted before drizzle.migrate() runs.
+- Existing DB with incomplete hash coverage: same path — reconcile idempotently, then baseline all journal entries.
+- Existing DB with full hash coverage: no-op.
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | Defense is correct: middleware → format check; actions → origin + auth | High | Strong | Full code path traced |
-| 2 | requireSameOriginAdmin is ONLY an origin check — auth omission in an action passes the lint gate | Medium | Moderate | The lint gate only enforces origin; auth is not lint-gated |
-| 3 | verifySessionToken timing oracle: length check before timingSafeEqual leaks signature-length info | Very Low | Weak | Expected length is public constant (64 hex chars); no useful info leaked |
+`reconcileLegacySchema()`: mirrors every known table and column including color/HDR columns added in migrations 0015-0018, `smart_collections` table with `query_json` column, `image_embeddings` with mediumblob and composite index, `entitlements`/`image_reactions` drops, `images.license_tier`/`images.reaction_count` drops (post-0023/0024).
 
-### Evidence For H1 (correct)
+`runMigrations()` post-condition (lines ~126-147): after drizzle.migrate() completes, re-reads all hashes from `__drizzle_migrations` and throws with tag list if any journal entry is missing. Surfaces non-monotonic-timestamp silently-skipped migrations at deploy time.
 
-- `apps/web/src/lib/session.ts:82-88`: `generateSessionToken()`: `timestamp:random:signature` where timestamp is `Date.now().toString()` (decimal integer), random is 32 hex chars, signature is 64 hex chars (HMAC-SHA256 hex).
-- `apps/web/src/lib/session.ts:94`: `export const verifySessionToken = cache(async function ...)` — React `cache()` wrapper. Per-request deduplication: within a single server render, multiple `isAdmin()` calls resolve to one DB query.
-- `apps/web/src/lib/session.ts:99-102`: Early return when token has wrong number of ':' separators.
-- `apps/web/src/lib/session.ts:107-108`: Expected HMAC computed from `timestamp:random` payload using `getSessionSecret()`.
-- `apps/web/src/lib/session.ts:110-115`: `signatureBuffer.length !== expectedSignatureBuffer.length` → null. This length check is REQUIRED before `timingSafeEqual` (which throws on unequal lengths). The information leaked (is the signature exactly 64 bytes?) is public knowledge and provides no exploitable oracle.
-- `apps/web/src/lib/session.ts:117-119`: `timingSafeEqual(signatureBuffer, expectedSignatureBuffer)` — constant-time comparison.
-- `apps/web/src/lib/session.ts:16-36`: `getSessionSecret()`: production requires `SESSION_SECRET` env var (≥32 chars); throws at startup otherwise. Dev falls back to INSERT IGNORE + re-fetch pattern for multi-process safety.
-- `apps/web/src/proxy.ts`: Format check: `token.length < 100` → redirect; `tokenParts.length !== 3 || tokenParts.some(p => p.length === 0)` → redirect. `x-gk-admin-render: 1` set when format-valid `admin_session` cookie is present.
-- `apps/web/src/lib/action-guards.ts`: `requireSameOriginAdmin()` calls `hasTrustedSameOrigin(requestHeaders)` only — origin check, NOT auth check.
-- `apps/web/src/lib/api-auth.ts`: `withAdminAuth` wraps all admin API routes. PAT path (X-Admin-Token / X-GalleryKit-Token) bypasses same-origin check; cookie path requires `hasTrustedSameOrigin` THEN `isAdmin()`.
+**Evidence Against / Gaps:**
 
-### Evidence Against H1 / Gaps
+CLAUDE.md describes `smart_collections` as storing "a JSON `rules` array" — the actual column is `query_json` everywhere in code (`db/schema.ts:297`, `scripts/migrate.js`, `lib/smart-collections.ts`). The term "rules" appears only as prose description, not as a column name. This is a CLAUDE.md terminology mismatch only; no code path is affected.
 
-- H2 is partially confirmed: `requireSameOriginAdmin()` is an origin-only check. The `lint:action-origin` gate enforces that every mutating server action calls it and returns early on failure. There is NO separate lint gate enforcing `isAdmin()` in server actions. If an action author adds `requireSameOriginAdmin()` but omits `getCurrentUser()`, the lint gate passes. However, any such omission produces a runtime error at the first `currentUser.id` access, surfacing immediately in testing. This is a structural reliance on "missing auth causes runtime failure" rather than a compile-time gate.
-- `x-gk-admin-render: 1` is set for any format-valid `admin_session` cookie, even if the HMAC would fail crypto verification. The Service Worker uses this header to exclude pages from the offline cache. A format-valid but crypto-invalid cookie causes the page to be excluded from offline cache even though the user is not authenticated. This is CONSERVATIVE (correct direction: no stale admin-rendered pages cached), not a security defect.
-
-### Rebuttal Round
-
-Best challenge to H1: `requireSameOriginAdmin()` does not call `isAdmin()`. If the lint gate is the only enforcement surface, any future action that calls origin-check but not auth-check would silently serve unauthenticated requests. The defense is structural (runtime failure on currentUser access) rather than mechanical (lint gate enforces auth). This is a LOW structural observation, not a live defect.
-
-H1 still stands. No live bypass path exists.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** The session token cryptographic flow is correct. Middleware provides format-based defense-in-depth only. Server actions require both `requireSameOriginAdmin()` and `getCurrentUser()`/`isAdmin()`. `withAdminAuth` covers all API routes. The `x-gk-admin-render` conservatism is correct-direction behavior.
-
-### Critical Unknown
-
-Whether any action currently calls `requireSameOriginAdmin()` but omits `isAdmin()` — not verified by exhaustive grep. Low priority: any such gap would produce immediate runtime failures.
-
-**Discriminating probe:** `grep -rn 'requireSameOriginAdmin' apps/web/src/app/actions/ | grep -l 'requireSameOriginAdmin'` → cross-reference against those files to confirm `getCurrentUser` or `isAdmin` presence.
-
-### Uncertainty Notes
-
-`Buffer.from(signatureString)` defaults to UTF-8 encoding; since hex strings are ASCII-subset, UTF-8 === ASCII for these characters. No encoding mismatch vulnerability exists.
+**Verdict: CONFIRMED-CORRECT.** Minor DOCS-LOW: CLAUDE.md uses "rules" where actual column name is `query_json` (no code impact).
 
 ---
 
-## TRACE21-06 — Semantic search mode resolver → embedding decode → scan → top-k
+## TRACE22-05: View-count buffer → flush → cap eviction → shutdown
 
-### Observation
+**Framing:** Could a swap-and-drain ordering error, timer stall, or missing retry-counter cleanup on eviction silently drop view counts or corrupt retry state?
 
-The semantic search mode stored in `admin_settings` can be `'disabled'`, `'stub'`, or `'production'`. A stored `'production'` value must heal to `'disabled'` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` is set. Embeddings are stored as MEDIUMBLOB (raw float32 binary), decoded via `decodeEmbeddingColumn`. Production uses `dotProduct` (normalized vectors); stub uses `cosineSimilarity`.
+**Evidence For (no defect):**
 
-### Frame
+`apps/web/src/lib/data.ts`:
+- `let viewCountBuffer = new Map<number, number>()` — confirmed `let` (rebindable for C2-F01 swap).
+- `bufferGroupViewCount()`: capacity guard `viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)` before increment.
+- `flushGroupViewCounts()`:
+  - Entry: `viewCountFlushTimer = null` BEFORE `if (isFlushing)` guard (COR-R4C11-01) — prevents stale timer handle.
+  - `isFlushing` early-return re-arms a timer.
+  - Drain: `const batch = viewCountBuffer; viewCountBuffer = new Map();` swap BEFORE any `db.update()`.
+  - Iteration: `for (i = 0; i < entries.length; i += FLUSH_CHUNK_SIZE)` — no unbounded `Promise.all`.
+  - Post-re-buffer cap enforcement: `while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE)` FIFO eviction, each eviction also calls `viewCountRetryCount.delete(oldestKey)` (R21C21 T3 fix — present and test-locked).
+  - Backoff: `consecutiveFlushFailures` increments only on `batch.size > 0` total failure; resets only on `succeeded > 0`. Capped by `MAX_FLUSH_INTERVAL_MS` (5 min).
+  - `currentFlushPromise` assigned before buffer swap; cleared in finally.
+- `flushBufferedSharedGroupViewCounts()` (shutdown): `await currentFlushPromise` BEFORE `viewCountBuffer.size === 0` early return — prevents SIGTERM mid-flush from skipping the in-progress drain.
 
-Does the mode heal apply symmetrically in both the happy and fallback config paths? Is the embedding decode immune to legacy rows? Is the similarity function selection correct?
+All load-bearing invariants locked by `apps/web/src/__tests__/data-view-count-flush.test.ts` (12 it() blocks including COR-R4C11-01, C2-F01 swap ordering, FIFO eviction with retry-counter cleanup, and shutdown drain ordering).
 
-### Hypothesis Table
-
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|-----------|-----------|------------------|--------------------------|
-| 1 | All three sub-claims are correct | High | Strong | Each confirmed at file:line |
-| 2 | Catch/defaults path in gallery-config.ts skips the 'production' heal | Low | Weak | gallery-config.ts:196 confirms it is present |
-| 3 | decodeEmbeddingColumn silently drops all rows on legacy base64 format | Very Low | Weak | 3-case handler covers both; returns null on size mismatch (skipped, not fatal) |
-
-### Evidence For H1 (correct)
-
-- `apps/web/src/lib/gallery-config.ts:141-142`: Happy path. `if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') { return 'disabled'; }`. Heal is applied.
-- `apps/web/src/lib/gallery-config.ts:193-200`: Catch/defaults path. `if (raw === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') { return 'disabled'; }`. The heal is symmetric. Comment at line 195 explicitly notes "Apply the same operator-gate check as the happy path (line 141)." Added as AGG-C10-02.
-- `apps/web/src/lib/clip-embeddings.ts:109-127`: `decodeEmbeddingColumn` 3-case handler: (1) raw 2048-byte Buffer → decoded directly; (2) Buffer of ~2732 bytes (base64 ASCII of 2048 bytes) → decoded as base64; (3) string (defensive) → Buffer.from base64. Each case length-checks and returns `null` on mismatch. A corrupt row with an unexpected length is skipped — safe behavior.
-- `apps/web/src/lib/clip-embeddings.ts:50-60`: `dotProduct(a, b)` — used for production (normalized unit vectors, where dotProduct equals cosine similarity).
-- `apps/web/src/lib/clip-embeddings.ts:24-40`: `cosineSimilarity(a, b)` — computes norms then divides. Used for stub (non-normalized deterministic vectors).
-- `apps/web/src/app/api/search/semantic/route.ts`: `export const runtime = 'nodejs'` (R21-L1). Comment: "imports mysql2 (Node-only), Buffer, and in-process rate-limit Map (relies on shared process state); none are Edge-compatible."
-- Rate-limit pre-increment BEFORE config read. Rollback (`rollbackSemanticAttempt`) on disabled/503 BEFORE expensive embedding work. Post-embedding, no rollback — rate limit consumed. COR-R5C1-04 pattern.
-- `apps/web/src/lib/clip-embeddings.ts:18`: `export const SEMANTIC_SCAN_LIMIT = 2000` caps the brute-force vector scan for DoS-prevention.
-
-### Evidence Against H1 / Gaps
-
-- A corrupt row with length between 2049 and 2731 (not standard raw binary, not standard base64 size) falls to the base64 branch, which produces a wrong-length decoded buffer and returns null. The row is skipped — safe behavior.
-- `SEMANTIC_SCAN_LIMIT` (2000) caps the brute-force scan. With 5000+ images and production CLIP mode, the search is silently truncated. Both limits are documented in CLAUDE.md as deliberate DoS-prevention tradeoffs.
-
-### Rebuttal Round
-
-Best challenge: the SEMANTIC_SCAN_LIMIT truncation is silent — no UI indication that results may be incomplete due to the cap. This is a UX observation, not a correctness defect. Not actionable in a correctness-focused trace.
-
-H1 stands.
-
-### Current Best Explanation
-
-**CONFIRMED-CORRECT.** Mode heal is symmetric in both config paths. `decodeEmbeddingColumn` handles raw binary, legacy base64, and string defensively. `dotProduct` vs `cosineSimilarity` selection correctly matches the normalization state of production vs stub vectors. `runtime = 'nodejs'` pin applied (R21-L1).
-
-### Critical Unknown
-
-None. All three sub-claims are confirmed.
-
-### Uncertainty Notes
-
-`topK`'s threshold filtering behavior on empty result sets returns `[]`, which the route handles as a valid zero-result response.
+**Verdict: CONFIRMED-CORRECT.** R21C21 T3 fix (`viewCountRetryCount.delete(oldestKey)` in eviction) present and test-locked.
 
 ---
 
-## TRACE21-07 — Cycle-20 IMPLEMENT items: confirmed applied
+## TRACE22-06: Semantic search POST → scan cap → topK clamp → enrichment
 
-All env-parse parseInt→Number sites from the cycle-20 sweep have `Number()` + R20C20 comments confirmed in source.
+**Framing:** Can the `SEMANTIC_SCAN_LIMIT` or `SEMANTIC_TOP_K_MAX` clamp be bypassed by type-coercion or config-read failure?
 
-| Fix | Location | Evidence |
-|-----|----------|---------|
-| AUDIT_LOG_RETENTION_DAYS env-parse | `apps/web/src/lib/audit.ts:116` | `Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '')` + R20C20 comment |
-| SHARP_CONCURRENCY env-parse | `apps/web/src/lib/process-image.ts:46` | `Number(process.env.SHARP_CONCURRENCY ?? '')` + R20C20 comment |
-| IMAGE_MAX_INPUT_PIXELS env-parse | `apps/web/src/lib/process-image.ts:334` | `Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '')` + R20C20 comment |
-| IMAGE_MAX_INPUT_PIXELS_TOPIC env-parse | `apps/web/src/lib/process-image.ts:344` | `Number(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '')` + R20C20 comment |
-| parsePositiveIntEnv helper | `apps/web/src/lib/upload-limits.ts:11` | `Number()` in helper + R20C20 comment |
-| IMAGE_CLEANUP_CONCURRENCY env-parse | `apps/web/src/app/actions/images.ts:797` | `Number(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '')` + R20C20 comment |
-| TRUSTED_PROXY_HOPS env-parse | `apps/web/src/lib/rate-limit.ts:144-148` | `Number()` in `getTrustedProxyHopCount()` + R20C20 comment |
-| GPS strip walkAborted items-found path | `apps/web/src/lib/gps-exif-strip.ts:470` | R20C20 comment + `if (walkAborted) return null` before zero-items check |
-| bounded-map .data live-ref doc warning | `apps/web/src/lib/bounded-map.ts:52-59` | R20C20 comment + "LIVE reference — intentionally" warning |
-| Semantic route `runtime = 'nodejs'` pin | `apps/web/src/app/api/search/semantic/route.ts` | R21-L1 comment + `export const runtime = 'nodejs'` |
+**Evidence For (no defect):**
 
-**CONFIRMED-APPLIED.** All 10 items verified at HEAD.
+`apps/web/src/app/api/search/semantic/route.ts` gate sequence (in order):
+1. `hasTrustedSameOrigin()` — 403 on cross-origin.
+2. `isRestoreMaintenanceActive()` — 503 on maintenance.
+3. Content-Type: `.startsWith('application/json')` + sub-type rejection + chunked transfer rejection + Content-Length size guard + body text cap (8192 bytes, double enforcement).
+4. Body shape: `typeof body.query !== 'string'` → 400.
+5. `clampSemanticTopK()`: `typeof raw !== 'number'` guard — rejects booleans, arrays. `Math.min(Math.max(floor, 1), SEMANTIC_TOP_K_MAX)`.
+6. Query length: `countCodePoints(query) < 3` → 400 (codepoint-aware).
+7. Rate limit pre-increment BEFORE config read (COR-R5C1-04).
+8. `getGalleryConfig()` fail-closed: catch sets `semanticMode = 'disabled'`.
+9. Mode gate: not `'stub'` and not `'production'` → rollback + 503.
+10. Embedding (after this, no rollback — AGG-12 deliberate).
+11. DB scan: `.limit(SEMANTIC_SCAN_LIMIT)` hard cap in Drizzle call.
+12. Similarity: `isProd ? dotProduct : cosineSimilarity` — normalized prod, raw stub.
+13. `topK(scored, topKParam, activeThreshold)` — respects clamped `topKParam`.
+14. Enrichment: `searchEnrichmentSelectFields` — compile-time PII guard.
+15. Enrichment DB failure: falls back to `enrichedResults = []`, logs error. Rate budget already consumed; 200 with empty results returned (AGG-12 consistent — no rollback after expensive work).
+
+`export const runtime = 'nodejs'` — R21-L1 pin.
+
+**Evidence Against / Gaps:**
+
+Enrichment DB failure returns 200 with empty results indistinguishable from "no matches." AGG-12 design choice, not a bug, but unobservable without server-side log inspection.
+
+**Verdict: CONFIRMED-CORRECT.** No bypass path found.
 
 ---
 
-## One LOW structural observation (not a live defect)
+## Evidence For (summary)
 
-**TRACE21-05-LOW: `requireSameOriginAdmin()` is origin-only — no lint gate enforces `isAdmin()` in server actions.**
-
-The `lint:action-origin` gate enforces the CSRF origin check but not the authentication check. Any future action that calls `requireSameOriginAdmin()` but omits `getCurrentUser()` would pass lint. In practice, any such omission produces an immediate runtime error at the first `currentUser.id` access. The risk is real as a future-maintenance observation but there is no live instance of it.
-
-Discriminating probe: `grep -rn 'requireSameOriginAdmin' apps/web/src/app/actions/` + cross-check that each file also contains `getCurrentUser` or `isAdmin`. Any file that appears in the first list but not the second is the gap.
+- TRACE22-01: `images.ts:228` synchronous quota claim; `image-queue.ts` advisory lock before SELECT; `affectedRows === 0` → full-scan `deleteImageVariants` (direct file:line).
+- TRACE22-02: Color pipeline modules unchanged this cycle (git log); cycle-21 evidence carried.
+- TRACE22-03: `auth.ts` two-bucket pre-increment and rollback symmetry; every `requireSameOriginAdmin` caller has co-located `isAdmin()` or user resolution (exhaustive grep).
+- TRACE22-04: `migrate.js` `runMigrations` post-condition throw at lines ~138-145; `reconcileLegacySchema` covers all known tables/columns including post-0023/0024 drops.
+- TRACE22-05: `data-view-count-flush.test.ts` 12-invariant fixture locks all load-bearing patterns including R21C21 T3 eviction fix.
+- TRACE22-06: Gate sequence in `route.ts`; `clampSemanticTopK` typeof guard; `.limit(SEMANTIC_SCAN_LIMIT)` is direct Drizzle call.
 
 ---
 
-## Final Findings Table
+## Evidence Against / Gaps
 
-| ID | Flow | Label | Severity |
-|----|------|-------|---------|
-| TRACE21-01 | Upload → quota → enqueue → processed UPDATE → cleanup | CONFIRMED-CORRECT | — |
-| TRACE21-02 | Color signal precedence → encoder → ETag invalidation | CONFIRMED-CORRECT | — |
-| TRACE21-03 | GPS strip walkAborted → Tier 2 re-encode per format | CONFIRMED-CORRECT | — |
-| TRACE21-03a | HEIC structural-anomaly GPS retention (Tier 2 cannot encode HEVC) | CONFIRMED-CORRECT (design limitation) | — |
-| TRACE21-04 | Backfill sidecar + in-app → lock → delete-mid-reencode → no-version-bump | CONFIRMED-CORRECT | — |
-| TRACE21-05 | Session mint → middleware format check → verifySessionToken → requireSameOriginAdmin | CONFIRMED-CORRECT | — |
-| TRACE21-05-LOW | requireSameOriginAdmin is origin-only; no lint gate for isAdmin() in actions | NEEDS-MANUAL-VALIDATION | LOW |
-| TRACE21-06 | Semantic mode heal → decodeEmbeddingColumn → dotProduct/cosineSimilarity | CONFIRMED-CORRECT | — |
-| TRACE21-07 | Cycle-20 env-parse + GPS + bounded-map + runtime pin fixes | CONFIRMED-APPLIED | — |
+- TRACE22-01: A3 deferred item remains — 6 hand-placed settle sites with comment-only invariant, no automated enforcement.
+- TRACE22-03 (Hypothesis C): `lint:action-origin` does not check call order. Images.ts comment claiming its pattern "matches existing action pattern" is contradicted by 4 other action files.
+- TRACE22-04: CLAUDE.md uses "rules" terminology where actual column is `query_json`. Docs drift only.
+- TRACE22-06: Enrichment DB failure returns 200 with empty results — no caller-visible distinction from "no matches." Deliberate AGG-12 but unmonitored without logs.
+
+---
+
+## Rebuttal Round
+
+**Best challenge to "all flows confirmed-correct":**
+
+The auth-guard ordering inconsistency (Hypothesis C) is not merely cosmetic if the images.ts comment claiming "matches existing action pattern" actively misleads a developer adding the next action. The developer follows the comments in the file they are copying from — if that file says `requireSameOriginAdmin` first, they write it that way; if they are in `tags.ts` territory, they write `isAdmin` first. The linter enforces neither order, so the inconsistency compounds silently over time.
+
+**Why the leader (confirmed-correct) still stands:**
+
+Both orderings reject the same set of requests. No security or data-integrity difference is possible since both checks must pass for the action to proceed. The only observable difference is the error message shape on a doubly-rejected request. TRACE22-NEW-01 is correctly classified LOW/Informational.
+
+---
+
+## Convergence / Separation Notes
+
+- TRACE22-01 and TRACE22-05 are distinct: upload/processing is PQueue + advisory lock + file I/O; view-count buffer is process-local in-memory Map + deferred DB flush. No shared state.
+- TRACE22-03 and TRACE21-05-LOW collapse to the same structural gap (linter checks only one of two required auth primitives). TRACE22-NEW-01 is a sub-finding of TRACE21-05-LOW in that it describes the same audit gap, but the specific observation (ordering inversion) is distinct.
+- TRACE22-04 and TRACE22-02 share no runtime overlap; migration is deploy-time only.
+
+---
+
+## New Findings
+
+### TRACE22-NEW-01 — `isAdmin()` / `requireSameOriginAdmin()` call-order contradicts images.ts documentation comment
+
+**Severity:** LOW / Informational
+**Confidence:** High (exhaustive grep)
+
+**Location:**
+- Documented pattern: `apps/web/src/app/actions/images.ts:930,1132` (comment: "requireSameOriginAdmin first, then isAdmin — matches existing action pattern")
+- Actual majority pattern (reversed): `apps/web/src/app/actions/tags.ts:46-48`, `apps/web/src/app/actions/collections.ts:19-20`, `apps/web/src/app/actions/sharing.ts:88-90`, `apps/web/src/app/actions/admin-backfill.ts:34-37`
+
+**Description:**
+Images.ts comments at lines 930 and 1132 document that `requireSameOriginAdmin()` should be called before `isAdmin()`. The actual majority pattern across tags.ts, collections.ts, sharing.ts, and admin-backfill.ts calls `isAdmin()` first, returning early, then `requireSameOriginAdmin()`. Neither ordering is a security or correctness bug. The comment in images.ts claiming it "matches existing action pattern" is false and will mislead future developers.
+
+**Recommendation:** On the next pass that touches action guard patterns — remove the false "matches existing action pattern" claim from images.ts:930 and :1132, or pick one canonical order and standardize repo-wide. Low priority; no security or data-integrity risk.
+
+---
+
+## Current Best Explanation
+
+All 6 traced flows are correct at HEAD. The R21C21 T3 fix (retry-counter orphan cleanup in view-count buffer eviction) is present and test-locked. The migrate.js post-condition assertion surfaces non-monotonic journal timestamp issues as a deploy-time throw. The semantic search route correctly gates both the scan cap and result cap with no type-coercion bypass.
+
+One new LOW/Informational finding (TRACE22-NEW-01): documentation inconsistency in images.ts about intended call order of `isAdmin()` vs `requireSameOriginAdmin()`.
+
+No CRIT, HIGH, or MED findings discovered in cycle 22.
+
+---
+
+## Critical Unknown
+
+The A3 deferred item (6 hand-placed `settleUploadTrackerClaim` sites with a comment-only invariant) remains the largest latent structural gap. There is no automated enforcement that a new `await` in the upload span also includes a settle rollback on throw.
+
+---
+
+## Discriminating Probe
+
+To close A3: add a fixture-style test that reads `images.ts` source, extracts the `uploadImages` function body between the synchronous quota claim and final settle, and asserts no `await` exists in that span without a corresponding settle in the same `catch` or `finally` block. The same pattern as `data-view-count-flush.test.ts` (source-text fixture) and `backfill-color-pipeline.test.ts` (column set fixture). No DB or PQueue mocking required — source text only. This is the A3 exit criterion's concrete enforcement step (per cycle-21-deferred.md: "implement the idempotent settle-in-finally then").
+
+---
+
+## Uncertainty Notes
+
+- TRACE22-02 color pipeline: evidence carried from cycle 21 without re-reading `color-detection.ts`. Confidence remains high because git log shows no behavioral changes to those modules this cycle.
+- TRACE22-06 enrichment DB failure: the AGG-12 no-rollback-after-expensive-work design is intentional and correct, but the observable failure mode (200 + empty results, indistinguishable from "no matches") is a known unmonitored failure channel without server-side log inspection.
+- TRACE22-NEW-01 call-order inconsistency: both orderings are functionally equivalent for security; informational only, no immediate fix required.
