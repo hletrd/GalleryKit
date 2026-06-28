@@ -105,8 +105,11 @@ export async function createTopic(formData: FormData) {
 
     if (!label || !slug) return { error: t('labelSlugRequired') };
 
-    let order = parseInt(orderStr, 10);
-    if (Number.isNaN(order)) order = 0;
+    // R21C21 T2 (DBG21-01): Number() not parseInt() — parseInt('1e3',10) stops
+    // at 'e' and returns 1, silently mis-storing a scientific-notation order;
+    // !Number.isFinite also rejects Infinity (Number.isNaN did not).
+    let order = Number(orderStr);
+    if (!Number.isFinite(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order)); // Limit to reasonable range
 
     if (!isValidSlug(slug)) {
@@ -208,8 +211,11 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
 
     if (!label || !slug) return { error: t('labelSlugRequired') };
 
-    let order = parseInt(orderStr, 10);
-    if (Number.isNaN(order)) order = 0;
+    // R21C21 T2 (DBG21-01): Number() not parseInt() — parseInt('1e3',10) stops
+    // at 'e' and returns 1, silently mis-storing a scientific-notation order;
+    // !Number.isFinite also rejects Infinity (Number.isNaN did not).
+    let order = Number(orderStr);
+    if (!Number.isFinite(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order));
 
     if (!isValidSlug(slug)) {

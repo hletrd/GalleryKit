@@ -531,6 +531,45 @@ describe('topic actions', () => {
         expect(releaseLockQueryMock).toHaveBeenCalled();
     });
 
+    it('parses a scientific-notation order with Number(), not parseInt() (R21C21 T2 / DBG21-01)', async () => {
+        // parseInt('1e3', 10) stops at 'e' and returns 1, silently storing the
+        // wrong sort order; Number('1e3') === 1000, which the clamp preserves.
+        // Discriminator: this assertion FAILS against the pre-fix parseInt source
+        // (order would be 1). Same fix lands in updateTopic.
+        executeMock.mockResolvedValueOnce([[], []]);
+        const writeChain = makeWriteChain([{ insertId: 8 }]);
+        insertMock.mockReturnValueOnce(writeChain);
+
+        const formData = new FormData();
+        formData.set('label', 'Astro');
+        formData.set('slug', 'astro');
+        formData.set('order', '1e3');
+
+        await expect(createTopic(formData)).resolves.toEqual({ success: true });
+        expect(writeChain.values).toHaveBeenCalledWith(
+            expect.objectContaining({ order: 1000 }),
+        );
+    });
+
+    it('falls back to order 0 for a non-numeric order, rejecting Infinity (R21C21 T2)', async () => {
+        // Number('abc') is NaN → !Number.isFinite → 0. Number('1e999') is
+        // Infinity → !Number.isFinite → 0 (the old Number.isNaN guard let
+        // Infinity through; the clamp masked it, but !Number.isFinite is correct).
+        executeMock.mockResolvedValueOnce([[], []]);
+        const writeChain = makeWriteChain([{ insertId: 9 }]);
+        insertMock.mockReturnValueOnce(writeChain);
+
+        const formData = new FormData();
+        formData.set('label', 'Nebula');
+        formData.set('slug', 'nebula');
+        formData.set('order', 'abc');
+
+        await expect(createTopic(formData)).resolves.toEqual({ success: true });
+        expect(writeChain.values).toHaveBeenCalledWith(
+            expect.objectContaining({ order: 0 }),
+        );
+    });
+
     it('rejects updateTopic with invalidLabel when the label contains control characters', async () => {
         const formData = new FormData();
         formData.set('label', 'Updated\u0000');
