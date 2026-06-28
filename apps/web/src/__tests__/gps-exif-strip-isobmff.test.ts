@@ -20,6 +20,51 @@ function metaBox(content: Buffer): Buffer {
     return Buffer.concat([header, versionFlags, content]);
 }
 
+/** Build an `infe` v2 box advertising the given item id with type "Exif". */
+function exifInfe(itemId: number): Buffer {
+    const data = Buffer.alloc(12);
+    data.writeUInt8(2, 0);            // FullBox version 2 (HEIF item)
+    data.writeUInt16BE(itemId, 4);   // item_ID
+    // bytes 6-7 item_protection_index = 0
+    data.write('Exif', 8, 'ascii');  // item_type
+    const box = Buffer.alloc(8 + data.length);
+    box.writeUInt32BE(box.length, 0);
+    box.write('infe', 4, 'ascii');
+    data.copy(box, 8);
+    return box;
+}
+
+/** Build an `iinf` v0 box wrapping a single infe entry. */
+function iinfWith(infe: Buffer): Buffer {
+    const data = Buffer.concat([Buffer.alloc(6), infe]); // version(1)+flags(3)+entry_count(2)
+    data.writeUInt8(0, 0);           // version 0
+    data.writeUInt16BE(1, 4);        // entry_count = 1
+    const box = Buffer.alloc(8 + data.length);
+    box.writeUInt32BE(box.length, 0);
+    box.write('iinf', 4, 'ascii');
+    data.copy(box, 8);
+    return box;
+}
+
+/** Build a minimal `iloc` v0 box with itemCount = 0 (no extents). */
+function emptyIloc(): Buffer {
+    const data = Buffer.alloc(8); // version+flags(4), sizesByte, sizesByte2, itemCount(2) — all 0
+    const box = Buffer.alloc(8 + data.length);
+    box.writeUInt32BE(box.length, 0);
+    box.write('iloc', 4, 'ascii');
+    data.copy(box, 8);
+    return box;
+}
+
+/** A 64-bit box whose largesize overflows MAX_SAFE_INTEGER (aborts the walk). */
+function oversizedBox(): Buffer {
+    const box = Buffer.alloc(16);
+    box.writeUInt32BE(1, 0);                       // size = 1 → read 64-bit largesize
+    box.write('free', 4, 'ascii');
+    box.writeBigUInt64BE(0xffffffffffffffffn, 8);  // > Number.MAX_SAFE_INTEGER
+    return box;
+}
+
 describe('stripGpsFromIsobmffBuffer malformed-box handling (R19C19 F2)', () => {
     it('returns null (anomaly → re-encode) when a 64-bit box claims an oversized size before Exif items', () => {
         // Child box with size===1 (extended size) and largesize > MAX_SAFE_INTEGER.
@@ -55,5 +100,32 @@ describe('stripGpsFromIsobmffBuffer malformed-box handling (R19C19 F2)', () => {
         const result = stripGpsFromIsobmffBuffer(buf);
         expect(result).not.toBeNull();
         expect(result?.stripped).toBe(false);
+    });
+
+    it('R20C20 (CQ20-06): returns null when the walk aborts AFTER finding an Exif item', () => {
+        // Container with a valid Exif infe (exifItemIds becomes non-empty) and an
+        // empty iloc, followed by a malformed box that aborts the walk. BEFORE the
+        // fix the walkAborted check lived inside the empty-items branch, so this
+        // returned { stripped: false } — a "clean" verdict that trusted a walk it
+        // never finished (a later GPS-bearing item could have survived). AFTER the
+        // fix any structural anomaly returns null → metadata-free re-encode.
+        const aborted = metaBox(Buffer.concat([
+            iinfWith(exifInfe(1)),
+            emptyIloc(),
+            oversizedBox(),
+        ]));
+        expect(stripGpsFromIsobmffBuffer(aborted)).toBeNull();
+
+        // Discriminator: the SAME container WITHOUT the malformed trailing box
+        // completes cleanly and reports { stripped: false } (Exif item found, no
+        // extent to strip) — proving the null above is driven by walkAborted, not
+        // by the Exif item or the empty iloc.
+        const clean = metaBox(Buffer.concat([
+            iinfWith(exifInfe(1)),
+            emptyIloc(),
+        ]));
+        const cleanResult = stripGpsFromIsobmffBuffer(clean);
+        expect(cleanResult).not.toBeNull();
+        expect(cleanResult?.stripped).toBe(false);
     });
 });

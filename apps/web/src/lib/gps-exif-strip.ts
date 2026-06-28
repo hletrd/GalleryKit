@@ -458,12 +458,17 @@ export function stripGpsFromIsobmffBuffer(input: Buffer): GpsStripResult | null 
         }
     }
 
+    // R20C20 (CQ20-06): honor walkAborted UNCONDITIONALLY, not only on the
+    // zero-items branch. If the walk found >=1 Exif item and THEN aborted on a
+    // later malformed box, the original R19C19 F2 check (which lived inside the
+    // empty-items branch below) was bypassed — so a GPS-bearing item past the
+    // corruption would never be discovered and {stripped:true} was returned.
+    // Returning null on ANY structural anomaly forces the caller's metadata-free
+    // re-encode, matching this module's "null on ANY anomaly" doctrine.
+    // Non-exploitable in practice (real HEIF/AVIF carry a single Exif item) but a
+    // privacy-consistency fix: we must not trust a partial walk we did not finish.
+    if (walkAborted) return null;
     if (exifItemIds.size === 0 && xmpItemIds.size === 0) {
-        // R19C19 F2: if the walk aborted on a malformed box we may simply have
-        // never reached the Exif/XMP items — report a structural anomaly (null)
-        // so the caller re-encodes (stripping ALL metadata) rather than trusting
-        // a "no GPS present" verdict we did not actually establish.
-        if (walkAborted) return null;
         return { buffer: input, stripped: false };
     }
     if (!ilocBox) return null;
