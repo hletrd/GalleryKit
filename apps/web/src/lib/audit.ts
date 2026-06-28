@@ -108,7 +108,12 @@ export async function purgeOldAuditLog(maxAgeMs?: number): Promise<void> {
     if (maxAgeMs !== undefined) {
         effectiveMaxAgeMs = Number.isFinite(maxAgeMs) && maxAgeMs > 0 ? maxAgeMs : DEFAULT_MAX_AGE_MS;
     } else {
-        const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10);
+        // R20C20: parse with Number(), not parseInt(..., 10). parseInt stops at
+        // the first non-digit, so AUDIT_LOG_RETENTION_DAYS='1e3' silently became 1
+        // (a 1-day retention that passes the `> 0` guard and near-empties the audit
+        // log on the next hourly GC). Number('1e3') === 1000. NaN/''/negative still
+        // fall through to the 90-day default via the finite-and-positive guard below.
+        const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? '');
         effectiveMaxAgeMs = Number.isFinite(retentionDays) && retentionDays > 0
             ? retentionDays * 24 * 60 * 60 * 1000
             : DEFAULT_MAX_AGE_MS;

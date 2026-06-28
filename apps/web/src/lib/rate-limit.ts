@@ -141,7 +141,10 @@ export function buildAccountRateLimitKey(username: string): string {
 
 export function getTrustedProxyHopCount(value: string | undefined = process.env.TRUSTED_PROXY_HOPS): number {
     if (!value) return DEFAULT_TRUSTED_PROXY_HOPS;
-    const parsed = Number.parseInt(value, 10);
+    // R20C20: Number(), not parseInt — parseInt('1e1')===1 (wrong); Number('1e1')===10.
+    // The Number.isInteger guard rejects fractional/NaN values back to the default,
+    // which is the conservative (fewer-trusted-hops) choice for this security setting.
+    const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_TRUSTED_PROXY_HOPS;
     return parsed;
 }

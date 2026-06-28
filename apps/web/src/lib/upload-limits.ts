@@ -8,7 +8,11 @@ const DEFAULT_SERVER_ACTION_UPLOAD_BODY_BYTES = Math.max(MAX_UPLOAD_FILE_BYTES, 
 function parsePositiveIntEnv(name: string, fallback: number): number {
     const rawValue = process.env[name]?.trim();
     if (!rawValue) return fallback;
-    const parsed = Number.parseInt(rawValue, 10);
+    // R20C20: Number(), not parseInt(..., 10). parseInt('2e9')===2, which passes the
+    // `> 0` guard and would set the upload byte/file cap to 2 — blocking every upload.
+    // Number('2e9') === 2_000_000_000. Floor so a fractional value (e.g. '1.5e9')
+    // resolves to an integer byte/file count; NaN/negative still fall to the default.
+    const parsed = Math.floor(Number(rawValue));
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 

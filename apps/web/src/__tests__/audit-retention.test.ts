@@ -83,4 +83,13 @@ describe('purgeOldAuditLog retention validation (COR-R4C6-10)', () => {
         await purgeOldAuditLog(7 * DAY_MS);
         expect(lastCutoff().getTime()).toBe(Date.now() - 7 * DAY_MS);
     });
+
+    it('R20C20: scientific-notation env value is parsed in full, not truncated', async () => {
+        // parseInt('1e3', 10) === 1 would have silently set a 1-DAY retention
+        // (passing the `> 0` guard) and near-emptied the audit log on the next GC.
+        // Number('1e3') === 1000 keeps the operator-intended 1000-day window.
+        process.env.AUDIT_LOG_RETENTION_DAYS = '1e3';
+        await purgeOldAuditLog();
+        expect(lastCutoff().getTime()).toBe(Date.now() - 1000 * DAY_MS);
+    });
 });

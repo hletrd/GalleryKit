@@ -135,6 +135,15 @@ describe('getClientIp', () => {
         expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
     });
 
+    it('R20C20: parses scientific-notation TRUSTED_PROXY_HOPS in full (1e1 -> 10, not 1)', () => {
+        // parseInt('1e1', 10) === 1 silently undercounted the trusted hop chain;
+        // Number('1e1') === 10 honors the operator value. Fractional/NaN values are
+        // still rejected to the default by the Number.isInteger guard.
+        expect(getTrustedProxyHopCount('1e1')).toBe(10);
+        expect(getTrustedProxyHopCount('2.5')).toBe(1);
+        expect(getTrustedProxyHopCount('abc')).toBe(1);
+    });
+
     it('falls back to x-real-ip when forwarded-for is absent or invalid', () => {
         process.env.TRUST_PROXY = 'true';
 

@@ -42,7 +42,8 @@ const cpuCount = typeof os.availableParallelism === 'function'
 // drowning the libuv pool when QUEUE_CONCURRENCY > 1. Divide by the format
 // fan-out so the per-image total stays close to (cores - 1).
 const maxConcurrency = Math.max(1, Math.floor((cpuCount - 1) / 3));
-const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
+// R20C20: Number(), not parseInt — 'N e' scientific-notation env values silently truncate.
+const envConcurrency = Number(process.env.SHARP_CONCURRENCY ?? '');
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     ? Math.min(envConcurrency, Math.max(1, cpuCount - 1))
     : maxConcurrency;
@@ -327,7 +328,10 @@ async function _verifyWebpIccChunk(filePath: string): Promise<void> {
     }
 }
 
-const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
+// R20C20: Number(), not parseInt(..., 10). parseInt('256e6') === 256, which would
+// pass the `> 0` guard and set limitInputPixels to 256 px — rejecting EVERY upload
+// larger than ~16x16 as a decompression bomb. Number('256e6') === 268435456.
+const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
     : 256 * 1024 * 1024;
@@ -336,7 +340,8 @@ const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels >
 // Topic images are resized to 512x512 and don't need the same pixel headroom.
 // A separate env var allows independent tuning without affecting full-image processing.
 export const MAX_INPUT_PIXELS_TOPIC = (() => {
-    const envTopicPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '', 10);
+    // R20C20: Number(), not parseInt — same scientific-notation truncation as above.
+    const envTopicPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '');
     return Number.isFinite(envTopicPixels) && envTopicPixels > 0
         ? envTopicPixels
         : 64 * 1024 * 1024;

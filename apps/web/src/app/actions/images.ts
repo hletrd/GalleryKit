@@ -793,7 +793,8 @@ export async function deleteImages(ids: number[]) {
     // C2-AGG-02 / plan-257. C6-AGG6R-05: env-configurable via
     // IMAGE_CLEANUP_CONCURRENCY (default 5) so NAS-backed deployments
     // with higher I/O latency can tune this without code changes.
-    const CLEANUP_CONCURRENCY = Math.max(1, Number.parseInt(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '', 10) || 5);
+    // R20C20: Number(), not parseInt — 'N e' scientific-notation values truncate; Number('')===0 → falls to `|| 5`.
+    const CLEANUP_CONCURRENCY = Math.max(1, Number(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '') || 5);
     const cleanupFailures: ImageCleanupFailure[] = [];
     for (let i = 0; i < imageRecords.length; i += CLEANUP_CONCURRENCY) {
         const chunk = imageRecords.slice(i, i + CLEANUP_CONCURRENCY);
