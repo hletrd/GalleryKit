@@ -18,12 +18,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * a60baa8f-p7 is replaced at build time by scripts/build-sw.ts.
+ * eab944ba-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = 'a60baa8f-p7';
+const SW_VERSION = 'eab944ba-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
