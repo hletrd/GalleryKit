@@ -163,6 +163,11 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         // The eviction must use FIFO (keys().next()) matching the viewCountRetryCount pattern.
         expect(fnBody!).toMatch(/const\s+oldestKey\s*=\s*viewCountBuffer\.keys\(\)\.next\(\)\.value/);
         expect(fnBody!).toMatch(/viewCountBuffer\.delete\s*\(\s*oldestKey\s*\)/);
+        // R21C21 T3 (C21-RVW-01): the eviction loop must ALSO drop the evicted
+        // group's retry counter — the missed sibling of the R15C15 CR-15 drop-path
+        // delete. Otherwise an evicted group that re-enters inherits a stale retry
+        // count and exhausts its VIEW_COUNT_MAX_RETRIES budget early.
+        expect(fnBody!).toMatch(/viewCountRetryCount\.delete\s*\(\s*oldestKey\s*\)/);
     });
 
     it('viewCountRetryCount has MAX_VIEW_COUNT_RETRY_SIZE cap with FIFO eviction', () => {

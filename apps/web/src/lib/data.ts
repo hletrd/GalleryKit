@@ -164,6 +164,12 @@ async function flushGroupViewCounts() {
             const oldestKey = viewCountBuffer.keys().next().value;
             if (oldestKey !== undefined) {
                 viewCountBuffer.delete(oldestKey);
+                // R21C21 T3 (C21-RVW-01): also drop the evicted group's retry
+                // counter — the missed sibling of the R15C15 CR-15 drop-path
+                // delete at line ~146. Without this, an evicted group that later
+                // re-enters the buffer inherits a stale retry count and exhausts
+                // its VIEW_COUNT_MAX_RETRIES budget after fewer real failures.
+                viewCountRetryCount.delete(oldestKey);
             } else {
                 break;
             }
