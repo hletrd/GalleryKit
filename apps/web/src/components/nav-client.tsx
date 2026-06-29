@@ -104,7 +104,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
                     aria-expanded={isExpanded}
-                    aria-controls="primary-nav-controls"
+                    aria-controls="primary-nav-topics primary-nav-controls"
                 >
                     {isExpanded ? (
                         <ChevronUp className="h-4 w-4" />

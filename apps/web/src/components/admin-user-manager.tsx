@@ -134,8 +134,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                 </Dialog>
             </CardHeader>
             <CardContent>
-                <div className="border rounded-md">
-                    <Table>
+                <div className="overflow-x-auto rounded-md border">
+                    <Table className="min-w-[520px]">
                         <TableHeader>
                             <TableRow>
                                 <TableHead>{t('users.username')}</TableHead>

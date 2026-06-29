@@ -21,7 +21,7 @@ Everything else in the pipeline already exists and is reused: the `image_embeddi
 | Embedding dim | **512 via Matryoshka truncation** of the native 1024 | Keeps `EMBEDDING_DIM=512` / 2048-byte BLOB and all existing ser-de **unchanged → zero schema migration**. 1024 is a reversible later upgrade (re-embed). |
 | Quantization | int8 ONNX | CPU-feasible footprint. |
 | Runtime | Transformers.js v3 (`@huggingface/transformers`) in-process; **fallback** raw `onnxruntime-node` | Higher-level wrapper handles image preprocessing + multilingual tokenization → less glue. Fallback if jina's custom arch isn't turnkey in Transformers.js (resolved by a planning spike). |
-| Weights location | Downloaded once to the `./data/models/` **bind-mount volume**, NOT baked into the image | Keeps the Docker image lean (the deploy host is disk-constrained). |
+| Weights location | Downloaded once to the `./data/models/clip/` **bind-mount volume**, NOT baked into the image | Keeps the Docker image lean (the deploy host is disk-constrained). |
 | Scale | ~thousands of photos → **linear cosine scan**, no ANN index | Single-digit-ms scan at this size; matches existing `SEMANTIC_SCAN_LIMIT` design. |
 | Features in v1 | Text→image search **and** image→image "similar photos" | "Similar photos" reuses stored vectors → near-zero added cost. |
 
@@ -31,14 +31,14 @@ Everything else in the pipeline already exists and is reused: the `image_embeddi
 
 **New / changed (small):**
 1. `lib/clip-inference.ts` — stub → real encoder (image + text), wrapping the model loader.
-2. New `lib/clip-model.ts` (or similar) — lazy-singleton model loader (load on first use, reuse process-wide), reads weights from `./data/models/`.
+2. New `lib/clip-model.ts` (or similar) — lazy-singleton model loader (load on first use, reuse process-wide), reads weights from `./data/models/clip/`.
 3. New `scripts/download-clip-models.ts` — one-time weight fetch into the volume.
 4. `lib/gallery-config-shared.ts` — validator allows `'production'`.
 5. `lib/clip-embeddings.ts` — `CLIP_MODEL_VERSION` bumped to the real model id (e.g. `jina-clip-v2-d512-int8`); threshold recalibrated.
 6. `app/api/search/semantic/route.ts` — scan filtered to the active production `model_version`; serve only when real embeddings exist.
 7. New `app/api/search/similar/[id]/route.ts` (or extension) + a "Similar photos" entry in the photo viewer.
 8. `components/search.tsx` — drop the experimental disclaimer when mode is `production`.
-9. Docker: add `onnxruntime-node` to the web image; ensure `./data/models/` is on the data volume.
+9. Docker: add `onnxruntime-node` to the web image; ensure `./data/models/clip/` is on the data volume.
 
 ## 4. Embedding Generation (image side — always async)
 
@@ -69,9 +69,9 @@ Everything else in the pipeline already exists and is reused: the `image_embeddi
 ## 8. Docker / Ops
 
 - `onnxruntime-node` native binary added to the web image (the one unavoidable image-size bump; model weights stay on the volume).
-- First run downloads weights to `./data/models/` (one-time, persisted across deploys via the existing `./data` bind mount). Document an offline pre-seed path for air-gapped deploys.
+- First run downloads weights to `./data/models/clip/` (one-time, persisted across deploys via the existing `./data` bind mount). Document an offline pre-seed path for air-gapped deploys.
 - Single-writer topology → model loaded once per process; int8 footprint bounded.
-- **Note:** the per-deploy Docker auto-prune just added to `deploy.sh` leaves `./data` (hence `./data/models/`) untouched — bind mounts are never pruned. No interaction risk.
+- **Note:** the per-deploy Docker auto-prune just added to `deploy.sh` leaves `./data` (hence `./data/models/clip/`) untouched — bind mounts are never pruned. No interaction risk.
 
 ## 9. Error Handling / Degradation
 

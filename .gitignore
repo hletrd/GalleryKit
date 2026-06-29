@@ -23,6 +23,10 @@ test
 # negation above otherwise overrides the global `*.log` rule and tracks them.
 .context/reviews/**/*.log
 .context/reviews/gate-logs/
+.context/reviews/**/*.tmp
+.context/reviews/**/*.bak
+.context/reviews/scratch/
+.context/reviews/**/scratch/
 .agent/
 apps/web/.context/
 apps/web/test-results/

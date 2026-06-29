@@ -56,7 +56,7 @@ npm run dev                    # Start dev server (localhost:3000)
 npm run build                  # Build for production
 
 # Database (run from apps/web/)
-npm run db:push               # Push schema to MySQL (drizzle-kit)
+npm run db:push               # Local throwaway schema push only; use migrations for shared/prod DBs
 npm run db:seed               # Seed admin user
 npm run init                  # Full DB initialization
 
@@ -487,6 +487,8 @@ For one-off scripts that need source files / dev-only deps (tsx, vitest, etc.), 
 ### CLIP semantic search — seeding model weights on the deploy host
 
 The CLIP model weights are **NOT baked into the Docker image** (they are tens-of-hundreds of MB and live on the host volume). The image only guarantees the mount point exists (`/app/data/models/clip`, created by `mkdir -p` in the runner stage and surfaced via `CLIP_MODELS_ROOT`). The runtime encoder reads weights from that path at first inference.
+
+`CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in `lib/clip-model.ts`. Raise it only after measuring CPU and RSS headroom on the deploy host because each concurrent request runs an ONNX forward pass.
 
 **One-time seed procedure (run before enabling semantic search in production):**
 

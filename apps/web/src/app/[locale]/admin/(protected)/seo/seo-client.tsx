@@ -71,16 +71,16 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
                     <Button asChild variant="ghost" size="icon" aria-label={t('aria.goBack')}>
                         <Link href={localizePath(locale, '/admin/dashboard')}>
                             <ChevronLeft className="h-4 w-4" />
                         </Link>
                     </Button>
-                    <h1 className="text-3xl font-bold tracking-tight">{t('seo.title')}</h1>
+                    <h1 className="min-w-0 text-3xl font-bold tracking-tight">{t('seo.title')}</h1>
                 </div>
-                <Button onClick={handleSave} disabled={isPending} className="gap-2">
+                <Button onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
                     <Save className="h-4 w-4" />
                     {isPending ? t('seo.saving') : t('seo.save')}
                 </Button>

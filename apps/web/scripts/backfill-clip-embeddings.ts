@@ -20,6 +20,9 @@
  *     --user root -w /app/apps/web web-web:latest \
  *     sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production --force"
  *
+ * CLIP_INFERENCE_CONCURRENCY defaults to 1 and is capped by lib/clip-model.ts.
+ * Raise it only after measuring CPU and RSS headroom on the deploy host.
+ *
  * What it does
  * ────────────
  * For every processed image row in the DB that lacks an image_embeddings row

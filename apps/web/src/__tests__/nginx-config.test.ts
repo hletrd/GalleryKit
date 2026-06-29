@@ -5,6 +5,9 @@ import { resolve } from 'path';
 const nginxConfig = readFileSync(resolve(__dirname, '..', '..', 'nginx', 'default.conf'), 'utf8');
 const composeConfig = readFileSync(resolve(__dirname, '..', '..', 'docker-compose.yml'), 'utf8');
 const dockerfile = readFileSync(resolve(__dirname, '..', '..', 'Dockerfile'), 'utf8');
+const rootReadme = readFileSync(resolve(__dirname, '..', '..', '..', '..', 'README.md'), 'utf8');
+const webReadme = readFileSync(resolve(__dirname, '..', '..', 'README.md'), 'utf8');
+const envExample = readFileSync(resolve(__dirname, '..', '..', '.env.local.example'), 'utf8');
 
 describe('nginx production edge hardening', () => {
     it('preserves trusted forwarded proto instead of overwriting it with the local scheme', () => {
@@ -31,6 +34,15 @@ describe('nginx production edge hardening', () => {
         expect(nginxConfig).not.toContain('$proxy_add_x_forwarded_for');
         const forwardedForHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) ?? [];
         expect(forwardedForHeaders.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('documents the checked-in nginx template as the direct trusted proxy hop', () => {
+        for (const source of [rootReadme, webReadme, envExample]) {
+            expect(source).toContain('direct trusted hop');
+            expect(source).toContain('overwrites');
+            expect(source).toContain('X-Forwarded-For');
+            expect(source).toContain('TRUSTED_PROXY_HOPS=1');
+        }
     });
 
     it('overwrites forwarded host on every proxied location and documents TLS edge ownership', () => {

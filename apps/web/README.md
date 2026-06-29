@@ -27,7 +27,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 | `npm run dev` | Start development server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint check |
-| `npm run db:push` | Push schema to MySQL |
+| `npm run db:push` | Local throwaway schema push only; use committed migrations for shared/prod DBs |
 | `npm run db:seed` | Seed admin user |
 | `npm run init` | Apply committed migrations, then seed admin |
 | `npm test` | Vitest unit suite (2000+ tests) |
@@ -46,7 +46,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 - Leave `IMAGE_BASE_URL` unset for local/self-hosted uploads served directly from the app.
 - `/api/health` is liveness-only by default and does not probe the DB; set `HEALTH_CHECK_DB=true` only for private readiness checks.
 - Uploads are capped at **200 MiB per file** and **2 GiB** total per upload window by default. The shipped nginx config caps general requests at **2 MiB**, login at **64 KiB**, DB restore at **250 MiB**, dashboard uploads at **216 MiB**, and `/api/admin/lr/upload` at **216 MiB** so Lightroom publishes bypass the generic `/api/admin/` 2 MiB cap; override `UPLOAD_MAX_TOTAL_BYTES` only if every layer can safely absorb the larger multipart bodies.
-- Set `TRUST_PROXY=true` when running behind the provided nginx reverse proxy or another trusted proxy chain so rate limits use real client IPs and same-origin checks use the forwarded host/protocol. Keep `TRUSTED_PROXY_HOPS=1` for the shipped nginx-only topology; use `2` only for a known trusted CDN/LB → nginx → app chain. The app selects the client immediately before the trusted proxy suffix in `X-Forwarded-For`; ensure the proxy overwrites `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with trusted values. Admin same-origin checks fail closed if both `Origin` and `Referer` are missing.
+- Set `TRUST_PROXY=true` when running behind the provided nginx reverse proxy or another trusted proxy chain so rate limits use real client IPs and same-origin checks use the forwarded host/protocol. The checked-in nginx template is the direct trusted hop and overwrites `X-Forwarded-For` / `X-Real-IP` with `$remote_addr`, so keep `TRUSTED_PROXY_HOPS=1` for that topology. If a CDN/LB sits in front and you need original visitor IPs, first configure nginx/real_ip or equivalent trusted-header normalization so the app receives a complete trusted chain; only then raise `TRUSTED_PROXY_HOPS`. Ensure the proxy overwrites `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with trusted values. Admin same-origin checks fail closed if both `Origin` and `Referer` are missing.
 - The checked-in `docker-compose.yml` assumes a Linux host with `network_mode: host`, a host-managed MySQL instance, and a host-side `src/site-config.json` bind mount. Build/deploy flows now fail fast if `src/site-config.json` is missing.
 - The checked-in nginx proxies `/uploads/{jpeg,webp,avif}` to the app, which is the documented host-side reverse-proxy topology. It is meant to sit behind a TLS-terminating edge; if nginx is your public edge, add a real 443 server and redirect cleartext 80 traffic. If a custom host-side nginx serves `/uploads` statically, point it at the host bind mount (`apps/web/public/uploads`) and keep originals private. Runtime topic cover resources are separately persisted at `apps/web/public/resources`.
 - Admin database backups are plaintext SQL dumps in `data/backups/` until you move or encrypt them. The app keeps them non-public and authenticated, but host/storage encryption is an operator responsibility.
@@ -60,6 +60,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 - **Model:** `jinaai/jina-clip-v2` (int8 ONNX via `@huggingface/transformers`), embeddings truncated to 512-dim (Matryoshka) and L2-normalized. Model-version tag: `jina-clip-v2-d512-q8`. Production cosine threshold `0.22`.
 - **Modes** (`semantic_search_mode` admin setting): `disabled` (default — routes return 503) · `stub` (deterministic non-meaningful vectors, experimental demo, disclaimer shown) · `production` (real encoder).
 - **Weights are NOT baked into the image.** They load **offline** (`allowRemoteModels=false`) from the `CLIP_MODELS_ROOT` bind-mount (under `./data/models/clip`), so seed them once on the host before going live. The `onnxruntime-node` CPU binding ships inside the npm tarball — no extra Dockerfile step.
+- **Concurrency:** `CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in code. Raise it only after measuring CPU/RSS headroom because each concurrent request runs an ONNX forward pass.
 - **Honesty gate:** `production` serves results only from rows matching the active `model_version`; if no real embeddings exist yet it returns 503 rather than serving stub or empty results under the production label.
 - **Scan scope:** searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill.
 - **Same posture as other public routes:** same-origin guard on the query endpoints + bounded per-IP rate limiting.

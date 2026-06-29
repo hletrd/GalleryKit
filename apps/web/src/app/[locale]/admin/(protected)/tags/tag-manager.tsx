@@ -14,6 +14,7 @@ import {
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
@@ -92,7 +93,8 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                 </Button>
                 <h1 className="text-3xl font-bold">{t('tags.title')}</h1>
             </div>
-            <Table>
+            <div className="overflow-x-auto rounded-md border">
+            <Table className="min-w-[520px]">
                 <TableHeader>
                     <TableRow>
                         <TableHead>{t('tags.name')}</TableHead>
@@ -124,6 +126,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                     )}
                 </TableBody>
             </Table>
+            </div>
 
             {/* Delete Tag Confirmation.
                 DES-R4C14-B: the action used to close the dialog synchronously
@@ -166,6 +169,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                 <DialogContent closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('tags.edit')}</DialogTitle>
+                        <DialogDescription>{t('tags.editDescription')}</DialogDescription>
                     </DialogHeader>
                     {editingTag && (
                         <form action={handleUpdate} className="space-y-4">

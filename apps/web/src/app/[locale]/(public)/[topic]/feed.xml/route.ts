@@ -88,7 +88,8 @@ export async function GET(
         // so entries fall back to the feed-level author until a safe public
         // display-name field exists. Do not expose admin usernames here.
         const entryAuthorName = typeof img.author_name === 'string' ? img.author_name.trim() : '';
-        const perEntryAuthor = entryAuthorName && entryAuthorName !== seo.author
+        const feedAuthorName = seo.author.trim() || seo.title.trim() || siteConfig.title || 'GalleryKit';
+        const perEntryAuthor = entryAuthorName && entryAuthorName !== feedAuthorName
             ? { name: entryAuthorName }
             : undefined;
 
@@ -112,7 +113,8 @@ export async function GET(
     const siteCopyright = typeof (siteConfig as unknown as { copyright?: unknown }).copyright === 'string'
         ? ((siteConfig as unknown as { copyright: string }).copyright).trim()
         : '';
-    const feedRights = siteCopyright || `© ${new Date().getFullYear()} ${seo.author}`;
+    const feedAuthorName = seo.author.trim() || seo.title.trim() || siteConfig.title || 'GalleryKit';
+    const feedRights = siteCopyright || `© ${new Date().getFullYear()} ${feedAuthorName}`;
 
     const xml = composeAtomFeed({
         feedId: feedSelfUrl,
@@ -122,7 +124,7 @@ export async function GET(
         feedUpdated,
         // R17-M1: feed-level <author> required by RFC 4287 §4.1.1.
         feedAuthor: {
-            name: seo.author,
+            name: feedAuthorName,
             uri: baseUrl || undefined,
         },
         feedRights,

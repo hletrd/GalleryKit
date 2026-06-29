@@ -225,16 +225,16 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
                     <Button asChild variant="ghost" size="icon" aria-label={t('aria.goBack')}>
                         <Link href={localizePath(locale, '/admin/dashboard')}>
                             <ChevronLeft className="h-4 w-4" />
                         </Link>
                     </Button>
-                    <h1 className="text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
+                    <h1 className="min-w-0 text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
                 </div>
-                <Button onClick={handleSave} disabled={isPending} className="gap-2">
+                <Button onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {isPending ? t('settings.saving') : t('settings.save')}
                 </Button>
@@ -639,8 +639,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     <CardDescription>{t('settings.semanticSearchDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
                             <Label htmlFor="semantic-search-mode">{t('settings.semanticSearchMode')}</Label>
                             <p id="semantic-search-mode-help" className="text-xs text-muted-foreground">
                                 {t('settings.semanticSearchEnabledHint')}
@@ -655,7 +655,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             value={['disabled', 'stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}
                             onValueChange={(value) => handleChange('semantic_search_mode', value)}
                         >
-                            <SelectTrigger id="semantic-search-mode" className="w-[200px]" aria-describedby="semantic-search-mode-help">
+                            <SelectTrigger id="semantic-search-mode" className="w-full sm:w-[200px]" aria-describedby="semantic-search-mode-help">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>

@@ -90,6 +90,12 @@ for (const [label, source] of SUITES) {
         it('lineage comment cites R25-M1', () => {
             expect(source).toContain('R25-M1');
         });
+
+        it('uses a non-empty feed author fallback for fresh site configs', () => {
+            expect(source).toContain("seo.author.trim() || seo.title.trim() || siteConfig.title || 'GalleryKit'");
+            expect(source).toContain('const feedRights = siteCopyright || `© ${new Date().getFullYear()} ${feedAuthorName}`');
+            expect(source).toMatch(/feedAuthor:\s*\{\s*name: feedAuthorName,/);
+        });
     });
 }
 

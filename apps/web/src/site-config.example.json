@@ -3,7 +3,7 @@
     "description": "A self-hosted photo gallery",
     "url": "https://example.com",
     "locale": "en_US",
-    "author": "",
+    "author": "GalleryKit",
     "nav_title": "GalleryKit",
     "home_link": "/",
     "footer_text": "Powered by GalleryKit",

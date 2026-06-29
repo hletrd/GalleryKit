@@ -16,6 +16,7 @@ import {
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -189,6 +190,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     <DialogContent closeLabel={t('aria.close')}>
                         <DialogHeader>
                             <DialogTitle>{t('categories.add')}</DialogTitle>
+                            <DialogDescription>{t('categories.createDescription')}</DialogDescription>
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
                             <div className="grid w-full items-center gap-1.5">
@@ -213,7 +215,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 </Dialog>
             </div>
 
-            <Table>
+            <div className="overflow-x-auto rounded-md border">
+            <Table className="min-w-[760px]">
                 <TableHeader>
                     <TableRow>
                         <TableHead>{t('categories.order')}</TableHead>
@@ -259,6 +262,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     ))}
                 </TableBody>
             </Table>
+            </div>
 
             {/* Delete Topic Confirmation.
                 COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
@@ -295,6 +299,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 <DialogContent className="max-w-xl" closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('categories.edit')}</DialogTitle>
+                        <DialogDescription>{t('categories.editDescription')}</DialogDescription>
                     </DialogHeader>
                     {editingTopic && (
                         <div className="space-y-6">
