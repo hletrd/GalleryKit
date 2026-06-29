@@ -2,7 +2,6 @@
 
 ## Active Plans
 
-- Cycle 5/100 Implementation Plan — TODO (`cycle-5-2026-06-29-plan.md`)
 - Cycle 5/100 Deferred Findings — TODO / deferred (`cycle-5-2026-06-29-deferred.md`)
 - Cycle 3/100 Implementation Plan — TODO (`cycle-3-2026-06-29-plan.md`)
 - Cycle 3/100 Deferred Findings — TODO / deferred (`cycle-3-2026-06-29-deferred.md`)
@@ -30,6 +29,7 @@
 
 ## Completed Plans (Cycle 6 Loop)
 
+- Cycle 5/100 Implementation Plan — DONE / archived under `archive/cycle-5-2026-06-29-plan.md`
 - Cycle 2/100 Implementation Plan — DONE / archived under `archive/cycle-2-2026-06-29-plan.md`
 - 236 — Cycle 6 Loop: SEO Unicode-Formatting Parity + `containsUnicodeFormatting` Helper — DONE / archived under `done/236-cycle6-loop-seo-unicode-and-helper.md`
 
