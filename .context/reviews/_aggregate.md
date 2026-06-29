@@ -1,259 +1,434 @@
-# Aggregate Review - Cycle 4/100
+# Aggregate Review - review-plan-fix Cycle 5
 
 Date: 2026-06-29
-HEAD reviewed: `0fa5beb1` plus review-artifact-only commits created during the review wave
+Scope: cycle 5 fan-out across code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer, and product-marketer-reviewer.
 
 ## Agent Coverage
 
-Prompt 1 requested all available review agents. This environment exposed only native `default`, `explorer`, and `worker` agent types, plus two registered prompt files in `~/.codex/agents`. I therefore spawned `default` agents with explicit reviewer-role prompts and included both registered custom reviewers:
+- Completed: code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer, product-marketer-reviewer.
+- UI/UX was included because the repository contains a Next.js web frontend. The designer lane used `agent-browser`; local MySQL was unavailable, so DB-backed pages were partly validated by source/tests plus route-shell browser evidence.
+- Additional locally registered reviewer-style agents were enumerated. `ui-ux-designer-reviewer` and `product-marketer-reviewer` were BurstPick-specific prompts; the UI lane was covered by the required designer reviewer, and the product-marketer lane was adapted to GalleryKit without BurstPick assumptions.
 
-- `code-reviewer` -> `.context/reviews/code-reviewer.md`
-- `perf-reviewer` -> `.context/reviews/perf-reviewer.md`
-- `security-reviewer` -> `.context/reviews/security-reviewer.md`
-- `critic` -> `.context/reviews/critic.md`
-- `verifier` -> `.context/reviews/verifier.md`
-- `test-engineer` -> `.context/reviews/test-engineer.md`
-- `tracer` -> `.context/reviews/tracer.md`
-- `architect` -> `.context/reviews/architect.md`
-- `debugger` -> `.context/reviews/debugger.md`
-- `document-specialist` -> `.context/reviews/document-specialist.md`
-- `designer` -> `.context/reviews/designer.md`
-- `ui-ux-designer-reviewer` -> `.context/reviews/ui-ux-designer-reviewer.md`
-- `product-marketer-reviewer` -> `.context/reviews/product-marketer-reviewer.md`
+## Agent Failures
 
-The child-agent concurrency cap prevented a literal one-batch fan-out of all 13 roles; agents were run in parallel waves and every role returned successfully. No agent failures.
+None after retry/slot management. The initial test-engineer spawn hit the native thread limit and was retried after completed agents were closed.
 
-## Summary
+## Merged Findings
 
-Unique new findings: 21
+### AGG-C5-01 - Docker runner omits immutable public assets
 
-- Active implementation findings: 15
-- Deferred findings: 6
-- Zero-finding reports: `code-reviewer`, `debugger`, `ui-ux-designer-reviewer`
+Severity: High
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: verifier, tracer
 
-Cross-agent agreement raised confidence for:
+Citations:
+- `apps/web/Dockerfile:105-120`
+- `apps/web/docker-compose.yml:23-27`
+- `apps/web/src/components/register-service-worker.tsx:18`
+- `apps/web/src/components/histogram.tsx:544`
+- `apps/web/src/app/[locale]/globals.css:5`
+- `apps/web/src/app/manifest.ts:35`
 
-- Public-route rate-limit scanner false negative: `critic` + `test-engineer`
-- Lightroom upload restore/quota ordering: `architect` + `tracer`
-- Broad-public-mount documentation drift: `verifier` + `document-specialist`
+Failure scenario:
+The runner image does not copy `apps/web/public`, while compose bind-mounts only mutable public subdirectories. Production can therefore 404 `/sw.js`, `/histogram-worker.js`, fonts, and PWA icons.
 
-## Active Findings
+Suggested fix:
+Copy the full built `public` tree into the runner image, keep `public/uploads` and `public/resources` as bind mounts, and add packaging/source-contract tests.
 
-### AGG-C4-01 - Public mutating-route rate-limit scanner accepts unreachable helper calls
+### AGG-C5-02 - Docker build context still admits mutable topic resources
 
-- Sources: `critic` CRIT-C4-01, `test-engineer` TE-C4-01
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/scripts/check-public-route-rate-limit.ts:125-153`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:167-205`
-- Problem: A helper call inside an unreachable branch such as `if (false) { preIncrement... }` can satisfy the lint gate before a mutation.
-- Failure scenario: A future public mutating route passes CI while performing DB writes without charging a public rate-limit bucket.
-- Fix: Add dead-branch fixtures and make the scanner fail closed for conditional helper calls that do not dominate the later mutation.
+Severity: Medium
+Confidence: High
+Status: Confirmed/Likely
+Cross-agent agreement: code-reviewer, verifier
 
-### AGG-C4-02 - Playwright nav specs still query the removed static theme-toggle name
+Citations:
+- `.dockerignore:16-18`
+- `apps/web/.dockerignore:7-8`
+- `apps/web/.gitignore:49`
+- `apps/web/docker-compose.yml:25`
 
-- Source: `critic` CRIT-C4-02
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/e2e/test-fixes.spec.ts:24-40`, `apps/web/e2e/nav-visual-check.spec.ts:66-76`, `apps/web/src/components/nav-client.tsx:41-46`
-- Problem: Specs still locate `"Toggle theme"` while the component now exposes a stateful accessible name.
-- Failure scenario: `npm run test:e2e --workspace=apps/web` fails despite correct UI behavior.
-- Fix: Use a regex or stable test selector and assert the stateful accessible name changes after click.
+Failure scenario:
+Runtime topic-cover resources under `public/resources` can enter Docker build context and image layers even though production is supposed to persist them as bind-mounted mutable data.
 
-### AGG-C4-03 - Topic cover uploads are not persisted after the narrowed public mount
+Suggested fix:
+Ignore `apps/web/public/resources/**` in the root context and `public/resources/**` in the app context, with tests covering both contexts.
 
-- Source: `tracer` TRC-C4-01
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/src/lib/process-topic-image.ts:20-28`, `apps/web/src/lib/process-topic-image.ts:72-89`, `apps/web/docker-compose.yml:23-26`
-- Problem: Runtime topic covers are written under `public/resources`, but deployment now bind-mounts only `public/uploads`.
-- Failure scenario: A topic cover uploaded by an admin disappears after container replacement while the DB still points at its filename.
-- Fix: Persist `public/resources` in Docker/compose/deploy/docs/tests or move topic resources under a durable data-backed route.
+### AGG-C5-03 - Legacy-original migration can delete the only good original
 
-### AGG-C4-04 - Lightroom upload checks restore maintenance only after multipart parsing and topic DB read
+Severity: High
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: critic, debugger, tracer
 
-- Sources: `architect` ARCH-C4-01, `tracer` TRC-C4-02
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/src/app/api/admin/lr/upload/route.ts:70-148`
-- Problem: The route parses a large multipart body and queries `topics` before the restore-maintenance entry guard.
-- Failure scenario: A Lightroom retry during restore spends memory/bandwidth and can hit table-restore timing errors before returning a retryable maintenance response.
-- Fix: Move an authenticated restore-maintenance check before `request.formData()` and before topic lookup; keep late cleanup checks for mid-request restore races.
+Citations:
+- `apps/web/scripts/migrate.js:46-110`
+- `apps/web/src/__tests__/upload-paths.test.ts:58-76`
 
-### AGG-C4-05 - Lightroom upload cumulative quota is enforced after full multipart parsing
+Failure scenario:
+If `data/uploads/original/foo.jpg` exists but is corrupt/truncated while a valid legacy `public/uploads/original/foo.jpg` remains, startup unlinks the valid source solely because the target path exists.
 
-- Source: `architect` ARCH-C4-02
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/src/app/api/admin/lr/upload/route.ts:70-80`, `apps/web/src/app/api/admin/lr/upload/route.ts:210-238`, `apps/web/nginx/default.conf:122-144`
-- Problem: The upload tracker rejects only after Next/Node has materialized the multipart body.
-- Failure scenario: A compromised token or retry loop can force several 216 MiB parses before quota rejects later requests.
-- Fix: Validate `Content-Length` / transfer encoding and pre-claim a conservative upload budget before `request.formData()`, then settle to actual file size afterward.
+Suggested fix:
+Before unlinking a legacy source, compare size plus SHA-256. Delete only identical duplicates; on mismatch, fail startup or quarantine without deleting the public source. Add identical/divergent/`EXDEV` regression tests.
 
-### AGG-C4-06 - Scoped PAT authorization updates `last_used_at` before scope acceptance
+### AGG-C5-04 - Service-worker offline HTML cache can outlive share revoke/delete/expiry
 
-- Source: `tracer` TRC-C4-03
-- Original severity/confidence: Low/High
-- Status: Confirmed
-- File+line: `apps/web/src/lib/admin-tokens.ts:136-165`, `apps/web/src/lib/api-auth.ts:63-84`
-- Problem: Valid but wrong-scope PAT attempts update "Last used" even though authorization fails.
-- Failure scenario: An admin sees recent token usage and mistakes denied probes for successful Lightroom upload activity.
-- Fix: Split token verification from usage marking and update `last_used_at` only after required scope passes.
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: critic, debugger
 
-### AGG-C4-07 - Deploy/disk-hygiene docs still describe the old broad `./public` bind mount
+Citations:
+- `apps/web/public/sw.template.js:271-310`
+- `apps/web/public/sw.template.js:366-369`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14-96`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:17-108`
+- `apps/web/src/app/actions/sharing.ts:306-386`
 
-- Sources: `verifier` V-C4-01, `document-specialist` DOC-C4-01
-- Original severity/confidence: Low/High
-- Status: Confirmed
-- File+line: `AGENTS.md:19`, `CLAUDE.md:460`, `CLAUDE.md:475`, `apps/web/deploy.sh:39-42`, `apps/web/deploy.sh:60`
-- Problem: Authoritative docs/comments still say `./public` is persisted even though code/test now require `./public/uploads`.
-- Failure scenario: A future deploy edit restores the broad mount and reopens service-worker/generated-asset drift.
-- Fix: Update docs/comments/output to say persistence is `./data`, `./public/uploads`, `./public/resources` if AGG-C4-03 persists it, and `./src/site-config.json`; immutable public assets come from the image.
+Failure scenario:
+A visitor opens a shared link/group, then the admin revokes/deletes/expires it. Online requests fail correctly, but the same device can still view cached HTML offline for up to 24 hours.
 
-### AGG-C4-08 - Shipped CLIP superpowers docs still encode pre-implementation state
+Suggested fix:
+Exclude `/s/` and `/g/` from offline HTML caching, or add and honor a no-offline-cache response header. Add SW contract coverage and update docs.
 
-- Source: `document-specialist` DOC-C4-02
-- Original severity/confidence: Low/High
-- Status: Confirmed
-- File+line: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:4-63`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md:15-96`
-- Problem: The docs simultaneously say CLIP is shipped and that production is rejected/stub-only, with unchecked executable implementation steps.
-- Failure scenario: A future agent/operator follows the stale plan and redoes completed work or changes thresholds away from current code.
-- Fix: Convert those docs to post-implementation records with explicit historical boundaries and completed-status annotations.
+### AGG-C5-05 - Disabled semantic search can consume unmetered parse/config work
 
-### AGG-C4-09 - 404 pages render a duplicate skip link before navigation
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: critic, debugger
 
-- Source: `designer` DES-C4-01
-- Original severity/confidence: Low/High
-- Status: Confirmed by source
-- File+line: `apps/web/src/app/[locale]/layout.tsx:123-128`, `apps/web/src/app/[locale]/not-found.tsx:20-23`
-- Problem: Locale layout and `not-found.tsx` both render a skip link to `#main-content`.
-- Failure scenario: Keyboard users encounter two identical bypass links on a dead URL before reaching navigation or recovery actions.
-- Fix: Remove the local skip link from `not-found.tsx` while preserving `main#main-content`.
+Citations:
+- `apps/web/src/app/api/search/semantic/route.ts:100-225`
+- `apps/web/src/__tests__/semantic-search-route.test.ts:208-218`
+- `apps/web/src/lib/rate-limit.ts:312-352`
 
-### AGG-C4-10 - Lightroom token dates ignore the selected app locale
+Failure scenario:
+While semantic search is disabled, a same-origin-looking client repeatedly sends valid JSON bodies. The route reads/parses the body and loads config, then rolls back the limiter token.
 
-- Source: `designer` DES-C4-02
-- Original severity/confidence: Low/High
-- Status: Confirmed by source
-- File+line: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:22`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:123-128`
-- Problem: Token dates use bare `toLocaleDateString()` instead of the app locale.
-- Failure scenario: Korean UI on an English-configured browser shows English/US dates in the token table.
-- Fix: Destructure `locale` from `useTranslation()` and pass it into date formatting.
+Suggested fix:
+Check semantic mode before body materialization, or keep disabled-mode attempts charged. Update tests to prove disabled mode does not read request bodies or does not roll back.
 
-### AGG-C4-11 - Lightroom token list loading state is a silent spinner
+### AGG-C5-06 - Lightroom upload leaks pre-claimed quota when topic lookup throws
 
-- Source: `designer` DES-C4-03
-- Original severity/confidence: Low/High
-- Status: Confirmed by source
-- File+line: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:107-110`
-- Problem: Initial token loading has only a spinner, no `role="status"`, `aria-live`, or text alternative.
-- Failure scenario: Screen-reader users get no loading state while the token list is fetching.
-- Fix: Wrap the loading state in `role="status" aria-live="polite"`, hide the spinner from AT, and add localized sr-only text.
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: tracer
 
-### AGG-C4-12 - RAW rejection copy recommends HEIF though HEIF is not reliably accepted
+Citations:
+- `apps/web/src/app/api/admin/lr/upload/route.ts:94-131`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:198-205`
 
-- Source: `product-marketer-reviewer` PM-C4-01
-- Original severity/confidence: Medium/High
-- Status: Confirmed
-- File+line: `apps/web/messages/en.json:560-561`, `apps/web/messages/ko.json:560-561`, `apps/web/src/app/actions/images.ts:523-560`
-- Problem: The RAW rejection guidance recommends HEIF, but the picker no longer advertises HEIF and the installed Sharp build does not reliably decode `.heif` / `.heic`.
-- Failure scenario: A photographer exports RAWs to HEIF based on product guidance and then cannot select or process them.
-- Fix: Remove HEIF from RAW recovery copy unless HEIF support is runtime-gated end-to-end.
+Failure scenario:
+The Lightroom upload route preclaims count/bytes, then the topic `SELECT` can throw before the preclaim is settled. Transient DB errors can consume quota until the tracking window expires without landing an image.
 
-### AGG-C4-13 - Deploy disk-hygiene and data-safety contract has no regression test
+Suggested fix:
+Wrap the topic lookup after preclaim in `try/catch`, settle quota on throw, and add a regression test.
 
-- Source: `test-engineer` TE-C4-02
-- Original severity/confidence: Medium/High
-- Status: Confirmed coverage gap
-- File+line: `apps/web/deploy.sh:31-56`, `scripts/deploy-remote.sh:22-72`
-- Problem: Load-bearing deploy prune ordering, prune flags, and config-driven SSH behavior are untested.
-- Failure scenario: A future edit moves prune before `up -d`, adds destructive `volume prune -a`, removes builder prune, or hardcodes a remote target while CI stays green.
-- Fix: Add a deploy script source-contract test.
+### AGG-C5-07 - Restore does not quiesce color-pipeline backfills
 
-### AGG-C4-14 - Production site-config validator lacks failure-path tests
+Severity: High
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: architect
 
-- Source: `test-engineer` TE-C4-03
-- Original severity/confidence: Medium/High
-- Status: Confirmed coverage gap
-- File+line: `apps/web/scripts/ensure-site-config.mjs:4-43`, `.github/workflows/quality.yml:27-34`
-- Problem: CI only exercises the happy path for canonical URL validation.
-- Failure scenario: A refactor weakens production URL validation and CI still passes.
-- Fix: Add subprocess tests for missing config, missing production URL, placeholder host, invalid scheme/relative URL, and valid BASE_URL override.
+Citations:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:279-340`
+- `apps/web/src/lib/admin-backfill-runner.ts:303-327`
+- `apps/web/src/lib/admin-backfill-runner.ts:498-617`
+- `apps/web/scripts/backfill-color-pipeline.ts:301-311`
 
-### AGG-C4-15 - Smart-collection cursor pagination computes a discarded total count
+Failure scenario:
+An active backfill continues through SQL restore and writes stale metadata or derivatives to a restored row with the same id.
 
-- Source: `perf-reviewer` PERF-C4-05
-- Original severity/confidence: Low/High
-- Status: Confirmed
-- File+line: `apps/web/src/lib/data.ts:1388-1428`, `apps/web/src/app/actions/public.ts:161-225`
-- Problem: Cursor load-more callers discard `total`, but the shared query still computes `COUNT(*) OVER()`.
-- Failure scenario: Infinite-scroll smart collections pay extra DB work on every page.
-- Fix: Split the cursor query shape and add a test that the load-more path does not include `COUNT(*) OVER()`.
+Suggested fix:
+Include the color-pipeline backfill lock in restore quiescence or expose/await a backfill drain before import. Add restore contract tests.
 
-## Deferred Findings
+### AGG-C5-08 - Restored databases resume before current migrations/reconcile run
 
-These findings are recorded for future work and are not implemented in this cycle. Security/correctness/data-loss findings are not deferred unless the repo's own rules explicitly establish the current bounded topology or the finding is performance-only.
+Severity: High
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: architect
 
-### DEF-C4-01 - Timeline and on-this-day queries are non-sargable
+Citations:
+- `apps/web/Dockerfile:137-143`
+- `apps/web/scripts/migrate.js:725-789`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:493-507`
 
-- Source: `perf-reviewer` PERF-C4-01
-- File+line: `apps/web/src/lib/data-timeline.ts:97-116`, `apps/web/src/lib/data-timeline.ts:129-141`, `apps/web/src/lib/data-timeline.ts:186-207`
-- Original severity/confidence: Medium/High
-- Reason for deferral: Performance-only schema redesign requiring generated columns or query-shape migration; no data-loss/security impact. It is already tracked as prior performance debt, but this cycle preserves the new review finding.
-- Exit criterion: Re-open when library size or query telemetry shows timeline/on-this-day latency scaling with total processed image count, or when adding the next schema/index migration batch.
+Failure scenario:
+Restoring an older dump resumes current app code against an older schema until next restart/deploy, causing unknown-column errors or skipped migration postconditions.
 
-### DEF-C4-02 - Public map lacks a map/GPS access path and renders too many markers
+Suggested fix:
+Run the same migration/reconcile path inside restore maintenance before ending maintenance and resuming queues.
 
-- Source: `perf-reviewer` PERF-C4-02
-- File+line: `apps/web/src/lib/data.ts:1624-1660`, `apps/web/src/components/map/map-client.tsx:76-143`
-- Original severity/confidence: Medium/High
-- Reason for deferral: Performance-only map architecture/indexing work. Current personal-gallery deployment remains bounded by `MAP_MAX_MARKERS`, and no data-loss/security issue is claimed.
-- Exit criterion: Re-open when geotagged public photos approach the marker cap, map route latency becomes visible, or a map endpoint/index migration is planned.
+### AGG-C5-09 - Backup/restore is DB-only while gallery state spans DB and files
 
-### DEF-C4-03 - Production CLIP embedding work escapes image-queue backpressure
+Severity: Medium
+Confidence: High
+Status: Risk
+Cross-agent agreement: architect
 
-- Source: `perf-reviewer` PERF-C4-03
-- File+line: `apps/web/src/lib/image-queue.ts:512-567`, `apps/web/src/lib/clip-model.ts:151-199`
-- Original severity/confidence: Medium/High
-- Reason for deferral: Availability/performance architecture work requiring a dedicated embedding queue or durable job model. This is already recorded as prior cycle-3 deferred debt.
-- Exit criterion: Re-open before raising upload concurrency, when production semantic ingestion volume grows, or when adding queue/drain observability.
+Citations:
+- `apps/web/docker-compose.yml:23-27`
+- `apps/web/src/app/actions/images.ts:304-408`
+- `apps/web/src/app/actions/images.ts:653-677`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:138-166`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:454-518`
 
-### DEF-C4-04 - Semantic/similar search scan and sort embeddings synchronously on request path
+Failure scenario:
+DB restore can resurrect rows whose image/resource files were deleted, or leave orphan files no longer referenced by DB rows.
 
-- Source: `perf-reviewer` PERF-C4-04
-- File+line: `apps/web/src/app/api/search/semantic/route.ts:240-281`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
-- Original severity/confidence: Medium/Medium
-- Reason for deferral: Performance/recall architecture work requiring vector indexing or a bounded top-K rewrite. The current route has explicit scan caps and same-origin/rate-limit controls.
-- Exit criterion: Re-open when `SEMANTIC_SCAN_LIMIT` is raised above the default, search latency exceeds budget, or a vector-index backend is introduced.
+Suggested fix:
+Either label restore explicitly as DB-only and add post-restore reconciliation, or implement full gallery snapshots containing SQL plus uploads/resources/config with manifest hashes.
 
-### DEF-C4-05 - Color-pipeline backfill filters on unindexed `pipeline_version`
+### AGG-C5-10 - Timeline and On-This-Day use non-sargable date functions
 
-- Source: `perf-reviewer` PERF-C4-06
-- File+line: `apps/web/src/lib/admin-backfill-runner.ts:370-410`, `apps/web/scripts/backfill-color-pipeline.ts:326-332`
-- Original severity/confidence: Low/Medium
-- Reason for deferral: Performance-only admin maintenance optimization. A proper fix needs an index migration or progress UX redesign.
-- Exit criterion: Re-open on the next pipeline-version bump, when backfill discovery becomes slow, or when adding a schema migration for operational indexes.
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: perf-reviewer
 
-### DEF-C4-06 - Process-local security state is unsafe if production is horizontally scaled
+Citations:
+- `apps/web/src/lib/data-timeline.ts:97`
+- `apps/web/src/lib/data-timeline.ts:129`
+- `apps/web/src/lib/data-timeline.ts:186`
+- `apps/web/src/components/on-this-day-widget.tsx:14`
+- `apps/web/src/db/schema.ts:111`
 
-- Source: `security-reviewer` SEC-C4-01
-- File+line: `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/lib/upload-tracker-state.ts:7-79`, `apps/web/src/lib/rate-limit.ts:68-108`, `apps/web/src/lib/rate-limit.ts:314-318`, `apps/web/docker-compose.yml:14-21`
-- Original severity/confidence: Medium/High
-- Reason for deferral: The repo explicitly defines the current production topology as single-instance. CLAUDE.md states: "The shipped Docker Compose deployment is a single web-instance / single-writer topology" and "do not horizontally scale the web service unless those coordination states are moved to a shared store." Under that repo rule, this is an operator-scale-out guardrail rather than a current deployment defect.
-- Exit criterion: Re-open before any multi-process, multi-replica, worker split, or load-balanced deployment; or if adding Redis/DB-backed shared state.
+Failure scenario:
+`/timeline`, `/year/:year`, and home renders scan processed images with `YEAR/MONTH/DAY(capture_date)`, increasing DB CPU as libraries grow.
 
-## Agent Findings Count
+Suggested fix:
+Use date ranges where possible and/or add generated indexed capture year/month/day columns or a derived timeline table.
 
-- `code-reviewer`: 0
-- `perf-reviewer`: 6
-- `security-reviewer`: 1
-- `critic`: 2
-- `verifier`: 1
-- `test-engineer`: 3
-- `tracer`: 3
-- `architect`: 2
-- `debugger`: 0
-- `document-specialist`: 2
-- `designer`: 3
-- `ui-ux-designer-reviewer`: 0
-- `product-marketer-reviewer`: 1
+### AGG-C5-11 - Public map can fetch/render 10,000 markers
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: perf-reviewer
+
+Citations:
+- `apps/web/src/lib/data.ts:1642`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:8`
+- `apps/web/src/components/map-client.tsx:76`
+- `apps/web/src/db/schema.ts:111`
+
+Failure scenario:
+`/map` can serialize and mount thousands of Leaflet markers on the main thread without map-specific indexing, bounds fetching, or clustering.
+
+Suggested fix:
+Add map/GPS access paths or denormalized eligibility, plus bounds-based fetching or clustering.
+
+### AGG-C5-12 - Production CLIP embedding escapes queue backpressure
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: perf-reviewer
+
+Citations:
+- `apps/web/src/lib/image-queue.ts:204`
+- `apps/web/src/lib/image-queue.ts:470`
+- `apps/web/src/lib/image-queue.ts:490`
+- `apps/web/src/lib/clip-model.ts:151`
+
+Failure scenario:
+Completed image jobs launch detached real embedding work, allowing Sharp raw conversion and ONNX inference to pile up outside `QUEUE_CONCURRENCY` and shutdown drains.
+
+Suggested fix:
+Move embedding to a bounded queue with drain/shutdown behavior, or to a durable DB-backed embedding worker.
+
+### AGG-C5-13 - Semantic/similar search can decode and rank up to 1,000,000 vectors
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: perf-reviewer
+
+Citations:
+- `apps/web/src/lib/clip-embeddings.ts:36`
+- `apps/web/src/lib/clip-embeddings.ts:104`
+- `apps/web/src/lib/clip-embeddings.ts:164`
+- `apps/web/src/app/api/search/semantic/route.ts:240`
+- `apps/web/src/app/api/search/similar/[id]/route.ts:141`
+- `apps/web/src/db/schema.ts:271`
+
+Failure scenario:
+An increased `SEMANTIC_SCAN_LIMIT` can pull huge MEDIUMBLOB sets, allocate many `Float32Array`s, score every vector, and sort full match sets in-process.
+
+Suggested fix:
+Lower or guard the hard ceiling, use bounded heap top-K, add metrics, and move larger installs to ANN/vector search.
+
+### AGG-C5-14 - Admin dashboard loads every permanently failed image
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: perf-reviewer
+
+Citations:
+- `apps/web/src/lib/data.ts:993`
+- `apps/web/src/db/schema.ts:108`
+
+Failure scenario:
+Many failed rows make dashboard load scan/sort and hydrate the full failure list.
+
+Suggested fix:
+Cap or paginate failed rows and add a matching index.
+
+### AGG-C5-15 - Semantic route lacks model-version filtering regression coverage
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: test-engineer
+
+Citations:
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/__tests__/semantic-search-route.test.ts`
+
+Failure scenario:
+A future route refactor can mix stub and production embedding rows, returning irrelevant results across model spaces.
+
+Suggested fix:
+Add tests proving semantic text search filters by the active model version.
+
+### AGG-C5-16 - Cursor pagination tests copy a looser cursor mock
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: test-engineer
+
+Citations:
+- `apps/web/src/__tests__/data-pagination.test.ts`
+- real cursor helper in `apps/web/src/lib/data.ts`
+
+Failure scenario:
+Tests pass with a local mock that accepts behavior the production cursor helper rejects.
+
+Suggested fix:
+Export or otherwise test the real cursor normalization helper directly.
+
+### AGG-C5-17 - Real CLIP activation tests are opt-in/skipped in blocking CI
+
+Severity: Medium
+Confidence: Medium
+Status: Risk
+Cross-agent agreement: test-engineer
+
+Citations:
+- CLIP model activation tests under `apps/web/src/__tests__/clip-*`
+- `apps/web/package.json` blocking `test` script
+
+Failure scenario:
+Production CLIP activation can regress without the blocking suite noticing because real-model tests are skipped unless model weights/env are present.
+
+Suggested fix:
+Keep heavyweight model tests opt-in, but add a lightweight blocking contract around production-mode gating/offline-load prerequisites.
+
+### AGG-C5-18 - Semantic search comments still describe stub-only behavior
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: document-specialist
+
+Citations:
+- `apps/web/src/__tests__/semantic-search-route.test.ts:95-96`
+- `apps/web/src/app/api/search/semantic/route.ts:209-227`
+
+Failure scenario:
+Future test/refactor work may reject production mode again because comments say only stub serves public requests.
+
+Suggested fix:
+Update comments to state that stub is the default test mode while stub and gated production serve public requests.
+
+### AGG-C5-19 - Embeddings action header comment describes old future-ONNX behavior
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: document-specialist
+
+Citations:
+- `apps/web/src/app/actions/embeddings.ts:3-9`
+- `apps/web/src/app/actions/embeddings.ts:68-99`
+
+Failure scenario:
+Future cleanup may remove production/model-version handling as “unneeded.”
+
+Suggested fix:
+Rewrite the header comment for disabled no-op, stub writes, production real encoder, and active model-version selection.
+
+### AGG-C5-20 - Admin analytics public links force default-locale pages and English aria labels
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: designer
+
+Citations:
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:112`
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:194`
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:222`
+- `apps/web/src/proxy.ts:7`
+
+Failure scenario:
+A Korean admin on `/ko/admin/analytics` opens a public preview and lands on `/en/...`; screen readers also announce English text in the Korean admin page.
+
+Suggested fix:
+Pass/read locale in `AnalyticsClient`, use localized paths, add localized `opensInNewWindow` text, and format counts with locale.
+
+### AGG-C5-21 - GPS privacy copy contradicts retained-original GPS scrubbing
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: product-marketer-reviewer
+
+Citations:
+- `apps/web/messages/en.json:701-704`
+- `apps/web/messages/ko.json:701-704`
+- `apps/web/src/app/actions/images.ts:333-343`
+- `apps/web/src/lib/process-image.ts:1600-1639`
+- `CLAUDE.md:218`
+
+Failure scenario:
+An admin enables GPS stripping expecting only DB/public metadata to omit GPS, then later finds retained originals had GPS removed when possible.
+
+Suggested fix:
+Update both locales to state that new uploads omit GPS from gallery metadata and, when possible, remove GPS metadata from retained originals; existing images are unchanged.
+
+### AGG-C5-22 - Auto alt-text copy implies Florence-2 setup although feature is EXIF-derived stub
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: product-marketer-reviewer
+
+Citations:
+- `apps/web/messages/en.json:712-715`
+- `apps/web/messages/ko.json:712-715`
+- `apps/web/src/lib/caption-generator.ts:1-18`
+- `apps/web/src/lib/caption-generator.ts:33-64`
+- `apps/web/src/lib/image-queue.ts:470-488`
+
+Failure scenario:
+An operator enables Auto Alt-Text expecting a real local Florence-2 vision model, or bulk-copies EXIF-derived placeholders as if they were real generated captions.
+
+Suggested fix:
+Reword settings copy to current truth: EXIF-derived placeholders, no vision model yet; avoid “AI” wording until real inference ships.
+
+## Security Review Result
+
+Security-reviewer found no critical/high/medium/low security vulnerabilities in the reviewed auth, session, upload, backup, route, privacy, and header surfaces. It recorded one residual scale-out risk for process-local state if the single-instance topology changes.
+
+## Deferred Candidates
+
+Performance-only findings AGG-C5-10 through AGG-C5-14 and test-strategy findings AGG-C5-16 through AGG-C5-17 may be candidates for explicit deferral if they cannot be completed in this cycle. Data-loss, correctness, privacy, and production-packaging findings are not treated as silently deferrable.
 
