@@ -144,7 +144,7 @@ vi.mock('@/lib/action-guards', () => ({
     requireSameOriginAdmin: vi.fn(async () => null),
 }));
 
-import { createTopic, createTopicAlias, deleteTopicAlias, updateTopic } from '@/app/actions/topics';
+import { createTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible, updateTopic } from '@/app/actions/topics';
 
 describe('topic actions', () => {
     beforeEach(() => {
@@ -669,5 +669,13 @@ describe('topic actions', () => {
         await expect(createTopicAlias('travel', 'ko')).resolves.toEqual({ error: 'reservedRouteSegment' });
         expect(selectMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed map visibility values before persistence or audit logging', async () => {
+        await expect(setTopicMapVisible('travel', 'true' as unknown as boolean)).resolves.toEqual({ error: 'invalidInput' });
+
+        expect(updateMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
     });
 });

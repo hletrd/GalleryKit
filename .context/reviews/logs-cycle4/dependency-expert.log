@@ -139,7 +139,7 @@ Create `apps/web/.env.local` from `apps/web/.env.local.example`:
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=<redacted>
 DB_NAME=gallery
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<random-64-char-hex>
@@ -985,7 +985,7 @@ Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap s
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=your_user
-DB_PASSWORD=your_password
+DB_PASSWORD=<redacted>
 DB_NAME=gallery
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<openssl rand -hex 32>
@@ -2475,7 +2475,7 @@ export function parseImageSizes(sizesStr: string): number[] {
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=<redacted>
 DB_NAME=gallery
 # DB_SSL=false  # TLS is auto-enabled for non-localhost DB_HOST; set to "false" to disable
 

@@ -109,15 +109,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return notFound();
     }
 
-    // Fire-and-forget durable view recording. Only on the initial shared-group
-    // page load (no per-photo query param) and only when there are visible images
-    // — matching the existing bufferGroupViewCount logic in data.ts.
-    // The existing denormalized view_count column is kept in lockstep by the
-    // existing buffer flush mechanism; this adds the durable per-event record.
-    if (!photoId && group.images.length > 0) {
-        void recordSharedGroupView(group.id);
-    }
-
     const gridImageSize = findGridCardImageSize(config.imageSizes);
     const gridImageSizes = config.imageSizes;
     const smallGridSize = gridImageSizes.length >= 2 ? gridImageSizes[0] : gridImageSize;
@@ -130,6 +121,13 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         if (index !== -1) {
             selectedImage = group.images[index];
         }
+    }
+
+    // Fire-and-forget durable view recording. Use the same resolved selection
+    // decision as the denormalized bufferGroupViewCount path in data.ts, so an
+    // invalid ?photoId= URL cannot increment only one shared-group counter.
+    if (!selectedImage && group.images.length > 0) {
+        void recordSharedGroupView(group.id);
     }
 
     if (selectedImage) {

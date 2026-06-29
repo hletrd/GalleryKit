@@ -531,7 +531,7 @@ weights (above), run the `--production --force` backfill (above), set `SEMANTIC_
 in `.env.local`, and set the DB row `admin_settings.semantic_search_mode='production'`. Without
 the env flag the routes 503 regardless of the DB value.
 
-**Runtime limits:** `SEMANTIC_SCAN_LIMIT` (default 2000) caps the brute-force vector scan
+**Runtime limits:** `SEMANTIC_SCAN_LIMIT` (default 2000, hard cap 25000) caps the brute-force vector scan
 for semantic search — the maximum number of embedding rows the route will read from the
 DB per query. `SEMANTIC_TOP_K_MAX` (default 50) is the hard ceiling on results returned
 to the client; the admin UI default is 20. Both limits prevent unbounded CPU/DB consumption
@@ -588,7 +588,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration and aliased exports are rejected — use the direct variable-export form so the wrapper is explicit.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-api-auth.test.ts`.
 - `npm run lint:action-origin --workspace=apps/web`
-  - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), excluding basenames `auth` and `public`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
+  - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), excluding basename `auth`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
   - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
   - Read-only exports must carry an explicit leading comment containing `@action-origin-exempt: <reason>`; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
@@ -599,7 +599,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
-**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` is intentionally excluded by name because it owns its own same-origin handling. `public.ts` is scanned with the narrower public-rate-limit contract for intentionally unauthenticated analytics writes.
+**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` is intentionally excluded by name because it owns its own same-origin handling. `public.ts` is scanned too: intentionally unauthenticated public mutating actions must carry `@action-origin-exempt` and prove their own rate-limit-before-mutation contract in code/tests.
 
 ## Touch-Target Audit
 

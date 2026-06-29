@@ -165,7 +165,7 @@ Per the review-plan-fix deferred-fix rules: every review finding NOT scheduled i
 
 ### AGG-C3-31 — Real SESSION_SECRET + bootstrap passwords recoverable in git history
 - **Severity/Confidence:** MEDIUM (operational) / High (security-reviewer).
-- **Citation:** initial commit `d7c32790` `apps/web/.env.local.example` (64-hex `SESSION_SECRET`, `DB_PASSWORD=password`, `ADMIN_PASSWORD=password`), removed in `d068a7fb`. **HEAD is clean** (placeholders only).
+- **Citation:** initial commit `d7c32790` `apps/web/.env.local.example` (64-hex `SESSION_SECRET`, `DB_PASSWORD=<redacted>`, `ADMIN_PASSWORD=<redacted>`), removed in `d068a7fb`. **HEAD is clean** (placeholders only).
 - **Reason for deferral:** This is an OPERATIONAL item, not a code defect fixable at HEAD — the working tree is already clean. CLAUDE.md already documents the required mitigation: "If you ever seeded an environment from older checked-in examples, rotate both `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical git values must be treated as compromised and must not be reused." No code change can remediate a value already in git history; the fix is operational (confirm prod isn't using the historical secret; rotate if uncertain; optionally history-purge). Per Destructive Action Safety, history rewriting / secret rotation requires explicit user confirmation and is out of scope for an autonomous code-fix cycle.
 - **Exit criterion:** Re-open only as an explicit operator action: verify the production `SESSION_SECRET` is not the historical `5e47a072…` value and rotate it (plus admin/DB creds) if there is any doubt. NOT a code task.
 

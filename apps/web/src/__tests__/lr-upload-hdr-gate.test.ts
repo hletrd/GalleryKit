@@ -154,6 +154,13 @@ describe('lr upload metadata/parity source-contract (cycle 3)', () => {
         );
         expect(LR_SRC).toMatch(/err\s+instanceof\s+RawFileError/);
     });
+
+    it('does not return raw processor exception messages for generic save failures', () => {
+        expect(LR_SRC).toContain("console.error('LR upload: failed to save uploaded original'");
+        expect(LR_SRC).toContain("Upload failed while processing the image.");
+        expect(LR_SRC).not.toContain("const msg = err instanceof Error ? err.message : 'Upload failed'");
+        expect(LR_SRC).not.toContain('NextResponse.json({ error: msg }');
+    });
 });
 
 /**

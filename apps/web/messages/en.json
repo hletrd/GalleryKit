@@ -587,6 +587,7 @@
     "seoOgImageUrlInvalid": "OG image URL must be a relative path or a same-origin http(s) URL",
     "failedToUpdateSeoSettings": "Failed to update SEO settings",
     "failedToFetchGallerySettings": "Failed to fetch gallery settings",
+    "failedToRetryImage": "Failed to retry image processing",
     "invalidSettingKey": "Invalid setting key",
     "invalidSettingValue": "Invalid value for setting: {key}",
     "imageSizesLocked": "Output sizes are locked once photos exist. Regenerate the library to change them.",
@@ -788,7 +789,7 @@
     "labelField": "Label",
     "labelPlaceholder": "e.g. Lightroom Classic – MacBook",
     "createTitle": "Generate Lightroom Token",
-    "createDesc": "Give this token a memorable label. Scopes lr:upload, lr:read, lr:delete are granted automatically.",
+    "createDesc": "Give this token a memorable label. Upload access is granted automatically.",
     "createButton": "Generate",
     "plaintextTitle": "Your new token",
     "plaintextDesc": "Copy this token now — it will not be shown again after you close this dialog.",
@@ -803,7 +804,8 @@
     "revokeAria": "Revoke token {label}",
     "created": "Created",
     "lastUsed": "Last used",
-    "expires": "Expires"
+    "expires": "Expires",
+    "neverExpires": "Never expires; revoke to disable"
   },
   "timeline": {
     "title": "Timeline",

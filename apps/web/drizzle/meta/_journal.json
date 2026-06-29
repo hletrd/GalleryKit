@@ -190,6 +190,13 @@
       "when": 1782300000000,
       "tag": "0026_analytics_top_view_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1782400000000,
+      "tag": "0027_analytics_retention_indexes",
+      "breakpoints": true
     }
   ]
 }

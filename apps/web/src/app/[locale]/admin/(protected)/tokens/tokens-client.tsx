@@ -57,7 +57,7 @@ export function TokensClient() {
         startTransition(async () => {
             const result = await createLrToken({
                 label: newLabel.trim(),
-                scopes: ['lr:upload', 'lr:read', 'lr:delete'],
+                scopes: ['lr:upload'],
             });
             if ('error' in result) {
                 toast.error(result.error);
@@ -130,9 +130,7 @@ export function TokensClient() {
                                     {token.lastUsedAt && (
                                         <> &middot; {t('lrToken.lastUsed')}: {formatTokenDate(token.lastUsedAt)}</>
                                     )}
-                                    {token.expiresAt && (
-                                        <> &middot; {t('lrToken.expires')}: {formatTokenDate(token.expiresAt)}</>
-                                    )}
+                                    <> &middot; {t('lrToken.expires')}: {token.expiresAt ? formatTokenDate(token.expiresAt) : t('lrToken.neverExpires')}</>
                                 </p>
                                 <p className="text-xs text-muted-foreground">{token.scopes.join(', ')}</p>
                             </div>

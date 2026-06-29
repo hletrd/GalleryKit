@@ -122,6 +122,20 @@ describe('sidecar backfill delete-mid-reencode cleanup (cleanupDeletedMidReencod
             expect(call[2]).toEqual([]);
         }
     });
+
+    it('logs cleanup failures without rejecting the committed batch path', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        deleteImageVariantsMock.mockRejectedValueOnce(new Error('unlink failed'));
+
+        await expect(cleanupDeletedMidReencodeVariants(files('deleted-row'))).resolves.toBeUndefined();
+
+        expect(deleteImageVariantsMock).toHaveBeenCalledTimes(3);
+        expect(warnSpy).toHaveBeenCalledWith(
+            '[backfill-color-pipeline] Failed to clean deleted-mid-reencode derivative:',
+            expect.any(Error),
+        );
+        warnSpy.mockRestore();
+    });
 });
 
 describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, architect Rec 1)', () => {

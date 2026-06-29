@@ -2,7 +2,7 @@
 
 Created: 2026-06-29
 Source: `.context/reviews/_aggregate.md` and cycle 9 per-agent reports.
-Status: TODO
+Status: DONE
 
 This plan schedules every non-deferred cycle 9 finding for implementation. Deferred findings are recorded in `plan/plan-371-cycle9-deferred.md`. No cycle 9 aggregate finding is silently dropped.
 
@@ -24,7 +24,7 @@ Deployment after green gates and pushed commits:
 
 ### 1. Analytics retention purge indexes
 
-Status: TODO
+Status: DONE
 Findings: C9-02
 Original severity/confidence: Medium / High
 Citations: `apps/web/src/lib/view-retention.ts:56-81`, `apps/web/src/db/schema.ts:231-259`
@@ -44,7 +44,7 @@ Acceptance:
 
 ### 2. Failed-image retry must preserve failure state on rejected enqueue
 
-Status: TODO
+Status: DONE
 Findings: C9-03
 Original severity/confidence: Medium / High
 Citations: `apps/web/src/app/actions/images.ts:1196-1239`, `apps/web/src/lib/image-queue.ts:388-400`, `apps/web/src/lib/image-queue.ts:828`, `apps/web/src/__tests__/failed-image-retry.test.ts:99-105`
@@ -62,7 +62,7 @@ Acceptance:
 
 ### 3. Docker native package architecture normalization
 
-Status: TODO
+Status: DONE
 Findings: C9-04
 Original severity/confidence: Medium / High
 Citations: `apps/web/Dockerfile:38-51`, `apps/web/README.md:48-49`, `CLAUDE.md:17`, `CLAUDE.md:556-559`
@@ -80,7 +80,7 @@ Acceptance:
 
 ### 4. Lightroom token least-privilege and expiry honesty
 
-Status: TODO
+Status: DONE
 Findings: C9-05
 Original severity/confidence: Medium / High
 Citations: `apps/web/messages/en.json:781-806`, `apps/web/messages/ko.json:831-856`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:57-61`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:128-181`, `apps/web/src/app/actions/lr-tokens.ts:28-93`, `apps/web/src/lib/admin-tokens.ts:24-25`, `apps/web/src/app/api/admin/lr/upload/route.ts:527`
@@ -99,7 +99,7 @@ Acceptance:
 
 ### 5. Public analytics write validation and shared-group counter consistency
 
-Status: TODO
+Status: DONE
 Findings: C9-06, C9-14
 Original severity/confidence: Medium / Medium; Low / High
 Citations: `apps/web/src/app/actions/public.ts:319-414`, `apps/web/src/db/schema.ts:220-260`, `apps/web/src/lib/analytics-data.ts:28-53`, `apps/web/src/lib/analytics-data.ts:161-185`, `apps/web/src/lib/data.ts:1312-1327`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:93-119`, `apps/web/src/lib/data.ts:120-125`
@@ -118,7 +118,7 @@ Acceptance:
 
 ### 6. Semantic embedding retry after processed=true
 
-Status: TODO
+Status: DONE
 Findings: C9-07
 Original severity/confidence: Medium / High
 Citations: `apps/web/src/lib/image-queue.ts:556-683`, `apps/web/src/lib/image-queue.ts:823-859`, `CLAUDE.md:151`, `apps/web/README.md:53-73`
@@ -136,7 +136,7 @@ Acceptance:
 
 ### 7. Topic map visibility runtime validation
 
-Status: TODO
+Status: DONE
 Findings: C9-08
 Original severity/confidence: Medium / High
 Citations: `apps/web/src/app/actions/topics.ts:594-614`, `apps/web/src/db/schema.ts:4-12`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:66`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:244-245`
@@ -152,7 +152,7 @@ Acceptance:
 
 ### 8. DB restore temp-file cleanup ownership
 
-Status: TODO
+Status: DONE
 Findings: C9-09
 Original severity/confidence: Low / High
 Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:434-493`, `apps/web/src/app/[locale]/admin/db-actions.ts:499-585`
@@ -169,7 +169,7 @@ Acceptance:
 
 ### 9. Bulk update existing-row accounting
 
-Status: TODO
+Status: DONE
 Findings: C9-10
 Original severity/confidence: Low / Medium
 Citations: `apps/web/src/app/actions/images.ts:940-963`, `apps/web/src/app/actions/images.ts:1024-1037`, `apps/web/src/app/actions/images.ts:1091-1134`, `apps/web/src/app/actions/tags.ts:304-343`
@@ -187,7 +187,7 @@ Acceptance:
 
 ### 10. Semantic scan limit hard cap
 
-Status: TODO
+Status: DONE
 Findings: C9-12
 Original severity/confidence: Medium / Medium
 Citations: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:242-280`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
@@ -203,7 +203,7 @@ Acceptance:
 
 ### 11. Lightroom upload generic processor errors
 
-Status: TODO
+Status: DONE
 Findings: C9-15
 Original severity/confidence: Low / Medium
 Citations: `apps/web/src/app/api/admin/lr/upload/route.ts:284-304`, `apps/web/src/lib/process-image.ts:844-887`
@@ -221,7 +221,7 @@ Acceptance:
 
 ### 12. Sidecar deleted-mid-reencode cleanup resilience
 
-Status: TODO
+Status: DONE
 Findings: C9-16
 Original severity/confidence: Low / Medium
 Citations: `apps/web/scripts/backfill-color-pipeline.ts:127-132`, `apps/web/scripts/backfill-color-pipeline.ts:400-459`, `apps/web/src/lib/admin-backfill-runner.ts:430-439`
@@ -238,7 +238,7 @@ Acceptance:
 
 ### 13. Rate-limit comment and test-header alignment
 
-Status: TODO
+Status: DONE
 Findings: C9-17
 Original severity/confidence: Low / High
 Citations: `apps/web/src/lib/rate-limit.ts:17-30`, `apps/web/src/lib/rate-limit.ts:323-340`, `apps/web/src/app/api/search/semantic/route.ts:12-16`, `apps/web/src/app/api/search/semantic/route.ts:181-230`, `apps/web/src/__tests__/semantic-search-route.test.ts:187`, `apps/web/src/__tests__/og-photo-fallback.test.ts:9-10`, `apps/web/src/app/api/og/photo/[id]/route.tsx:126-131`
@@ -254,7 +254,7 @@ Acceptance:
 
 ### 14. Action-origin documentation alignment
 
-Status: TODO
+Status: DONE
 Findings: C9-18
 Original severity/confidence: Medium / High
 Citations: `CLAUDE.md:590-602`, `apps/web/src/app/actions/public.ts:311-314`, `apps/web/scripts/check-action-origin.ts:49`, `apps/web/scripts/check-action-origin.ts:360-364`, `apps/web/scripts/check-action-origin.ts:488-490`
@@ -270,7 +270,7 @@ Acceptance:
 
 ### 15. Deploy env-file docs alignment
 
-Status: TODO
+Status: DONE
 Findings: C9-19
 Original severity/confidence: Low / High
 Citations: `AGENTS.md:17-18`, `README.md:108-116`, `CLAUDE.md:648-657`, `.env.deploy.example:1-4`, `scripts/deploy-remote.sh:22-29`, `scripts/deploy-remote.sh:55-58`
@@ -286,7 +286,7 @@ Acceptance:
 
 ### 16. Service worker generated artifact freshness
 
-Status: TODO
+Status: DONE
 Findings: C9-20
 Original severity/confidence: Medium / High
 Citations: `CLAUDE.md:402-403`, `apps/web/scripts/build-sw.ts:28-47`, `apps/web/package.json:10`, `apps/web/public/sw.js:21-26`
@@ -302,7 +302,7 @@ Acceptance:
 
 ### 17. Tracked secret artifact scan
 
-Status: TODO
+Status: DONE
 Findings: C9-21
 Original severity/confidence: Low / High
 Citations: `.context/plans/done/plan-166-cycle1-admin-upload-test-and-docs.md:22`, `.context/reviews/archive/security-reviewer-cycle1-rpf.md:167-196`, `.context/reviews/archive/security-reviewer-cycle7-rpf.md:36-38`, `.context/reviews/logs-cycle4/designer.log:2467`, `.context/reviews/run7-cycle1/security-reviewer.md:42`, `plan/plan-353-run6-cycle3-deferred.md:168`, `apps/web/src/__tests__/tracked-secrets.test.ts:5-20`
@@ -319,7 +319,7 @@ Acceptance:
 
 ### 18. Missing tests for semantic malformed rows and audit metadata serialization
 
-Status: TODO
+Status: DONE
 Findings: C9-22 partial
 Original severity/confidence: Medium / High
 Citations: `.context/reviews/test-engineer.md` findings `TE9-C01`, `TE9-C02`

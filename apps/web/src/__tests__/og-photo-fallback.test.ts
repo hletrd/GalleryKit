@@ -6,8 +6,8 @@
  *  - The route uses `pickFirstAvailablePhotoBuffer(origin, baseFilename,
  *    imageSizes)` to iterate configured sizes ascending and return the
  *    first JPEG derivative that fetches successfully under the byte cap.
- *  - On all-sizes-fail, the route falls back to the site-default OG
- *    (rolling back the rate-limit budget first).
+ *  - On all-sizes-fail after the DB lookup, the route falls back to the
+ *    site-default OG while keeping the already-charged rate-limit budget.
  *  - The route no longer pins a single `OG_PHOTO_TARGET_SIZE` constant.
  *
  * Pure source-grep fixture — no Sharp / Satori / network setup required.

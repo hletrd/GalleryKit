@@ -578,6 +578,8 @@ async function reconcileLegacySchema(connection, dbName) {
         'CREATE INDEX idx_image_views_bot_viewed_referrer ON image_views (bot, viewed_at, referrer_host)');
     await ensureIndex(connection, dbName, 'image_views', 'idx_image_views_bot_viewed_image',
         'CREATE INDEX idx_image_views_bot_viewed_image ON image_views (bot, viewed_at, image_id)');
+    await ensureIndex(connection, dbName, 'image_views', 'idx_image_views_viewed_at_id',
+        'CREATE INDEX idx_image_views_viewed_at_id ON image_views (viewed_at, id)');
 
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS topic_views (
@@ -594,6 +596,8 @@ async function reconcileLegacySchema(connection, dbName) {
     `);
     await ensureIndex(connection, dbName, 'topic_views', 'idx_topic_views_bot_viewed_topic',
         'CREATE INDEX idx_topic_views_bot_viewed_topic ON topic_views (bot, viewed_at, topic)');
+    await ensureIndex(connection, dbName, 'topic_views', 'idx_topic_views_viewed_at_id',
+        'CREATE INDEX idx_topic_views_viewed_at_id ON topic_views (viewed_at, id)');
 
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS shared_group_views (
@@ -610,6 +614,8 @@ async function reconcileLegacySchema(connection, dbName) {
     `);
     await ensureIndex(connection, dbName, 'shared_group_views', 'idx_shared_group_views_bot_viewed_group',
         'CREATE INDEX idx_shared_group_views_bot_viewed_group ON shared_group_views (bot, viewed_at, group_id)');
+    await ensureIndex(connection, dbName, 'shared_group_views', 'idx_shared_group_views_viewed_at_id',
+        'CREATE INDEX idx_shared_group_views_viewed_at_id ON shared_group_views (viewed_at, id)');
 
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS image_embeddings (

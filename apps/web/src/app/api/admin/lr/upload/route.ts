@@ -300,8 +300,11 @@ export const POST = withAdminAuth(
                         { status: 422, headers: NO_CACHE },
                     );
                 }
-                const msg = err instanceof Error ? err.message : 'Upload failed';
-                return NextResponse.json({ error: msg }, { status: 422, headers: NO_CACHE });
+                console.error('LR upload: failed to save uploaded original', err);
+                return NextResponse.json(
+                    { error: 'Upload failed while processing the image.' },
+                    { status: 422, headers: NO_CACHE },
+                );
             }
 
         // R4C4 COR-R4C4-03: contain the WHOLE post-save window, mirroring the

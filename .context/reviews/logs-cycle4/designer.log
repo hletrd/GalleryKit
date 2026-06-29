@@ -360,7 +360,7 @@ Create `apps/web/.env.local` from `apps/web/.env.local.example`:
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=<redacted>
 DB_NAME=gallery
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<random-64-char-hex>
@@ -2464,7 +2464,7 @@ hook: PostToolUse Completed
 hook: PreToolUse
 hook: PreToolUse Completed
 exec
-/bin/zsh -lc "node -e \"const fs=require('fs'); const p='apps/web/.env.local'; if("'!fs.existsSync(p)){console.log('"'NO_ENV'); process.exit(0);} const txt=fs.readFileSync(p,'utf8'); const m=txt.match(/"'^ADMIN_PASSWORD=(.*)$/m); if(!m){console.log('"'NO_ADMIN_PASSWORD'); process.exit(0);} const v=m[1].trim(); console.log(v.startsWith('"'$argon2'"')?'HASH':'PLAINTEXT');\"" in /Users/hletrd/flash-shared/gallery
+/bin/zsh -lc "node -e \"const fs=require('fs'); const p='apps/web/.env.local'; if("'!fs.existsSync(p)){console.log('"'NO_ENV'); process.exit(0);} const txt=fs.readFileSync(p,'utf8'); const m=txt.match(/"'^ADMIN_PASSWORD_REDACTED$/m); if(!m){console.log('"'NO_ADMIN_PASSWORD'); process.exit(0);} const v=m[1].trim(); console.log(v.startsWith('"'$argon2'"')?'HASH':'PLAINTEXT');\"" in /Users/hletrd/flash-shared/gallery
  succeeded in 0ms:
 HASH
 
@@ -8530,4 +8530,3 @@ EOF" in /Users/hletrd/flash-shared/gallery
     "error: WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=XF_5Z3G6xoW_wYiha9u6k' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
   ]
 }
-

@@ -39,7 +39,7 @@
 
 ## Git-history secrets scan — confirmed already-documented condition
 - Scanned `git log --all -p` for live secret shapes (`sk_live_`, `sk_test_`, `AKIA`, `gh[ps]_`, `glpat-`, `xox[bap]-`, `eyJ...`). **Zero live cloud/API tokens in history.**
-- A historical `SESSION_SECRET=5e47a072...` and `DB_PASSWORD=password` appear in history, but only inside `.context/reviews/*.md` documentation files that quoted them while documenting the rotation warning. They are **absent from the working tree** (verified: grep over all `.env*/.json/.md/.ts` at HEAD returns nothing). The only tracked env files at HEAD are `.env.deploy.example` and `apps/web/.env.local.example`, both with `<change-me>` / `<generate-...>` placeholders.
+- Historical `SESSION_SECRET=<redacted>` and `DB_PASSWORD=<redacted>` assignments appear in history, but only inside `.context/reviews/*.md` documentation files that quoted them while documenting the rotation warning. They are **absent from the working tree** (verified: grep over all `.env*/.json/.md/.ts` at HEAD returns nothing). The only tracked env files at HEAD are `.env.deploy.example` and `apps/web/.env.local.example`, both with `<change-me>` / `<generate-...>` placeholders.
 - This is the **explicitly documented** condition CLAUDE.md already warns about: *"If you ever seeded an environment from older checked-in examples, rotate both `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical git values must be treated as compromised and must not be reused."* Not a new finding — already known and already warned.
 
 ---

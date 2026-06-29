@@ -31,14 +31,14 @@ export {
 // R22C22 T4 (critic m1 + SEC-22-INFO): guard the FLOORED result, not the raw
 // value — a fractional input that floors below 1 (e.g. '0.5' → 0) must fall back
 // to the default rather than yield 0 (a 0 scan-limit would scan nothing). Also
-// apply a generous upper clamp so an operator misconfiguration can't request an
-// unbounded scan / top-k.
-const ENV_INT_MAX = 1_000_000;
+// apply a host-budgeted upper clamp so an operator misconfiguration can't
+// request a million-row brute-force scan/top-k in one public request.
+export const SEMANTIC_ENV_INT_MAX = 25_000;
 function envPositiveInt(raw: string | undefined, fallback: number): number {
     const n = Number(raw ?? '');
     if (!Number.isFinite(n) || n <= 0) return fallback;
     const i = Math.floor(n);
-    return i >= 1 ? Math.min(i, ENV_INT_MAX) : fallback;
+    return i >= 1 ? Math.min(i, SEMANTIC_ENV_INT_MAX) : fallback;
 }
 export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
 export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);

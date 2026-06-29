@@ -72,15 +72,16 @@ describe('semantic limits env wiring (R21C21 T4)', () => {
         },
     );
 
-    // R22C22 T4 (SEC-22-INFO): generous upper clamp against operator misconfig.
-    it('clamps an unbounded override to ENV_INT_MAX (1_000_000)', async () => {
+    // R22C22 T4 (SEC-22-INFO) / C9-12: host-budgeted upper clamp against
+    // operator misconfiguration on the current brute-force scan path.
+    it('clamps an unbounded override to SEMANTIC_ENV_INT_MAX (25_000)', async () => {
         const m = await load({ SEMANTIC_SCAN_LIMIT: '5e9', SEMANTIC_TOP_K_MAX: '2000000' });
-        expect(m.SEMANTIC_SCAN_LIMIT).toBe(1_000_000);
-        expect(m.SEMANTIC_TOP_K_MAX).toBe(1_000_000);
+        expect(m.SEMANTIC_SCAN_LIMIT).toBe(25_000);
+        expect(m.SEMANTIC_TOP_K_MAX).toBe(25_000);
     });
 
     it('keeps a value exactly at the clamp ceiling', async () => {
-        const m = await load({ SEMANTIC_SCAN_LIMIT: '1000000' });
-        expect(m.SEMANTIC_SCAN_LIMIT).toBe(1_000_000);
+        const m = await load({ SEMANTIC_SCAN_LIMIT: '25000' });
+        expect(m.SEMANTIC_SCAN_LIMIT).toBe(25_000);
     });
 });

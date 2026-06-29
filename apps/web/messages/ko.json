@@ -587,6 +587,7 @@
     "seoOgImageUrlInvalid": "OG 이미지 URL은 상대 경로이거나 동일 출처의 http(s) URL이어야 합니다",
     "failedToUpdateSeoSettings": "SEO 설정 저장에 실패했습니다",
     "failedToFetchGallerySettings": "갤러리 설정을 불러오지 못했습니다",
+    "failedToRetryImage": "이미지 처리를 다시 시작하지 못했습니다",
     "invalidSettingKey": "잘못된 설정 키입니다",
     "invalidSettingValue": "설정값이 올바르지 않습니다: {key}",
     "imageSizesLocked": "사진이 있으면 출력 크기는 잠깁니다. 변경하려면 라이브러리를 다시 생성해 주세요.",
@@ -838,7 +839,7 @@
     "labelField": "라벨",
     "labelPlaceholder": "예: 라이트룸 클래식 – 맥북",
     "createTitle": "라이트룸 토큰 생성",
-    "createDesc": "이 토큰에 기억하기 쉬운 라벨을 지정하세요. lr:upload, lr:read, lr:delete 권한이 자동으로 부여됩니다.",
+    "createDesc": "이 토큰에 기억하기 쉬운 라벨을 지정하세요. 업로드 권한만 자동으로 부여됩니다.",
     "createButton": "생성",
     "plaintextTitle": "새 토큰",
     "plaintextDesc": "지금 이 토큰을 복사하세요. 이 대화 상자를 닫으면 다시 표시되지 않습니다.",
@@ -853,6 +854,7 @@
     "revokeAria": "토큰 {label} 철회",
     "created": "생성일",
     "lastUsed": "마지막 사용",
-    "expires": "만료일"
+    "expires": "만료일",
+    "neverExpires": "만료 없음. 비활성화하려면 철회하세요."
   }
 }

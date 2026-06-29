@@ -41,6 +41,16 @@ describe('upload embedding hook wiring', () => {
     expect(src).toMatch(/mode === 'production'[\s\S]*SEMANTIC_SEARCH_ALLOW_PRODUCTION/);
     expect(src).toMatch(/return 'disabled'/);
   });
+
+  it('bootstraps a bounded retry for processed rows missing the active model embedding', () => {
+    expect(src).toContain('BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE = 50');
+    expect(src).toContain('bootstrapMissingActiveEmbeddings');
+    expect(src).toContain('activeModelVersion');
+    expect(src).toMatch(/eq\(images\.processed,\s*true\)/);
+    expect(src).toMatch(/isNull\(imageEmbeddings\.imageId\)/);
+    expect(src).toMatch(/\.limit\(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE\)/);
+    expect(src).toContain('storeImageEmbeddingForMode(row.id, originalPath, semanticMode)');
+  });
 });
 
 describe('upload enqueue snapshots semanticSearchMode (R17C17 PERF-17-04)', () => {

@@ -120,7 +120,7 @@ cycle-18 fix commits included. No sampling: every file under
 - **OBS-R4C19-A (LOW/Medium):** `scripts/seed-admin.ts` (wired to
   `npm run db:seed`) lacks the `$$argon2` double-escape normalization
   its sibling `scripts/migrate-admin-auth.ts:42-44` has. A
-  compose-interpolated `ADMIN_PASSWORD=$$argon2…` would silently pass
+  compose-interpolated `ADMIN_PASSWORD=<redacted>` would silently pass
   `assertStrongBootstrapPassword` (length > 16) and be re-hashed as
   plaintext → admin login fails with the real password and nothing
   explains why. Exit criterion: first support report of bootstrap

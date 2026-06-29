@@ -53,10 +53,10 @@ function resolveRetentionMs(maxAgeMs?: number): number {
         : DEFAULT_VIEW_RETENTION_MS;
 }
 
-/**
- * Delete view-event rows older than the retention window, in bounded chunks.
- * Uses the `(…, viewed_at)` composite indexes for the range scan.
- *
+ /**
+  * Delete view-event rows older than the retention window, in bounded chunks.
+ * Uses the `(viewed_at, id)` retention indexes for the cutoff range scan.
+  *
  * @param maxAgeMs optional explicit retention window (positive ms); falls back
  *                 to VIEW_RETENTION_DAYS env / the 395-day default.
  * @returns total rows deleted across all three tables.

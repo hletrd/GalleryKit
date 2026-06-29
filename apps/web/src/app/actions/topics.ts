@@ -602,6 +602,7 @@ export async function setTopicMapVisible(topicSlug: string, mapVisible: boolean)
 
     const { value: cleanSlug, rejected: slugRejected } = requireCleanInput(topicSlug);
     if (slugRejected || !cleanSlug || !isValidSlug(cleanSlug)) return { error: t('invalidSlug') };
+    if (typeof mapVisible !== 'boolean') return { error: t('invalidInput') };
 
     const [result] = await db
         .update(topics)

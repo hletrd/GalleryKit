@@ -102,6 +102,16 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(actionsSource).toMatch(/colorSignals:\s*\{/);
         });
 
+        it('restores a visible failed state when the queue rejects the retry job', () => {
+            expect(actionsSource).toContain('const enqueued = enqueueImageProcessing');
+            expect(actionsSource).toMatch(/if\s*\(\s*!enqueued\s*\)\s*\{/);
+            expect(actionsSource).toMatch(/processing_error:\s*retryError/);
+            expect(actionsSource).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
+            expect(actionsSource).toMatch(/processing_settings_json:\s*null/);
+            expect(actionsSource).toContain('state.permanentlyFailedIds.add(id)');
+            expect(actionsSource).toContain("return { error: t('failedToRetryImage') }");
+        });
+
         it('returns { success: true } on successful retry initiation', () => {
             expect(actionsSource).toMatch(/return\s*\{\s*success:\s*true\s+as\s+const\s*\}/);
         });

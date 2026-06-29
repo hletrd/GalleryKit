@@ -625,7 +625,7 @@ Edit `apps/web/.env.local` with your MySQL credentials and public URLs:
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=your_user
-DB_PASSWORD=your_password
+DB_PASSWORD=<redacted>
 DB_NAME=gallery
 BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix

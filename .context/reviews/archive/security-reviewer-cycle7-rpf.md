@@ -33,9 +33,9 @@ Final sweep reran targeted searches for secrets, child-process use, raw SQL, dan
 
 **Evidence:**
 - `git show d7c3279:apps/web/.env.local.example` shows:
-  - `DB_PASSWORD=password` (`:5`)
-  - `ADMIN_PASSWORD=password` (`:10`)
-  - fixed `SESSION_SECRET=5e47a072...` (`:11`)
+  - `DB_PASSWORD=<redacted>` (`:5`)
+  - `ADMIN_PASSWORD=<redacted>` (`:10`)
+  - fixed `SESSION_SECRET=<redacted>` (`:11`)
 - Current docs already warn operators to rotate old copied values: `README.md:139-149`, `CLAUDE.md:82-84`, `apps/web/.env.local.example:17-29`.
 
 **Why this is a problem:** Anyone who ever bootstrapped an environment from the old example file may still be using compromised credentials/session keys. Even though HEAD is clean, public git history is durable attacker knowledge.

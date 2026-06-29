@@ -164,15 +164,15 @@ Also add restore-time validation that rejects dumps containing non-conforming st
 **Confidence:** HIGH  
 **Category:** OWASP A02 Cryptographic Failures / Secrets Management  
 **Locations:**
-- `git history for apps/web/.env.local.example` (confirmed via `git log -p -S 'SESSION_SECRET=...' -- apps/web/.env.local.example`)
+- `git history for apps/web/.env.local.example` (confirmed via git history search for `SESSION_SECRET=<redacted>`)
 - current operator warnings in `README.md:113-140`
 - current example env in `apps/web/.env.local.example:1-25`
 
 **Why this is a problem:**
 The current tracked files are clean, but the repository history still contains:
 - a fixed real `SESSION_SECRET`
-- `ADMIN_PASSWORD=password`
-- `DB_PASSWORD=password`
+- `ADMIN_PASSWORD=<redacted>`
+- `DB_PASSWORD=<redacted>`
 
 That means any deployment, fork, backup, screenshot, or copied `.env.local.example` that reused those historical values must be treated as compromised.
 
@@ -191,9 +191,9 @@ An operator bootstraps a deployment from an old clone, copied wiki snippet, stal
 
 ```env
 # BAD (historical pattern)
-ADMIN_PASSWORD=password
-SESSION_SECRET=<fixed shared secret>
-DB_PASSWORD=password
+ADMIN_PASSWORD=<redacted>
+SESSION_SECRET=<redacted>
+DB_PASSWORD=<redacted>
 
 # GOOD
 ADMIN_PASSWORD=<generate-a-strong-admin-secret-or-argon2-hash>

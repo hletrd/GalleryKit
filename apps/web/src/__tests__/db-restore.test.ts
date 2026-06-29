@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError } from '@/lib/db-restore';
+
+const DB_ACTIONS_SRC = readFileSync(
+    resolve(__dirname, '../app/[locale]/admin/db-actions.ts'),
+    'utf8',
+);
 
 describe('hasPlausibleSqlDumpHeader', () => {
     it('accepts normal mysqldump-style leading statements and comments', () => {
@@ -29,5 +36,15 @@ describe('isIgnorableRestoreStdinError', () => {
         expect(isIgnorableRestoreStdinError({ code: 'ECONNRESET' })).toBe(false);
         expect(isIgnorableRestoreStdinError(new Error('boom'))).toBe(false);
         expect(isIgnorableRestoreStdinError(null)).toBe(false);
+    });
+});
+
+describe('restore temp-file cleanup ownership', () => {
+    it('uses one finalizer until cleanup is transferred to the mysql restore process', () => {
+        expect(DB_ACTIONS_SRC).toContain('let cleanupTransferredToRestoreProcess = false');
+        expect(DB_ACTIONS_SRC).toContain('const cleanupTempFile = async () =>');
+        expect(DB_ACTIONS_SRC).toContain('cleanupTransferredToRestoreProcess = true');
+        expect(DB_ACTIONS_SRC).toMatch(/return\s+await\s+new\s+Promise<RestoreResult>/);
+        expect(DB_ACTIONS_SRC).toMatch(/finally\s*\{[\s\S]*if\s*\(!cleanupTransferredToRestoreProcess\)\s*\{[\s\S]*await cleanupTempFile\(\)/);
     });
 });

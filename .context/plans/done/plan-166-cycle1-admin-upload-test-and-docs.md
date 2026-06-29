@@ -19,7 +19,7 @@ Fix the confirmed admin/upload/test/docs issues that currently produce false con
   - `apps/web/scripts/seed-admin.ts`
   - `apps/web/scripts/migrate-admin-auth.ts`
 - **Implementation notes:**
-  - Remove `ADMIN_PASSWORD=password` style guidance.
+  - Remove `ADMIN_PASSWORD=<redacted>` style guidance.
   - Add clear strong-secret requirements (or pre-hashed Argon2 guidance).
   - Keep docs aligned with the actual compose command and required env vars.
 

@@ -433,79 +433,85 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
 
     // Stream to disk to avoid holding up to 250MB in Node.js heap.
     const tempPath = path.join(os.tmpdir(), `restore-${randomUUID()}.sql`);
-    try {
-        const webStream = file.stream();
-        const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
-        await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
-    } catch {
+    let cleanupTransferredToRestoreProcess = false;
+    const cleanupTempFile = async () => {
         await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: t('failedToSaveUpload') };
-    }
-
-    // Validate file header
-    const headerBuf = Buffer.alloc(256);
-    const fd = await fs.open(tempPath, 'r');
-    let headerBytesRead = 0;
+    };
     try {
-        // C7R-RPL-04 / AGG7R-04: capture bytesRead so files shorter
-        // than 256 bytes don't see trailing zeros in the decoded
-        // string. Buffer.alloc zeroes memory so the exploit surface
-        // is minimal, but decoding only the bytes actually read is
-        // the correct behavior and survives any future buffer-pool
-        // changes in Node.
-        const { bytesRead } = await fd.read(headerBuf, 0, 256, 0);
-        headerBytesRead = bytesRead;
-    } finally {
-        await fd.close();
-    }
-    const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
-    const validHeader = hasPlausibleSqlDumpHeader(headerBytes);
-    if (!validHeader) {
-        await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: t('invalidSqlDump') };
-    }
-
-    const CHUNK_SIZE = 1024 * 1024;
-    const fileSize = (await fs.stat(tempPath)).size;
-    const scanFd = await fs.open(tempPath, 'r');
-    let dangerousSqlDetected = false;
-    try {
-        let scanTail = '';
-        for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
-            const readSize = Math.min(CHUNK_SIZE, fileSize - off);
-            const chunkBuf = Buffer.alloc(readSize);
-            // C7R-RPL-04 / AGG7R-04: capture bytesRead and decode only
-            // the actually-read prefix. Short reads are rare but legal
-            // and the current Buffer.alloc zero-fill would otherwise
-            // pad the decoded chunk with NULL characters.
-            const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, off);
-            if (bytesRead === 0) break;
-            const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
-            const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
-            if (containsDangerousSql(combined)) {
-                dangerousSqlDetected = true;
-                break;
-            }
-            scanTail = nextTail;
+        try {
+            const webStream = file.stream();
+            const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
+            await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
+        } catch {
+            await cleanupTempFile();
+            return { success: false, error: t('failedToSaveUpload') };
         }
-    } finally {
-        await scanFd.close();
-    }
-    if (dangerousSqlDetected) {
-        await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: t('disallowedSql') };
-    }
 
-    const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
+        // Validate file header
+        const headerBuf = Buffer.alloc(256);
+        const fd = await fs.open(tempPath, 'r');
+        let headerBytesRead = 0;
+        try {
+            // C7R-RPL-04 / AGG7R-04: capture bytesRead so files shorter
+            // than 256 bytes don't see trailing zeros in the decoded
+            // string. Buffer.alloc zeroes memory so the exploit surface
+            // is minimal, but decoding only the bytes actually read is
+            // the correct behavior and survives any future buffer-pool
+            // changes in Node.
+            const { bytesRead } = await fd.read(headerBuf, 0, 256, 0);
+            headerBytesRead = bytesRead;
+        } finally {
+            await fd.close();
+        }
+        const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
+        const validHeader = hasPlausibleSqlDumpHeader(headerBytes);
+        if (!validHeader) {
+            await cleanupTempFile();
+            return { success: false, error: t('invalidSqlDump') };
+        }
 
-    if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
-        await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: t('missingDbConfig') };
-    }
+        const CHUNK_SIZE = 1024 * 1024;
+        const fileSize = (await fs.stat(tempPath)).size;
+        const scanFd = await fs.open(tempPath, 'r');
+        let dangerousSqlDetected = false;
+        try {
+            let scanTail = '';
+            for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
+                const readSize = Math.min(CHUNK_SIZE, fileSize - off);
+                const chunkBuf = Buffer.alloc(readSize);
+                // C7R-RPL-04 / AGG7R-04: capture bytesRead and decode only
+                // the actually-read prefix. Short reads are rare but legal
+                // and the current Buffer.alloc zero-fill would otherwise
+                // pad the decoded chunk with NULL characters.
+                const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, off);
+                if (bytesRead === 0) break;
+                const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
+                const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
+                if (containsDangerousSql(combined)) {
+                    dangerousSqlDetected = true;
+                    break;
+                }
+                scanTail = nextTail;
+            }
+        } finally {
+            await scanFd.close();
+        }
+        if (dangerousSqlDetected) {
+            await cleanupTempFile();
+            return { success: false, error: t('disallowedSql') };
+        }
 
-    const restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
+        const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
-    return new Promise<RestoreResult>((resolve) => {
+        if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
+            await cleanupTempFile();
+            return { success: false, error: t('missingDbConfig') };
+        }
+
+        const restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
+
+        cleanupTransferredToRestoreProcess = true;
+        return await new Promise<RestoreResult>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
         // to avoid exposing credentials in /proc/<pid>/cmdline
         // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
@@ -529,7 +535,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             readStream.destroy();
             restore.stdin.destroy();
             restore.kill();
-            fs.unlink(tempPath).catch(() => {});
+            cleanupTempFile();
             resolve({ success: false, error });
         };
 
@@ -553,7 +559,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         restore.on('close', async (code: number) => {
             if (settled) return;
             settled = true;
-            await fs.unlink(tempPath).catch(() => {});
+            await cleanupTempFile();
             if (code === 0) {
                 const migrationResult = await runPostRestoreMigrations(t);
                 if (!migrationResult.success) {
@@ -580,8 +586,13 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         });
 
         // Start piping after all handlers are registered
-        readStream.pipe(restore.stdin);
-    });
+            readStream.pipe(restore.stdin);
+        });
+    } finally {
+        if (!cleanupTransferredToRestoreProcess) {
+            await cleanupTempFile();
+        }
+    }
 }
 
 async function resolveMigrationScriptPath(): Promise<string> {

@@ -325,6 +325,47 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(json.results[0].filename_jpeg).toBe('mountain.jpg');
     });
 
+    it('skips malformed scanned embedding rows without failing the whole query', async () => {
+        const validBuf = Buffer.alloc(2048);
+        for (let i = 0; i < 512; i++) {
+            validBuf.writeFloatLE(0.5, i * 4);
+        }
+        const mockEmbeddingRows = [
+            { imageId: 99, embedding: Buffer.from('not-a-valid-embedding') },
+            { imageId: 1, embedding: validBuf },
+        ];
+        const mockImageRows = [
+            { id: 1, title: 'Mountain', description: 'A mountain', filename_jpeg: 'mountain.jpg', width: 1920, height: 1080, topic: 'nature', topic_label: 'Nature', camera_model: 'Sony A7IV' },
+        ];
+
+        dbSelectMock.mockImplementation(() => ({
+            from: (table: Record<string, unknown>) => {
+                const isEmbeddingQuery = 'embedding' in table;
+                if (isEmbeddingQuery) {
+                    return {
+                        where: vi.fn().mockReturnValue({
+                            orderBy: vi.fn().mockReturnValue({
+                                limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                            }),
+                        }),
+                    };
+                }
+                return {
+                    leftJoin: vi.fn().mockReturnValue({
+                        where: vi.fn().mockResolvedValue(mockImageRows),
+                    }),
+                };
+            },
+        }));
+        embedTextStubMock.mockReturnValue(new Float32Array(512).fill(0.5));
+
+        const response = await POST(mockRequest({ query: 'mountain landscape' }));
+
+        expect(response.status).toBe(200);
+        const json = await response.json();
+        expect(json.results.map((result: { imageId: number }) => result.imageId)).toEqual([1]);
+    });
+
     it('returns 500 and keeps rate-limit budget when embedding scan fails (AGG-12)', async () => {
         dbSelectMock.mockReturnValue({
             from: vi.fn().mockReturnValue({

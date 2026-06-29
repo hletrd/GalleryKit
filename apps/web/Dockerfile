@@ -42,13 +42,18 @@ ARG TARGETARCH
 # we install every needed Linux native explicitly with --no-save. Order
 # matters: dependent libvips before sharp.
 RUN npm ci --workspace=apps/web --include=optional && \
+    case "${TARGETARCH:-arm64}" in \
+        amd64) npm_arch="x64" ;; \
+        arm64) npm_arch="arm64" ;; \
+        *) echo "Unsupported TARGETARCH=${TARGETARCH:-unset}; expected amd64 or arm64" >&2; exit 1 ;; \
+    esac && \
     npm install --workspace=apps/web --include=optional --no-save \
-        @img/sharp-libvips-linux-${TARGETARCH:-arm64}@1.2.4 \
-        @img/sharp-linux-${TARGETARCH:-arm64}@0.34.5 \
-        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc@2.5.6 \
-        @swc/core-linux-${TARGETARCH:-arm64}-gnu@1.15.41 \
-        @next/swc-linux-${TARGETARCH:-arm64}-gnu@16.2.9 \
-        lightningcss-linux-${TARGETARCH:-arm64}-gnu@1.32.0
+        @img/sharp-libvips-linux-${npm_arch}@1.2.4 \
+        @img/sharp-linux-${npm_arch}@0.34.5 \
+        @parcel/watcher-linux-${npm_arch}-glibc@2.5.6 \
+        @swc/core-linux-${npm_arch}-gnu@1.15.41 \
+        @next/swc-linux-${npm_arch}-gnu@16.2.9 \
+        lightningcss-linux-${npm_arch}-gnu@1.32.0
 
 FROM build-base AS prod-deps
 WORKDIR /app

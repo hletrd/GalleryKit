@@ -7,6 +7,17 @@ const root = (relativePath: string) => readFileSync(join(process.cwd(), '..', '.
 const app = (relativePath: string) => readFileSync(join(process.cwd(), relativePath), 'utf8');
 
 describe('Cycle 7 upload config and queue durability contracts', () => {
+    it('Docker native packages normalize OCI TARGETARCH to npm package architecture names', () => {
+        const dockerfile = app('Dockerfile');
+
+        expect(dockerfile).toContain('amd64) npm_arch="x64"');
+        expect(dockerfile).toContain('arm64) npm_arch="arm64"');
+        expect(dockerfile).toContain('Unsupported TARGETARCH=');
+        expect(dockerfile).toContain('@img/sharp-linux-${npm_arch}@');
+        expect(dockerfile).not.toMatch(/@img\/sharp(?:-libvips)?-linux-\$\{TARGETARCH/);
+        expect(dockerfile).not.toMatch(/@next\/swc-linux-\$\{TARGETARCH/);
+    });
+
     it('upload write paths use strict gallery config and persist a processing settings snapshot', () => {
         const browserUpload = src('app/actions/images.ts');
         const lrUpload = src('app/api/admin/lr/upload/route.ts');
@@ -109,10 +120,18 @@ describe('Cycle 7 public UI and API contracts', () => {
 
 describe('Cycle 7 docs and admin navigation contracts', () => {
     it('Lightroom tokens have admin nav labels and docs point to the Tokens page', () => {
+        const tokenClient = src('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+
         expect(src('components/admin-nav.tsx')).toContain("'/admin/tokens'");
         expect(app('messages/en.json')).toContain('"tokens": "Tokens"');
         expect(app('messages/ko.json')).toContain('"tokens": "토큰"');
         expect(root('CLAUDE.md')).toContain('dedicated admin Tokens page');
+        expect(tokenClient).toContain("scopes: ['lr:upload']");
+        expect(tokenClient).not.toContain("'lr:read'");
+        expect(tokenClient).not.toContain("'lr:delete'");
+        expect(tokenClient).toContain("t('lrToken.neverExpires')");
+        expect(app('messages/en.json')).toContain('Upload access is granted automatically');
+        expect(app('messages/en.json')).toContain('Never expires; revoke to disable');
     });
 
     it('fresh-install docs create a category before upload', () => {

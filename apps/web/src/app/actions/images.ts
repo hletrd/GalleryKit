@@ -36,6 +36,7 @@ import { headers } from 'next/headers';
 import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 import { stripStubPrefix } from '@/lib/caption-constants';
 import { parseBoundedPositiveInteger } from '@/lib/env';
+import { toMySqlDateTime } from '@/lib/mysql-datetime';
 
 type ImageCleanupFailure = {
     target: 'original' | 'webp' | 'avif' | 'jpeg';
@@ -726,7 +727,6 @@ export async function deleteImages(ids: number[]) {
             return { error: t('invalidImageId') };
         }
     }
-
     // Fetch all images in one query — select only needed columns
     const imageRecords = await db.select({
         id: images.id,
@@ -961,6 +961,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             return { error: t('invalidImageId') };
         }
     }
+    const requestedIds = [...new Set(ids)];
     if (!Array.isArray(addTagNames) || !Array.isArray(removeTagNames)) {
         return { error: t('invalidInput') };
     }
@@ -1022,7 +1023,16 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     }
 
     try {
-        await db.transaction(async (tx) => {
+        const existingIds = await db.transaction(async (tx) => {
+            const existingRows = await tx.select({ id: images.id })
+                .from(images)
+                .where(inArray(images.id, requestedIds))
+                .limit(requestedIds.length);
+            const existingImageIds = existingRows.map((row) => row.id);
+            if (existingImageIds.length === 0) {
+                return existingImageIds;
+            }
+
             // Build scalar SET clause — only include fields not in 'leave' mode so
             // the UPDATE is minimal and untouched fields are never overwritten.
             const setClause: Record<string, string | null> = {};
@@ -1033,7 +1043,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             if (description.mode === 'clear') setClause['description'] = null;
 
             if (Object.keys(setClause).length > 0) {
-                await tx.update(images).set(setClause).where(inArray(images.id, ids));
+                await tx.update(images).set(setClause).where(inArray(images.id, existingImageIds));
             }
 
             // US-P52: Apply suggested alt text → title or description.
@@ -1045,7 +1055,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                     title: images.title,
                     description: images.description,
                     alt_text_suggested: images.alt_text_suggested,
-                }).from(images).where(inArray(images.id, ids));
+                }).from(images).where(inArray(images.id, existingImageIds));
 
                 // Build a map of id → suggested caption for rows that qualify.
                 // Rows with an existing admin-set value for the target field are skipped
@@ -1099,7 +1109,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 const resolved = await ensureTagRecord(tx, cleanName, slug);
                 if (resolved.kind !== 'found') continue;
                 await tx.insert(imageTags).ignore().values(
-                    ids.map(imageId => ({ imageId, tagId: resolved.tag.id }))
+                    existingImageIds.map(imageId => ({ imageId, tagId: resolved.tag.id }))
                 );
             }
 
@@ -1112,14 +1122,16 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 const resolved = await findTagRecordByNameOrSlug(tx, cleanName);
                 if (resolved.kind !== 'found') continue;
                 await tx.delete(imageTags).where(
-                    and(inArray(imageTags.imageId, ids), eq(imageTags.tagId, resolved.tag.id))
+                    and(inArray(imageTags.imageId, existingImageIds), eq(imageTags.tagId, resolved.tag.id))
                 );
             }
+            return existingImageIds;
         });
 
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'images_bulk_update', 'image', 'bulk', undefined, {
-            ids,
+            ids: existingIds,
+            requestedIds,
             topicMode: topic.mode,
             titlePrefixMode: titlePrefix.mode,
             descriptionMode: description.mode,
@@ -1131,7 +1143,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
         // Revalidate broadly — many images and potentially multiple topics may be affected.
         revalidateAllAppData();
 
-        return { success: true as const, count: ids.length };
+        return { success: true as const, count: existingIds.length };
     } catch (e) {
         console.error('bulkUpdateImages transaction failed:', e);
         return { error: t('failedToUpdateImage') };
@@ -1206,8 +1218,10 @@ export async function retryFailedImage(id: number) {
     state.claimRetryCounts.delete(id);
     state.lastErrors.delete(id);
 
-    // Re-enqueue for processing.
-    enqueueImageProcessing({
+    // Re-enqueue for processing. If the queue rejects the job (shutdown,
+    // duplicate/ineligible state, etc.), restore a visible failed state instead
+    // of reporting success while the image disappears from the failed list.
+    const enqueued = enqueueImageProcessing({
         id: image.id,
         filenameOriginal: image.filename_original,
         filenameWebp: image.filename_webp,
@@ -1235,6 +1249,19 @@ export async function retryFailedImage(id: number) {
         camera_model: image.camera_model,
         capture_date: image.capture_date,
     });
+    if (!enqueued) {
+        const retryError = image.processing_error || t('failedToRetryImage');
+        await db.update(images)
+            .set({
+                processing_error: retryError,
+                failed_at: toMySqlDateTime(new Date()),
+                processing_settings_json: null,
+            })
+            .where(eq(images.id, id));
+        state.permanentlyFailedIds.add(id);
+        state.lastErrors.set(id, retryError);
+        return { error: t('failedToRetryImage') };
+    }
 
     return { success: true as const };
 }

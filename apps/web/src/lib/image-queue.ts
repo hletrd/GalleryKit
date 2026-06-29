@@ -78,6 +78,7 @@ const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 let bootstrapCleanupRun = false;
 const CLAIM_RETRY_DELAY_MS = 5000;
 const BOOTSTRAP_BATCH_SIZE = 500;
+const BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE = 50;
 const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
@@ -327,6 +328,86 @@ function trackQueueSideEffect(state: ProcessingQueueState, task: Promise<void>) 
     task.finally(() => {
         state.sideEffects.delete(task);
     }).catch(() => {});
+}
+
+async function storeImageEmbeddingForMode(
+    imageId: number,
+    originalPath: string,
+    semanticMode: 'stub' | 'production',
+) {
+    let embedding: Float32Array;
+    let modelVersion: string;
+    if (semanticMode === 'production') {
+        embedding = await embedImageReal(originalPath);
+        modelVersion = PRODUCTION_MODEL_VERSION;
+    } else {
+        embedding = embedImageStub(imageId);
+        modelVersion = STUB_MODEL_VERSION;
+    }
+    // AGG-C10-01: store the RAW 2048-byte little-endian float32 buffer directly
+    // into the MEDIUMBLOB. See schema.ts/image-queue embedding comments.
+    if (isRestoreMaintenanceActive()) {
+        console.debug(`[Queue] Skipping embedding write for image ${imageId} during restore maintenance`);
+        return;
+    }
+    const buf = embeddingToBuffer(embedding);
+    const embeddingValue = buf as unknown as string;
+    await db.insert(imageEmbeddings)
+        .values({
+            imageId,
+            embedding: embeddingValue,
+            modelVersion,
+        })
+        .onDuplicateKeyUpdate({
+            set: {
+                embedding: embeddingValue,
+                modelVersion,
+            },
+        });
+    console.debug(`[Queue] Embedding stored for image ${imageId} (model=${modelVersion})`);
+}
+
+async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
+    let semanticMode: 'disabled' | 'stub' | 'production';
+    try {
+        const cfg = await getGalleryConfig();
+        semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
+    } catch {
+        return;
+    }
+    if (semanticMode === 'disabled') return;
+
+    const activeModelVersion = semanticMode === 'production'
+        ? PRODUCTION_MODEL_VERSION
+        : STUB_MODEL_VERSION;
+    const rows = await db.select({
+        id: images.id,
+        filename_original: images.filename_original,
+    })
+        .from(images)
+        .leftJoin(imageEmbeddings, and(
+            eq(imageEmbeddings.imageId, images.id),
+            eq(imageEmbeddings.modelVersion, activeModelVersion),
+        ))
+        .where(and(
+            eq(images.processed, true),
+            isNull(imageEmbeddings.imageId),
+        ))
+        .orderBy(asc(images.id))
+        .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
+
+    for (const row of rows) {
+        trackQueueSideEffect(state, (async () => {
+            try {
+                if (!row.filename_original) return;
+                const originalPath = await resolveOriginalUploadPath(row.filename_original);
+                if (!originalPath) return;
+                await storeImageEmbeddingForMode(row.id, originalPath, semanticMode);
+            } catch (err) {
+                console.warn(`[Queue] Failed to retry missing embedding for image ${row.id}:`, err);
+            }
+        })());
+    }
 }
 
 async function drainQueueSideEffects(state: ProcessingQueueState) {
@@ -642,41 +723,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 }
                 if (semanticMode === 'disabled') return;
                 try {
-                    let embedding: Float32Array;
-                    let modelVersion: string;
-                    if (semanticMode === 'production') {
-                        embedding = await embedImageReal(originalPath);
-                        modelVersion = PRODUCTION_MODEL_VERSION;
-                    } else {
-                        embedding = embedImageStub(job.id);
-                        modelVersion = STUB_MODEL_VERSION;
-                    }
-                    // AGG-C10-01: store the RAW 2048-byte little-endian float32 buffer
-                    // directly into the MEDIUMBLOB. mysql2 inserts Buffer bytes verbatim.
-                    // (Previously base64-encoded; the read path could not round-trip that
-                    // because mysql2 returns a Buffer for the blob and Buffer.from(buf,
-                    // 'base64') is a no-op. The Drizzle column is typed `text` as a schema
-                    // approximation — see schema.ts:264 — so the Buffer is cast through
-                    // `unknown` at the single write site.) decodeEmbeddingColumn() reads it.
-                    if (isRestoreMaintenanceActive()) {
-                        console.debug(`[Queue] Skipping embedding write for image ${job.id} during restore maintenance`);
-                        return;
-                    }
-                    const buf = embeddingToBuffer(embedding);
-                    const embeddingValue = buf as unknown as string;
-                    await db.insert(imageEmbeddings)
-                        .values({
-                            imageId: job.id,
-                            embedding: embeddingValue,
-                            modelVersion,
-                        })
-                        .onDuplicateKeyUpdate({
-                            set: {
-                                embedding: embeddingValue,
-                                modelVersion,
-                            },
-                        });
-                    console.debug(`[Queue] Embedding stored for image ${job.id} (model=${modelVersion})`);
+                    await storeImageEmbeddingForMode(job.id, originalPath, semanticMode);
                 } catch (embedErr) {
                     console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
                 }
@@ -885,6 +932,12 @@ export const bootstrapImageProcessingQueue = async () => {
         if (lastPending) {
             state.bootstrapCursorId = lastPending.id;
         }
+        // C9-07: processed=true is committed before embedding side effects run.
+        // If the process restarts or the side effect transiently fails, retry a
+        // bounded batch of processed rows missing the active model embedding.
+        bootstrapMissingActiveEmbeddings(state).catch((err) => {
+            console.debug('bootstrapMissingActiveEmbeddings failed:', err);
+        });
         // R10-M14: When pending.length === 0 during a CONTINUATION scan
         // (bootstrapCursorId !== null), we cannot distinguish "no more pending
         // images" from "all pending images in this batch are permanently failed".

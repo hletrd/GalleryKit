@@ -3,8 +3,9 @@
 import { headers } from 'next/headers';
 import { getImagesLite, normalizeImageListCursor, searchImages, getSmartCollectionBySlugCached, getImagesForSmartCollection, type ImageListCursorInput } from '@/lib/data';
 import { parseSmartCollectionQuery, compileSmartCollection } from '@/lib/smart-collections';
-import { db, imageViews, topicViews, sharedGroupViews } from '@/db';
+import { db, images, imageViews, topicViews, sharedGroupViews, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { isBot, lookupCountry, sanitizeReferrerHost } from '@/lib/analytics';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
@@ -13,6 +14,7 @@ import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, ch
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { canonicalizeRequestedTagSlugs } from '@/lib/tag-slugs';
+import { toMySqlDateTime } from '@/lib/mysql-datetime';
 
 type PublicImageListItem = Awaited<ReturnType<typeof getImagesLite>>[number];
 type PublicSearchItem = Awaited<ReturnType<typeof searchImages>>[number];
@@ -310,8 +312,10 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
 
 // ---------------------------------------------------------------------------
 // US-P44: fire-and-forget view recording actions.
-// These live in public.ts (excluded from the action-origin gate by name) and
-// do NOT require same-origin admin auth — they are intentionally public.
+// These live in public.ts and carry explicit @action-origin-exempt comments
+// because lint:action-origin scans this file too. They do NOT require
+// same-origin admin auth — they are intentionally public, rate-limited, and
+// validate targets before durable writes.
 // Bot views are recorded with bot=true and excluded from public-facing counts.
 // Full IPs are never stored; only country_code derived from the IP.
 // ---------------------------------------------------------------------------
@@ -360,6 +364,11 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
+    const [visibleImage] = await db.select({ id: images.id })
+        .from(images)
+        .where(and(eq(images.id, imageId), eq(images.processed, true)))
+        .limit(1);
+    if (!visibleImage) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;
@@ -383,6 +392,11 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     // and keeps the validation posture identical across the public actions.
     if (!isValidSlug(topicSlug)) return;
     if (isRestoreMaintenanceActive()) return;
+    const [visibleTopic] = await db.select({ slug: topics.slug })
+        .from(topics)
+        .where(eq(topics.slug, topicSlug))
+        .limit(1);
+    if (!visibleTopic) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;
@@ -400,6 +414,17 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
 export async function recordSharedGroupView(groupId: number): Promise<void> {
     if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
+    const [visibleGroup] = await db.select({ id: sharedGroups.id })
+        .from(sharedGroups)
+        .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
+        .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
+        .where(and(
+            eq(sharedGroups.id, groupId),
+            eq(images.processed, true),
+            or(isNull(sharedGroups.expires_at), gt(sharedGroups.expires_at, toMySqlDateTime(new Date()))),
+        ))
+        .limit(1);
+    if (!visibleGroup) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;

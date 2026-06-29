@@ -125,11 +125,19 @@ export type BatchFilenames = { filename_webp: string; filename_avif: string; fil
  * cleanupDeletedMidReencodeVariants. ENOENT-tolerant via deleteImageVariants.
  */
 export async function cleanupDeletedMidReencodeVariants(files: BatchFilenames): Promise<void> {
-    await Promise.all([
+    const settled = await Promise.allSettled([
         deleteImageVariants(UPLOAD_DIR_WEBP, files.filename_webp, []),
         deleteImageVariants(UPLOAD_DIR_AVIF, files.filename_avif, []),
         deleteImageVariants(UPLOAD_DIR_JPEG, files.filename_jpeg, []),
     ]);
+    for (const result of settled) {
+        if (result.status === 'rejected') {
+            console.warn(
+                '[backfill-color-pipeline] Failed to clean deleted-mid-reencode derivative:',
+                result.reason,
+            );
+        }
+    }
 }
 
 /**

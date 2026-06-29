@@ -22,9 +22,18 @@ const TEMPLATE = readFileSync(
     resolve(__dirname, '../../public/sw.template.js'),
     'utf-8',
 );
+const BUILD_SW = readFileSync(resolve(__dirname, '../../scripts/build-sw.ts'), 'utf-8');
 const PROXY = readFileSync(resolve(__dirname, '../proxy.ts'), 'utf-8');
 
 describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
+    it('generates sw.js from a deterministic template-plus-pipeline stamp', () => {
+        expect(BUILD_SW).toContain("import { createHash } from 'crypto'");
+        expect(BUILD_SW).toContain('PIPELINE=${IMAGE_PIPELINE_VERSION}');
+        expect(BUILD_SW).not.toContain('execFileSync');
+        expect(BUILD_SW).not.toContain('rev-parse');
+        expect(BUILD_SW).not.toContain('Date.now()');
+    });
+
     it('never reads the forbidden request Cookie header', () => {
         expect(TEMPLATE).not.toMatch(/headers\.get\(['"]Cookie['"]\)/i);
         expect(TEMPLATE).not.toMatch(/hasAdminSession/);

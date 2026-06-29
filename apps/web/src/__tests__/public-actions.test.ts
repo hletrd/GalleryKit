@@ -11,6 +11,7 @@ const {
     pruneSearchRateLimitMock,
     getRateLimitBucketStartMock,
     isRestoreMaintenanceActiveMock,
+    dbSelectMock,
     dbInsertMock,
     dbValuesMock,
     searchRateLimit,
@@ -25,6 +26,7 @@ const {
     pruneSearchRateLimitMock: vi.fn(),
     getRateLimitBucketStartMock: vi.fn(),
     isRestoreMaintenanceActiveMock: vi.fn(),
+    dbSelectMock: vi.fn(),
     dbInsertMock: vi.fn(),
     dbValuesMock: vi.fn(),
     searchRateLimit: new Map<string, { count: number; resetAt: number }>(),
@@ -80,10 +82,15 @@ vi.mock('@/lib/rate-limit', () => ({
 
 vi.mock('@/db', () => ({
     db: {
+        select: dbSelectMock,
         insert: dbInsertMock,
     },
+    images: { id: 'images.id', processed: 'images.processed' },
     imageViews: { table: 'image_views' },
+    topics: { slug: 'topics.slug' },
     topicViews: { table: 'topic_views' },
+    sharedGroups: { id: 'shared_groups.id', expires_at: 'shared_groups.expires_at' },
+    sharedGroupImages: { groupId: 'shared_group_images.group_id', imageId: 'shared_group_images.image_id' },
     sharedGroupViews: { table: 'shared_group_views' },
 }));
 
@@ -95,6 +102,7 @@ describe('searchImagesAction', () => {
         getImagesLiteMock.mockReset();
         searchImagesMock.mockReset();
         getClientIpMock.mockReset();
+        dbSelectMock.mockReset();
         dbInsertMock.mockReset();
         dbValuesMock.mockReset();
         checkRateLimitMock.mockReset();
@@ -116,6 +124,12 @@ describe('searchImagesAction', () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
         getImagesLiteMock.mockResolvedValue([{ id: 1 }]);
         searchImagesMock.mockResolvedValue([{ id: 1 }]);
+        dbSelectMock.mockReturnValue({
+            from: vi.fn(() => ({
+                innerJoin: vi.fn().mockReturnThis(),
+                where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([{ id: 1, slug: 'seoul' }]) })),
+            })),
+        });
         dbValuesMock.mockResolvedValue(undefined);
         dbInsertMock.mockReturnValue({ values: dbValuesMock });
     });
@@ -229,10 +243,28 @@ describe('searchImagesAction', () => {
         await recordTopicView('seoul');
         await recordSharedGroupView(11);
 
+        expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).toHaveBeenCalledTimes(3);
         expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 7 }));
         expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ topic: 'seoul' }));
         expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ groupId: 11 }));
+    });
+
+    it('skips public analytics writes when the target is not public and valid', async () => {
+        dbSelectMock.mockReturnValue({
+            from: vi.fn(() => ({
+                innerJoin: vi.fn().mockReturnThis(),
+                where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })),
+            })),
+        });
+
+        await recordPhotoView(7);
+        await recordTopicView('seoul');
+        await recordSharedGroupView(11);
+
+        expect(dbSelectMock).toHaveBeenCalledTimes(3);
+        expect(headersMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
     it('rejects invalid analytics recorder inputs before header or DB work', async () => {

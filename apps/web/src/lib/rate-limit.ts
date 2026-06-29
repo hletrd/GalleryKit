@@ -321,8 +321,8 @@ export function pruneSemanticRateLimit(now: number) {
 }
 
 /** Pre-increment the semantic search rate-limit counter. Returns `true` when the
- *  bucket is over the limit AFTER the increment. Callers must invoke
- *  `rollbackSemanticAttempt(ip)` on every early-return path before expensive work. */
+ *  bucket is over the limit AFTER the increment. Callers refund only branches
+ *  that return before the guarded embedding/vector-scan work is consumed. */
 export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()): boolean {
     pruneSemanticRateLimit(now);
     const entry = semanticRateLimit.get(ip);
@@ -335,9 +335,9 @@ export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()
 }
 
 /** Roll back a pre-incremented semantic search rate-limit counter. Used when the
- *  request was rejected before the expensive embedding work ran (e.g.,
- *  semantic search disabled, invalid body, query too short) — Pattern 2
- *  (rollback on validation failure) per the docstring at the top of this file. */
+ *  request exits before the guarded embedding/vector-scan resource is consumed
+ *  (for example disabled mode or too-short query). Malformed bodies that were
+ *  already read stay charged per the route-level posture. */
 export function rollbackSemanticAttempt(ip: string) {
     const currentEntry = semanticRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {

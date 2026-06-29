@@ -159,9 +159,9 @@ beforeEach(() => {
             update: vi.fn(() => updateChain),
             insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
             delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) })),
-            select: vi.fn(() => makeSelectChain([{ slug: 'travel' }])),
+            select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
         };
-        await cb(tx);
+        return await cb(tx);
     });
 
     // Default select for topic existence check
@@ -293,10 +293,11 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
                 update: vi.fn(() => updateChain),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => makeSelectChain([{ slug: 'travel' }])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
-            await cb(tx);
+            const result = await cb(tx);
             capturedSetClause = updateChain.set.mock.calls[0]?.[0] as Record<string, unknown>;
+            return result;
         });
 
         dbSelectMock.mockReturnValueOnce(makeSelectChain([{ slug: 'travel' }]));
@@ -319,10 +320,11 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
                 update: vi.fn(() => updateChain),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => makeSelectChain([{ slug: 'travel' }])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
-            await cb(tx);
+            const result = await cb(tx);
             capturedSetClause = updateChain.set.mock.calls[0]?.[0] as Record<string, unknown>;
+            return result;
         });
 
         const res = await bulkUpdateImages(makeInput({
@@ -343,12 +345,13 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
                 update: vi.fn(() => updateChain),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => makeSelectChain([])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
-            await cb(tx);
+            const result = await cb(tx);
             if (updateChain.set.mock.calls.length > 0) {
                 capturedSetClause = updateChain.set.mock.calls[0]?.[0] as Record<string, unknown>;
             }
+            return result;
         });
 
         const res = await bulkUpdateImages(makeInput({ titlePrefix: { mode: 'set', value: 'hello' } }));
@@ -365,14 +368,50 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
                 update: vi.fn(() => { updateCalled = true; return { set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) }; }),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => makeSelectChain([])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
-            await cb(tx);
+            return await cb(tx);
         });
 
         const res = await bulkUpdateImages(makeInput());
         expect(res).toEqual({ success: true, count: 3 });
         expect(updateCalled).toBe(false);
+    });
+
+    it('counts and audits only image IDs that still exist inside the transaction', async () => {
+        let insertedImageIds: number[] = [];
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const tx = {
+                update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) })),
+                insert: vi.fn(() => ({
+                    ignore: vi.fn(() => ({
+                        values: vi.fn((rows: Array<{ imageId: number }>) => {
+                            insertedImageIds = rows.map((row) => row.imageId);
+                            return Promise.resolve([]);
+                        }),
+                    })),
+                })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 3 }])),
+            };
+            return await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ addTagNames: ['nature'] }));
+
+        expect(res).toEqual({ success: true, count: 2 });
+        expect(insertedImageIds).toEqual([1, 3]);
+        expect(logAuditEventMock).toHaveBeenCalledWith(
+            1,
+            'images_bulk_update',
+            'image',
+            'bulk',
+            undefined,
+            expect.objectContaining({
+                ids: [1, 3],
+                requestedIds: [1, 2, 3],
+            }),
+        );
     });
 });
 
@@ -406,6 +445,20 @@ describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', ()
         const capturedUpdates: { id: number; title?: string }[] = [];
 
         transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const selectMock = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }]))
+                .mockReturnValueOnce({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                alt_text_suggested: '[AUTO] Photo taken with X',
+                            },
+                        ])),
+                    })),
+                });
             const tx = {
                 update: vi.fn((table: unknown) => ({
                     set: vi.fn((clause: Record<string, unknown>) => ({
@@ -420,20 +473,9 @@ describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', ()
                 })),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => ({
-                    from: vi.fn(() => ({
-                        where: vi.fn(() => Promise.resolve([
-                            {
-                                id: 1,
-                                title: null,
-                                description: null,
-                                alt_text_suggested: '[AUTO] Photo taken with X',
-                            },
-                        ])),
-                    })),
-                })),
+                select: selectMock,
             };
-            await cb(tx);
+            return await cb(tx);
         });
 
         const res = await bulkUpdateImages(makeInput({ applyAltSuggested: 'title' }));
@@ -449,6 +491,21 @@ describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', ()
         let updateCalled = false;
 
         transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const selectMock = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }]))
+                .mockReturnValueOnce({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                // Stripping this prefix leaves empty string -> must be skipped.
+                                alt_text_suggested: '[AUTO] ',
+                            },
+                        ])),
+                    })),
+                });
             const tx = {
                 update: vi.fn(() => ({
                     set: vi.fn(() => ({
@@ -460,21 +517,9 @@ describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', ()
                 })),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => ({
-                    from: vi.fn(() => ({
-                        where: vi.fn(() => Promise.resolve([
-                            {
-                                id: 1,
-                                title: null,
-                                description: null,
-                                // Stripping this prefix leaves empty string → must be skipped
-                                alt_text_suggested: '[AUTO] ',
-                            },
-                        ])),
-                    })),
-                })),
+                select: selectMock,
             };
-            await cb(tx);
+            return await cb(tx);
         });
 
         const res = await bulkUpdateImages(makeInput({ applyAltSuggested: 'title' }));
@@ -494,10 +539,10 @@ describe('bulkUpdateImages — tag mutations', () => {
                 update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) })),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn(() => { insertValuesCalled = true; return Promise.resolve([]); }) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-                select: vi.fn(() => makeSelectChain([])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
             void valuesMock;
-            await cb(tx);
+            return await cb(tx);
         });
 
         const res = await bulkUpdateImages(makeInput({ addTagNames: ['nature'] }));
@@ -513,9 +558,9 @@ describe('bulkUpdateImages — tag mutations', () => {
                 update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) })),
                 insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
                 delete: vi.fn(() => ({ where: vi.fn(() => { deleteCalled = true; return Promise.resolve([{ affectedRows: 3 }]); }) })),
-                select: vi.fn(() => makeSelectChain([])),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };
-            await cb(tx);
+            return await cb(tx);
         });
 
         const res = await bulkUpdateImages(makeInput({ removeTagNames: ['nature'] }));
