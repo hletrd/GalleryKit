@@ -1,108 +1,68 @@
-# Debugger Review - Cycle 9
+# Debugger Review - Cycle 10
 
-Scope: latent bugs, failure modes, regressions, exception cleanup, races, stale artifacts, queue/backfill/restore behavior, upload/delete retry edges, API route error behavior, client state, and tests that can mask failures in `/Users/hletrd/flash-shared/gallery`.
+Scope: latent bug surface, failure modes, async failures, race symptoms, data corruption/loss, and regressions in current `HEAD` of `/Users/hletrd/flash-shared/gallery`.
 
 Constraints honored:
-- Read `AGENTS.md` and `CLAUDE.md` before repository review.
-- Review-only lane: no source-code or plan edits.
-- Existing dirty sibling review files were left untouched.
+- Read and followed `AGENTS.md` plus `CLAUDE.md`.
+- Review-only lane: no source edits.
+- Wrote only this report artifact.
+- Did not run deploy.
+- Existing dirty sibling review artifacts were left untouched.
 
-## Inventory
+## Inventory Summary
 
-Built a review-relevant inventory before findings:
-- `554` review-relevant tracked files across `apps/web/src`, `apps/web/scripts`, `apps/web/e2e`, migrations, app configs, and committed context docs/plans/reviews.
-- Approx. `83,287` lines in the code/script/test/migration inventory.
-- Key surfaces traced: upload/LR upload, queue bootstrap and retry, delete cleanup, restore maintenance, in-app and sidecar backfills, public/admin API routes, semantic/OG rate-limit contracts, client search/load-more/admin state, service worker generation, tests that rely on source-grep fixtures.
+Built the inventory before findings. The broad review set contained `2223` files across `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, `.context`, root docs, and package manifests.
 
-## Confirmed Issues
+Primary runtime surfaces reviewed:
+- Upload and import: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-filenames.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`.
+- Processing and cleanup: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/restore-maintenance.ts`.
+- Data, schema, migration, restore: `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`.
+- Public/admin actions and APIs: `apps/web/src/app/actions/auth.ts`, `settings.ts`, `topics.ts`, `public.ts`, `sharing.ts`, `admin-users.ts`, `embeddings.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/smart-collections.ts`, `apps/web/src/lib/serve-upload.ts`.
+- Final sweeps: cleanup/unlink swallowing, queue/delete race cleanup, restore maintenance gates, migration journal cursor behavior, public route mutation/rate-limit surfaces, and source-grep tests around cleanup contracts.
 
-### DBG9-01 - `retryFailedImage` reports success after a rejected queue enqueue
+## Confirmed Findings
 
-Severity: Medium  
-Confidence: High  
+### DBG10-01 - Image delete cleanup reports success even when filesystem unlinks fail
+
+Severity: High
+Confidence: High
 Status: Confirmed issue
 
 Code regions:
-- `apps/web/src/app/actions/images.ts:1196-1199` clears `processing_error`, `failed_at`, and writes a fresh `processing_settings_json`.
-- `apps/web/src/app/actions/images.ts:1203-1207` clears in-memory permanent-failure/retry state.
-- `apps/web/src/app/actions/images.ts:1210-1239` calls `enqueueImageProcessing(...)` but ignores its boolean result and always returns `{ success: true }`.
-- `apps/web/src/lib/image-queue.ts:388-400` documents and implements `false` returns for rejected jobs: shutdown, restore maintenance, invalid filenames, or permanently failed state.
-- `apps/web/src/lib/image-queue.ts:828` makes bootstrap select only `processed=false AND processing_error IS NULL`, so a retry that cleared the error but failed to enqueue moves the row out of the failed-images surface.
-- `apps/web/src/__tests__/failed-image-retry.test.ts:99-105` only source-greps that an enqueue call exists and that success can be returned; it does not assert rejected enqueue behavior.
-- `apps/web/src/__tests__/retry-failed-image-auth.test.ts:125-157` covers auth gates only, so it cannot catch this queue-return regression.
+- `apps/web/src/app/actions/images.ts:56-86` defines `collectImageCleanupFailures`, but it only records a cleanup failure when the supplied operation rejects.
+- `apps/web/src/app/actions/images.ts:681-699` uses that helper for single-image delete and returns `cleanupFailureCount: cleanupFailures.length`.
+- `apps/web/src/app/actions/images.ts:816-859` uses the same helper for bulk delete and returns the same count.
+- `apps/web/src/lib/upload-paths.ts:75-79` makes `deleteOriginalUploadFile` resolve after swallowing both private and legacy original `fs.unlink` failures with `.catch(() => {})`.
+- `apps/web/src/lib/process-image.ts:90-101` makes `safeUnlink` swallow all non-`ENOENT` unlink failures after a debug log.
+- `apps/web/src/lib/process-image.ts:573-620` makes `deleteImageVariants` call `safeUnlink` for every derivative, so derivative unlink failures also resolve.
+- Related paths with the same cleanup primitive: `apps/web/src/lib/admin-backfill-runner.ts:430-439` and `apps/web/scripts/backfill-color-pipeline.ts:127-136`.
 
 Concrete failure scenario:
-A restored or repaired DB row is in the failed state but carries invalid derivative filename metadata. The admin clicks Retry. `retryFailedImage` clears the failure columns and local retry maps, then `enqueueImageProcessing` rejects the job at `image-queue.ts:398-400`. The action still returns success. The row is no longer visible in `getFailedImages()` because `processing_error` is now null, yet it is not queued. Future bootstrap scans can rediscover it, but the same filename guard rejects it again without restoring a visible failure state, leaving an admin-facing "retry succeeded" result for a still-unprocessed image.
+An admin deletes an image while the upload directory has a permission drift, transient `EIO`, `EBUSY`, `EMFILE`, readonly mount, or other non-`ENOENT` unlink failure. The database row is deleted first. The original cleanup operation then resolves because `deleteOriginalUploadFile` swallows unlink errors, and every derivative cleanup operation resolves because `safeUnlink` swallows unlink errors. `collectImageCleanupFailures` sees four successful promises, so the action returns `{ success: true, cleanupFailureCount: 0 }`. Public derivative files under `public/uploads` can remain directly reachable by old URLs even though the image was deleted from the DB; private originals can also remain on disk. The UI warning path in `apps/web/src/components/image-manager.tsx:145-178` is therefore never reached for the most important cleanup failures.
 
-Suggested fix:
-Validate the job filenames before clearing failure state, or capture the `enqueueImageProcessing` return value and return an error while preserving/restoring `processing_error` when enqueue is rejected. Add a behavioral test where `enqueueImageProcessingMock.mockReturnValue(false)` asserts the action does not return success and does not silently remove the row from the failed state.
+Why this is confirmed:
+The delete actions depend on promise rejection to observe cleanup failure, but the cleanup functions intentionally convert non-`ENOENT` unlink failures into fulfilled promises. No race timing is required; any actual unlink rejection is masked deterministically.
 
-## Likely Issues
+Concrete fix:
+Separate tolerant temporary-file cleanup from deletion guarantees. For image deletion and deleted-mid-reencode cleanup, use a strict cleanup helper that treats `ENOENT` as success but returns or throws structured failures for `EACCES`, `EPERM`, `EIO`, `EBUSY`, `EMFILE`, and scan failures. Make `deleteOriginalUploadFile` and `deleteImageVariants` either return `ImageCleanupFailure[]` or expose strict variants such as `deleteOriginalUploadFileStrict` / `deleteImageVariantsStrict`. Then have `collectImageCleanupFailures` retry strict operations and report nonzero `cleanupFailureCount` to the UI/logs. Add a regression test that mocks `fs.unlink` to reject with `EACCES` and asserts delete returns a cleanup warning instead of `cleanupFailureCount: 0`.
 
-### DBG9-02 - Sidecar deleted-mid-reencode cleanup can make a committed batch fail
+## Reviewed Non-Findings
 
-Severity: Low  
-Confidence: Medium  
-Status: Likely issue
-
-Code regions:
-- `apps/web/scripts/backfill-color-pipeline.ts:400-436` commits the DB batch transaction.
-- `apps/web/scripts/backfill-color-pipeline.ts:439-459` detects rows deleted mid-reencode and then awaits cleanup after the DB transaction.
-- `apps/web/scripts/backfill-color-pipeline.ts:127-132` implements `cleanupDeletedMidReencodeVariants` as raw `Promise.all(...)` with no local catch.
-- `apps/web/src/lib/admin-backfill-runner.ts:430-439` has the safer sibling behavior: cleanup errors are caught and logged because this cleanup is best-effort.
-
-Concrete failure scenario:
-During a sidecar run, an image is deleted after its derivatives are re-encoded but before the sidecar `UPDATE images ... WHERE id = ?` batch commits. The batch correctly records `affectedRows=0` and attempts orphan derivative cleanup. If one unlink path throws anything other than the ENOENT-tolerant path, for example EACCES/EPERM from a filesystem permission drift, the post-commit `Promise.all` rejects. The DB updates for sibling rows are already committed, but the sidecar treats the cleanup miss as a fatal flush failure and can abort the remaining run. The in-app runner explicitly avoids this escalation for the same cleanup class.
-
-Suggested fix:
-Mirror `admin-backfill-runner.ts`: catch cleanup failures inside `cleanupDeletedMidReencodeVariants`, log a warning with enough filename/id context, and continue the sidecar summary. If the operator needs non-zero visibility for incomplete cleanup, track a separate cleanup failure counter rather than throwing after committed DB work.
-
-## Stale Artifacts / Tests That Can Mislead
-
-### DBG9-03 - Semantic/OG rate-limit comments disagree with current locked behavior
-
-Severity: Low  
-Confidence: High  
-Status: Stale artifact / test-contract risk
-
-Code regions:
-- `apps/web/src/lib/rate-limit.ts:17-30` describes `/api/search/semantic` as Pattern 2 rollback for branches that never reach the guarded resource.
-- `apps/web/src/lib/rate-limit.ts:323-340` says callers must rollback on early returns before expensive work and names invalid body/query-too-short as rollback examples.
-- `apps/web/src/app/api/search/semantic/route.ts:12-16` says malformed post-read bodies intentionally stay charged.
-- `apps/web/src/app/api/search/semantic/route.ts:181-230` pre-increments before body read and returns malformed-body/invalid-query errors without `rollbackSemanticAttempt`.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:187`, `:237`, `:249`, and `:344` assert no rollback on several semantic route branches, matching the route rather than the old `rate-limit.ts` prose.
-- `apps/web/src/__tests__/og-photo-fallback.test.ts:9-10` says all-sizes-fail fallback rolls back the OG rate-limit budget.
-- `apps/web/src/__tests__/og-photo-fallback.test.ts:53-75` and `apps/web/src/app/api/og/photo/[id]/route.tsx:126-131` correctly lock the opposite: all-sizes-fail remains charged after DB/internal fetch work.
-
-Concrete failure scenario:
-A future maintainer follows the central `rate-limit.ts` docstring and adds semantic rollbacks for invalid post-read bodies or restores OG all-sizes-fail rollback. The existing source-grep tests partially protect the actual behavior, but the top-level comments point in the other direction and make the failure mode look like a fix. This is especially risky because both routes are unauthenticated public surfaces where rollback policy is part of the DoS/enumeration boundary.
-
-Suggested fix:
-Update the `rate-limit.ts` semantic pattern docs to distinguish pre-body/pre-config refunds from post-body charged malformed requests, or move `/api/search/semantic` into a distinct "charged after body materialization" pattern. Update the `og-photo-fallback.test.ts` header so it matches the actual assertions at lines 53-75. Prefer behavioral route tests over source-grep where practical.
-
-## Risks Needing Manual Validation
-
-- `apps/web/scripts/backfill-color-pipeline.ts:36-43` documents a known per-image-lock gap for the sidecar. Current predicates reduce the live retry collision: the sidecar selects already-processed rows, while `retryFailedImage` selects `processed=false AND processing_error IS NOT NULL` at `apps/web/src/app/actions/images.ts:1179`. I did not find a current retry-vs-sidecar double-encode path, but the sidecar still lacks the in-app runner's per-image claim and remains worth operator validation before any future predicate broadening.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:238-523` has deeply nested cleanup scopes and indentation that makes review difficult, but the route preserves quota settling, original cleanup, late restore checks, lock release in `finally`, and JSON error responses across the traced throw paths. No confirmed bug found; keep this path under focused tests when touched.
-
-## False Positives / Already Fixed
-
-- Prior `DBG-C7-01` is fixed. `apps/web/src/lib/process-image.ts:1061-1068` now reads fresh dimensions and assigns `processingBaseWidth = freshBaseWidth`; the derivative loop uses `processingBaseWidth` at `apps/web/src/lib/process-image.ts:1149-1152`.
-- Prior `DBG-C7-02` is fixed. `apps/web/src/components/tag-filter.tsx:10-22` accepts canonical `currentTags` and derives `canonicalTags` from props, not raw `useSearchParams().get('tags')`; active state and URL mutation use `canonicalTags` at lines `29-40` and `64-97`.
-- The service worker stamp lag is still a non-finding. `apps/web/package.json:10` runs `scripts/build-sw.ts` in prebuild, and `apps/web/public/sw.js` differs from the template only by the expected stamped version marker.
-- Restore upload/processing lock sequencing was rechecked around `apps/web/src/app/[locale]/admin/db-actions.ts` and the queue restore helpers; no new restore-maintenance regression was confirmed in this pass.
+- Migration journal ordering is non-monotonic in `apps/web/drizzle/meta/_journal.json:47-130`, and the sweep confirmed entries `0007` through `0017` have `when` values below earlier entries. This is already accounted for in `apps/web/scripts/migrate.js:686-762` via reconcile plus per-entry baselining, and `apps/web/scripts/migrate.js:764-785` fails loudly if any committed migration hash is missing after Drizzle runs. I did not classify this as a new runtime finding.
+- The sidecar deleted-mid-reencode cleanup no longer matches the older fatal-cleanup risk. `apps/web/scripts/backfill-color-pipeline.ts:127-136` now uses `Promise.allSettled` and logs individual cleanup failures, while `apps/web/src/lib/admin-backfill-runner.ts:430-439` catches best-effort cleanup failures. The remaining problem is that the underlying unlink helper can still mask failures, covered by `DBG10-01`.
+- Restore/upload maintenance gates were traced through `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/app/actions/images.ts`, and the Lightroom upload route. I did not confirm a new restore-vs-upload race in this pass.
+- Queue bootstrap, retry, permanent-failure, and deleted-mid-update cleanup paths in `apps/web/src/lib/image-queue.ts` were reviewed. I did not confirm a new stuck-job or duplicate-processing regression beyond the cleanup observability issue above.
 
 ## Verification Evidence
 
-Commands run:
-- `npm run lint:api-auth --workspace=apps/web` — passed.
-- `npm run lint:action-origin --workspace=apps/web` — passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` — passed.
-- `npm test --workspace=apps/web -- failed-image-retry retry-failed-image-auth semantic-search-route og-photo-fallback sw-template-contract` — 5 files passed, 61 tests passed.
+Read-only commands and checks performed:
+- `git status --short --branch` to identify pre-existing dirty artifacts before writing this report.
+- Inventory via `rg --files` across app source, scripts, migrations, tests, configs, and committed context.
+- Targeted sweeps for cleanup/unlink swallowing, `deleteImageVariants`, `deleteOriginalUploadFile`, `safeUnlink`, `cleanupFailureCount`, queue/delete race cleanup, migration journal cursor behavior, and public/admin async surfaces.
+- Migration journal monotonicity check with a Node script; result confirmed non-monotonic historical entries but no new finding because the migration script now handles that condition.
+- Line-numbered inspection of all code regions cited above.
 
-Final missed-issue sweep:
-- Full inventory via `rg --files` over app/lib/components/scripts/tests/migrations/config/context.
-- Targeted sweeps for `KNOWN GAP`, `TODO`, `FIXME`, `rollback`, `retryFailedImage`, queue/bootstrap retry maps, cleanup/unlink paths, sidecar/in-app backfill differences, generated service worker drift, API route auth/rate-limit gates, and source-grep tests that can mask behavior.
-- Reviewed dirty sibling review artifacts only as context; did not edit or stage them.
+Tests not run:
+- Full lint/typecheck/build/test gates were not run because this prompt requested a review report only and no source changes. The finding should be locked with a focused failing regression test during the fix prompt.
 
-No new Critical or High findings were confirmed in this lane.
+No additional confirmed Critical or High findings were found after the final missed-issues sweep.
