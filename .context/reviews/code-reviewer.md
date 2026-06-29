@@ -1,72 +1,86 @@
-# Code Reviewer — review-plan-fix cycle 4
+# Code Reviewer — review-plan-fix cycle 5
 
-**Date:** 2026-06-29  
-**HEAD:** `0fa5beb107ff232ce6a004887ad7c574dd0e2963` (`0fa5beb1`)  
-**Role:** code-reviewer  
-**Scope:** current HEAD only; repository-wide code quality, logic, SOLID/maintainability, correctness, edge cases, error handling, cross-file interactions, and test gaps. No application code changes made.
+**Date:** 2026-06-29
+**HEAD:** `79c698eb877e563cd46331c8cd92fc29ed970874` (`79c698eb`)
+**Role:** code-reviewer
+**Scope:** current HEAD only; code quality, logic, SOLID/maintainability, operational correctness, test strength, and cross-file interactions. No application source edits made.
 
 ## Inventory Coverage
 
-I built the review inventory from `AGENTS.md`, full `CLAUDE.md`, current cycle-3 plan/deferred files, current `.context/reviews/code-reviewer.md`, latest aggregate history, `git log -12`, `git diff 3f24038b04f48c73f5dac079cd3276fecbd48282..HEAD`, route/action inventories, and full source enumeration.
+I inventoried the current HEAD before reviewing implementation details.
 
-Relevant files examined:
+Changed files in HEAD:
 
-- Instructions and history: `AGENTS.md`, `CLAUDE.md`, `.context/plans/cycle-3-2026-06-29-plan.md`, `.context/plans/cycle-3-2026-06-29-deferred.md`, current `.context/reviews/code-reviewer.md`.
-- Current delta from the previous code-review base: 48 files, including restore-maintenance fixes, public analytics actions, route-rate-limit lint, CLIP constant split, map loader, nav aria labels, upload picker contract, docker-compose public mount, i18n strings, tests, docs, and review/plan records.
-- Full code inventory: 477 source files under `apps/web/src`, 27 scripts under `apps/web/scripts`, 8 e2e files, 28 Drizzle migration/meta files, plus package/config/deploy files.
-- Line-level reads on touched implementation regions: `apps/web/src/app/actions/images.ts:928-1127`, `apps/web/src/app/actions/lr-tokens.ts:28-140`, `apps/web/src/app/actions/public.ts:113-411`, `apps/web/scripts/check-public-route-rate-limit.ts:107-153`, `apps/web/src/components/map/map-loader.tsx:24-39`, `apps/web/src/app/[locale]/(public)/map/page.tsx:11-68`, `apps/web/src/components/nav-client.tsx:41-46` and `:161-165`, `apps/web/src/components/search.tsx:1-21`, `apps/web/src/components/upload-dropzone.tsx:175-177`, `apps/web/src/lib/clip-embedding-constants.ts:1-13`, `apps/web/src/lib/clip-embeddings.ts:9-44`, `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/app/[locale]/admin/db-actions.ts:266-360`, `apps/web/docker-compose.yml:23-26`, and `apps/web/src/lib/data-timeline.ts:88-97`.
-- Repo-wide sweeps: public/admin route handlers, server-action origin gates, restore-maintenance coverage, raw DB mutations, client imports of server-oriented CLIP helpers, privacy-sensitive selectors, map GPS exposure, Drizzle/schema comments, generated static asset behavior, and stale prior findings.
+- `CLAUDE.md`
+- `apps/web/public/sw.js`
+- `apps/web/src/__tests__/deploy-script-contract.test.ts`
 
-Skipped as not review-relevant code: `node_modules`, `test-results`, screenshots/images under `.context`, binary fixtures/icons/fonts, and generated build output. No relevant source/config/script/test/migration file category was skipped.
+Review-relevant files and regions examined:
+
+- Commit/delta: `git show --stat --oneline --find-renames HEAD`, `git show --unified=80 HEAD`.
+- Project instructions/context: `AGENTS.md` supplied in prompt, `CLAUDE.md`.
+- Deployment/runtime contracts: `.dockerignore:1-24`, `apps/web/.dockerignore:1-18`, `apps/web/Dockerfile:59-120`, `apps/web/docker-compose.yml:23-27`, `apps/web/deploy.sh:28-62`, `scripts/deploy-remote.sh`.
+- New/adjacent tests: `apps/web/src/__tests__/deploy-script-contract.test.ts:1-51`, `apps/web/src/__tests__/nginx-config.test.ts:1-52`, `apps/web/src/__tests__/sw-template-contract.test.ts:1-168`.
+- Service worker generation and output: `apps/web/scripts/build-sw.ts:1-57`, `apps/web/public/sw.template.js:1-120`, `apps/web/public/sw.js:1-220`, `apps/web/package.json:8-26`.
+- Public asset surfaces: `apps/web/src/app/manifest.ts:1-53`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/public/`, and the current local `.next/standalone/apps/web/public` build output as evidence of what Next packages.
+- Repo-wide sweeps: `rg` over `public/uploads`, `public/resources`, broad `public` mounts, Docker context rules, `sw.js`, deploy scripts, sidecar examples, and persistence documentation.
+
+Skipped/not inspected in depth:
+
+- Application feature logic outside deploy/public-asset packaging, because HEAD only changed documentation, generated service-worker stamp, and deploy-contract tests.
+- Full unit/build gates, because the reviewed delta is narrow; I ran targeted deploy/runtime contract tests instead.
+- `node_modules`, screenshots, binary images/fonts, and historical plan/review archives except where they surfaced current deploy-contract lineage.
 
 ## Validation Evidence
 
-- `npm run lint --workspace=apps/web` — pass.
-- `npm run lint:api-auth --workspace=apps/web` — pass; 2 admin API routes wrapped.
-- `npm run lint:action-origin --workspace=apps/web` — pass; mutating server actions enforce same-origin provenance or documented read-only/public exemptions.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` — pass; public mutating route inventory remains covered.
-- `npm run typecheck --workspace=apps/web` — pass.
-- Targeted tests for the touched contracts: `npm test --workspace=apps/web -- bulk-update-images.test.ts lr-tokens-action.test.ts public-actions.test.ts check-public-route-rate-limit.test.ts client-source-contracts.test.ts map-thumb-wiring.test.ts nginx-config.test.ts semantic-scan-limit-source.test.ts` — pass, 8 files / 106 tests.
-- Full unit suite: `npm test --workspace=apps/web` — pass, 243 files passed / 2 skipped, 2255 tests passed / 4 skipped.
-- `npm run build --workspace=apps/web` — pass. Build logged the documented local-DB-unavailable sitemap fallback (`ECONNREFUSED 127.0.0.1:3306`) and completed successfully. The build regenerated `apps/web/public/sw.js` to the current short SHA as a local side effect; I restored that review-only side effect before writing this report.
+- `npm test --workspace=apps/web -- deploy-script-contract nginx-config` — pass, 2 files / 11 tests.
+- Confirmed current Docker build context is repo root via `apps/web/docker-compose.yml:5-6`.
+- Confirmed root `.dockerignore` excludes `apps/web/public/uploads` but not `apps/web/public/resources`.
+- Confirmed local generated standalone output currently contains `apps/web/.next/standalone/apps/web/public/resources/...` files when resources exist under `apps/web/public/resources`.
 
-## Confirmed Issues
+## Findings
 
-None.
+### MEDIUM — Confirmed — High confidence
 
-The cycle-3 scheduled fixes are present at current HEAD and hold under source review plus tests:
+**File/region:** `.dockerignore:16-18`, with cross-file flow through `apps/web/Dockerfile:69` and `apps/web/Dockerfile:106` plus the runtime mount in `apps/web/docker-compose.yml:26`.
 
-- `bulkUpdateImages` now fails fast during restore maintenance before origin/auth/DB work (`apps/web/src/app/actions/images.ts:928-936`) and is covered by `bulk-update-images.test.ts`.
-- Lightroom token create/revoke now fail fast during restore maintenance before credential writes (`apps/web/src/app/actions/lr-tokens.ts:28-40`, `apps/web/src/app/actions/lr-tokens.ts:108-116`) and are covered by `lr-tokens-action.test.ts`.
-- Public analytics recorders skip writes during restore maintenance after input validation but before headers/DB work (`apps/web/src/app/actions/public.ts:357-409`) and are covered by `public-actions.test.ts`.
-- Unsupported advertised browser-upload extensions were removed from the picker accept list (`apps/web/src/components/upload-dropzone.tsx:175-177`), matching the source contract tests.
-- The public route rate-limit scanner now ignores uncalled nested helper references and requires a top-level executed limiter before mutation (`apps/web/scripts/check-public-route-rate-limit.ts:107-153`); current public API routes pass the lint gate.
-- Search no longer imports the server-oriented embedding helper from the client; constants live in the client-safe module (`apps/web/src/components/search.tsx:19`, `apps/web/src/lib/clip-embedding-constants.ts:1-13`).
-- The compose public mount now preserves built immutable public assets while only bind-mounting mutable uploads (`apps/web/docker-compose.yml:23-26`).
+**Issue:** The root Docker build context excludes runtime uploads but not runtime topic-cover resources. The compose build uses the repo root as context (`apps/web/docker-compose.yml:5-6`), so the root `.dockerignore` is authoritative for normal deploys. It currently ignores:
 
-## Likely Issues
+```text
+apps/web/public/uploads
+apps/web/public/uploads/**
+apps/web/data
+```
 
-None at actionable confidence.
+but has no matching `apps/web/public/resources` / `apps/web/public/resources/**` rule. Because the builder stage does `COPY . .` (`apps/web/Dockerfile:69`) and the runner stage copies `.next/standalone` (`apps/web/Dockerfile:106`), gitignored topic-cover files under `apps/web/public/resources/` can be sent into the Docker build and baked into the image before the compose bind mount hides that path at runtime.
 
-## Known Risks Not Refiled
+**Failure scenario:** A production host has admin-uploaded topic covers in `apps/web/public/resources/`. `npm run deploy` builds from the repo root. Docker sends those gitignored files into the build context, Next includes them under `.next/standalone/apps/web/public/resources`, and the final image now contains stale runtime/user-generated cover assets. In the documented compose path the bind mount hides them, but the image is still unnecessarily carrying mutable runtime state; if the image is pushed, inspected, or run without the mount, those stale resources can leak or be served. This also contradicts the newly reinforced contract that mutable `public/resources` state lives in the host bind mount while immutable public assets come from the image.
 
-The current deferred items remain real operational or architectural risks, but they are already recorded in `.context/plans/cycle-3-2026-06-29-deferred.md` and were not refiled as fresh findings:
+**Concrete fix:** Add `apps/web/public/resources` and `apps/web/public/resources/**` to the root `.dockerignore`. Also add the analogous `public/resources` and `public/resources/**` entries to `apps/web/.dockerignore` for anyone building with `apps/web` as context. Strengthen a source-contract test to read both `.dockerignore` files and assert both `public/uploads` and `public/resources` are excluded from Docker build contexts while `apps/web/public/resources/.gitkeep` remains only a git placeholder. Optionally update the Dockerfile comment at `apps/web/Dockerfile:105` from broad “public is mounted at runtime” wording to “only public/uploads and public/resources are mounted; immutable public assets are packaged in the image.”
 
-- Timeline/year/on-this-day indexing and date-part query scalability: `apps/web/src/lib/data-timeline.ts:95-205`, deferred as `DEF-C3-02`.
-- Semantic/similar search bounded brute-force scan and recall limits: `apps/web/src/app/api/search/semantic/route.ts:240-281`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, deferred as `DEF-C3-03`.
-- Production CLIP embedding backpressure against Sharp queue work: `apps/web/src/lib/image-queue.ts:512-567`, deferred as `DEF-C3-04`.
-- Process-local coordination state under unsupported scale-out: `apps/web/src/lib/restore-maintenance.ts:1-56`, deferred as `DEF-C3-05`.
-- Public map marker/index scalability: `apps/web/src/lib/data.ts:1624-1660`, `apps/web/src/components/map/map-client.tsx:76-143`, deferred as `DEF-C3-08`.
+## Non-Findings
 
-## Non-Findings / Stale Claims Avoided
-
-- The restore-maintenance gaps from cycle 3 are fixed in source and covered by targeted tests.
-- The route-rate-limit scanner no longer accepts nested/unreachable helper calls as satisfying a mutating route.
-- The CLIP constant split does not leak `process`/`Buffer`/server imports into `Search`; server routes still correctly import scan/top-k caps from `clip-embeddings`.
-- The `sw.js` current-HEAD stamp mismatch after docs/test commits is a build-time artifact, not a production serving defect after the compose mount fix: production build regenerates `sw.js`, and `./public/uploads` no longer masks built `public/sw.js` in the container.
+- The HEAD `sw.js` stamp (`48d9ad6a-p7`) does not match the current HEAD short SHA (`79c698eb`), but this is not an actionable defect for this commit. `apps/web/scripts/build-sw.ts` stamps `git rev-parse --short HEAD` during the production `prebuild` hook; the HEAD change did not alter the service-worker template logic.
+- The new CLAUDE sidecar example now uses separate `public/uploads` and `public/resources` mounts, which matches the compose runtime mount contract.
+- The new deploy-script contract test passes, and the existing nginx-config test still pins narrow compose mounts. The finding above is a Docker build-context gap, not a failure of the compose runtime mount itself.
 
 ## Final Missed-Issues Sweep
 
-Final sweep covered changed files since the cycle-3 review base, all public/admin API routes, all server actions, restore maintenance gates, DB mutation surfaces, public privacy selectors, map GPS exception boundaries, client/server import boundaries, generated asset serving, route metadata title templating, upload picker/runtime-format alignment, Drizzle/schema comments, lint gates, typecheck, targeted tests, full unit suite, and production build.
+Final sweep covered:
 
-Verdict: **0 confirmed issues, 0 likely issues.**
+- Current HEAD changed files and full diff.
+- All authoritative deployment docs included in the new test.
+- Docker compose, Dockerfile, root and app `.dockerignore` files.
+- Service-worker template/generated parity and build stamping.
+- Public immutable assets (`sw.js`, icons, fonts, histogram worker) versus mutable public state (`uploads`, `resources`).
+- Existing deploy/nginx source-contract tests and their blind spots.
+
+Not inspected:
+
+- Deep application logic unrelated to deploy packaging.
+- Full lint/typecheck/build/unit suite.
+- Live Docker image build or push; evidence was collected from source, current build artifacts, and targeted tests.
+
+## Recommendation
+
+**REQUEST CHANGES** for the Docker build-context hygiene gap before treating the deploy-persistence contract as closed.
