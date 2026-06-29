@@ -1,90 +1,250 @@
-# Tracer Review - Cycle 7/100
+# Cycle 9 Tracer Review
 
-HEAD reviewed: `17124135`
+HEAD reviewed: `2506c5f7`
 
-Scope: causal tracing of suspicious flows across upload -> queue -> processing, delete/retry/backfill races, restore maintenance, public tag/search pagination, auth/session/token paths, semantic embeddings, service worker caching, migrations, and deploy. This was a read-only review. No fixes, commits, pushes, deploys, or full quality gates were run by this lane.
+Mode: read-only causal tracing review. Source code and plans were not edited.
 
-## Inventory Built Before Findings
+## Scope And Method
 
-Read first:
+Read first, per workspace rule:
 - `AGENTS.md`
 - `CLAUDE.md`
-- active OMX review instructions: `~/.agents/skills/ultrawork/SKILL.md`, `~/.agents/skills/code-review/SKILL.md`
 
-Review-relevant files inventoried and examined by line-numbered read or targeted symbol search:
-- Upload / queue / processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-tracker-state.ts`
-- Delete / retry / backfill: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`
-- Restore / maintenance / deploy: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/scripts/migrate.js`, `apps/web/deploy.sh`, `package.json`, `apps/web/nginx/default.conf`
-- Public tag/search pagination: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/tag-filter.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/tag-slugs.ts`, `apps/web/src/lib/data.ts`, related tests under `apps/web/src/__tests__/tag-slugs.test.ts` and `apps/web/src/__tests__/public-actions.test.ts`
-- Auth / sessions / tokens: `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/request-origin.ts`
-- Semantic embeddings: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-inference.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/search-enrichment-fields.ts`
-- Service worker: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/src/lib/sw-cache.ts`
+Required traces covered:
+- Upload -> DB -> queue -> processing -> public rendering.
+- Restore -> maintenance -> queue.
+- Search/tag filters -> data queries -> UI.
+- Semantic search -> model -> embeddings -> enrichment.
+- Sharing/analytics -> rate limit -> writes.
+- Deploy/migration artifacts.
 
-## Causal Trace Summary
+I traced each lane from entry point to durable side effects and then ran a final missed-issue sweep against prior review hypotheses and high-risk keywords. This report distinguishes confirmed issues, likely issues, risks needing manual validation, and false positives/already fixed.
 
-Upload -> queue -> processing:
-- Browser and Lightroom upload paths both check restore maintenance, acquire the upload-processing contract lock, snapshot processing settings, persist an unprocessed row, and enqueue work (`apps/web/src/app/actions/images.ts:107-229`, `apps/web/src/app/actions/images.ts:360-502`, `apps/web/src/app/api/admin/lr/upload/route.ts:216-237`, `apps/web/src/app/api/admin/lr/upload/route.ts:436-477`). The queue then claims per-image advisory locks and conditionally marks rows processed only if still pending (`apps/web/src/lib/image-queue.ts:256-283`, `apps/web/src/lib/image-queue.ts:364-467`). No new confirmed issue found.
+## Inventory
 
-Delete / retry / backfill races:
-- Delete clears queue bookkeeping and removes all variant sizes by directory scan (`apps/web/src/app/actions/images.ts:641-688`). Retry clears failure state and removes the ID from the permanent-failure set before enqueueing (`apps/web/src/app/actions/images.ts:1130-1208`). The in-app backfill uses a global backfill lock and per-image processing locks (`apps/web/src/lib/admin-backfill-runner.ts:303-368`), and both in-app and sidecar paths clean variants when a row is deleted mid-reencode (`apps/web/src/lib/admin-backfill-runner.ts:421-440`, `apps/web/scripts/backfill-color-pipeline.ts:119-146`). The sidecar's documented per-image lock gap remains an operator constraint, not a new source finding.
+Upload, DB, queue, processing, rendering:
+- Browser upload: `apps/web/src/app/actions/images.ts:113-190`, `apps/web/src/app/actions/images.ts:317-425`, `apps/web/src/app/actions/images.ts:480-512`
+- Lightroom upload: `apps/web/src/app/api/admin/lr/upload/route.ts:60-115`, `apps/web/src/app/api/admin/lr/upload/route.ts:241-305`, `apps/web/src/app/api/admin/lr/upload/route.ts:374-489`
+- Queue snapshot and worker: `apps/web/src/lib/image-queue.ts:90-175`, `apps/web/src/lib/image-queue.ts:392-465`, `apps/web/src/lib/image-queue.ts:525-683`, `apps/web/src/lib/image-queue.ts:814-884`
+- Original save/format processing: `apps/web/src/lib/process-image.ts:844-994`, `apps/web/src/lib/process-image.ts:1002-1120`
+- Public render/query: `apps/web/src/lib/data.ts:618-646`, `apps/web/src/lib/data.ts:784-811`, `apps/web/src/components/home-client.tsx:286-421`
 
-Restore maintenance:
-- Restore takes `LOCK_DB_RESTORE`, the upload-processing contract lock, and the color-backfill lock before setting maintenance and quiescing the queue (`apps/web/src/app/[locale]/admin/db-actions.ts:279-369`). The queue quiesce order is pause -> clear -> onIdle -> drain side effects, which avoids the known queued-job deadlock (`apps/web/src/lib/image-queue.ts:869-923`). No new confirmed issue found.
+Restore, maintenance, queue:
+- Restore lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts:266-386`
+- Dump scan/import: `apps/web/src/app/[locale]/admin/db-actions.ts:468-584`
+- SQL scanner: `apps/web/src/lib/sql-restore-scan.ts:39-155`
+- Queue quiesce/resume: `apps/web/src/lib/image-queue.ts:966-1019`
 
-Public tag/search pagination:
-- Server pages parse, dedupe, and filter tag slugs against existing tags before querying and before passing `currentTags` to `HomeClient` (`apps/web/src/app/[locale]/(public)/page.tsx:149-166`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:166-176`). `LoadMore` uses that canonical prop, and the server action canonicalizes again before querying (`apps/web/src/components/home-client.tsx:438-447`, `apps/web/src/app/actions/public.ts:113-145`). The `TagFilter` chip state and next URL, however, derive from raw URL search params; confirmed issue TRC-C7-01 below.
+Search/tag filters:
+- Public pages: `apps/web/src/app/[locale]/(public)/page.tsx:149-222`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:134-215`
+- Tag UI: `apps/web/src/components/tag-filter.tsx:10-120`, `apps/web/src/components/home-client.tsx:243-273`, `apps/web/src/components/home-client.tsx:412-421`
+- Public actions and data: `apps/web/src/app/actions/public.ts:113-310`, `apps/web/src/lib/data.ts:1481-1632`
+- Search UI: `apps/web/src/components/search.tsx:154-253`
 
-Auth / session / tokens:
-- Sessions use signed HMAC tokens, DB hash lookup, constant-time signature compare, production env-secret enforcement, and expiry deletion (`apps/web/src/lib/session.ts:16-151`). API admin routes centralize cookie auth plus same-origin, while PAT routes require an allowed token scope and no-store headers (`apps/web/src/lib/api-auth.ts:54-133`). PATs are SHA-256-hashed, scope-checked, expiry-checked, and fail closed if the table is missing (`apps/web/src/lib/admin-tokens.ts:137-171`). No new confirmed issue found.
+Semantic search and embeddings:
+- Semantic route: `apps/web/src/app/api/search/semantic/route.ts:156-330`
+- Similar route: `apps/web/src/app/api/search/similar/[id]/route.ts:97-215`
+- Embedding helpers/caps: `apps/web/src/lib/clip-embeddings.ts:22-44`, `apps/web/src/lib/clip-embeddings.ts:116-172`
+- Real model loader: `apps/web/src/lib/clip-model.ts:53-71`, `apps/web/src/lib/clip-model.ts:98-128`, `apps/web/src/lib/clip-model.ts:171-223`
+- Queue embedding write: `apps/web/src/lib/image-queue.ts:600-683`
+- Sidecar backfill: `apps/web/scripts/backfill-clip-embeddings.ts:1-60`, `apps/web/scripts/backfill-clip-embeddings.ts:113-196`
+- In-app embedding action: `apps/web/src/app/actions/embeddings.ts:55-180`
 
-Semantic embeddings:
-- Semantic text search gates same-origin, maintenance, JSON content type, body size, active mode, rate limiting, active model version, and processed-image enrichment (`apps/web/src/app/api/search/semantic/route.ts:98-335`). Similar-image search is production-only and uses the production model version (`apps/web/src/app/api/search/similar/[id]/route.ts:60-237`). Production mode is operator-gated by `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`apps/web/src/lib/gallery-config.ts:126-145`). No new confirmed issue found.
+Sharing, analytics, rate limits:
+- Share writes: `apps/web/src/app/actions/sharing.ts:22-82`, `apps/web/src/app/actions/sharing.ts:84-183`, `apps/web/src/app/actions/sharing.ts:185-304`
+- Analytics writes: `apps/web/src/app/actions/public.ts:319-414`
+- Analytics reads/index use: `apps/web/src/lib/analytics-data.ts:28-86`, `apps/web/src/lib/analytics-data.ts:93-112`, `apps/web/src/lib/analytics-data.ts:161-191`
+- Schema/indexes: `apps/web/src/db/schema.ts:220-260`, `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3`
 
-Service worker:
-- The shipped template and generated SW bypass admin routes, cache only derivative images with bounded ETag revalidation, and bypass revocable share HTML pages (`apps/web/public/sw.template.js:176-272`, `apps/web/public/sw.template.js:348-381`, `apps/web/public/sw.js:26-32`). No new confirmed issue found.
-
-Migrations / deploy:
-- Migration bootstrap baselines every journal hash and fails if Drizzle silently skips any committed migration (`apps/web/scripts/migrate.js:170-185`, `apps/web/scripts/migrate.js:712-772`). Deploy runs `git pull --ff-only`, builds via compose, then prunes only unused Docker artifacts after the stack is up (`apps/web/deploy.sh:10-61`). No new confirmed issue found.
+Deploy/migrations:
+- Migration reconciler/postcondition: `apps/web/scripts/migrate.js:719-779`, `apps/web/scripts/migrate.js:804-835`
+- Journal tail: `apps/web/drizzle/meta/_journal.json:145-193`
+- Runtime image/deploy: `apps/web/Dockerfile:105-145`, `apps/web/docker-compose.yml:1-27`, `apps/web/deploy.sh:10-62`
+- Semantic operations docs: `CLAUDE.md:509-538`
 
 ## Confirmed Issues
 
-### TRC-C7-01 - Tag filter chips derive active state and next URLs from raw query params instead of canonical server tags
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-
-Code region:
-- `apps/web/src/components/tag-filter.tsx:10-39`
-- `apps/web/src/components/tag-filter.tsx:57-117`
-- `apps/web/src/app/[locale]/(public)/page.tsx:149-166`
-- `apps/web/src/app/[locale]/(public)/page.tsx:221-223`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:166-176`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:214-215`
-- `apps/web/src/components/home-client.tsx:241-270`
-- `apps/web/src/components/home-client.tsx:438-447`
-
-Why it is a problem:
-The server canonicalizes the requested `tags` query by parsing, deduplicating, length-limiting, and filtering to tags that exist in the current gallery/topic (`page.tsx:149-166`, `[topic]/page.tsx:166-176`). That canonical list is passed to `HomeClient` as `currentTags`, and `LoadMore` uses it for query continuity (`home-client.tsx:438-447`). But `TagFilter` ignores that canonical prop and recomputes `currentTags` directly from `useSearchParams().get('tags')` without the same canonicalization or existence filtering (`tag-filter.tsx:13-15`). Its "All" active state, per-chip `aria-pressed`, chip variant, and click handler all use that raw array (`tag-filter.tsx:21-39`, `tag-filter.tsx:57-117`).
-
-Concrete failure scenario:
-Visit `/?tags=missing` or `/?tags=landscape,missing`. The server correctly filters with no valid missing tag, so the gallery data, heading, total count, and load-more requests reflect either all photos or only valid tags. The chip bar still sees raw `missing`, so "All" is not active for `/?tags=missing`; for mixed valid+invalid params, clicking a real chip preserves the invalid slug in the next URL because `handleTagClick` appends/removes against the raw array. The UI can show a filtered/unfiltered gallery while the filter controls announce a different state, and malformed query params can persist across subsequent navigation.
-
-Suggested fix:
-Make `TagFilter` accept the canonical `currentTags` from `HomeClient`, derive active state from that prop, and build next URLs from the canonical list. When preserving unrelated search params, replace only `tags` with the canonical next list and remove it when empty. Add a focused test for `TagFilter` or a source-level contract test covering `/?tags=missing` and `/?tags=valid,missing` so raw URL state cannot diverge from server-filtered state again.
+None found in the current tree.
 
 ## Likely Issues
 
-None beyond the confirmed finding above.
+None found.
 
 ## Risks Needing Manual Validation
 
-- Production CLIP readiness: source proves offline load configuration, operator gating, model-version filtering, and production-row checks, but not that the deploy host's `CLIP_MODELS_ROOT` bind mount has the seeded weights or that production embedding row count is non-zero.
-- Runtime topology: restore maintenance flags, upload quota reservations, queue state, and some rate-limit buckets are process-local. `CLAUDE.md` and the shipped compose topology describe a single web-instance deployment; horizontal scaling would need shared coordination first.
-- Sidecar color backfill overlap: `apps/web/scripts/backfill-color-pipeline.ts:36-43` documents that the sidecar does not take per-image processing locks while its batched update design runs. Keep sidecar use as an operator maintenance action and avoid concurrent manual retry/delete workflows unless separately validated.
+### TRC9-RISK-01 - Semantic search recall is capped to the most recently updated embedding rows
 
-## Final Missed-Issues Sweep
+Severity: Medium
+Confidence: High
+Status: Risk needing manual validation
 
-Final searches covered advisory lock acquisition/release sites, restore maintenance checks, upload quota claim/settle paths, queue retry/permanent-failure state, delete-mid-processing cleanup, backfill update affectedRows handling, public tag canonicalization, search/semantic route gates, session/token verification, service-worker cache bypasses, migration postconditions, deploy prune safety, and relevant tests. The only current-head confirmed issue found by this tracer lane is TRC-C7-01.
+Code region:
+- `apps/web/src/lib/clip-embeddings.ts:22-44`
+- `apps/web/src/app/api/search/semantic/route.ts:242-283`
+- `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
+- `apps/web/src/db/schema.ts:277-292`
+- `apps/web/drizzle/0022_image_embeddings_model_version_idx.sql:1-9`
+- `CLAUDE.md:534-538`
 
-Validation not run: no tests or build were executed because this lane was review-only and changed only the review artifact.
+Concrete failure scenario:
+`SEMANTIC_SCAN_LIMIT` defaults to 2000 (`clip-embeddings.ts:43-44`). Both natural-language semantic search and similar-image search read only rows matching the active model version, ordered by `updated_at DESC`, then apply `.limit(SEMANTIC_SCAN_LIMIT)` before scoring (`semantic/route.ts:242-283`, `similar/[id]/route.ts:141-170`). On a gallery with more production embeddings than the cap, older rows are not candidates at all. A user searching for an older photo or asking for similar photos from an older shoot can receive no match even though that image has a valid embedding. This is intentional as a CPU/DB bound and is documented as a runtime limit (`CLAUDE.md:534-538`), but the user-facing feature reads as semantic search over the gallery.
+
+Suggested fix:
+Add an operator/admin health surface that compares production embedding count to `SEMANTIC_SCAN_LIMIT` and labels semantic search as "recent embedding window" when count exceeds the cap. For complete-gallery semantics, replace the brute-force latest-row scan with a vector index/ANN path or a paginated bounded top-k scan that makes recall tradeoffs explicit.
+
+### TRC9-RISK-02 - Unwired in-app embedding backfill reports success after only one capped candidate set
+
+Severity: Low
+Confidence: Medium
+Status: Risk needing manual validation
+
+Code region:
+- `apps/web/src/app/actions/embeddings.ts:79-80`
+- `apps/web/src/app/actions/embeddings.ts:103-124`
+- `apps/web/src/app/actions/embeddings.ts:129-172`
+- `apps/web/scripts/backfill-clip-embeddings.ts:113-117`
+- `apps/web/scripts/backfill-clip-embeddings.ts:192-196`
+
+Concrete failure scenario:
+The in-app action is explicitly noted as currently unwired and secondary to the sidecar (`actions/embeddings.ts:79-80`). If a future UI or admin workflow wires it directly, it selects at most `SEMANTIC_SCAN_LIMIT` pending rows once (`actions/embeddings.ts:103-124`), processes that fixed array, and returns `{ status: 'ok', processed, skipped }` (`actions/embeddings.ts:129-172`). With 3000 missing embeddings and the default cap of 2000, it can return success after 2000 rows with no `hasMore` or remaining-count signal. The sidecar at least logs that the scan limit was reached and says to rerun (`backfill-clip-embeddings.ts:113-117`).
+
+Suggested fix:
+Keep the action unwired, remove it, or make it keyset-paginated like the sidecar and return `hasMore`/remaining count. Add a source contract if it stays dark so a future UI cannot present the capped one-shot action as a complete backfill.
+
+### TRC9-RISK-03 - Process-local coordination remains valid only under the documented single web-instance topology
+
+Severity: Medium
+Confidence: High
+Status: Risk needing manual validation
+
+Code region:
+- `CLAUDE.md:227`
+- `apps/web/docker-compose.yml:1-27`
+- `apps/web/src/lib/restore-maintenance.ts:1-55`
+- `apps/web/src/lib/image-queue.ts:273-323`
+- `apps/web/src/app/actions/public.ts:319-338`
+- `apps/web/src/app/actions/sharing.ts:22-82`
+
+Concrete failure scenario:
+The shipped compose file runs one `gallerykit-web` service with host networking and bind mounts (`docker-compose.yml:1-27`), matching the documented single-writer assumption (`CLAUDE.md:227`). Restore maintenance state, queue state, upload tracking, and several rate-limit fast paths are process-local. If production is later scaled to multiple web containers behind the same database without moving those states to shared storage, one instance can accept uploads or public write attempts while another is in restore maintenance, and per-IP limits are divided by instance count.
+
+Suggested fix:
+Before any scale-out, move restore maintenance, queue coordination, upload quota tracking, and public/share/semantic rate-limit fast paths into shared database/Redis-backed state, or hard-fail startup when more than one web instance is configured.
+
+## False Positives / Already Fixed
+
+### TRC9-FP-01 - Lightroom upload missing semantic-search mode snapshot
+
+Severity if live: Medium
+Confidence: High
+Status: Already fixed
+
+Evidence:
+- Browser upload snapshots `semanticSearchMode`: `apps/web/src/app/actions/images.ts:504-507`
+- Lightroom upload snapshots the same field: `apps/web/src/app/api/admin/lr/upload/route.ts:452-478`
+- Queue accepts and applies the field: `apps/web/src/lib/image-queue.ts:90-117`, `apps/web/src/lib/image-queue.ts:632-643`
+
+Failure scenario if unfixed:
+Lightroom uploads in production semantic mode would process derivatives but skip production embeddings until a backfill.
+
+Suggested fix:
+No source fix needed. Keep the browser/LR enqueue parity covered by tests or source contracts.
+
+### TRC9-FP-02 - Restart/bootstrap re-enqueues permanently failed rows
+
+Severity if live: Medium
+Confidence: High
+Status: Already fixed
+
+Evidence:
+- Bootstrap excludes rows with `processing_error`: `apps/web/src/lib/image-queue.ts:823-859`
+- Runtime permanent-failure set blocks repeated enqueue within a process: `apps/web/src/lib/image-queue.ts:402-407`
+
+Failure scenario if unfixed:
+Rows that had exhausted retries would be reprocessed on every restart.
+
+Suggested fix:
+No source fix needed.
+
+### TRC9-FP-03 - Restore SQL scanner misses dangerous statements split by comments
+
+Severity if live: High
+Confidence: High
+Status: Already fixed
+
+Evidence:
+- Dangerous statement patterns include privilege, DDL, handler, definer, prepared statement, and file-system primitives: `apps/web/src/lib/sql-restore-scan.ts:39-105`
+- Scanner checks both comment-deleted and comment-spaced sanitized forms: `apps/web/src/lib/sql-restore-scan.ts:113-155`
+- Restore reads the whole dump in overlapping chunks through that scanner before invoking `mysql --one-database`: `apps/web/src/app/[locale]/admin/db-actions.ts:468-520`
+
+Failure scenario if unfixed:
+A crafted dump could hide `DROP`, `CREATE USER`, or similar tokens across comments and pass the pre-import scanner.
+
+Suggested fix:
+No source fix needed.
+
+### TRC9-FP-04 - Public semantic route reads body before rate limiting
+
+Severity if live: Medium
+Confidence: High
+Status: Already fixed
+
+Evidence:
+- Content-type, transfer-encoding, content-length, and config gates run before body materialization: `apps/web/src/app/api/search/semantic/route.ts:156-173`
+- Semantic rate limit is pre-incremented before `request.text()`: `apps/web/src/app/api/search/semantic/route.ts:178-203`
+
+Failure scenario if unfixed:
+Attackers could force repeated body reads/JSON parse work without spending rate-limit budget.
+
+Suggested fix:
+No source fix needed.
+
+### TRC9-FP-05 - Analytics top-view queries lack supporting indexes
+
+Severity if live: Low
+Confidence: High
+Status: Already fixed
+
+Evidence:
+- Top queries group by entity after `bot`/window filtering: `apps/web/src/lib/analytics-data.ts:28-86`, `apps/web/src/lib/analytics-data.ts:161-180`
+- Schema includes top-view indexes: `apps/web/src/db/schema.ts:231-260`
+- Migration 0026 creates the matching indexes: `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3`
+- Journal includes migration 0026 with a monotonic tail entry: `apps/web/drizzle/meta/_journal.json:187-193`
+
+Failure scenario if unfixed:
+Admin analytics could degrade to full table scans as view rows grow.
+
+Suggested fix:
+No source fix needed.
+
+### TRC9-FP-06 - Migration journal non-monotonic entries can silently skip deploy migrations
+
+Severity if live: High
+Confidence: High
+Status: Already fixed for current flow
+
+Evidence:
+- Fresh/legacy databases are reconciled and all journal hashes are baselined: `apps/web/scripts/migrate.js:719-756`
+- After Drizzle migrate, every journal hash is asserted present: `apps/web/scripts/migrate.js:758-779`
+- The runtime image copies the migration script and runs it before `server.js`: `apps/web/Dockerfile:105-145`
+- The journal tail is monotonic for recent entries: `apps/web/drizzle/meta/_journal.json:145-193`
+
+Failure scenario if unfixed:
+Drizzle's MySQL cursor could skip committed migrations while deploy appears green.
+
+Suggested fix:
+No source fix needed. Continue following the AGENTS migration rule for future entries.
+
+## Final Missed-Issue Sweep
+
+Final sweep covered:
+- Upload maintenance checks, upload quota claim/settle, strict config reads, DB insert cleanup, queue enqueue parity, per-image advisory claims, derivative verification, delete-during-processing cleanup, queue side effects, and bootstrap retry state.
+- Restore locks, maintenance begin/end, queue quiesce order, SQL scanner comment/literal handling, `mysql --one-database` invocation, and post-restore migration behavior.
+- Tag query canonicalization, AND semantics for multiple tags, search LIKE escaping, public search rate-limit pre-increment/rollback, UI stale-response guards, and load-more cursor continuity.
+- Semantic mode gates, production env opt-in, model-version filtering, embedding binary decode/write shape, CLIP inference concurrency, enrichment privacy select, and scan-limit behavior.
+- Share creation rate limits, atomic share-key update, group-share transaction, analytics rate limits, privacy-preserving analytics writes, and top-view query indexes.
+- Deploy bind mounts, prune-after-up guarantees, migration journal tail, migration hash postconditions, and single-instance topology assumptions.
+
+No confirmed source defects were found. The actionable items from this lane are the three manual-validation/operational risks above, led by semantic-search recall when production embedding count exceeds `SEMANTIC_SCAN_LIMIT`.
+
+Validation not run: no tests or build were executed because this was a review artifact only and no source files were changed.
