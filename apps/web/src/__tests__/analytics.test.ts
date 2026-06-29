@@ -141,6 +141,12 @@ describe('sanitizeReferrerHost', () => {
     it('returns direct for IPv6 loopback', () => {
         expect(sanitizeReferrerHost('http://[::1]/page')).toBe('direct');
     });
+
+    it('returns direct for IPv4 and IPv6 link-local hosts', () => {
+        expect(sanitizeReferrerHost('http://169.254.10.20/page')).toBe('direct');
+        expect(sanitizeReferrerHost('http://[fe80::1]/page')).toBe('direct');
+        expect(sanitizeReferrerHost('http://[febf::1]/page')).toBe('direct');
+    });
 });
 
 // ---------------------------------------------------------------------------

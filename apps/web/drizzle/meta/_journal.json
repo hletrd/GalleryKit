@@ -183,6 +183,13 @@
       "when": 1782200000000,
       "tag": "0025_processing_settings_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1782300000000,
+      "tag": "0026_analytics_top_view_indexes",
+      "breakpoints": true
     }
   ]
 }

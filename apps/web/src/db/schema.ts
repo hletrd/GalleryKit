@@ -232,6 +232,7 @@ export const imageViews = mysqlTable("image_views", {
     idxImageViewsImageIdViewedAt: index('idx_image_views_image_id_viewed_at').on(table.imageId, table.viewed_at),
     idxImageViewsBotViewedCountry: index('idx_image_views_bot_viewed_country').on(table.bot, table.viewed_at, table.country_code),
     idxImageViewsBotViewedReferrer: index('idx_image_views_bot_viewed_referrer').on(table.bot, table.viewed_at, table.referrer_host),
+    idxImageViewsBotViewedImage: index('idx_image_views_bot_viewed_image').on(table.bot, table.viewed_at, table.imageId),
 }));
 
 export const topicViews = mysqlTable("topic_views", {
@@ -243,6 +244,7 @@ export const topicViews = mysqlTable("topic_views", {
     bot: boolean("bot").notNull().default(false),
 }, (table) => ({
     idxTopicViewsTopicViewedAt: index('idx_topic_views_topic_viewed_at').on(table.topic, table.viewed_at),
+    idxTopicViewsBotViewedTopic: index('idx_topic_views_bot_viewed_topic').on(table.bot, table.viewed_at, table.topic),
 }));
 
 export const sharedGroupViews = mysqlTable("shared_group_views", {
@@ -254,6 +256,7 @@ export const sharedGroupViews = mysqlTable("shared_group_views", {
     bot: boolean("bot").notNull().default(false),
 }, (table) => ({
     idxSharedGroupViewsGroupIdViewedAt: index('idx_shared_group_views_group_id_viewed_at').on(table.groupId, table.viewed_at),
+    idxSharedGroupViewsBotViewedGroup: index('idx_shared_group_views_bot_viewed_group').on(table.bot, table.viewed_at, table.groupId),
 }));
 
 // US-P51 (Phase 5.1): CLIP semantic search — 512-dim float32 embeddings per image.

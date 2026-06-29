@@ -74,7 +74,7 @@ export function lookupCountry(ip: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 // Private / loopback / link-local IP patterns (IPv4 + IPv6)
-const PRIVATE_IP_RE = /^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::1$|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:)/i;
+const PRIVATE_IP_RE = /^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|::1$|fc[0-9a-f]{2}:|fd[0-9a-f]{2}:|fe[89ab][0-9a-f]:)/i;
 
 // Simple test: is the string a bare IPv4/IPv6 address?
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;

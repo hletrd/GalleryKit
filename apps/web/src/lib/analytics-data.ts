@@ -1,8 +1,8 @@
 /**
  * Analytics data access layer for the admin /analytics page (US-P44).
  * All queries exclude bot=true rows from counts exposed to admins.
- * Indexed columns (image_id+viewed_at, topic+viewed_at, group_id+viewed_at)
- * are used for all time-window scans.
+ * Indexed columns (bot+viewed_at+entity_id / breakdown dimension) are used
+ * for time-window scans while excluding bot rows.
  */
 
 import { db, imageViews, topicViews, sharedGroupViews, images, topics, sharedGroups } from '@/db';
