@@ -102,9 +102,11 @@ ENV CLIP_MODELS_ROOT="/app/data/models/clip"
 # design — the deploy recreates the container regardless.)
 ENV NEXT_MANUAL_SIG_HANDLE=true
 
-# Copy necessary files from apps/web (public is mounted at runtime)
+# Copy necessary files from apps/web. Immutable public assets are packaged in
+# the image; only public/uploads and public/resources are mounted at runtime.
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=node:node /app/apps/web/public ./apps/web/public
 COPY --from=builder --chown=node:node /app/apps/web/drizzle ./apps/web/drizzle
 COPY --from=builder --chown=node:node /app/apps/web/scripts/migrate.js ./apps/web/scripts/migrate.js
 COPY --from=builder --chown=node:node /app/apps/web/scripts/mysql-connection-options.js ./apps/web/scripts/mysql-connection-options.js

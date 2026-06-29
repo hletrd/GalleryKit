@@ -6,6 +6,8 @@ node_modules
 **/*.db
 public/uploads
 public/uploads/**
+public/resources
+public/resources/**
 build
 dist
 *.log

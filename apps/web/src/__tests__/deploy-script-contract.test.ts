@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
 const remoteDeployScript = readFileSync(resolve(repoRoot, 'scripts/deploy-remote.sh'), 'utf8');
+const dockerfile = readFileSync(resolve(repoRoot, 'apps/web/Dockerfile'), 'utf8');
+const rootDockerignore = readFileSync(resolve(repoRoot, '.dockerignore'), 'utf8');
+const appDockerignore = readFileSync(resolve(repoRoot, 'apps/web/.dockerignore'), 'utf8');
 const deploymentDocs = [
     deployScript,
     readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8'),
@@ -47,5 +50,20 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).toContain('DEPLOY_USER');
         expect(remoteDeployScript).toContain('DEPLOY_PATH');
         expect(remoteDeployScript).not.toMatch(/ssh\s+[-\w\s]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
+    });
+
+    it('packages immutable public assets while runtime public data stays mounted narrowly', () => {
+        expect(dockerfile).toContain('COPY --from=builder --chown=node:node /app/apps/web/public ./apps/web/public');
+        expect(dockerfile).toContain('mkdir -p apps/web/public/uploads apps/web/public/resources');
+        expect(deploymentDocs).toContain('./public/uploads');
+        expect(deploymentDocs).toContain('./public/resources');
+        expect(deploymentDocs).toContain('immutable public assets');
+    });
+
+    it('keeps mutable public data out of Docker build contexts', () => {
+        expect(rootDockerignore).toContain('apps/web/public/uploads/**');
+        expect(rootDockerignore).toContain('apps/web/public/resources/**');
+        expect(appDockerignore).toContain('public/uploads/**');
+        expect(appDockerignore).toContain('public/resources/**');
     });
 });
