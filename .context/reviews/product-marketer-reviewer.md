@@ -1,39 +1,40 @@
-# Product Marketer Review - Cycle 4
+# Product Marketer Review - Cycle 5
 
 Date: 2026-06-29
 Reviewer: product-marketer-reviewer
-HEAD reviewed: `10b500bb30399f7c66812a5ad899f070f88d5501`
+HEAD reviewed: `a8aef8d0a418e251915e44c2eacf4bbd255870e1`
 Repository: GalleryKit
-Scope: product-facing copy, positioning consistency, public UX expectations, docs/user-promise mismatches, SEO/OpenGraph/feed presentation, and product-surface confusion risks. No application code was edited.
+Scope: product-positioning, documentation, market-communication, photographer trust messaging, claims vs implemented behavior, deployment docs, admin settings, public pages, and product boundaries. The BurstPick-specific installed prompt was not applied; only the product-marketer-reviewer lens was adapted to GalleryKit.
+Edit scope: only `.context/reviews/product-marketer-reviewer.md` was changed.
 
 ## Executive Summary
 
-Finding count: 1
+Finding count: 2
 
 | Severity | Count |
 | --- | ---: |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
+| Medium | 2 |
 | Low | 0 |
 
-GalleryKit's current product positioning remains mostly source-backed: it is presented as a self-hosted photo gallery, not a marketing site, and its README/admin copy is generally honest about semantic search being operator-gated, HDR delivery being SDR-only today, storage being local, and the absence of paid-download/product-commerce surfaces. The remaining product-facing issue is an ingest-contract copy mismatch: the RAW rejection message still recommends HEIF as a safe export target even though the current picker no longer advertises HEIF and the installed Sharp build only exposes HEIF-family input for `.avif`.
+GalleryKit's current public positioning is largely code-backed: the README presents a self-hosted photographer gallery, semantic search is clearly operator-gated, storage is documented as local filesystem only, deploy docs describe the single-writer host-network shape, and CLAUDE.md explicitly preserves the "no edit / culling / scoring" and "free / no payments" boundaries. The two product-communication risks are both admin-trust copy mismatches: the GPS privacy toggle understates what the product now does to retained originals, and the auto-alt-text settings copy implies a Florence-2 model requirement even though the current implementation is an EXIF-derived stub.
 
 ## Inventory
 
-Relevant product-facing inventory inspected:
+Relevant docs and product/UI files inspected before judging findings:
 
-- Required context: `AGENTS.md`, `CLAUDE.md`, `/Users/hletrd/.codex/agents/product-marketer-reviewer.md`.
-- Public/docs surfaces: `README.md`, `apps/web/README.md`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`.
-- Localized copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Public metadata/SEO routes: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `c/[slug]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `map/page.tsx`, `sitemap.ts`, `robots.ts`, `manifest.ts`, `feed.xml/route.ts`, `[topic]/feed.xml/route.ts`.
-- OG/feed implementation: `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/lib/atom-feed.ts`, `apps/web/src/lib/seo-og-url.ts`, `apps/web/src/lib/image-url.ts`.
-- Product promise implementation checks: upload/dropzone and server ingest paths, image processing extension gate, RAW/HDR handling, semantic search settings/routes, storage abstraction notes, Lightroom token upload path, auto-alt-text stub surfaces, public search/share routes.
-- Prior review history: current `.context/reviews/*.md` plus targeted archived product-marketer/designer/document/security reports, used to avoid carrying fixed or already-filed issues.
+- Required context: `AGENTS.md`, `CLAUDE.md`.
+- Public docs/config: `README.md`, `apps/web/README.md`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`, root/app `package.json`.
+- Localized product/admin copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Admin product surfaces: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, `seo/seo-client.tsx`, `users/page.tsx`, `tokens/tokens-client.tsx`, `db/page.tsx`, `dashboard/*`, `apps/web/src/components/image-manager.tsx`, `bulk-edit-dialog.tsx`.
+- Public pages/components: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `c/[slug]/page.tsx`, `map/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `apps/web/src/components/search.tsx`, `similar-photos.tsx`, `footer.tsx`, `color-details-section.tsx`, `lightbox-color-pip.tsx`.
+- Claim implementation checks: `apps/web/src/app/actions/settings.ts`, `images.ts`, `apps/web/src/lib/gallery-config*.ts`, `process-image.ts`, `gps-exif-strip.ts`, `data.ts`, `caption-generator.ts`, `image-queue.ts`, semantic search API routes, storage quarantine tests, free-download contract tests, PWA service worker files.
+- Product boundary searches: BurstPick references, payment/Stripe/entitlement surfaces, S3/MinIO/storage claims, edit/cull/scoring/rating language, semantic-search scan/gate behavior, public GPS exposure, and deploy/proxy claims.
 
 ## Findings
 
-### PM-C4-01 - RAW rejection copy recommends HEIF even though the current product does not reliably accept HEIF uploads
+### PM-C5-01 - GPS privacy copy says source EXIF is untouched, but enabled uploads now scrub retained originals
 
 Severity: Medium
 Confidence: High
@@ -41,32 +42,64 @@ Status: Confirmed
 
 Exact regions:
 
-- `apps/web/messages/en.json:560-561` tells admins whose RAW uploads were rejected to export to `JPEG, TIFF, AVIF, HEIF, or PNG`.
-- `apps/web/messages/ko.json:560-561` gives the same remediation and includes `HEIF`.
-- `apps/web/src/app/actions/images.ts:523-560` catches `RawFileError` and returns those localized `rawNotSupported` / `rawRejectedWarning` strings for RAW-only or mixed upload failures.
-- `apps/web/src/components/upload-dropzone.tsx:175-177` now advertises only `.jpg`, `.jpeg`, `.png`, `.webp`, `.avif`, `.tiff`, `.tif`, and `.gif` in the browser picker.
-- `apps/web/src/lib/process-image.ts:385-387` still extension-allows `.heic` / `.heif`, but current runtime evidence from the installed Sharp `0.34.5` build shows `sharp.format.heif.input.fileSuffix` is only `[".avif"]`; `raw.input.file` and ImageMagick input are unavailable. That makes `.heif` / `.heic` an unreliable recommendation in this deployment.
+- `apps/web/messages/en.json:701-704` labels the privacy section and says: "New uploads won't store GPS in gallery metadata. Existing images and source EXIF aren't touched."
+- `apps/web/messages/ko.json:701-704` carries the same promise in Korean: "새 업로드는 갤러리 메타데이터에 GPS를 저장하지 않습니다. 기존 이미지와 원본 EXIF는 그대로 둡니다."
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:543-568` renders that copy beside the `strip_gps_on_upload` switch.
+- `apps/web/src/app/actions/images.ts:333-343` does the real upload behavior: it nulls DB `latitude` / `longitude` and calls `stripGpsFromOriginal(...)` on the saved original when the setting is enabled.
+- `apps/web/src/lib/process-image.ts:1600-1639` documents the current retained-original scrubber: lossless GPS neutralization for JPEG/TIFF/HEIF/AVIF/HEIC/WebP, metadata-free re-encode fallback for some formats, and best-effort failure logging.
+- `CLAUDE.md:218` also states the correct current product contract: `strip_gps_on_upload` scrubs the on-disk original, not just gallery metadata.
 
 Why this is a problem:
 
-The product gives a concrete recovery path after a failed RAW upload. HEIF is part of that promise, but the visible picker no longer offers HEIF and the current processing runtime does not advertise `.heif` / `.heic` decode support. This is not a marketing-site polish issue; it is a first-run operator trust issue on the upload flow.
+This is a photographer-trust and consent mismatch. The UI tells the operator that source EXIF is not touched, but the product intentionally modifies the retained original's GPS-bearing metadata when the privacy toggle is enabled. The implementation is directionally privacy-positive, but the admin copy now misstates the preservation contract.
 
-Concrete user failure scenario:
+Concrete failure scenario:
 
-A photographer batch-drops RAW files, receives the localized "export to ... HEIF" advice, exports from Lightroom or Photos to `.heif`, then cannot select that file in the picker or gets a generic processing failure if they bypass the picker through drag/drop or integration. The product appears to give authoritative guidance, then rejects the guided format.
+A photographer enables the toggle expecting only GalleryKit's database/public metadata to omit GPS while preserving upload originals byte-for-byte for later admin download or archive use. Later they download an original and find GPS EXIF removed or, on a fallback path, rewritten without metadata. Even though the privacy outcome is safer, the product violated the stated "source EXIF isn't touched" expectation.
 
 Concrete fix:
 
-Remove `HEIF` from `rawNotSupported` and `rawRejectedWarning` in both locales unless HEIF/HEIC decode is made runtime-gated and visible end-to-end. The safe current wording should recommend JPEG, TIFF, AVIF, or PNG. If HEIF is intended as a supported target, derive the dropzone accept list, server extension allowlist, and localized supported-format copy from the actual Sharp runtime capability or a build-time capability check, and add a HEIF-specific unsupported-format message for deployments without that decoder.
+Update both locale strings to distinguish existing images from future uploads and disclose retained-original behavior. Example: "New uploads won't store GPS in gallery metadata. When possible, GalleryKit also removes GPS metadata from the retained original; existing images are not changed." Korean copy should carry the same nuance. If best-effort failures remain possible, mention that server logs record failures rather than promising absolute removal.
+
+### PM-C5-02 - Auto alt-text settings copy implies Florence-2 model setup, but the shipped feature is an EXIF-derived stub
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+
+Exact regions:
+
+- `apps/web/messages/en.json:712-715` says GalleryKit will "Generate AI alt-text suggestions using a local Florence-2 model" and that enabling it "Requires the Florence-2 ONNX model (stub active)."
+- `apps/web/messages/ko.json:712-715` mirrors that Florence-2/model-requirement framing.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:604-628` renders this as a real admin setting.
+- `apps/web/src/lib/caption-generator.ts:1-18` states the actual implementation is a stub and that real Florence-2 ONNX inference, weights, and download script are deferred.
+- `apps/web/src/lib/caption-generator.ts:33-64` generates only deterministic EXIF-derived text such as `[AUTO] Photo taken with Canon EOS R5`; no model is loaded and no vision inference runs.
+- `apps/web/src/lib/image-queue.ts:470-488` stores this generated caption after processing when `auto_alt_text_enabled` is true.
+- `apps/web/src/components/bulk-edit-dialog.tsx:241-258` and `apps/web/src/app/actions/images.ts:1027-1063` expose/copy these suggestions into title or description, so the stub output can become user-visible metadata.
+
+Why this is a problem:
+
+The copy simultaneously says "local Florence-2 model" and "stub active", then tells admins a Florence-2 ONNX model is required. Code reality is simpler: no model is required today, and the output is not AI vision captioning. That ambiguity can cause operators to waste setup time, overestimate caption quality, or believe GalleryKit is already doing image-understanding work it does not do.
+
+Concrete failure scenario:
+
+An operator turns on Auto Alt-Text after reading "Requires the Florence-2 ONNX model", searches deployment docs for a Florence-2 seeding flow, finds none, and assumes the install is incomplete. Alternatively, they enable it expecting actual image captions and bulk-copy `[AUTO] Photo taken with ...` camera-derived hints into public titles/descriptions, weakening public accessibility/SEO copy under an "AI suggested" label.
+
+Concrete fix:
+
+Reword the setting to the current product truth: "Generate EXIF-derived alt-text placeholders (stub; no vision model runs yet)" and "When enabled, stores deterministic hints after processing. Real Florence-2 ONNX captioning is a future feature." Avoid saying a Florence-2 model is required until the model download/runtime path exists. Consider renaming "AI-suggested alt text" in bulk-edit copy to "auto-suggested alt text" while the producer remains a stub.
 
 ## Source-Backed Non-Findings
 
-- The cycle-3 product-marketer finding about the upload picker advertising RAW/HEIC/HEIF/BMP is fixed at current HEAD: `upload-dropzone.tsx:175-177` no longer includes those extensions.
-- Semantic search copy is currently honest enough for a self-hosted gallery: README and app README say production CLIP is disabled by default and operator-gated; admin settings expose only Disabled/Stub; runtime heals production to disabled unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
-- Shared photo/group pages intentionally use generic, noindex/noarchive/noimageindex metadata and avoid share-key DB lookup in `generateMetadata`; this is a defensible privacy/security tradeoff, not a product-preview defect.
-- Timeline/map/year document-title duplication is already filed in the current designer report, so this pass does not duplicate it.
-- README upload/nginx and feed-attribution documentation drift is already filed in the current document-specialist report; this pass did not re-file it.
+- No BurstPick assumptions found in repo product surfaces. The review treated GalleryKit as a self-hosted photographer gallery.
+- Self-hosting/local-storage positioning is honest: `README.md:7-9` and `apps/web/src/site-config.json:2-9` present GalleryKit as self-hosted; `CLAUDE.md:141` explicitly says the storage abstraction is not a supported S3/MinIO switch; storage quarantine tests prevent accidental product exposure.
+- Payment boundary is preserved: `CLAUDE.md:553` says paid downloads/Stripe were removed and must not be re-added; current searches found no checkout/entitlement product surfaces, and free-download contract tests guard the viewer download path.
+- No edit/culling/scoring product promise leak was found. `CLAUDE.md:257-259` states photos arrive after editing and no edit/culling/scoring features ship. The remaining "score" fields are semantic-search ranking internals in API types, not user-facing scoring/culling claims.
+- Semantic search claims are generally honest: `README.md:37` calls it self-hosted/operator-enabled and disabled by default; `apps/web/README.md:53-73` documents weights/backfill/env/DB activation; `gallery-config.ts:126-145` heals production to disabled without `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`; `search.tsx:434-469` shows the toggle only when mode is not disabled and warns in stub mode; `similar-photos.tsx:98-101` hides similar photos unless production mode is active.
+- PWA claim is backed by implementation: `apps/web/package.json:10` builds icons/service worker before build, and `apps/web/public/sw.template.js` / `sw.js` implement image stale-while-revalidate plus HTML offline fallback behavior.
+- Admin root-account messaging is consistent: `README.md:40` says multiple root admins with no role separation; `apps/web/messages/en.json:46-50` warns new admins are full-access root admins; `CLAUDE.md:227` confirms there is no role/capability model.
+- Deployment docs are aligned with the current single-writer posture: `README.md:145-151`, `README.md:168-186`, `apps/web/README.md:41-49`, and `CLAUDE.md:226` all warn about production URL validation, proxy trust, host-network deployment, and not scaling web horizontally without shared coordination state.
 
 ## Final Sweep
 
-Final sweep covered docs, localized copy, public route metadata, OG cards, feeds, sitemap/robots, share pages, upload error copy, semantic-search honesty, auto-alt-text stub copy, storage/payment promises, and prior review history. No additional product-marketing findings were promoted beyond PM-C4-01.
+Final sweep covered README/app README, CLAUDE, site config, admin settings/SEO/users/tokens/DB/dashboard copy, public search/similar/color/share pages, PWA files, semantic routes, upload/GPS/RAW/HDR behavior, storage/payment/product-boundary searches, and current test contracts. No additional product-marketing findings were promoted beyond PM-C5-01 and PM-C5-02.
