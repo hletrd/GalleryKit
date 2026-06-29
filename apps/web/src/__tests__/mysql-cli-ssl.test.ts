@@ -11,7 +11,15 @@ describe('mysql CLI SSL args', () => {
 
     it('requires SSL for non-local MySQL hosts by default', () => {
         expect(shouldRequireMysqlCliSsl('db.example.com')).toBe(true);
-        expect(getMysqlCliSslArgs('db.example.com')).toEqual(['--ssl-mode=REQUIRED']);
+        expect(() => getMysqlCliSslArgs('db.example.com')).toThrow('DB_SSL_CA is required');
+    });
+
+    it('verifies the remote MySQL server identity when a CA is configured', () => {
+        expect(getMysqlCliSslArgs('db.example.com', undefined, '/etc/mysql/ca.pem')).toEqual([
+            '--ssl',
+            '--ssl-ca=/etc/mysql/ca.pem',
+            '--ssl-verify-server-cert',
+        ]);
     });
 
     it('honors DB_SSL=false for non-local backup and restore CLI paths', () => {

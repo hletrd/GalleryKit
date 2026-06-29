@@ -10,10 +10,10 @@
  *   - Returns enriched top-K image results above the active cosine threshold
  *
  * Rate-limit posture: disabled mode returns before body reads or rate-limit
- * charging. Serving modes consume the counter before reading the body so
- * chunked or missing-length requests cannot materialize arbitrary payloads for
- * free. Post-read malformed bodies stay charged because the memory/CPU cost
- * was already consumed.
+ * charging. Serving modes consume the counter before reading the body; missing
+ * Content-Length and chunked requests fail before charging so they cannot
+ * materialize arbitrary payloads for free. Post-read malformed bodies stay
+ * charged because the memory/CPU cost was already consumed.
  *
  * Serving gate: this endpoint SERVES requests in two modes:
  *   - 'stub'       — demo/experimental posture. Embeds via deterministic `embedTextStub`.
@@ -145,20 +145,24 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Body size guard — reject oversized payloads before parsing
     const contentLength = request.headers.get('content-length');
-    if (contentLength) {
-        const contentLengthNum = Number(contentLength);
-        if (!Number.isFinite(contentLengthNum) || contentLengthNum < 0) {
-            return NextResponse.json(
-                { error: 'Invalid Content-Length' },
-                { status: 400, headers: NO_STORE_HEADERS },
-            );
-        }
-        if (contentLengthNum > MAX_SEMANTIC_BODY_BYTES) {
-            return NextResponse.json(
-                { error: 'Request body too large' },
-                { status: 413, headers: NO_STORE_HEADERS },
-            );
-        }
+    if (!contentLength) {
+        return NextResponse.json(
+            { error: 'Content-Length is required' },
+            { status: 411, headers: NO_STORE_HEADERS },
+        );
+    }
+    const contentLengthNum = Number(contentLength);
+    if (!Number.isFinite(contentLengthNum) || contentLengthNum < 0) {
+        return NextResponse.json(
+            { error: 'Invalid Content-Length' },
+            { status: 400, headers: NO_STORE_HEADERS },
+        );
+    }
+    if (contentLengthNum > MAX_SEMANTIC_BODY_BYTES) {
+        return NextResponse.json(
+            { error: 'Request body too large' },
+            { status: 413, headers: NO_STORE_HEADERS },
+        );
     }
 
     // Check semantic search mode before body materialization. Disabled mode is

@@ -81,15 +81,24 @@ const semanticRouteSource = readFileSync(
 );
 
 function mockRequest(body: unknown, headersInit: Record<string, string> = {}): NextRequest {
+    const rawBody = JSON.stringify(body);
     return {
-        headers: new Headers({ 'content-type': 'application/json', ...headersInit }),
-        text: async () => JSON.stringify(body),
+        headers: new Headers({
+            'content-type': 'application/json',
+            'content-length': String(Buffer.byteLength(rawBody, 'utf8')),
+            ...headersInit,
+        }),
+        text: async () => rawBody,
     } as unknown as NextRequest;
 }
 
 function mockRawRequest(rawBody: string, headersInit: Record<string, string> = {}): NextRequest {
     return {
-        headers: new Headers({ 'content-type': 'application/json', ...headersInit }),
+        headers: new Headers({
+            'content-type': 'application/json',
+            'content-length': String(Buffer.byteLength(rawBody, 'utf8')),
+            ...headersInit,
+        }),
         text: async () => rawBody,
     } as unknown as NextRequest;
 }
@@ -164,6 +173,16 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Request body too large' });
     });
 
+    it('returns 411 before charging when Content-Length is missing', async () => {
+        const response = await POST(mockRequest({ query: 'mountain landscape' }, {
+            'content-length': '',
+        }));
+
+        expect(response.status).toBe(411);
+        await expect(response.json()).resolves.toEqual({ error: 'Content-Length is required' });
+        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
     it('rejects mixed-case chunked transfer encoding', async () => {
         const response = await POST(mockRequest({ query: 'mountain landscape' }, {
             'transfer-encoding': 'gzip, Chunked',
@@ -179,7 +198,9 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(oversizedJson.length).toBeLessThan(8192);
         expect(Buffer.byteLength(oversizedJson, 'utf8')).toBeGreaterThan(8192);
 
-        const response = await POST(mockRawRequest(oversizedJson));
+        const response = await POST(mockRawRequest(oversizedJson, {
+            'content-length': String(oversizedJson.length),
+        }));
 
         expect(response.status).toBe(413);
         await expect(response.json()).resolves.toEqual({ error: 'Request body too large' });
@@ -189,7 +210,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
     it('returns 400 for invalid JSON body', async () => {
         const req = {
-            headers: new Headers({ 'content-type': 'application/json' }),
+            headers: new Headers({ 'content-type': 'application/json', 'content-length': '16' }),
             text: async () => '{ invalid json }',
         } as unknown as NextRequest;
 
@@ -224,7 +245,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'disabled' });
         const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));
         const request = {
-            headers: new Headers({ 'content-type': 'application/json' }),
+            headers: new Headers({ 'content-type': 'application/json', 'content-length': '30' }),
             text: textMock,
         } as unknown as NextRequest;
 
@@ -240,7 +261,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
     it('returns 499 for already-aborted serving-mode requests before charging rate limit', async () => {
         const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));
         const request = {
-            headers: new Headers({ 'content-type': 'application/json' }),
+            headers: new Headers({ 'content-type': 'application/json', 'content-length': '30' }),
             signal: { aborted: true },
             text: textMock,
         } as unknown as NextRequest;

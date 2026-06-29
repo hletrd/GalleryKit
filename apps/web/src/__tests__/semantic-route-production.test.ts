@@ -16,7 +16,15 @@ import { embedTextReal } from '@/lib/clip-model';
 import { POST } from '@/app/api/search/semantic/route';
 
 function req(body: object) {
-  return new Request('http://localhost/api/search/semantic', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) as never;
+  const rawBody = JSON.stringify(body);
+  return new Request('http://localhost/api/search/semantic', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'content-length': String(Buffer.byteLength(rawBody, 'utf8')),
+    },
+    body: rawBody,
+  }) as never;
 }
 
 describe('semantic route — production', () => {

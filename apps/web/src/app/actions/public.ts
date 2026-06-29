@@ -8,6 +8,7 @@ import { isBot, lookupCountry, sanitizeReferrerHost } from '@/lib/analytics';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
+import { isBase56 } from '@/lib/base56';
 import { stripControlChars } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit, getRateLimitBucketStart } from '@/lib/rate-limit';
@@ -411,8 +412,10 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
 }
 
 // @action-origin-exempt: public analytics endpoint — no admin auth needed
-export async function recordSharedGroupView(groupId: number): Promise<void> {
+export async function recordSharedGroupView(groupId: number, groupKey: string): Promise<void> {
     if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
+    const trimmedGroupKey = typeof groupKey === 'string' ? groupKey.trim() : '';
+    if (!isBase56(trimmedGroupKey, 10)) return;
     if (isRestoreMaintenanceActive()) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
@@ -423,6 +426,7 @@ export async function recordSharedGroupView(groupId: number): Promise<void> {
         .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
         .where(and(
             eq(sharedGroups.id, groupId),
+            eq(sharedGroups.key, trimmedGroupKey),
             eq(images.processed, true),
             or(isNull(sharedGroups.expires_at), gt(sharedGroups.expires_at, toMySqlDateTime(new Date()))),
         ))

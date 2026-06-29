@@ -11,6 +11,14 @@ export function shouldRequireMysqlCliSsl(
 export function getMysqlCliSslArgs(
     host: string | undefined,
     dbSsl: string | undefined = process.env.DB_SSL,
+    dbSslCa: string | undefined = process.env.DB_SSL_CA,
 ) {
-    return shouldRequireMysqlCliSsl(host, dbSsl) ? ['--ssl-mode=REQUIRED'] : [];
+    if (!shouldRequireMysqlCliSsl(host, dbSsl)) return [];
+
+    const caPath = dbSslCa?.trim();
+    if (!caPath) {
+        throw new Error('DB_SSL_CA is required for verified MySQL CLI TLS when DB_HOST is non-local');
+    }
+
+    return ['--ssl', `--ssl-ca=${caPath}`, '--ssl-verify-server-cert'];
 }

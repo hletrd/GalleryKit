@@ -44,7 +44,12 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { isRestoreMaintenanceActive, cleanupOriginalIfRestoreMaintenanceBegan } from '@/lib/restore-maintenance';
 import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
 import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
-import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
+import {
+    MAX_TOTAL_UPLOAD_BYTES,
+    MAX_UPLOAD_FILE_BYTES,
+    SERVER_ACTION_BODY_OVERHEAD_BYTES,
+    UPLOAD_MAX_FILES_PER_WINDOW,
+} from '@/lib/upload-limits';
 
 const NO_CACHE = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -94,6 +99,12 @@ export const POST = withAdminAuth(
             return NextResponse.json(
                 { error: 'Cumulative upload size exceeded; retry later' },
                 { status: 429, headers: NO_CACHE },
+            );
+        }
+        if (declaredUploadBytes > MAX_UPLOAD_FILE_BYTES + SERVER_ACTION_BODY_OVERHEAD_BYTES) {
+            return NextResponse.json(
+                { error: 'Uploaded file is too large' },
+                { status: 413, headers: NO_CACHE },
             );
         }
 
@@ -150,6 +161,13 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Missing file field' }, { status: 400, headers: NO_CACHE });
         }
         const fileSize = fileEntry.size;
+        if (fileSize > MAX_UPLOAD_FILE_BYTES) {
+            settleTrackerToActual(false);
+            return NextResponse.json(
+                { error: 'Uploaded file is too large' },
+                { status: 413, headers: NO_CACHE },
+            );
+        }
 
         // R4C1 COR-R4C1-03: mirror the browser path's user-filename guard
         // (app/actions/images.ts → getSafeUserFilename, C2L2-03/C2L2-05).

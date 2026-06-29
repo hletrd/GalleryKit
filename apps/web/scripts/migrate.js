@@ -233,6 +233,20 @@ async function ensureColumn(connection, dbName, tableName, columnName, addSql) {
     return false;
 }
 
+async function ensureColumnDefinition(connection, dbName, tableName, columnName, predicate, alterSql) {
+    const existing = await columnInfo(connection, dbName, tableName, columnName);
+    if (existing && !predicate(existing)) {
+        await connection.query(alterSql);
+        return true;
+    }
+    return false;
+}
+
+function isBooleanFalseDefault(info) {
+    const defaultValue = String(info.COLUMN_DEFAULT ?? '').toLowerCase();
+    return defaultValue === '0' || defaultValue === 'false' || defaultValue === "b'0'";
+}
+
 // Idempotent column drop. MySQL 8.0 has no DROP COLUMN IF EXISTS (MariaDB-only),
 // so guard on INFORMATION_SCHEMA. Used by reconcileLegacySchema to converge a DB
 // to the CURRENT schema even when a feature's column was removed — the migration
@@ -427,6 +441,15 @@ async function reconcileLegacySchema(connection, dbName) {
     // R10-M4: delivered AVIF bit depth (10-bit vs 8-bit). Public-safe.
     await ensureColumn(connection, dbName, 'images', 'avif_10bit', 'ALTER TABLE images ADD COLUMN avif_10bit boolean DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
+
+    await ensureColumnDefinition(
+        connection,
+        dbName,
+        'images',
+        'processed',
+        (info) => isBooleanFalseDefault(info),
+        'ALTER TABLE images MODIFY COLUMN processed boolean DEFAULT false'
+    );
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');
     if (captureDateInfo && captureDateInfo.DATA_TYPE !== 'datetime') {

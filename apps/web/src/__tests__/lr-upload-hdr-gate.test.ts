@@ -235,21 +235,33 @@ describe('lr upload parity source-contract (cycle 4)', () => {
             /import\s*\{\s*settleUploadTrackerClaim\s*\}\s*from\s*['"]@\/lib\/upload-tracker['"]/,
         );
         expect(LR_SRC).toMatch(
-            /import\s*\{[^}]*MAX_TOTAL_UPLOAD_BYTES[^}]*UPLOAD_MAX_FILES_PER_WINDOW[^}]*\}\s*from\s*['"]@\/lib\/upload-limits['"]/,
+            /import\s*\{[^}]*MAX_TOTAL_UPLOAD_BYTES[^}]*MAX_UPLOAD_FILE_BYTES[^}]*SERVER_ACTION_BODY_OVERHEAD_BYTES[^}]*UPLOAD_MAX_FILES_PER_WINDOW[^}]*\}\s*from\s*['"]@\/lib\/upload-limits['"]/,
         );
     });
 
-    it('enforces the cumulative count and byte windows before body parsing (DEF-C4-03)', () => {
+    it('enforces the individual and cumulative byte windows before body parsing (DEF-C4-03)', () => {
         expect(LR_SRC).toMatch(/request\.headers\.get\(['"]content-length['"]\)/);
         expect(LR_SRC).toMatch(/request\.headers\.get\(['"]transfer-encoding['"]\)/);
         expect(LR_SRC).toMatch(/declaredUploadBytes\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
+        expect(LR_SRC).toMatch(/declaredUploadBytes\s*>\s*MAX_UPLOAD_FILE_BYTES\s*\+\s*SERVER_ACTION_BODY_OVERHEAD_BYTES/);
         expect(LR_SRC).toMatch(/tracker\.count\s*\+\s*1\s*>\s*UPLOAD_MAX_FILES_PER_WINDOW/);
         expect(LR_SRC).toMatch(/tracker\.bytes\s*\+\s*declaredUploadBytes\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
+        const perFilePreParseIndex = LR_SRC.indexOf('MAX_UPLOAD_FILE_BYTES + SERVER_ACTION_BODY_OVERHEAD_BYTES');
         const trackerIndex = LR_SRC.indexOf('tracker.count += 1');
         const formDataIndex = LR_SRC.indexOf('request.formData()');
+        expect(perFilePreParseIndex).toBeGreaterThan(-1);
         expect(trackerIndex).toBeGreaterThan(-1);
         expect(formDataIndex).toBeGreaterThan(-1);
+        expect(perFilePreParseIndex).toBeLessThan(formDataIndex);
         expect(trackerIndex).toBeLessThan(formDataIndex);
+    });
+
+    it('rejects parsed Lightroom files above MAX_UPLOAD_FILE_BYTES before saving', () => {
+        const sizeCheckIndex = LR_SRC.search(/fileSize\s*>\s*MAX_UPLOAD_FILE_BYTES/);
+        const saveIndex = LR_SRC.indexOf('saveOriginalAndGetMetadata(fileEntry)');
+        expect(sizeCheckIndex).toBeGreaterThan(-1);
+        expect(saveIndex).toBeGreaterThan(-1);
+        expect(sizeCheckIndex).toBeLessThan(saveIndex);
     });
 
     it('settles the tracker claim back down on a pre-success reject (DEF-C4-03)', () => {

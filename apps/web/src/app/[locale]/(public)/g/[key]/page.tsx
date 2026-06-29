@@ -128,7 +128,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     // decision as the denormalized bufferGroupViewCount path in data.ts, so an
     // invalid ?photoId= URL cannot increment only one shared-group counter.
     if (!selectedImage && group.images.length > 0) {
-        void recordSharedGroupView(group.id);
+        void recordSharedGroupView(group.id, key);
     }
 
     if (selectedImage) {

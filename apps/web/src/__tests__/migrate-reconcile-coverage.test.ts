@@ -235,3 +235,11 @@ describe('reconcileLegacySchema DROP tripwire — migration 0024 reactions (R16C
         ).toBe(true);
     });
 });
+
+describe('reconcileLegacySchema column-definition convergence (C12-01)', () => {
+    it('repairs images.processed default drift in executable code', () => {
+        expect(MIGRATE_SRC_CODE).toMatch(/ensureColumnDefinition\(/);
+        expect(MIGRATE_SRC_CODE).toMatch(/isBooleanFalseDefault\(/);
+        expect(MIGRATE_SRC_CODE).toMatch(/ALTER TABLE images MODIFY COLUMN processed boolean DEFAULT false/);
+    });
+});

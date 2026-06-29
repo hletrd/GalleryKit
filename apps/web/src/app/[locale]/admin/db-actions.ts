@@ -146,7 +146,13 @@ export async function dumpDatabase() {
     // backups at rest as the personal-gallery threat model.
     await fs.mkdir(backupsDir, { recursive: true, mode: 0o700 });
 
-    const sslArgs = getMysqlCliSslArgs(DB_HOST);
+    let sslArgs: string[];
+    try {
+        sslArgs = getMysqlCliSslArgs(DB_HOST);
+    } catch (err) {
+        console.error('Database backup TLS configuration is incomplete:', err);
+        return { success: false as const, error: t('backupFailed') };
+    }
 
     return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
@@ -508,7 +514,14 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             return { success: false, error: t('missingDbConfig') };
         }
 
-        const restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
+        let restoreSslArgs: string[];
+        try {
+            restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
+        } catch (err) {
+            await cleanupTempFile();
+            console.error('Database restore TLS configuration is incomplete:', err);
+            return { success: false, error: t('restoreFailed'), keepMaintenance: false };
+        }
 
         cleanupTransferredToRestoreProcess = true;
         return await new Promise<RestoreResult>((resolve) => {

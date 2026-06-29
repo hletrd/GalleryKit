@@ -89,7 +89,7 @@ vi.mock('@/db', () => ({
     imageViews: { table: 'image_views' },
     topics: { slug: 'topics.slug' },
     topicViews: { table: 'topic_views' },
-    sharedGroups: { id: 'shared_groups.id', expires_at: 'shared_groups.expires_at' },
+    sharedGroups: { id: 'shared_groups.id', key: 'shared_groups.key', expires_at: 'shared_groups.expires_at' },
     sharedGroupImages: { groupId: 'shared_group_images.group_id', imageId: 'shared_group_images.image_id' },
     sharedGroupViews: { table: 'shared_group_views' },
 }));
@@ -241,7 +241,7 @@ describe('searchImagesAction', () => {
     it('records public analytics views without blocking on the insert promise', async () => {
         await recordPhotoView(7);
         await recordTopicView('seoul');
-        await recordSharedGroupView(11);
+        await recordSharedGroupView(11, '23456789AB');
 
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).toHaveBeenCalledTimes(3);
@@ -260,17 +260,32 @@ describe('searchImagesAction', () => {
 
         await recordPhotoView(7);
         await recordTopicView('seoul');
-        await recordSharedGroupView(11);
+        await recordSharedGroupView(11, '23456789AB');
 
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(headersMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
+    it('validates shared-group analytics against the public key before inserting', async () => {
+        dbSelectMock.mockReturnValue({
+            from: vi.fn(() => ({
+                innerJoin: vi.fn().mockReturnThis(),
+                where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })),
+            })),
+        });
+
+        await recordSharedGroupView(11, '23456789AB');
+
+        expect(dbSelectMock).toHaveBeenCalledOnce();
+        expect(dbInsertMock).not.toHaveBeenCalled();
+    });
+
     it('rejects invalid analytics recorder inputs before header or DB work', async () => {
         await recordPhotoView(0);
         await recordTopicView('INVALID SLUG!');
-        await recordSharedGroupView(-1);
+        await recordSharedGroupView(-1, '23456789AB');
+        await recordSharedGroupView(11, 'invalid-key');
 
         expect(headersMock).not.toHaveBeenCalled();
         expect(getClientIpMock).not.toHaveBeenCalled();
@@ -282,7 +297,7 @@ describe('searchImagesAction', () => {
 
         await recordPhotoView(7);
         await recordTopicView('seoul');
-        await recordSharedGroupView(11);
+        await recordSharedGroupView(11, '23456789AB');
 
         expect(headersMock).not.toHaveBeenCalled();
         expect(getClientIpMock).not.toHaveBeenCalled();
