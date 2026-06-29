@@ -1,83 +1,138 @@
-# Cycle 15 Architect Review
+# Architect Review - Cycle 16/100
 
-## Scope and Inventory
+## Scope
 
-Reviewed current HEAD `d401dd68`. I read `AGENTS.md` and `CLAUDE.md` first, inventoried the architecture surfaces, then inspected implementation and tests by subsystem. No source code was modified.
+- Reviewed HEAD: `7506661e247ee63680b547ed89a1e8462883b2e8`.
+- Review mode: architecture lane, current HEAD only.
+- Write scope: this report only.
+- Existing unrelated worktree changes observed in other review reports were not inspected as source of truth and were not modified.
+- Validation: repository inventory, whole-tree source/config/script scans, targeted full reads of boundary-owning modules, and a final missed-issues sweep. No test suite was run because this is a review-only artifact.
 
-Inventory covered:
+## Inventory Summary
 
-- Docs and operating contracts: `AGENTS.md`, `CLAUDE.md`, root/package config, Next/TypeScript config, Docker, Nginx, deploy scripts.
-- UI/server contracts: app routes and server actions under `apps/web/src/app`, admin/public layouts, upload route twins, API routes, service-worker registration and generated assets.
-- Domain/data layer: `apps/web/src/lib/data.ts`, analytics/search/sharing/settings/gallery config modules, privacy projection guards, public/admin data shapes.
-- State and cache ownership: service worker cache modules, upload serving, revalidation, process-local queues, restore maintenance, rate limits, view-count buffering, advisory locks.
-- Data model and migrations: `apps/web/src/db/schema.ts`, all committed Drizzle migrations, `_journal.json`, `apps/web/scripts/migrate.js`, reconcile/baseline/postcondition tests.
-- Deployment topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, entrypoint and runtime env handling.
-- Tests and lint contracts: source tests, E2E inventory, custom lint scripts for admin API auth, action origin, public mutating route rate limits, migration coverage, storage quarantine, service-worker contracts.
+No sampling was used for inventory. Every tracked path at HEAD was enumerated, then architecture-relevant surfaces were classified and scanned for route/action boundaries, server/client layering, storage access, upload/queue flows, migrations, deployment topology, and cross-cutting guards.
 
-Architecture-relevant inventory size was 510 files across `src/app`, `src/lib`, `src/db`, migrations, scripts, tests, E2E, and Nginx. I inspected the active runtime/config/schema/test surfaces by subsystem rather than relying on the previous cycle review. Existing unrelated dirty review files were present before this pass and were not used as current-HEAD evidence.
+Key architecture surfaces:
 
-## Findings
+- Application routes and server actions: `apps/web/src/app/**` (77 files), including public gallery pages, admin pages, public API routes, admin API routes, upload actions, smart-collection actions, sitemap/feed routes, and search endpoints.
+- UI components: `apps/web/src/components/**` (57 files), with server/client boundary checks around imports from data and configuration modules.
+- Domain and infrastructure libraries: `apps/web/src/lib/**` (96 files), including data access, queueing, upload contracts, rate limiting, CLIP embeddings, smart collections, image processing, analytics, caching, validation, and auth/session helpers.
+- Database schema and connection layer: `apps/web/src/db/**` (3 files).
+- Migrations and migration metadata: `apps/web/drizzle/**` (31 files), including `_journal.json` and SQL migration history.
+- Operational scripts and deployment: `apps/web/scripts/**` (27 files), `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `next.config.ts`, and package manifests.
+- Automated coverage inventory: `apps/web/src/__tests__/**` (267 files) and `apps/web/e2e/**` (8 files), used to understand enforced architectural contracts such as privacy guards, auth wrappers, route rate-limit checks, and touch-target rules.
+- Project context and historical plans/reviews: `.context/**` (1755 files) was inventoried for process context; current review findings are based on HEAD source files, not prior review conclusions.
 
-### ARCH-C15-01 - Failed restore maintenance blocks the next in-process restore attempt
+Primary boundary files inspected in detail:
 
-- Severity: High
-- Confidence: High
-- Status: Confirmed
-- Area: restore lifecycle, state ownership, recovery topology
+- Data/read model: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/analytics-data.ts`, `apps/web/src/lib/view-retention.ts`.
+- Write paths: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/collections.ts`, `apps/web/src/app/actions/public.ts`.
+- Upload and processing: `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/instrumentation.ts`.
+- Search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`.
+- Schema/migrations: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`.
+- Runtime/deploy: `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/src/proxy.ts`.
 
-Citations:
+## Confirmed Issues
 
-- `apps/web/src/app/[locale]/admin/db-actions.ts:288`-`293` returns `restoreInProgress` immediately when process-local restore maintenance is active.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:393`-`405` records `keepRestoreMaintenance` from `runRestore()` and skips `endRestoreMaintenance()` when a failed restore asks to keep maintenance active.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:560`-`568` resolves read/stdin/spawn handoff failures with `keepMaintenance: true`.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:600`-`615` also keeps maintenance active when post-restore migrations fail or the `mysql` import exits non-zero.
-- `apps/web/src/lib/restore-maintenance.ts:1`-`18` stores maintenance state only on `globalThis`; `apps/web/src/lib/restore-maintenance.ts:21`-`26` exposes only a boolean gate/message; `apps/web/src/lib/restore-maintenance.ts:44`-`55` has no owner, phase, recovery token, or retry path.
-- `apps/web/src/__tests__/restore-upload-lock.test.ts:57`-`77` source-locks the decision to keep maintenance active after migration and handoff failures, but there is no corresponding test that a corrective restore can be attempted while other writers stay blocked.
-
-Failure scenario:
-
-An admin restores a bad dump, the `mysql` process partially imports and exits non-zero, or the import succeeds but the post-restore migration/reconcile step fails. The code deliberately keeps restore maintenance active to protect the app from serving or mutating a potentially inconsistent database. In that same Node process, the only UI/API recovery path is another call to `restoreDatabase()`, but that action checks `getRestoreMaintenanceMessage()` before it tries to acquire `LOCK_DB_RESTORE` or validate a new restore file. The corrected dump is rejected as "restore in progress" even though the previous restore process and DB advisory locks are gone. Recovery now requires manual process restart or out-of-band DB repair, exactly when the restore UI is supposed to be the recovery mechanism.
-
-Concrete fix:
-
-Split "writers are blocked because the DB may be inconsistent" from "no restore may start." Let `restoreDatabase()` enter a narrowly authenticated recovery branch when maintenance is active and the DB restore advisory lock is free, while keeping uploads, public writes, analytics writes, image queue work, token mutation, and semantic search blocked. A durable or process-local restore phase/owner token is enough for the single-process topology; if the state moves to shared storage later, store `{active, phase, owner, lastFailure}` and require a new restore to replace the failed owner after lock acquisition. Add regression tests for a failed import/migration followed by a second restore attempt that is allowed, plus tests that unrelated mutating routes remain blocked until a successful restore exits maintenance.
-
-### ARCH-C15-02 - Locale-prefixed upload derivatives bypass the service-worker image cache policy
+### ARCH-16-01 - Smart-collection AST breadth is unbounded and can amplify public request cost
 
 - Severity: Medium
-- Confidence: Medium
-- Status: Likely issue
-- Area: cache ownership, URL contract, locale routing
-
-Citations:
-
-- `apps/web/src/lib/sw-cache.ts:73`-`81` treats only root `/uploads/avif|webp|jpeg/...` URLs as image derivatives.
-- `apps/web/public/sw.template.js:50`-`55` and the shipped generated `apps/web/public/sw.js:50`-`55` repeat the same root-only predicate.
-- `apps/web/public/sw.template.js:386`-`389` and `apps/web/public/sw.js:386`-`389` route only predicate matches through `staleWhileRevalidateImage()`.
-- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:4`-`12` serves locale-prefixed upload derivatives through the same `serveUploadFile()` helper.
-- `apps/web/nginx/default.conf:173`-`184` proxies optional locale-prefixed derivative paths to Next with the same cache policy as root uploads.
-- `CLAUDE.md:296` documents both route handlers and says they execute for `/uploads/...` and `/{locale}/uploads/...` URLs.
-- `apps/web/src/__tests__/sw-cache.test.ts:81`-`100` tests only the root `/uploads/...` predicate shape and has no locale-prefixed derivative case.
-- `apps/web/src/lib/image-url.ts:32`-`37` and most components generate root `/uploads/...` URLs today, which lowers immediate blast radius but leaves the supported locale-prefixed URL shape outside the service-worker contract.
+- Confidence: High
+- Code regions:
+  - `apps/web/src/lib/smart-collections.ts:142-145` defines `MAX_DEPTH` and `MAX_IN_VALUES`, but no maximum children per group, total AST nodes, compiled predicates, or serialized query size.
+  - `apps/web/src/lib/smart-collections.ts:165-178` compiles every group child and spreads all generated clauses into `drizzleAnd(...clauses)` / `drizzleOr(...clauses)`.
+  - `apps/web/src/lib/smart-collections.ts:416-421` validates group children only for being a non-empty array, then recursively validates every child.
+  - `apps/web/src/app/actions/collections.ts:32-50` and `apps/web/src/app/actions/collections.ts:83-98` persist `query_json` after `parseSmartCollectionQuery` without breadth or byte-size enforcement.
+  - `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:86-101` reparses and compiles the stored query during unauthenticated public page rendering.
+  - `apps/web/src/app/actions/public.ts:203-218` repeats the parse/compile/query path for public smart-collection load-more requests.
 
 Failure scenario:
 
-A user reaches or bookmarks a valid locale-prefixed derivative URL such as `/ko/uploads/jpeg/photo_1536.jpg`, or a future localized component/link builder preserves the locale prefix for image paths because the server and Nginx both explicitly support that shape. The service worker does not classify that request as an image derivative, so it skips the image stale-while-revalidate path, LRU accounting, HEAD freshness probe, and image-cache metadata. Equivalent bytes now have different offline and freshness behavior depending on URL shape. After color, quality, size, or pipeline changes, root URLs and locale-prefixed URLs can refresh differently in the PWA even though the server-side route contract says they are equivalent derivative serving paths.
+An admin, or anyone who compromises an admin session, can create a smart collection whose JSON fits in the database `TEXT` column but contains thousands of sibling predicates in a single `and` or `or` group. The current depth cap prevents deeply nested recursion and the `in` cap prevents one large `in` list, but neither cap limits breadth. Each unauthenticated request to the collection page or load-more action then parses the large JSON, recursively compiles every predicate, creates a very large SQL expression, and asks MySQL to plan and execute it. A single admin-authored object can therefore become a public CPU and database planner amplifier.
 
-Concrete fix:
+Suggested fix:
 
-Make the derivative predicate canonical across `src/lib/sw-cache.ts`, `public/sw.template.js`, and regenerated `public/sw.js`, for example by matching an optional locale segment before `/uploads/(avif|webp|jpeg)/`. Add unit tests for `/en/uploads/jpeg/foo.jpg` and `/ko/uploads/avif/foo.avif`, keep `/uploads/original/...` excluded, and keep `sw-template-contract.test.ts` pinning the template/generated pair. If the intended architecture is instead "only root upload URLs participate in PWA image caching," remove or narrow the locale-prefixed upload route/support from docs and Nginx so the serving contract has a single cache owner.
+Add explicit structural limits to the smart-collection query contract:
+
+- `MAX_CHILDREN_PER_GROUP`, enforced before recursively validating children.
+- `MAX_AST_NODES` or `MAX_PREDICATES`, counted across the whole tree during validation.
+- `MAX_QUERY_JSON_BYTES`, enforced in create/update actions before persistence.
+- Regression tests for create/update rejection, parser error shape, and public route/load-more behavior with the maximum accepted query.
+
+Keep these limits in `apps/web/src/lib/smart-collections.ts` so all writers and readers share the same contract. If future smart collections need very large boolean expressions, store normalized clauses and precomputed membership rather than compiling unbounded JSON into public-request SQL.
+
+## Likely Issues
+
+No likely architecture issues were found beyond the confirmed smart-collection breadth gap. The remaining items below are manual-validation risks because current HEAD has explicit constraints or documentation that make them acceptable under the documented single-instance personal-gallery topology.
+
+## Manual-Validation Risks
+
+### MVR-16-01 - Process-local coordination assumes exactly one active web process
+
+- Severity if topology changes: Medium
+- Confidence: High
+- Code regions:
+  - `apps/web/docker-compose.yml:11-16` defines a single `gallerykit-web` service instance for the deployed app.
+  - `apps/web/src/lib/image-queue.ts:76-90` and `apps/web/src/lib/image-queue.ts:275-325` keep queue status, active job IDs, processed IDs, and retry state in process memory.
+  - `apps/web/src/lib/data.ts:13-35` buffers shared-group view-count increments in process memory before flushing to MySQL.
+  - `apps/web/src/lib/upload-tracker-state.ts:7-20` and `apps/web/src/lib/upload-tracker-state.ts:70-79` track active upload claims in process memory.
+  - `apps/web/src/lib/rate-limit.ts:112-121` uses an in-memory fast path ahead of durable rate-limit persistence.
+
+Risk scenario:
+
+The design is coherent for the documented single-web-container deployment, and several operations also use database locks or durable tables. If the app is horizontally scaled without an architecture change, status visibility, upload-setting locks, retry bookkeeping, buffered counters, and rate-limit fast paths can diverge across processes. That would produce inconsistent admin status, premature setting changes during uploads on another worker, duplicate or missing transient queue state, or weaker burst limiting.
+
+Suggested validation/fix:
+
+Before adding replicas, externalize these coordination points to MySQL or Redis, or add an explicit deployment guard that fails startup when multiple web instances are configured without a distributed coordination backend. Keep the current single-instance assumption documented in deployment runbooks.
+
+### MVR-16-02 - Semantic search remains a bounded brute-force architecture
+
+- Severity if data or caps grow: Medium
+- Confidence: Medium
+- Code regions:
+  - `apps/web/src/lib/clip-embeddings.ts:36-44` allows `SEMANTIC_SCAN_LIMIT` up to 25,000.
+  - `apps/web/src/app/api/search/semantic/route.ts:261-305` loads a capped embedding candidate set and scores it in the request path.
+  - `apps/web/src/app/api/search/similar/[id]/route.ts:143-176` uses the same request-path scoring pattern for similar-image search.
+  - `apps/web/src/lib/clip-model.ts:53-70` constrains local CLIP inference concurrency but still runs model inference in the web runtime.
+
+Risk scenario:
+
+Current HEAD has rate limits, mode gates, scan caps, and concurrency caps, so this is not a confirmed defect. The architecture is still linear-scan search inside the web request path. If production image count, embedding count, scan caps, or inference concurrency are raised without load testing, search latency and Node CPU pressure can degrade regular gallery traffic.
+
+Suggested validation/fix:
+
+Keep the current caps conservative unless production profiling proves headroom. If semantic search becomes a primary workflow or the corpus grows materially, move vector ranking to a dedicated vector index/service or a precomputed nearest-neighbor table rather than raising brute-force scan limits.
+
+### MVR-16-03 - Dockerfile native package pins are coupled to package versions by convention
+
+- Severity if dependencies are upgraded without the Dockerfile: Low
+- Confidence: Medium
+- Code regions:
+  - `apps/web/Dockerfile:50-56` explicitly installs native production packages such as `@next/swc-linux-x64-gnu@16.2.9`, `@swc/core-linux-x64-gnu@1.15.41`, and `@img/sharp-linux-x64@0.34.5`.
+  - `apps/web/package.json:35-43` currently declares matching application-level Next.js, Sharp, and related package versions.
+
+Risk scenario:
+
+Current HEAD appears internally consistent. The risk is architectural coupling: dependency upgrades in `package.json` or `package-lock.json` can silently diverge from the explicit native package versions in the Dockerfile. That can produce container-only build/runtime failures or native binary mismatches even when local install and typecheck pass.
+
+Suggested validation/fix:
+
+Add a lightweight CI/script check that compares Dockerfile native pins against `package-lock.json`, or derive the native package install versions from the lockfile during the Docker build. Keep explicit pins only if the version-sync check is enforced.
 
 ## Final Missed-Issues Sweep
 
-I rechecked the highest-risk architectural seams after drafting findings:
+Final sweep checks performed across HEAD:
 
-- Restore/upload/image-queue coordination: DB restore uses DB advisory locks, upload-processing contract lock, backfill lock, queue quiesce/resume, and maintenance gates across public/admin mutations. The unresolved gap is specifically the failed-restore retry path above.
-- Migration strategy: current migrations, `_journal.json`, `migrate.js`, `migrate-reconcile-coverage.test.ts`, and `migration-journal.test.ts` now cover the previously fragile non-monotonic journal/reconcile path. I did not find a new current-HEAD migration drift issue beyond the existing documented operational constraints.
-- Public/admin boundaries: admin API auth wrappers, same-origin server-action guards, privacy omit/type tests, and public projection fields are aligned with the documented model in the sampled route/action/data paths.
-- Public unauthenticated expensive GETs: OG routes now pre-increment rate limits and have source/tests locking charged failure semantics, so I did not carry a public-GET rate-limit finding.
-- Deployment topology: `CLAUDE.md` explicitly treats the single web instance as a correctness boundary for process-local state. I did not repeat that accepted topology constraint as a new finding this cycle.
-- Storage abstraction: the storage module remains quarantined by source tests, so the previous cycle's storage-abstraction risks are future integration risks, not current production coupling defects.
-- Cache/serving layers: Next static serving, route-handler fallback, Nginx, service-worker cache, and upload route method tests are mostly aligned. The missed contract is the locale-prefixed derivative URL shape in the service worker.
+- Server/client boundary scan: checked `"use client"` files for direct imports from server-only data, database, filesystem, auth, and image-processing modules. No confirmed boundary violation found.
+- Admin API boundary scan: checked admin API handlers against `withAdminAuth(...)` expectations and existing lint coverage. No confirmed gap found.
+- Mutating public route scan: checked public `POST`/`PUT`/`PATCH`/`DELETE` routes for durable pre-increment rate-limit helpers or explicit exemptions. No confirmed gap found.
+- Server-action origin scan: checked mutating server actions for same-origin admin guards where required. No confirmed gap found.
+- Privacy/select-shape scan: checked public data selection patterns and privacy guard tests around admin-only columns. No confirmed leak found.
+- Upload/settings interaction scan: checked browser upload, Lightroom upload, upload tracker claims, and upload-processing contract lock interactions. No confirmed race beyond the documented single-process manual-validation risk.
+- Queue/bootstrap/shutdown scan: checked instrumentation bootstrap, advisory locks, retry state, derivative generation, and graceful shutdown. No confirmed architecture issue under the current single-instance deployment.
+- Migration/schema scan: checked schema, migration journal, reconcile baseline, and migration post-condition assertion. No confirmed migration architecture issue found.
+- Cache/revalidation scan: checked gallery config, smart collections, image mutations, and public load-more/search flows for obvious stale boundary violations. No additional confirmed issue found.
+- Deployment/topology scan: checked Next standalone config, nginx upload/body limits, Docker build strategy, docker-compose service shape, and deploy helper. No confirmed issue beyond the native-pin drift risk.
 
-Tests were not run because this was a review-only task and no production source changed. Validation evidence is direct current-HEAD file/line inspection, targeted source/test sweeps, and the artifact written here.
+Stop condition reached: one confirmed architecture issue was identified with exact code regions and fix direction; likely issues were not found; manual-validation risks were documented separately from confirmed defects.
