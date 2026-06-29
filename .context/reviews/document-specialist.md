@@ -1,70 +1,106 @@
-# Cycle 11 Document-Specialist Review
+# Cycle 12 Document-Specialist Review
 
 **Date:** 2026-06-29
-**HEAD reviewed:** `944bbdb0e930c0f4b03bc09b240a2dfcb93935f2`
-**Scope:** PROMPT 1 document/code mismatch review only. Production code was not edited; this report is the only intended write.
+**HEAD reviewed:** `d7fd0db296817e7322bb62b346a6b2c64904cec9`
+**Scope:** Document/code mismatch review only. No production code fixes were made.
 
-## Inventory Summary
+## Inventory
 
-I built the review inventory before evaluating mismatches. The current unignored repo inventory, excluding `node_modules`, `.next`, `.claude/worktrees`, and `.git`, contains 780 files. I inspected the canonical docs and their implementation touchpoints across:
+I built the review inventory first, then checked each authoritative claim against the corresponding implementation. There is no `.context/docs/` directory in this checkout, so I treated the current governing docs plus `.context/plans/README.md` as the review-relevant `.context` documentation surface and treated historical review/plan archives as non-authoritative history unless they were needed to understand a current claim.
 
-- Governing docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
-- Package, CI, and quality-gate surfaces: root `package.json`, `apps/web/package.json`, lint/type/build/test scripts, and existing review artifacts for current claims.
-- Deploy/runtime contracts: `.env.deploy.example`, deploy scripts, Dockerfile/Compose, nginx config, health routes, and build-time guards.
-- Public-source contracts cited by docs: SEO/base URL handling, OpenGraph routes, feed routes, service-worker source/generated copy, public route freshness, semantic-search activation, migration/privacy contracts, and associated tests.
-- Final grep sweeps covered `BASE_URL`, `siteConfig.url`, `every public page`, `revalidate = 0`, `per-entry <author>`, and `author_name` references.
+Reviewed authoritative docs:
+
+- `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
+- `.context/plans/README.md` and current `.context/plan/*.md` / `.context/plans/*.md` index surfaces.
+- Deploy docs and config claims in root/app READMEs, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, and build/deploy guard scripts.
+- Migration and schema docs in `AGENTS.md`, `CLAUDE.md`, `apps/web/drizzle/meta/_journal.json`, `apps/web/drizzle/*.sql`, `apps/web/scripts/init-db.ts`, and `apps/web/scripts/migrate.js`.
+- Security/privacy docs and implementation in `proxy.ts`, `request-origin.ts`, `action-guards.ts`, `rate-limit.ts`, public/admin API route guards, data select fields, privacy tests, and map/feed/search surfaces.
+- User-facing i18n strings in `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
+- Comments and test descriptions found by full-text sweeps for behavior claims (`must`, `not implemented`, `future`, `per-entry`, `X-Forwarded-Host`, `BASE_URL`, `siteConfig.url`, `onnxruntime`, privacy-sensitive fields, migration journal, and line-reference patterns).
+
+Skipped only generated/build/vendor or historical non-authoritative files: `node_modules`, `.next`, `.git`, uploaded/resource data, gate logs, archived reviews/plans, and prior review artifacts not used as current product documentation. No source or doc fixes were implemented.
 
 ## Findings
 
-### CONFIRMED - MEDIUM - Base-URL docs say `site-config.url` must match `BASE_URL`, but the build guard permits a split-brain OG configuration
+### CONFIRMED - LOW - `uploaded_by` comments still describe public Atom per-entry attribution that the privacy contract removed
 
-**Files/regions:** `CLAUDE.md:214`, `CLAUDE.md:633-636`, `apps/web/scripts/ensure-site-config.mjs:11-40`, `apps/web/src/__tests__/ensure-site-config.test.ts:69-76`, `apps/web/src/lib/data.ts:1740-1747`, `apps/web/src/app/api/og/photo/[id]/route.tsx:51-58`, `apps/web/src/app/api/og/photo/[id]/route.tsx:112-131`, `apps/web/src/app/api/og/photo/[id]/route.tsx:252-297`
-
-**Confidence:** High
-
-**Evidence:** `CLAUDE.md:636` documents `site-config.json.url` as the canonical base URL that "must match `BASE_URL` env var", while `CLAUDE.md:214` says production validates the effective canonical base URL as `BASE_URL || siteConfig.url` and also says per-photo OG derivative fetches are pinned to trusted `siteConfig.url`. The validator implements only the effective URL check: it reads `process.env.BASE_URL || siteConfig.url` (`apps/web/scripts/ensure-site-config.mjs:11-12`) and rejects missing, non-http(s), or placeholder effective hosts (`apps/web/scripts/ensure-site-config.mjs:23-40`). The test suite explicitly locks that split by expecting success when `BASE_URL` overrides a `site-config` value of `https://example.com` (`apps/web/src/__tests__/ensure-site-config.test.ts:69-76`). SEO settings then publish `url: process.env.BASE_URL || siteConfig.url` (`apps/web/src/lib/data.ts:1740-1747`), but the per-photo OG route still uses `new URL(siteConfig.url).origin` for internal derivative fetches (`apps/web/src/app/api/og/photo/[id]/route.tsx:112-125`) and falls back when those fetches fail (`apps/web/src/app/api/og/photo/[id]/route.tsx:126-131`). Invalid-ID fallback paths also use `siteConfig.url` directly (`apps/web/src/app/api/og/photo/[id]/route.tsx:51-58`), and the fallback builder redirects relative to whichever canonical base URL it receives (`apps/web/src/app/api/og/photo/[id]/route.tsx:252-297`).
-
-**Failure scenario:** An operator follows the docs loosely, leaves `apps/web/src/site-config.json.url` at `https://example.com`, and sets `BASE_URL=https://gallery.example.com`. The production build passes because the validator and test accept the `BASE_URL` override, sitemap/metadata use `gallery.example.com`, but per-photo OG image generation attempts internal derivative fetches from `https://example.com/uploads/...`. Valid photo OG images then fall back to the site-default/root response instead of rendering the photo, and malformed-ID fallback can derive redirects from the stale `siteConfig.url`.
-
-**Concrete fix:** Pick one contract and align docs, guard, and route. If `siteConfig.url` must match `BASE_URL`, make `ensure-site-config.mjs` validate `siteConfig.url` itself when `BASE_URL` is set and update the override test. If `BASE_URL` is the intended runtime override, change the per-photo OG route to use the same centralized canonical URL (`seo.url` or a shared `BASE_URL` helper) for derivative fetch origin and fallback paths, then update `CLAUDE.md:636` to say `BASE_URL` overrides `site-config.url`.
-
-### CONFIRMED - LOW - Service-worker docs claim every public page sets `revalidate = 0`, but the privacy page does not
-
-**Files/regions:** `CLAUDE.md:399-410`, `apps/web/public/sw.template.js:7-15`, `apps/web/public/sw.js:7-15`, `apps/web/src/__tests__/sw-template-contract.test.ts:6-11`, `apps/web/src/app/[locale]/(public)/privacy/page.tsx:1-15`, `apps/web/src/app/[locale]/(public)/page.tsx:16`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:38`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:19`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/map/page.tsx:10`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:16`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:17`
+**Files/regions:** `CLAUDE.md:171`, `apps/web/src/lib/data.ts:833-845`, `apps/web/src/app/feed.xml/route.ts:76-82`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`, `apps/web/src/app/actions/images.ts:435-438`, `apps/web/src/app/api/admin/lr/upload/route.ts:416-422`, `apps/web/src/__tests__/privacy-fields.test.ts:28-30`
 
 **Confidence:** High
 
-**Evidence:** `CLAUDE.md:399` accurately narrows freshness to public photo, topic, shared, and home pages, but `CLAUDE.md:410` broadens the service-worker rationale to "every public page sets `revalidate = 0`". The shipped service-worker template and generated copy repeat that broad statement (`apps/web/public/sw.template.js:7-15`, `apps/web/public/sw.js:7-15`), and the SW contract test preamble says every public page ships `no-store` (`apps/web/src/__tests__/sw-template-contract.test.ts:6-11`). Most public routes do export `revalidate = 0` at the cited route files, but `apps/web/src/app/[locale]/(public)/privacy/page.tsx:1-15` has metadata and render code without a `revalidate` export.
+**Evidence:** `CLAUDE.md:171` says `uploaded_by` is admin-only and public Atom currently uses the feed-level author until a safe public display-name field exists. The data helper enforces that by selecting `author_name: sql<string | null>\`NULL\`` and documenting that every entry falls back to the feed-level author (`apps/web/src/lib/data.ts:833-845`). Both feed routes now carry the same privacy invariant (`apps/web/src/app/feed.xml/route.ts:76-82`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`). However, the browser upload path still says recording `uploaded_by` lets "per-entry Atom `<author>`" attribute the upload and that "the public feed renders a JOIN-derived display name" (`apps/web/src/app/actions/images.ts:435-438`). The Lightroom upload path similarly says a missing `uploaded_by` makes public Atom per-entry author attribution dead (`apps/web/src/app/api/admin/lr/upload/route.ts:416-422`). The privacy test fixture also says per-entry Atom author uses a JOIN-derived display name in `getImagesForFeed` (`apps/web/src/__tests__/privacy-fields.test.ts:28-30`).
 
-**Failure scenario:** A maintainer extending `networkFirstHtml` or the SW cache contract can rely on the broader doc/test/template claim and assume all public HTML is dynamic/no-store. The privacy page is a counterexample, so the stated Cache-Control premise is false for at least one public route. The current privacy page is static and low-risk, but the mismatch makes future offline-cache reasoning and route audits less reliable.
+**Failure scenario:** A future maintainer follows the upload-path comments rather than the data-layer privacy contract and reintroduces an admin-user join or expects Lightroom/browser upload attribution to appear in public feeds. That can either leak admin identifiers through unauthenticated `feed.xml` endpoints or send someone debugging a nonexistent attribution feature.
 
-**Concrete fix:** Update the service-worker docs, template comment, generated `sw.js`, and test preamble to match the narrower true contract: dynamic public gallery/photo/topic/share/map/timeline/year pages set `revalidate = 0`, while static public pages such as privacy may be cacheable. If the product intent really is "every public page", add `export const revalidate = 0` to the privacy route and keep the broad docs.
+**Suggested fix:** Rewrite the stale comments to say `uploaded_by` is retained for admin audit/ownership only; public Atom entries intentionally use the feed-level author until a separate public display-name field exists. Keep the route/data comments as the source of truth.
 
-### CONFIRMED - LOW - Atom feed route comments still describe per-entry admin authors even though data intentionally emits `NULL`
+### CONFIRMED - LOW - Florence caption-generator comments say `onnxruntime-node` still needs to be added, but it is already installed for CLIP
 
-**Files/regions:** `CLAUDE.md:171`, `apps/web/src/lib/data.ts:827-845`, `apps/web/src/app/feed.xml/route.ts:76-83`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`
+**Files/regions:** `apps/web/src/lib/caption-generator.ts:4-17`, `apps/web/package.json:28-29`, `package-lock.json:1038-1047`, `package-lock.json:8638-8643`, `apps/web/README.md:58-60`, `CLAUDE.md:540`
 
 **Confidence:** High
 
-**Evidence:** `CLAUDE.md:171` documents the current privacy contract: `uploaded_by` is admin-only and public Atom uses the feed-level author until a safe public display-name exists. The data layer enforces that by selecting `author_name: sql<string | null>\`NULL\`` and explaining that public Atom must not expose the admin login username (`apps/web/src/lib/data.ts:827-845`). The route-level comments still say "per-entry `<author>` when the upload carries a known admin" and explain the `NULL` fallback (`apps/web/src/app/feed.xml/route.ts:76-83`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`). Because the helper always returns `NULL`, the per-entry author branch is currently dead for production feed data.
+**Evidence:** The caption generator stub says the full Florence path is deferred because `onnxruntime-node` adds native binaries, claims the stub keeps the binary footprint zero, and lists "`onnxruntime-node` is added as a dependency" as a future prerequisite (`apps/web/src/lib/caption-generator.ts:4-17`). Current semantic-search code already ships `@huggingface/transformers` as a production dependency (`apps/web/package.json:28-29`), and the lockfile shows `@huggingface/transformers` depends on `onnxruntime-node@1.21.0` (`package-lock.json:1038-1047`, `package-lock.json:8638-8643`). The app README and CLAUDE.md explicitly document that the CPU binding ships inside the npm tarball and needs no Dockerfile step (`apps/web/README.md:58-60`, `CLAUDE.md:540`).
 
-**Failure scenario:** A future maintainer reads the route comments as the intended R17-L2 behavior and restores an admin-user join or otherwise wires `uploaded_by` into public feed entries, contradicting the documented privacy decision in `CLAUDE.md` and the data-layer security comment. That could expose valid admin identifiers through unauthenticated `feed.xml` endpoints.
+**Failure scenario:** A future implementer treats the caption comment as current and spends time adding a duplicate native dependency, changing Dockerfile install behavior, or deferring Florence work under the false assumption that the runtime binding is absent. That is low runtime risk but high maintenance noise around native dependencies.
 
-**Concrete fix:** Replace the stale route comments with the current invariant: `author_name` is intentionally `NULL`, so entries fall back to the feed-level author until a separate admin-set public display-name field exists. Alternatively, remove the dead per-entry branch from the routes until such a field is implemented.
+**Suggested fix:** Update `caption-generator.ts` to say the Florence implementation is still deferred because the Florence weights/download/operator flow and inference integration are not implemented. Remove the claim that `onnxruntime-node` still needs to be added or that the current binary footprint is zero.
 
-## Likely Issues
+### CONFIRMED - LOW - CLAUDE base-URL prose overstates `siteConfig.url` and `BASE_URL` matching requirements
 
-None beyond the confirmed findings above.
+**Files/regions:** `CLAUDE.md:214`, `CLAUDE.md:633-636`, `apps/web/src/lib/constants.ts:21-24`, `apps/web/scripts/ensure-site-config.mjs:11-40`, `apps/web/src/__tests__/ensure-site-config.test.ts:69-76`, `apps/web/src/app/api/og/photo/[id]/route.tsx:103-120`, `apps/web/src/lib/data.ts:1736-1740`, `README.md:147-148`, `apps/web/README.md:42`
 
-## Final Missed-Issue Sweep
+**Confidence:** High
 
-The final sweep rechecked canonical docs and code comments against implementation for base URL validation/OG origin selection, public route cache freshness, service-worker offline fallback rationale, Atom feed author privacy, semantic search activation, migration/hash contracts, upload/derivative limits, health/readiness behavior, Docker/nginx deploy assumptions, and privacy-sensitive field guards.
+**Evidence:** CLAUDE says per-photo OG internal derivative fetches are pinned to trusted `siteConfig.url` (`CLAUDE.md:214`) and the deployment checklist says `site-config.json.url` "must match `BASE_URL` env var" (`CLAUDE.md:633-636`). Current code centralizes `BASE_URL` as `process.env.BASE_URL || siteConfig.url` (`apps/web/src/lib/constants.ts:21-24`), the build guard validates that effective value (`apps/web/scripts/ensure-site-config.mjs:11-40`), and the test suite explicitly accepts `BASE_URL` overriding a placeholder `site-config` URL (`apps/web/src/__tests__/ensure-site-config.test.ts:69-76`). The per-photo OG route comments and code now use the trusted effective canonical origin, not raw `siteConfig.url` (`apps/web/src/app/api/og/photo/[id]/route.tsx:103-120`). SEO settings also use `process.env.BASE_URL || siteConfig.url` (`apps/web/src/lib/data.ts:1736-1740`). The root and app READMEs match the code by saying to set a real `BASE_URL` or replace `site-config.json.url` (`README.md:147-148`, `apps/web/README.md:42`).
 
-Already-aligned areas included Node/package script names, Docker bind mounts and prune-after-up policy, upload and nginx body-size limits, health/live route behavior, semantic-search stub/production gating, similar-search production-only UI gating, migration journal postconditions, and the `_PrivacySensitiveKeys`/`SENSITIVE_KEYS` privacy guard.
+**Failure scenario:** An operator or future maintainer following only CLAUDE can believe the app requires `siteConfig.url` and `BASE_URL` to be identical, even though the tested code supports `BASE_URL` as an override. Conversely, a future "docs-alignment" patch could incorrectly tighten the guard and break the supported override path.
+
+**Suggested fix:** Update CLAUDE to use one contract consistently: either document `BASE_URL || siteConfig.url` as the canonical value everywhere, or deliberately change code/tests to enforce exact matching. The current implementation evidence favors updating CLAUDE.
+
+### CONFIRMED - LOW - Privacy test comment points at an obsolete `data.ts` line range
+
+**Files/regions:** `apps/web/src/__tests__/privacy-fields.test.ts:71-85`, `apps/web/src/lib/data.ts:459-477`
+
+**Confidence:** High
+
+**Evidence:** The symmetric privacy-guard test comment says the existing `_privacyGuard` is at `data.ts:198-200` (`apps/web/src/__tests__/privacy-fields.test.ts:80`). The guard is now at `apps/web/src/lib/data.ts:459-477`.
+
+**Failure scenario:** This does not change test behavior, but it sends future reviewers to the wrong region when auditing a privacy-sensitive field addition. The prompt explicitly includes test descriptions and comments that claim behavior; stale line references are low-cost drift that tends to compound in this repo.
+
+**Suggested fix:** Replace the hard-coded line range with a symbol reference such as "`_privacyGuard` in `apps/web/src/lib/data.ts`" or update the current line reference.
+
+### RISK - LOW - Shipped nginx catch-all does not set `X-Forwarded-Host` even though docs require proxies to overwrite it
+
+**Files/regions:** `README.md:153`, `apps/web/README.md:48`, `apps/web/nginx/default.conf:56-160`, `apps/web/nginx/default.conf:185-195`, `apps/web/src/lib/request-origin.ts:55-68`
+
+**Confidence:** Medium
+
+**Evidence:** The root README and app README both say the trusted proxy must overwrite `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` (`README.md:153`, `apps/web/README.md:48`). Most specific nginx locations do set `X-Forwarded-Host` (`apps/web/nginx/default.conf:56-160`), but the catch-all `location /` sets `Host`, `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto` without `X-Forwarded-Host` (`apps/web/nginx/default.conf:185-195`). Current same-origin calculation falls back from trusted `x-forwarded-host` to `host` (`apps/web/src/lib/request-origin.ts:55-68`), so I did not confirm a live break in the shipped topology.
+
+**Failure scenario:** The shipped config contradicts the docs for all catch-all routes, including public same-origin-gated endpoints routed through `location /`. Today the Host fallback appears to preserve behavior, but a future request-origin refactor or a custom proxy copied from the docs/config split could rely solely on `X-Forwarded-Host` and fail same-origin validation or use an unexpected host.
+
+**Suggested fix:** Either add `proxy_set_header X-Forwarded-Host $host;` to the catch-all location to match the docs, or narrow the docs to say the app accepts trusted `X-Forwarded-Host` when present and falls back to `Host` when the proxy overwrites that header correctly.
+
+## Aligned Areas Rechecked
+
+- Admin initialization: `apps/web/scripts/init-db.ts:24-30` calls `migrate.js`, and `migrate.js:787-827` seeds the admin user after migrations. The app README's "migrations, then seed admin" script description is accurate.
+- Migration runbook: journal/postcondition docs match `migrate.js` per-entry baselining and missing-hash assertion.
+- Privacy field guard: `publicSelectFields`, `publicMapSelectFields`, `_PrivacySensitiveKeys`, and `SENSITIVE_KEYS` are aligned for the current admin-only columns.
+- Service worker freshness comments: current CLAUDE text and SW/template comments now correctly narrow the `revalidate = 0` claim to dynamic gallery/photo pages; the static privacy page is not a mismatch.
+- Feed route comments: root and topic feed routes now correctly say `author_name` is `NULL` and entries fall back to the feed-level author.
+- i18n strings: auto-alt text strings in English and Korean correctly describe EXIF-derived placeholders and state that Florence inference is not implemented.
+- Semantic search docs: production/stub gating, scan/top-k env caps, model-version honesty gate, offline weights, and same-origin/rate-limit posture match the inspected code.
+- Deploy/body limits: Docker bind mounts, prune-after-up policy, health/live route behavior, nginx body-size caps, and app upload caps are aligned with the current docs.
+
+## Final Sweep
+
+Final sweeps covered commonly missed issue classes: stale "future dependency" comments, stale line-number comments, user-facing i18n honesty, deploy helper assumptions, nginx header/body-limit claims, migration journal monotonicity/runbook claims, same-origin/proxy trust docs, public privacy select fields, public map GPS exception, Atom feed author privacy, service-worker offline-cache rationale, and semantic-search production activation.
+
+Skipped files were limited to generated/build/vendor data and historical artifacts that are not current authoritative documentation: `node_modules`, `.next`, `.git`, uploaded/resource data, gate logs, archived reviews/plans, and prior cycle review files beyond confirming the target file was being replaced for cycle 12.
 
 ## Validation Evidence
 
-- Inventory command: `rg --files -g '!node_modules/**' -g '!.next/**' -g '!.claude/worktrees/**' -g '!.git/**' | wc -l` returned 780 files.
-- Read-only line sweeps over `CLAUDE.md`, root/app READMEs, build guard tests, OG routes, service-worker template/generated copy, public route files, feed routes, and data helpers.
-- `git status --short` checked before writing; `.context/reviews/critic.md` was already dirty and was not touched.
-- Not run: lint, typecheck, build, unit tests, or E2E. This was a review-only document/source-contract task and no production source was edited.
+- Read-only review commands over authoritative docs, implementation files, i18n files, migration metadata, and comment/test-description sweeps.
+- `git status --short` was clean before writing this report.
+- No lint/typecheck/build/test suite was run because this was a review-only task and no production source code was changed.
