@@ -1129,6 +1129,18 @@ export async function processImageFormats(
         const ext = path.extname(baseFilename);
         const name = path.basename(baseFilename, ext);
         let lastRendered: { resizeWidth: number; filePath: string } | null = null;
+        const writeSizedVariantAtomically = async (
+            outputPath: string,
+            writeTemp: (tmpPath: string) => Promise<void>,
+        ) => {
+            const tmpPath = `${outputPath}.${randomUUID()}.tmp`;
+            try {
+                await writeTemp(tmpPath);
+                await fs.rename(tmpPath, outputPath);
+            } finally {
+                await safeUnlink(tmpPath);
+            }
+        };
 
         for (const size of sortedSizes) {
             // Don't upscale if original is smaller.
@@ -1139,15 +1151,18 @@ export async function processImageFormats(
             const outputPath = path.join(dir, sizedFilename);
 
             if (lastRendered && lastRendered.resizeWidth === resizeWidth) {
+                const duplicateSourcePath = lastRendered.filePath;
                 // C4F-11: prefer hard link (zero-copy on same filesystem) over
                 // copyFile for same-size variant dedup, matching the atomic
                 // link pattern used for the base filename (line 507). Falls
                 // back to copyFile on cross-device or link failure.
-                try {
-                    await fs.link(lastRendered.filePath, outputPath);
-                } catch {
-                    await fs.copyFile(lastRendered.filePath, outputPath);
-                }
+                await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                    try {
+                        await fs.link(duplicateSourcePath, tmpPath);
+                    } catch {
+                        await fs.copyFile(duplicateSourcePath, tmpPath);
+                    }
+                });
             } else {
                 // CM-CRIT-1 / CM-HIGH-1: build per-format pipelines that
                 // explicitly convert pixel values into the target colorspace
@@ -1181,11 +1196,13 @@ export async function processImageFormats(
                     // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives
                     // is false (default). P3-capable browsers render full gamut;
                     // non-capable browsers safely fall back to sRGB clipping.
-                    await base
-                        .toColorspace(targetIcc)
-                        .withIccProfile(targetIcc)
-                        .webp({ quality: qualityWebp })
-                        .toFile(outputPath);
+                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                        await base
+                            .toColorspace(targetIcc)
+                            .withIccProfile(targetIcc)
+                            .webp({ quality: qualityWebp })
+                            .toFile(tmpPath);
+                    });
                 } else if (format === 'avif') {
                     // AVIF: P3-tagged only when SOURCE was actually P3
                     // (resolveAvifIccProfile returns 'p3' iff the source ICC
@@ -1201,42 +1218,44 @@ export async function processImageFormats(
                     // ~30% extra CPU; encode time is amortized over many
                     // views on a self-hosted gallery.
                     const wantHighBitdepth = isWideGamutSource && await canUseHighBitdepthAvif();
-                    try {
-                        await base
-                            .toColorspace(avifIcc)
-                            .withIccProfile(avifIcc)
-                            .avif({
-                                quality: qualityAvif,
-                                effort: effectiveEffort,
-                                ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
-                            })
-                            .toFile(outputPath);
-                        // R10-M4: 10-bit encode succeeded for this image.
-                        if (wantHighBitdepth) avif10bit = true;
-                    } catch (err: unknown) {
-                        if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
-                            // Probe said 10-bit is available but this specific encode
-                            // still failed — downgrade to 8-bit for this image only.
-                            // R4C8 COR-R4C8-06: `bitdepth: 8` MUST be explicit.
-                            // Sharp option setters only assign keys present in
-                            // the passed object — they never RESET prior state —
-                            // and clone() copies the options snapshot, so without
-                            // this the retry re-encoded with heifBitdepth 10 and
-                            // failed again, making the documented per-image 8-bit
-                            // fallback unsatisfiable.
-                            await base.clone()
+                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                        try {
+                            await base
                                 .toColorspace(avifIcc)
                                 .withIccProfile(avifIcc)
                                 .avif({
                                     quality: qualityAvif,
                                     effort: effectiveEffort,
-                                    bitdepth: 8,
+                                    ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
                                 })
-                                .toFile(outputPath);
-                        } else {
-                            throw err;
+                                .toFile(tmpPath);
+                            // R10-M4: 10-bit encode succeeded for this image.
+                            if (wantHighBitdepth) avif10bit = true;
+                        } catch (err: unknown) {
+                            if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
+                                // Probe said 10-bit is available but this specific encode
+                                // still failed — downgrade to 8-bit for this image only.
+                                // R4C8 COR-R4C8-06: `bitdepth: 8` MUST be explicit.
+                                // Sharp option setters only assign keys present in
+                                // the passed object — they never RESET prior state —
+                                // and clone() copies the options snapshot, so without
+                                // this the retry re-encoded with heifBitdepth 10 and
+                                // failed again, making the documented per-image 8-bit
+                                // fallback unsatisfiable.
+                                await base.clone()
+                                    .toColorspace(avifIcc)
+                                    .withIccProfile(avifIcc)
+                                    .avif({
+                                        quality: qualityAvif,
+                                        effort: effectiveEffort,
+                                        bitdepth: 8,
+                                    })
+                                    .toFile(tmpPath);
+                            } else {
+                                throw err;
+                            }
                         }
-                    }
+                    });
                 } else {
                     // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives
                     // is false (default), same as WebP above.
@@ -1253,21 +1272,23 @@ export async function processImageFormats(
                     // C3-A6: chromaSubsampling type now flows through end-to-end
                     // as JpegChromaSubsampling; the runtime cast at this site is
                     // no longer required.
-                    await base
-                        .toColorspace(targetIcc)
-                        .withIccProfile(targetIcc)
-                        .jpeg({
-                            quality: qualityJpeg,
-                            // R10-M3: chroma subsampling tracks the TARGET gamut, not the
-                            // source. When force_srgb_derivatives=true, a wide-gamut
-                            // source is converted to sRGB and should follow the SDR
-                            // chroma setting (default 4:2:0) — not the wide-gamut chroma
-                            // setting (default 4:4:4). The previous code keyed off the
-                            // source gamut, so force-sRGB wide-gamut sources got 4:4:4
-                            // regardless of the photographer's `sdr_jpeg_chroma` choice.
-                            chromaSubsampling: targetIcc === 'p3' ? effectiveChroma : effectiveSdrChroma,
-                        })
-                        .toFile(outputPath);
+                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                        await base
+                            .toColorspace(targetIcc)
+                            .withIccProfile(targetIcc)
+                            .jpeg({
+                                quality: qualityJpeg,
+                                // R10-M3: chroma subsampling tracks the TARGET gamut, not the
+                                // source. When force_srgb_derivatives=true, a wide-gamut
+                                // source is converted to sRGB and should follow the SDR
+                                // chroma setting (default 4:2:0) — not the wide-gamut chroma
+                                // setting (default 4:4:4). The previous code keyed off the
+                                // source gamut, so force-sRGB wide-gamut sources got 4:4:4
+                                // regardless of the photographer's `sdr_jpeg_chroma` choice.
+                                chromaSubsampling: targetIcc === 'p3' ? effectiveChroma : effectiveSdrChroma,
+                            })
+                            .toFile(tmpPath);
+                    });
                 }
 
                 lastRendered = { resizeWidth, filePath: outputPath };

@@ -35,12 +35,11 @@ const ROUTE_FILE_NAMES = new Set([
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// Recognized rate-limit invocation shapes. We accept any helper whose
-// name starts with `preIncrement` (the documented Pattern 2 shape) plus
-// the bespoke helpers used by older route files (`checkAndIncrement…`).
-// Future routes are expected to use the `preIncrement` shape, but we don't
-// force a refactor on the existing code for this lint gate.
+// Recognized rate-limit invocation shapes. The helper must be imported from an
+// approved rate-limit module; a local/noop function with the same prefix does
+// not satisfy this gate.
 const RATE_LIMIT_NAME_PREFIXES = ['preIncrement', 'checkAndIncrement'];
+const APPROVED_RATE_LIMIT_MODULES = new Set(['@/lib/rate-limit', '@/lib/auth-rate-limit']);
 
 const EXEMPT_TAG = '@public-no-rate-limit-required';
 
@@ -93,10 +92,32 @@ function expressionBody(node: ts.Expression | undefined): ts.Node | undefined {
     return undefined;
 }
 
-function isRateLimitHelperCall(node: ts.CallExpression): boolean {
+function collectApprovedRateLimitImports(sourceFile: ts.SourceFile): Set<string> {
+    const approved = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || !APPROVED_RATE_LIMIT_MODULES.has(statement.moduleSpecifier.text)
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const localName = element.name.text;
+            if (RATE_LIMIT_NAME_PREFIXES.some((prefix) => localName.startsWith(prefix))) {
+                approved.add(localName);
+            }
+        }
+    }
+    return approved;
+}
+
+function isRateLimitHelperCall(node: ts.CallExpression, approvedRateLimitImports: Set<string>): boolean {
     const callee = node.expression;
     if (!ts.isIdentifier(callee)) return false;
-    return RATE_LIMIT_NAME_PREFIXES.some((prefix) => callee.text.startsWith(prefix));
+    return approvedRateLimitImports.has(callee.text);
 }
 
 function isKnownMutationCall(node: ts.CallExpression): boolean {
@@ -104,7 +125,7 @@ function isKnownMutationCall(node: ts.CallExpression): boolean {
     return ts.isPropertyAccessExpression(callee) && MUTATING_CALL_METHOD_NAMES.has(callee.name.text);
 }
 
-function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
+function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
     if (!body) return false;
 
     let sawRateLimit = false;
@@ -112,7 +133,7 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
 
     const inspectExpression = (node: ts.Node) => {
         if (ts.isCallExpression(node)) {
-            if (isRateLimitHelperCall(node)) {
+            if (isRateLimitHelperCall(node, approvedRateLimitImports)) {
                 sawRateLimit = true;
             }
             if (isKnownMutationCall(node)) {
@@ -127,7 +148,7 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
         const visit = (current: ts.Node) => {
             if (found) return;
             if (ts.isFunctionLike(current)) return;
-            if (ts.isCallExpression(current) && isRateLimitHelperCall(current)) {
+            if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
                 found = true;
                 return;
             }
@@ -197,6 +218,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         scriptKind = ts.ScriptKind.JS;
     }
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
+    const approvedRateLimitImports = collectApprovedRateLimitImports(sourceFile);
 
     // Find any exported mutating handler in the file
     const localBodies = new Map<string, ts.Node | undefined>();
@@ -273,7 +295,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body))) {
+    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else {
         report.failed.push(

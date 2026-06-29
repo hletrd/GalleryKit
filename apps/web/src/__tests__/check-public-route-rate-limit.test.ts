@@ -287,6 +287,34 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails when a local helper spoofs a rate-limit prefix', () => {
+        const source = `
+            function preIncrementNoop() { return false; }
+            export async function POST(request) {
+                if (preIncrementNoop()) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when a helper prefix is imported from an unapproved module', () => {
+        const source = `
+            import { preIncrementNoop } from './not-rate-limit';
+            export async function POST(request) {
+                if (preIncrementNoop()) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('detects PUT/PATCH/DELETE as mutating handlers', () => {
         const source = `
             export async function PUT(request) {

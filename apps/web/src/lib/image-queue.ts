@@ -174,6 +174,7 @@ export type ProcessingQueueState = {
     bootstrapRetryTimer?: ReturnType<typeof setTimeout>;
     bootstrapContinuationScheduled?: boolean;
     bootstrapCursorId: number | null;
+    sideEffects: Set<Promise<void>>;
 };
 
 export const getProcessingQueueState = (): ProcessingQueueState => {
@@ -198,6 +199,9 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         && existing.enqueued instanceof Set
         && 'bootstrapped' in existing
     ) {
+        if (!(existing.sideEffects instanceof Set)) {
+            existing.sideEffects = new Set<Promise<void>>();
+        }
         return existing;
     }
 
@@ -219,10 +223,24 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         shuttingDown: false,
         bootstrapContinuationScheduled: false,
         bootstrapCursorId: null,
+        sideEffects: new Set<Promise<void>>(),
     };
     globalWithQueue[processingQueueKey] = newState;
     return newState;
 };
+
+function trackQueueSideEffect(state: ProcessingQueueState, task: Promise<void>) {
+    state.sideEffects.add(task);
+    task.finally(() => {
+        state.sideEffects.delete(task);
+    }).catch(() => {});
+}
+
+async function drainQueueSideEffects(state: ProcessingQueueState) {
+    while (state.sideEffects.size > 0) {
+        await Promise.allSettled(Array.from(state.sideEffects));
+    }
+}
 
 function getProcessingLockName(jobId: number) {
     return getImageProcessingLockName(jobId);
@@ -467,11 +485,10 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 return;
             }
 
-            // US-P52: Fire-and-forget caption hook. MUST NOT block the queue job.
+            // US-P52: Tracked caption side effect. It does not block the queue
+            // job's processed=true transition, but restore/shutdown drains it.
             // Runs after Sharp processing completes and processed=true is committed.
-            // Uses the same void-IIFE pattern as the embedding hook below for
-            // consistency (L7).
-            void (async () => {
+            trackQueueSideEffect(state, (async () => {
                 try {
                     const caption = await generateCaption(
                         { imageId: job.id, camera_model: job.camera_model, capture_date: job.capture_date },
@@ -485,9 +502,10 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 } catch (captionErr) {
                     console.warn(`[Queue] Caption generation failed for image ${job.id}:`, captionErr);
                 }
-            })();
+            })());
 
-            // US-P51: Fire-and-forget embedding hook. MUST NOT block the queue job.
+            // US-P51: Tracked embedding side effect. It does not block the
+            // queue job's processed=true transition, but restore/shutdown drains it.
             // Runs after Sharp processing + processed=true is committed. Gated by
             // semantic_search_mode admin setting so it is a no-op by default.
             //
@@ -509,7 +527,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             //   The `model_version` column on image_embeddings already distinguishes
             //   stub rows, so no schema migration is needed for that future encoder
             //   to tell stub vectors apart from production ones.
-            void (async () => {
+            trackQueueSideEffect(state, (async () => {
                 // PERF-16-01: reuse the bootstrap config read when it already
                 // resolved the mode (legacy/bootstrap jobs); only normal jobs —
                 // which skip the bootstrap read — fetch the mode here.
@@ -546,6 +564,10 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                     // 'base64') is a no-op. The Drizzle column is typed `text` as a schema
                     // approximation — see schema.ts:264 — so the Buffer is cast through
                     // `unknown` at the single write site.) decodeEmbeddingColumn() reads it.
+                    if (isRestoreMaintenanceActive()) {
+                        console.debug(`[Queue] Skipping embedding write for image ${job.id} during restore maintenance`);
+                        return;
+                    }
                     const buf = embeddingToBuffer(embedding);
                     const embeddingValue = buf as unknown as string;
                     await db.insert(imageEmbeddings)
@@ -564,7 +586,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 } catch (embedErr) {
                     console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
                 }
-            })();
+            })());
 
             console.debug(`[Queue] Job ${job.id} complete`);
         } catch (err) {
@@ -871,6 +893,7 @@ export async function quiesceImageProcessingQueueForRestore(
     queue.pause();
     queue.clear();
     await queue.onIdle();
+    await drainQueueSideEffects(state);
     state.enqueued.clear();
     state.retryCounts.clear();
     state.claimRetryCounts.clear();

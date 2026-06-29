@@ -370,6 +370,7 @@ export function UploadDropzone({
                             className="flex h-11 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
+                            disabled={uploading}
                         >
                             {topics.map(t => (
                                 <option key={t.slug} value={t.slug}>{t.label}</option>
@@ -384,6 +385,7 @@ export function UploadDropzone({
                             selectedTags={selectedTags}
                             onTagsChange={setSelectedTags}
                             placeholder={t('upload.addExistingTag')}
+                            disabled={uploading}
                         />
                         </div>
                     </div>
@@ -447,10 +449,10 @@ export function UploadDropzone({
 
                 {/* File Grid */}
                 {files.length > 0 && (
-                    <div className={`space-y-4 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`space-y-4 ${uploading ? 'opacity-50' : ''}`} aria-disabled={uploading}>
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
-                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive-text">{t('upload.clearAll')}</Button>
+                            <Button variant="ghost" size="sm" disabled={uploading} onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive-text">{t('upload.clearAll')}</Button>
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -471,6 +473,7 @@ export function UploadDropzone({
                                         size="icon"
                                         className="absolute top-1 right-1 h-11 w-11 z-10 bg-background/50 hover:bg-destructive hover:text-white rounded-full sm:opacity-0 sm:group-hover:opacity-100 opacity-100 focus-visible:opacity-100 transition-opacity"
                                         aria-label={t('aria.removeFile')}
+                                        disabled={uploading}
                                         onClick={() => removeFile(i)}
                                     >
                                         <X className="h-4 w-4" />
@@ -515,6 +518,7 @@ export function UploadDropzone({
                                                     placeholder={t('upload.addTagPlaceholder')}
                                                     ariaLabel={t('upload.tagsForFile', { file: file.name })}
                                                     className="w-full text-xs"
+                                                    disabled={uploading}
                                                 />
                                             </div>
                                             {fileError && (

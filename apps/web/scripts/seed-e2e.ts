@@ -41,6 +41,7 @@ const seedTopic = {
 
 const seedTopicAliases = ['spotlight-smoke'];
 const E2E_SHARE_KEY = 'Abc234Def6';
+const DISPOSABLE_DB_NAME_PATTERN = /(?:^|[_-])(e2e|test|ci)(?:$|[_-])|^gallery_(e2e|test|ci)$/i;
 
 const seedImages: SeedImage[] = [
   {
@@ -156,6 +157,17 @@ async function createVariants(baseName: string, width: number, height: number, h
 async function main() {
   if (process.env.NODE_ENV === 'production') {
       console.error('Refusing to run seed-e2e in production environment');
+      process.exit(1);
+  }
+  const dbName = process.env.DB_NAME?.trim() ?? '';
+  const explicitlyAllowed = process.env.E2E_ALLOW_DESTRUCTIVE_SEED === 'true';
+  const ciAllowed = process.env.CI === 'true';
+  const disposableDbName = DISPOSABLE_DB_NAME_PATTERN.test(dbName);
+  if (!explicitlyAllowed && !ciAllowed && !disposableDbName) {
+      console.error(
+        'Refusing to run seed-e2e against DB_NAME=' +
+        `${dbName || '(unset)'}. Set E2E_ALLOW_DESTRUCTIVE_SEED=true or use a disposable DB name containing e2e/test/ci.`,
+      );
       process.exit(1);
   }
 

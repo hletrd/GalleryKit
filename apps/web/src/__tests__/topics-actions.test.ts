@@ -485,6 +485,44 @@ describe('topic actions', () => {
         expect(deleteTopicImageMock).toHaveBeenCalledWith('old-topic.webp');
     });
 
+    it('deletes the locked-row replaced image when the pre-lock cover read is stale', async () => {
+        executeMock.mockResolvedValueOnce([[], []]);
+        selectMock
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
+            .mockReturnValueOnce(makeSelectChain([]));
+        processTopicImageMock.mockResolvedValue('new-cover.webp');
+
+        transactionMock.mockImplementation(async (callback: (tx: {
+            select: typeof selectMock;
+            insert: typeof insertMock;
+            update: typeof updateMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            const txSelect = vi.fn().mockReturnValue(makeSelectChain([{
+                slug: 'old-topic',
+                image_filename: 'concurrent-cover.webp',
+                map_visible: true,
+            }]));
+            await callback({
+                select: txSelect,
+                insert: vi.fn(() => makeWriteChain([{ insertId: 13 }])),
+                update: vi.fn(() => makeUpdateChain([{ affectedRows: 1 }])),
+                delete: vi.fn(() => makeWriteChain([{ affectedRows: 1 }])),
+            });
+        });
+
+        const formData = new FormData();
+        formData.set('label', 'New Topic');
+        formData.set('slug', 'new-topic');
+        formData.set('order', '5');
+        formData.set('image', new File(['x'], 'cover.jpg', { type: 'image/jpeg' }));
+
+        await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
+        expect(deleteTopicImageMock).toHaveBeenCalledWith('concurrent-cover.webp');
+        expect(deleteTopicImageMock).not.toHaveBeenCalledWith('old-topic.webp');
+    });
+
+
     it('allows deleting legacy dotted aliases even though new ones are rejected', async () => {
         deleteMock.mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
 
@@ -608,7 +646,8 @@ describe('topic actions', () => {
         const setPayloads: unknown[] = [];
         selectMock
             .mockReturnValueOnce(makeSelectChain([{ image_filename: 'cover.webp' }]))
-            .mockReturnValueOnce(makeSelectChain([{ slug: 'travel' }]));
+            .mockReturnValueOnce(makeSelectChain([{ slug: 'travel' }]))
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: 'cover.webp' }]));
         updateMock.mockReturnValue({
             set: vi.fn((payload: unknown) => {
                 setPayloads.push(payload);

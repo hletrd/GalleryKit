@@ -213,6 +213,13 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Query must be at least 3 characters' });
     });
 
+    it('returns 400 for query longer than 200 code points', async () => {
+        const response = await POST(mockRequest({ query: '가'.repeat(201) }));
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({ error: 'Query must be 200 characters or fewer' });
+    });
+
     it('returns 503 when semantic search mode is disabled', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'disabled' });
         const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));

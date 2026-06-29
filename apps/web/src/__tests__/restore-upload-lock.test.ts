@@ -43,25 +43,22 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain("path.join(process.cwd(), 'apps', 'web', 'scripts', 'migrate.js')");
     });
 
-    it('releases the upload-processing contract lock exactly once (C3-AGG-01)', () => {
+    it('has setup-fallback cleanup for restore locks acquired before maintenance begins', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
 
-        // Count occurrences of the release call on uploadContractLock.
-        // After the C3-AGG-01 fix, the outer finally block no longer
-        // has a redundant release — only the inner finally releases it.
-        const releaseMatches = source.match(/uploadContractLock\?\.release\(\)/g);
-        expect(releaseMatches).not.toBeNull();
-        expect(releaseMatches!.length).toBe(1);
+        expect(source).toContain('let dbRestoreLockHeld = false');
+        expect(source).toContain('dbRestoreLockHeld = true');
+        expect(source).toContain('upload-processing contract release (setup fallback) failed');
+        expect(source).toContain('RELEASE_LOCK (backfill setup fallback) failed');
+        expect(source).toContain('RELEASE_LOCK (setup fallback) failed');
+    });
 
-        // The single release must be inside the inner finally block
-        // (the one that also nulls the reference).
-        const innerFinallyIdx = source.indexOf('await uploadContractLock?.release()');
-        const nullAssignmentIdx = source.indexOf('uploadContractLock = null', innerFinallyIdx);
-        expect(nullAssignmentIdx).toBeGreaterThan(innerFinallyIdx);
+    it('keeps restore maintenance active after post-restore migration failure', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
 
-        // Confirm the outer finally block does NOT contain a release call.
-        // The outer finally starts after the inner finally closes.
-        const outerFinallyMarker = 'C3-AGG-01';
-        expect(source).toContain(outerFinallyMarker);
+        expect(source).toContain('let keepRestoreMaintenance = false');
+        expect(source).toContain('keepRestoreMaintenance = restoreResult.keepMaintenance === true');
+        expect(source).toContain('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
+        expect(source).toContain('keepMaintenance: true');
     });
 });

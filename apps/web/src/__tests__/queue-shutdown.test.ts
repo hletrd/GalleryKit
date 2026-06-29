@@ -50,4 +50,30 @@ describe('drainProcessingQueueForShutdown', () => {
         expect(queue.clear).toHaveBeenCalledTimes(1);
         expect(queue.onIdle).toHaveBeenCalledTimes(1);
     });
+
+    it('waits for tracked side effects after the queue is idle', async () => {
+        let resolveSideEffect!: () => void;
+        const sideEffect = new Promise<void>((resolve) => {
+            resolveSideEffect = resolve;
+        });
+        const state = {
+            enqueued: new Set<number>(),
+            sideEffects: new Set([sideEffect]),
+            shuttingDown: false,
+        };
+        const queue = {
+            pause: vi.fn(),
+            clear: vi.fn(),
+            onIdle: vi.fn().mockResolvedValue(undefined),
+        };
+
+        const drain = drainProcessingQueueForShutdown(state, queue);
+        await Promise.resolve();
+        resolveSideEffect();
+        state.sideEffects.delete(sideEffect);
+        await drain;
+
+        expect(queue.onIdle).toHaveBeenCalledTimes(1);
+        expect(state.sideEffects.size).toBe(0);
+    });
 });

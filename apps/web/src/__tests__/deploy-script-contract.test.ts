@@ -66,4 +66,17 @@ describe('deploy script safety contract', () => {
         expect(appDockerignore).toContain('public/uploads/**');
         expect(appDockerignore).toContain('public/resources/**');
     });
+
+    it('pins explicit Docker native optional dependency installs to lockfile versions', () => {
+        const nativeInstallBlock = dockerfile.match(/npm install --workspace=apps\/web --include=optional --no-save \\\n(?<body>[\s\S]*?)\n\nFROM build-base AS prod-deps/);
+        expect(nativeInstallBlock?.groups?.body).toBeTruthy();
+        const packageTokens = nativeInstallBlock!.groups!.body
+            .split(/\\\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+        for (const token of packageTokens) {
+            expect(token, token).toMatch(/@\d+\.\d+\.\d+$/);
+        }
+    });
 });

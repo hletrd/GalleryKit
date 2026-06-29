@@ -21,6 +21,7 @@ interface TagInputProps {
     placeholder?: string;
     className?: string;
     ariaLabel?: string;
+    disabled?: boolean;
 }
 
 export function normalizeTagInputValue(value: string) {
@@ -44,6 +45,7 @@ export function TagInput({
     placeholder,
     className,
     ariaLabel,
+    disabled = false,
 }: TagInputProps) {
     const { t } = useTranslation();
     const [inputValue, setInputValue] = React.useState('');
@@ -83,6 +85,7 @@ export function TagInput({
     };
 
     const addTag = (tag: string) => {
+        if (disabled) return;
         const clean = tag.trim();
         if (!isValidTagName(clean)) return;
         const nextTag = resolveCanonicalTagName(availableTags, clean);
@@ -94,10 +97,12 @@ export function TagInput({
     };
 
     const removeTag = (tagToRemove: string) => {
+        if (disabled) return;
         onTagsChange(selectedTags.filter(tag => tag !== tagToRemove));
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (disabled) return;
         // R4C6 COR-R4C6-01: an in-progress IME composition (Korean, etc.)
         // delivers Enter/comma/arrow keydowns BEFORE the text is settled.
         // Acting on them adds half-composed tags, pops tags on the
@@ -166,7 +171,7 @@ export function TagInput({
         setHighlightedIndex(0);
     }, [filteredTags.length, showCreateOption]);
 
-    const suggestionsVisible = isOpen && !!(inputValue || filteredTags.length > 0);
+    const suggestionsVisible = !disabled && isOpen && !!(inputValue || filteredTags.length > 0);
     const activeDescendantId = suggestionsVisible
         ? highlightedIndex < filteredTags.length
             ? `${suggestionsId}-option-${filteredTags[highlightedIndex]?.id}`
@@ -177,12 +182,16 @@ export function TagInput({
 
     return (
         <div className={cn("relative", className)} ref={containerRef}>
-            <div className="flex flex-wrap items-center gap-2 p-2 rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+            <div className={cn(
+                "flex flex-wrap items-center gap-2 p-2 rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+                disabled && "opacity-60",
+            )}>
                 {selectedTags.map(tag => (
                     <Badge variant="secondary" key={tag} className="gap-1 pr-1">
                         {tag}
                         <button
                             type="button"
+                            disabled={disabled}
                             onClick={(e) => { e.stopPropagation(); removeTag(tag); }}
                             className="ml-1 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
                             aria-label={t('aria.removeTag', { tag })}
@@ -201,6 +210,8 @@ export function TagInput({
 	                    aria-controls={suggestionsVisible ? suggestionsId : undefined}
                     aria-activedescendant={activeDescendantId}
                     className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+                    disabled={disabled}
+                    aria-disabled={disabled}
                     placeholder={selectedTags.length === 0 ? placeholder : ''}
                     value={inputValue}
                     onChange={(e) => {

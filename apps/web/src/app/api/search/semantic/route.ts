@@ -93,6 +93,7 @@ export function clampSemanticTopK(raw: unknown): number {
 /** Maximum acceptable request body size in bytes. Semantic queries are short
  *  strings (< 200 code points), so a multi-KB body is always malicious. */
 const MAX_SEMANTIC_BODY_BYTES = 8192;
+const MAX_SEMANTIC_QUERY_CODE_POINTS = 200;
 
 export async function POST(request: NextRequest): Promise<Response> {
     // Same-origin check
@@ -223,6 +224,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // validation, matching the pattern used in public.ts and process-image.ts.
     if (countCodePoints(query) < 3) {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+    if (countCodePoints(query) > MAX_SEMANTIC_QUERY_CODE_POINTS) {
+        return NextResponse.json({ error: 'Query must be 200 characters or fewer' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
     // Embed query — production uses the real CLIP encoder (async); stub uses the sync stub.

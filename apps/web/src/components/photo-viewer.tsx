@@ -575,20 +575,20 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             <p className="mb-2 text-xs text-muted-foreground sr-only md:not-sr-only" id="photo-viewer-shortcuts">
                 {t('viewer.shortcutsHint')}
             </p>
-            <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
+            <div className="flex min-w-0 items-center justify-between gap-2 mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
                     // F-20: explicit `h-11` (44 px) on the Back button so the
                     // mobile primary navigation action clears the touch
                     // target floor; the default ghost-Button height was 32 px.
-                    <Button asChild variant="ghost" className="pl-0 gap-2 h-11">
+                    <Button asChild variant="ghost" className="pl-0 gap-2 h-11 min-w-0 max-w-[min(58vw,24rem)]">
                         <Link href={localizePath(locale, `/${image.topic}`)}>
-                            <ArrowLeft className="h-4 w-4" />
-                            {t('viewer.backTo', { topic: image.topic_label || image.topic })}
+                            <ArrowLeft className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{t('viewer.backTo', { topic: image.topic_label || image.topic })}</span>
                         </Link>
                     </Button>
                 )}
 
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
                     <LightboxTrigger onClick={() => setShowLightbox(true)} />
 
                     <Button

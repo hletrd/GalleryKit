@@ -22,7 +22,7 @@ describe('buildContentSecurityPolicy', () => {
       // previous literal www. hosts silently blocked.
       expect(cspWithGa).toContain("script-src 'nonce-abc123' 'self' https://*.googletagmanager.com");
       expect(cspWithGa).toContain("connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com");
-      expect(cspWithGa).toContain("img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com");
+      expect(cspWithGa).toContain("img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org https://*.google-analytics.com https://*.googletagmanager.com");
       expect(cspWithGa).not.toContain("script-src 'unsafe-inline'");
       // Analytics tier ONLY — advertising hosts must never creep in.
       expect(cspWithGa).not.toContain('doubleclick');
@@ -41,7 +41,7 @@ describe('buildContentSecurityPolicy', () => {
       expect(cspNoGa).not.toContain('google-analytics.com');
       expect(cspNoGa).not.toContain('analytics.google.com');
       expect(cspNoGa).toContain("connect-src 'self'");
-      expect(cspNoGa).toContain("img-src 'self' data: blob:;");
+      expect(cspNoGa).toContain("img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org;");
     } finally {
       if (originalGaId !== undefined) {
         process.env.NEXT_PUBLIC_GA_ID = originalGaId;

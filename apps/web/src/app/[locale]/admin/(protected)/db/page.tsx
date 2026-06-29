@@ -22,15 +22,19 @@ import {
 import { useTranslations } from 'next-intl';
 import { MAX_RESTORE_SIZE_BYTES, MAX_RESTORE_SIZE_LABEL } from '@/lib/db-restore';
 
+type PendingDbAction = 'backup' | 'restore' | 'export' | null;
+
 export default function DbPage() {
     const t = useTranslations('db');
     const tShared = useTranslations('imageManager');
     const [isPending, startTransition] = useTransition();
+    const [pendingAction, setPendingAction] = useState<PendingDbAction>(null);
     const [restoreFile, setRestoreFile] = useState<File | null>(null);
     const [restoreInputKey, setRestoreInputKey] = useState(0);
     const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
     const handleBackup = () => {
+        setPendingAction('backup');
         startTransition(async () => {
             try {
                 const result = await dumpDatabase();
@@ -52,6 +56,8 @@ export default function DbPage() {
                 }
             } catch {
                 toast.error(t('errorBackup'));
+            } finally {
+                setPendingAction(null);
             }
         });
     };
@@ -74,6 +80,7 @@ export default function DbPage() {
         const formData = new FormData();
         formData.append('file', restoreFile);
 
+        setPendingAction('restore');
         startTransition(async () => {
             try {
                 const result = await restoreDatabase(formData);
@@ -87,11 +94,14 @@ export default function DbPage() {
                 }
             } catch {
                 toast.error(t('errorRestore'));
+            } finally {
+                setPendingAction(null);
             }
         });
     };
 
     const handleExportCsv = () => {
+        setPendingAction('export');
         startTransition(async () => {
             try {
                 const result = await exportImagesCsv();
@@ -119,6 +129,8 @@ export default function DbPage() {
                 }
             } catch {
                 toast.error(t('errorExport'));
+            } finally {
+                setPendingAction(null);
             }
         });
     };
@@ -145,7 +157,7 @@ export default function DbPage() {
                             disabled={isPending}
                             className="w-full"
                         >
-                            {isPending ? t('backupButtonProcessing') : t('backupButton')}
+                            {pendingAction === 'backup' ? t('backupButtonProcessing') : t('backupButton')}
                         </Button>
                     </CardContent>
                 </Card>
@@ -198,7 +210,7 @@ export default function DbPage() {
                                 variant="destructive"
                                 className="w-full"
                             >
-                                {isPending ? t('restoreButtonProcessing') : t('restoreButton')}
+                                {pendingAction === 'restore' ? t('restoreButtonProcessing') : t('restoreButton')}
                             </Button>
                             <AlertDialogContent>
                                 <AlertDialogHeader>
@@ -241,7 +253,7 @@ export default function DbPage() {
                             variant="secondary"
                             className="w-full"
                         >
-                            {isPending ? t('exportButtonProcessing') : t('exportButton')}
+                            {pendingAction === 'export' ? t('exportButtonProcessing') : t('exportButton')}
                         </Button>
                     </CardContent>
                 </Card>

@@ -75,4 +75,12 @@ describe('revalidateLocalizedPaths', () => {
 
         expect(revalidatePath).toHaveBeenCalledWith('/', 'layout');
     });
+
+    it('does not throw when full app revalidation fails', () => {
+        revalidatePath.mockImplementationOnce(() => {
+            throw new Error('cache unavailable');
+        });
+
+        expect(() => revalidateAllAppData()).not.toThrow();
+    });
 });

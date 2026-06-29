@@ -6,6 +6,7 @@ export type QueueShutdownLike = {
 
 export type QueueShutdownStateLike = {
     enqueued: Set<number>;
+    sideEffects?: Set<Promise<void>>;
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
     gcInterval?: ReturnType<typeof setInterval>;
@@ -39,6 +40,9 @@ export async function drainProcessingQueueForShutdown(
         queue.clear();
         state.enqueued.clear();
         await queue.onIdle();
+        while (state.sideEffects && state.sideEffects.size > 0) {
+            await Promise.allSettled(Array.from(state.sideEffects));
+        }
     })();
 
     await state.shutdownPromise;

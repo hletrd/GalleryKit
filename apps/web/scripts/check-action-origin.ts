@@ -12,11 +12,11 @@
  *
  * Scanned files (C5R-RPL-06 / AGG5R-05 + C6R-RPL-02 / AGG6R-01):
  * - Auto-discovered RECURSIVELY via app/actions/ (all server-action-capable script descendants),
- *   EXCLUDING files whose basename is `auth` or `public`. `auth.ts` owns its own
+ *   EXCLUDING files whose basename is `auth`. `auth.ts` owns its own
  *   `hasTrustedSameOrigin` invocations directly at the call sites that
- *   the scanner cannot generically detect; `public.*` is the
- *   unauthenticated read-only action surface (search + loadMoreImages)
- *   which intentionally skips the origin check.
+ *   the scanner cannot generically detect. Public actions are scanned with a
+ *   narrower public-rate-limit contract for intentionally unauthenticated
+ *   analytics writes.
  * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
  *   it lives outside the `actions/` directory).
  *
@@ -46,7 +46,7 @@ const REPO_SRC = path.resolve(__dirname, '../src');
  */
 const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']);
 
-const EXCLUDED_ACTION_BASENAMES = new Set(['auth', 'public']);
+const EXCLUDED_ACTION_BASENAMES = new Set(['auth']);
 
 /**
  * Recursively walk a directory collecting action source files, excluding
@@ -233,6 +233,37 @@ function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
     return nodeContainsMutatingCall(statement);
 }
 
+function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && names.has(node.expression.text)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return found;
+}
+
+function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
+    if (!ts.isBlock(body)) return false;
+    let sawRateLimit = false;
+    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt']);
+
+    for (const statement of body.statements) {
+        if (statementContainsPreGuardMutation(statement) && !sawRateLimit) {
+            return false;
+        }
+        if (nodeContainsCallNamed(statement, publicRateLimitNames)) {
+            sawRateLimit = true;
+        }
+    }
+
+    return sawRateLimit;
+}
+
 function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
@@ -303,6 +334,10 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             // gate still green. An exempt comment on a body containing a
             // direct mutating call is therefore a hard failure, not a skip.
             if (body && nodeContainsMutatingCall(body)) {
+                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body)) {
+                    report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);
+                    return;
+                }
                 report.failed.push(
                     `EXEMPT COMMENT ON MUTATING ACTION: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' but its body performs mutations; exemption is reserved for read-only exports — remove the comment and return early on requireSameOriginAdmin() instead`,
                 );

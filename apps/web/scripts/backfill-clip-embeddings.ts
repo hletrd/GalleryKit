@@ -111,6 +111,12 @@ async function main() {
     let cursor = 0;
 
     for (;;) {
+        const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
+        if (remainingScanBudget === 0) {
+            console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
+            break;
+        }
+
         // Select processed images without an embedding row AT THE TARGET
         // model_version. A row embedded under a DIFFERENT version (e.g. a stub
         // row when running --production) still matches and gets re-embedded.
@@ -135,16 +141,10 @@ async function main() {
                 ),
             )
             .orderBy(asc(images.id))
-            .limit(BATCH_SIZE);
+            .limit(Math.min(BATCH_SIZE, remainingScanBudget));
 
         if (rows.length === 0) break;
         cursor = rows[rows.length - 1].id;
-
-        // Cap total scan to SEMANTIC_SCAN_LIMIT
-        if (processed + failed + rows.length > SEMANTIC_SCAN_LIMIT) {
-            console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
-            break;
-        }
 
         // Process with bounded concurrency
         for (let i = 0; i < rows.length; i += BATCH_CONCURRENCY) {

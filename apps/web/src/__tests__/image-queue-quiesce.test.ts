@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
@@ -172,5 +174,14 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
         // clear-before-await; this pins quiesce to the same single
         // paused-queue ordering so the two consumers cannot drift again.
         expect(calls).toEqual(['pause', 'clear', 'onIdle']);
+    });
+
+    it('declares and drains tracked side effects before reporting restore quiescence', async () => {
+        const source = readFileSync(path.join(__dirname, '..', 'lib', 'image-queue.ts'), 'utf8');
+
+        expect(source).toContain('sideEffects: Set<Promise<void>>');
+        expect(source).toContain('trackQueueSideEffect(state');
+        expect(source).toContain('await drainQueueSideEffects(state)');
+        expect(source).toContain('Skipping embedding write for image');
     });
 });

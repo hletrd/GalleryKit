@@ -282,7 +282,10 @@ export async function restoreDatabase(formData: FormData) {
     // different connections, making the lock unreliable.
     const conn = await connection.getConnection();
     let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> = null;
+    let dbRestoreLockHeld = false;
     let backfillLockHeld = false;
+    let restoreLifecycleVerified = false;
+    let keepRestoreMaintenance = false;
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
@@ -295,6 +298,7 @@ export async function restoreDatabase(formData: FormData) {
         if (acquired !== 1 && acquired !== BigInt(1)) {
             return { success: false, error: t('restoreInProgress') };
         }
+        dbRestoreLockHeld = true;
 
         // Restore rewrites the same database/filesystem contract that uploads
         // depend on. Hold the upload-processing contract lock for the whole
@@ -305,6 +309,7 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (upload-contract early-return) failed:', err);
             });
+            dbRestoreLockHeld = false;
             return { success: false, error: t('restoreInProgress') };
         }
 
@@ -317,6 +322,7 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (backfill-lock early-return) failed:', err);
             });
+            dbRestoreLockHeld = false;
             await uploadContractLock.release();
             uploadContractLock = null;
             return { success: false, error: t('restoreInProgress') };
@@ -339,6 +345,7 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
             });
+            dbRestoreLockHeld = false;
             if (backfillLockHeld) {
                 await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
                     console.debug('RELEASE_LOCK (backfill maintenance-begin early-return) failed:', err);
@@ -359,18 +366,26 @@ export async function restoreDatabase(formData: FormData) {
                 return { success: false, error: t('restoreFailed') };
             }
 
-            return await runRestore(formData, t);
+            const restoreResult = await runRestore(formData, t);
+            restoreLifecycleVerified = restoreResult.success === true;
+            keepRestoreMaintenance = restoreResult.keepMaintenance === true;
+            return restoreResult;
         } finally {
-            endRestoreMaintenance();
-            await resumeImageProcessingQueueAfterRestore().catch((err) => {
-                console.error('Failed to resume image-processing queue after restore', err);
-            });
+            if (restoreLifecycleVerified || !keepRestoreMaintenance) {
+                endRestoreMaintenance();
+                if (restoreLifecycleVerified) {
+                    await resumeImageProcessingQueueAfterRestore().catch((err) => {
+                        console.error('Failed to resume image-processing queue after restore', err);
+                    });
+                }
+            }
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if
             // the release round-trip errors.
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (restore finally) failed:', err);
             });
+            dbRestoreLockHeld = false;
             if (backfillLockHeld) {
                 await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
                     console.debug('RELEASE_LOCK (backfill restore finally) failed:', err);
@@ -381,14 +396,29 @@ export async function restoreDatabase(formData: FormData) {
             uploadContractLock = null;
         }
     } finally {
-        // C3-AGG-01: uploadContractLock is already released and nulled in the
-        // inner finally block above (line 360-361). No second release needed —
-        // the inner finally guarantees exactly one release on every code path.
+        if (uploadContractLock) {
+            await uploadContractLock.release().catch((err) => {
+                console.debug('upload-processing contract release (setup fallback) failed:', err);
+            });
+            uploadContractLock = null;
+        }
+        if (backfillLockHeld) {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
+                console.debug('RELEASE_LOCK (backfill setup fallback) failed:', err);
+            });
+        }
+        if (dbRestoreLockHeld) {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
+                console.debug('RELEASE_LOCK (setup fallback) failed:', err);
+            });
+        }
         conn.release();
     }
 }
 
-async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTranslations>>) {
+type RestoreResult = { success: boolean; error?: string; keepMaintenance?: boolean };
+
+async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTranslations>>): Promise<RestoreResult> {
     const fileEntry = formData.get('file');
     if (!fileEntry || !(fileEntry instanceof File)) {
         return { success: false, error: t('noFileProvided') };
@@ -473,7 +503,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
 
     const restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
 
-    return new Promise<{ success: boolean, error?: string }>((resolve) => {
+    return new Promise<RestoreResult>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
         // to avoid exposing credentials in /proc/<pid>/cmdline
         // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
@@ -525,7 +555,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             if (code === 0) {
                 const migrationResult = await runPostRestoreMigrations(t);
                 if (!migrationResult.success) {
-                    resolve({ success: false, error: migrationResult.error ?? t('restoreFailed') });
+                    resolve({ success: false, error: migrationResult.error ?? t('restoreFailed'), keepMaintenance: true });
                     return;
                 }
                 // Audit logging is fire-and-forget; wrap in try-catch so a

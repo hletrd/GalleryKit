@@ -390,7 +390,7 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
         const found = walkForActionFiles(tempRoot).map((p) => path.relative(tempRoot, p));
         expect(found).toContain(path.join('sub', 'keep.ts'));
         expect(found.find((p) => p.endsWith('auth.ts'))).toBeUndefined();
-        expect(found.find((p) => p.endsWith('public.ts'))).toBeUndefined();
+        expect(found.find((p) => p.endsWith('public.tsx'))).toBeDefined();
     });
 });
 
@@ -460,7 +460,7 @@ describe('walkForActionFiles — extension coverage', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('discovers TS/TSX/JS action files while excluding auth/public by basename', () => {
+    it('discovers TS/TSX/JS action files while excluding auth by basename', () => {
         fs.writeFileSync(path.join(tempDir, 'images.ts'), '');
         fs.writeFileSync(path.join(tempDir, 'albums.tsx'), '');
         fs.writeFileSync(path.join(tempDir, 'legacy.js'), '');
@@ -469,6 +469,34 @@ describe('walkForActionFiles — extension coverage', () => {
         fs.writeFileSync(path.join(tempDir, 'notes.md'), '');
 
         const discovered = walkForActionFiles(tempDir).map((file) => path.basename(file)).sort();
-        expect(discovered).toEqual(['albums.tsx', 'images.ts', 'legacy.js']);
+        expect(discovered).toEqual(['albums.tsx', 'images.ts', 'legacy.js', 'public.tsx']);
+    });
+});
+
+describe('checkActionSource — public analytics actions', () => {
+    it('allows an exempt public mutation only when rate-limited before insert', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                if (isViewRecordRateLimited(params.ip, Date.now())) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
+    it('fails an exempt public mutation without a pre-insert public rate limit', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
 });

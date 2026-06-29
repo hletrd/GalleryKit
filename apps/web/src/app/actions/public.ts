@@ -110,6 +110,7 @@ async function checkLoadMoreRateLimit(
     return { status: 'ok' };
 }
 
+/** @action-origin-exempt: public read-only pagination action with its own rate limit */
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offsetOrCursor: number | ImageListCursorInput = 0, limit: number = 30): Promise<LoadMoreImagesResult> {
     if (isRestoreMaintenanceActive()) return { status: 'maintenance', images: [], hasMore: true };
     // Validate slug format before passing to data layer (defense in depth)
@@ -158,6 +159,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     }
 }
 
+/** @action-origin-exempt: public read-only pagination action with its own rate limit */
 export async function loadMoreSmartCollectionImages(
     slug: string,
     offsetOrCursor: number | ImageListCursorInput = 0,
@@ -224,6 +226,7 @@ export async function loadMoreSmartCollectionImages(
     }
 }
 
+/** @action-origin-exempt: public read-only search action with its own rate limit */
 export async function searchImagesAction(query: string): Promise<SearchImagesResult> {
     if (!query || typeof query !== 'string') return { status: 'invalid', results: [] };
     if (isRestoreMaintenanceActive()) return { status: 'maintenance', results: [] };

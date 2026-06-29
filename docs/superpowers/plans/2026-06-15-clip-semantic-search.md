@@ -952,7 +952,7 @@ Expected: all green. Fix any failure at root cause (no suppressions) and commit.
 ```
 Expected: every processed image gets a `PRODUCTION_MODEL_VERSION` embedding row; stub rows superseded.
 
-- [x] **Step 5: Flip the admin setting** `semantic_search_mode` → `production` in Admin → Settings. Verify: the search box no longer shows the experimental disclaimer; a Korean and an English query return relevant photos; "similar photos" works on a photo page.
+- [x] **Historical note:** production semantic activation is no longer a one-click Admin → Settings toggle. Use the current operator runbook in `apps/web/README.md`: seed weights, backfill embeddings, set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, then set `admin_settings.semantic_search_mode='production'`. Verify: the search box no longer shows the experimental disclaimer; a Korean and an English query return relevant photos; "similar photos" works on a photo page.
 
 - [x] **Step 6: Final commit if any gate fixes were needed**, then confirm `master` is in sync and deployed.
 

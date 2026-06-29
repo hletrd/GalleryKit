@@ -57,5 +57,9 @@ export function revalidateAdminSurfaces() {
 }
 
 export function revalidateAllAppData() {
-    revalidatePath('/', 'layout');
+    try {
+        revalidatePath('/', 'layout');
+    } catch (error) {
+        console.debug('Failed to revalidate app layout:', error);
+    }
 }

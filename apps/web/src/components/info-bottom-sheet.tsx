@@ -39,7 +39,7 @@ interface InfoBottomSheetProps {
     isSharedView?: boolean;
 }
 
-type SheetState = 'collapsed' | 'peek' | 'expanded';
+type SheetState = 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
@@ -65,8 +65,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
 
     const getTranslateY = useCallback((state: SheetState): string => {
         switch (state) {
-            case 'collapsed':
-                return 'calc(100% - 28px)'; // only drag handle visible
             case 'peek':
                 return `calc(100% - ${PEEK_HEIGHT}px)`;
             case 'expanded':
@@ -101,16 +99,14 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         let shouldClose = false;
         setSheetState(prev => {
             if (isSwipeUp) {
-                if (prev === 'collapsed') return 'peek';
                 if (prev === 'peek') return 'expanded';
                 return prev;
             }
             if (isSwipeDown) {
                 if (prev === 'expanded') return 'peek';
-                if (prev === 'peek') return 'collapsed';
-                if (prev === 'collapsed') {
+                if (prev === 'peek') {
                     shouldClose = true;
-                    return 'collapsed';
+                    return 'peek';
                 }
                 return prev;
             }

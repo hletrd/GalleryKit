@@ -59,6 +59,11 @@ const GA_IMG_SOURCES = [
   'https://*.google-analytics.com',
   'https://*.googletagmanager.com',
 ] as const;
+const OSM_TILE_IMG_SOURCES = [
+  'https://a.tile.openstreetmap.org',
+  'https://b.tile.openstreetmap.org',
+  'https://c.tile.openstreetmap.org',
+] as const;
 
 export function buildContentSecurityPolicy({
   nonce,
@@ -73,6 +78,7 @@ export function buildContentSecurityPolicy({
 } = {}) {
   const includeGoogleAnalytics = hasGoogleAnalyticsId(googleAnalyticsId);
   const imgSources = getCspImageSources(imageBaseUrl);
+  imgSources.push(...OSM_TILE_IMG_SOURCES);
   if (includeGoogleAnalytics) {
     imgSources.push(...GA_IMG_SOURCES);
   }

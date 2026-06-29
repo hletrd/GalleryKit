@@ -29,7 +29,7 @@
 ## Features
 
 - **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
-- **Multi-Format Optimization** -- automatic AVIF (10-bit for wide-gamut), WebP, and JPEG conversion via Sharp pipeline
+- **Multi-Format Optimization** -- wide-gamut-aware AVIF/WebP/JPEG conversion via Sharp, with 10-bit AVIF when the deployed libheif stack supports it and explicit 8-bit fallback when it does not
 - **Photographer-grade color management** -- ICC profile honored, NCLX `colr` ISOBMFF detection, ICC chromaticity-based gamut detection (Eizo / BenQ / X-Rite custom monitor profiles), Display P3 / DCI-P3 / Adobe RGB / ProPhoto / Rec.2020 sources mapped to Display P3 with 4:4:4 chroma JPEG, DCI-P3 white-point Bradford-adapted to D65. Apple HDR gain map detection (admin audit only). PQ / HLG ingest gated behind admin opt-in. See `CLAUDE.md` "Color & HDR Pipeline" for the full decision matrix
 - **Topics & Albums** -- organize photos into categories with slug aliases
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)

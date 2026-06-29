@@ -233,9 +233,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     if (!currentTopic) {
         return { error: t('topicNotFound') };
     }
-    const previousImageFilename = currentTopic?.image_filename ?? null;
 
     let imageFilename = undefined;
+    let replacedImageFilename: string | null = null;
     let imageWarning: string | undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
@@ -278,6 +278,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     }
 
                     const nextImageFilename = imageFilename ?? transactionTopic.image_filename ?? null;
+                    if (imageFilename && transactionTopic.image_filename !== imageFilename) {
+                        replacedImageFilename = transactionTopic.image_filename ?? null;
+                    }
 
                     await tx.insert(topics).values({
                         label,
@@ -344,6 +347,17 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     throw new TopicNotFoundError();
                 }
 
+                const [topicBeforeUpdate] = await db.select({ image_filename: topics.image_filename })
+                    .from(topics)
+                    .where(eq(topics.slug, cleanCurrentSlug))
+                    .limit(1);
+                if (!topicBeforeUpdate) {
+                    throw new TopicNotFoundError();
+                }
+                if (imageFilename && topicBeforeUpdate.image_filename !== imageFilename) {
+                    replacedImageFilename = topicBeforeUpdate.image_filename ?? null;
+                }
+
                 const [updateResult] = await db.update(topics)
                     .set({
                         label,
@@ -357,9 +371,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
             }
         });
 
-        if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
-            try { await deleteTopicImage(previousImageFilename); }
-            catch (e) { console.error('Failed to delete previous topic image:', previousImageFilename, e); }
+        if (replacedImageFilename) {
+            try { await deleteTopicImage(replacedImageFilename); }
+            catch (e) { console.error('Failed to delete previous topic image:', replacedImageFilename, e); }
         }
 
         const currentUser = await getCurrentUser();

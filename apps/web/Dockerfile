@@ -43,12 +43,12 @@ ARG TARGETARCH
 # matters: dependent libvips before sharp.
 RUN npm ci --workspace=apps/web --include=optional && \
     npm install --workspace=apps/web --include=optional --no-save \
-        @img/sharp-libvips-linux-${TARGETARCH:-arm64} \
-        @img/sharp-linux-${TARGETARCH:-arm64} \
-        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc \
-        @swc/core-linux-${TARGETARCH:-arm64}-gnu \
-        @next/swc-linux-${TARGETARCH:-arm64}-gnu \
-        lightningcss-linux-${TARGETARCH:-arm64}-gnu
+        @img/sharp-libvips-linux-${TARGETARCH:-arm64}@1.2.4 \
+        @img/sharp-linux-${TARGETARCH:-arm64}@0.34.5 \
+        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc@2.5.6 \
+        @swc/core-linux-${TARGETARCH:-arm64}-gnu@1.15.41 \
+        @next/swc-linux-${TARGETARCH:-arm64}-gnu@16.2.9 \
+        lightningcss-linux-${TARGETARCH:-arm64}-gnu@1.32.0
 
 FROM build-base AS prod-deps
 WORKDIR /app
