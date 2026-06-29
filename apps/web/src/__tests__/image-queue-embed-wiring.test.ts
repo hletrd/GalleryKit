@@ -44,12 +44,14 @@ describe('upload embedding hook wiring', () => {
 
   it('bootstraps a bounded retry for processed rows missing the active model embedding', () => {
     expect(src).toContain('BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE = 50');
+    expect(src).toContain('BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY = 2');
     expect(src).toContain('bootstrapMissingActiveEmbeddings');
     expect(src).toContain('activeModelVersion');
     expect(src).toMatch(/eq\(images\.processed,\s*true\)/);
     expect(src).toMatch(/isNull\(imageEmbeddings\.imageId\)/);
     expect(src).toMatch(/\.limit\(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE\)/);
     expect(src).toContain('storeImageEmbeddingForMode(row.id, originalPath, semanticMode)');
+    expect(src).toContain('await Promise.allSettled(tasks)');
   });
 });
 

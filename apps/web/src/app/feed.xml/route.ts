@@ -73,10 +73,9 @@ export async function GET(request: NextRequest) {
             ?? toIso(img.created_at)
             ?? new Date().toISOString();
 
-        // R17-L2: per-entry <author> when the upload carries a known admin.
-        // NULL falls back to the feed-level <author> per RFC 4287 §4.1.1.
-        // We omit the override when the entry author matches the feed
-        // author to avoid emitting a redundant identical block.
+        // Privacy invariant: the public feed helper returns author_name NULL
+        // so entries fall back to the feed-level author until a safe public
+        // display-name field exists. Do not expose admin usernames here.
         const entryAuthorName = typeof img.author_name === 'string' ? img.author_name.trim() : '';
         const perEntryAuthor = entryAuthorName && entryAuthorName !== seo.author
             ? { name: entryAuthorName }

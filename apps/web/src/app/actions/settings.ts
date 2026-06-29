@@ -41,10 +41,10 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
     const defaults = getSettingDefaults();
 
     // Validate all provided keys are allowed and all values are strings.

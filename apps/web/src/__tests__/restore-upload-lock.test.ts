@@ -35,12 +35,13 @@ describe('restore/upload writer coordination', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
 
         const mysqlSuccessIdx = source.indexOf('if (code === 0) {');
-        const migrationIdx = source.indexOf('const migrationResult = await runPostRestoreMigrations(t)');
+        const migrationIdx = source.indexOf('migrationResult = await runPostRestoreMigrations(t)');
         const revalidateIdx = source.indexOf('revalidateAllAppData();', migrationIdx);
         expect(migrationIdx).toBeGreaterThan(mysqlSuccessIdx);
         expect(revalidateIdx).toBeGreaterThan(migrationIdx);
         expect(source).toContain("path.join(process.cwd(), 'scripts', 'migrate.js')");
         expect(source).toContain("path.join(process.cwd(), 'apps', 'web', 'scripts', 'migrate.js')");
+        expect(source).toContain("console.error('post-restore migrate setup error:', err)");
     });
 
     it('has setup-fallback cleanup for restore locks acquired before maintenance begins', () => {

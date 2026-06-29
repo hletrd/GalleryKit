@@ -28,6 +28,7 @@ import sharp from 'sharp';
 import PQueue from 'p-queue';
 import type { RowDataPacket } from 'mysql2';
 import { detectColorSignals } from '../src/lib/color-detection';
+import { parseBoundedPositiveInteger } from '../src/lib/env';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 
 interface DbRow extends RowDataPacket {
@@ -77,7 +78,10 @@ async function main() {
         process.exit(0);
     }
 
-    const concurrency = Math.max(1, Number(process.env.BACKFILL_CONCURRENCY) || 2);
+    const concurrency = parseBoundedPositiveInteger(process.env.BACKFILL_CONCURRENCY, {
+        fallback: 2,
+        max: 8,
+    });
     const queue = new PQueue({ concurrency });
     const flips: FlipCounts = { primaries: 0, transfer: 0, matrix: 0, hdr: 0, total: 0 };
     let checked = 0;

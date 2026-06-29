@@ -225,6 +225,12 @@ const MUTATING_FUNCTION_NAMES = new Set([
     'revalidateTag',
 ]);
 
+const PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES = new Set([
+    'getCurrentUser',
+    'getSession',
+    'isAdmin',
+]);
+
 /**
  * R4C2 SEC-R4C2-02: generic walker — true when any node in the subtree is a
  * DIRECT mutating call (`.insert(...)` / `.update(...)` / `logAuditEvent(...)`
@@ -270,6 +276,10 @@ function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
     return found;
 }
 
+function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
+    return nodeContainsCallNamed(statement, PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
+}
+
 function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimit = false;
@@ -302,7 +312,11 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
         const guardName = sameOriginGuardVariableName(body.statements[index], approvedImports);
         if (!guardName) continue;
 
-        if (body.statements.slice(0, index).some(statementContainsPreGuardMutation)) {
+        const preGuardStatements = body.statements.slice(0, index);
+        if (
+            preGuardStatements.some(statementContainsPreGuardMutation)
+            || preGuardStatements.some(statementContainsPreOriginAuthRead)
+        ) {
             return false;
         }
 
@@ -310,7 +324,10 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
             if (statementReturnsOnGuard(followingStatement, guardName)) {
                 return true;
             }
-            if (statementContainsPreGuardMutation(followingStatement)) {
+            if (
+                statementContainsPreGuardMutation(followingStatement)
+                || statementContainsPreOriginAuthRead(followingStatement)
+            ) {
                 return false;
             }
         }

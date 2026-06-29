@@ -62,6 +62,7 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         const loader = await read('components/map/map-loader.tsx');
         expect(loader).toContain('Suspense');
         expect(loader).toContain('role="status"');
-        expect(loader).toContain('aria-label={label}');
+        expect(loader).toContain('{label}');
+        expect(loader).toContain('animate-pulse');
     });
 });

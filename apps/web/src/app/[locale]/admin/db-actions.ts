@@ -44,12 +44,12 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     if (maintenanceError) {
         return { error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating/exporting server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) {
+        return { error: t('unauthorized') };
+    }
 
     // group_concat_max_len is already set to 65535 on every pool connection
     // via poolConnection.on('connection', ...) in db/index.ts — no per-session
@@ -122,12 +122,12 @@ export async function dumpDatabase() {
     if (maintenanceError) {
         return { success: false as const, error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { success: false as const, error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { success: false as const, error: originError };
+    if (!(await isAdmin())) {
+        return { success: false as const, error: t('unauthorized') };
+    }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
@@ -269,12 +269,12 @@ export async function restoreDatabase(formData: FormData) {
     if (maintenanceError) {
         return { success: false, error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { success: false, error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { success: false, error: originError };
+    if (!(await isAdmin())) {
+        return { success: false, error: t('unauthorized') };
+    }
 
     // Use a dedicated connection from the pool so GET_LOCK and RELEASE_LOCK
     // execute on the same session. Advisory locks are session-scoped —
@@ -561,7 +561,13 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             settled = true;
             await cleanupTempFile();
             if (code === 0) {
-                const migrationResult = await runPostRestoreMigrations(t);
+                let migrationResult: { success: boolean; error?: string };
+                try {
+                    migrationResult = await runPostRestoreMigrations(t);
+                } catch (err) {
+                    console.error('post-restore migrate setup error:', err);
+                    migrationResult = { success: false, error: t('restoreFailed') };
+                }
                 if (!migrationResult.success) {
                     resolve({ success: false, error: migrationResult.error ?? t('restoreFailed'), keepMaintenance: true });
                     return;

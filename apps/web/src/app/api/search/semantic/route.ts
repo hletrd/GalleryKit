@@ -183,6 +183,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
     const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
 
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
     // AGG-C1/M5: charge before reading the body. This is still after cheap
     // same-origin/maintenance/content-header/config gates, but before
     // potentially large body materialization.
@@ -194,9 +198,6 @@ export async function POST(request: NextRequest): Promise<Response> {
             { error: 'Rate limited' },
             { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
         );
-    }
-    if (isRequestAborted(request)) {
-        return abortResponse();
     }
 
     // Parse body — read as text first with explicit byte cap.

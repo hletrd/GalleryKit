@@ -116,6 +116,7 @@ export default async function YearInReviewPage({
         })),
     } : null;
     const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
+    const eagerArchiveImageIds = new Set(galleryPhotos.slice(0, 6).map((photo) => photo.id));
 
     return (
         <div className="space-y-6">
@@ -174,17 +175,21 @@ export default async function YearInReviewPage({
 
                                 <GridPictureFallbackBoundary className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                                     {monthPhotos.map((photo) => {
+                                        const shouldEagerLoad = eagerArchiveImageIds.has(photo.id);
                                         const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
                                         const altText = getConcisePhotoAltText(photo, tCommon('photo'));
                                         const baseAvif = photo.filename_avif.replace(/\.avif$/i, '');
                                         const baseWebp = photo.filename_webp.replace(/\.webp$/i, '');
+                                        const aspectRatio = photo.width > 0 && photo.height > 0
+                                            ? `${photo.width} / ${photo.height}`
+                                            : '1 / 1';
 
                                         return (
                                             <div
                                                 key={photo.id}
                                                 className="break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2"
                                                 style={{
-                                                    aspectRatio: `${photo.width} / ${photo.height}`,
+                                                    aspectRatio,
                                                     backgroundColor: 'hsl(var(--muted))',
                                                 }}
                                             >
@@ -211,7 +216,8 @@ export default async function YearInReviewPage({
                                                             width={photo.width}
                                                             height={photo.height}
                                                             className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                            loading="lazy"
+                                                            loading={shouldEagerLoad ? 'eager' : 'lazy'}
+                                                            fetchPriority={shouldEagerLoad ? 'high' : undefined}
                                                             decoding="async"
                                                         />
                                                         <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">

@@ -12,8 +12,9 @@
  *   camera_model, lens_model, capture_date, topic, tag.
  */
 
-import { sql, type SQL, and as drizzleAnd, or as drizzleOr, eq, gt, gte, lt, lte, like, inArray } from 'drizzle-orm';
+import { sql, type SQL, and as drizzleAnd, or as drizzleOr, eq, gt, gte, lt, lte, inArray } from 'drizzle-orm';
 import { images, tags, imageTags } from '@/db';
+import { containsLike } from '@/lib/sql-like';
 
 // ── Column allowlist ─────────────────────────────────────────────────────────
 
@@ -215,9 +216,7 @@ function compilePredicate(pred: Predicate): SQL {
             return lte(col, pred.value) as SQL;
 
         case 'contains': {
-            const escaped = String((pred as ContainsPredicate).value)
-                .replace(/[%_\\]/g, '\\$&');
-            return like(col, `%${escaped}%`) as SQL;
+            return containsLike(col, String((pred as ContainsPredicate).value));
         }
 
         case 'between': {
@@ -257,12 +256,11 @@ function compileTagPredicate(pred: TagPredicate): SQL {
     }
 
     if (pred.operator === 'contains') {
-        const escaped = String(pred.value).replace(/[%_\\]/g, '\\$&');
         return sql`${images.id} IN (
             SELECT ${imageTags.imageId}
             FROM ${imageTags}
             INNER JOIN ${tags} ON ${imageTags.tagId} = ${tags.id}
-            WHERE ${tags.name} LIKE ${`%${escaped}%`}
+            WHERE ${containsLike(tags.name, pred.value)}
         )`;
     }
 

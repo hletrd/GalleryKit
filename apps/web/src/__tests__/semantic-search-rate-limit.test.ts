@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+    ADMIN_TOKEN_AUTH_MAX_REQUESTS,
+    ADMIN_TOKEN_AUTH_WINDOW_MS,
     SEMANTIC_RATE_LIMIT_MAX,
     SEMANTIC_RATE_LIMIT_WINDOW_MS,
+    preIncrementAdminTokenAuthAttempt,
     preIncrementSemanticAttempt,
+    resetAdminTokenAuthRateLimitForTests,
     rollbackSemanticAttempt,
     resetSemanticRateLimitForTests,
 } from '@/lib/rate-limit';
 
 afterEach(() => {
     resetSemanticRateLimitForTests();
+    resetAdminTokenAuthRateLimitForTests();
 });
 
 describe('preIncrementSemanticAttempt (R2C11-MED-01 / R2C11-LOW-10)', () => {
@@ -51,6 +56,29 @@ describe('preIncrementSemanticAttempt (R2C11-MED-01 / R2C11-LOW-10)', () => {
 
         // ipB should still have budget
         expect(preIncrementSemanticAttempt(ipB, now)).toBe(false);
+    });
+});
+
+describe('preIncrementAdminTokenAuthAttempt (C11-06)', () => {
+    it('allows a generous burst and then limits token probes per IP', () => {
+        const ip = '203.0.113.70';
+        const now = 9_000_000;
+
+        for (let i = 0; i < ADMIN_TOKEN_AUTH_MAX_REQUESTS; i++) {
+            expect(preIncrementAdminTokenAuthAttempt(ip, now)).toBe(false);
+        }
+        expect(preIncrementAdminTokenAuthAttempt(ip, now)).toBe(true);
+    });
+
+    it('resets after the token-auth window expires', () => {
+        const ip = '203.0.113.71';
+        const start = 10_000_000;
+
+        for (let i = 0; i < ADMIN_TOKEN_AUTH_MAX_REQUESTS; i++) {
+            preIncrementAdminTokenAuthAttempt(ip, start);
+        }
+        expect(preIncrementAdminTokenAuthAttempt(ip, start)).toBe(true);
+        expect(preIncrementAdminTokenAuthAttempt(ip, start + ADMIN_TOKEN_AUTH_WINDOW_MS + 1)).toBe(false);
     });
 });
 

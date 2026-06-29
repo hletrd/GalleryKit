@@ -103,13 +103,13 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
-    it('allows non-mutating localization/auth work before the same-origin guard', () => {
+    it('allows non-mutating localization before the same-origin guard', () => {
         const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 const t = await getTranslations('serverActions');
-                if (!(await isAdmin())) return { error: t('unauthorized') };
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
+                if (!(await isAdmin())) return { error: t('unauthorized') };
                 await db.delete(foo).where(eq(foo.id, id));
                 return { success: true };
             }
@@ -117,6 +117,23 @@ describe('checkActionSource — function declarations', () => {
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
+    });
+
+    it('fails when auth/session reads happen before the same-origin guard', () => {
+        const src = withApprovedActionGuard(`
+            export async function deleteFoo(id) {
+                const t = await getTranslations('serverActions');
+                if (!(await isAdmin())) return { error: t('unauthorized') };
+                const user = await getCurrentUser();
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true, userId: user?.id };
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('fails when revalidation happens before the same-origin guard', () => {

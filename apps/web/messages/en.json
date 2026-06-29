@@ -230,8 +230,8 @@
     "bulkSelectTopic": "Select category…",
     "bulkAddTags": "Add tags",
     "bulkRemoveTags": "Remove tags",
-    "bulkApplyAltSuggested": "Apply suggested alt text",
-    "bulkApplyAltSuggestedHint": "Copies AI-suggested alt text into the chosen field only when that field is currently empty.",
+    "bulkApplyAltSuggested": "Apply EXIF-derived suggested alt text",
+    "bulkApplyAltSuggestedHint": "Copies EXIF-derived suggested alt text into the chosen field only when that field is currently empty.",
     "bulkAltSuggested_none": "Do not apply",
     "bulkAltSuggested_title": "Copy to title",
     "bulkAltSuggested_description": "Copy to description"
@@ -341,7 +341,7 @@
     "downloadP3Jpeg": "Download (8-bit Display P3 JPEG)",
     "downloadP3Avif": "Download (Display P3 AVIF)",
     "downloadP3AvifDesc": "Smaller file, wider gamut — modern browsers only",
-    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram, Space to toggle slideshow.",
+    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram. Space toggles slideshow in lightbox.",
     "slideshowOn": "Slideshow started",
     "slideshowOff": "Slideshow stopped",
     "colorDetails": "Color details",
@@ -778,7 +778,7 @@
     "analyticsEnabled": "This site loads Google Analytics to measure visits and interactions. Google may receive request and device information according to its own policies.",
     "analyticsDisabled": "Google Analytics is not configured on this site.",
     "metadataTitle": "Photo Metadata",
-    "metadataBody": "Public pages exclude GPS coordinates. Upload settings can strip location data from original files before storage when that privacy option is enabled."
+    "metadataBody": "Standard gallery and photo pages exclude GPS coordinates. The public map can show coordinates only for topics an admin explicitly marks as map-visible. Upload settings can strip location data from original files before storage when that privacy option is enabled."
   },
   "onThisDay": {
     "title": "On This Day",

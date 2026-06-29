@@ -24,7 +24,7 @@
  * (CM-HIGH-5), so once an image is reprocessed any cached client copy
  * will revalidate against the new ETag and re-fetch automatically.
  *
- * Concurrency is capped at BACKFILL_CONCURRENCY (default 2) to avoid
+ * Concurrency is capped at BACKFILL_CONCURRENCY (default 2, max 8) to avoid
  * starving the live web process during long re-runs.
  *
  * Advisory lock
@@ -54,6 +54,7 @@ import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecisi
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
+import { parseBoundedPositiveInteger } from '../src/lib/env';
 import { getGalleryConfig } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
 
@@ -367,7 +368,10 @@ async function main() {
         process.exit(0);
     }
 
-    const concurrency = Math.max(1, Number(process.env.BACKFILL_CONCURRENCY) || 2);
+    const concurrency = parseBoundedPositiveInteger(process.env.BACKFILL_CONCURRENCY, {
+        fallback: 2,
+        max: 8,
+    });
     const queue = new PQueue({ concurrency });
     let skipped = 0;
     let processed = 0;

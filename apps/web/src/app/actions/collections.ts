@@ -16,9 +16,9 @@ export async function createSmartCollection(formData: FormData) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
     const { value: name, rejected: nameRejected } = requireCleanInput(formData.get('name')?.toString());
@@ -65,9 +65,9 @@ export async function updateSmartCollection(id: number, formData: FormData) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) return { error: t('invalidInput') };
 
@@ -113,9 +113,9 @@ export async function deleteSmartCollection(id: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) return { error: t('invalidInput') };
 

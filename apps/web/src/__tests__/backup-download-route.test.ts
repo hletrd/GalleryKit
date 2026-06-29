@@ -10,11 +10,13 @@ const {
     getCurrentUserMock,
     logAuditEventMock,
     getClientIpMock,
+    createReadStreamMock,
 } = vi.hoisted(() => ({
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
     logAuditEventMock: vi.fn(),
     getClientIpMock: vi.fn(),
+    createReadStreamMock: vi.fn(),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
@@ -40,6 +42,15 @@ vi.mock('@/lib/rate-limit', async () => {
     };
 });
 
+vi.mock('fs', async () => {
+    const actual = await vi.importActual<typeof import('fs')>('fs');
+    createReadStreamMock.mockImplementation(actual.createReadStream);
+    return {
+        ...actual,
+        createReadStream: createReadStreamMock,
+    };
+});
+
 import { GET } from '@/app/api/admin/db/download/route';
 
 const originalCwd = process.cwd();
@@ -57,6 +68,7 @@ describe('backup download route', () => {
         getCurrentUserMock.mockReset();
         logAuditEventMock.mockReset();
         getClientIpMock.mockReset();
+        createReadStreamMock.mockClear();
 
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 7 });
@@ -140,23 +152,20 @@ describe('backup download route', () => {
     });
 
     it('returns a 500 for unexpected filesystem failures instead of masking them as 404', async () => {
-        const backupsDir = path.join(tempCwd, 'data', 'backups');
-        const filePath = path.join(backupsDir, VALID_BACKUP_FILE);
+        const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
         await fsp.writeFile(filePath, 'backup-data');
-        await fsp.chmod(backupsDir, 0o000);
+        createReadStreamMock.mockImplementationOnce(() => {
+            throw Object.assign(new Error('deterministic stream failure'), { code: 'EACCES' });
+        });
 
-        try {
-            const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
-                headers: {
-                    host: 'localhost',
-                    referer: 'http://localhost/admin/db',
-                },
-            }));
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+            headers: {
+                host: 'localhost',
+                referer: 'http://localhost/admin/db',
+            },
+        }));
 
-            expect(response.status).toBe(500);
-            expect(await response.text()).toBe('Internal Server Error');
-        } finally {
-            await fsp.chmod(backupsDir, 0o755);
-        }
+        expect(response.status).toBe(500);
+        expect(await response.text()).toBe('Internal Server Error');
     });
 });

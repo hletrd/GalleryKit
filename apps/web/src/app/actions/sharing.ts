@@ -85,10 +85,10 @@ export async function createPhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
@@ -186,10 +186,10 @@ export async function createGroupShareLink(imageIds: number[]) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
@@ -307,10 +307,10 @@ export async function revokePhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: t('invalidImageId') };
@@ -347,10 +347,10 @@ export async function deleteGroupShareLink(groupId: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(groupId) || groupId <= 0) {
         return { error: t('invalidGroupId') };

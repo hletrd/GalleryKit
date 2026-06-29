@@ -56,9 +56,9 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { status: 'error', message: maintenanceError };
-    if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { status: 'unauthorized', message: originError };
+    if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
 
     // Rate-limit: once per hour per admin user
     const user = await getCurrentUser();

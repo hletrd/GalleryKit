@@ -5,7 +5,7 @@
  *  - Image derivatives (/uploads/avif|webp|jpeg/): stale-while-revalidate,
  *    50 MB LRU cap, admin-route bypass.
  *  - HTML routes: network-first, 24 h OFFLINE-ONLY fallback cache.
- *    R4C6 COR-R4C6-05: every public page sets revalidate = 0 (dynamic
+ *    R4C6 COR-R4C6-05: dynamic gallery/photo pages set revalidate = 0
  *    rendering; Next.js emits no-cache response headers for dynamically
  *    rendered routes), so honoring Cache-Control here left this cache
  *    permanently empty — the PWA offline story never functioned. Caching 200 GET HTML is therefore
@@ -18,12 +18,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 858bc13e-p7 is replaced at build time by scripts/build-sw.ts.
+ * 219131d6-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '858bc13e-p7';
+const SW_VERSION = '219131d6-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;

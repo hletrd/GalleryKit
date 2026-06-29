@@ -79,6 +79,7 @@ let bootstrapCleanupRun = false;
 const CLAIM_RETRY_DELAY_MS = 5000;
 const BOOTSTRAP_BATCH_SIZE = 500;
 const BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE = 50;
+const BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY = 2;
 const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
@@ -399,8 +400,9 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
             .orderBy(asc(images.id))
             .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
 
-        for (const row of rows) {
-            trackQueueSideEffect(state, (async () => {
+        for (let i = 0; i < rows.length; i += BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY) {
+            const chunk = rows.slice(i, i + BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY);
+            const tasks = chunk.map((row) => (async () => {
                 try {
                     if (!row.filename_original) return;
                     const originalPath = await resolveOriginalUploadPath(row.filename_original);
@@ -410,6 +412,10 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
                     console.warn(`[Queue] Failed to retry missing embedding for image ${row.id}:`, err);
                 }
             })());
+            for (const task of tasks) {
+                trackQueueSideEffect(state, task);
+            }
+            await Promise.allSettled(tasks);
         }
 
         const lastRow = rows.at(-1);

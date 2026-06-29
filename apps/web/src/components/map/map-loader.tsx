@@ -24,11 +24,15 @@ interface MapLoaderProps {
 function MapLoadingFallback({ label }: { label: string }) {
     return (
         <div
-            className="min-h-[520px] w-full rounded-lg border bg-muted/20"
+            className="flex min-h-[520px] w-full items-center justify-center rounded-lg border bg-muted/20 text-sm text-muted-foreground"
             role="status"
             aria-live="polite"
-            aria-label={label}
-        />
+        >
+            <span className="inline-flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+                {label}
+            </span>
+        </div>
     );
 }
 

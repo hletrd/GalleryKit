@@ -1,10 +1,11 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull, isNotNull } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, isNull, isNotNull } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import { isRestoreMaintenanceActive } from './restore-maintenance';
+import { containsLike } from './sql-like';
 import { isValidTagSlug, isValidSlug } from './validation';
 import { countCodePoints } from './utils';
 import siteConfig from '@/site-config.json';
@@ -1488,15 +1489,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     if (limit <= 0) return [];
     const effectiveLimit = Math.min(Math.max(limit, 1), 100);
 
-    // R2C11-LOW-06: LIKE escaping assumes backslash escape semantics
-    // (standard MySQL default). If the server runs with
-    // NO_BACKSLASH_ESCAPES SQL mode, the escaping below would be weakened
-    // because backslash would no longer be treated as an escape character.
-    // At personal-gallery scale this is an acceptable risk; for
-    // multi-tenant or hardened deployments, consider using parameterized
-    // full-text search or a dedicated search engine instead.
-    const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
-    const searchTerm = `%${escaped}%`;
+    const searchTerm = query.trim();
 
     // PRIVACY: Omit filename_webp and filename_avif from public search results
     // to minimize internal filename exposure. filename_jpeg is needed for thumbnails.
@@ -1546,12 +1539,12 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .where(and(
             eq(images.processed, true),
             or(
-                like(images.title, searchTerm),
-                like(images.description, searchTerm),
-                like(images.camera_model, searchTerm),
-                like(images.lens_model, searchTerm),
-                like(images.topic, searchTerm),
-                like(topics.label, searchTerm),
+                containsLike(images.title, searchTerm),
+                containsLike(images.description, searchTerm),
+                containsLike(images.camera_model, searchTerm),
+                containsLike(images.lens_model, searchTerm),
+                containsLike(images.topic, searchTerm),
+                containsLike(topics.label, searchTerm),
             )
         ))
         // C4F-12: ORDER BY matches gallery sort order (capture_date DESC,
@@ -1586,12 +1579,12 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const remainingLimit = effectiveLimit - results.length;
     const mainIds = results.map(r => r.id);
 
-    const tagConditions = [eq(images.processed, true), like(tags.name, searchTerm)];
+    const tagConditions: SQL[] = [eq(images.processed, true) as SQL, containsLike(tags.name, searchTerm)];
     if (mainIds.length > 0) {
         tagConditions.push(notInArray(images.id, mainIds));
     }
 
-    const aliasConditions = [eq(images.processed, true), like(topicAliases.alias, searchTerm)];
+    const aliasConditions: SQL[] = [eq(images.processed, true) as SQL, containsLike(topicAliases.alias, searchTerm)];
     if (mainIds.length > 0) {
         aliasConditions.push(notInArray(images.id, mainIds));
     }

@@ -7,6 +7,7 @@ import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { sanitizeForOg } from '@/lib/og-sanitize';
 import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
+import { BASE_URL } from '@/lib/constants';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -50,12 +51,12 @@ export async function GET(
     // Validate id is a positive integer
     if (!/^\d+$/.test(id)) {
         rollbackOgAttempt(ip);
-        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(BASE_URL, OG_ERROR_CACHE_CONTROL);
     }
     const imageId = parseInt(id, 10);
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
         rollbackOgAttempt(ip);
-        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(BASE_URL, OG_ERROR_CACHE_CONTROL);
     }
 
     try {
@@ -99,21 +100,21 @@ export async function GET(
         //
         // next/og (Satori) fetches the photo derivative by HTTP.
         // SEC-01 / AGG-M7 (run-6 cycle-2): pin the internal fetch base to the
-        // TRUSTED canonical site origin (`siteConfig.url`) rather than
+        // TRUSTED effective canonical site origin (`BASE_URL || siteConfig.url`) rather than
         // `new URL(req.url).origin`. The request origin is derived from the
         // inbound Host / X-Forwarded-Host; a fronting proxy that forwards an
         // arbitrary Host could otherwise coerce this server-side fetch into
         // hitting `http://attacker/uploads/jpeg/<uuid>` (a weak blind-SSRF /
         // cache-poison primitive). The path component is already a validated
         // UUID derivative — pinning the host closes the only attacker lever.
-        // If siteConfig.url is unset / unparseable, do NOT fall back to the
+        // If the effective canonical URL is unset / unparseable, do NOT fall back to the
         // attacker-controllable request origin; return a canonical fallback
         // response or fail closed.
         let fetchOrigin: string;
         try {
-            fetchOrigin = new URL(siteConfig.url).origin;
+            fetchOrigin = new URL(BASE_URL).origin;
         } catch {
-            // R5-H4: fail closed — when siteConfig.url is unset (dev), do NOT
+            // R5-H4: fail closed — when the canonical URL is unset (dev), do NOT
             // fall back to the attacker-controllable request origin. Return the
             // fallback response instead of exposing a blind-SSRF primitive.
             return buildFallbackResponse(seo.url, OG_ERROR_CACHE_CONTROL, seo.og_image_url || undefined);
@@ -240,7 +241,7 @@ export async function GET(
         if (e instanceof Error) {
             console.error(`[og/photo] ${e.message}`);
         }
-        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(BASE_URL, OG_ERROR_CACHE_CONTROL);
     }
 }
 

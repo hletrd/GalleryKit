@@ -2,6 +2,7 @@ import { isAdmin } from '@/app/actions/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { getTranslations } from 'next-intl/server';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
+import { getClientIp, preIncrementAdminTokenAuthAttempt } from '@/lib/rate-limit';
 import { verifyToken, markTokenUsed, tokenHasScope, type AdminTokenScope, type VerifiedToken } from '@/lib/admin-tokens';
 
 const NO_STORE_HEADERS = {
@@ -68,6 +69,13 @@ export function withAdminAuth<T extends unknown[]>(
         if (options?.allowTokenScope && headers) {
             const presented = headers.get(TOKEN_HEADER);
             if (presented) {
+                const ip = getClientIp(headers);
+                if (preIncrementAdminTokenAuthAttempt(ip, Date.now())) {
+                    return NextResponse.json({ error: 'Rate limited' }, {
+                        status: 429,
+                        headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' },
+                    });
+                }
                 const verified = await verifyToken(presented);
                 if (verified && tokenHasScope(verified.scopes, options.allowTokenScope)) {
                     await markTokenUsed(verified.id);

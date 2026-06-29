@@ -230,8 +230,8 @@
     "bulkSelectTopic": "카테고리 선택…",
     "bulkAddTags": "태그 추가",
     "bulkRemoveTags": "태그 제거",
-    "bulkApplyAltSuggested": "제안된 대체 텍스트 적용",
-    "bulkApplyAltSuggestedHint": "AI가 제안한 대체 텍스트를 선택한 필드가 비어 있는 경우에만 복사합니다.",
+    "bulkApplyAltSuggested": "EXIF 기반 제안 대체 텍스트 적용",
+    "bulkApplyAltSuggestedHint": "EXIF 기반 제안 대체 텍스트를 선택한 필드가 비어 있는 경우에만 복사합니다.",
     "bulkAltSuggested_none": "적용 안 함",
     "bulkAltSuggested_title": "제목으로 복사",
     "bulkAltSuggested_description": "설명으로 복사"
@@ -341,7 +341,7 @@
     "downloadP3Jpeg": "다운로드 (8비트 Display P3 JPEG)",
     "downloadP3Avif": "다운로드 (Display P3 AVIF)",
     "downloadP3AvifDesc": "파일은 작고 색 영역은 넓습니다 (최신 브라우저 전용)",
-    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, C 색상 정보, H 히스토그램, Space 슬라이드쇼 토글.",
+    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, C 색상 정보, H 히스토그램. Space는 라이트박스에서 슬라이드쇼를 토글합니다.",
     "slideshowOn": "슬라이드쇼 시작",
     "slideshowOff": "슬라이드쇼 중지",
     "colorDetails": "색상 정보",
@@ -778,7 +778,7 @@
     "analyticsEnabled": "이 사이트는 방문과 상호작용을 측정하기 위해 Google Analytics를 불러옵니다. Google은 자체 정책에 따라 요청 및 기기 정보를 받을 수 있습니다.",
     "analyticsDisabled": "이 사이트에는 Google Analytics가 설정되어 있지 않습니다.",
     "metadataTitle": "사진 메타데이터",
-    "metadataBody": "공개 페이지에는 GPS 좌표가 포함되지 않습니다. 개인정보 옵션이 켜져 있으면 업로드 설정에서 원본 파일을 저장하기 전에 위치 정보를 제거할 수 있습니다."
+    "metadataBody": "일반 갤러리와 사진 페이지에는 GPS 좌표가 포함되지 않습니다. 공개 지도는 관리자가 지도 표시를 명시적으로 켠 토픽의 좌표만 보여 줄 수 있습니다. 개인정보 옵션이 켜져 있으면 업로드 설정에서 원본 파일을 저장하기 전에 위치 정보를 제거할 수 있습니다."
   },
   "onThisDay": {
     "title": "오늘의 사진",

@@ -76,10 +76,10 @@ export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // AGG10R-RPL-01: validate form-field shape BEFORE the rate-limit
     // pre-increment, mirroring the AGG9R-RPL-01 fix applied to
@@ -183,12 +183,12 @@ export async function deleteAdminUser(id: number) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
-    const currentUser = await getCurrentUser();
-    if (!currentUser) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: t('invalidUserId') };

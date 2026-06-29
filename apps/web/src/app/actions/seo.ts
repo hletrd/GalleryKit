@@ -55,10 +55,10 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
-    if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // C7-AGG7R-03: check Unicode formatting on RAW values BEFORE
     // normalizeStringRecord strips them (stripControlChars now removes

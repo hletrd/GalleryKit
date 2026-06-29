@@ -37,7 +37,9 @@
 - **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Live on the [demo](https://gallery.atik.kr)
 - **Progressive Web App** -- installable PWA with a service worker (stale-while-revalidate image cache + offline HTML fallback)
 - **Sharing** -- per-photo and group share links with Base56 short keys
-- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
+- **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
+
+GalleryKit is not a photo editor, culler, or scoring tool. Photos are expected to arrive after editing; admin batch operations change metadata only.
 - **Internationalization** -- English and Korean (next-intl), incl. localized color metadata
 - **Docker Support** -- standalone output with documented Linux host-network + reverse-proxy deployment
 

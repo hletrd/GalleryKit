@@ -68,6 +68,10 @@ export const SEARCH_WINDOW_MS = 60 * 1000; // 1 minute
 export const SEARCH_MAX_REQUESTS = 30;
 export const SEARCH_RATE_LIMIT_MAX_KEYS = 2000;
 
+export const ADMIN_TOKEN_AUTH_WINDOW_MS = 60 * 1000;
+export const ADMIN_TOKEN_AUTH_MAX_REQUESTS = 120;
+export const ADMIN_TOKEN_AUTH_RATE_LIMIT_MAX_KEYS = 2000;
+
 // AGG8F-01 / plan-233: in-memory rate-limit for the public unauthenticated
 // `/api/og` endpoint. The route runs a CPU-bound React-tree → SVG → PNG
 // pipeline (~200-400ms per call) and was previously the only public surface
@@ -111,6 +115,8 @@ export const searchRateLimit = createResetAtBoundedMap<string>(SEARCH_RATE_LIMIT
 const SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS = 1000;
 let lastSearchRateLimitPruneAt = 0;
 let warnedMissingTrustProxy = false;
+
+const adminTokenAuthRateLimit = createResetAtBoundedMap<string>(ADMIN_TOKEN_AUTH_RATE_LIMIT_MAX_KEYS);
 
 export function normalizeIp(value: string | null): string | null {
     if (!value) return null;
@@ -218,6 +224,32 @@ export function pruneSearchRateLimit(now: number, options?: { force?: boolean })
 
 export function resetSearchRateLimitPruneStateForTests() {
     lastSearchRateLimitPruneAt = 0;
+}
+
+export function pruneAdminTokenAuthRateLimit(now: number) {
+    adminTokenAuthRateLimit.prune(now);
+}
+
+/** Lightweight pre-auth guard for PAT-bearing admin API requests.
+ *
+ * This runs before `verifyToken()`, which consults the DB, so invalid token
+ * spray is bounded even when no authenticated session exists. The limit is
+ * deliberately looser than public search because Lightroom integrations can
+ * burst metadata reads during sync.
+ */
+export function preIncrementAdminTokenAuthAttempt(ip: string, now: number = Date.now()): boolean {
+    pruneAdminTokenAuthRateLimit(now);
+    const entry = adminTokenAuthRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        adminTokenAuthRateLimit.set(ip, { count: 1, resetAt: now + ADMIN_TOKEN_AUTH_WINDOW_MS });
+    } else {
+        adminTokenAuthRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
+    }
+    return (adminTokenAuthRateLimit.get(ip)?.count ?? 0) > ADMIN_TOKEN_AUTH_MAX_REQUESTS;
+}
+
+export function resetAdminTokenAuthRateLimitForTests() {
+    adminTokenAuthRateLimit.clear();
 }
 
 // AGG8F-01 / plan-233: pre-increment-then-check helpers for `/api/og`.

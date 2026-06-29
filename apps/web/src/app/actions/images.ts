@@ -117,13 +117,13 @@ export async function uploadImages(formData: FormData) {
     if (maintenanceError) {
         return { error: maintenanceError };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         return { error: t('unauthorized') };
     }
-    // C2R-02: defense-in-depth same-origin check for mutating server actions.
-    const originError = await requireSameOriginAdmin();
-    if (originError) return { error: originError };
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
     // Topic and tags are admin-controlled strings that become route/query/UI
     // data. Reject rather than silently stripping C0/C1 or Unicode formatting
@@ -618,12 +618,12 @@ export async function deleteImage(id: number) {
     if (maintenanceError) {
         return { error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) {
+        return { error: t('unauthorized') };
+    }
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
@@ -714,12 +714,12 @@ export async function deleteImages(ids: number[]) {
     if (maintenanceError) {
         return { error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) {
+        return { error: t('unauthorized') };
+    }
 
     if (!Array.isArray(ids) || ids.length === 0) {
         return { error: t('noImagesSelected') };
@@ -874,12 +874,12 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     if (maintenanceError) {
         return { error: maintenanceError };
     }
-    if (!(await isAdmin())) {
-        return { error: t('unauthorized') };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    if (!(await isAdmin())) {
+        return { error: t('unauthorized') };
+    }
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: t('invalidImageId') };

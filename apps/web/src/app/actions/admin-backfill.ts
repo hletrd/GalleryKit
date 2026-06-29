@@ -31,11 +31,11 @@ export interface TriggerBackfillResult {
 
 export async function triggerBackfill(): Promise<TriggerBackfillResult> {
     const t = await getTranslations('serverActions');
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { ok: false, status: 'error', error: originError };
     if (!(await isAdmin())) {
         return { ok: false, status: 'error', error: t('unauthorized') };
     }
-    const originError = await requireSameOriginAdmin();
-    if (originError) return { ok: false, status: 'error', error: originError };
 
     // AGG-20 (plan-330 Unit B): the candidate count `triggerAdminBackfill`
     // returns (`affectedRows`) is a count-then-handoff snapshot — a benign

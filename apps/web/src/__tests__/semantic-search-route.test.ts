@@ -237,6 +237,23 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 
+    it('returns 499 for already-aborted serving-mode requests before charging rate limit', async () => {
+        const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));
+        const request = {
+            headers: new Headers({ 'content-type': 'application/json' }),
+            signal: { aborted: true },
+            text: textMock,
+        } as unknown as NextRequest;
+
+        const response = await POST(request);
+
+        expect(response.status).toBe(499);
+        await expect(response.json()).resolves.toEqual({ error: 'Request aborted' });
+        expect(textMock).not.toHaveBeenCalled();
+        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
     it('returns 503 in production mode when no production embeddings exist', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
 
