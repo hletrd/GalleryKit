@@ -1,244 +1,92 @@
-# Debugger Review - review-plan-fix cycle 4
-
-Date: 2026-06-29
-Role: debugger
-Scope: current HEAD only, `10b500bb`
-Result: 0 fresh debugger findings
-Application code edited: no
-
-## Instructions and Context Loaded
-
-- Read `AGENTS.md` first.
-- Read `CLAUDE.md` for architecture, operations, runtime topology, queueing, restore, deploy, browser, color/HDR, CLIP, and testing context.
-- Loaded the `code-review` skill because this is a review task.
-- Consulted `.context/reviews/debugger.md` from cycle 3, `.context/reviews/_aggregate.md`, and the cycle 4 reviewer reports only enough to avoid duplicate findings.
-- Confirmed the current HEAD delta from the executable source baseline is review-documentation only; the application/runtime source reviewed here matches the cycle 4 source already examined by sibling lanes.
-
-## Bug-Surface Inventory
-
-I built the review inventory first, then inspected the relevant files in each surface.
-
-### Startup, Shutdown, and Background Work
-
-Reviewed:
-
-- `apps/web/src/instrumentation.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/queue-shutdown.ts`
-- `apps/web/src/lib/restore-maintenance.ts`
-- `apps/web/src/lib/clip-embeddings.ts`
-- `apps/web/src/lib/clip-model.ts`
-
-Failure modes checked:
-
-- SIGTERM/SIGINT ordering and timeout behavior
-- queue drain and restore quiescing
-- claim/retry/backoff behavior
-- detached CLIP embedding work
-- bootstrap idempotence and process-local state
-- shutdown with pending async work
-
-### Restore, Upload, and Maintenance Gates
-
-Reviewed:
-
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/upload-processing-lock.ts`
-- `apps/web/src/lib/upload-tracker.ts`
-- `apps/web/src/lib/lr-contract.ts`
-- `apps/web/src/lib/restore-maintenance.ts`
-
-Failure modes checked:
-
-- database restore lock ordering
-- maintenance-mode write blocking
-- temporary SQL file cleanup
-- dangerous restore SQL pre-scan
-- mysql child-process event ordering
-- upload disk preclaim and rollback
-- LR contract stale state
-- public writes during restore
-- token creation/revocation during restore
-
-### Public Routes, Server Actions, and Auth Boundaries
-
-Reviewed:
-
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/app/api/admin/*`
-- `apps/web/src/app/actions/auth.ts`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/lib/session.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/lib/request-origin.ts`
-- `apps/web/src/proxy.ts`
-
-Failure modes checked:
-
-- missing admin wrappers
-- missing same-origin checks on mutating actions
-- public mutating route rate limits
-- session/runtime differences
-- stale token and cache behavior
-- non-admin data leakage
-- restore-gate bypasses
-
-### Data Access, Pagination, and Edge-Case Rows
-
-Reviewed:
-
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/data-timeline.ts`
-- `apps/web/src/lib/data-map.ts`
-- `apps/web/src/db/schema.ts`
-- `apps/web/drizzle/*.sql`
-- `apps/web/drizzle/meta/_journal.json`
-- `apps/web/scripts/migrate.js`
-
-Failure modes checked:
-
-- cursor stability
-- large collections
-- NULL and missing GPS/capture-date rows
-- MySQL date/time semantics
-- view-count buffering
-- schema baseline/reconcile behavior
-- journal ordering and migration post-conditions
-- stale schema/test fixture drift
-
-### Browser, Runtime, and Generated Artifacts
-
-Reviewed:
-
-- `apps/web/src/components/register-service-worker.tsx`
-- `apps/web/public/sw.template.js`
-- `apps/web/public/sw.js`
-- `apps/web/scripts/build-sw.ts`
-- `apps/web/src/lib/use-display-capability.ts`
-- `apps/web/src/components/wide-gamut-hint.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/similar-photos.tsx`
-- `apps/web/src/components/map/map-loader.tsx`
-- `apps/web/src/components/map/map-client.tsx`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/package.json`
-
-Failure modes checked:
-
-- stale service worker generation
-- bind-mounted public assets overriding build output
-- browser color-gamut differences
-- Chromium/Safari/Firefox behavior differences
-- racey search responses
-- map loading failure fallback
-- Docker runtime file layout
-
-## Fresh Findings
-
-No fresh debugger findings were confirmed or judged likely for current HEAD.
-
-This pass found several real risk areas, but each matched an already-recorded cycle 3 or cycle 4 finding and is therefore not duplicated below as a new debugger issue.
-
-## Known Risks Not Refiled
-
-These are intentionally not counted as fresh findings because they are already present in cycle 3 or sibling cycle 4 reports.
-
-### Timeline and Calendar Query Shape
-
-- Existing finding: `PERF-C4-01`
-- Regions: `apps/web/src/lib/data-timeline.ts:97-116`, `apps/web/src/lib/data-timeline.ts:129-141`, `apps/web/src/lib/data-timeline.ts:186-207`
-- Status: still relevant, but already filed.
-- Failure mode: month/day extraction and generated date logic can remain non-sargable or timezone-sensitive for large datasets.
-
-### Map Scalability and GPS Indexing
-
-- Existing finding: `PERF-C4-02`
-- Regions: `apps/web/src/lib/data.ts:593-625`, `apps/web/src/components/map/map-client.tsx`
-- Status: still relevant, but already filed.
-- Failure mode: large GPS-heavy galleries can force full marker transfer and heavy browser clustering/rendering.
-
-### CLIP Embedding Work Escapes Queue Backpressure
-
-- Existing findings: `C3-03`, `PERF-C4-03`
-- Region: `apps/web/src/lib/image-queue.ts:512-567`
-- Status: still relevant, but already filed.
-- Failure mode: detached embedding generation can continue outside the image queue's retry/backpressure contract and may be abandoned on shutdown.
-
-### Semantic and Similar Search Scan/Rerank Cost
-
-- Existing findings: `C3-02`, `PERF-C4-04`
-- Regions: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`
-- Status: still relevant, but already filed.
-- Failure mode: newest-first candidate limits can miss older relevant images and synchronous reranking can overload API paths.
-
-### Smart Collection Count and Backfill Filter Costs
-
-- Existing findings: `PERF-C4-05`, `PERF-C4-06`
-- Regions: `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/db/schema.ts`
-- Status: still relevant, but already filed.
-- Failure mode: unnecessary counts and unindexed `pipeline_version` filters can increase latency on large galleries.
-
-### Process-Local Coordination Under Horizontal Scale-Out
-
-- Existing findings: `C3-06`, `SEC-C4-01`
-- Regions: `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/upload-processing-lock.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/admin-rate-limit.ts`, `apps/web/src/lib/view-count-buffer.ts`
-- Status: still relevant, but already filed.
-- Failure mode: multi-process or multi-container deployments can split locks, rate limits, queued counters, and restore gates.
-
-### Calendar Local-Time Semantics
-
-- Existing finding: `C3-05`
-- Region: `apps/web/src/lib/data-timeline.ts`
-- Status: still relevant as a product/runtime semantic risk, but already filed.
-- Failure mode: server-local date interpretation can disagree with photographer/user expectations around midnight and timezone boundaries.
-
-## Non-Findings From This Pass
-
-### Service Worker Stale Artifact
-
-`apps/web/public/sw.js` contains an older generated stamp than current HEAD, but this is not a fresh production bug for current HEAD:
-
-- `apps/web/package.json` runs `scripts/build-sw.ts` in `prebuild`.
-- `apps/web/Dockerfile` runs `npm run build`.
-- `apps/web/docker-compose.yml` now bind-mounts only `./public/uploads`, not the entire `public` directory.
-
-Concrete scenario checked: a deploy should regenerate the service worker at build time and should not be overwritten by a stale host-level `public/sw.js` bind mount. The stale committed artifact remains untidy, but the earlier production failure mode is no longer present in the inspected deployment path.
-
-### Restore Write-Gap Regressions
-
-The prior restore-gap class was rechecked across `images.ts`, `lr-tokens.ts`, `public.ts`, and the LR upload route. Mutating paths now carry maintenance/admin/origin gating in the relevant high-risk regions. No fresh bypass was found.
-
-### Migration Journal Drift
-
-`apps/web/drizzle/meta/_journal.json` still contains historical non-monotonic entries, but `apps/web/scripts/migrate.js` now reconciles legacy schemas, baselines journal entries, and asserts committed journal hashes after migration. This remains an operationally important area, but I did not find a fresh latent migration failure beyond already-known history.
-
-### Browser Runtime Fallbacks
-
-Search request staleness, map loader failure fallback, and wide-gamut capability handling were rechecked. I did not find a fresh browser/runtime exception path that is not already covered by existing reviewer notes.
-
-## Missed-Issues Sweep
-
-Final sweep areas and result:
-
-- Async failures: inspected queue drain, restore quiescing, child-process restore, detached embedding, background retries, and shutdown timeout paths. No fresh finding beyond filed CLIP/backpressure and scale-out risks.
-- Queue/restoration failures: inspected restore lock, upload lock, maintenance mode, temp-file cleanup, and write gates. No fresh finding.
-- Edge-case data: inspected NULL/missing capture dates, GPS data, cursor paths, view counters, smart collections, semantic candidates, and schema-sensitive privacy fields. No fresh finding beyond filed performance/semantic risks.
-- Stale generated artifacts: inspected service worker template/output/build hook and Docker/public mounts. No fresh production bug.
-- Browser/runtime differences: inspected service worker registration, wide-gamut detection, search races, and map fallback behavior. No fresh finding.
-- Tests may miss: reviewed migration, privacy, route-lint, origin-lint, public-rate-limit, touch-target, and queue-related test coverage at a surface level. Remaining risk is primarily scale/data-volume behavior already captured in sibling reports.
-
-## Coverage Statement
-
-This was a static latent-bug review of current HEAD. I examined the relevant source, scripts, schema, generated artifact, and deployment files identified by the inventory above. I did not inspect binary assets, screenshots, or photo fixtures because they are not relevant to the requested latent failure-mode review.
-
-I did not rerun the full quality gate suite in this debugger lane because no application code was changed and the task asked for a review artifact. I relied on direct source inspection plus the fresh cycle 4 sibling review evidence for current-source verification, including lint, auth/origin/rate-limit lint, typecheck, full unit tests, targeted tests, and build results recorded in those reports.
-
-Stop condition met: no unreported fresh debugger finding remained after the final missed-issues sweep, and the report was written to `.context/reviews/debugger.md`.
+# Debugger Review - Cycle 5
+
+Role: `debugger`
+Scope: current `HEAD` production bug and incident-path review
+HEAD: `20e0d1f3` (`docs(review): 📝 record cycle 5 critic review`)
+Timestamp: 2026-06-29 KST
+Status: review artifact only; no source edits
+
+## Inventory And Method
+
+Required context loaded first:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `~/.agents/skills/code-review/SKILL.md`
+- Current `.context/reviews/critic.md`
+
+Repository inventory:
+- Current route/action surface under `apps/web/src/app`: public pages, admin pages, 8 API route files, and 12 server-action files.
+- Runtime/startup/shutdown paths: `apps/web/scripts/migrate.js`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`.
+- Cleanup/race paths: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`.
+- Public incident paths: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/api/search/semantic/route.ts`, semantic/share/SW tests.
+- Guard coverage checked with `rg` across startup, signal, cleanup, delete, advisory-lock, restore, service-worker, and semantic-rate-limit surfaces.
+
+Validation evidence:
+- Source-confirmed all findings against current `HEAD`.
+- Confirmed no source files were edited before writing this report.
+- Did not run full lint/typecheck/build/test because this lane is report-only and changed only a markdown review artifact.
+
+## Findings
+
+### DBG-C5-01 - Startup migration can delete the only valid original on private-path conflict
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed
+- Type: startup data-loss edge case / cleanup race
+- Location/region:
+  - `apps/web/scripts/migrate.js:46-55` resolves the legacy public original root and the private original root.
+  - `apps/web/scripts/migrate.js:58-95` migrates legacy originals during startup.
+  - `apps/web/scripts/migrate.js:74-76` unlinks the legacy public source whenever the private target already exists.
+  - `apps/web/scripts/migrate.js:79-84` uses rename or `EXDEV` copy+unlink when the target does not exist.
+  - `apps/web/scripts/migrate.js:97-110` then refuses production startup only if public originals remain.
+- Failure scenario: A previous interrupted migration, manual recovery, or cross-device copy leaves `data/uploads/original/foo.jpg` present but truncated or corrupt while the original valid bytes remain at `public/uploads/original/foo.jpg`. On the next startup, the target-exists branch deletes the valid public source without comparing bytes. The follow-up production assertion passes because the public source is gone, leaving only the bad private copy.
+- Concrete fix: In the `fs.existsSync(target)` branch, compare source and target before unlinking. At minimum compare size and a SHA-256 hash. Only unlink when the bytes match. If they differ, fail startup with an actionable conflict error or quarantine the legacy source under the private data root with a unique suffix. Add tests for identical conflict, divergent conflict, and `EXDEV` copy conflict behavior.
+
+### DBG-C5-02 - Service-worker HTML fallback can serve revoked share pages offline
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Type: stale authorization state / privacy expectation regression
+- Location/region:
+  - `apps/web/public/sw.template.js:271-293` caches any successful HTML response unless `x-gk-admin-render` is `1`.
+  - `apps/web/public/sw.template.js:294-310` serves cached HTML on network failure for up to `HTML_MAX_AGE_MS`.
+  - `apps/web/public/sw.template.js:366-369` routes all HTML GETs through `networkFirstHtml`.
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14-26` marks single-photo share pages dynamic/no-cache/noindex.
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:79-96` returns `notFound()` when a share key is invalid.
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:17-29` marks shared-group pages dynamic/no-cache/noindex.
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:82-108` returns `notFound()` when a group key is invalid.
+- Failure scenario: A visitor opens `/s/<key>` or `/g/<key>` while online, so the service worker stores the rendered HTML. The admin later revokes the single-photo share, deletes the group, or the group expires. Online requests correctly return 404, but the same browser can still see the cached shared page while offline for the 24-hour HTML fallback window. Server-side revalidation cannot evict already-installed client Cache Storage entries.
+- Concrete fix: Treat secret-bearing public share routes as permissioned for offline-cache purposes. Either bypass `networkFirstHtml` for `/s/` and `/g/` paths, including locale-prefixed forms, or emit a response header such as `x-gk-no-offline-cache: 1` from share pages and have the service worker honor it before `htmlCache.put(...)`. Add `sw-template-contract` coverage proving share HTML is not cached.
+
+### DBG-C5-03 - Disabled semantic search still performs unmetered body parse and config work
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Type: public API abuse path / disabled-feature incident path
+- Location/region:
+  - `apps/web/src/app/api/search/semantic/route.ts:100-156` performs same-origin, maintenance, content-type, transfer-encoding, and optional `Content-Length` gates.
+  - `apps/web/src/app/api/search/semantic/route.ts:158-169` increments the semantic rate-limit bucket.
+  - `apps/web/src/app/api/search/semantic/route.ts:171-207` reads the request body, checks byte length, parses JSON, trims the query, and validates code-point length.
+  - `apps/web/src/app/api/search/semantic/route.ts:209-225` loads config, then rolls back the limiter and returns 503 when semantic mode is disabled.
+  - `apps/web/src/__tests__/semantic-search-route.test.ts:208-218` pins the current increment-then-rollback disabled-mode behavior.
+- Failure scenario: Semantic search is disabled by default or temporarily disabled during an operation. A same-origin-looking client can repeatedly send valid small JSON bodies. Each request still consumes body materialization, JSON parse, validation, and config lookup, then refunds the only semantic limiter token. Sustained traffic never accumulates local rate-limit pressure while still creating avoidable CPU and DB/config load.
+- Concrete fix: Check semantic mode before reading the body and before charging the semantic limiter, immediately after the cheap header gates. If the config read is considered expensive enough to protect, add a small disabled-mode limiter that is not rolled back. Update tests to assert disabled mode does not call `request.text()` or to explicitly assert disabled attempts remain charged.
+
+## Non-Findings / Residual Risk
+
+- Startup/shutdown signal handling in `apps/web/src/instrumentation.ts:18-88` is guarded against repeat signals, drains the image queue and buffered shared-group view counts, and exits deliberately after success or timeout. I did not find a stronger current defect than the startup migration conflict above.
+- Queue cleanup and delete-mid-processing paths have focused test coverage for permanent failures, restore quiesce, deleted-mid-reencode cleanup, and variant directory scans. I did not refile those as active findings.
+- Process-local rate limits, process-local restore flags, and best-effort shared-group view buffering remain documented single-writer assumptions in `CLAUDE.md`; I treated them as accepted topology constraints rather than new bugs.
+
+## Final Missed-Issues Sweep
+
+- Re-ran targeted source searches for `process.on`, `SIGTERM`, `setInterval`, `unlink`, `rm`, `DELETE`, `cleanup`, `quiesce`, `restore`, advisory locks, service-worker HTML caching, and semantic rollback paths.
+- Checked that no existing SW contract test mentions `/s/`, `/g/`, or a no-offline-cache header.
+- Checked that semantic disabled-mode tests explicitly expect limiter rollback after body/config work.
+- Checked that legacy-original migration has no byte-equality guard or tests around divergent source/target conflicts.
+- The three findings above are the concrete current-HEAD debugger issues I would schedule for fixes. No additional high-confidence startup/shutdown crash or cleanup-race finding survived the final sweep.
+
+Finding count: 3 total - 1 High, 2 Medium.
