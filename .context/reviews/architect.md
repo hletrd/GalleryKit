@@ -1,125 +1,83 @@
-# Cycle 14 Architect Review
+# Cycle 15 Architect Review
 
 ## Scope and Inventory
 
-Reviewed current HEAD `c2da917d` only. I read `AGENTS.md` and `CLAUDE.md` first, then built an architecture inventory before inspecting implementation details.
+Reviewed current HEAD `d401dd68`. I read `AGENTS.md` and `CLAUDE.md` first, inventoried the architecture surfaces, then inspected implementation and tests by subsystem. No source code was modified.
 
-Inventory built from tracked files:
+Inventory covered:
 
-- Root/project contracts and build config: `AGENTS.md`, `CLAUDE.md`, package manifests, TypeScript/Next config, Docker/Nginx/deploy files, GitHub workflow files.
-- Active web app source: `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/src/db`.
-- Data/schema/migration surfaces: `apps/web/drizzle`, `apps/web/scripts/migrate.js`, migration tests and schema-contract tests.
-- Runtime/ops surfaces: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/scripts/entrypoint.sh`, `apps/web/nginx/default.conf`, env examples.
-- Boundary and regression tests: `apps/web/src/__tests__`, `apps/web/e2e`, custom lint scripts.
-- Historical context files under `.context/` were inventoried as review/plan history, but not treated as runtime authority for current HEAD.
+- Docs and operating contracts: `AGENTS.md`, `CLAUDE.md`, root/package config, Next/TypeScript config, Docker, Nginx, deploy scripts.
+- UI/server contracts: app routes and server actions under `apps/web/src/app`, admin/public layouts, upload route twins, API routes, service-worker registration and generated assets.
+- Domain/data layer: `apps/web/src/lib/data.ts`, analytics/search/sharing/settings/gallery config modules, privacy projection guards, public/admin data shapes.
+- State and cache ownership: service worker cache modules, upload serving, revalidation, process-local queues, restore maintenance, rate limits, view-count buffering, advisory locks.
+- Data model and migrations: `apps/web/src/db/schema.ts`, all committed Drizzle migrations, `_journal.json`, `apps/web/scripts/migrate.js`, reconcile/baseline/postcondition tests.
+- Deployment topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, entrypoint and runtime env handling.
+- Tests and lint contracts: source tests, E2E inventory, custom lint scripts for admin API auth, action origin, public mutating route rate limits, migration coverage, storage quarantine, service-worker contracts.
 
-Architecture-relevant file counts from the inventory: app routes/actions 77, components 57, lib modules 96, DB modules 3, migrations 31, scripts 27, E2E tests 8, source tests 265, web config/ops files 42, GitHub workflow files 3. I inspected the active architecture surfaces above by category rather than sampling a few representative files.
+Architecture-relevant inventory size was 510 files across `src/app`, `src/lib`, `src/db`, migrations, scripts, tests, E2E, and Nginx. I inspected the active runtime/config/schema/test surfaces by subsystem rather than relying on the previous cycle review. Existing unrelated dirty review files were present before this pass and were not used as current-HEAD evidence.
 
-No production code was modified. Existing unrelated dirty review files were present before this pass and were not used as current-HEAD evidence.
+## Findings
 
-## Confirmed Issues
+### ARCH-C15-01 - Failed restore maintenance blocks the next in-process restore attempt
 
-No confirmed current-HEAD production architecture defects were found in the shipped local-filesystem, single-web-instance topology. The auth/API/action-origin/rate-limit boundaries, public/admin projection split, migration hash postconditions, private-original/public-derivative storage split, derivative serving containment checks, and documented Docker deployment shape are internally consistent for that topology.
-
-## Likely Issues
-
-### ARCH-C14-01 - Quarantined storage abstraction models topic resources in the wrong keyspace
-
-- Severity: Medium
+- Severity: High
 - Confidence: High
-- Status: Likely issue if the storage abstraction is wired into production paths
-- Citations:
-  - `apps/web/src/lib/storage/index.ts:4`-`12` says the storage backend exists but is not wired into the live upload, processing, or serving pipeline.
-  - `apps/web/src/__tests__/storage-quarantine.test.ts:1`-`27` and `apps/web/src/__tests__/storage-quarantine.test.ts:111`-`132` enforce that quarantine and describe wiring it in as a deliberate product decision.
-  - `apps/web/src/lib/storage/local.ts:15`-`20` stores all storage keys, including `resources`, under `UPLOAD_ROOT`.
-  - `apps/web/src/lib/storage/local.ts:130`-`137` returns `/uploads/<key>` for every non-original key.
-  - `apps/web/src/lib/process-topic-image.ts:11`-`28` defines the real topic-resource root as `public/resources`, separate from `UPLOAD_ROOT`.
-  - `apps/web/src/lib/process-topic-image.ts:72`-`102` writes and deletes topic images directly under that `public/resources` root.
-  - `apps/web/docker-compose.yml:23`-`27` persists `./public/uploads` and `./public/resources` as separate bind mounts.
-  - `apps/web/next.config.ts:29`-`34` permits both `/uploads/**` and `/resources/**` as distinct image sources.
-  - `apps/web/src/lib/serve-upload.ts:15` and `apps/web/src/lib/serve-upload.ts:137`-`140` only serve upload top-level directories `jpeg`, `webp`, and `avif`.
+- Status: Confirmed
+- Area: restore lifecycle, state ownership, recovery topology
 
-Failure scenario: a future storage integration follows the advertised `getStorage()` path for topic cover images and writes a key such as `resources/topic.webp`. `LocalStorageBackend` stores it under `public/uploads/resources/topic.webp` and returns `/uploads/resources/topic.webp`. That path is not the deployed `public/resources` bind mount, is not the URL shape the app config treats as resources, and is rejected by the upload route because `resources` is not an allowed upload directory. The result is a topic image that appears successfully written by the storage layer but is not durably mounted or served through the intended resource URL.
+Citations:
 
-Concrete fix: before relaxing the storage quarantine, split the storage model into explicit keyspaces or backends: upload derivatives under `UPLOAD_ROOT` with `/uploads/{jpeg,webp,avif}/...`, private originals under `UPLOAD_ORIGINAL_ROOT`, and topic resources under `public/resources` with `/resources/...`. Alternatively remove `resources` from `REQUIRED_DIRS` and from the storage abstraction until the resource-store design is implemented. Update `CLAUDE.md`, `storage-quarantine.test.ts`, and URL/serving tests in the same change that intentionally wires the abstraction into production.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:288`-`293` returns `restoreInProgress` immediately when process-local restore maintenance is active.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:393`-`405` records `keepRestoreMaintenance` from `runRestore()` and skips `endRestoreMaintenance()` when a failed restore asks to keep maintenance active.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:560`-`568` resolves read/stdin/spawn handoff failures with `keepMaintenance: true`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:600`-`615` also keeps maintenance active when post-restore migrations fail or the `mysql` import exits non-zero.
+- `apps/web/src/lib/restore-maintenance.ts:1`-`18` stores maintenance state only on `globalThis`; `apps/web/src/lib/restore-maintenance.ts:21`-`26` exposes only a boolean gate/message; `apps/web/src/lib/restore-maintenance.ts:44`-`55` has no owner, phase, recovery token, or retry path.
+- `apps/web/src/__tests__/restore-upload-lock.test.ts:57`-`77` source-locks the decision to keep maintenance active after migration and handoff failures, but there is no corresponding test that a corrective restore can be attempted while other writers stay blocked.
 
-### ARCH-C14-02 - LocalStorageBackend write paths are less hardened than the live upload pipeline
+Failure scenario:
+
+An admin restores a bad dump, the `mysql` process partially imports and exits non-zero, or the import succeeds but the post-restore migration/reconcile step fails. The code deliberately keeps restore maintenance active to protect the app from serving or mutating a potentially inconsistent database. In that same Node process, the only UI/API recovery path is another call to `restoreDatabase()`, but that action checks `getRestoreMaintenanceMessage()` before it tries to acquire `LOCK_DB_RESTORE` or validate a new restore file. The corrected dump is rejected as "restore in progress" even though the previous restore process and DB advisory locks are gone. Recovery now requires manual process restart or out-of-band DB repair, exactly when the restore UI is supposed to be the recovery mechanism.
+
+Concrete fix:
+
+Split "writers are blocked because the DB may be inconsistent" from "no restore may start." Let `restoreDatabase()` enter a narrowly authenticated recovery branch when maintenance is active and the DB restore advisory lock is free, while keeping uploads, public writes, analytics writes, image queue work, token mutation, and semantic search blocked. A durable or process-local restore phase/owner token is enough for the single-process topology; if the state moves to shared storage later, store `{active, phase, owner, lastFailure}` and require a new restore to replace the failed owner after lock acquisition. Add regression tests for a failed import/migration followed by a second restore attempt that is allowed, plus tests that unrelated mutating routes remain blocked until a successful restore exits maintenance.
+
+### ARCH-C15-02 - Locale-prefixed upload derivatives bypass the service-worker image cache policy
 
 - Severity: Medium
 - Confidence: Medium
-- Status: Likely issue if the quarantine is breached or the backend becomes live
-- Citations:
-  - `apps/web/src/__tests__/storage-quarantine.test.ts:11`-`16` documents the hazard: importing `@/lib/storage` would establish a second write path parallel to audited upload/process serving behavior.
-  - `apps/web/src/lib/storage/local.ts:40`-`47` prevents lexical path traversal by resolving under `UPLOAD_ROOT`.
-  - `apps/web/src/lib/storage/local.ts:62`-`84` writes streams and buffers directly to the final path after `mkdir`.
-  - `apps/web/src/lib/storage/local.ts:91`-`98` rejects symlinks only on the read-stream path, not before writes.
-  - `apps/web/src/lib/storage/local.ts:118`-`127` copies by hard link or `copyFile` without destination symlink/regular-file checks.
-  - `apps/web/src/lib/upload-paths.ts:11`-`46` defines the audited live upload roots that the production pipeline uses directly instead of `LocalStorageBackend`.
+- Status: Likely issue
+- Area: cache ownership, URL contract, locale routing
 
-Failure scenario: after a future integration, an admin-triggered or background path writes through `LocalStorageBackend` to a key whose final path has been replaced by a symlink inside the writable upload tree. The resolver verifies the path string stays under `UPLOAD_ROOT`, but `createWriteStream()` / `fs.writeFile()` follow the final symlink. In a normal deployment direct filesystem access is restricted, which is why this is not a confirmed current bug; the architectural risk is that the dormant backend advertises a production-like storage API while missing the hardening expected of a live write path.
+Citations:
 
-Concrete fix: either keep `lib/storage` quarantined, or make it production-grade before integration. Write to a random temp file in the same directory, open/create with no-follow/exclusive semantics where Node and the platform support them, verify parent and final path with `lstat`/`realpath`, then atomically rename. Apply equivalent checks to `copy()`, and add tests covering final-path symlink writes, parent traversal, temp-file cleanup, and failed partial writes.
+- `apps/web/src/lib/sw-cache.ts:73`-`81` treats only root `/uploads/avif|webp|jpeg/...` URLs as image derivatives.
+- `apps/web/public/sw.template.js:50`-`55` and the shipped generated `apps/web/public/sw.js:50`-`55` repeat the same root-only predicate.
+- `apps/web/public/sw.template.js:386`-`389` and `apps/web/public/sw.js:386`-`389` route only predicate matches through `staleWhileRevalidateImage()`.
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:4`-`12` serves locale-prefixed upload derivatives through the same `serveUploadFile()` helper.
+- `apps/web/nginx/default.conf:173`-`184` proxies optional locale-prefixed derivative paths to Next with the same cache policy as root uploads.
+- `CLAUDE.md:296` documents both route handlers and says they execute for `/uploads/...` and `/{locale}/uploads/...` URLs.
+- `apps/web/src/__tests__/sw-cache.test.ts:81`-`100` tests only the root `/uploads/...` predicate shape and has no locale-prefixed derivative case.
+- `apps/web/src/lib/image-url.ts:32`-`37` and most components generate root `/uploads/...` URLs today, which lowers immediate blast radius but leaves the supported locale-prefixed URL shape outside the service-worker contract.
 
-## Risks Needing Manual Validation
+Failure scenario:
 
-### ARCH-C14-03 - Topic slug is a mutable natural key with manual rename fan-out
+A user reaches or bookmarks a valid locale-prefixed derivative URL such as `/ko/uploads/jpeg/photo_1536.jpg`, or a future localized component/link builder preserves the locale prefix for image paths because the server and Nginx both explicitly support that shape. The service worker does not classify that request as an image derivative, so it skips the image stale-while-revalidate path, LRU accounting, HEAD freshness probe, and image-cache metadata. Equivalent bytes now have different offline and freshness behavior depending on URL shape. After color, quality, size, or pipeline changes, root URLs and locale-prefixed URLs can refresh differently in the PWA even though the server-side route contract says they are equivalent derivative serving paths.
 
-- Severity: Medium
-- Confidence: High
-- Status: Risk needing planned schema migration / manual validation
-- Citations:
-  - `apps/web/src/db/schema.ts:4`-`17` makes `topics.slug` the primary key and references it from `topic_aliases.topic_slug` without `onUpdate`.
-  - `apps/web/src/db/schema.ts:19`-`33` references `topics.slug` from `images.topic` without `onUpdate`.
-  - `apps/web/src/db/schema.ts:239`-`249` references `topics.slug` from `topic_views.topic` with delete cascade, also without `onUpdate`.
-  - `apps/web/src/app/actions/topics.ts:255`-`301` renames a slug by inserting a new topic row, hand-updating FK children, then later deleting the old topic.
-  - `apps/web/src/app/actions/topics.ts:303`-`336` separately scans and rewrites topic references inside `smart_collections.query_json`.
-  - `apps/web/src/app/actions/topics.ts:338`-`339` deletes the old topic row after the manual fan-out.
-  - `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1`-`23` explicitly states this is a tactical guard and that the structural fix, either `ON UPDATE CASCADE` plus in-place update or a surrogate key, is deferred.
+Concrete fix:
 
-Failure scenario: a later feature adds a new table, cache table, search index table, or JSON store that references `topics.slug`, but the developer misses the hand-maintained rename transaction. Renaming a topic can then cascade-delete history, leave stale JSON predicates, or silently orphan data. This already happened for `topic_views` according to the inline history at `apps/web/src/app/actions/topics.ts:294`-`300`, and the current guard only catches schema FKs plus the known smart-collection store.
-
-Concrete fix: plan a migration away from mutable natural-key ownership. Preferred options are an immutable surrogate `topics.id` referenced by child tables with `slug` as a unique route field, or adding `ON UPDATE CASCADE` and changing rename to an in-place slug update for FK-backed stores. Keep a separate, explicit migration for JSON query normalization if smart collections continue to refer to slug values; the more durable design is to store topic predicates relationally or by immutable id. Until then, keep the FK registry test and add any new non-FK slug store to the rename transaction and tests in the same change.
-
-### ARCH-C14-04 - Migration runner does not detect live schema drift once all hashes are recorded
-
-- Severity: Medium
-- Confidence: Medium
-- Status: Risk needing manual validation
-- Citations:
-  - `apps/web/drizzle/meta/_journal.json:47`-`64` shows the committed journal has historical non-monotonic `when` values.
-  - `apps/web/scripts/migrate.js:748`-`768` reconciles and baselines fresh databases.
-  - `apps/web/scripts/migrate.js:771`-`777` returns early when every committed migration hash is present in `__drizzle_migrations`.
-  - `apps/web/scripts/migrate.js:779`-`785` only runs `reconcileLegacySchema()` when gallery tables exist and the migration log is incomplete.
-  - `apps/web/scripts/migrate.js:787`-`808` verifies hash presence after Drizzle's migrator, but not the actual live column/index/FK shape when hashes are already covered.
-  - `CLAUDE.md:421`-`427` documents that the hash postcondition exists to catch Drizzle cursor skips caused by the non-monotonic journal.
-
-Failure scenario: production records every migration hash but the live schema is still wrong because of a manual DB repair, a prior bug in `reconcileLegacySchema`, a failed external restore that also restored `__drizzle_migrations`, or an index/FK drift that the hash table cannot represent. On the next deploy, `prepareLegacyDatabaseIfNeeded()` sees all hashes and skips reconcile. `runMigrations()` also sees all hashes and succeeds. The app can then boot on a schema that is "migration-complete" by hash but missing a column, index, FK behavior, or default needed by current code.
-
-Concrete fix: add a lightweight schema-shape postcondition after migrations that compares required tables, columns, nullability/defaults where important, and critical indexes/FKs against `schema.ts` / `reconcileLegacySchema`. It can start as a read-only verifier that fails deploy with actionable drift output. If always running full reconcile is too invasive, run only additive/idempotent checks on every deploy and reserve repair for explicit operator action. Keep the existing hash postcondition; it solves migration-log completeness, not live schema equivalence.
-
-### ARCH-C14-05 - Single-instance runtime remains a correctness boundary, not just a deployment preference
-
-- Severity: High if violated
-- Confidence: High
-- Status: Risk needing operational validation / accepted topology constraint
-- Citations:
-  - `CLAUDE.md:227`-`230` documents the shipped topology as single web instance / single writer and names process-local coordination states.
-  - `apps/web/docker-compose.yml:3`-`27` defines one host-networked `web` service with local bind mounts.
-  - `apps/web/src/lib/restore-maintenance.ts:1`-`22` stores restore maintenance state on `globalThis`.
-  - `apps/web/src/lib/restore-maintenance.ts:44`-`55` toggles restore maintenance only in the current process.
-  - `apps/web/src/lib/image-queue.ts:76`-`90` and `apps/web/src/lib/image-queue.ts:275`-`325` keep queue state in a process-local global.
-  - `apps/web/src/lib/image-queue.ts:1035`-`1088` quiesces and resumes only the current process queue around restore.
-  - `apps/web/src/lib/rate-limit.ts:75`-`96` and `apps/web/src/lib/rate-limit.ts:110`-`119` define in-memory public/admin-token rate-limit buckets.
-  - `apps/web/src/lib/data.ts:13`-`35` and `apps/web/src/lib/data.ts:75`-`150` buffer shared-group view counts in process memory before flushing to MySQL.
-
-Failure scenario: an operator later adds a second container, a blue/green overlap, Node clustering, or a process manager that runs multiple app processes against the same bind mounts and MySQL database. One process can enter restore maintenance while another still accepts uploads or queues image work. Public rate-limit budgets split per process. Shared-group view counts can be lost or double-buffered per process. Advisory locks cover some DB-critical sections, but they do not make the maintenance flag, queue lifecycle, rate-limit fast paths, or view-count buffer cluster-wide.
-
-Concrete fix: keep "exactly one active web process per deployment" as an operational invariant and verify it in deploy/runbook checks. If horizontal scaling is desired, first move restore maintenance, upload/queue coordination, public rate limits, backfill status, and view-count buffering to shared durable state such as MySQL rows with transactional claims, Redis, or a dedicated worker queue. Add multi-process tests for restore/upload/queue interleavings before enabling scale-out.
+Make the derivative predicate canonical across `src/lib/sw-cache.ts`, `public/sw.template.js`, and regenerated `public/sw.js`, for example by matching an optional locale segment before `/uploads/(avif|webp|jpeg)/`. Add unit tests for `/en/uploads/jpeg/foo.jpg` and `/ko/uploads/avif/foo.avif`, keep `/uploads/original/...` excluded, and keep `sw-template-contract.test.ts` pinning the template/generated pair. If the intended architecture is instead "only root upload URLs participate in PWA image caching," remove or narrow the locale-prefixed upload route/support from docs and Nginx so the serving contract has a single cache owner.
 
 ## Final Missed-Issues Sweep
 
-Final sweep commands covered current HEAD commit, dirty-state awareness, storage-import quarantine, and architecture risk markers across docs, app source, scripts, migrations, Docker/Nginx, and workflows. The sweep specifically rechecked terms around deferred work, quarantine, single-writer/process-local state, advisory locks, reconcile/baseline behavior, orphan cleanup, drift, and manual/operational hazards.
+I rechecked the highest-risk architectural seams after drafting findings:
 
-Relevant active architecture files skipped: none in the runtime source/config/schema/migration/deploy/test-contract set described above. Excluded as non-runtime or non-current evidence: historical `.context/reviews` and `.context/plans` artifacts, generated/build outputs, runtime upload/data directories, untracked env files, and unrelated dirty review files that were already present before this task.
+- Restore/upload/image-queue coordination: DB restore uses DB advisory locks, upload-processing contract lock, backfill lock, queue quiesce/resume, and maintenance gates across public/admin mutations. The unresolved gap is specifically the failed-restore retry path above.
+- Migration strategy: current migrations, `_journal.json`, `migrate.js`, `migrate-reconcile-coverage.test.ts`, and `migration-journal.test.ts` now cover the previously fragile non-monotonic journal/reconcile path. I did not find a new current-HEAD migration drift issue beyond the existing documented operational constraints.
+- Public/admin boundaries: admin API auth wrappers, same-origin server-action guards, privacy omit/type tests, and public projection fields are aligned with the documented model in the sampled route/action/data paths.
+- Public unauthenticated expensive GETs: OG routes now pre-increment rate limits and have source/tests locking charged failure semantics, so I did not carry a public-GET rate-limit finding.
+- Deployment topology: `CLAUDE.md` explicitly treats the single web instance as a correctness boundary for process-local state. I did not repeat that accepted topology constraint as a new finding this cycle.
+- Storage abstraction: the storage module remains quarantined by source tests, so the previous cycle's storage-abstraction risks are future integration risks, not current production coupling defects.
+- Cache/serving layers: Next static serving, route-handler fallback, Nginx, service-worker cache, and upload route method tests are mostly aligned. The missed contract is the locale-prefixed derivative URL shape in the service worker.
 
-Tests were not run because this was a review-only task and no production code was changed. Validation evidence is the current-HEAD inventory, direct file/line inspection, and targeted final searches described above.
+Tests were not run because this was a review-only task and no production source changed. Validation evidence is direct current-HEAD file/line inspection, targeted source/test sweeps, and the artifact written here.

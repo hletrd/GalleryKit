@@ -1,98 +1,60 @@
-# Verifier Review - Cycle 14
+# Verifier Review - Cycle 15
 
 Date: 2026-06-30
-Role: cycle-14 verifier, evidence-based correctness check
-Scope: `/Users/hletrd/flash-shared/gallery` current `HEAD` only
-HEAD: `c2da917d0fe9620bcbef3897570591080445592c`
-Constraint: review artifact only. No production code edited.
+Role: cycle-15 reviewer lane, verifier
+Scope: current `HEAD` in `/Users/hletrd/flash-shared/gallery`
+HEAD: `e87d1bc2ba75d1ec90704920ea0fa240cdba749c`
+Constraint: review artifact only. No source-code edits.
 
-## Inventory Built Before Inspection
+## Inventory First
 
-I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the current tracked repo before inspecting behavior.
+Relevant files inventoried before inspection:
 
-Tracked inventory:
-
-- Total tracked files: 2551.
-- Current implementation and invariant surfaces inventoried: 77 `apps/web/src/app` files, 96 `apps/web/src/lib` files, 57 component files, 27 scripts, 31 migration files, 9 public assets/templates, 27 config/deploy files, 265 unit/source-contract tests, and 8 e2e files.
-- Review focus set from stated invariants: auth/session/origin gates, public API rate limits, server-action scanners, schema/migration/reconcile, public/admin privacy field separation, upload/original-file privacy, image/color/HDR pipeline, CLIP semantic search, service worker caching, deploy/runtime persistence, Docker prune guarantees, and build/test gates.
-- Historical `.context/` and `plan/` files were inventoried and used only as hints/regression context; implementation claims were validated against current code, tests, and command output.
-
-Relevant current-source files skipped: none intentionally. Excluded from behavior inspection: binary fixtures, screenshots, generated build output, `.git`, `node_modules`, local env/secrets, runtime upload/data directories, and historical review artifacts that do not encode current runtime behavior.
+- Project contracts: `AGENTS.md`, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
+- Current HEAD delta: `apps/web/src/__tests__/cycle-7-source-contracts.test.ts`, `apps/web/src/__tests__/shared-page-title.test.ts`.
+- Adjacent implementation: `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/lib/base56.ts`, `apps/web/src/lib/photo-title.ts`, `apps/web/src/components/nav-client.tsx`.
+- Adjacent proof: `apps/web/src/__tests__/shared-route-rate-limit-source.test.ts`, `apps/web/src/__tests__/photo-title.test.ts`, `apps/web/src/__tests__/alt-text-fallback.test.ts`, the security lint scripts, and full unit/type/build gates.
+- Excluded from behavior inspection: binary fixtures/screenshots, `.git`, `node_modules`, local env/secrets, runtime upload/data directories, and historical `.context` artifacts except as prior-review context.
 
 ## Findings
 
-No confirmed correctness findings were identified in this pass.
+No confirmed, likely, or risk-level contract violations were found.
 
-No likely implementation issues had enough evidence to report as actionable.
+Finding count: 0
 
-## Risks Needing Manual Validation
+## Evidence Checked
 
-### Risk 1 - Browser e2e flow was not freshly proven locally
+- HEAD is test-only: `git show --stat HEAD` reports changes only in `cycle-7-source-contracts.test.ts` and `shared-page-title.test.ts`.
+- The Base56 fixture correction is valid. `BASE56_CHARS` excludes `0`, `1`, `I`, `O`, `l`, and similar ambiguous characters at `apps/web/src/lib/base56.ts:3`; `isBase56(str, 10)` enforces exact length and allowed charset at `apps/web/src/lib/base56.ts:31-40`. The new fixtures `23456789AB` and `CDEFGHJKLM` in `apps/web/src/__tests__/shared-page-title.test.ts:68-69` are both valid 10-character keys.
+- The shared routes still enforce the documented enumeration contract. Single-photo shares validate malformed keys before rate-limit charging at `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:83-89`, then perform the DB lookup at `:92-98`. Group shares do the same at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:89-107`.
+- Metadata comments match implementation: both share metadata functions explicitly avoid rate-limit and share-key DB lookups (`s/[key]/page.tsx:35-45`, `g/[key]/page.tsx:40-49`), and `shared-route-rate-limit-source.test.ts:48-80` locks those source contracts.
+- The updated nav source-contract expectation matches DOM reality. The hamburger button controls both referenced regions at `apps/web/src/components/nav-client.tsx:106-107`; those IDs exist at `:117` and `:156`. The source-contract assertion at `apps/web/src/__tests__/cycle-7-source-contracts.test.ts:114-117` is therefore aligned with implementation.
+- Shared-page title behavior is not merely a stale source assertion. The route renders `getPhotoDisplayTitle(...)` output into headings at `s/[key]/page.tsx:104-116` and `g/[key]/page.tsx:139-152`; the helper preserves meaningful titles and falls back to tag-derived labels at `apps/web/src/lib/photo-title.ts:33-55`. The behavior is covered directly by `shared-page-title.test.ts:105-159` and helper-level tests in `photo-title.test.ts`.
+- Public-route freshness docs remain true for the reviewed routes. `CLAUDE.md:400` documents `revalidate = 0` for public photo/topic/shared/home surfaces; the inspected public gallery/photo/share/topic/map/year/timeline/smart-collection routes all export `revalidate = 0`.
+- Security-gate docs match scripts and results. AGENTS lists blocking gates at `AGENTS.md:32-38`; CLAUDE documents the scanner contracts at `CLAUDE.md:587-602`. All scanner commands passed.
 
-- Severity: Medium
-- Confidence: High
-- Status: Risk needing manual validation
-- Evidence:
-  - `apps/web/playwright.config.ts:78-85` starts a local web server for `npm run test:e2e`.
-  - `apps/web/scripts/run-e2e-server.mjs:75-78` runs `npm run init`, then seeds e2e data before building/serving.
-  - The local e2e run failed before tests started because `scripts/migrate.js` could not connect to MySQL at `127.0.0.1:3306`.
-- Concrete failure scenario:
-  - A regression in browser-only behavior, hydration, navigation, or admin flows could remain undetected by this verifier run because Playwright did not reach the app.
-- Concrete fix:
-  - Run `npm run test:e2e --workspace=apps/web` in an environment with the expected MySQL test database available, or provide an `E2E_ENV_FILE`/`E2E_BASE_URL` target that satisfies the guarded remote-e2e config.
-
-## Confirmed Correct Invariants
-
-- Security scanners passed:
-  - `npm run lint:api-auth --workspace=apps/web` passed; both admin API routes are wrapped by `withAdminAuth`.
-  - `npm run lint:action-origin --workspace=apps/web` passed; mutating server actions return early on `requireSameOriginAdmin()` or carry explicit read-only/public-rate-limit exemptions.
-  - `npm run lint:public-route-rate-limit --workspace=apps/web` passed; public mutating API routes are rate-limited or exempted.
-- Type/lint/build/unit gates passed:
-  - `npm run typecheck --workspace=apps/web` passed.
-  - `npm run lint --workspace=apps/web` passed.
-  - `npm test --workspace=apps/web` passed: 258 files passed, 2 skipped; 2386 tests passed, 4 skipped.
-  - `npm run build --workspace=apps/web` passed. Build logged the documented sitemap homepage-only fallback when local DB was unavailable; `apps/web/src/app/sitemap.ts:24-55` intentionally catches DB failure for prerender/build.
-- Service-worker cycle-13 finding is fixed:
-  - `apps/web/src/lib/sw-cache.ts:54-63` and `apps/web/public/sw.template.js:42-47` both match `/admin`, localized admin paths, and `/api/admin`.
-  - `apps/web/src/__tests__/sw-cache.test.ts:47-78` now covers `/admin` and `/admin/dashboard`.
-  - `npm test --workspace=apps/web -- sw-cache.test.ts sw-template-contract.test.ts` passed: 41 tests.
-- Migration journal risk is known and guarded, not a new finding:
-  - The historical non-monotonic journal block is documented in tests.
-  - `apps/web/src/__tests__/migration-journal.test.ts:76-104` enforces monotonicity for new/global entries.
-  - `apps/web/scripts/migrate.js:710-744` baselines per journal hash, and `apps/web/scripts/migrate.js:787-806` throws if Drizzle silently skips a journal hash.
-- Privacy field separation remains enforced:
-  - `apps/web/src/lib/data.ts:368-507` derives public/map select fields from admin fields and applies TypeScript guards for sensitive keys.
-  - `apps/web/src/__tests__/privacy-fields.test.ts:7-132` symmetrically asserts admin-only key differences and search enrichment omissions.
-  - `apps/web/src/lib/search-enrichment-fields.ts:29-47` has its own compile-time sensitive-key guard for semantic/similar search enrichment.
-- Recent cycle-14/15 hinted regressions are already fixed in current HEAD:
-  - GPS NaN/Infinity coordinates return null and are covered by `apps/web/src/__tests__/process-image-metadata.test.ts:167-211`.
-  - BoundedMap copy-on-read rate-limit users write back via `.set()` in `sharing.ts:40-57`, `admin-users.ts:31-44`, and `embeddings.ts:36-49`.
-  - Admin-only color fields are gated in `color-details-section.tsx:194-215` and `color-details-section.tsx:453-459`, with source-contract coverage in `color-details-section-delivered.test.ts:33-46`.
-  - LR upload disk-space check uses `stats.bavail * stats.bsize` at `apps/web/src/app/api/admin/lr/upload/route.ts:280-288`.
-
-## Validation Evidence
+## Validation
 
 Commands run:
 
-- `git status --short && git rev-parse HEAD` -> clean before review; HEAD `c2da917d0fe9620bcbef3897570591080445592c`.
+- `npm test --workspace=apps/web -- cycle-7-source-contracts shared-page-title` -> passed, 2 files / 15 tests.
+- `npm test --workspace=apps/web` -> passed, 259 files passed / 2 skipped; 2404 tests passed / 4 skipped.
+- `npm run typecheck --workspace=apps/web` -> passed.
+- `npm run lint --workspace=apps/web` -> passed.
 - `npm run lint:api-auth --workspace=apps/web` -> passed.
 - `npm run lint:action-origin --workspace=apps/web` -> passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` -> passed.
-- `npm run typecheck --workspace=apps/web` -> passed.
-- `npm run lint --workspace=apps/web` -> passed.
-- `npm test --workspace=apps/web` -> passed: 2386 passed, 4 skipped.
-- `npm run build --workspace=apps/web` -> passed; local DB unavailable warning was the documented sitemap fallback.
-- `npm test --workspace=apps/web -- sw-cache.test.ts sw-template-contract.test.ts` -> passed: 41 tests.
-- `npm run test:e2e --workspace=apps/web` -> not completed; webServer init failed due `connect ECONNREFUSED 127.0.0.1:3306`.
+- `npm run build --workspace=apps/web` -> passed. Build logged the documented sitemap fallback because local MySQL at `127.0.0.1:3306` was unavailable; build still completed successfully.
+
+Not run:
+
+- `npm run test:e2e --workspace=apps/web`; this HEAD only changes unit/source-contract tests, and no browser-flow behavior changed. Existing Playwright coverage remains available when browser-flow coverage is required by AGENTS.
 
 ## Final Missed-Issues Sweep
 
-Final sweep actions:
+- Rechecked the changed tests against the actual route validation, rate-limit, title-rendering, and nav-control implementation.
+- Rechecked comments in share pages and CLAUDE route-freshness/lint-gate docs against current code.
+- Re-ran all relevant non-e2e quality gates after inspection.
+- Checked `git status --short` after the build hook; no generated source/public diffs were left behind before writing this review artifact.
 
-- Rechecked prior verifier finding against current `sw-cache.ts`, `sw.template.js`, generated `sw.js`, and service-worker tests.
-- Rechecked current source against known risk clusters from recent plans: GPS parsing, BoundedMap rate-limit writeback, admin-only color metadata gates, LR disk-space checks, migration baselining, and public search enrichment privacy.
-- Re-ran the full unit suite, lint, typecheck, build, and custom security scanners.
-- Attempted Playwright e2e and recorded the DB-environment blocker.
-- Checked `git status --short` after validation; only this review file is modified.
-
-Relevant files skipped: none, aside from non-source/generated/binary/local-secret/runtime artifacts listed in the inventory.
+Stop condition met: no pending review findings, no source-code edits made, and the requested review artifact has been written.

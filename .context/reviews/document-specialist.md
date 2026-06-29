@@ -1,7 +1,7 @@
-# Cycle 14 Document-Specialist Review
+# Cycle 15 Document-Specialist Review
 
-Date: 2026-06-30  
-Reviewed HEAD: `c2da917d`  
+Date: 2026-06-30
+Reviewed HEAD: `d401dd68`
 Scope: documentation/code mismatch review for `/Users/hletrd/flash-shared/gallery`.
 
 ## Methodology and Inventory
@@ -13,98 +13,96 @@ Inventory built before inspection:
 - Canonical docs and app docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
 - Env/config examples: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`.
 - Deploy/runbook surfaces: root `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`.
-- Migration/schema contracts: `apps/web/drizzle/**/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
+- Superpowers docs: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`.
+- Plan/review contract surfaces: `.context/plans/README.md`, current cycle plan/deferred files, previous document-specialist reports, and review indexes where present.
 - Tests-as-contract and lint gates: auth/action/rate-limit scanners, privacy fixtures, upload-limit tests, nginx config tests, semantic-search tests, service-worker contract tests, touch-target audit.
-- Source comments carrying operational or safety contracts: upload paths, image processing, CLIP model/download/backfill, storage abstraction, DB restore, rate limiting, CSP, public routes, and admin actions.
-- Historical/current planning and review docs under `docs/`, `plan/`, and `.context/` were inventoried and searched. Archived plans/reviews were treated as historical evidence unless they were linked from current authoritative docs.
+- Source comments carrying operational or product/security/perf contracts: display capability, histogram color handling, color-pipeline backfill, CLIP model/download/backfill, upload paths, image processing, storage, DB restore, rate limiting, CSP, public routes, and admin actions.
 
 Excluded from content review: `node_modules`, `.git`, build outputs, runtime data, uploads/resources, generated test output, and binary screenshots/media. Existing unrelated modified review files in `.context/reviews/` were ignored; this pass reviewed current HEAD behavior and wrote only this report.
 
 ## Confirmed Issues
 
-### DOC14-01 - `db:push` is advertised as a normal database command even though the repo requires journaled migrations
+### DOC15-01 - Display-detection comments still claim canvas-P3 participates in `useDisplayCapability`
 
-Severity: Medium  
-Confidence: High  
-Category: unsafe operational guidance
-
-Evidence:
-
-- `CLAUDE.md:58-61` lists `npm run db:push` under "Database" with the description "Push schema to MySQL (drizzle-kit)" and no development-only warning.
-- `apps/web/README.md:23-32` also lists `npm run db:push` as "Push schema to MySQL".
-- The script exists and runs `drizzle-kit push`: `apps/web/package.json:17`.
-- The authoritative schema policy says migrations must live in `apps/web/drizzle/NNNN_*.sql`, must be added to `_journal.json`, and must mirror `reconcileLegacySchema`: `AGENTS.md:22-27`, `CLAUDE.md:429-435`.
-- The migration runbook explains why journal hashes and `__drizzle_migrations` postconditions are safety-critical after prior production drift: `CLAUDE.md:415-427`.
-
-Concrete failure scenario:
-
-An agent or operator follows the common-command table against a real `.env.local` and runs `npm run db:push` to apply a schema change. The database changes outside the committed SQL/journal/reconcile path. A later deploy or fresh restore cannot prove the schema via journal hashes, and the next migration author has no committed baseline for the out-of-band change.
-
-Concrete fix:
-
-Either remove `db:push` from operator-facing docs or mark it explicitly as local throwaway prototyping only, never production or committed schema work. Point schema changes to the migration checklist and `npm run init`/deploy migrator path instead.
-
-### DOC14-02 - CLIP backfill concurrency docs imply a now-available operator tuning path that is not documented or wired at that layer
-
-Severity: Low  
-Confidence: High  
-Category: stale source comment / missing operational docs
+Severity: Low
+Confidence: High
+Status: Confirmed
+Category: stale source comment / product-behavior drift
 
 Evidence:
 
-- `apps/web/scripts/backfill-clip-embeddings.ts:44-45` says concurrency is capped at `BATCH_CONCURRENCY=2` and "Operators can raise this once the real ONNX inference ships."
-- Real ONNX/Transformers inference is already shipped and documented as production-active: `CLAUDE.md:527-539`.
-- The script-level batch concurrency is still a hardcoded constant: `apps/web/scripts/backfill-clip-embeddings.ts:72-73`.
-- The actual runtime inference limiter is a different env knob, `CLIP_INFERENCE_CONCURRENCY`, default `1`, max `4`: `apps/web/src/lib/clip-model.ts:53-56`.
-- The CLIP runbook commands document `CLIP_MODELS_ROOT` but not `CLIP_INFERENCE_CONCURRENCY`: `CLAUDE.md:510-523`; `.env.local.example:68-72` also omits it.
+- `apps/web/src/components/wide-gamut-hint.tsx:68-73` says `useDisplayCapability` adds `screen.colorGamut` "plus a canvas-P3 probe" to avoid falsely treating Firefox 124+ on macOS internal P3 as sRGB.
+- `apps/web/src/components/photo-viewer.tsx:353-356` says Firefox resolves P3 through "the canvas-P3 probe in useDisplayCapability".
+- `apps/web/src/components/histogram.tsx:497-504` says histogram uses `useDisplayCapability` and that the hook adds "`screen.colorGamut` + MQ + canvas-P3 layered detection".
+- `apps/web/src/__tests__/use-display-capability.test.ts:4-6`, `:73`, and `:188-190` still describe the test harness as mocking or requiring a canvas-P3 probe inside display detection.
+- The actual implementation does not use canvas or `document` at all. `apps/web/src/lib/use-display-capability.ts:4-11` documents the current order as `screen.colorGamut` -> media queries -> conservative Firefox/sRGB fallback, and `apps/web/src/lib/use-display-capability.ts:49-75` implements only `window.screen.colorGamut`, `(color-gamut: rec2020/p3)`, and `(dynamic-range: high)`.
+- The canonical runbook agrees with the implementation: `CLAUDE.md:365-368` says the canvas-P3 probe is not used for display detection because it tests API capability, not display gamut, and Firefox falls back to conservative `srgb`.
 
 Concrete failure scenario:
 
-An operator sees slow production CLIP backfill after real ONNX inference is live. The script comment says concurrency can be raised, but the sidecar command and env example do not name the real knob. They may edit `BATCH_CONCURRENCY`, run multiple sidecars, or assume the backfill is already parallel, while actual model inference remains serialized by `CLIP_INFERENCE_CONCURRENCY=1`.
+A future maintainer follows the component comments instead of the hook and reintroduces canvas-P3 as a display-gamut signal, or preserves tests that appear to cover a nonexistent probe. On sRGB displays where the browser can still create a P3 canvas, users could be treated as P3-capable: the wide-gamut warning can be suppressed and histogram/image-path choices can imply more accurate color display than the screen supports.
 
 Concrete fix:
 
-Update the script comment and CLIP runbook to distinguish script batch concurrency from model inference concurrency. Document `CLIP_INFERENCE_CONCURRENCY` with default `1`, max `4`, CPU/RAM caveats, and an example sidecar `-e CLIP_INFERENCE_CONCURRENCY=2` only when appropriate.
+Update the stale comments in `wide-gamut-hint.tsx`, `photo-viewer.tsx`, `histogram.tsx`, and `use-display-capability.test.ts` to say `useDisplayCapability` is `screen.colorGamut` -> color-gamut media query -> conservative `srgb`. Keep canvas-P3 language only where it refers to canvas rendering capability, such as histogram's separate `getSupportsCanvasP3()` path.
 
-## Likely Issues
+### DOC15-02 - Plan index marks implemented or complete implementation plans as active TODO
 
-### DOC14-03 - Shipped CLIP design spec still uses the broad `./data/models/` path where implementation/runbooks use `data/models/clip`
-
-Severity: Low  
-Confidence: Medium  
-Category: stale design doc / operator ambiguity
+Severity: Low
+Confidence: High
+Status: Confirmed
+Category: plan/review contract drift
 
 Evidence:
 
-- The shipped/activated CLIP spec says weights are downloaded to `./data/models/`: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:24`, `:34`, `:41`, `:72`.
-- The current implementation default is `data/models/clip`: `apps/web/src/lib/clip-paths.ts:48-65`.
-- The downloader comment and production runbooks use the exact `clip` child path: `apps/web/scripts/download-clip-models.ts:5-30`, `CLAUDE.md:489-522`, `apps/web/README.md:62-72`.
-- The same spec later mentions `./data/models/clip`, so the file is internally inconsistent: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:137`.
+- `.context/plans/README.md:7` lists "Cycle 12/100 Implementation Plan - TODO" under Active Plans.
+- `.context/plans/cycle-12-2026-06-29-plan.md:5` says `Status: IMPLEMENTED`, and `.context/plans/cycle-12-2026-06-29-plan.md:13-31` marks every scheduled Cycle 12 fix `DONE`.
+- `.context/plans/README.md:15` lists "Cycle 3/100 Implementation Plan - TODO" under Active Plans.
+- `.context/plans/cycle-3-2026-06-29-plan.md:5` says `Status: complete; deployment pending`, and `.context/plans/cycle-3-2026-06-29-plan.md:13-83` shows the inspected scheduled items as `Progress: DONE`.
 
 Concrete failure scenario:
 
-A future operator or agent follows the shipped spec instead of the newer runbook and seeds/checks the parent `data/models` directory. The runtime loader points at `data/models/clip`, so offline model load can still fail even though "models" appears populated.
+Cycle prompts and future agents use `.context/plans/README.md` as the active-work index and reopen or duplicate already implemented work. Cycle 3 is especially misleading because the child plan says only deployment is pending, while the index presents the implementation plan as unstarted TODO.
 
 Concrete fix:
 
-Update the spec's shipped-status sections to consistently say `data/models/clip` for the CLIP cache root, while noting that it sits under the persisted `data/` bind mount.
+Update `.context/plans/README.md` so implementation-plan entries mirror their child plan status: move Cycle 12 implementation out of active TODO, and mark Cycle 3 implementation as complete/deployment-pending instead of TODO. Keep separate deferred ledgers active only when their own deferred files are still unresolved. A lightweight consistency check could compare index labels with each referenced plan's top-level `Status:`.
 
-## Risks Needing Manual Validation
+### DOC15-03 - Sidecar color-pipeline backfill docs say `BACKFILL_CONCURRENCY` is uncapped, but the script clamps it to 8
 
-- Historical `.context/` and `plan/` files contain intentionally stale recommendations and old review findings. I inventoried and searched them, but did not treat every archived recommendation as live operational guidance. Manual validation is needed only if a future process starts linking a historical archive as authoritative current runbook material.
-- Env docs still omit some low-level/test-only or advanced knobs (`UPLOAD_ROOT`, `TOPIC_RESOURCES_ROOT`, `IMAGE_CLEANUP_CONCURRENCY`, E2E-only variables). I did not file these as findings because current docs either frame them as sidecar/test overrides or do not present them as normal operator controls. Revisit if these become supported deployment knobs.
+Severity: Low
+Confidence: High
+Status: Confirmed
+Category: operational documentation drift
+
+Evidence:
+
+- `CLAUDE.md:108` describes `BACKFILL_CONCURRENCY` as "Sidecar `--rm` backfill concurrency (uncapped; separate MySQL pool)".
+- `CLAUDE.md:333` repeats that sidecar `BACKFILL_CONCURRENCY` is "uncapped" because it runs in a separate `--rm` container with its own MySQL pool.
+- `apps/web/scripts/backfill-color-pipeline.ts:27-28` says concurrency is capped at `BACKFILL_CONCURRENCY` default 2, max 8, to avoid starving the live web process.
+- `apps/web/scripts/backfill-color-pipeline.ts:367-370` passes `{ fallback: 2, max: 8 }` to `parseBoundedPositiveInteger`.
+- `apps/web/src/lib/env.ts:18-23` floors the value and returns `Math.min(value, max)`, so values above 8 are silently clamped to 8.
+
+Concrete failure scenario:
+
+An operator sets `BACKFILL_CONCURRENCY=16` or `32` from the runbook expecting an uncapped sidecar and then gets a slower maintenance window because the script clamps to 8. Conversely, a future maintainer may remove the script cap to satisfy the docs, increasing database contention during long re-encode runs.
+
+Concrete fix:
+
+Update `CLAUDE.md` to distinguish "not capped by the live web pool-budget formula" from "uncapped". Document the actual sidecar behavior as default 2, max 8, separate MySQL pool, and still concurrency-limited to protect live traffic. If uncapped sidecars are genuinely desired, change the script and add an explicit operational warning and test coverage for that decision.
 
 ## Verified Non-Findings
 
-- Deploy helper, `.env.deploy.example`, Docker bind mounts, host-network topology, and post-deploy Docker prune guidance match `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `docker-compose.yml`, and `Dockerfile`.
-- Nginx body caps match docs and tests: 2 MiB default/admin API, 64 KiB login, 250 MiB DB restore, 216 MiB dashboard upload, 216 MiB Lightroom upload.
-- Health docs match implementation: Docker probes `/api/live`; `/api/health` is liveness-only unless `HEALTH_CHECK_DB=true`.
-- Privacy/admin-only field docs are aligned with `publicSelectFields`, `PrivacySensitiveKeys`, and `privacy-fields.test.ts`; prior stale privacy line-number comments are fixed.
-- Prior stale Atom `uploaded_by` comments are fixed; browser and Lightroom upload comments now describe admin/audit linkage and feed-level public author fallback.
-- CLIP production mode, model version, threshold, same-origin/rate-limit gates, and runtime limits match current search routes and constants, aside from the concurrency/path documentation issues above.
+- Root/app README command tables and package scripts match the current root and `apps/web` `package.json` scripts.
+- Remote deploy docs match `scripts/deploy-remote.sh`, `.env.deploy.example`, `apps/web/deploy.sh`, `docker-compose.yml`, and the documented post-deploy Docker prune sequence. The checked script prunes containers, images, builders, and volumes without `volume prune -a`, after `up -d`.
+- Docker bind mounts and deploy docs still match persistence boundaries: `./data`, `./public/uploads`, `./public/resources`, read-only `./src/site-config.json`, and host MySQL.
+- Upload-format docs and picker/runtime behavior match for JPEG, PNG, WebP, AVIF, TIFF, and GIF; unsupported RAW-like formats are not advertised by the current picker.
+- Semantic-search docs match route gates for same-origin checks, rate limiting after cheap rejects, threshold defaults, and CLIP activation path.
+- PWA/offline docs match the service-worker contract at the reviewed level: visited image caching, network-first HTML, offline fallback, and explicit privacy-sensitive bypasses.
+- `docs/superpowers` CLIP spec/plan were inspected as shipped historical design material; no additional current-code mismatch survived the "real mismatch only" threshold beyond issues already recorded in prior reviews.
 
 ## Final Missed-Issues Sweep
 
-Final sweep rechecked canonical docs, app README, env examples, deploy/runbook files, migration journal/runbook, security lint scripts, tests-as-contract, CLIP docs, storage docs, and high-risk source comments for `MUST`, `never`, `production`, `operator`, `rate-limit`, `migration`, `backfill`, `restore`, `prune`, `body cap`, `semantic`, `privacy`, and related terms.
+Final sweep rechecked canonical docs, app README, env examples, deploy/runbook files, migration/schema rules, package scripts, docs/superpowers, `.context` plan/review indexes, and source comments for `MUST`, `never`, `production`, `operator`, `security`, `rate-limit`, `migration`, `deploy`, `prune`, `body cap`, `semantic`, `clip`, `backfill`, `color-gamut`, `canvas-P3`, `privacy`, and related terms.
 
-No additional confirmed mismatch survived the evidence threshold. No relevant active documentation/code contract files were skipped; only non-authoritative generated/binary/runtime artifacts and historical archive material not used as current guidance were excluded as noted above.
+No additional confirmed mismatch survived the evidence threshold. No source code was modified and no commit was made.
