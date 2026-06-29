@@ -22,10 +22,10 @@ function req(body: object) {
 describe('semantic route — production', () => {
   beforeEach(() => { whereSpy.mockClear(); vi.mocked(embedTextReal).mockClear(); });
 
-  it('serves in production mode and embeds via the REAL encoder', async () => {
+  it('returns 503 in production mode when no real embeddings are present', async () => {
     vi.mocked(getGalleryConfig).mockResolvedValue({ semanticSearchMode: 'production' } as never);
     const res = await POST(req({ query: 'sunset over the sea' }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(embedTextReal).toHaveBeenCalledOnce();
   });
 

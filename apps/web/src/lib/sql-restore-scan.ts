@@ -132,9 +132,27 @@ export function stripSqlCommentsAndLiterals(input: string): string {
     ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
 }
 
+function stripSqlCommentsAndLiteralsWithCommentSpaces(input: string): string {
+    const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
+    const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, (match) => ' '.repeat(match.length));
+    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+
+    return [
+        /'(?:''|\\.|[^'\\])*'/gs,
+        /"(?:\"\"|\\.|[^"\\])*"/gs,
+        /`(?:``|\\.|[^`\\])*`/gs,
+        /0x[0-9a-fA-F]+/g,
+        /b'[01]+'/g,
+        /0b[01]+/g,
+    ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
+}
+
 export function containsDangerousSql(input: string): boolean {
-    const sanitized = stripSqlCommentsAndLiterals(input);
-    return DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(sanitized));
+    const sanitizedForms = [
+        stripSqlCommentsAndLiterals(input),
+        stripSqlCommentsAndLiteralsWithCommentSpaces(input),
+    ];
+    return sanitizedForms.some((sanitized) => DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(sanitized)));
 }
 
 export function appendSqlScanChunk(

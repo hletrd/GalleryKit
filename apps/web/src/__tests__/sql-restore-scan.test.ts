@@ -50,6 +50,24 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('DROP TABLE images');")).toBe(false);
     });
 
+    it('blocks dangerous multi-token statements split by block comments', () => {
+        const maliciousStatements = [
+            'DROP/**/TABLE images;',
+            'DROP/**/DATABASE gallerykit;',
+            'CREATE/**/DATABASE other;',
+            "CREATE/**/USER 'x'@'%' IDENTIFIED BY 'pw';",
+            'DELETE/**/FROM images WHERE id = 1;',
+            'TRUNCATE/**/TABLE sessions;',
+            'CALL/**/dangerous_proc();',
+            "RENAME/**/USER 'foo'@'%' TO 'bar'@'%';",
+            'CREATE VIEW v AS SELECT 1 SQL/**/SECURITY/**/DEFINER;',
+        ];
+
+        for (const statement of maliciousStatements) {
+            expect(containsDangerousSql(statement), statement).toBe(true);
+        }
+    });
+
     // CR-R9C5-01 (run-9 cycle-5): the app's own mysqldump backup emits a
     // `DROP TABLE IF EXISTS \`<table>\`;` line for EVERY current-schema table
     // (default --add-drop-table). When tables were added to the schema after

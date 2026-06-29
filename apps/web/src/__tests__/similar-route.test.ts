@@ -197,7 +197,9 @@ describe('GET /api/search/similar/[id]', () => {
         targetRows = [];
         const res = await GET(req('99') as never, params('99'));
         expect(res.status).toBe(404);
-        expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
+        // Once target lookup DB work has been consumed, failures stay charged so
+        // missing embeddings cannot be probed for free.
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
     });
 
     // --- AGG-C9-03 (run-6 cycle-9): the three failure modes the sibling
@@ -229,14 +231,14 @@ describe('GET /api/search/similar/[id]', () => {
         // A non-empty row whose base64 decodes to the wrong byte length: real
         // decodeEmbeddingColumn (NOT mocked) returns null → the corrupt-embedding 404
         // path, distinct from the missing-row 404 above. The rate-limit token is
-        // rolled back since no similarity result is served.
+        // not rolled back because target lookup DB work was already consumed.
         const corruptB64 = Buffer.from('not-a-512-dim-vector').toString('base64');
         // Sanity: this is intentionally NOT EMBEDDING_BYTES long once decoded.
         expect(Buffer.from(corruptB64, 'base64').length).not.toBe(EMBEDDING_BYTES);
         targetRows = [{ embedding: corruptB64 }];
         const res = await GET(req('42') as never, params('42'));
         expect(res.status).toBe(404);
-        expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
     });
 
     it('returns 200 and excludes self from results in production mode', async () => {

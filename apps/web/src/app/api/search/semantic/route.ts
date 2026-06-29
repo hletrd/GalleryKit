@@ -9,10 +9,11 @@
  *   - Scans up to SEMANTIC_SCAN_LIMIT (2000) most-recent embeddings
  *   - Returns top-K image IDs with cosine score above COSINE_THRESHOLD (0.18)
  *
- * Rate-limit posture: Pattern 2 (rollback on validation failure). The counter
- * is consumed AFTER cheap validation gates (same-origin, maintenance,
- * semantic-enabled, body shape, query length) and rolled back on any
- * early-return path before expensive embedding work begins.
+ * Rate-limit posture: Pattern 2 until protected request parsing or semantic
+ * work begins. The counter is consumed before reading the body so chunked or
+ * missing-length requests cannot materialize arbitrary payloads for free.
+ * Early config/mode failures still roll back; post-read malformed or oversized
+ * bodies stay charged because the memory/CPU cost was already consumed.
  *
  * Serving gate: this endpoint SERVES requests in two modes:
  *   - 'stub'       — demo/experimental posture. Embeds via `embedTextStub` (sync,
@@ -125,9 +126,14 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Content-Type must be application/json' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
-    // Reject chunked transfer encoding — body size cannot be verified
+    // Reject chunked transfer encoding — body size cannot be verified.
+    // Header values are case-insensitive and comma-tokenized.
     const transferEncoding = request.headers.get('transfer-encoding');
-    if (transferEncoding?.includes('chunked')) {
+    const transferEncodingTokens = transferEncoding
+        ?.toLowerCase()
+        .split(',')
+        .map((token) => token.trim()) ?? [];
+    if (transferEncodingTokens.includes('chunked')) {
         return NextResponse.json({ error: 'Chunked transfer encoding is not supported' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
@@ -149,14 +155,27 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
     }
 
-    // Parse body — read as text first with explicit size cap
+    // AGG-C1/M5: charge before reading the body. This is still after cheap
+    // same-origin/maintenance/content-header gates, but before potentially large
+    // body materialization.
+    const ip = getClientIp(request.headers);
+    const now = Date.now();
+    const overLimit = preIncrementSemanticAttempt(ip, now);
+    if (overLimit) {
+        return NextResponse.json(
+            { error: 'Rate limited' },
+            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+        );
+    }
+
+    // Parse body — read as text first with explicit byte cap.
     let rawBody: string;
     try {
         rawBody = await request.text();
     } catch {
         return NextResponse.json({ error: 'Failed to read request body' }, { status: 400, headers: NO_STORE_HEADERS });
     }
-    if (rawBody.length > MAX_SEMANTIC_BODY_BYTES) {
+    if (Buffer.byteLength(rawBody, 'utf8') > MAX_SEMANTIC_BODY_BYTES) {
         return NextResponse.json(
             { error: 'Request body too large' },
             { status: 413, headers: NO_STORE_HEADERS },
@@ -185,34 +204,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     // validation, matching the pattern used in public.ts and process-image.ts.
     if (countCodePoints(query) < 3) {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
-    }
-
-    // Capability gate (AGG-C10-09): SERVES both 'stub' and 'production' modes;
-    // 'disabled' (the default, and what a stored 'production' heals to without the
-    // operator env opt-in — see gallery-config.ts AGG-C10-02) yields a 503. The
-    // server re-reads the resolved mode authoritatively below and fails closed.
-    // COR-R5C1-04: rate-limit pre-increment is placed BEFORE the config read
-    // so the counter is consumed on every request that passes cheap validation,
-    // preventing free config probing. Pattern 2: rollback on all subsequent
-    // early-return paths before expensive work begins.
-    //
-    // AGG-R5C3-10 (BUG-R5C3-05): when TRUST_PROXY is unset, getClientIp returns
-    // 'unknown' for EVERY client, so all anonymous callers collapse into ONE
-    // shared 30/min bucket (rate-limit.ts emits a one-time [SECURITY] warning to
-    // this effect). Unlike a best-effort idempotency key — which can be safely
-    // omitted on unknown IPs because its only cost is losing double-click dedup —
-    // this rate limit is a SECURITY control and MUST stay applied even to the
-    // shared 'unknown' bucket: a fail-open semantic endpoint would be a free DoS
-    // amplifier. Operators behind a reverse proxy MUST set TRUST_PROXY=true so
-    // per-client buckets are restored.
-    const ip = getClientIp(request.headers);
-    const now = Date.now();
-    const overLimit = preIncrementSemanticAttempt(ip, now);
-    if (overLimit) {
-        return NextResponse.json(
-            { error: 'Rate limited' },
-            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
-        );
     }
 
     // Check semantic search mode — 'stub' and 'production' serve public requests;
@@ -260,6 +251,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         // AGG-12: do NOT rollback after expensive work begins. The rate-limit
         // budget was consumed fairly; refunding would amplify DoS cost.
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
+    }
+    if (isProd && rows.length === 0) {
+        return NextResponse.json(
+            { error: 'Semantic search is not fully configured' },
+            { status: 503, headers: NO_STORE_HEADERS },
+        );
     }
 
     // Compute similarity for all scanned embeddings.

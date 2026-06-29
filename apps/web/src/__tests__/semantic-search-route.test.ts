@@ -80,6 +80,13 @@ function mockRequest(body: unknown, headersInit: Record<string, string> = {}): N
     } as unknown as NextRequest;
 }
 
+function mockRawRequest(rawBody: string, headersInit: Record<string, string> = {}): NextRequest {
+    return {
+        headers: new Headers({ 'content-type': 'application/json', ...headersInit }),
+        text: async () => rawBody,
+    } as unknown as NextRequest;
+}
+
 describe('/api/search/semantic POST (C12-TE-01)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -149,6 +156,29 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Request body too large' });
     });
 
+    it('rejects mixed-case chunked transfer encoding', async () => {
+        const response = await POST(mockRequest({ query: 'mountain landscape' }, {
+            'transfer-encoding': 'gzip, Chunked',
+        }));
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({ error: 'Chunked transfer encoding is not supported' });
+        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
+    it('charges and rejects post-read bodies that exceed the byte cap with multibyte text', async () => {
+        const oversizedJson = JSON.stringify({ query: '山'.repeat(3000) });
+        expect(oversizedJson.length).toBeLessThan(8192);
+        expect(Buffer.byteLength(oversizedJson, 'utf8')).toBeGreaterThan(8192);
+
+        const response = await POST(mockRawRequest(oversizedJson));
+
+        expect(response.status).toBe(413);
+        await expect(response.json()).resolves.toEqual({ error: 'Request body too large' });
+        expect(preIncrementSemanticAttemptMock).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
     it('returns 400 for invalid JSON body', async () => {
         const req = {
             headers: new Headers({ 'content-type': 'application/json' }),
@@ -187,18 +217,15 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
     });
 
-    it('CRT-R5C1-01 (updated): production mode serves real results via embedTextReal', async () => {
-        // 'production' is now a live serving mode (Task 7). The real encoder is called;
-        // the stub encoder must NOT be called.
+    it('returns 503 in production mode when no production embeddings exist', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
 
         const response = await POST(mockRequest({ query: 'mountain landscape' }));
 
-        expect(response.status).toBe(200);
-        // Real encoder called; stub encoder must not be called.
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
         expect(embedTextRealMock).toHaveBeenCalledOnce();
         expect(embedTextStubMock).not.toHaveBeenCalled();
-        // Rate limit was NOT rolled back (request served successfully).
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 

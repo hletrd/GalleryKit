@@ -16,15 +16,17 @@
  *      503 else (rollback). Stub vectors are random, so "similar" would be
  *      meaningless in stub mode.
  *   6. Target embedding lookup for (id, PRODUCTION_MODEL_VERSION) → 404 if absent
- *      (rollback).
+ *      (no rollback; DB work was already consumed).
  *   7. Scan up to SEMANTIC_SCAN_LIMIT most-recent production embeddings, compute
  *      cosine vs target, exclude self, apply topK / PRODUCTION_COSINE_THRESHOLD.
  *   8. Enrich result ids with image metadata (same SELECT/JOIN as semantic route).
  *   9. Return { results: enriched } with NO_STORE_HEADERS.
  *
- * Rate-limit posture: Pattern 2 (rollback on validation failure). Shares the
+ * Rate-limit posture: Pattern 2 until protected DB work begins. Shares the
  * same `preIncrementSemanticAttempt` / `rollbackSemanticAttempt` budget as the
- * semantic text-search endpoint — both are embedding-scan operations.
+ * semantic text-search endpoint — both are embedding-scan operations. Once this
+ * route reaches target lookup or scan DB work, failures stay charged to avoid
+ * turning missing/corrupt embeddings or transient DB errors into free probes.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -123,19 +125,16 @@ export async function GET(
             .limit(1);
 
         if (targetRows.length === 0 || !targetRows[0].embedding) {
-            rollbackSemanticAttempt(ip);
             return NextResponse.json({ error: 'No embedding found for this image' }, { status: 404, headers: NO_STORE_HEADERS });
         }
 
         // AGG-C10-01: decode the raw-Buffer (current) or legacy base64 column value.
         const decoded = decodeEmbeddingColumn(targetRows[0].embedding);
         if (decoded === null) {
-            rollbackSemanticAttempt(ip);
             return NextResponse.json({ error: 'Embedding data is corrupt' }, { status: 404, headers: NO_STORE_HEADERS });
         }
         targetEmbedding = decoded;
     } catch {
-        rollbackSemanticAttempt(ip);
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
@@ -150,7 +149,6 @@ export async function GET(
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {
-        rollbackSemanticAttempt(ip);
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
