@@ -5,6 +5,13 @@ import { resolve } from 'node:path';
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
 const remoteDeployScript = readFileSync(resolve(repoRoot, 'scripts/deploy-remote.sh'), 'utf8');
+const deploymentDocs = [
+    deployScript,
+    readFileSync(resolve(repoRoot, 'AGENTS.md'), 'utf8'),
+    readFileSync(resolve(repoRoot, 'CLAUDE.md'), 'utf8'),
+    readFileSync(resolve(repoRoot, 'README.md'), 'utf8'),
+    readFileSync(resolve(repoRoot, 'apps/web/README.md'), 'utf8'),
+].join('\n');
 
 describe('deploy script safety contract', () => {
     it('starts the stack before pruning Docker artifacts', () => {
@@ -27,9 +34,10 @@ describe('deploy script safety contract', () => {
     });
 
     it('documents only narrow mutable public bind mounts as persistent', () => {
-        expect(deployScript).toContain('./public/uploads');
-        expect(deployScript).toContain('./public/resources');
-        expect(deployScript).not.toContain('./public -> /app/apps/web/public');
+        expect(deploymentDocs).toContain('./public/uploads');
+        expect(deploymentDocs).toContain('./public/resources');
+        expect(deploymentDocs).not.toContain('./public -> /app/apps/web/public');
+        expect(deploymentDocs).not.toContain('/apps/web/public:/app/apps/web/public');
     });
 
     it('keeps remote deploy target config-driven', () => {
@@ -41,4 +49,3 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).not.toMatch(/ssh\s+[-\w\s]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
     });
 });
-

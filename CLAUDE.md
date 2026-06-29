@@ -339,7 +339,8 @@ docker run --rm \
   -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
   -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
   -v /home/ubuntu/gallery/apps/web/data:/app/data \
-  -v /home/ubuntu/gallery/apps/web/public:/app/apps/web/public \
+  -v /home/ubuntu/gallery/apps/web/public/uploads:/app/apps/web/public/uploads \
+  -v /home/ubuntu/gallery/apps/web/public/resources:/app/apps/web/public/resources \
   -v /home/ubuntu/gallery/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e BACKFILL_CONCURRENCY=2 -e UPLOAD_ORIGINAL_ROOT=/app/data/uploads/original \
