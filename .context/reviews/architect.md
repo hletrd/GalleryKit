@@ -1,3 +1,108 @@
+# Architecture Review - Cycle 5/100
+
+Date: 2026-06-29
+Reviewer role: architect
+Scope: current HEAD only (`2f7895a5`)
+Output: report-only; no application code changes
+
+## Inventory And Review Coverage
+
+I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the architecture-sensitive surfaces before filing findings. I used current cycle peer reports only to avoid duplicate filings, especially the current critic findings on legacy-original migration deletion, service-worker offline HTML, and disabled semantic-search request work.
+
+Architecture-relevant inventory examined:
+
+- Product and operating contract: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/critic.md`, `.context/reviews/architect.md`
+- Deployment and storage topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`
+- Database and migration strategy: `apps/web/src/db/schema.ts`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration journal/reconcile tests
+- Restore and backup flows: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/advisory-locks.ts`, restore-maintenance/upload-lock tests
+- Background processing and data-model boundaries: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/process-topic-image.ts`, upload/delete actions
+- Cache and service-worker boundaries: `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`, upload serving routes and headers
+- Public/privacy/data access boundaries: `apps/web/src/lib/data.ts`, route/action ownership around uploads, topics, semantic search, and public mutation lint contracts
+
+## Findings
+
+### ARCH-C5-01 - Restore does not quiesce color-pipeline backfills
+
+Severity: High
+Confidence: High
+Status: Confirmed
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/db-actions.ts:279-340` acquires only `LOCK_DB_RESTORE`, the upload-processing contract lock, starts restore maintenance, flushes shared-group view counts, and quiesces the image-processing queue before `runRestore(...)`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:341-354` ends maintenance and resumes the image queue after `runRestore(...)`, but never coordinates with the color-pipeline backfill lock.
+- `apps/web/src/lib/admin-backfill-runner.ts:303-327` protects in-app color backfill with a separate `LOCK_COLOR_PIPELINE_BACKFILL` advisory lock.
+- `apps/web/src/lib/admin-backfill-runner.ts:687-701` checks restore maintenance before fetching a batch and immediately before `reprocessOne(...)`, but an already-running `reprocessOne(...)` is not interrupted.
+- `apps/web/src/lib/admin-backfill-runner.ts:498-617` holds a per-image processing claim, writes derivatives, detects color metadata, and persists updates by `WHERE id = ${row.id}` at `apps/web/src/lib/admin-backfill-runner.ts:560-573` or `apps/web/src/lib/admin-backfill-runner.ts:597-602`.
+- `apps/web/scripts/backfill-color-pipeline.ts:301-311` uses the same color backfill advisory lock for the sidecar script, independent of restore.
+
+Failure scenario:
+
+An admin starts the in-app color backfill or the sidecar backfill script, then starts a database restore while one row is already inside `reprocessOne(...)`. Restore maintenance prevents new batches but does not drain the active re-encode/detect/update window. After the SQL import recreates rows, the old backfill task can update `images` by the pre-restore numeric id. If the restored database contains a different row with that id, stale pipeline metadata and derivative outputs from the old row can be written into the restored gallery. If the row no longer exists, derivative cleanup covers only the specific deleted-mid-reencode path, not the restored-row mismatch.
+
+Concrete fix:
+
+Treat color-pipeline backfill as part of the restore quiescence contract. Acquire `LOCK_COLOR_PIPELINE_BACKFILL` in `restoreDatabase(...)` before `beginRestoreMaintenance()` and release it in the restore `finally`, or expose an abort/drain primitive from `admin-backfill-runner` and wait for all active `reprocessOne(...)` work before SQL import. The sidecar script already uses the same advisory lock, so the same restore acquisition would also fail fast when an operator backfill is running. Add a restore contract test that proves `restoreDatabase(...)` obtains the color backfill lock before `runRestore(...)`, releases it on all paths, and does not resume queues until the lock is released.
+
+### ARCH-C5-02 - Restored databases resume before current migrations/reconcile run
+
+Severity: High
+Confidence: High
+Status: Confirmed
+
+Evidence:
+
+- `apps/web/Dockerfile:137-143` runs `node apps/web/scripts/migrate.js` only in the container startup command before `server.js`.
+- `apps/web/scripts/migrate.js:725-745` defines the migration post-condition that detects missing journal hash rows.
+- `apps/web/scripts/migrate.js:771-789` runs legacy upload migration, legacy schema preparation, Drizzle migrations, and admin seeding in the startup migrator.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:331-340` restore preparation calls `runRestore(formData, t)` directly after flushing/quiescing.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:493-507` resolves a successful restore after temp cleanup, audit logging, and `revalidateAllAppData()`. It does not invoke `migrate.js`, `runMigrations(...)`, or `reconcileLegacySchema(...)`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:341-354` then ends restore maintenance and resumes the image queue.
+
+Failure scenario:
+
+An operator restores a SQL dump from before a current migration, or a dump carrying stale `__drizzle_migrations` rows. The current Next.js process resumes traffic and background work against a schema that may be missing columns, indexes, or repaired baseline rows expected by current code. Requests can fail with MySQL unknown-column errors, queue work can persist incomplete rows, and the Drizzle silent-skip post-condition in `migrate.js` is bypassed until the next container restart or deploy.
+
+Concrete fix:
+
+Run the same migration/reconcile/post-condition path inside the restore maintenance window after `mysql` exits successfully and before `endRestoreMaintenance()` or queue resume. Prefer extracting the reusable migration routine from `scripts/migrate.js` into a module callable by both startup and restore; a lower-risk interim is spawning `node apps/web/scripts/migrate.js` from the restore action with sanitized environment and treating failure as restore failure. Add a restore test/source contract that success cannot resolve until current migrations and reconcile checks have passed.
+
+### ARCH-C5-03 - Backup/restore is database-only while durable gallery state is split across DB and bind-mounted files
+
+Severity: Medium
+Confidence: High
+Status: Risk
+
+Evidence:
+
+- `apps/web/docker-compose.yml:23-27` persists mutable gallery state across `./data`, `./public/uploads`, `./public/resources`, and read-only `./src/site-config.json`.
+- `apps/web/src/app/actions/images.ts:304-408` uploads write originals to filesystem first, then insert DB rows referencing generated filenames.
+- `apps/web/src/app/actions/images.ts:653-677` deletes image DB rows transactionally, then removes original and derivative files best-effort afterward.
+- `apps/web/src/lib/process-topic-image.ts:72-98` writes topic/resource images as files under the resources store, while DB topic rows reference those filenames.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:138-166` creates backups by running `mysqldump` into `data/backups`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:454-518` restores by piping SQL into `mysql`; no upload/resource/site-config snapshot, file manifest, or post-restore file reconciliation is part of the flow.
+
+Failure scenario:
+
+An admin takes a database backup, later deletes photos or replaces topic images, then restores the older SQL dump. The restored DB reintroduces rows pointing at originals, derivatives, or resource images that the filesystem no longer contains. Public pages can render broken image URLs, background processing can skip rows as missing originals, and topic covers can disappear. The reverse direction also leaves orphan files when the restored DB no longer references files that remain on disk. The current implementation may be intentionally named as a DB backup, but operationally it is adjacent to a gallery rollback button while gallery state is not DB-contained.
+
+Concrete fix:
+
+Either narrow the product contract or make the backup atomic. For a DB-only contract, label the admin action and restore result explicitly as database-only and add a post-restore reconciliation report listing DB rows with missing files and files without DB owners. For a full gallery restore contract, quiesce writers and create a snapshot bundle containing SQL plus `data` originals, `public/uploads`, `public/resources`, and the relevant site config, with a manifest and hashes. In either path, add a test or source contract so future UI/docs cannot imply full gallery restore unless file state is included or reconciled.
+
+## Final Missed-Issues Sweep
+
+- Searched restore, queue, in-app backfill, sidecar backfill, advisory-lock, and migration call sites with `rg` after drafting findings.
+- Re-checked deployment and storage mounts against the backup/restore implementation.
+- Re-checked service-worker/upload cache boundaries and did not re-file the current critic service-worker finding.
+- Re-checked migration journal/reconcile contracts; the remaining issue is restore not invoking that existing migrator, not the migrator itself.
+
+## Verification
+
+Static architecture review only. I did not run the full quality gates because this lane changed only the review artifact and did not modify application code.
+
+---
+
 # Architecture Review - Cycle 4/100
 
 Date: 2026-06-29
