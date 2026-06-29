@@ -1,9 +1,31 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { dirname, join, relative, resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 
 function source(path: string) {
   return readFileSync(resolve(__dirname, '..', path), 'utf8');
+}
+
+function walkFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      results.push(...walkFiles(full));
+    } else {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+function hasMetadataProvider(path: string): boolean {
+  const code = readFileSync(path, 'utf8');
+  return code.includes('generateMetadata') && (
+    code.includes('adminRouteMetadata(') ||
+    code.includes('adminTokenRouteMetadata')
+  );
 }
 
 describe('client component source contracts', () => {
@@ -51,6 +73,58 @@ describe('client component source contracts', () => {
       expect(code, `${path} should export generateMetadata`).toContain('generateMetadata');
       expect(code, `${path} should use the localized metadata helper`).toContain(contract);
     }
+
+    const adminRoot = resolve(__dirname, '../app/[locale]/admin');
+    const routeFiles = walkFiles(adminRoot)
+      .filter((path) => path.endsWith('/page.tsx'))
+      .map((path) => relative(resolve(__dirname, '..'), path));
+
+    for (const routeFile of routeFiles) {
+      let current = resolve(__dirname, '..', routeFile);
+      let covered = hasMetadataProvider(current);
+      while (!covered && dirname(current).startsWith(adminRoot)) {
+        current = join(dirname(current), 'layout.tsx');
+        if (statSync(current, { throwIfNoEntry: false })?.isFile()) {
+          covered = hasMetadataProvider(current);
+        }
+        const parent = dirname(dirname(current));
+        if (dirname(current) === adminRoot || parent.length >= dirname(current).length) break;
+        current = parent;
+      }
+      expect(covered, `${routeFile} should have page or ancestor admin metadata coverage`).toBe(true);
+    }
+  });
+
+  it('upload picker only advertises formats accepted as first-class browser uploads', () => {
+    const code = source('components/upload-dropzone.tsx');
+    const acceptList = /'image\/\*':\s*\[([^\]]+)\]/.exec(code)?.[1] ?? '';
+    for (const ext of ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tiff', '.tif', '.gif']) {
+      expect(acceptList).toContain(`'${ext}'`);
+    }
+    for (const ext of ['.arw', '.heic', '.heif', '.bmp']) {
+      expect(acceptList).not.toContain(`'${ext}'`);
+    }
+  });
+
+  it('templated public route metadata returns bare titles for archive/map/year pages', () => {
+    expect(source('app/[locale]/(public)/timeline/page.tsx')).toContain("title: t('title'),");
+    expect(source('app/[locale]/(public)/map/page.tsx')).toContain("title: t('title'),");
+    expect(source('app/[locale]/(public)/year/[year]/page.tsx')).toContain("const title = t('yearInReview'");
+  });
+
+  it('theme toggle announces current and next theme state', () => {
+    const code = source('components/nav-client.tsx');
+    expect(code).toContain('const currentTheme');
+    expect(code).toContain('const nextThemeValue');
+    expect(code).toContain("t('aria.cycleTheme'");
+    expect(code).toContain('aria-label={themeAriaLabel}');
+    expect(code).not.toContain("aria-label={t('aria.toggleTheme')}");
+  });
+
+  it('search imports semantic request defaults from the client-safe constant module', () => {
+    const code = source('components/search.tsx');
+    expect(code).toContain("from '@/lib/clip-embedding-constants'");
+    expect(code).not.toContain("from '@/lib/clip-embeddings'");
   });
 
   it('timeline and year cards use localized photo labels and action aria names', () => {

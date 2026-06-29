@@ -48,11 +48,20 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         const loader = await read('components/map/map-loader.tsx');
         expect(client).toMatch(/imageSizes:\s*number\[\]/);
         expect(loader).toMatch(/imageSizes:\s*number\[\]/);
+        expect(loader).toMatch(/loadingLabel:\s*string/);
     });
 
     it('map page passes the configured imageSizes from getGalleryConfig', async () => {
         const page = await read('app/[locale]/(public)/map/page.tsx');
         expect(page).toMatch(/getGalleryConfig/);
         expect(page).toMatch(/imageSizes=\{config\.imageSizes\}/);
+        expect(page).toMatch(/loadingLabel=\{t\('loading'\)\}/);
+    });
+
+    it('map-loader provides a localized status fallback for the dynamic chunk', async () => {
+        const loader = await read('components/map/map-loader.tsx');
+        expect(loader).toContain('Suspense');
+        expect(loader).toContain('role="status"');
+        expect(loader).toContain('aria-label={label}');
     });
 });

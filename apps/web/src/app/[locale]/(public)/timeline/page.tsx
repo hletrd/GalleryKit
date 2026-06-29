@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
         : undefined;
 
     return {
-        title: `${t('title')} | ${seo.title}`,
+        title: t('title'),
         description: t('description'),
         alternates: { canonical: pageUrl, languages: alternateLanguages },
         openGraph: {

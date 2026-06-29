@@ -34,7 +34,7 @@ export async function generateMetadata({
     const pageUrl = localizeUrl(seo.url, locale, `/year/${yearNum}`);
     const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
     const alternateLanguages = buildHreflangAlternates(seo.url, `/year/${yearNum}`);
-    const title = `${t('yearInReview', { year: yearNum })} | ${seo.title}`;
+    const title = t('yearInReview', { year: yearNum });
     const description = t('yearInReviewDescription', { year: yearNum });
     const ogImages = seo.og_image_url
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: t('yearInReview', { year: yearNum }) }]

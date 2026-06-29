@@ -1,19 +1,26 @@
 /**
- * CLIP embedding helpers — pure utilities for US-P51 (CLIP semantic search).
+ * CLIP embedding helpers for US-P51 (CLIP semantic search).
  *
- * No database imports. Safe to use in server-only lib modules.
- * All functions are deterministic and side-effect-free.
+ * No database imports. Buffer/env usage makes this module server-oriented; client
+ * components should import display/request constants from
+ * `clip-embedding-constants` instead.
  */
 
-export const EMBEDDING_DIM = 512;
-export const EMBEDDING_BYTES = EMBEDDING_DIM * 4; // 512 × 4-byte float32
-// AGG-C10-09: renamed from the misleading `CLIP_MODEL_VERSION` — this is the STUB
-// encoder identity (deterministic, NOT semantically meaningful). The real encoder
-// identity is PRODUCTION_MODEL_VERSION below. The model_version column partitions
-// stub vs production rows so they are never co-ranked.
-export const STUB_MODEL_VERSION = 'stub-sha256-v1';
-export const COSINE_THRESHOLD = 0.18;
-export const SEMANTIC_TOP_K_DEFAULT = 20;
+import {
+    COSINE_THRESHOLD,
+    EMBEDDING_BYTES,
+    EMBEDDING_DIM,
+    SEMANTIC_TOP_K_DEFAULT,
+    STUB_MODEL_VERSION,
+} from './clip-embedding-constants';
+
+export {
+    COSINE_THRESHOLD,
+    EMBEDDING_BYTES,
+    EMBEDDING_DIM,
+    SEMANTIC_TOP_K_DEFAULT,
+    STUB_MODEL_VERSION,
+} from './clip-embedding-constants';
 
 // R21C21 T4 (CRIT21-02): SEMANTIC_TOP_K_MAX and SEMANTIC_SCAN_LIMIT are
 // documented in CLAUDE.md ("Runtime limits") as env-tunable operational caps

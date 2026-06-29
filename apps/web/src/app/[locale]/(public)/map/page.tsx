@@ -16,7 +16,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ]);
     const pageUrl = localizeUrl(seo.url, locale, '/map');
     return {
-        title: `${t('title')} | ${seo.title}`,
+        title: t('title'),
         description: t('description'),
         alternates: { canonical: pageUrl },
         robots: { index: false, follow: true },
@@ -59,6 +59,7 @@ export default async function MapPage() {
                     locale={locale}
                     noPhotosLabel={t('noPhotos')}
                     openPhotoLabel={t('openPhoto')}
+                    loadingLabel={t('loading')}
                     imageSizes={config.imageSizes}
                 />
             )}

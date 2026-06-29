@@ -38,6 +38,12 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const { t } = useTranslation();
     const { theme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
+    const currentTheme = (theme ?? 'system') as StoredTheme;
+    const nextThemeValue = nextTheme(currentTheme);
+    const themeAriaLabel = t('aria.cycleTheme', {
+        theme: t(`theme.${currentTheme}`),
+        nextTheme: t(`theme.${nextThemeValue}`),
+    });
 
     // Auto-collapse when viewport crosses into desktop
     useEffect(() => {
@@ -153,10 +159,10 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 )}>
                     <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
                     <button
-                        onClick={() => setTheme(nextTheme((theme ?? 'system') as StoredTheme))}
+                        onClick={() => setTheme(nextThemeValue)}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        aria-label={t('aria.toggleTheme')}
-                        title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+                        aria-label={themeAriaLabel}
+                        title={themeAriaLabel}
                     >
                         {(theme === 'light') && <Sun className="h-4 w-4" />}
                         {(theme === 'dark') && <Moon className="h-4 w-4" />}

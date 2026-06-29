@@ -86,9 +86,9 @@ export const images = mysqlTable("images", {
 
     // R17-L2: admin user that performed the upload. NULL for legacy rows
     // (pre-migration) and for any future programmatic ingest path that
-    // doesn't carry a session. Surfaced via JOIN in `getImagesForFeed` to
-    // drive per-entry Atom <author>; the raw column is admin-only PII.
-    // ON DELETE SET NULL keeps the photo but drops the authorship link.
+    // doesn't carry a session. Admin-only PII; public Atom currently falls
+    // back to the feed-level author until a safe public display-name field
+    // exists. ON DELETE SET NULL keeps the photo but drops the private link.
     uploaded_by: int("uploaded_by").references(() => adminUsers.id, { onDelete: 'set null' }),
 
     created_at: timestamp("created_at")

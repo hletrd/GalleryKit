@@ -167,7 +167,7 @@ git values must be treated as compromised and must not be reused.
 | `was_downscaled` | Whether a 50 MP+ wide-gamut source was downscaled to ≤ `WIDE_GAMUT_MAX_SOURCE_PIXELS` before the rgb16 fan-out | admin-only — omitted from `publicSelectFields`, in `_PrivacySensitiveKeys`, persisted by both backfill entry points |
 | `avif_10bit` | libheif 10-bit-encode probe result (whether the AVIF was actually encoded at 10-bit) | public-safe (R10-M4) — describes encoded output, not source PII; present in `publicSelectFields` and surfaced in the public Color Details audit |
 | `pipeline_version` | Encoder version used to produce derivatives (current: 7) | admin-only |
-| `uploaded_by` | Admin user id captured on upload; FK to `admin_users(id)` with `ON DELETE SET NULL` (R17-L2) | admin-only — public Atom feed surfaces a JOIN-derived display name only |
+| `uploaded_by` | Admin user id captured on upload; FK to `admin_users(id)` with `ON DELETE SET NULL` (R17-L2) | admin-only — public Atom currently uses the feed-level author until a safe public display-name field exists |
 
 ## Image Upload Flow
 

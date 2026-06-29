@@ -29,6 +29,16 @@ const SIMILAR_ROUTE_SRC = readFileSync(
     'utf8',
 );
 
+const SEARCH_COMPONENT_SRC = readFileSync(
+    resolve(__dirname, '../components/search.tsx'),
+    'utf8',
+);
+
+const CLIP_CONSTANTS_SRC = readFileSync(
+    resolve(__dirname, '../lib/clip-embedding-constants.ts'),
+    'utf8',
+);
+
 describe('semantic route SEMANTIC_SCAN_LIMIT source contract (cycle-17 TE gap)', () => {
     it('imports SEMANTIC_SCAN_LIMIT from the clip-embeddings module', () => {
         // The constant must be imported (not inlined as a magic number) so the
@@ -63,5 +73,18 @@ describe('similar/[id] route SEMANTIC_SCAN_LIMIT source contract (cycle-22 TE ga
         // would allow the image-similarity scan to read all rows with no cap,
         // but no existing behavioral test would catch the regression.
         expect(SIMILAR_ROUTE_SRC).toMatch(/\.limit\(\s*SEMANTIC_SCAN_LIMIT\s*\)/);
+    });
+});
+
+describe('client-safe semantic constants', () => {
+    it('keeps the search client off server-oriented embedding helpers', () => {
+        expect(SEARCH_COMPONENT_SRC).toContain("from '@/lib/clip-embedding-constants'");
+        expect(SEARCH_COMPONENT_SRC).not.toContain("from '@/lib/clip-embeddings'");
+    });
+
+    it('keeps the client-safe constant module free of server-only APIs', () => {
+        expect(CLIP_CONSTANTS_SRC).not.toMatch(/\bprocess\b/);
+        expect(CLIP_CONSTANTS_SRC).not.toMatch(/\bBuffer\b/);
+        expect(CLIP_CONSTANTS_SRC).not.toMatch(/from ['"](?:fs|node:fs|path|node:path|@\/db|server-only)/);
     });
 });

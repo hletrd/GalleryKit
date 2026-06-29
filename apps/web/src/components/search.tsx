@@ -16,7 +16,7 @@ import { imageUrl, sizedImageUrl } from '@/lib/image-url';
 import { isImeComposingNativeEvent, isImeComposingReactEvent } from '@/lib/ime';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
-import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embeddings';
+import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embedding-constants';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
 import { countCodePoints } from '@/lib/utils';
 

@@ -608,7 +608,7 @@
   "aria": {
     "searchPhotos": "사진 검색",
     "toggleTheme": "테마 전환",
-    "cycleTheme": "테마: {theme}. 클릭하여 변경.",
+    "cycleTheme": "현재 테마: {theme}. {nextTheme}(으)로 변경.",
     "expandMenu": "메뉴 열기",
     "collapseMenu": "메뉴 닫기",
     "openFullscreen": "전체 화면으로 보기",
@@ -773,6 +773,7 @@
   "map": {
     "title": "지도",
     "description": "지도에서 위치 정보가 있는 사진 찾아보기",
+    "loading": "지도를 불러오는 중",
     "noPhotos": "지도에 표시할 위치 정보가 있는 사진이 없습니다.",
     "openPhoto": "사진 열기"
   },

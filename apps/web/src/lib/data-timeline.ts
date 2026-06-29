@@ -89,8 +89,10 @@ const ON_THIS_DAY_LIMIT = 6;
  * Return up to 6 processed photos whose capture_date matches today's
  * MM-DD across any year. Photos with NULL capture_date are excluded.
  *
- * Uses MONTH() + DAY() so the query stays within the composite index
- * prefix (processed, capture_date) — no full table scan.
+ * Uses MONTH() + DAY() for straightforward MM-DD matching. Those predicates
+ * are not sargable on capture_date; this is acceptable at the current
+ * personal-gallery scale, but large installs should add generated month/day
+ * columns or a range/index strategy before relying on this widget heavily.
  */
 export async function getOnThisDayImages(month: number, day: number) {
     const rows = await db

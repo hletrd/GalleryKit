@@ -3,6 +3,8 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const nginxConfig = readFileSync(resolve(__dirname, '..', '..', 'nginx', 'default.conf'), 'utf8');
+const composeConfig = readFileSync(resolve(__dirname, '..', '..', 'docker-compose.yml'), 'utf8');
+const dockerfile = readFileSync(resolve(__dirname, '..', '..', 'Dockerfile'), 'utf8');
 
 describe('nginx production edge hardening', () => {
     it('preserves trusted forwarded proto instead of overwriting it with the local scheme', () => {
@@ -16,6 +18,8 @@ describe('nginx production edge hardening', () => {
         expect(nginxConfig).toMatch(/location ~ \^\(\/\[a-z\]\{2\}\)\?\/admin\$ \{[\s\S]*client_max_body_size 64K;/);
         expect(nginxConfig).toMatch(/location ~ \^\(\/\[a-z\]\{2\}\)\?\/admin\/db \{[\s\S]*client_max_body_size 250M;/);
         expect(nginxConfig).toMatch(/location ~ \^\(\/\[a-z\]\{2\}\)\?\/admin\/dashboard \{[\s\S]*client_max_body_size 216M;/);
+        expect(nginxConfig).toMatch(/location \^~ \/api\/admin\/lr\/upload \{[\s\S]*client_max_body_size 216M;/);
+        expect(nginxConfig.indexOf('location ^~ /api/admin/lr/upload')).toBeLessThan(nginxConfig.indexOf('location ^~ /api/admin/ {'));
     });
 
     it('rate-limits settings, SEO, and admin API mutation surfaces', () => {
@@ -33,5 +37,15 @@ describe('nginx production edge hardening', () => {
         const uploadsLocation = nginxConfig.match(/location ~ \^\(\?:\/\[a-z\]\{2\}\)\?\/uploads\/\(jpeg\|webp\|avif\)[\s\S]*?\n    \}/)?.[0] ?? '';
         expect(uploadsLocation).toContain('proxy_pass http://nextjs;');
         expect(uploadsLocation).not.toContain('root /app/apps/web/public;');
+    });
+
+    it('binds the standalone server to loopback in Dockerfile and compose', () => {
+        expect(dockerfile).toContain('ENV HOSTNAME="127.0.0.1"');
+        expect(composeConfig).toContain('HOSTNAME: 127.0.0.1');
+    });
+
+    it('mounts only mutable public uploads so built assets come from the image', () => {
+        expect(composeConfig).toContain('./public/uploads:/app/apps/web/public/uploads');
+        expect(composeConfig).not.toContain('./public:/app/apps/web/public');
     });
 });

@@ -235,6 +235,16 @@ describe('searchImagesAction', () => {
         expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ groupId: 11 }));
     });
 
+    it('rejects invalid analytics recorder inputs before header or DB work', async () => {
+        await recordPhotoView(0);
+        await recordTopicView('INVALID SLUG!');
+        await recordSharedGroupView(-1);
+
+        expect(headersMock).not.toHaveBeenCalled();
+        expect(getClientIpMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
+    });
+
     it('skips public analytics writes during restore maintenance before header or DB work', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
 
@@ -245,6 +255,18 @@ describe('searchImagesAction', () => {
         expect(headersMock).not.toHaveBeenCalled();
         expect(getClientIpMock).not.toHaveBeenCalled();
         expect(dbInsertMock).not.toHaveBeenCalled();
+    });
+
+    it('skips public analytics writes after the per-IP view recorder budget is exhausted', async () => {
+        getClientIpMock.mockReturnValue('198.51.100.200');
+
+        for (let i = 0; i < 120; i++) {
+            await recordPhotoView(i + 1);
+        }
+        await recordPhotoView(999);
+
+        expect(dbInsertMock).toHaveBeenCalledTimes(120);
+        expect(dbValuesMock).not.toHaveBeenCalledWith(expect.objectContaining({ imageId: 999 }));
     });
 
     it('rolls back the in-memory pre-increment when the DB bucket is already over the limit', async () => {
