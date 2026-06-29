@@ -63,6 +63,19 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain('keepMaintenance: true');
     });
 
+    it('keeps restore maintenance active after mysql import handoff failures', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+
+        const failRestoreIdx = source.indexOf('const failRestore = (error: string');
+        const failResolveIdx = source.indexOf('resolve({ success: false, error, keepMaintenance: true })', failRestoreIdx);
+        const nonzeroIdx = source.indexOf("t('restoreExitedWithCode'", failRestoreIdx);
+        const nonzeroWindow = source.slice(nonzeroIdx, nonzeroIdx + 180);
+
+        expect(failRestoreIdx).toBeGreaterThan(-1);
+        expect(failResolveIdx).toBeGreaterThan(failRestoreIdx);
+        expect(nonzeroWindow).toContain('keepMaintenance: true');
+    });
+
     it('resumes quiesced image-processing rows when restore exits maintenance after failure', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
 

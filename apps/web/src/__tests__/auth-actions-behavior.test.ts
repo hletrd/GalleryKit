@@ -240,7 +240,6 @@ describe('auth server-action behavior locks', () => {
 
     it('updatePassword rejects hostile origins before password verification or transaction', async () => {
         hasTrustedSameOriginMock.mockReturnValue(false);
-        setupSelectQueue([{ id: 7, username: 'admin', created_at: new Date() }]);
 
         await expect(updatePassword(null, form({
             currentPassword: 'old-password-value',
@@ -248,6 +247,8 @@ describe('auth server-action behavior locks', () => {
             confirmPassword: 'new-password-value',
         }))).resolves.toEqual({ error: 'unauthorized' });
 
+        expect(verifySessionTokenMock).not.toHaveBeenCalled();
+        expect(dbSelectMock).not.toHaveBeenCalled();
         expect(argonVerifyMock).not.toHaveBeenCalled();
         expect(dbTransactionMock).not.toHaveBeenCalled();
     });

@@ -1,125 +1,112 @@
-# Designer Review - Cycle 12
+# Designer Review - Cycle 13
 
-Role: Cycle 12 designer reviewer using the local UI/UX-designer perspective, adapted to GalleryKit's Next.js web photo gallery. Scope covered information architecture, affordances, keyboard/focus navigation, WCAG 2.2/accessibility, contrast/ARIA/focus traps/reduced motion, responsive behavior, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL, and perceived performance. No production code was changed.
-
-## Executive Summary
-
-GalleryKit's current UI surface is generally disciplined: the public/admin IA is coherent, touch-target and focus-visible protections are backed by tests, the admin login shell is accessible in live browser checks, and the prior timeline/year/map responsive regressions appear fixed. I found one confirmed accessibility defect and one likely mobile semantics risk:
-
-- Confirmed: the privacy route nests a second `<main>` landmark inside the public layout's existing `<main>`.
-- Likely: the mobile photo info bottom sheet advertises modal dialog semantics and traps focus even in its peek state, while visually presenting as a partial sheet with no backdrop.
-
-The largest review limitation is local data availability. The local dev server started successfully, but public gallery routes that query MySQL fell into the app error shell because `127.0.0.1:3306` refused connections. I therefore used live browser evidence for admin/login and static public pages, and source/test review for DB-backed photo/gallery interactions.
+Role: designer / UI-UX reviewer subagent for GalleryKit. Scope covered information architecture, affordances, keyboard/focus navigation, WCAG 2.2 accessibility, contrast/ARIA/focus traps/reduced motion, responsive breakpoints, loading/empty/error states, form validation UX, dark/light/OLED mode, i18n/RTL applicability, and perceived performance. No production code was changed.
 
 ## Inventory Reviewed
 
-I first built a review-relevant inventory, then read the UI files rather than sampling. The render-surface inventory contained 99 TypeScript/TSX/CSS files under:
+I first read `AGENTS.md` and `CLAUDE.md`, then built a UI inventory excluding `node_modules`, `.git`, build output, uploads/resources, and runtime state. The review-relevant inventory included 507 UI-adjacent source/test/message files across:
 
-- Public routes: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]`, `c/[slug]`, `g/[key]`, `s/[key]`, `p/[id]`, `map`, `timeline`, `year`, `privacy`, plus public layout/loading/error/not-found shells.
-- Admin routes: login, protected layout, dashboard, upload/image management, categories, tags, SEO, settings, password, users, DB, tokens, analytics, loading/error shells.
-- Components: `nav`, `footer`, `home-client`, `load-more`, `photo-viewer`, `photo-navigation`, `image-zoom`, `lightbox`, `info-bottom-sheet`, color/histogram widgets, search, tag/filter controls, upload/dropzone/image-manager admin components, map components, and shared UI primitives.
-- Styling and contracts: `apps/web/src/app/[locale]/globals.css`, Tailwind/theme tokens, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, and UI-oriented tests/e2e specs including touch targets, focus-visible scans, i18n parity, lightbox controls, info-sheet IA, HDR badge contrast, admin flows, public flows, and navigation fixes.
+- Public App Router pages/layouts: home, topic, smart collection, shared group/link, photo detail/loading, map, timeline, year archive, privacy, not-found/error/loading shells.
+- Admin pages/layouts: login, protected layout, dashboard/upload/image manager, categories, tags, SEO, settings, password, users, DB, tokens, analytics, admin error/loading shells.
+- Components/primitives: nav/footer/search, masonry/photo viewer/lightbox/info sheet, color details/histogram/wide-gamut hint, upload dropzone, tag input, image manager, admin nav/header, Radix/shadcn UI primitives.
+- Styling/config/i18n/tests: `globals.css`, `tailwind.config.ts`, `components.json`, `messages/en.json`, `messages/ko.json`, Playwright e2e specs, and UI/a11y Vitest coverage.
 
-Final sweep included searches for `main`, `role=`, `aria-`, `FocusTrap`, `prefers-reduced-motion`, `forced-colors`, `tabIndex`, `aria-keyshortcuts`, loading/empty/error labels, and route-level shells.
+## Validation Evidence
 
-## Browser Evidence
+- Local dev server: `http://127.0.0.1:3200` via `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3200`.
+- Browser checks: Chromium headless at mobile viewport `390x844` for `/en`, `/en/admin`, `/en/privacy`, search dialog interaction, skip-link focus, and computed styles.
+- Runtime blocker: `/en` rendered the localized error shell because local DB-backed queries failed; `/en/admin` and `/en/privacy` rendered. I did not run DB init/seed because that would mutate the configured local database.
+- Targeted tests passed: `npm test --workspace=apps/web -- --run` for 10 UI/a11y files, 78 tests total (`a11y-us-p15`, touch-target audit, focus-visible scans, info bottom-sheet IA, search disclaimer, error shell, privacy landmark).
 
-Tooling: `agent-browser` CLI with local Chromium. Screenshots captured:
+## Confirmed Issues
 
-- `/tmp/gallery-desktop-home.png`
-- `/tmp/gallery-admin-login-desktop.png`
-- `/tmp/gallery-admin-login-mobile-dark.png`
-- `/tmp/gallery-privacy-mobile.png`
+### DES-C13-01 - OKLCH theme overrides invalidate Tailwind color utilities in modern browsers
 
-Runtime checks:
-
-- Local dev server: `http://127.0.0.1:3100`.
-- `/en`: HTTP 200 but rendered the app error boundary because MySQL was unavailable. Accessibility snapshot exposed a `main` region with heading `Error`, text `Something went wrong loading this page.`, and buttons `Try again` / `Return to Gallery`.
-- `/en/admin`: rendered the login shell. Snapshot exposed one `main`, heading `Admin`, labeled `Username` and `Password` fields, `Show password`, `Sign in`, and a notifications region. DOM state check returned `mainCount: 1`, `nestedMain: false`, active element `login-username`, and no horizontal overflow.
-- `/en/privacy` at mobile viewport `390x844`: rendered without DB access. Accessibility snapshot exposed `navigation "Main navigation"`, then `main > main`, then footer `contentinfo`. DOM state check returned `mainCount: 2`, `nestedMain: true`, and `bodyOverflowX: 0`.
-
-The agent-browser style/box commands returned success without a payload in this installed CLI build, so I did not include computed-style or box-metric claims beyond DOM state and accessibility snapshots.
-
-## Findings
-
-### DES-C12-01 - Privacy page nests a second main landmark inside the public main
-
-Severity: Low
+Severity: High
 Confidence: High
 Classification: confirmed
 
 Source evidence:
 
-- The public layout wraps every public child route in a skip-link target `<main id="main-content" tabIndex={-1}>` at `apps/web/src/app/[locale]/(public)/layout.tsx:12`.
-- The privacy page returns another `<main className="container mx-auto max-w-3xl px-4 py-12">` at `apps/web/src/app/[locale]/(public)/privacy/page.tsx:18`.
+- Tailwind color tokens still wrap CSS variables as HSL channel lists, e.g. `primary.DEFAULT: 'hsl(var(--primary))'`, `primary.foreground: 'hsl(var(--primary-foreground))'`, `destructive.text: 'hsl(var(--destructive-text))'` in `apps/web/tailwind.config.ts:23-58`.
+- `globals.css` overwrites those same variables with full `oklch(...)` color functions under `@supports (color: oklch(0 0 0))` at `apps/web/src/app/[locale]/globals.css:121-148`.
 
 Browser evidence:
 
-- Route: `http://127.0.0.1:3100/en/privacy`.
-- Selector/state evidence: `document.querySelectorAll('main').length === 2`; `document.querySelector('main main') !== null`.
-- Accessibility snapshot exposed nested landmarks as `main` containing another `main`.
-- Screenshot: `/tmp/gallery-privacy-mobile.png`.
+- Selector `button.bg-primary.text-primary-foreground` on `/en/admin` sign-in button computed as `background-color: rgba(0, 0, 0, 0)` and `color: rgb(9, 9, 11)` in Chromium, despite carrying the primary-button classes.
+- Selector `p[role="alert"].text-destructive-text` after a failed login computed as `color: rgb(9, 9, 11)`, not the intended red.
+- Stylesheet rules for `.bg-primary` / `.text-destructive-text` exist, but they evaluate to invalid declarations like `hsl(var(--primary))` after `--primary` becomes a full Lab/OKLCH color.
 
 Failure scenario:
 
-A keyboard or screen-reader user activates the skip link and lands in the outer public `main`, then landmark navigation exposes another nested `main` for the same page content. This makes the privacy page's landmark model inconsistent with other public routes and weakens the WCAG 2.2 expectation that repeated landmarks describe distinct regions.
+In modern browsers that support OKLCH/Lab, primary buttons lose their filled-background affordance, error/destructive text falls back to normal foreground color, and related accent/ring/destructive utilities can silently degrade. This affects visual hierarchy, error recognition, and focus/affordance clarity across public and admin UI.
 
 Suggested fix:
 
-Change the privacy page wrapper from `<main>` to `<section>` or `<div>`, preferably with `aria-labelledby` pointing at the page `<h1>` if an explicit region name is useful. Keep the public layout's existing `main-content` skip target as the single page-level main landmark.
+Use one token contract consistently. Either remove the OKLCH overrides and keep `--primary`/friends as HSL channels, or change Tailwind colors to use raw variables (`var(--primary)`, `var(--primary-foreground)`, etc.) with HSL fallbacks supplied as complete color values. Add a browser/computed-style regression test for `.bg-primary`, `.text-primary-foreground`, `.text-destructive-text`, and `.ring-ring`.
 
-### DES-C12-02 - Mobile info sheet likely overstates modality in peek state
+### DES-C13-02 - TagInput text field misses the 44 px touch-target contract
 
 Severity: Medium
-Confidence: Medium
-Classification: likely
+Confidence: High
+Classification: confirmed from source
 
 Source evidence:
 
-- The bottom sheet shows a backdrop only when `sheetState === 'expanded'` at `apps/web/src/components/info-bottom-sheet.tsx:176-181`.
-- The focus trap is active whenever `isOpen`, regardless of sheet state, at `apps/web/src/components/info-bottom-sheet.tsx:185-192`.
-- The sheet container always uses `role="dialog"` and `aria-modal="true"` at `apps/web/src/components/info-bottom-sheet.tsx:194-199`.
-- The peek state is implemented as a partial-height translated sheet with `minHeight: PEEK_HEIGHT`, `overflowY: hidden`, and transform-driven position at `apps/web/src/components/info-bottom-sheet.tsx:200-210`.
-
-Browser evidence:
-
-- Not directly reproduced in local browser because DB-backed photo pages could not render without MySQL.
-- This is a source-confirmed semantics risk rather than a live-confirmed behavioral failure.
+- `TagInput` wraps selected tags and a raw `<input role="combobox">` in a bordered flex container, but the container has no click handler to focus the input: `apps/web/src/components/tag-input.tsx:184-188`.
+- The raw input class is only `flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground`, with no `min-h-11`, padding, or shared `Input` primitive: `apps/web/src/components/tag-input.tsx:203-223`.
+- This component is used in upload/admin editing paths: `apps/web/src/components/upload-dropzone.tsx:393`, `apps/web/src/components/upload-dropzone.tsx:521`, `apps/web/src/components/bulk-edit-dialog.tsx:263`, `apps/web/src/components/bulk-edit-dialog.tsx:276`, and `apps/web/src/components/image-manager.tsx:493`.
 
 Failure scenario:
 
-On mobile, a user opens photo information and receives a partial "peek" sheet. Visually, the page still reads as a photo view with a partial panel and no backdrop, but assistive technology is told a modal dialog is active and keyboard focus is trapped inside it. That mismatch can make the underlying photo context unreachable by keyboard/screen reader until close, while sighted users see a less-than-modal interaction model.
+On mobile admin workflows, the visible tag-entry field can present as a small text-line target inside a larger decorative container. Tapping the empty padded area does not focus the combobox, and the actual text input does not meet the repo’s 44x44 px target policy from `CLAUDE.md`. This is easy to miss because the existing touch-target audit does not scan raw text inputs.
 
 Suggested fix:
 
-Pick one modal contract and make the implementation match it:
+Give the combobox input a real `min-h-11` target (and enough vertical padding), or make the wrapper an honest focus proxy with `onClick={() => inputRef.current?.focus()}` while preserving combobox semantics. Extend `touch-target-audit.test.ts` to cover raw text/search inputs or this component specifically.
 
-- If peek is meant to be a non-modal disclosure, set `aria-modal={false}` and disable `FocusTrap` until expanded, then use modal semantics only for the expanded state.
-- If any open sheet state is meant to be modal, show the backdrop/inert treatment consistently while open and make the visual state communicate that the rest of the page is unavailable.
+## Likely Issue / Manual Validation Needed
 
-Add a mobile regression test that opens the info sheet, checks `aria-modal`/focus containment for peek versus expanded states, and verifies the visible backdrop/inert behavior matches the chosen contract.
+### DES-C13-R1 - Mobile info sheet may overstate modality in peek state
 
-## Verified Strengths and Non-Findings
+Severity: Medium
+Confidence: Medium
+Classification: likely; not browser-confirmed because DB-backed photo pages did not render locally
 
-- Admin login IA and accessibility held in live browser checks: one main landmark, explicit labels, initial focus on username, password visibility button, notifications region, and no horizontal overflow at desktop/mobile sampled widths.
-- The local DB failure reached a usable error shell with a heading, explanatory copy, retry action, and return action instead of a blank page.
-- Timeline/year image geometry regressions from earlier cycles appear addressed in source: archive thumbnails guard invalid dimensions and use eager/high-priority loading for initial visible items.
-- Shared-group photo cards now compute safe aspect ratios and use `containIntrinsicSize`/above-fold loading hints in source review.
-- Map loading has a visible fallback skeleton rather than a blank suspended map area.
-- Reduced-motion and forced-colors handling are present in global CSS, and core animated surfaces include motion-reduction branches.
-- Touch-target and focus-visible coverage is institutionalized through tests, including the 44 px audit and focus-visible link scanning.
-- English/Korean message parity is enforced by tests. The app currently declares `dir="ltr"`, which is appropriate for the supported locales reviewed here; no RTL support is claimed by the code.
+Source evidence:
+
+- The backdrop renders only when `sheetState === 'expanded'`: `apps/web/src/components/info-bottom-sheet.tsx:176-182`.
+- `FocusTrap` is active for any `isOpen` state: `apps/web/src/components/info-bottom-sheet.tsx:184-193`.
+- The sheet always advertises `role="dialog"` and `aria-modal="true"`: `apps/web/src/components/info-bottom-sheet.tsx:194-199`.
+- Peek state is visually partial via transform/min height/hidden overflow: `apps/web/src/components/info-bottom-sheet.tsx:199-210`.
+
+Risk scenario:
+
+If peek is intended as a non-modal partial disclosure, keyboard and screen-reader users are trapped in a modal dialog while sighted users see no backdrop and a partially available photo view. If peek is intended as modal, the missing backdrop/inert visual treatment undersells that the rest of the page is unavailable.
+
+Suggested validation/fix:
+
+Manually test a mobile photo page with VoiceOver/TalkBack and keyboard. Then choose one contract: modal in all open states with consistent backdrop/inert treatment, or non-modal peek with trap/`aria-modal` enabled only when expanded.
+
+## Verified Strengths
+
+- Skip link works in browser: first `Tab` focuses “Skip to content”; `Enter` moves focus to `#main-content`.
+- `/en/admin` login shell has one main landmark, visible labels, focused username input, password reveal button, and 44 px controls.
+- `/en/privacy` now has one main landmark and no nested `main main`; the previous cycle’s privacy landmark issue is fixed.
+- Search dialog opens from mobile nav, autofocuses `#search-input`, uses `role="dialog" aria-modal="true"`, focus trap, close button, live result status, and 44 px input/close controls.
+- Shared `Table` primitive wraps tables in `overflow-x-auto`, covering admin table overflow paths.
+- Reduced-motion and forced-colors handling exist in global CSS; photo/lightbox/image-zoom paths include reduced-motion handling.
+- English/Korean key parity and touch/focus-visible policies are backed by tests. Current locales are LTR, and `dir="ltr"` is appropriate for the shipped locale set.
 
 ## Limitations
 
-- Local MySQL was unavailable, so DB-backed public gallery/photo/map pages could not be fully exercised in the local browser. I used static/source/test review for those surfaces.
-- I did not log into admin because no credentials were provided and the task did not require credentialed mutation.
-- I did not run the full lint/typecheck/build/test suite because this pass is a review artifact only and no production code was edited.
+- DB-backed public gallery/photo/map and authenticated admin workflows were not fully browser-exercised because the configured local DB failed queries. I used source and existing test coverage for those paths.
+- I did not mutate local DB state or run e2e seed/init.
+- Full lint/typecheck/build/test suite was not run because this was a review-only artifact and no production code changed.
 
 ## Completion Check
 
-- Review inventory built before findings.
-- All review-relevant render-surface UI files in the inventory were examined.
-- Browser evidence collected where feasible with accessibility snapshots and DOM state checks.
-- Findings include file/line evidence, failure scenarios, severity, confidence, and suggested fixes.
-- Final sweep performed for commonly missed landmarks, focus traps, motion, contrast-related hooks, loading/empty/error states, and i18n/RTL assumptions.
+- Inventory built before findings.
+- Browser automation used where feasible with DOM/computed-style evidence.
+- Relevant source and cross-file interactions inspected.
+- Final sweep covered IA, affordances, focus/keyboard, WCAG/accessibility, contrast/theme, ARIA/focus traps, responsive behavior, loading/empty/error states, validation UX, i18n/RTL applicability, and perceived performance.

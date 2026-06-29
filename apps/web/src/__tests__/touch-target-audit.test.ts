@@ -440,6 +440,15 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: 'native <select className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
     },
+    // DES-C13-02: raw visible text-like inputs. shadcn <Input> is a primitive
+    // with its own sizing contract, but ad-hoc `<input type="text">` surfaces
+    // can bypass that primitive and present only a text-line target. Hidden,
+    // file, checkbox, and radio inputs are excluded; checkbox/radio have a
+    // dedicated wrapper-aware scan below.
+    {
+        pattern: /<input\b(?=[^>]*\btype=["'](?:text|search|email|password)["'])(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*>/,
+        description: 'raw visible text/search/email/password <input> without explicit ≥44 px height',
+    },
     // AGG-R5C3-06 (CRT-R5C3-01): anchor-based touch targets. The cycle-2
     // fixes added `min-h-11` links in g/[key]/page.tsx, not-found.tsx, and
     // error.tsx, but no pattern guarded `<Link>`/`<a>` — so a regression to
@@ -965,6 +974,18 @@ describe('touch-target audit (44 px floor)', () => {
         // <button role="checkbox">, NOT a raw <input>, so it never enters this
         // scan — a bare <Checkbox /> usage must not false-positive.
         expect(scanSource('fixture/shadcn-checkbox.tsx', '<Checkbox id="x" checked={v} />')).toEqual([]);
+    });
+
+    it('scanSource catches raw visible text inputs without a 44 px height and accepts min-h-11', () => {
+        const violating = '<input type="text" className="flex-1 min-w-[120px] bg-transparent" />';
+        const issues = scanSource('fixture/text-input-violation.tsx', violating);
+        expect(issues.some((i) => i.pattern.includes('raw visible text/search'))).toBe(true);
+
+        const compliant = '<input type="text" className="flex-1 min-h-11 min-w-[120px] bg-transparent" />';
+        expect(scanSource('fixture/text-input-ok.tsx', compliant)).toEqual([]);
+
+        const fileInput = '<input type="file" className="sr-only" />';
+        expect(scanSource('fixture/file-input-ok.tsx', fileInput)).toEqual([]);
     });
 
     it('scanSource accepts multi-line <Button size="icon"> with h-11 override', () => {

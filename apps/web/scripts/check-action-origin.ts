@@ -283,18 +283,35 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
 function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimit = false;
+    let sawMutationBeforeRateLimit = false;
     const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt']);
 
+    const visit = (node: ts.Node) => {
+        if (sawMutationBeforeRateLimit) return;
+
+        if (ts.isCallExpression(node)) {
+            const callee = node.expression;
+            if (ts.isIdentifier(callee) && publicRateLimitNames.has(callee.text)) {
+                sawRateLimit = true;
+            }
+            if (ts.isPropertyAccessExpression(callee) && MUTATING_METHOD_NAMES.has(callee.name.text) && !sawRateLimit) {
+                sawMutationBeforeRateLimit = true;
+                return;
+            }
+            if (ts.isIdentifier(callee) && MUTATING_FUNCTION_NAMES.has(callee.text) && !sawRateLimit) {
+                sawMutationBeforeRateLimit = true;
+                return;
+            }
+        }
+
+        ts.forEachChild(node, visit);
+    };
+
     for (const statement of body.statements) {
-        if (statementContainsPreGuardMutation(statement) && !sawRateLimit) {
-            return false;
-        }
-        if (nodeContainsCallNamed(statement, publicRateLimitNames)) {
-            sawRateLimit = true;
-        }
+        visit(statement);
     }
 
-    return sawRateLimit;
+    return sawRateLimit && !sawMutationBeforeRateLimit;
 }
 
 function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set<string>): boolean {

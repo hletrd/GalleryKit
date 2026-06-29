@@ -15,7 +15,7 @@
  *    response header set by proxy.ts (the SW cannot read the request
  *    Cookie header — it is a Fetch-spec forbidden header, which is why
  *    the old cookie sniff never worked).
- *  - /admin/* and /api/admin/*: always bypass to network.
+ *  - /admin/*, /[locale]/admin/*, and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
  * __SW_VERSION__ is replaced at build time by scripts/build-sw.ts.
@@ -40,7 +40,8 @@ const HEAD_REVALIDATE_TIMEOUT_MS = 300;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function isAdminRoute(pathname) {
-  return (
+    return (
+    /^\/admin(\/|$)/.test(pathname) ||
     /^\/[a-z]{2}(-[A-Z]{2})?\/admin(\/|$)/.test(pathname) ||
     /^\/api\/admin(\/|$)/.test(pathname)
   );

@@ -78,6 +78,16 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(shareBypassIdx).toBeGreaterThan(-1);
         expect(htmlCacheIdx).toBeGreaterThan(shareBypassIdx);
     });
+
+    it('bypasses unlocalized and localized admin routes', () => {
+        const adminFn = TEMPLATE.slice(
+            TEMPLATE.indexOf('function isAdminRoute'),
+            TEMPLATE.indexOf('function isImageDerivative'),
+        );
+        expect(adminFn).toMatch(/\^\\\/admin/);
+        expect(adminFn).toMatch(/\^\\\/\[a-z\]\{2\}/);
+        expect(adminFn).toMatch(/\^\\\/api\\\/admin/);
+    });
 });
 
 describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11)', () => {

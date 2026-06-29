@@ -7,9 +7,9 @@
  * - Allowlisted columns only: unknown column names throw a typed error.
  * - Depth-limited: max 4 nested AND/OR groups; deeper trees throw.
  * - Drizzle parameter binding for all values — no raw string concatenation.
- * - Discriminated-union AST supports eq, gt, gte, lt, lte, between, in,
- *   contains predicates over iso, focal_length, f_number, exposure_time,
- *   camera_model, lens_model, capture_date, topic, tag.
+ * - Discriminated-union AST supports column-appropriate predicates over iso,
+ *   focal_length, f_number, exposure_time, camera_model, lens_model,
+ *   capture_date, topic, tag.
  */
 
 import { sql, type SQL, and as drizzleAnd, or as drizzleOr, eq, gt, gte, lt, lte, inArray } from 'drizzle-orm';
@@ -290,6 +290,14 @@ const VALID_OPERATORS = new Set([
  * depth for rows persisted before this guard.
  */
 const TAG_OPERATORS = new Set(['eq', 'contains']);
+const NUMERIC_COLUMNS = new Set<AllowedColumn>(['iso', 'focal_length', 'f_number']);
+const TEXT_COLUMNS = new Set<AllowedColumn>(['exposure_time', 'camera_model', 'lens_model']);
+const DATE_COLUMNS = new Set<AllowedColumn>(['capture_date']);
+const TOPIC_COLUMNS = new Set<AllowedColumn>(['topic']);
+const NUMERIC_OPERATORS = new Set(['eq', 'gt', 'gte', 'lt', 'lte', 'between', 'in']);
+const TEXT_OPERATORS = new Set(['eq', 'contains', 'in']);
+const DATE_OPERATORS = new Set(['eq', 'gt', 'gte', 'lt', 'lte', 'between', 'in']);
+const TOPIC_OPERATORS = new Set(['eq', 'in']);
 
 const VALID_COLUMNS = new Set<AllowedColumn>([
     'iso', 'focal_length', 'f_number', 'exposure_time',
@@ -326,6 +334,76 @@ function isScalarValue(v: unknown): v is string | number {
     return typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v));
 }
 
+function isDateStringValue(v: unknown): v is string {
+    return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.test(v);
+}
+
+function validatePredicateSemantics(column: AllowedColumn, operator: string, node: Record<string, unknown>) {
+    if (column === 'tag') {
+        if (!TAG_OPERATORS.has(operator)) {
+            throw new SmartCollectionQueryError(
+                `Tag predicate only supports "eq" and "contains" operators, got "${operator}"`,
+            );
+        }
+        return;
+    }
+
+    if (NUMERIC_COLUMNS.has(column)) {
+        if (!NUMERIC_OPERATORS.has(operator)) {
+            throw new SmartCollectionQueryError(`Column "${column}" does not support "${operator}"`);
+        }
+        const values = operator === 'between'
+            ? [node.lo, node.hi]
+            : operator === 'in'
+                ? node.values
+                : [node.value];
+        const flatValues = Array.isArray(values) ? values : [];
+        if (!flatValues.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+            throw new SmartCollectionQueryError(`Column "${column}" requires finite number values`);
+        }
+        return;
+    }
+
+    if (TEXT_COLUMNS.has(column)) {
+        if (!TEXT_OPERATORS.has(operator)) {
+            throw new SmartCollectionQueryError(`Column "${column}" does not support "${operator}"`);
+        }
+        const values = operator === 'in' ? node.values : [node.value];
+        const flatValues = Array.isArray(values) ? values : [];
+        if (!flatValues.every((v) => typeof v === 'string')) {
+            throw new SmartCollectionQueryError(`Column "${column}" requires string values`);
+        }
+        return;
+    }
+
+    if (DATE_COLUMNS.has(column)) {
+        if (!DATE_OPERATORS.has(operator)) {
+            throw new SmartCollectionQueryError(`Column "${column}" does not support "${operator}"`);
+        }
+        const values = operator === 'between'
+            ? [node.lo, node.hi]
+            : operator === 'in'
+                ? node.values
+                : [node.value];
+        const flatValues = Array.isArray(values) ? values : [];
+        if (!flatValues.every(isDateStringValue)) {
+            throw new SmartCollectionQueryError(`Column "${column}" requires date string values`);
+        }
+        return;
+    }
+
+    if (TOPIC_COLUMNS.has(column)) {
+        if (!TOPIC_OPERATORS.has(operator)) {
+            throw new SmartCollectionQueryError(`Column "${column}" does not support "${operator}"`);
+        }
+        const values = operator === 'in' ? node.values : [node.value];
+        const flatValues = Array.isArray(values) ? values : [];
+        if (!flatValues.every((v) => typeof v === 'string')) {
+            throw new SmartCollectionQueryError(`Column "${column}" requires string values`);
+        }
+    }
+}
+
 function validateNode(node: unknown, depth: number): SmartCollectionQuery {
     if (depth > MAX_DEPTH) {
         throw new SmartCollectionDepthError(depth);
@@ -349,15 +427,6 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
         }
         if (typeof n.operator !== 'string' || !VALID_OPERATORS.has(n.operator)) {
             throw new SmartCollectionQueryError(`Unknown operator "${n.operator}"`);
-        }
-        // R4C7 COR-R4C7-03: the tag predicate compiles to a subquery that
-        // only supports eq/contains — reject anything else at validation
-        // (write) time so the save action fails loudly instead of the
-        // public collection page 404ing on compile.
-        if (n.column === 'tag' && !TAG_OPERATORS.has(n.operator)) {
-            throw new SmartCollectionQueryError(
-                `Tag predicate only supports "eq" and "contains" operators, got "${n.operator}"`,
-            );
         }
         // Structural checks per operator
         if (n.operator === 'between') {
@@ -389,6 +458,7 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
                 throw new SmartCollectionQueryError(`${n.operator} predicate value must be a string or finite number`);
             }
         }
+        validatePredicateSemantics(n.column as AllowedColumn, n.operator, n);
         return n as unknown as Predicate;
     }
 

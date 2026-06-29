@@ -182,10 +182,15 @@ export function TagInput({
 
     return (
         <div className={cn("relative", className)} ref={containerRef}>
-            <div className={cn(
+            <div
+                className={cn(
                 "flex flex-wrap items-center gap-2 p-2 rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
                 disabled && "opacity-60",
-            )}>
+                )}
+                onClick={() => {
+                    if (!disabled) inputRef.current?.focus();
+                }}
+            >
                 {selectedTags.map(tag => (
                     <Badge variant="secondary" key={tag} className="gap-1 pr-1">
                         {tag}
@@ -209,7 +214,7 @@ export function TagInput({
 	                    aria-expanded={suggestionsVisible}
 	                    aria-controls={suggestionsVisible ? suggestionsId : undefined}
                     aria-activedescendant={activeDescendantId}
-                    className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+                    className="flex-1 min-h-11 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
                     disabled={disabled}
                     aria-disabled={disabled}
                     placeholder={selectedTags.length === 0 ? placeholder : ''}

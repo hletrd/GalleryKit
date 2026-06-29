@@ -55,8 +55,9 @@ export function isAdminRoute(url: string): boolean {
   try {
     const parsed = new URL(url);
     const pathname = parsed.pathname;
-    // Match /[locale]/admin/* and /api/admin/*
+    // Match /admin/*, /[locale]/admin/*, and /api/admin/*
     return (
+      /^\/admin(\/|$)/.test(pathname) ||
       /^\/[a-z]{2}(-[A-Z]{2})?\/admin(\/|$)/.test(pathname) ||
       /^\/api\/admin(\/|$)/.test(pathname)
     );

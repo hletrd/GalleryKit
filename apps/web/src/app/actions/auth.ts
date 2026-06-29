@@ -282,6 +282,13 @@ export async function logout(formData?: FormData) {
 
 export async function updatePassword(prevState: { error?: string; success?: boolean; message?: string } | null, formData: FormData) {
     const t = await getTranslations('serverActions');
+    // Match the non-auth mutating action contract: reject hostile origins
+    // before any session/user read.
+    const requestHeaders = await headers();
+    if (!hasTrustedSameOrigin(requestHeaders)) {
+        return { error: t('unauthorized') };
+    }
+
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         return { error: t('unauthorized') };
@@ -289,12 +296,6 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
-    }
-
-    // Rate limit password change attempts (separate map from login)
-    const requestHeaders = await headers();
-    if (!hasTrustedSameOrigin(requestHeaders)) {
-        return { error: t('unauthorized') };
     }
 
     // C9R-RPL-01 / AGG9R-RPL-01: validate form-field shape BEFORE the

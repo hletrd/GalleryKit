@@ -432,10 +432,11 @@ export async function uploadImages(formData: FormData) {
                     is_hdr: data.colorSignals?.isHdr ?? false,
                     has_gain_map: data.colorSignals?.hasGainMap ?? false,
                     pipeline_version: IMAGE_PIPELINE_VERSION,
-                    // R17-L2: record the admin who performed this upload so
-                    // per-entry Atom <author> can attribute it. Admin-only
-                    // PII on read; the public feed renders a JOIN-derived
-                    // display name, not the raw id.
+                    // R17-L2: record the admin who performed this upload for
+                    // admin/audit linkage. Admin-only PII on read; public
+                    // Atom currently uses the configured feed-level author.
+                    // Per-entry public attribution requires a separate safe
+                    // display-name column, not raw admin usernames/ids.
                     uploaded_by: currentUser.id,
                     // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
                     // getSafeExtension() in process-image.ts guarantees ASCII-only

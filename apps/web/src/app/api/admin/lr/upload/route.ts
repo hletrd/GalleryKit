@@ -432,14 +432,12 @@ export const POST = withAdminAuth(
             has_gain_map: data.colorSignals?.hasGainMap ?? false,
             pipeline_version: IMAGE_PIPELINE_VERSION,
             // Run-3 RPF cycle 3 / F2 (SEC-C3-02): attribute the upload to the
-            // verified PAT user, mirroring the browser path
-            // (app/actions/images.ts:375 `uploaded_by: currentUser.id`). Without
-            // this, every LR-published image has `uploaded_by = NULL` and the
-            // public Atom per-entry <author> (R17-L2) falls back to the
-            // feed-level author — attribution is dead on the primary non-browser
-            // ingest path even though the PAT identifies the photographer.
-            // Cookie-fallback requests (tokenUserId === null) degrade gracefully
-            // to NULL, same as a legacy upload.
+            // verified PAT user for admin/audit linkage, mirroring the browser
+            // path. Public Atom currently uses the configured feed-level
+            // author; per-entry public attribution requires a future safe
+            // display-name column. Cookie-fallback requests
+            // (tokenUserId === null) degrade gracefully to NULL, same as a
+            // legacy upload.
             uploaded_by: tokenUserId,
             original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
             original_file_size: fileEntry.size,

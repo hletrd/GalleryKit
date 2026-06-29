@@ -357,7 +357,7 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
 /**
  * Record a photo view event. Intentionally fire-and-forget: the INSERT
  * is NOT awaited so analytics never blocks the page render. Errors are
- * swallowed via `.catch()` — a failed view recording is acceptable
+ * swallowed across the full recorder body — a failed view recording is acceptable
  * compared to a broken user experience.
  *
  * @action-origin-exempt: public analytics endpoint — no admin auth needed
@@ -365,23 +365,27 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
-    const [visibleImage] = await db.select({ id: images.id })
-        .from(images)
-        .where(and(eq(images.id, imageId), eq(images.processed, true)))
-        .limit(1);
-    if (!visibleImage) return;
-    // Fire-and-forget: swallow errors so analytics never blocks page render
-    db.insert(imageViews).values({
-        imageId,
-        referrer_host: params.referrer_host,
-        country_code: params.country_code,
-        bot: params.bot,
-    }).catch((err: unknown) => {
+    try {
+        const requestHeaders = await headers();
+        const params = await buildViewParams(requestHeaders);
+        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        const [visibleImage] = await db.select({ id: images.id })
+            .from(images)
+            .where(and(eq(images.id, imageId), eq(images.processed, true)))
+            .limit(1);
+        if (!visibleImage) return;
+        // Fire-and-forget: swallow errors so analytics never blocks page render
+        db.insert(imageViews).values({
+            imageId,
+            referrer_host: params.referrer_host,
+            country_code: params.country_code,
+            bot: params.bot,
+        }).catch((err: unknown) => {
+            console.warn('[analytics] recordPhotoView failed:', err);
+        });
+    } catch (err) {
         console.warn('[analytics] recordPhotoView failed:', err);
-    });
+    }
 }
 
 // @action-origin-exempt: public analytics endpoint — no admin auth needed
@@ -393,22 +397,26 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     // and keeps the validation posture identical across the public actions.
     if (!isValidSlug(topicSlug)) return;
     if (isRestoreMaintenanceActive()) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
-    const [visibleTopic] = await db.select({ slug: topics.slug })
-        .from(topics)
-        .where(eq(topics.slug, topicSlug))
-        .limit(1);
-    if (!visibleTopic) return;
-    db.insert(topicViews).values({
-        topic: topicSlug,
-        referrer_host: params.referrer_host,
-        country_code: params.country_code,
-        bot: params.bot,
-    }).catch((err: unknown) => {
+    try {
+        const requestHeaders = await headers();
+        const params = await buildViewParams(requestHeaders);
+        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        const [visibleTopic] = await db.select({ slug: topics.slug })
+            .from(topics)
+            .where(eq(topics.slug, topicSlug))
+            .limit(1);
+        if (!visibleTopic) return;
+        db.insert(topicViews).values({
+            topic: topicSlug,
+            referrer_host: params.referrer_host,
+            country_code: params.country_code,
+            bot: params.bot,
+        }).catch((err: unknown) => {
+            console.warn('[analytics] recordTopicView failed:', err);
+        });
+    } catch (err) {
         console.warn('[analytics] recordTopicView failed:', err);
-    });
+    }
 }
 
 // @action-origin-exempt: public analytics endpoint — no admin auth needed
@@ -417,27 +425,31 @@ export async function recordSharedGroupView(groupId: number, groupKey: string): 
     const trimmedGroupKey = typeof groupKey === 'string' ? groupKey.trim() : '';
     if (!isBase56(trimmedGroupKey, 10)) return;
     if (isRestoreMaintenanceActive()) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
-    const [visibleGroup] = await db.select({ id: sharedGroups.id })
-        .from(sharedGroups)
-        .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
-        .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
-        .where(and(
-            eq(sharedGroups.id, groupId),
-            eq(sharedGroups.key, trimmedGroupKey),
-            eq(images.processed, true),
-            or(isNull(sharedGroups.expires_at), gt(sharedGroups.expires_at, toMySqlDateTime(new Date()))),
-        ))
-        .limit(1);
-    if (!visibleGroup) return;
-    db.insert(sharedGroupViews).values({
-        groupId,
-        referrer_host: params.referrer_host,
-        country_code: params.country_code,
-        bot: params.bot,
-    }).catch((err: unknown) => {
+    try {
+        const requestHeaders = await headers();
+        const params = await buildViewParams(requestHeaders);
+        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        const [visibleGroup] = await db.select({ id: sharedGroups.id })
+            .from(sharedGroups)
+            .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
+            .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
+            .where(and(
+                eq(sharedGroups.id, groupId),
+                eq(sharedGroups.key, trimmedGroupKey),
+                eq(images.processed, true),
+                or(isNull(sharedGroups.expires_at), gt(sharedGroups.expires_at, toMySqlDateTime(new Date()))),
+            ))
+            .limit(1);
+        if (!visibleGroup) return;
+        db.insert(sharedGroupViews).values({
+            groupId,
+            referrer_host: params.referrer_host,
+            country_code: params.country_code,
+            bot: params.bot,
+        }).catch((err: unknown) => {
+            console.warn('[analytics] recordSharedGroupView failed:', err);
+        });
+    } catch (err) {
         console.warn('[analytics] recordSharedGroupView failed:', err);
-    });
+    }
 }

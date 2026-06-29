@@ -78,7 +78,7 @@ describe('Privacy field separation', () => {
      * will fail loudly — forcing the developer to make an explicit
      * decision about the new field's privacy disposition.
      *
-     * The existing `_privacyGuard` at `data.ts:198-200` catches the case
+     * The existing `_privacyGuard` in `apps/web/src/lib/data.ts` catches the case
      * where a KNOWN sensitive key leaks into `publicSelectFields`, but
      * does NOT catch a new unknown sensitive field. This test closes the
      * gap symmetrically.

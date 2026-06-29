@@ -91,7 +91,7 @@ Everything else in the pipeline already exists and is reused: the `image_embeddi
 
 ANN / vector index (small scale), GPU inference, model fine-tuning, full 1024-dim (reversible later upgrade), the Florence-2 auto-alt-text stub (separate feature, US-P52), HDR delivery (separate feature, WI-09).
 
-## 12. Open Items to Resolve During Planning
+## 12. Planning Decisions and Resolutions
 
 1. **Runtime spike:** confirm whether jina-clip-v2 (int8, Matryoshka-512) loads turnkey in Transformers.js v3, or whether the raw `onnxruntime-node` fallback (with jina's published ONNX + manual preprocessing) is required. Pick one; both keep the in-process + volume-weights decision.
 2. **Exact model id / ONNX source** (HF repo + revision) and the int8 artifact, pinned for reproducible downloads.
@@ -129,7 +129,7 @@ These are explicit planning decisions with defined options and a defined fallbac
 | `cos(image, "고양이 사진")` [KO matching] | **0.3004** | **0.3167** |
 | `cos(image, "a city street at night")` [unrelated] | 0.1345 | 0.1439 |
 
-Matching clearly beats unrelated in both English and Korean. Matryoshka-512 preserves the gap (and is marginally stronger — higher matching, same unrelated). **This resolves open items 1, 2, and 4.** Open item 3 (threshold value) is deferred to Task 14.
+Matching clearly beats unrelated in both English and Korean. Matryoshka-512 preserves the gap (and is marginally stronger — higher matching, same unrelated). **This resolves open items 1, 2, and 4.** Open item 3 (threshold value) was resolved in Task 14 as `PRODUCTION_COSINE_THRESHOLD = 0.22`.
 
 **Operational notes:**
 - `onnxruntime` emits benign shape-mismatch warnings on text-only inference because `JinaCLIPModel.forward` creates a zero-size dummy `pixel_values` tensor internally — these are harmless and do not affect output correctness.

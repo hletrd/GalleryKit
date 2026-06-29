@@ -557,6 +557,22 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
     });
 
+    it('allows an exempt public mutation when a try block rate-limits before insert', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                try {
+                    const params = await buildViewParams(await headers());
+                    if (isViewRecordRateLimited(params.ip, Date.now())) return;
+                    db.insert(imageViews).values({ imageId: id }).catch(console.debug);
+                } catch {}
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
     it('fails an exempt public mutation without a pre-insert public rate limit', () => {
         const src = `
             /** @action-origin-exempt: public analytics endpoint */

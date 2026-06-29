@@ -8,8 +8,8 @@
  * When `auto_alt_text_enabled` is true, this stub generates a deterministic
  * EXIF-derived hint string (e.g. "Photo taken with Canon EOS R5") rather than
  * running actual vision inference. This satisfies the schema, hook integration,
- * fallback resolver, and admin bulk-editor surfaces while keeping the binary
- * footprint zero.
+ * fallback resolver, and admin bulk-editor surfaces while adding no Florence-2
+ * model weights or captioning-runner footprint.
  *
  * DEFERRED-FIX: Swap `generateCaptionStub` for real caption inference only after
  * a model, download script, runtime path, and operator runbook are added.

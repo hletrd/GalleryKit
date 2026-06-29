@@ -317,6 +317,21 @@ describe('searchImagesAction', () => {
         expect(dbValuesMock).not.toHaveBeenCalledWith(expect.objectContaining({ imageId: 999 }));
     });
 
+    it('swallows pre-insert analytics failures for all recorders', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        dbSelectMock.mockImplementation(() => {
+            throw new Error('select failed before insert');
+        });
+
+        await expect(recordPhotoView(7)).resolves.toBeUndefined();
+        await expect(recordTopicView('seoul')).resolves.toBeUndefined();
+        await expect(recordSharedGroupView(11, '23456789AB')).resolves.toBeUndefined();
+
+        expect(dbInsertMock).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledTimes(3);
+        warnSpy.mockRestore();
+    });
+
     it('rolls back the in-memory pre-increment when the DB bucket is already over the limit', async () => {
         checkRateLimitMock.mockResolvedValue({ limited: true, count: 31 });
 

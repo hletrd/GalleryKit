@@ -246,14 +246,24 @@ describe('validate/compile agreement (R4C7 COR-R4C7-03)', () => {
     const columns = ['iso', 'focal_length', 'f_number', 'exposure_time', 'camera_model', 'lens_model', 'capture_date', 'topic', 'tag'] as const;
     const operators = ['eq', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'contains'] as const;
 
+    const valueFor = (column: string) => {
+        if (['iso', 'focal_length', 'f_number'].includes(column)) return 1;
+        if (column === 'capture_date') return '2024-01-01';
+        return '1';
+    };
+
     const minimalAstFor = (column: string, operator: string): string => {
         if (operator === 'between') {
-            return JSON.stringify({ type: 'predicate', column, operator, lo: '1', hi: '2' });
+            const lo = valueFor(column);
+            const hi = typeof lo === 'number' ? 2 : '2024-01-02';
+            return JSON.stringify({ type: 'predicate', column, operator, lo, hi });
         }
         if (operator === 'in') {
-            return JSON.stringify({ type: 'predicate', column, operator, values: ['1', '2'] });
+            const first = valueFor(column);
+            const second = typeof first === 'number' ? 2 : column === 'capture_date' ? '2024-01-02' : '2';
+            return JSON.stringify({ type: 'predicate', column, operator, values: [first, second] });
         }
-        return JSON.stringify({ type: 'predicate', column, operator, value: '1' });
+        return JSON.stringify({ type: 'predicate', column, operator, value: valueFor(column) });
     };
 
     it('compiles every validator-accepted column × operator combination', () => {
@@ -270,8 +280,24 @@ describe('validate/compile agreement (R4C7 COR-R4C7-03)', () => {
                 expect(() => compileSmartCollection(ast)).not.toThrow();
             }
         }
-        // Sanity: 8 direct columns × 8 operators + tag × 2 = 66 accepted shapes.
-        expect(accepted).toBe(66);
+        // Sanity: numeric 3×7 + text 3×3 + date 1×7 + topic 1×2 + tag 2 = 41.
+        expect(accepted).toBe(41);
+    });
+
+    it('rejects semantically invalid column/operator/value combinations at validation time', () => {
+        const invalid = [
+            { type: 'predicate', column: 'iso', operator: 'contains', value: '1' },
+            { type: 'predicate', column: 'camera_model', operator: 'gt', value: 'Leica' },
+            { type: 'predicate', column: 'camera_model', operator: 'eq', value: 1 },
+            { type: 'predicate', column: 'capture_date', operator: 'contains', value: '2024' },
+            { type: 'predicate', column: 'capture_date', operator: 'eq', value: 20240101 },
+            { type: 'predicate', column: 'topic', operator: 'contains', value: 'old' },
+            { type: 'predicate', column: 'topic', operator: 'gt', value: 'travel' },
+        ];
+
+        for (const ast of invalid) {
+            expect(() => parseSmartCollectionQuery(JSON.stringify(ast))).toThrow(SmartCollectionQueryError);
+        }
     });
 });
 
@@ -316,12 +342,9 @@ describe('remapTopicSlugInQuery — topic slug rename (DBG-16-03)', () => {
         expect(remapTopicSlugInQuery(camera, 'old', 'new').changed).toBe(false);
     });
 
-    it('does NOT rewrite substring (contains) topic predicates — only exact identity', () => {
-        const ast = parseSmartCollectionQuery(
+    it('rejects substring topic predicates — only exact identity is supported', () => {
+        expect(() => parseSmartCollectionQuery(
             JSON.stringify({ type: 'predicate', column: 'topic', operator: 'contains', value: 'old' }),
-        );
-        const res = remapTopicSlugInQuery(ast, 'old', 'new');
-        expect(res.changed).toBe(false);
-        expect(res.ast).toEqual({ type: 'predicate', column: 'topic', operator: 'contains', value: 'old' });
+        )).toThrow(SmartCollectionQueryError);
     });
 });

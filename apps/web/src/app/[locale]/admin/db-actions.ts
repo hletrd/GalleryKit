@@ -549,7 +549,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             restore.stdin.destroy();
             restore.kill();
             cleanupTempFile();
-            resolve({ success: false, error });
+            resolve({ success: false, error, keepMaintenance: true });
         };
 
         // Register all event handlers BEFORE piping to prevent missed events
@@ -596,7 +596,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
                 revalidateAllAppData();
                 resolve({ success: true });
             } else {
-                resolve({ success: false, error: t('restoreExitedWithCode', { code }) });
+                resolve({ success: false, error: t('restoreExitedWithCode', { code }), keepMaintenance: true });
             }
         });
 

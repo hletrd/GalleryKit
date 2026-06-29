@@ -45,6 +45,14 @@ class MockMetaStore implements MetaStore {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('sw-cache: isAdminRoute', () => {
+  it('matches /admin', () => {
+    expect(isAdminRoute('http://localhost/admin')).toBe(true);
+  });
+
+  it('matches /admin/dashboard', () => {
+    expect(isAdminRoute('http://localhost/admin/dashboard')).toBe(true);
+  });
+
   it('matches /en/admin/', () => {
     expect(isAdminRoute('http://localhost/en/admin/')).toBe(true);
   });
