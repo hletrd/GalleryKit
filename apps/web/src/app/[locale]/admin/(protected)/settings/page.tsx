@@ -2,8 +2,11 @@ import { getGallerySettingsAdmin } from '@/app/actions/settings';
 import { SettingsClient } from './settings-client';
 import { getTranslations } from 'next-intl/server';
 import { getImageCount } from '@/lib/data';
+import { adminRouteMetadata } from '../../admin-metadata';
 
 export const dynamic = 'force-dynamic';
+
+export const generateMetadata = () => adminRouteMetadata('settings');
 
 export default async function SettingsPage() {
     const [result, t, imageCount] = await Promise.all([

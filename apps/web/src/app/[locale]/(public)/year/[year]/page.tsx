@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { getTranslations, getLocale } from 'next-intl/server';
 import { getYearInReviewImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
-import { localizePath, localizeUrl, buildHreflangAlternates } from '@/lib/locale-path';
+import { localizePath, localizeUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
 import { imageUrl, absoluteImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -20,24 +20,46 @@ export async function generateMetadata({
     params: Promise<{ year: string }>;
 }): Promise<Metadata> {
     const { year: yearParam } = await params;
-    const yearNum = Number(yearParam);
-    if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
-        return { title: 'Not Found', robots: { index: false, follow: false } };
-    }
-
-    const [locale, t, seo] = await Promise.all([
+    const [locale, t, tTopic, seo] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
+        getTranslations('topic'),
         getSeoSettings(),
     ]);
+    const yearNum = Number(yearParam);
+    if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
+        return { title: tTopic('notFoundTitle'), robots: { index: false, follow: false } };
+    }
 
     const pageUrl = localizeUrl(seo.url, locale, `/year/${yearNum}`);
+    const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
     const alternateLanguages = buildHreflangAlternates(seo.url, `/year/${yearNum}`);
+    const title = `${t('yearInReview', { year: yearNum })} | ${seo.title}`;
+    const description = t('yearInReviewDescription', { year: yearNum });
+    const ogImages = seo.og_image_url
+        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: t('yearInReview', { year: yearNum }) }]
+        : undefined;
 
     return {
-        title: `${t('yearInReview', { year: yearNum })} | ${seo.title}`,
-        description: t('yearInReviewDescription', { year: yearNum }),
+        title,
+        description,
         alternates: { canonical: pageUrl, languages: alternateLanguages },
+        openGraph: {
+            title,
+            description,
+            url: pageUrl,
+            siteName: seo.title,
+            locale: openGraphLocale,
+            alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
+            type: 'website',
+            ...(ogImages ? { images: ogImages } : {}),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title,
+            description,
+            ...(ogImages ? { images: ogImages.map((image) => image.url) } : {}),
+        },
     };
 }
 
@@ -53,9 +75,11 @@ export default async function YearInReviewPage({
         return notFound();
     }
 
-    const [locale, t, yearInReview, config, seo, nonce] = await Promise.all([
+    const [locale, t, tCommon, tAria, yearInReview, config, seo, nonce] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
+        getTranslations('common'),
+        getTranslations('aria'),
         getYearInReviewImages(yearNum),
         getGalleryConfig(),
         getSeoSettings(),
@@ -86,7 +110,7 @@ export default async function YearInReviewPage({
             // Googlebot Image always gets a 200 response (sized
             // derivative can 404 for legacy / mid-backfill rows).
             thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
-            name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+            name: getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`),
         })),
     } : null;
     const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
@@ -148,8 +172,8 @@ export default async function YearInReviewPage({
 
                                 <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                                     {monthPhotos.map((photo) => {
-                                        const displayTitle = getPhotoDisplayTitleFromTagNames(photo, monthName);
-                                        const altText = getConcisePhotoAltText(photo, 'Photo');
+                                        const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
+                                        const altText = getConcisePhotoAltText(photo, tCommon('photo'));
                                         const baseAvif = photo.filename_avif.replace(/\.avif$/i, '');
                                         const baseWebp = photo.filename_webp.replace(/\.webp$/i, '');
 
@@ -164,7 +188,7 @@ export default async function YearInReviewPage({
                                             >
                                                 <Link
                                                     href={localizePath(locale, `/p/${photo.id}`)}
-                                                    aria-label={displayTitle}
+                                                    aria-label={tAria('viewPhoto', { title: displayTitle })}
                                                 >
                                                     <div className="relative w-full">
                                                         <picture>

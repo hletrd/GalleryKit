@@ -1,5 +1,39 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { ensureEnglishLocale, expectNoNextError } from './helpers';
+
+async function expectVisibleNavTargetsAreStable(nav: Locator) {
+  const metrics = await nav.locator('a,button').evaluateAll((elements) => elements
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return {
+        text: element.textContent?.trim() ?? element.getAttribute('aria-label') ?? element.tagName,
+        width: rect.width,
+        height: rect.height,
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        visible: rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+      };
+    })
+    .filter((metric) => metric.visible));
+
+  expect(metrics.length).toBeGreaterThan(0);
+  for (const metric of metrics) {
+    expect(metric.width, `${metric.text} width`).toBeGreaterThanOrEqual(44);
+    expect(metric.height, `${metric.text} height`).toBeGreaterThanOrEqual(44);
+  }
+
+  for (let i = 0; i < metrics.length; i++) {
+    for (let j = i + 1; j < metrics.length; j++) {
+      const a = metrics[i];
+      const b = metrics[j];
+      const overlaps = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      expect(overlaps, `${a.text} overlaps ${b.text}`).toBe(false);
+    }
+  }
+}
 
 test.describe('Nav visual checks', () => {
   test('mobile nav collapsed screenshot', async ({ page }) => {
@@ -11,6 +45,7 @@ test.describe('Nav visual checks', () => {
     await expect(nav).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Expand menu' })).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
+    await expectVisibleNavTargetsAreStable(nav);
     await page.screenshot({ path: 'test-results/nav-collapsed-mobile.png', fullPage: false });
   });
 
@@ -24,6 +59,7 @@ test.describe('Nav visual checks', () => {
     await nav.getByRole('button', { name: 'Expand menu' }).click();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
     await expect(nav.locator('a[href*="/e2e-smoke"]').first()).toBeVisible();
+    await expectVisibleNavTargetsAreStable(nav);
     await page.screenshot({ path: 'test-results/nav-expanded-mobile.png', fullPage: false });
   });
 
@@ -36,6 +72,7 @@ test.describe('Nav visual checks', () => {
     await expect(nav).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
+    await expectVisibleNavTargetsAreStable(nav);
     await page.screenshot({ path: 'test-results/nav-desktop.png', fullPage: false });
   });
 });

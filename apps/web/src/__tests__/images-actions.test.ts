@@ -221,6 +221,20 @@ describe('uploadImages', () => {
 
     it('revalidates the affected topic path after a successful upload', async () => {
         insertMock.mockReturnValue(makeInsertChain([{ insertId: 9 }]));
+        getGalleryConfigMock.mockResolvedValueOnce({
+            stripGpsOnUpload: false,
+            imageQualityWebp: 91,
+            imageQualityAvif: 86,
+            imageQualityJpeg: 92,
+            imageSizes: [640, 1536, 2048, 4096],
+            forceSrgbDerivatives: true,
+            wideGamutJpegChroma: '4:4:4',
+            avifEffort: 7,
+            sdrJpegChroma: '4:2:2',
+            wideGamutMaxSourcePixels: 42_000_000,
+            autoAltTextEnabled: true,
+            semanticSearchMode: 'production',
+        });
 
         const formData = new FormData();
         formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
@@ -230,6 +244,19 @@ describe('uploadImages', () => {
         await expect(uploadImages(formData)).resolves.toMatchObject({ success: true, count: 1 });
         expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/', '/admin/dashboard', '/travel');
         expect(uploadContractReleaseMock).toHaveBeenCalled();
+        expect(enqueueImageProcessingMock).toHaveBeenCalledWith(expect.objectContaining({
+            id: 9,
+            topic: 'travel',
+            quality: { webp: 91, avif: 86, jpeg: 92 },
+            imageSizes: [640, 1536, 2048, 4096],
+            forceSrgbDerivatives: true,
+            wideGamutJpegChroma: '4:4:4',
+            avifEffort: 7,
+            sdrJpegChroma: '4:2:2',
+            wideGamutMaxSourcePixels: 42_000_000,
+            autoAltTextEnabled: true,
+            semanticSearchMode: 'production',
+        }));
     });
 
     it('rejects upload tags whose generated slug would be empty', async () => {

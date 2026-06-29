@@ -2,8 +2,11 @@ import { getTranslations } from 'next-intl/server';
 import { TokensClient } from './tokens-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Key } from 'lucide-react';
+import { adminTokenRouteMetadata } from '../../admin-metadata';
 
 export const dynamic = 'force-dynamic';
+
+export const generateMetadata = adminTokenRouteMetadata;
 
 export default async function TokensPage() {
     const t = await getTranslations('lrToken');

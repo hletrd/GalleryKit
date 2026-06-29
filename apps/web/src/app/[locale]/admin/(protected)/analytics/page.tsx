@@ -1,8 +1,11 @@
 import { getTranslations } from 'next-intl/server';
 import { getTopPhotosByViews, getTopTopicsByViews, getCountryBreakdown, getReferrerBreakdown, getTopSharedGroupsByViews, type TimeWindow } from '@/lib/analytics-data';
 import { AnalyticsClient } from './analytics-client';
+import { adminRouteMetadata } from '../../admin-metadata';
 
 export const dynamic = 'force-dynamic';
+
+export const generateMetadata = () => adminRouteMetadata('analytics');
 
 export default async function AnalyticsPage({
     searchParams,

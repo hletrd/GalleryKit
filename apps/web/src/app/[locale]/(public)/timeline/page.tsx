@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { getTranslations, getLocale } from 'next-intl/server';
 import { getTimelineYears, getTimelineImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
-import { localizePath, localizeUrl, buildHreflangAlternates } from '@/lib/locale-path';
+import { localizePath, localizeUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
 import { imageUrl, absoluteImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -21,12 +21,32 @@ export async function generateMetadata(): Promise<Metadata> {
     ]);
 
     const pageUrl = localizeUrl(seo.url, locale, '/timeline');
+    const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
     const alternateLanguages = buildHreflangAlternates(seo.url, '/timeline');
+    const ogImages = seo.og_image_url
+        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: t('title') }]
+        : undefined;
 
     return {
         title: `${t('title')} | ${seo.title}`,
         description: t('description'),
         alternates: { canonical: pageUrl, languages: alternateLanguages },
+        openGraph: {
+            title: `${t('title')} | ${seo.title}`,
+            description: t('description'),
+            url: pageUrl,
+            siteName: seo.title,
+            locale: openGraphLocale,
+            alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
+            type: 'website',
+            ...(ogImages ? { images: ogImages } : {}),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title: `${t('title')} | ${seo.title}`,
+            description: t('description'),
+            ...(ogImages ? { images: ogImages.map((image) => image.url) } : {}),
+        },
     };
 }
 
@@ -37,9 +57,11 @@ export default async function TimelinePage({
 }) {
     const { year: yearParam } = await searchParams;
 
-    const [locale, t, years, config, seo, nonce] = await Promise.all([
+    const [locale, t, tCommon, tAria, years, config, seo, nonce] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
+        getTranslations('common'),
+        getTranslations('aria'),
         getTimelineYears(),
         getGalleryConfig(),
         getSeoSettings(),
@@ -96,7 +118,7 @@ export default async function TimelinePage({
             // Googlebot Image always gets a 200 response (sized
             // derivative can 404 for legacy / mid-backfill rows).
             thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
-            name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+            name: getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`),
         })),
     } : null;
     const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
@@ -189,8 +211,8 @@ export default async function TimelinePage({
 
                                 <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                                     {monthPhotos.map((photo) => {
-                                        const displayTitle = getPhotoDisplayTitleFromTagNames(photo, 'Photo');
-                                        const altText = getConcisePhotoAltText(photo, 'Photo');
+                                        const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
+                                        const altText = getConcisePhotoAltText(photo, tCommon('photo'));
                                         const baseAvif = photo.filename_avif.replace(/\.avif$/i, '');
                                         const baseWebp = photo.filename_webp.replace(/\.webp$/i, '');
                                         const mediumSize = imageSizes.length >= 2
@@ -208,7 +230,7 @@ export default async function TimelinePage({
                                             >
                                                 <Link
                                                     href={localizePath(locale, `/p/${photo.id}`)}
-                                                    aria-label={displayTitle}
+                                                    aria-label={tAria('viewPhoto', { title: displayTitle })}
                                                 >
                                                     <div className="relative w-full">
                                                         <picture>

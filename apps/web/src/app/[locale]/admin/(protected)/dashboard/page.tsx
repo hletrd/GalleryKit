@@ -3,8 +3,11 @@ import { getGalleryConfig } from "@/lib/gallery-config";
 import { DashboardClient } from "./dashboard-client";
 import { MAX_TOTAL_UPLOAD_BYTES, MAX_UPLOAD_FILE_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from "@/lib/upload-limits";
 import { parsePageParam } from "@/lib/pagination";
+import { adminRouteMetadata } from '../../admin-metadata';
 
 export const dynamic = 'force-dynamic';
+
+export const generateMetadata = () => adminRouteMetadata('dashboard');
 
 const PAGE_SIZE = 50;
 
