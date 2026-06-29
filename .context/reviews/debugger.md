@@ -1,65 +1,208 @@
-# Debugger — review-plan-fix cycle 2
+# Debugger Review - review-plan-fix cycle 3
 
-**Date:** 2026-06-29
-**HEAD:** `3d1387045e0d7f1e06fb48756e412228bbdaf08d`
-**Role:** debugger
-**Scope:** latent bugs, failure modes, edge cases, async/resource cleanup, parser/number/date behavior, and regression checks. No application code edited.
+Date: 2026-06-29
+Role: `debugger`
+Scope: current HEAD only (`3d3b78167360b9c66070619c0734c97dc49653f8`). The HEAD commit itself is review-doc-only over `3f24038b`, so the live app code reviewed here is unchanged from that app-code HEAD.
+Status: report-only pass; no application code edited.
 
-## Inventory Coverage
+## Inventory And Method
 
-Debugger inventory was built before analysis from the same repository inventory as the code-review lane, then narrowed to failure-prone surfaces:
+Required context read first:
+- `AGENTS.md`
+- `CLAUDE.md`
 
-- Async/resource paths: image queue, backfill runner, restore actions, upload/save/delete flows, serve-upload streaming, shutdown hooks, timers, and DB pool initialization.
-- Parser/number/date paths: route params, env parsing, EXIF values, pagination, semantic limits, capture-date grouping, migration journal metadata, JSON parsing, and binary metadata readers.
-- Public abuse paths: semantic/similar search, OG rendering, share routes, analytics actions, public load-more/search.
-- Deployment failure paths: Docker build context, nginx upload proxy, compose bind mounts, entrypoint permissions, CI workflow.
-- Regression docs/plans: current top-level reports, latest run9/run10 review-plan-fix artifacts, and carry-forward deferred findings.
+History checked to avoid stale fixed claims:
+- `.context/reviews/_aggregate.md`
+- `.context/reviews/code-reviewer.md`
+- `.context/reviews/critic.md`
+- `.context/reviews/perf-reviewer.md`
+- `.context/reviews/security-reviewer.md`
+- `.context/reviews/verifier.md`
+- relevant `.context/plans` hits for service-worker stamps, semantic scan limits, timezone claims, direct-exposure fixes, and deferred CLIP/search risks
 
-Targeted validation evidence:
+Inventory covered:
+- 294 tracked app/deploy/migration/e2e files across `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/e2e`, `apps/web/drizzle`, `apps/web/nginx`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/package.json`, and service-worker assets.
+- Focused debugger sweeps over async/background work, fire-and-forget promises, timers, global/process-local state, env parsing, date/time handling, route runtime pins, upload/restore cleanup, filesystem streaming, raw SQL/process execution, semantic search, service-worker/deploy behavior, and prior-cycle rejected/fixed claims.
 
-```text
-npm test --workspace=apps/web -- similar-route semantic-search-route image-types-shutter pagination nginx-config
-7 files passed, 57 tests passed
-```
+Validation evidence:
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+- Static line-numbered inspection was performed for each cited region below.
 
-## Confirmed Issues
+## Findings
 
-### DBG-01 — Docker builds can ingest local `.claude/` worktrees because the root Docker ignore misses a gitignored runtime directory
+### DBG-C3-01 - Runtime `public` bind mount can serve a stale service worker instead of the build-generated one
 
-**Severity:** Medium
-**Confidence:** High
-**Status:** Confirmed
-**Location:** `.gitignore:30`, `.dockerignore:1-22`, `apps/web/docker-compose.yml:4-6`, `apps/web/Dockerfile:69`
+Severity: Medium
+Confidence: High
+Risk type: Confirmed production/deploy failure mode
 
-Debugger view of the failure: the build pipeline has a reproducibility/resource failure mode. `.gitignore:30` excludes `.claude/`, and the current workspace contains `.claude/worktrees/...`; however `.dockerignore:1-22` excludes `.omx`, `.omc`, and `.agent` but not `.claude`. Because the compose build context is the repo root and the Dockerfile runs `COPY . .`, those local worktrees enter the Docker build context and builder filesystem.
+Evidence:
+- `apps/web/package.json:10-11` runs `scripts/build-sw.ts` during `prebuild`.
+- `apps/web/scripts/build-sw.ts:28-56` stamps `public/sw.js` with `<git-short-sha>-p<IMAGE_PIPELINE_VERSION>`.
+- `apps/web/Dockerfile:71-75` runs `npm run build`, so the image build regenerates `sw.js`.
+- `apps/web/docker-compose.yml:23-26` bind-mounts host `./public` over `/app/apps/web/public` at runtime.
+- `apps/web/public/sw.js:21-29` is currently stamped `2051bb87-p7`, while current HEAD is `3d3b7816`.
 
-Concrete failure scenario: after several agent sessions, `.claude/` grows or contains nested worktrees with generated files. A deploy now sends and copies that tree. Best case: the build is slower and cache keys churn on unrelated local agent state. Worse case: a future `.claude` artifact contains local diagnostics or credentials and becomes available in builder-layer cache/history, despite being intentionally excluded from Git.
+Failure scenario:
+The deploy image contains a freshly generated service worker, but the running container serves the host-mounted committed `apps/web/public/sw.js`. If a service-worker logic fix, cache namespace fix, or image-pipeline cache invalidation change lands without a matching host artifact refresh, clients keep using the old `gk-images-*`, `gk-html-*`, and `gk-meta-*` cache namespaces. This is production-only because local builds see the regenerated working-tree artifact, while compose runtime masks the image copy.
 
-Suggested fix: add `.claude/` to root `.dockerignore`; keep it aligned with `.gitignore` local-agent/runtime excludes. Add a regression test or simple static check so any future gitignored local runtime directory is either intentionally dockerignored or explicitly documented as safe to include.
+Concrete fix:
+Mount only mutable public data, for example `./public/uploads`, and serve generated immutable assets from the image. If the full `public` bind mount must remain, regenerate `apps/web/public/sw.js` on the host as part of deploy before `docker compose up`, and add a static test/deploy check that fails when `SW_VERSION` does not match the intended build stamp.
 
-## Risks / Not Confirmed
+### DBG-C3-02 - Semantic and similar search can never see older relevant embeddings outside the newest-first scan window
 
-### RISK-01 — Server-local calendar semantics may surprise non-UTC/non-local deployments
+Severity: Medium
+Confidence: High
+Risk type: Confirmed product-correctness/scaling defect once the corpus exceeds the cap
 
-**Severity:** Low risk
-**Confidence:** Medium
-**Location:** `apps/web/src/components/on-this-day-widget.tsx:15-17`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:67-70`, `apps/web/src/lib/data-timeline.ts:237-242`
+Evidence:
+- `apps/web/src/app/api/search/semantic/route.ts:240-249` selects embeddings ordered by `updated_at DESC` and limits to `SEMANTIC_SCAN_LIMIT`.
+- `apps/web/src/app/api/search/semantic/route.ts:262-281` scores only that scanned window.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:141-170` repeats the same newest-first capped production-embedding scan for similar-photo results.
+- `apps/web/src/lib/clip-embeddings.ts:32-40` allows `SEMANTIC_SCAN_LIMIT` to default to 2000 and be raised as high as 1,000,000.
+- `apps/web/src/db/schema.ts:282-285` has a recency scan index, not a vector/ANN or recall-preserving nearest-neighbor index.
 
-`OnThisDayWidget` derives "today" from the Node process timezone, while timeline grouping parses timezone-less `capture_date` strings with local `Date` methods. This is not a confirmed bug because the code may intentionally define calendar views by server/operator timezone, and MySQL `DATETIME` plus camera EXIF timestamps are timezone-less. If the product wants viewer-local or fixed UTC/KST calendar semantics, these paths need an explicit helper instead of ad hoc `new Date().getMonth()/getDate()` usage.
+Failure scenario:
+A gallery has 15,000 embedded photos. A visitor searches for, or asks for similar photos to, an old image whose best matches are outside the newest 2000 embedding rows. The route returns weaker newer matches or no matches even though the correct embeddings exist. Raising `SEMANTIC_SCAN_LIMIT` trades the recall bug for request-path DB transfer, synchronous decode/scoring, and event-loop pressure.
 
-Suggested fix if semantics are intended to be fixed-zone: centralize capture-date parsing and "today" derivation in one calendar helper, with tests for midnight boundary dates and documented server/viewer timezone behavior.
+Concrete fix:
+Move retrieval to a recall-preserving vector index/ANN backend or a worker-maintained candidate index. Until then, surface an operator warning when eligible embedding count exceeds `SEMANTIC_SCAN_LIMIT`, make UI/operator copy honest about the scanned window, and keep a strict production ceiling. If the cap grows, replace full-array `sort()` in `topK()` with bounded heap selection and move scoring off the request thread.
 
-## Regression Checks Cleared
+### DBG-C3-03 - Production CLIP embedding work escapes the image-processing queue's backpressure
 
-- Semantic route abuse paths: current tests passed; malformed/oversized post-read bodies and missing production embeddings are charged as intended.
-- Similar route abuse paths: current tests passed; missing/corrupt target embeddings no longer refund the limiter after DB work.
-- Numeric parsing regressions: pagination now uses `Number()` via `parsePageParam`; semantic env caps floor and clamp; upload/view/audit env parsing uses `Number()` guards.
-- EXIF shutter formatting: subnormal positive values no longer produce `1/Infinity`.
-- Binary parser sweep: current code retains explicit bounds checks in ICC, NCLX/color, gain-map, GPS strip, and embedding decode paths.
-- Streaming cleanup: `serveUploadFile` streams from `realpath`, handles HEAD without opening a stream, and destroys the stream on abort/error.
+Severity: Medium
+Confidence: High
+Risk type: Confirmed production concurrency/resource risk
 
-## Final Sweep
+Evidence:
+- `apps/web/src/lib/image-queue.ts:204-212` bounds the main image-processing queue with `QUEUE_CONCURRENCY`.
+- `apps/web/src/lib/image-queue.ts:414-429` runs Sharp derivative generation inside that queue.
+- `apps/web/src/lib/image-queue.ts:512-567` starts embedding generation in a detached `void (async () => { ... })()` after `processed=true` is committed.
+- `apps/web/src/lib/image-queue.ts:535-537` calls `embedImageReal(originalPath)` in production semantic mode.
+- `apps/web/src/lib/image-queue.ts:569` marks the queue job complete before the detached embedding work finishes.
+- `apps/web/src/lib/clip-model.ts:151-186` performs Sharp decode/resize, raw pixel conversion, and model inference.
 
-Missed-issue sweep covered: parseInt/Number/date use, JSON.parse guards, raw Buffer/binary reads, timer cleanup, fire-and-forget promises, DB catch/rollback behavior, route runtime pins, Docker/nginx deploy failure modes, and stale prior findings against current HEAD.
+Failure scenario:
+During bulk uploads with production semantic search enabled, each completed queue job can leave CLIP inference running while the next Sharp job starts. Operators see `QUEUE_CONCURRENCY=1` and expect one heavy image task, but the process can run Sharp encode, Sharp CLIP resize, JS pixel packing, and model inference concurrently. This can spike CPU/RSS, increase GC pressure, and hurt public request latency in the single web process.
 
-Verdict: **1 confirmed deploy/build failure mode, 1 low-risk calendar semantics concern, and no confirmed current runtime debugger defect beyond DBG-01.**
+Concrete fix:
+Route embeddings through a bounded queue such as `EMBEDDING_CONCURRENCY=1`, or await production embeddings inside the existing queue if immediate search availability is required. Longer term, persist embedding jobs and drain them through a separate worker with queue depth, active count, latency, and failure metrics.
+
+### DBG-C3-04 - Timeline and On-This-Day public queries remain non-sargable, and one comment claims the opposite
+
+Severity: Medium
+Confidence: High
+Risk type: Confirmed public-route performance failure mode
+
+Evidence:
+- `apps/web/src/lib/data-timeline.ts:88-94` says the `MONTH() + DAY()` query stays within the `(processed, capture_date)` index prefix and avoids a full table scan.
+- `apps/web/src/lib/data-timeline.ts:95-114` filters On-This-Day with `MONTH(capture_date)` and `DAY(capture_date)`.
+- `apps/web/src/lib/data-timeline.ts:127-140` computes distinct timeline years with `YEAR(capture_date)`.
+- `apps/web/src/lib/data-timeline.ts:184-205` filters timeline pages with `YEAR(capture_date)` and optional `MONTH(capture_date)`.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:14,60-82` renders dynamically and calls those helpers on request.
+- `apps/web/src/db/schema.ts:111-117` has no generated date-part columns or functional indexes for those predicates.
+
+Failure scenario:
+As the gallery grows, home/timeline/year pages evaluate date functions over the processed image set on every dynamic render. The `LIMIT` caps returned rows, not rows examined. The misleading comment makes the risk easier to miss during future tuning because it states the query is already index-friendly.
+
+Concrete fix:
+Fix the comment first so it accurately says the predicates are non-sargable. Then use half-open range predicates for year/month pages, and add generated/stored `capture_year`, `capture_month`, and `capture_day` columns with covering indexes for On-This-Day and year discovery. Add migration, Drizzle schema, legacy reconcile coverage, and query-plan regression tests.
+
+### DBG-C3-05 - Calendar features rely on server-local date semantics for timezone-less capture dates
+
+Severity: Low
+Confidence: Medium
+Risk type: Likely/manual-validation date-time risk
+
+Evidence:
+- `apps/web/src/components/on-this-day-widget.tsx:14-23` defines "today" from `new Date()` in the Node process timezone before querying `MONTH()`/`DAY()`.
+- `apps/web/src/components/on-this-day-widget.tsx:51-52` derives the displayed capture year with `new Date(photo.capture_date).getFullYear()`.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:87-97` groups photos by `new Date(photo.capture_date).getMonth() + 1`.
+- `apps/web/src/lib/data-timeline.ts:237-245` repeats the same grouping in year-in-review.
+- `apps/web/src/lib/process-image.ts:507-520` intentionally stores EXIF strings as timezone-less `YYYY-MM-DD HH:mm:ss` literals.
+
+Failure scenario:
+This is not confirmed wrong under the current Docker/server-local deployment, and prior history correctly rejected a blanket "use UTC getters" fix. The latent risk is that the product has no explicit contract for whether calendar features mean server-local today, gallery-local today, viewer-local today, or pure stored-date parts. If the server timezone changes, or if a future runtime parses space-separated MySQL `DATETIME` strings differently, anniversaries and month grouping can shift around midnight or become implementation-defined.
+
+Concrete fix:
+Define the calendar contract explicitly. For stored capture dates, avoid `new Date()` when only date parts are needed: parse `YYYY-MM-DD` substrings or expose normalized date-part columns/helpers. For "today", use one named helper that implements the chosen timezone, with tests around midnight boundaries and non-UTC `TZ`.
+
+### DBG-C3-06 - Restore maintenance, upload quotas, and public limiter state are process-local despite DB-wide effects
+
+Severity: Medium
+Confidence: High
+Risk type: Manual-validation operational risk under unsupported scale-out
+
+Evidence:
+- `apps/web/src/lib/restore-maintenance.ts:1-56` stores restore maintenance on `globalThis`.
+- `apps/web/src/lib/upload-tracker-state.ts:7-20` stores cumulative upload windows in a process-local `Map`.
+- `apps/web/src/lib/rate-limit.ts:68-89` stores OG/share limiter maps in memory.
+- `apps/web/src/lib/rate-limit.ts:312-335` stores semantic limiter state in memory.
+- `apps/web/src/lib/data.ts:12-61` stores shared-group view-count buffers and timers in module/global process state.
+- `apps/web/docker-compose.yml:14-21` documents the intended host-networked single web instance, but the app does not enforce that topology at startup.
+
+Failure scenario:
+The documented topology is single-instance, so this is not a confirmed defect for the shipped deployment. If an operator starts a second process or future orchestration scales replicas before moving state to shared storage, one process can enter restore maintenance while another accepts uploads, quota windows split by instance, public limiter budgets multiply by replica count, and view counts become more lossy than documented.
+
+Concrete fix:
+Make the single-writer contract executable with a startup/deploy guard or DB advisory lease. If scale-out is desired, move maintenance flags, upload claims, public limiter buckets, and view-count buffering into DB/Redis/shared durable state first.
+
+### DBG-C3-07 - Browser upload quota settlement still depends on a hand-maintained invariant across a long awaited region
+
+Severity: Low-Medium
+Confidence: Medium
+Risk type: Likely future-regression risk; no current leaked claim confirmed
+
+Evidence:
+- `apps/web/src/app/actions/images.ts:224-228` pre-claims quota before the first awaited disk/topic/file work.
+- `apps/web/src/app/actions/images.ts:233-250` manually rolls the claim back for disk-space failures.
+- `apps/web/src/app/actions/images.ts:257-265` documents that every await between claim and final settlement must roll back on throw.
+- `apps/web/src/app/actions/images.ts:266-278` manually rolls back topic lookup failures.
+- `apps/web/src/app/actions/images.ts:507-522` relies on `deleteOriginalUploadFile()` never rejecting inside the per-file catch.
+- `apps/web/src/app/actions/images.ts:540-564` performs the final settlement only after all per-file work.
+- `apps/web/src/app/actions/images.ts:590-592` releases only the upload contract lock in the outer `finally`.
+
+Failure scenario:
+The current obvious branches are covered by comments and targeted tests, and the Lightroom route has an idempotent settle closure. The browser path still relies on contributors preserving a comment-enforced invariant across many awaited operations. A future validation, cleanup, or DB call added after the pre-claim but before final settlement can throw without calling `settleUploadTrackerClaim()`, inflating the admin/IP quota window for up to an hour after no file was accepted.
+
+Concrete fix:
+Replace the manual invariant with a scoped claim object or `try/finally` wrapper that automatically rolls back unless explicitly committed. Add a regression test that injects a post-claim failure and asserts the tracker is restored.
+
+## Rechecked Fixed Or Rejected Claims
+
+- `.claude/` Docker build-context leakage is fixed in current HEAD: `.dockerignore` now excludes `.claude` and `.claude/`.
+- Direct container exposure is reduced in current shipped defaults: `apps/web/Dockerfile:80-85` and `apps/web/docker-compose.yml:14-21` bind the app to `127.0.0.1`.
+- CLIP pre-enable operator docs now include `--production --force`; the old empty-production-backfill operator-flow defect is not re-filed.
+- Similar-route limiter refunds after target DB work are not reintroduced; current code keeps 404/500 after DB lookup charged.
+- The cycle-22 "switch timeline grouping to UTC getters" claim remains rejected. The current risk is undocumented semantics, not a blanket UTC conversion.
+
+## Final Missed-Issues Sweep
+
+Security/auth/origin:
+- Admin API wrapper lint passed.
+- Mutating server-action same-origin lint passed.
+- Public mutating route rate-limit lint passed.
+- Route runtime pins for Node-bound DB/Sharp/Buffer paths were inspected; no Edge-runtime drift found.
+
+Async/resource cleanup:
+- Fire-and-forget caption and embedding hooks catch their own errors, so no unhandled rejection was found.
+- `serve-upload` and backup download stream from `realpath` and avoid opening streams for HEAD responses.
+- Restore and upload advisory locks release in `finally` blocks on the inspected paths.
+
+Parser/date/env:
+- No new unsafe `parseInt`/`Number` route-param issue was found.
+- Semantic limit env parsing is bounded, but the operational cap/relevance issue remains DBG-C3-02.
+- Calendar semantics remain the main date/time risk (DBG-C3-05).
+
+Deployment/production-only:
+- The stale service-worker bind-mount mismatch is the clearest current production-only failure mode (DBG-C3-01).
+- Build, typecheck, and full unit tests were not re-run in this debugger pass to avoid regenerating `apps/web/public/sw.js`; other cycle-3 lanes have recent green evidence for those gates.
+
+## Finding Count
+
+Total findings: 7
+- Confirmed: 4
+- Likely: 2
+- Manual-validation operational risk: 1

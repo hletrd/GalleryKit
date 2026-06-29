@@ -1,75 +1,71 @@
-# Verifier Review - review-plan-fix Cycle 2
+# Verifier Review - review-plan-fix Cycle 3
 
 **Date:** 2026-06-29
-**HEAD:** `3d138704` (`master`, in sync with `origin/master`)
+**HEAD:** `3f24038b04f48c73f5dac079cd3276fecbd48282` (`master`, in sync with `origin/master`)
 **Role:** verifier
-**Scope:** read-only repository verification review; no application code edited.
+**Scope:** current HEAD only; no application code edited. This file is the requested review artifact.
 
 ## Inventory
 
-Built inventory before findings:
+Reviewed the required repo instructions first: `AGENTS.md` and `CLAUDE.md`.
 
-- Instructions and behavior docs: `AGENTS.md`, `CLAUDE.md`.
-- Package and CI metadata: root `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `.github/workflows/quality.yml`.
-- Current HEAD/worktree: `git status --short --branch`, `git log -1 --stat --oneline --decorate`.
-- Source surface: 240 tracked app/package/config source-relevant files across `apps/web/src/app`, `components`, `lib`, `db`, `proxy.ts`, `instrumentation.ts`, `i18n`, messages, configs, package metadata, and workflow metadata; 226 tracked non-test TS/TSX files under `apps/web/src`.
-- Test surface: 245 Vitest files under `apps/web/src/__tests__`; 5 Playwright spec files plus helpers/fixtures under `apps/web/e2e`.
-- Operational/schema surface: 27 scripts under `apps/web/scripts`; 25 SQL migrations plus 3 Drizzle metadata files.
-- Review/plan history: 1663 tracked files under `.context/reviews`; 59 tracked `.context/plans` files; 169 root `plan/` files.
+Inventory covered:
 
-## Fresh Verification Evidence
+- Current HEAD and worktree: `git status --short --branch`, `git rev-parse HEAD`, `git log -1 --stat --decorate --oneline`, recent cycle-2 source commits.
+- Build/deploy surface: root `package.json`, `apps/web/package.json`, `.dockerignore`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/public/sw.js`, `apps/web/public/sw.template.js`, `apps/web/scripts/build-sw.ts`, `apps/web/scripts/generate-pwa-icons.ts`.
+- App source routes/components/libs/scripts/tests inventory under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/src/__tests__`, `apps/web/scripts`, `apps/web/e2e`.
+- Cycle-relevant files from current HEAD history: Docker/operator default changes, CLIP backfill docs/script comments, admin route metadata, timeline/year metadata and labels, service-worker stamp.
+- Schema/privacy surface: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`.
+- Review/plan history: `.context/reviews`, `.context/plans`, root `plan/`.
 
-| Gate | Result | Evidence |
+## Verification Evidence
+
+| Gate / check | Result | Evidence |
 | --- | --- | --- |
+| API auth lint | PASS | `npm run lint:api-auth --workspace=apps/web`; 2 admin API routes OK |
+| Action-origin lint | PASS | `npm run lint:action-origin --workspace=apps/web`; all mutating server actions enforce same-origin provenance |
+| Public-route rate-limit lint | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web`; public mutating routes OK |
 | ESLint | PASS | `npm run lint --workspace=apps/web` exit 0 |
-| API auth lint | PASS | `npm run lint:api-auth` exit 0; 2 admin API routes OK |
-| Action-origin lint | PASS | `npm run lint:action-origin` exit 0; 42 exports checked/skip-exempted |
-| Public-route rate-limit lint | PASS | `npm run lint:public-route-rate-limit` exit 0; 6 public route files checked |
 | Typecheck | PASS | `npm run typecheck --workspace=apps/web` exit 0; app + scripts clean |
-| Vitest | PASS | `npm test --workspace=apps/web` exit 0; 243 files passed, 2 skipped; 2236 tests passed, 4 skipped |
+| Vitest | PASS | `npm test --workspace=apps/web`; 243 files passed, 2 skipped; 2238 tests passed, 4 skipped |
+| Production compile path | PASS with caveat | `npm --ignore-scripts run build --workspace=apps/web` exit 0; local sitemap DB fallback logged for missing MySQL and build completed |
+| Worktree cleanliness | PASS | `git status --short` empty after verification commands |
 
-`npm run build --workspace=apps/web` was not run in this verification lane because this repo's `prebuild` rewrites `apps/web/public/sw.js`; I avoided dirtying generated application assets during a no-app-code review.
+Build caveat: I did not run the exact `npm run build --workspace=apps/web` lifecycle because `prebuild` rewrites `apps/web/public/sw.js`. I validated the production compile without lifecycle scripts to preserve current HEAD for review, then inspected the skipped generator/deploy path manually.
 
 ## Findings
 
-### V-C2-01 - AGENTS.md incorrectly says `.context/plans/` is gitignored
+### V-C3-01 - Runtime public bind mount can mask build-generated service-worker assets
 
-Status: Confirmed
-Severity: Low
-Confidence: High
-
-Evidence:
-- `AGENTS.md:41` states: `.context/plans/` is gitignored and local-only.
-- `git ls-files '.context/plans/*'` returned 59 tracked files, including `.context/plans/README.md` and many `.context/plans/done/*.md` entries.
-
-Failure scenario: an agent or contributor following `AGENTS.md` may treat `.context/plans/` artifacts as disposable local state, skip reviewing committed plan history there, or place sensitive/local-only material in a tracked directory under the false assumption that git ignores it.
-
-Suggested fix: update `AGENTS.md:41` to describe the actual split: `.context/reviews/` and existing `.context/plans/` contain committed history, while local-only plan-management artifacts belong in the configured ignored location, or add the missing `.gitignore` rule only if the project truly wants `.context/plans/` to become local-only.
-
-## Risks / Gaps
-
-### V-C2-R1 - Build gate was not re-run in this lane
-
-Status: Risk / verification gap
-Severity: Low
-Confidence: High
+Status: Likely / manual-validation risk
+Severity: Low-Medium
+Confidence: Medium
 
 Evidence:
-- `AGENTS.md:36` lists `npm run build --workspace=apps/web` as a blocking quality gate.
-- `apps/web/package.json:11` runs `prebuild`, which executes `tsx scripts/build-sw.ts`; current project practice treats `public/sw.js` as generated-but-committed.
 
-Failure scenario: a build-only error could exist despite lint/typecheck/Vitest passing. I did not observe one; this is a verification gap caused by avoiding a generated app-asset rewrite during a no-application-code review.
+- Current committed service worker is stamped `2051bb87-p7` in `apps/web/public/sw.js:21-26`, while current HEAD is `3f24038b`.
+- The generator says the stamp is derived from `git rev-parse --short HEAD` plus `IMAGE_PIPELINE_VERSION` in `apps/web/scripts/build-sw.ts:28-46`.
+- The normal build lifecycle runs that generator via `apps/web/package.json:10-11`.
+- The Docker image build also runs `npm run build` in `apps/web/Dockerfile:71-75`.
+- But the runtime service bind-mounts host `./public` over `/app/apps/web/public` in `apps/web/docker-compose.yml:23-26`, after `apps/web/deploy.sh:10-31` only performs `git pull --ff-only` and `docker compose ... up -d --build`.
 
-Suggested fix: run build in a controlled lane that either expects and commits the service-worker stamp or first verifies whether `build-sw.ts` is a no-op for the current HEAD. A future verifier helper could perform a dry-run/stamp check without mutating `sw.js`.
+Failure scenario:
 
-## Non-Findings Verified
+On deploy, Docker regenerates `sw.js` inside the image, but the running container serves the host-mounted `apps/web/public/sw.js` instead. If the committed host artifact is stale or generated from a previous source commit, the service-worker cache namespace may not reflect the image build that is actually running. For a future service-worker logic fix or image-pipeline cache-invalidation change, clients can remain on the old `gk-images-*`, `gk-html-*`, and `gk-meta-*` namespaces until a separately committed host artifact advances the stamp.
 
-- Public route rate-limit lint is now wired at root and CI: root `package.json:21` and `.github/workflows/quality.yml:64` both invoke it.
-- Vitest now discovers `.test.tsx`: `apps/web/vitest.config.ts:17` includes `src/__tests__/**/*.test.{ts,tsx}`.
-- Valid `/s/[key]` e2e coverage is no longer skipped: `apps/web/scripts/seed-e2e.ts:43` fixes `E2E_SHARE_KEY = 'Abc234Def6'`, `seed-e2e.ts:231` assigns it to the first image, and `apps/web/e2e/public.spec.ts:82-90` exercises the valid route.
-- The old inert caption mock is fixed: `apps/web/src/__tests__/image-queue-settings-wiring.test.ts:87` mocks `@/lib/caption-generator`, matching the real import at `apps/web/src/lib/image-queue.ts:21`.
-- Touch-target audit now covers app-level error/not-found/layout/loading files outside `SCAN_ROOTS`: `apps/web/src/__tests__/touch-target-audit.test.ts:59-65` and `:739-744`.
+Concrete fix:
+
+Make the runtime serve generated immutable public assets from the image and mount only mutable upload/resource persistence, for example `./public/uploads` (and any genuinely mutable resource directory) instead of all `./public`. Alternatively, add a host-side deploy step that regenerates `apps/web/public/sw.js` before `docker compose up` and make the stamp source self-consistent for committed artifacts, such as a source/template tree hash rather than the uncommittable current HEAD hash.
+
+## Confirmed Non-Findings
+
+- Security lint gates are green for admin API wrappers, mutating server-action origin checks, and public mutating route rate limits.
+- New admin metadata helpers use existing localized nav/LR-token keys in both `en.json` and `ko.json`; typecheck/build confirmed route metadata compatibility.
+- Timeline/year public pages now use localized `common`/`aria` fallbacks and include Open Graph/Twitter metadata without introducing new public data selectors.
+- CLIP production backfill guidance now documents `--production --force` for pre-enable population, matching the script's semantic-mode gate.
+- No schema migration was added in this HEAD. Journal tags and SQL files still correspond; privacy-sensitive fields remain omitted from `publicSelectFields` and guarded by compile-time plus Vitest checks.
+- Docker deploy pruning still runs after `up -d` and keeps the documented no-`-a` `volume prune` shape; bind-mounted data remains outside Docker volume pruning.
 
 ## Final Sweep
 
-Checked for focused tests (`.only`), skipped tests, screenshot-only visual tests, stale source-contract tests, root/CI script drift, migration/test inventory, and prior current review/plan docs. No critical/high correctness blockers were found. Remaining actionable issues are one confirmed documentation mismatch and the test-engineer coverage gaps recorded separately in `test-engineer.md`.
+Checked focused/skipped tests, script and root command drift, i18n key coverage, generated public assets, ignored runtime upload artifacts, migration inventory, public selector privacy guards, deployment assumptions, and current review/plan history. No confirmed critical/high correctness, security, migration, privacy, or deployment blockers were found in current HEAD. The single actionable item above is a likely deploy-artifact consistency risk that should be validated against the live deployment path before changing mount strategy.

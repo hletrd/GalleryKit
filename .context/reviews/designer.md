@@ -1,51 +1,72 @@
-# Designer Review - Review-Plan-Fix Cycle 2
+# Designer Review - Review-Plan-Fix Cycle 3
 
-Role: designer. Scope: UI architecture, page identity, localized interaction design, responsive/product-facing surfaces. No application code was edited.
+Role: designer. Scope: information architecture, affordances, keyboard/focus, WCAG 2.2, contrast, responsive breakpoints, loading/empty/error states, validation UX, dark/light mode, i18n/RTL, and perceived performance. No application code was edited.
 
 ## Inventory Coverage
 
-Built a UI/product inventory before reviewing: 132 files under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/i18n`, and `apps/web/messages`. Covered public routes, admin routes, localized messages, UI primitives, gallery/search/photo components, error/loading/not-found states, tests, package scripts, scripts, migrations, and current `.context` review/plan docs.
+Read `AGENTS.md` and `CLAUDE.md` first, then inventoried the current UI surface under `apps/web/src/app/[locale]`, `apps/web/src/components`, `apps/web/src/i18n`, and `apps/web/messages`. I also read current `.context` review and plan history, including cycle-2 UI findings and run-9/cycle-3 UI plans, to avoid stale claims.
 
-Browser automation was feasible partially. I started `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3012` and inspected `/en`, `/ko`, and `/en/admin` at desktop and mobile widths. The DB-backed public gallery routes rendered the localized error boundary because local DB queries failed, so public gallery visual states were backed primarily by source/DOM evidence rather than full screenshot inspection. `/en/admin` rendered and exposed a generic document title.
-
-Previously reported Cycle 1 issues were rechecked. Localized error skip targets, search option focus behavior, SEO-field descriptions, and the error document title are now covered in source/tests and were not re-filed.
+Browser automation evidence:
+- Started `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3013`.
+- Inspected `/en/admin`, `/ko/admin`, `/en`, `/ko`, `/en/timeline`, `/ko/timeline`, `/en/map`, `/ko/map`, `/en/year/2024`, and `/ko/year/2024` with Playwright.
+- `/en/admin` and `/ko/admin` rendered login forms with one `main`, localized h1s, labelled username/password fields, 44 px password-toggle and submit controls, and task-specific titles (`Admin | GalleryKit`, `관리 | GalleryKit`).
+- DB-backed public pages rendered localized error boundaries because local MySQL was unavailable (`ECONNREFUSED 127.0.0.1:3306`), but metadata/title and error-shell evidence was still observable.
 
 ## Findings
 
-### DES-C2-01 - Admin pages do not provide route-specific document titles
+### DES-C3-01 - Timeline, map, and year pages double-append the site name in document titles
 
 Severity: Medium
 Confidence: High
 
 Evidence:
-- Browser check of `http://127.0.0.1:3012/en/admin` returned document title `GalleryKit` while the visible heading was `Admin`.
-- `apps/web/src/app/[locale]/layout.tsx:22-27` sets a site-level title default/template.
-- `apps/web/src/app/[locale]/admin/page.tsx:6-15` renders the admin login form without `generateMetadata`.
-- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:5-17` wraps protected pages without metadata.
-- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx:6-9` is the only admin route currently exporting route-specific metadata.
-- Admin navigation labels already exist in `apps/web/messages/en.json:2-13` and `apps/web/messages/ko.json:2-13`.
+- Browser title checks returned `Timeline | GalleryKit | GalleryKit`, `타임라인 | GalleryKit | GalleryKit`, `Map | GalleryKit | GalleryKit`, `지도 | GalleryKit | GalleryKit`, `2024 in Review | GalleryKit | GalleryKit`, and `2024년 돌아보기 | GalleryKit | GalleryKit`.
+- `apps/web/src/app/[locale]/layout.tsx:24-27` sets `title.template` to `%s | ${seo.title}`.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:30-32` returns `title: ${t('title')} | ${seo.title}`.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:18-20` returns `title: ${t('title')} | ${seo.title}`.
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-44` builds `title = ${yearInReview} | ${seo.title}` and returns it as page metadata.
+- The home page already documents and fixes this class with `title: { absolute: title }` in `apps/web/src/app/[locale]/(public)/page.tsx:38-49`.
 
-Failure scenario: an admin user working across login, dashboard, analytics, settings, users, database, SEO, and token pages sees multiple browser tabs or screen-reader page-title entries collapse to the site title instead of the active task. This makes orientation weaker in a dense operational UI and undermines the otherwise localized admin navigation model.
+Failure scenario: browser tabs, history entries, and screen-reader title announcements stutter the brand name on archive/map pages. This weakens page identity in exactly the information-architecture routes people use to scan time/place context.
 
-Suggested fix: add localized `generateMetadata` for the admin login page and every protected admin page, using the existing `nav` message namespace. Example pattern: `Admin | GalleryKit`, `Dashboard | Admin | GalleryKit`, `Database | Admin | GalleryKit`. Add a source-level test that asserts all admin page modules except explicit redirects/export-only shells provide metadata or are covered by a metadata-bearing layout.
+Concrete fix: remove the baked-in `| ${seo.title}` from the metadata `title` on timeline/map/year and let the layout template append it, or use `{ absolute }` consistently when a page intentionally owns the full title. Keep OpenGraph/Twitter titles explicit because Next does not apply the document title template to those fields.
 
-### DES-C2-02 - Timeline and year photo cards use non-localized, non-actionable link names
+### DES-C3-02 - The four-state theme button exposes only a generic accessible name
 
-Severity: Medium
+Severity: Low
 Confidence: High
 
 Evidence:
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:192-193` passes hard-coded English fallback text, `Photo`, to photo title/alt helpers.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:209-212` sets the photo link accessible name to only `displayTitle`.
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:151-152` uses `monthName` for the display-title fallback but hard-codes `Photo` for alt fallback.
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:165-168` also labels the photo link with only `displayTitle`.
-- The home grid uses the stronger localized pattern in `apps/web/src/components/home-client.tsx:291-323`: localized untitled fallback plus `aria.viewPhoto`.
-- The On This Day widget follows the same localized action pattern in `apps/web/src/components/on-this-day-widget.tsx:49-59`.
+- `apps/web/src/components/nav-client.tsx:155-160` cycles `system -> light -> dark -> oled -> system` via `nextTheme(...)`, but the accessible name is always `aria-label={t('aria.toggleTheme')}`.
+- `apps/web/src/lib/theme.ts:39-45` confirms the button is a four-state cycle, not a binary toggle.
+- `apps/web/messages/en.json:610` and `apps/web/messages/ko.json:610` translate only `Toggle theme` / `테마 전환`.
+- Existing e2e checks query the same static accessible name in `apps/web/e2e/nav-visual-check.spec.ts:74` and `apps/web/e2e/test-fixes.spec.ts:24-40`.
 
-Failure scenario: on Korean timeline/year pages, untitled or untagged photos can expose English fallback text such as `Photo` in image alt text or link names. Screen-reader users also hear bare titles rather than an action-oriented label equivalent to "View photo: {title}", which is inconsistent with the primary gallery grid.
+Failure scenario: keyboard or screen-reader users can activate the theme control but cannot tell whether the current state is System, Light, Dark, or OLED, nor what the next press will do. The visual icon changes, but that state is not conveyed through the accessibility tree; the `title` attribute is not a reliable substitute when `aria-label` supplies the accessible name.
 
-Suggested fix: load localized `common`/`aria` strings, or add timeline-specific equivalents, then pass localized photo/untitled fallbacks into the helpers and set link labels through the same action template used by the home grid. Add a focused regression test that scans localized public photo-card routes for hard-coded `'Photo'` fallbacks and bare `aria-label={displayTitle}` links.
+Concrete fix: localize a stateful label such as `Theme: {current}. Switch to {next}` and compute it from `theme ?? 'system'` plus `nextTheme(...)`, or replace the cycle button with a small menu/segmented control whose options expose selected state. Add an e2e/source assertion that the theme button name changes after activation.
+
+### DES-C3-03 - The map route has no loading fallback for its client-only map chunk
+
+Severity: Low
+Confidence: High
+
+Evidence:
+- `apps/web/src/components/map/map-loader.tsx:8-10` uses `dynamic(..., { ssr: false })` with no `loading` component.
+- `apps/web/src/components/map/map-client.tsx:108-112` renders the eventual map as a 70vh region.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:51-64` has an empty state for zero markers, but no reserved/status state while the Leaflet client chunk is loading.
+
+Failure scenario: on a slow phone or cold route transition, the map page can show the heading followed by a blank area until Leaflet hydrates. Sighted users get no progress affordance, and assistive technology gets no `status` announcement that the map is loading.
+
+Concrete fix: add a `loading` fallback to `MapLoader` with the same 70vh dimensions, a subdued skeleton/placeholder, and `role="status"` using the localized loading string. This preserves layout stability and makes the client-only chunk delay perceivable.
+
+## Non-Findings Rechecked
+
+- Cycle-2 admin metadata is fixed: admin routes now call `adminRouteMetadata(...)`, and browser checks confirmed `/en/admin` title `Admin | GalleryKit`.
+- Cycle-2 timeline/year photo-card accessible names are fixed: both routes now use localized `common.photo` / `common.untitled` fallbacks and `aria.viewPhoto`.
+- Login validation controls have visible labels, required attributes, a localized show/hide password toggle, and alert feedback on server errors.
+- Touch target conventions remain broadly enforced through `ui/button.tsx`, `ui/switch.tsx`, nav controls, upload controls, timeline/year links, and the documented audit.
 
 ## Missed-Issues Sweep
 
-I re-ran source searches around focusable `role="option"` links, error boundaries, touch target primitives, route metadata, hard-coded English fallbacks, and admin navigation/title coverage. No additional designer-level blockers were found within the inventory. Residual risk is concentrated in DB-backed public gallery states that could not be fully rendered locally because the dev server returned DB query errors for `/en` and `/ko`.
+Final sweep covered public/admin metadata, localized fallback strings, focus-visible conventions, role/aria wiring, search dialog behavior, color/HDR audit surfaces, upload/login validation states, map loading/empty states, dark/light/OLED controls, and prior review findings. No additional designer-level blockers were found. Residual risk is loaded gallery/photo/admin-dashboard visual detail that requires a working local DB session; this pass could validate the localized error shell and admin login live, but not real photo grids or authenticated admin screens.
