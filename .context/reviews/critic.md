@@ -1,222 +1,121 @@
-# Cycle 9 Critic Review
+# Cycle 10 Critic Review
 
-Role: critic lane
-Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `23e96c34fb082a72108bdab69cd856b4c14fd6af`
-Mode: read-only whole-repository critique; no source code or plan files edited.
+Review target: current `master` HEAD `4fd8bf3b`.
 
-## Required Reads
+Scope: PROMPT 1 only. I did not edit application source. This report is the only file changed.
 
-- Read `AGENTS.md` first and applied the repo rules for review scope, deployment constraints, schema conventions, and quality gates.
-- Read `CLAUDE.md` before reviewing implementation details.
-- Loaded the local `code-review` skill and used a finding-first review stance.
+## Inventory and Evidence
 
-## Review Inventory
+Repository guidance reviewed:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.context/reviews/` prior review/report surface
 
-I built an inventory before promoting findings. Current repo inventory is roughly 6,450 files, with the review-relevant surface concentrated in these groups:
+Inventory built before findings:
+- App routes and pages: `apps/web/src/app/**`
+- Public/admin actions: `apps/web/src/app/actions/**`, `apps/web/src/app/[locale]/admin/db-actions.ts`
+- Public/admin APIs: `apps/web/src/app/api/**`
+- Core image/data/security libraries: `apps/web/src/lib/**`
+- Schema and migrations: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`
+- Backfill and operational scripts: `apps/web/scripts/**`
+- Tests for touched surfaces: `apps/web/src/__tests__/**`
+- Build/deploy/runtime surfaces: `apps/web/Dockerfile`, `apps/web/deploy.sh`, `apps/web/scripts/build-sw.ts`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`
 
-- Project docs and operations: `AGENTS.md`, `CLAUDE.md`, `apps/web/README.md`, deploy/nginx/Docker files, Drizzle migration journal, restore/backfill runbooks, prior `.context/reviews/**` and `.context/plans/**`.
-- Runtime config: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/src/proxy.ts`.
-- Public routes/pages: localized home/topic/photo/share/group/map/timeline/year/smart-collection pages, feed routes, upload-serving routes, OG image routes, semantic/similar search APIs.
-- Admin/API/actions: auth/session, admin users, image CRUD/upload/delete/retry, topics/tags, settings/SEO, sharing, DB backup/restore/download, Lightroom token upload, public analytics actions.
-- Core libraries: `data.ts`, schema/privacy guards, rate-limit/origin/auth helpers, image processing/queue/backfill, color/HDR/gain-map/ICC helpers, CLIP embeddings/inference, storage/upload paths, restore scanner, analytics.
-- UI/client: viewer/lightbox, grid picture fallback, search, similar photos, wide-gamut/color details, histogram, map, admin managers, upload dropzone, shared routes.
-- Tests and static gates: 190+ Vitest files plus custom auth/origin/rate-limit/touch-target/source-contract linters were inventoried as confidence evidence. I did not run the full suite because this lane is a review artifact only.
+Focused files examined for cross-file interactions:
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/__tests__/public-actions.test.ts`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/scripts/backfill-color-pipeline.ts`
+- `apps/web/src/lib/admin-backfill-runner.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/route.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/view-retention.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/drizzle/0027_analytics_retention_indexes.sql`
+- `apps/web/drizzle/meta/_journal.json`
+- `apps/web/scripts/migrate.js`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/process-image-variant-scan.test.ts`
+- `apps/web/src/__tests__/process-image-post-encode-verification.test.ts`
+- `apps/web/src/__tests__/backfill-color-pipeline.test.ts`
+- `apps/web/src/__tests__/backfill-color-pipeline-deleted-mid-reencode.test.ts`
+- `apps/web/src/__tests__/admin-backfill-runner-deleted-mid-reencode.test.ts`
 
-Excluded from line-by-line behavioral critique: generated `.next/**`, runtime upload/model files, binary assets, and historical review claims that no longer match current HEAD.
+Validation evidence:
+- `git status --short --branch` was clean before writing this report.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- I did a final missed-issues sweep across the public analytics action tests, derivative-generation cleanup path, queue/backfill callers, migration journal/schema reconciliation, privacy selectors, admin DB restore flow, LR upload route, semantic search routes, service worker build, Dockerfile, and deploy script.
 
-## Confirmed Issues
+## Findings
 
-### CRIT-C9-01 - Docker native package install breaks on `linux/amd64`
+### C10-CRIT-01 - Confirmed: public analytics rate limiting happens after attacker-controlled DB lookups
 
-Severity: Medium
+Severity: High
+
 Confidence: High
-Perspective: portability / deploy reliability / operational runbook
+
+Status: Confirmed
 
 Code regions:
+- `apps/web/src/app/actions/public.ts:364-374` validates `imageId`, checks maintenance, then performs a DB lookup at `367-370` before calling `headers()`, `buildViewParams()`, and `isViewRecordRateLimited()` at `372-374`.
+- `apps/web/src/app/actions/public.ts:387-402` does the same for topic slugs: syntactic validation first, DB lookup at `395-398`, limiter at `400-402`.
+- `apps/web/src/app/actions/public.ts:414-430` does the same for shared groups, with a joined visibility lookup at `417-426`, limiter at `428-430`.
+- These functions are public server-action entry points from `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:22,164-165`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:2,164`, and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:2,130`.
+- The test suite currently codifies the blind spot: `apps/web/src/__tests__/public-actions.test.ts:253-268` expects valid-but-not-public targets to perform three DB selects while never calling `headers()`, so no IP bucket is touched. `apps/web/src/__tests__/public-actions.test.ts:292-301` only proves the limiter blocks inserts after repeated valid public-photo calls; it does not prove repeated unknown valid IDs/slugs/groups stop causing DB reads.
 
-- `apps/web/Dockerfile:38-51`
-- `apps/web/README.md:48-49`
-- `CLAUDE.md:17`, `CLAUDE.md:556-559`
+Failure scenario:
+An unauthenticated client can repeatedly invoke the public analytics actions with syntactically valid but nonexistent image IDs, topic slugs, or group IDs. Every call bypasses the per-IP view-recorder budget until after the visibility lookup, so the attacker gets unmetered indexed DB reads and, for groups, a joined lookup. The insert is skipped, but the expensive and concurrency-relevant DB work already happened. This is especially risky under the documented single-instance / single-MySQL-writer topology where process-local rate limits are the main public abuse brake.
 
-Problem:
+Why reviewers might miss it:
+The route-level scanner passes because these are server actions, and `lint:action-origin` explicitly recognizes them as public rate-limited actions. The action does have a limiter, but it is placed after the database lookup. The existing unit test labels the pre-limiter DB lookup for valid non-public targets as expected behavior.
 
-The Dockerfile installs native optional packages by interpolating Docker BuildKit's `TARGETARCH` directly into npm package names, for example `@next/swc-linux-${TARGETARCH:-arm64}-gnu`, `@img/sharp-linux-${TARGETARCH:-arm64}`, `@swc/core-linux-${TARGETARCH:-arm64}-gnu`, and `lightningcss-linux-${TARGETARCH:-arm64}-gnu`. Docker uses `TARGETARCH=amd64` for x86_64, but these npm packages use `x64`, not `amd64`.
+Concrete fix:
+Move `headers()`, `buildViewParams()`, and `isViewRecordRateLimited(params.ip, Date.now())` before any DB visibility lookup in all three recorders, after only cheap type/shape validation and restore-maintenance checks. If preserving analytics budget for nonexistent targets is desired, use a two-stage limiter: a cheap pre-lookup bucket that always guards DB work, plus the existing insert bucket after visibility succeeds. Update `public-actions.test.ts` so valid-but-missing targets consume or trip the pre-lookup limiter, and add an exhaustion regression where calls with valid unknown IDs stop before `db.select`.
 
-Concrete failure scenario:
+### C10-CRIT-02 - Confirmed: failed re-encode can delete previously good public derivatives
 
-An operator follows the checked-in Compose/Docker deployment on a typical x86_64 Linux host or CI builder. The `prod-deps` stage tries to install packages such as `@next/swc-linux-amd64-gnu`, which do not exist, and the production image fails to build. This contradicts the docs' generic Linux/Docker posture and makes the deployment path architecture-dependent without warning.
+Severity: High
 
-Suggested fix:
-
-Normalize Docker arch to npm arch before the `npm install --no-save` step, e.g. `case "$TARGETARCH" in amd64) NPM_ARCH=x64 ;; arm64|'') NPM_ARCH=arm64 ;; *) exit 1 ;; esac`, then use `${NPM_ARCH}` in package names. Add a source-contract test or Dockerfile grep test that rejects `${TARGETARCH}` in native npm package names.
-
-### CRIT-C9-02 - New uploads can become permanently absent from production semantic search
-
-Severity: Medium
 Confidence: High
-Perspective: product trust / reliability / semantic-search contract
+
+Status: Confirmed
 
 Code regions:
+- `apps/web/src/lib/process-image.ts:1136-1145` writes each sized derivative to a temp path and then `fs.rename(tmpPath, outputPath)`. On POSIX this atomically replaces an existing public derivative at `outputPath`.
+- `apps/web/src/lib/process-image.ts:1298-1300` records the just-renamed sized derivative in `writtenSizedPaths[format]`.
+- `apps/web/src/lib/process-image.ts:1313-1341` creates or replaces the base format path and also records it in `writtenSizedPaths[format]`.
+- `apps/web/src/lib/process-image.ts:1346-1358` runs WebP, AVIF, and JPEG generation concurrently and throws if any format rejects.
+- `apps/web/src/lib/process-image.ts:1385-1401` catches any rejection and unlinks every path recorded in `writtenSizedPaths` across all formats.
+- Re-encode callers include `apps/web/scripts/backfill-color-pipeline.ts:200-236` and `apps/web/src/lib/admin-backfill-runner.ts:500-523`, both of which return an encode failure without repairing old derivative files after `processImageFormats` fails.
 
-- `apps/web/src/lib/image-queue.ts:556-560`
-- `apps/web/src/lib/image-queue.ts:600-683`
-- `apps/web/src/lib/image-queue.ts:823-859`
-- `CLAUDE.md:151`
-- `apps/web/README.md:53-61`, `apps/web/README.md:73`
+Failure scenario:
+A photo already has good public derivatives from a prior successful upload or backfill. A later force re-encode/backfill starts. WebP and JPEG succeed first and rename over the existing public files, while AVIF fails later due to encoder error, resource pressure, or bad metadata. The catch block then unlinks every path it recorded, including paths that were previously valid and were merely replaced during this invocation. The database row can remain processed/current, but public image files are now missing, causing broken gallery images. This violates the comment at `apps/web/src/lib/process-image.ts:1392-1395`, which claims prior successful run files are not touched; the code cannot distinguish an overwritten old file from a brand-new file once it has renamed into the final public path.
 
-Problem:
+Why reviewers might miss it:
+The write helper is correctly atomic for concurrent readers, and the catch block looks like responsible partial-output cleanup. The hidden assumption is that "paths we wrote" means "files that did not exist before this call." Because the final destination path is reused during re-encode, that assumption is false. Existing tests cover partial variant cleanup and deleted-mid-reencode cleanup, but I did not find a regression that pre-creates public derivatives, forces one format to fail after another format overwrites, and asserts the old files still exist.
 
-The queue marks an image `processed=true` before CLIP embedding is written. The embedding write is a tracked side effect and catches all failures with only a warning. Queue bootstrap only re-enqueues rows where `processed=false` and `processing_error IS NULL`, so a transient production embedding failure after successful derivative generation leaves a visible photo with no automatic retry path.
+Concrete fix:
+Change `processImageFormats` to stage every derivative under invocation-unique staging paths or a staging directory, verify all formats/sizes/base files and post-encode metadata there, then atomically promote the complete set into public paths only after the whole encode succeeds. Cleanup should delete only staging files. If staging is too invasive, snapshot pre-existing paths before overwrite and restore them on failure, but staging-then-promote is less error-prone. Add a regression around `processImageFormats` or a backfill caller: pre-create WebP/AVIF/JPEG derivative files, force one format to reject after at least one sibling format writes, and assert the pre-existing public derivative files remain present and unchanged.
 
-Concrete failure scenario:
+## Missed-Issues Sweep Notes
 
-Production semantic search is enabled and model weights are present. A new upload finishes Sharp processing, is marked `processed=true`, then `embedImageReal(originalPath)` or the `image_embeddings` upsert fails due to a temporary model-load, file, DB, or restore-maintenance problem. The photo is published and browseable, but natural-language search and similar-photo search never include it until an operator manually runs the sidecar backfill. The UI reports normal search behavior, so this looks like poor relevance rather than a failed ingestion contract.
+No additional confirmed findings from the final sweep:
+- Migration `0027_analytics_retention_indexes.sql` is represented in `meta/_journal.json`, the `when` ordering is monotonic, schema indexes match, and `scripts/migrate.js` reconciles the indexes for legacy baseline.
+- The privacy selector surface in `data.ts` and the symmetric `privacy-fields.test.ts` guard still omit the expected sensitive/admin-only fields from public outputs.
+- Admin restore has explicit DB/upload/backfill locks and calls queue quiesce/resume around restore; I did not find a confirmed lifecycle leak in that path.
+- LR upload and browser upload both snapshot processing settings, validate topic existence before insert, enqueue after DB insert, and use the upload tracker/finalization path.
+- Semantic and similar-search public routes have same-origin checks, body/shape limits, semantic feature gates, and public route rate limiting before expensive semantic work.
+- Service worker generation, Docker standalone build, and deploy disk-prune behavior match the project rules I reviewed.
 
-Suggested fix:
-
-Persist embedding state separately from image processing, such as `embedding_status`, `embedding_error`, `embedding_attempted_at`, or a durable embedding job table. Retry failed/missing embeddings independently when semantic mode is `production`. At minimum, add an admin health check and backfill warning for `processed=true` images missing the active `model_version` embedding.
-
-### CRIT-C9-03 - Public analytics writes trust client-supplied internal IDs
-
-Severity: Medium
-Confidence: Medium
-Perspective: UX trust / analytics integrity / security posture
-
-Code regions:
-
-- `apps/web/src/app/actions/public.ts:319-338`
-- `apps/web/src/app/actions/public.ts:360-375`
-- `apps/web/src/app/actions/public.ts:377-397`
-- `apps/web/src/app/actions/public.ts:399-414`
-- `apps/web/src/db/schema.ts:220-260`
-- `apps/web/src/lib/analytics-data.ts:28-53`, `apps/web/src/lib/analytics-data.ts:161-185`
-
-Problem:
-
-The public view-recording actions validate only primitive syntax (`imageId > 0`, valid topic slug, `groupId > 0`) before inserting analytics events. They do not verify that a photo is currently public/processed, that a shared group is unexpired and visible through the presented key, or that the event corresponds to the route context that just rendered. The only abuse control here is a process-local per-IP limit of 120/minute.
-
-Concrete failure scenario:
-
-A script calls the public Server Action endpoint shape with sequential `imageId` or `groupId` values. Existing IDs generate durable analytics rows even if the caller did not load the corresponding page or possess the relevant share key; non-existing IDs create FK failures that are swallowed after warning logs. Admin analytics can be polluted with fake top photos/shared groups, and a rotating-IP flood can still create DB pressure within the documented single-writer topology.
-
-Suggested fix:
-
-Move analytics insertion behind context-derived identifiers rather than raw client arguments. For photos, insert via `INSERT ... SELECT` where `images.id = ? AND processed = true`; for shared groups, record from the share key or a signed per-page token and require `expires_at` validity plus at least one processed image. Consider DB-backed global rate limiting for these write paths, matching the persistent login/rate-limit posture used elsewhere.
-
-### CRIT-C9-04 - Shared-group durable analytics and denormalized view counts disagree
-
-Severity: Low
-Confidence: High
-Perspective: hidden coupling / analytics correctness / admin trust
-
-Code regions:
-
-- `apps/web/src/lib/data.ts:1312-1327`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:93-119`
-- `apps/web/src/lib/data.ts:120-125`
-- `apps/web/src/lib/analytics-data.ts:140-185`
-
-Problem:
-
-`getSharedGroup()` increments the denormalized `shared_groups.view_count` when there are visible images and the selected photo id is missing or invalid. The shared-group page records a durable `shared_group_views` row only when `!photoId`. For a numeric-but-invalid `?photoId=...`, the denormalized counter increments but the durable analytics event does not.
-
-Concrete failure scenario:
-
-A stale client link or crawler requests `/g/<key>?photoId=999999` for a valid shared group. The page falls back to the grid and `getSharedGroup()` buffers a `view_count` increment because the selected photo is not actually in the group. But the page skips `recordSharedGroupView(group.id)` because `photoId` is truthy. The admin can see the share's own view count grow while the analytics "top shared albums" event stream undercounts the same visits.
-
-Suggested fix:
-
-Centralize the "counts as a group view" decision in one helper that returns both `group` and `hasValidSelectedPhoto`, then use the same boolean for the buffer and durable event. Alternatively pass `incrementViewCount:false` to the data accessor and let the route own both counters after it resolves whether `selectedImage` exists.
-
-## Likely Issues
-
-### CRIT-C9-05 - AVIF bit-depth metadata can overstate the downloadable/base AVIF
-
-Severity: Low
-Confidence: Medium
-Perspective: photographer intent / color-delivery honesty
-
-Code regions:
-
-- `apps/web/src/lib/process-image.ts:1018-1024`
-- `apps/web/src/lib/process-image.ts:1224-1262`
-- `apps/web/src/lib/process-image.ts:1409`
-- `apps/web/src/lib/image-queue.ts:542-560`
-- `apps/web/src/db/schema.ts:109-113`
-- `apps/web/src/components/color-details-section.tsx:471-497`
-- `apps/web/src/components/lightbox-color-pip.tsx:237-256`
-- `apps/web/messages/en.json:323-326`
-
-Problem:
-
-`avif10bit` is a single image-level boolean set to `true` after any high-bitdepth AVIF encode succeeds. The AVIF ladder is encoded size-by-size in ascending order. If an early sized derivative succeeds at 10-bit but a later/larger derivative falls back to explicit 8-bit in the per-image catch path, `avif10bit` remains true. The base/download AVIF is the largest configured derivative, but the public/admin labels say "10-bit AVIF (P3)" based on the image-level flag.
-
-Concrete failure scenario:
-
-A wide-gamut photo encodes `_640.avif` with `bitdepth:10`, then a larger size hits a libheif/sharp bitdepth failure or resource edge and falls back to `bitdepth:8`. The queue verifies only that the base AVIF file exists and stores `avif_10bit=true`. Visitors and photographers see the delivered-bit-depth row claim 10-bit AVIF even if the downloadable/base AVIF is 8-bit.
-
-Suggested fix:
-
-Track AVIF bit depth for the base/largest output explicitly, or store a richer status such as `avif_base_bit_depth` and optionally `avif_any_10bit`. The UI should label the downloadable/base asset, not any successful derivative. Add a unit test that simulates first-size 10-bit success plus largest-size fallback and asserts the stored public flag is false for the base file.
-
-## Risks Needing Manual Validation
-
-### CRIT-C9-R1 - Process-local coordination remains a scale and incident boundary
-
-Severity: Medium
-Confidence: High
-Perspective: architecture / operations / reliability contract
-
-Evidence regions:
-
-- `CLAUDE.md:227-228`
-- `apps/web/src/lib/data.ts:17-33`, `apps/web/src/lib/data.ts:52-60`, `apps/web/src/lib/data.ts:120-125`
-- `apps/web/src/app/actions/public.ts:319-338`
-- `apps/web/src/lib/rate-limit.ts:81-89`, `apps/web/src/lib/rate-limit.ts:317-346`
-- `apps/web/src/lib/admin-backfill-runner.ts:1-80`
-
-Risk:
-
-The docs correctly state that the shipped topology is single web instance / single writer, with process-local restore flags, upload quota tracking, image queue state, backfill status, some rate limits, and the shared-group view-count buffer. The risk is operational, not a code bug: any future move to multiple app processes, PM2 clustering, Kubernetes replicas, or blue/green overlap will weaken or duplicate these contracts unless the process-local state is moved to MySQL/Redis/advisory locks.
-
-Manual validation needed:
-
-Confirm production and deploy scripts never run overlapping web processes long enough for upload queues, analytics counters, or public rate limits to split. Add an ops checklist item: "no horizontal scaling until process-local states are externalized."
-
-### CRIT-C9-R2 - Database-only restore can create file/DB drift unless operators treat it as non-atomic
-
-Severity: Medium
-Confidence: High
-Perspective: operational runbook / data recovery / photographer trust
-
-Evidence regions:
-
-- `CLAUDE.md:209-210`
-- `apps/web/messages/en.json:18-24`
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:144-175`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:215-231`
-- `apps/web/src/app/[locale]/admin/db-actions.ts:157-257`, `apps/web/src/app/[locale]/admin/db-actions.ts:514-583`
-
-Risk:
-
-The UI and docs honestly disclose that backup/restore is database rows only and file storage is unchanged. The remaining risk is recovery correctness: restoring SQL from before a file upload/delete can make DB rows reference missing derivatives/originals or leave orphaned files on disk. That can break photo pages or preserve files the admin expected a rollback to remove.
-
-Manual validation needed:
-
-Exercise a restore drill that includes file changes, not only DB rows. Consider adding a restore preflight/reconciliation report that counts DB rows missing expected files and filesystem files without DB rows.
-
-## False Positives / Already Fixed
-
-- FP-C9-01: Database-only backup wording is already honest. `apps/web/messages/en.json:19` says files require host-level backups, and `apps/web/messages/en.json:24` warns restore leaves file storage unchanged; the admin page renders those strings at `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:150-174` and `:217-220`.
-- FP-C9-02: Public GPS and sensitive EXIF leakage is guarded. `apps/web/src/lib/data.ts:367-407` omits sensitive public fields, `_PrivacySensitiveKeys` guards future select drift at `apps/web/src/lib/data.ts:458-488`, and the public viewer gates GPS rendering behind `isAdmin` at `apps/web/src/components/photo-viewer.tsx:896-914` plus `apps/web/src/components/info-bottom-sheet.tsx:445-462`.
-- FP-C9-03: The semantic stub mode is not silently marketed as real CLIP. The UI shows the stub disclaimer at `apps/web/src/components/search.tsx:462-469`, and production routes require active model-version rows rather than serving stub vectors under the production label per `apps/web/README.md:58-61`.
-- FP-C9-04: Touch-target concerns are largely locked by tests and the shared button floor. `apps/web/src/components/ui/button.tsx:23-29` floors button sizes at 44 px or more, and the recursive audit covers components, admin routes, public routes, and app-level files in `apps/web/src/__tests__/touch-target-audit.test.ts:42-83`.
-- FP-C9-05: HDR ingest honesty remains explicit. HDR/gain-map state is stored for future delivery, but public HDR output is not advertised as shipped; the schema comment at `apps/web/src/db/schema.ts:54-72` and color UI gating avoid claiming HDR derivative delivery.
-
-## Final Missed-Issue Sweep
-
-- Re-swept auth/session/admin API wrappers, origin checks, PAT scope enforcement, restore scanner, backup download containment, upload path containment, privacy select guards, public search privacy, and migration journal conventions. No additional high-confidence security issue was found.
-- Re-swept photographer-intent paths: color/HDR detection, GPS stripping, private originals, wide-gamut hints, download labels, histogram placement, and "no edit/culling/scoring" posture. Only CRIT-C9-05 survived as a concrete residual concern.
-- Re-swept product/UX trust: DB-only restore wording, semantic stub honesty, share route noindex/generic metadata, and map visibility guards. These are mostly already fixed or explicitly documented.
-- Re-swept operational runbooks: deploy prune guarantees, disk-starvation incident guidance, CLIP seeding, single-instance warning, and restore locking. The main residuals are CRIT-C9-01 plus the manual-validation risks above.
-- No tests were run; this is a read-only critic artifact. The only intended file change from this lane is `.context/reviews/critic.md`.
+The two confirmed issues above both sit in reviewer blind spots: one passes the custom lint gates while preserving a pre-limiter DB read, and the other looks like careful cleanup while quietly breaking the "leave previous derivatives intact on failed retry" contract.
