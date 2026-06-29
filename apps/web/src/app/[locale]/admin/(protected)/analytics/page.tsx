@@ -8,10 +8,13 @@ export const dynamic = 'force-dynamic';
 export const generateMetadata = () => adminRouteMetadata('analytics');
 
 export default async function AnalyticsPage({
+    params,
     searchParams,
 }: {
+    params: Promise<{ locale: string }>;
     searchParams: Promise<{ window?: string }>;
 }) {
+    const { locale } = await params;
     const { window: windowParam } = await searchParams;
     const validWindows: TimeWindow[] = ['30d', '90d', 'all'];
     const window: TimeWindow = validWindows.includes(windowParam as TimeWindow)
@@ -34,6 +37,7 @@ export default async function AnalyticsPage({
 
     return (
         <AnalyticsClient
+            locale={locale}
             topPhotos={topPhotos}
             topTopics={topTopics}
             countries={countries}
@@ -59,6 +63,7 @@ export default async function AnalyticsPage({
                 colSharedAlbum: t('colSharedAlbum'),
                 noData: t('noData'),
                 untitled: t('untitled'),
+                opensInNewWindow: t('opensInNewWindow'),
                 approximateDisclaimer: t('approximateDisclaimer'),
             }}
         />

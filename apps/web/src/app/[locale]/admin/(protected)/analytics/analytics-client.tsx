@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { type TopPhotoRow, type TopTopicRow, type CountryRow, type ReferrerRow, type TopSharedGroupRow, type TimeWindow } from '@/lib/analytics-data';
+import { localizePath } from '@/lib/locale-path';
 
 interface AnalyticsTranslations {
     title: string;
@@ -23,12 +24,14 @@ interface AnalyticsTranslations {
     colSharedAlbum: string;
     noData: string;
     untitled: string;
+    opensInNewWindow: string;
     // R27-UX-MED-2: surface the truth about counter precision so the
     // photographer doesn't trust this as billing/audit-grade state.
     approximateDisclaimer: string;
 }
 
 interface Props {
+    locale: string;
     topPhotos: TopPhotoRow[];
     topTopics: TopTopicRow[];
     countries: CountryRow[];
@@ -38,7 +41,7 @@ interface Props {
     t: AnalyticsTranslations;
 }
 
-export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, topSharedGroups, currentWindow, t }: Props) {
+export function AnalyticsClient({ locale, topPhotos, topTopics, countries, referrers, topSharedGroups, currentWindow, t }: Props) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -106,23 +109,26 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                         </td>
                                     </tr>
                                 ) : (
-                                    topPhotos.map((row) => (
-                                        <tr key={row.imageId} className="border-b last:border-0 hover:bg-muted/30">
-                                            <td className="px-4 py-3">
-                                                <a
-                                                    href={`/p/${row.imageId}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={`${row.title || `${t.untitled} #${row.imageId}`} (opens in new window)`}
-                                                    className="text-primary underline-offset-4 hover:underline rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                                >
-                                                    {row.title || `${t.untitled} #${row.imageId}`}
-                                                </a>
-                                            </td>
-                                            <td className="px-4 py-3 text-muted-foreground">{row.topic}</td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
-                                        </tr>
-                                    ))
+                                    topPhotos.map((row) => {
+                                        const label = row.title || `${t.untitled} #${row.imageId}`;
+                                        return (
+                                            <tr key={row.imageId} className="border-b last:border-0 hover:bg-muted/30">
+                                                <td className="px-4 py-3">
+                                                    <a
+                                                        href={localizePath(locale, `/p/${row.imageId}`)}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        aria-label={`${label} ${t.opensInNewWindow}`}
+                                                        className="text-primary underline-offset-4 hover:underline rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                                    >
+                                                        {label}
+                                                    </a>
+                                                </td>
+                                                <td className="px-4 py-3 text-muted-foreground">{row.topic}</td>
+                                                <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
+                                            </tr>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>
@@ -151,7 +157,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                     topTopics.map((row) => (
                                         <tr key={row.topic} className="border-b last:border-0 hover:bg-muted/30">
                                             <td className="px-4 py-3">{row.label}</td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
                                         </tr>
                                     ))
                                 )}
@@ -182,7 +188,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                     countries.map((row) => (
                                         <tr key={row.country_code} className="border-b last:border-0 hover:bg-muted/30">
                                             <td className="px-4 py-3 font-mono">{row.country_code}</td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
                                         </tr>
                                     ))
                                 )}
@@ -192,12 +198,9 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                 </section>
 
                 {/* Cycle 4 RPF loop R27-UX-MED-4: top shared albums.
-                    Each row links to the `/g/${shareKey}` public route so
-                    the admin can preview the album exactly as the client
-                    sees it. The href is intentionally locale-agnostic —
-                    the public shared-group route lives under the
-                    `[locale]` segment but the share-key page itself does
-                    not depend on the admin's current locale. */}
+                    Each row links to the locale-scoped `/g/${shareKey}`
+                    public route so the admin previews the album with the
+                    same language chrome as the current admin session. */}
                 <section>
                     <h2 className="mb-3 text-lg font-semibold">{t.topSharedAlbumsTitle}</h2>
                     <div className="rounded-md border overflow-x-auto">
@@ -220,16 +223,16 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                         <tr key={row.shareKey} className="border-b last:border-0 hover:bg-muted/30">
                                             <td className="px-4 py-3">
                                                 <a
-                                                    href={`/g/${row.shareKey}`}
+                                                    href={localizePath(locale, `/g/${row.shareKey}`)}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    aria-label={`${row.shareKey} (opens in new window)`}
+                                                    aria-label={`${row.shareKey} ${t.opensInNewWindow}`}
                                                     className="font-mono text-primary underline-offset-4 hover:underline rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                                 >
                                                     {row.shareKey}
                                                 </a>
                                             </td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
                                         </tr>
                                     ))
                                 )}
@@ -260,7 +263,7 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, to
                                     referrers.map((row) => (
                                         <tr key={row.referrer_host} className="border-b last:border-0 hover:bg-muted/30">
                                             <td className="px-4 py-3 font-mono">{row.referrer_host}</td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
                                         </tr>
                                     ))
                                 )}
