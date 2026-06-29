@@ -1,78 +1,92 @@
-# Security Reviewer — review-plan-fix cycle 4
+# Security Reviewer - cycle 5/100
 
 Role: `security-reviewer`
-HEAD reviewed: `0fa5beb107ff232ce6a004887ad7c574dd0e2963`
+HEAD reviewed: `79c698eb`
 Date: 2026-06-29
-Scope: current HEAD only; report-only pass. No application code was edited.
+Scope: current HEAD in `/Users/hletrd/flash-shared/gallery`; report-only pass. No source code edited.
 
-## Inventory Coverage
+## Inventory
 
-- Read first: `AGENTS.md`, `CLAUDE.md`, and `/Users/hletrd/.agents/skills/security-review/SKILL.md`.
-- Consulted prior context only to avoid stale duplicates: current cycle-3 report, selected archived security reports, and the color-management security review. Prior findings were revalidated against current code before carry-forward.
-- Inventory snapshot: 2,497 tracked files; 483 tracked files under `apps/web/src`; 176 directly security-relevant tracked files across `apps/web/src/app/api`, `apps/web/src/app/actions`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, and `.dockerignore`.
-- Additional render/privacy sweep covered public/admin page and route surfaces under `apps/web/src/app`, including JSON-LD emitters, feeds, share pages, upload routes, admin pages, and OG routes.
-- Security domains reviewed from code, not comments/tests alone: OWASP Top 10, auth/authz, sessions/cookies, admin personal access tokens, CSRF/origin, public/admin rate limiting, SQL/raw queries, restore SQL scanning, file upload/processing, path traversal, symlink handling, SSRF, XSS/JSON-LD/XML escaping, secrets, backup/restore, Docker/nginx/deploy safety, privacy-sensitive fields, and destructive/data-loss risks.
-- Tracked secret sweep found no live committed secrets in HEAD. Tracked env files reviewed are examples/placeholders only.
+Read first:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `/Users/hletrd/.agents/skills/security-review/SKILL.md`
 
-## Validation Evidence
+Security-relevant files inventoried and reviewed:
+- API routes: `apps/web/src/app/api/**/route.{ts,tsx}` including admin DB download, Lightroom upload, health/live, OG, semantic search, and similar search.
+- Server actions: `apps/web/src/app/actions/*.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- Auth/session/token/origin/rate-limit: `apps/web/src/lib/api-auth.ts`, `session.ts`, `admin-tokens.ts`, `request-origin.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, `action-guards.ts`.
+- Upload/path/file surfaces: `upload-paths.ts`, `upload-filenames.ts`, `serve-upload.ts`, `process-image.ts`, `process-topic-image.ts`, `storage/local.ts`, Lightroom upload route.
+- Backup/restore: `db-actions.ts`, `api/admin/db/download/route.ts`, `db-restore.ts`, `sql-restore-scan.ts`, `backup-filename.ts`, `download-filename.ts`, `mysql-cli-ssl.ts`.
+- Public/admin data boundaries: `data.ts`, `search-enrichment-fields.ts`, `smart-collections.ts`, public pages, share pages, feed/JSON-LD emitters, OG routes.
+- Input/output safety: `sanitize.ts`, `validation.ts`, `safe-json-ld.ts`, `og-sanitize.ts`, `csv-escape.ts`, `seo-og-url.ts`, `content-security-policy.ts`.
+- Deployment/config: `apps/web/next.config.ts`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/deploy.sh`, `.dockerignore`, package manifests.
 
-- `npm audit --workspace=apps/web --audit-level=low`: pass; 0 vulnerabilities.
-- `npm run lint:api-auth --workspace=apps/web`: pass; admin API routes are wrapped by `withAdminAuth(...)`.
-- `npm run lint:action-origin --workspace=apps/web`: pass; mutating server actions enforce `requireSameOriginAdmin()` or carry an explicit read-only exemption.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; public mutating API route scan passes.
-- `npm test --workspace=apps/web -- request-origin api-auth-response-headers backup-download-route sql-restore-scan semantic-route-production semantic-search-rate-limit similar-route og-photo-fallback privacy-fields safe-json-ld sanitize-stderr`: pass; 11 files / 108 tests.
+Review categories covered: OWASP Top 10, secrets, auth/authz, CSRF/origin, rate limits, file upload/path traversal/symlink handling, SQL injection/raw SQL, SSRF, XSS/JSON-LD/XML output, backup/restore safety, session/token handling, public/admin data boundaries, and destructive operational paths.
 
 ## Findings
 
-### SEC-C4-01 — Process-local security state is unsafe if production is horizontally scaled
+No confirmed Critical, High, Medium, or Low vulnerabilities were found in current HEAD under the documented single-web-instance deployment.
 
-Status: manual-validation
-Original severity: Medium
+Finding count: 0 Critical, 0 High, 0 Medium, 0 Low.
+
+## Residual Risk
+
+### RR-C5-01 - Process-local security state would be unsafe if the app were horizontally scaled
+
+Severity: Medium if scaled out; not a current-topology vulnerability
 Confidence: High
-OWASP mapping: A04 Insecure Design, A05 Security Misconfiguration, A01 Broken Access Control
+Status: risk, not confirmed exploit in documented deployment
+OWASP: A04 Insecure Design, A05 Security Misconfiguration
 
-Code region:
-- `apps/web/src/lib/restore-maintenance.ts:1-56` stores restore-maintenance state on `globalThis`.
-- `apps/web/src/lib/upload-tracker-state.ts:7-79` stores active upload claims and cumulative upload bytes in a process-local `Map`.
-- `apps/web/src/lib/rate-limit.ts:68-89`, `apps/web/src/lib/rate-limit.ts:103-108`, and `apps/web/src/lib/rate-limit.ts:314-318` keep public OG/share/search/semantic limiter state in process-local bounded maps.
-- `apps/web/docker-compose.yml:14-21` ships one loopback-bound web service, which matches the documented single-instance topology, but there is no code-level shared-state mode if operators add replicas.
+File/region:
+- `apps/web/src/lib/restore-maintenance.ts` stores restore-maintenance state in process memory.
+- `apps/web/src/lib/upload-tracker-state.ts` stores active upload claims and cumulative upload windows in process-local maps.
+- `apps/web/src/lib/rate-limit.ts` keeps several public limiter buckets in process-local bounded maps.
+- `apps/web/docker-compose.yml:14-21` ships a single loopback-bound web service, matching `CLAUDE.md`'s single-instance topology.
 
-Why this is a problem:
-The security controls above are correct only when all requests hit the same Node.js process. In a multi-process or multi-replica deployment, these controls diverge per instance. The code does not use a shared database/Redis lease for public rate-limit buckets, restore-maintenance state, or upload quota claims.
-
-Concrete exploit/failure scenario:
-An operator scales the web service to two replicas behind a load balancer. During an admin database restore on replica A, an authenticated upload or Lightroom token upload lands on replica B. Replica B sees `isRestoreMaintenanceActive()` as false and has no active upload claims from replica A, so it can accept writes while the restore is fencing only A. Separately, an attacker can multiply public search/OG/share request budgets by distributing requests across replicas, weakening DoS throttles.
+Failure scenario:
+If an operator adds multiple web replicas behind a load balancer without changing these controls, a restore or upload quota state on replica A is invisible to replica B. An authenticated upload could land on B during A's restore window, and unauthenticated public route budgets could be multiplied by spraying requests across replicas.
 
 Concrete fix:
-Either enforce single-instance/single-writer as a hard production invariant, or move these controls to shared storage before scale-out. The robust fix is DB/Redis-backed public rate-limit buckets, a shared restore-maintenance lease/flag checked by every instance, and shared upload-claim accounting. Add a startup/deploy guard that fails when multiple replicas are configured without the shared-state mode enabled.
+Keep the single-instance topology as a hard deploy invariant, or move restore maintenance, upload-claim accounting, and public limiter state into shared DB/Redis-backed leases/buckets before scale-out. Add a startup/deploy guard if replica count can become greater than one.
 
-## Rechecked Prior Issues
+## Evidence Highlights
 
-- Historical AVIF/EXIF privacy leak class is not present in current code: image variants are created with explicit ICC handling and without broad metadata copying in `apps/web/src/lib/process-image.ts`; GPS stripping is centralized in `apps/web/src/lib/gps-exif-strip.ts`.
-- Historical login username/control-character handling is fixed: `apps/web/src/app/actions/auth.ts` strips/rejects control input before rate-limit and Argon2 work.
-- Historical health-route disclosure remains intentionally minimal: `apps/web/src/app/api/health/route.ts` returns only `ok`/`unavailable`, probes DB only when `HEALTH_CHECK_DB=true`, and sends `no-store` plus `nosniff`.
-- Historical Docker build-context leakage is fixed in current HEAD: `.dockerignore` excludes `.context`, `.omx`, `.agent`, `.claude`, env files, data, uploads, and docs not required for the build.
-- Historical OG SSRF/fallback risk is fixed: `apps/web/src/app/api/og/photo/[id]/route.tsx` pins internal image fetches to canonical site config instead of request origin, and fallback image URLs must stay same-origin.
+- Admin API boundary: `withAdminAuth` enforces token scope for PAT routes and same-origin plus `isAdmin()` for cookie-auth admin APIs (`apps/web/src/lib/api-auth.ts:68-130`).
+- Sessions: production refuses DB-stored signing secret fallback, tokens are HMAC-signed, timing-safe verified, DB-hashed, age-limited, and expired sessions are deleted (`apps/web/src/lib/session.ts:16-150`).
+- Login: same-origin check, IP plus account-scoped pre-increment rate limits, Argon2 dummy-hash timing equalization, session rotation, and secure cookie attributes are present (`apps/web/src/app/actions/auth.ts:70-240`).
+- Browser uploads: admin auth plus origin check, filename sanitization, count/byte limits, atomic preclaim, disk-space failure close, topic existence check, HDR/GPS policy, blur-data URL assertion, cleanup, and queue handoff are present (`apps/web/src/app/actions/images.ts:110-560`).
+- Lightroom upload: `withAdminAuth({ allowTokenScope: 'lr:upload' })`, content-length requirement, quota tracking, sanitized metadata, topic validation, upload contract lock, disk check, GPS/HDR parity, cleanup, and audit logging are present (`apps/web/src/app/api/admin/lr/upload/route.ts:55-430`).
+- Upload serving: allowed top-level dirs, extension matching, safe segment regex, `lstat` symlink rejection, `realpath` containment, resolved-path streaming, no SVG serving, and `nosniff` are present (`apps/web/src/lib/serve-upload.ts:127-309`).
+- Backup: admin and same-origin gated, owner-only backup dir/file modes, credentials via env instead of CLI args, sanitized stderr, non-empty output check, and authenticated download URL are present (`apps/web/src/app/[locale]/admin/db-actions.ts:120-257`).
+- Restore: admin and same-origin gated, advisory restore lock, upload contract lock, maintenance window, temp file mode `0600`, size/header validation, dangerous SQL scan, `mysql --one-database`, sanitized stderr, and temp cleanup are present (`apps/web/src/app/[locale]/admin/db-actions.ts:266-520`; scanner at `apps/web/src/lib/sql-restore-scan.ts:1-168`).
+- Backup download: `withAdminAuth`, backup filename allowlist, path containment, symlink rejection, realpath containment, resolved-path streaming, audit logging, `no-store`, and `nosniff` are present (`apps/web/src/app/api/admin/db/download/route.ts:22-101`).
+- Public semantic/similar search: same-origin gate, maintenance gate, body/type/size limits, rate-limit preincrement, bounded scan, model-version filtering, no-store responses, and shared privacy-guarded enrichment are present (`apps/web/src/app/api/search/semantic/route.ts:100-300`; `apps/web/src/app/api/search/similar/[id]/route.ts:60-237`).
+- Public/admin field boundary: public select shapes explicitly omit sensitive admin fields, and compile-time privacy guards check both standard public and map-visible projections (`apps/web/src/lib/data.ts:250-482`).
+- XSS/JSON-LD: all `dangerouslySetInnerHTML` hits reviewed are JSON-LD script emitters using `safeJsonLd`, which escapes `<` (`apps/web/src/lib/safe-json-ld.ts:14-16`).
+- Headers/CSP: global `nosniff`, `SAMEORIGIN`, referrer policy, permissions policy, HSTS in production, and CSP construction are present (`apps/web/next.config.ts:55-109`; `apps/web/src/lib/content-security-policy.ts`).
 
-## Security Posture Notes
+## Automated Validation
 
-- Auth/session: production requires a strong `SESSION_SECRET`; session tokens are HMAC-signed, timestamped, timing-safe verified, DB-hashed, and expired; admin cookies are `httpOnly`, `sameSite=lax`, and secure in production.
-- Authz/API: admin API routes are covered by `withAdminAuth`; cookie-auth API requests require trusted same-origin provenance; token-auth API requests require valid hashed PATs and scope checks.
-- CSRF/origin: mutating server actions call `requireSameOriginAdmin()`; public semantic/similar search routes also require same-origin before body parsing or expensive work.
-- Rate limiting: login/password/user creation use pre-increment patterns with DB-backed controls where needed; public route lints passed. The remaining scale-out caveat is captured in SEC-C4-01.
-- Injection: raw SQL reviewed uses Drizzle parameterization or mysql2 placeholders for runtime inputs; smart-collection SQL compiles from allowlisted AST columns and bound values; restore SQL scanning blocks dangerous statements before invoking `mysql --one-database`.
-- File/path handling: upload derivative serving and backup downloads validate filenames/path segments, reject symlinks, enforce `realpath` containment, and stream the resolved path.
-- Upload/image safety: upload paths use generated filenames, file-size and input-pixel caps, Sharp `failOn: 'error'`, RAW rejection unless handled as original-only, private original storage, disk-space checks, and cleanup on failure paths.
-- XSS/privacy: JSON-LD uses `safeJsonLd`; XML feeds escape text; privacy-sensitive fields are guarded by the privacy fixture; public search enrichment uses the shared public projection.
-- SSRF: OG photo generation does not trust request origin and caps/validates internal image fetches.
-- Secrets/deploy: no live tracked secrets found; deploy secrets are gitignored; Docker runs loopback-bound behind nginx; nginx blocks original uploads and adds core security headers/rate limits.
-- Backup/restore/destructive risk: dump/restore actions are admin and same-origin gated, use dedicated locks, temporary files mode `0600`, sanitized stderr, non-empty dump checks, and cleanup paths.
+Passed:
+- `npm run lint:api-auth --workspace=apps/web`
+- `npm run lint:action-origin --workspace=apps/web`
+- `npm run lint:public-route-rate-limit --workspace=apps/web`
+- `npm audit --workspace=apps/web --audit-level=moderate` - 0 vulnerabilities
+- `npm test --workspace=apps/web -- --run src/__tests__/api-auth-response-headers.test.ts src/__tests__/check-api-auth.test.ts src/__tests__/check-action-origin.test.ts src/__tests__/check-public-route-rate-limit.test.ts` - 4 files / 72 tests
+- `npm test --workspace=apps/web -- --run src/__tests__/session.test.ts src/__tests__/session-verify.test.ts src/__tests__/auth-rate-limit.test.ts src/__tests__/auth-rate-limit-ordering.test.ts src/__tests__/password-hashing-policy.test.ts src/__tests__/admin-tokens.test.ts` - 6 files / 82 tests
+- `npm test --workspace=apps/web -- --run src/__tests__/backup-download-route.test.ts src/__tests__/backup-filename.test.ts src/__tests__/db-restore.test.ts src/__tests__/sql-restore-scan.test.ts src/__tests__/restore-upload-lock.test.ts src/__tests__/request-origin.test.ts` - 6 files / 44 tests
+- `npm test --workspace=apps/web -- --run src/__tests__/upload-paths.test.ts src/__tests__/upload-filenames.test.ts src/__tests__/serve-upload.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/search-route-privacy.test.ts` - 6 files / 52 tests
 
 ## Final Missed-Issues Sweep
 
-- Negative-pattern sweeps covered `dangerouslySetInnerHTML`, JSON-LD emitters, XML feeds, `new URL`, `fetch`, child process spawn, direct shell execution, raw SQL, realpath/lstat file access, browser storage, target-blank links, env/secrets, upload roots, destructive deploy commands, and route inventories.
-- Every API route under `apps/web/src/app/api` was checked for auth/origin/rate-limit posture.
-- Mutating server actions were checked by source review plus the origin lint gate.
-- No confirmed Critical/High code-level vulnerability was found in current HEAD.
+- Route inventory: every `apps/web/src/app/api/**/route.{ts,tsx}` checked for auth, origin, rate-limit posture, runtime constraints, and response cache headers.
+- Action inventory: every mutating server action checked by source review and by `lint:action-origin`.
+- Raw SQL/process sweep: `db.execute`, `tx.execute`, `conn.query`, `spawn`, `mysqldump`, `mysql`, file streams, and restore scanner paths reviewed for parameterization, secret exposure, and cleanup.
+- XSS sweep: `dangerouslySetInnerHTML`, JSON-LD, feeds, OG rendering, and admin-controlled string validation reviewed.
+- Path traversal sweep: upload serving, backup download, local storage, topic images, original upload paths, and cleanup paths reviewed for filename/path validation, `realpath`, `lstat`, and symlink handling.
+- SSRF/open redirect sweep: OG photo fetch/fallback, SEO OG URL validation, image base URL parsing, and request-origin handling reviewed.
+- Secrets sweep: tracked source/docs/examples contain placeholders or operational notes only; no live usable credential was found in HEAD.
 
-Finding count: 1 total — 0 Critical, 0 High, 1 Medium, 0 Low. The single finding is a manual-validation operational risk, not a confirmed defect under the documented single-instance deployment.
+Conclusion: current HEAD presents a strong security posture for the documented single-instance deployment. No code change is recommended from this cycle.
