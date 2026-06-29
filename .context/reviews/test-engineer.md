@@ -1,9 +1,9 @@
-# Test Engineer Review - review-plan-fix Cycle 4
+# Test Engineer Review - review-plan-fix Cycle 5
 
-**Date:** 2026-06-29  
-**HEAD:** `10b500bb30399f7c66812a5ad899f070f88d5501`  
-**Role:** test-engineer  
-**Scope:** current HEAD only. Focused on test coverage gaps, flaky tests, regression locks, TDD shape, fixture adequacy, and whether critical contracts are actually tested. No application code was edited.
+**Date:** 2026-06-29
+**HEAD:** `2f7895a5782518236c124e490c5b374f92019473`
+**Role:** test-engineer
+**Scope:** current HEAD only. Focused on test coverage gaps, flaky tests, missing regression locks, bad mocks, quality-gate blind spots, and TDD opportunities. No application source was edited.
 
 ## Inventory
 
@@ -11,58 +11,25 @@ Required repo instructions read first: `AGENTS.md` and `CLAUDE.md`.
 
 Current HEAD test and behavior-surface inventory:
 
-- Unit tests: 245 tracked `*.test.ts` / `*.test.tsx` files under `apps/web/src/__tests__`.
-- E2E tests: 5 Playwright specs under `apps/web/e2e`.
-- Source under test: 231 non-test TS/TSX files under `apps/web/src`.
+- Unit tests: 247 tracked `*.test.ts` / `*.test.tsx` files under `apps/web/src/__tests__/`.
+- E2E tests: 5 Playwright specs under `apps/web/e2e/`.
+- Source under test: 229 non-test TS/TSX files under `apps/web/src`.
 - API routes: 8 App Router route modules under `apps/web/src/app/api`.
 - Server actions: 13 action modules under `apps/web/src/app/actions`.
-- Critical custom gates reviewed: `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, `touch-target-audit.test.ts`, focus/source-contract tests, privacy/schema/migration drift tests, E2E admin/origin smoke tests.
-- Operational/build contracts reviewed: `.github/workflows/quality.yml`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/scripts/run-e2e-server.mjs`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, Docker/compose tests.
-- Relevant prior history checked just enough to avoid stale duplicates: top-level `.context/reviews/test-engineer.md` from cycle 3 and `run9-cycle8/test-engineer.md`.
+- Blocking gates reviewed: ESLint, typecheck, Vitest, Playwright, `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, touch-target audit, privacy guards, migration/schema guards, deploy/build contract tests, and CI workflow wiring.
+- Prior cycle-4 test-engineer findings checked for staleness: deploy-script and site-config contract gaps are closed at current HEAD by dedicated tests.
 
 Validation evidence:
 
-- `npm test --workspace=apps/web -- check-public-route-rate-limit.test.ts public-actions.test.ts client-source-contracts.test.ts` - pass, 3 files / 52 tests.
-- Direct checker probe for the public-route rate-limit scanner false negative:
-  `checkPublicRouteSource("if (false) preIncrement...; await db.insert...")` returned passed with no failures.
-- No committed `.only` tests found. Expected skips remain CLIP model-seeded integration tests and admin E2E local-credential skips.
+- `npm test --workspace=apps/web -- semantic-route-production.test.ts semantic-similarity-selector-contract.test.ts data-pagination.test.ts smart-collection-pagination.test.ts public-actions.test.ts clip-offline-load.test.ts clip-semantic-integration.test.ts` - pass: 5 files / 36 tests passed; 2 files / 4 tests skipped by CLIP env gates.
+- `npm run lint:api-auth --workspace=apps/web` - pass.
+- `npm run lint:action-origin --workspace=apps/web` - pass.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - pass.
+- No committed `.only` tests found. Expected skips remain admin E2E local-credential skips and CLIP real-model opt-in suites.
 
 ## Findings
 
-### TE-C4-01 - Public mutating-route rate-limit scanner still passes unreachable helper calls
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed coverage gap / confirmed scanner false negative
-
-Exact region:
-
-- `apps/web/scripts/check-public-route-rate-limit.ts:107-150`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:153-205`
-
-Problem:
-
-`bodyCallsRateLimitBeforeMutation()` is statement-order aware, and cycle 3's broader nested-function blind spot is partially fixed. However, it still treats any rate-limit helper call inside a top-level statement as effective, even when the call is in an unreachable branch. The current fixtures reject after-mutation calls, nested local functions, nested callbacks, and rollback-only helpers, but they do not cover a dead branch such as `if (false) preIncrementSemanticAttempt(...)`.
-
-Concrete failure scenario:
-
-A future public `POST` route ships this shape:
-
-```ts
-export async function POST() {
-  if (false) preIncrementSemanticAttempt(ip, Date.now());
-  await db.insert(rows).values(payload);
-  return Response.json({ ok: true });
-}
-```
-
-The lint gate reports OK even though no request is charged before the mutation. A bot can then flood the route while `npm run lint:public-route-rate-limit` and CI stay green.
-
-Concrete fix/test to add:
-
-Add a failing fixture to `check-public-route-rate-limit.test.ts` for `if (false) preIncrement...` before `db.insert(...)`, plus at least one branch-only variant where the helper is under a condition that does not dominate the mutation. Then make `bodyCallsRateLimitBeforeMutation()` accept only a top-level executed pre-increment guard shape, for example `if (preIncrement*(...)) return ...;`, or fail closed for conditional statements whose rate-limit call does not dominate the later mutation.
-
-### TE-C4-02 - Deploy disk-hygiene and data-safety contract has no regression test
+### TE-C5-01 - Semantic text-search route does not regression-lock active model-version filtering
 
 Severity: Medium  
 Confidence: High  
@@ -70,71 +37,82 @@ Status: Confirmed coverage gap
 
 Exact region:
 
-- `apps/web/deploy.sh:31-56`
-- `scripts/deploy-remote.sh:22-72`
-- `AGENTS.md:17-19`
-- `CLAUDE.md:452-475`
+- Runtime contract: `apps/web/src/app/api/search/semantic/route.ts:227-249`
+- Existing semantic production test with unused `whereSpy`: `apps/web/src/__tests__/semantic-route-production.test.ts:8-30`
+- Similar route has the missing style of assertion: `apps/web/src/__tests__/similar-route.test.ts:306-320`
 
 Problem:
 
-The repo documents the deploy script as a load-bearing operational contract: every pushed iteration deploys, `apps/web/deploy.sh` must prune Docker only after `docker compose up -d --build`, and automatic `docker volume prune` must omit `-a` so bind-mounted data remains safe. There is no test or source-contract guard for any of this. Existing config tests cover nginx/Dockerfile/compose details, but `rg "deploy.sh|volume prune|container prune|image prune|builder prune" apps/web/src/__tests__` finds no coverage for the deploy scripts.
+The route correctly derives `activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION` and applies `.where(eq(imageEmbeddings.modelVersion, activeModelVersion))`. That filter is load-bearing: production search must not scan stub vectors, and stub search must not scan production vectors. Current semantic-route tests prove production calls `embedTextReal()` and disabled mode returns 503, but they never assert the DB scan's `modelVersion` predicate. `semantic-route-production.test.ts` defines `whereSpy` and clears it, but no test inspects it. The image-similarity route already has this regression lock.
 
 Concrete failure scenario:
 
-A future edit moves pruning before `up -d`, changes `docker volume prune -f` to `docker volume prune -af`, removes `builder prune`, or hardcodes a remote deploy target in `scripts/deploy-remote.sh`. CI remains green because no test reads either script. In production, that can either reintroduce the disk-full outage class or turn a routine deploy into a data-loss/host-specific operation.
+A future refactor removes the `.where(eq(imageEmbeddings.modelVersion, activeModelVersion))` line, hardcodes `STUB_MODEL_VERSION`, or accidentally filters production mode with the stub version. The mock DB still returns rows, `semantic-search-route.test.ts` can remain green, and production natural-language search starts ranking against mixed or wrong-model embeddings.
 
-Concrete fix/test to add:
+Concrete fix / TDD opportunity:
 
-Add a small source-contract test such as `deploy-script-contract.test.ts` that reads `apps/web/deploy.sh` and `scripts/deploy-remote.sh` and asserts:
+Add a failing test before changing the route. Mirror `similar-route.test.ts:306-320`: spy on the semantic route's scan `where()` arguments and assert production mode includes `PRODUCTION_MODEL_VERSION`; add a stub-mode companion asserting `STUB_MODEL_VERSION`. Prefer table-keyed query dispatch over call-order-only mocks so the test fails for the predicate, not for harmless query reordering.
 
-- `docker compose -f apps/web/docker-compose.yml up -d --build` appears before any `docker * prune`.
-- `docker container prune -f`, `docker image prune -af`, `docker builder prune -af`, and `docker volume prune -f` are present.
-- automatic `docker volume prune -af` / `--all` is absent.
-- `scripts/deploy-remote.sh` derives from `.env.deploy` / `DEPLOY_ENV_FILE` / `$HOME/.gallerykit-secrets/...`, not a hardcoded host or key path.
-
-### TE-C4-03 - Production site-config validator is only exercised indirectly with the happy-path CI URL
+### TE-C5-02 - Cursor pagination tests copy a looser `normalizeImageListCursor` mock instead of testing the real helper
 
 Severity: Medium  
 Confidence: High  
-Status: Confirmed coverage gap
+Status: Confirmed bad mock / confirmed missing regression lock
 
 Exact region:
 
-- `apps/web/scripts/ensure-site-config.mjs:4-43`
-- `.github/workflows/quality.yml:27-34` and `.github/workflows/quality.yml:51-52`
-- `apps/web/package.json` `prebuild` script
+- Real cursor normalizer: `apps/web/src/lib/data.ts:678-731`
+- Public action use sites: `apps/web/src/app/actions/public.ts:113-126` and `apps/web/src/app/actions/public.ts:161-185`
+- Divergent inline mocks: `apps/web/src/__tests__/public-actions.test.ts:37-54`, `apps/web/src/__tests__/load-more-rate-limit.test.ts:30-45`, `apps/web/src/__tests__/smart-collection-pagination.test.ts:56-75`
+- Existing direct data pagination tests do not cover the cursor normalizer: `apps/web/src/__tests__/data-pagination.test.ts:1-30`
 
 Problem:
 
-`ensure-site-config.mjs` is the production build/deploy guard that fails missing `src/site-config.json`, missing production base URLs, non-absolute URLs, non-http(s) schemes, and placeholder hosts (`example.com`, localhost, loopback). The CI workflow copies the example config and sets a valid `BASE_URL=https://gallerykit-ci.invalid`, so the normal build only exercises the happy path. There is no unit or subprocess test that asserts the failure cases remain loud.
+The production normalizer requires strict MySQL/ISO timestamp shapes via `MYSQL_DATETIME_CURSOR_RE` and `ISO_DATETIME_CURSOR_RE`; invalid strings return `null`. The public-action tests mock `@/lib/data` and reimplement `normalizeImageListCursor` inline, but the copied version accepts any short `capture_date` string and converts any `created_at` string with `new Date(...)`. Those tests therefore verify action wiring against a different cursor contract than production.
 
 Concrete failure scenario:
 
-A future refactor accidentally removes the placeholder-host check or stops requiring an absolute production URL. CI still passes because the workflow always supplies a valid `BASE_URL`. A production build can then bake `example.com`, `localhost`, or another invalid canonical origin into metadata/OG behavior, weakening the SSRF/canonical-origin hardening described in `CLAUDE.md`.
+A future cursor regression changes the real helper to accept malformed dates, reject valid MySQL fractional timestamps, or return a different `created_at` shape. The mocked action tests still pass because they never import the real helper. Conversely, a test can pass with a cursor shape production rejects, giving false confidence around load-more and smart-collection pagination.
 
-Concrete fix/test to add:
+Concrete fix / TDD opportunity:
 
-Add a focused subprocess test for `scripts/ensure-site-config.mjs`. Run it in a temp cwd containing `src/site-config.json` fixtures and assert exit code plus stderr for:
+Add direct unit tests for `normalizeImageListCursor` in `data-pagination.test.ts`: valid MySQL datetime, valid fractional MySQL datetime, valid ISO `Z`, `capture_date: null`, invalid free-form strings, overlong date strings, invalid `Date`, non-positive/non-integer id. Then replace the copied mocks with `vi.importActual('@/lib/data')` for `normalizeImageListCursor` while keeping heavy DB functions mocked.
 
-- missing config file,
-- `NODE_ENV=production` with no URL,
-- `NODE_ENV=production` with `siteConfig.url=https://example.com`,
-- `NODE_ENV=production` with a relative or `file:` URL,
-- success when `BASE_URL=https://gallerykit-ci.invalid` overrides the example config.
+### TE-C5-03 - Real CLIP model activation tests are opt-in and skipped by the blocking CI path
 
-For easier TDD, the script could first extract pure validation into an exported helper, then keep one subprocess test proving the CLI exits correctly.
+Severity: Medium  
+Confidence: Medium
+Status: Risk / quality-gate blind spot
+
+Exact region:
+
+- CI runs only default unit tests with no CLIP model env: `.github/workflows/quality.yml:27-37` and `.github/workflows/quality.yml:66-67`
+- Offline activation suite skip gate: `apps/web/src/__tests__/clip-offline-load.test.ts:15-18`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`
+- Real semantic-ranking suite skip gate: `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-9`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`
+- Skipped assertions that would prove the real path: `apps/web/src/__tests__/clip-offline-load.test.ts:54-64`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:72-80`
+
+Problem:
+
+Production semantic search is documented as live, but the two tests that prove real offline model loading and real ko/en semantic ranking both use `describe.skip` unless local env and seeded weights are present. The blocking GitHub Actions job supplies DB/admin/site env only, then runs plain `npm test`, so these suites are skipped in the default quality gate. Targeted validation in this review reproduced that posture: both CLIP real-model files skipped.
+
+Concrete failure scenario:
+
+A dependency update, pinned-revision path change, model-root layout change, or transformers runtime change breaks offline `jina-clip-v2` loading or multilingual ranking. Source-contract and mocked route tests can stay green while production silently falls back to errors, empty search results, or degraded relevance once the live model path is exercised.
+
+Concrete fix / TDD opportunity:
+
+Add a scheduled or manually-triggered CI job that seeds the pinned model cache once, sets `CLIP_OFFLINE_LOAD=1`, `CLIP_INTEGRATION=1`, and `CLIP_MODELS_ROOT`, then runs only the two real-model suites. Keep the default PR gate lightweight if model download cost is too high, but require the scheduled job before dependency/model-runtime upgrades. At minimum, publish the skip count as an explicit CI artifact so a skipped real-model lane is visible rather than buried in the unit-test summary.
 
 ## Closed Prior Items / Non-Findings
 
-- Cycle 3 public analytics recorder gap is closed at current HEAD: `public-actions.test.ts` imports `recordPhotoView`, `recordTopicView`, and `recordSharedGroupView`, and covers valid writes, invalid-input short-circuit, restore-maintenance short-circuit, and exhausted per-IP budget behavior.
-- Cycle 3 admin metadata static allowlist gap is closed at current HEAD: `client-source-contracts.test.ts` still checks known contracts, but also walks admin `page.tsx` files and accepts page or ancestor metadata providers.
-- Cycle 3 public-route scanner nested-helper gap is partially closed: fixtures now reject nested local functions and nested callbacks before mutation. TE-C4-01 is the narrower remaining unreachable-branch gap.
-- The action-origin scanner is stronger than the public-route scanner on dead branches: `check-action-origin.test.ts` explicitly covers `if (false) await requireSameOriginAdmin()`.
-- CI is configured to run lint, typecheck, security lint gates, unit tests, DB init, Playwright E2E, and build. Admin E2E is expected to run in GitHub Actions because `CI=true` and plaintext E2E credentials are supplied.
-- The nav visual-check spec still writes manual screenshots, but it now has DOM target-size and overlap assertions. I am not re-filing that as a current actionable gap.
+- Cycle-4 deploy script safety gap is closed: `apps/web/src/__tests__/deploy-script-contract.test.ts:16-50` now pins prune-after-up ordering, absence of all-volume prune, narrow bind mounts, and config-driven remote deploy.
+- Cycle-4 production site-config validator gap is closed: `apps/web/src/__tests__/ensure-site-config.test.ts:40-77` now subprocess-tests missing config, missing production URL, placeholder host, invalid URL schemes, relative URLs, and valid `BASE_URL` override.
+- Cycle-4 public mutating-route scanner dead-branch gap is closed: `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:195-225` now covers unreachable and branch-only helper calls, and `apps/web/scripts/check-public-route-rate-limit.ts:149-154` only lets the `if` condition dominate.
+- CI is wired to run lint, typecheck, security lint gates, unit tests, DB init, Playwright E2E, and build. Admin E2E is expected to run in GitHub Actions because `CI=true` plus plaintext E2E credentials are supplied.
+- The touch-target audit now scans shared components, admin routes, public routes, and app-level error/not-found/layout/loading files. I did not find a fresh scanner root omission.
 
 ## Final Missed-Issues Sweep
 
-Swept for focused/skipped tests, manual screenshot-only coverage, source-contract vacuity, scanner fixture gaps, public analytics rate limits, admin metadata route drift, deploy/build operational contracts, CI gate ordering, environment-gated CLIP tests, and recent prior test-engineer findings.
+Swept for committed `.only` tests, expected/hidden skips, env-gated tests, source-contract vacuity, custom-lint blind spots, brittle call-order mocks, duplicated mock logic, public API rate-limit coverage, public server-action exclusions, touch-target scanner reach, CI gate ordering, and prior test-engineer findings.
 
-Coverage statement: the application test posture is strong for core runtime behavior, security lint gates, migrations/schema drift, privacy field guards, color/HDR processing, CLIP contracts, upload processing, admin actions, and accessibility/touch-target source scans. The remaining gaps are mostly test harness/operational-regression locks: one confirmed lint false negative and two production/deploy contracts that are documented and critical but not directly tested.
+Coverage statement: current HEAD has strong regression coverage around admin/auth/origin gates, upload processing, migrations/schema drift, privacy field guards, deploy/build contracts, color/HDR processing, public analytics limits, and accessibility/touch-target scans. The remaining test-engineer gaps are concentrated in semantic-search regression locks and model-backed integration coverage rather than broad absence of tests.
