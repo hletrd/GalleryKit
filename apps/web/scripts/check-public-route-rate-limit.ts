@@ -108,22 +108,49 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
     if (!body) return false;
 
     let sawRateLimit = false;
-    let sawMutationBeforeRateLimit = false;
+    let sawMutation = false;
 
-    const visit = (node: ts.Node) => {
+    const inspectExpression = (node: ts.Node) => {
         if (ts.isCallExpression(node)) {
-            if (isKnownMutationCall(node) && !sawRateLimit) {
-                sawMutationBeforeRateLimit = true;
-            }
             if (isRateLimitHelperCall(node)) {
                 sawRateLimit = true;
             }
+            if (isKnownMutationCall(node)) {
+                sawMutation = true;
+            }
         }
-        ts.forEachChild(node, visit);
+        ts.forEachChild(node, inspectExpression);
     };
 
-    visit(body);
-    return sawRateLimit && !sawMutationBeforeRateLimit;
+    const inspectStatement = (statement: ts.Statement) => {
+        let statementHasRateLimit = false;
+        let statementHasMutation = false;
+        const visit = (node: ts.Node) => {
+            if (ts.isFunctionLike(node) && node !== statement) return;
+            if (ts.isCallExpression(node)) {
+                if (isRateLimitHelperCall(node)) statementHasRateLimit = true;
+                if (isKnownMutationCall(node)) statementHasMutation = true;
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(statement);
+        if (statementHasMutation && !sawRateLimit) {
+            sawMutation = true;
+        }
+        if (statementHasRateLimit) {
+            sawRateLimit = true;
+        }
+    };
+
+    if (ts.isBlock(body)) {
+        for (const statement of body.statements) {
+            inspectStatement(statement);
+        }
+    } else {
+        inspectExpression(body);
+    }
+
+    return sawRateLimit && !sawMutation;
 }
 
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {

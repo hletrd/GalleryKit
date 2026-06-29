@@ -164,6 +164,34 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when the only rate-limit helper call is hidden in a nested function before a mutation', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                const later = () => preIncrementSemanticAttempt('1.2.3.4', Date.now());
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when a nested callback calls a rate-limit helper before the handler mutates', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                items.map(() => preIncrementSemanticAttempt('1.2.3.4', Date.now()));
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('fails when only a rollback helper is called before mutation', () => {
         const source = `
             import { rollbackSemanticAttempt } from '@/lib/rate-limit';
