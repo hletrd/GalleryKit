@@ -1,28 +1,22 @@
-# Verifier Review - Cycle 9
+# Verifier Review - Cycle 10 Prompt 1
 
 Date: 2026-06-29
-Role: verifier lane
-Scope: current `HEAD` (`adb1ae67`) on `master`. Source code and plans were not edited.
+Role: cycle 10 verifier
+Scope: current `HEAD` `ee8e08af` (`fix(cycle9): harden review findings`) on `master`.
+Constraint: evidence-based correctness review only. Source was not edited except this report.
 
-## Inventory
+## Inventory Summary
 
-Read first: `AGENTS.md`, `CLAUDE.md`, and the `code-review` skill instructions.
+Built the inventory before judging findings:
 
-Review-relevant inventory was built across the requested contract surfaces, not by sampling:
+- Project contracts: `AGENTS.md` from the prompt, `CLAUDE.md`, `plan/plan-370-cycle9-fixes.md`, `plan/plan-371-cycle9-deferred.md`, `.context/reviews/_aggregate.md`, previous `.context/reviews/verifier.md`, and run-9 cycle-8 aggregate context.
+- Current HEAD change surface: `.env.deploy.example`, `CLAUDE.md`, `apps/web/Dockerfile`, `apps/web/drizzle/0027_analytics_retention_indexes.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/public/sw.js`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/build-sw.ts`, `apps/web/scripts/migrate.js`, changed tests, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/rate-limit.ts`, and `apps/web/src/lib/view-retention.ts`.
+- Cross-file surfaces examined: semantic embedding write/read/retry paths, public and shared analytics counters, failed-image retry, bulk image update accounting, restore temp cleanup, retention indexes/migrations/reconcile, Lightroom token scopes/copy, Docker native package arch normalization, service-worker generation, semantic scan caps, tracked-secret scan, and the tests locking those contracts.
+- Test inventory read or sampled where relevant: `image-queue-embed-wiring.test.ts`, `public-actions.test.ts`, `failed-image-retry.test.ts`, `bulk-update-images.test.ts`, `db-restore.test.ts`, `semantic-search-route.test.ts`, `cycle-7-source-contracts.test.ts`, migration/reconcile tests, `clip-semantic-limits-env.test.ts`, `sw-template-contract.test.ts`, `topics-actions.test.ts`, and `tracked-secrets.test.ts`.
 
-- Repo/runbook controls: `AGENTS.md`, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
-- Migration/schema surface: 27 SQL migrations, 27 journal entries, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, migration/reconcile tests.
-- Privacy/select surface: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, map/search privacy tests, all public search routes.
-- Auth/origin/rate-limit surface: 8 API route files, 13 action files plus `apps/web/src/app/[locale]/admin/db-actions.ts`, all three security lint scanners.
-- Image/color/HDR surface: process-image/color detection/ICC/gain-map/settings hash/serve-upload/backfill/queue files and related tests.
-- Queue/restore surface: image queue, admin backfill runner, sidecar backfill, DB restore, restore maintenance, upload tracker/contract lock.
-- Service worker/generated artifacts: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/__tests__/sw-template-contract.test.ts`.
-- Deploy/runbooks: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, deploy/nginx/site-config tests.
-- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`; both currently have 784 flattened keys and no parity gaps.
+## Confirmed Findings
 
-## Confirmed Issues
-
-### F-001 - Committed generated service worker has a stale cache version
+### F-001 - Semantic bootstrap retries only one 50-row missing-embedding batch, then marks bootstrap complete
 
 Severity: Medium
 Confidence: High
@@ -30,84 +24,82 @@ Status: Confirmed
 
 Evidence:
 
-- `CLAUDE.md:407` states that `public/sw.template.js` is the shipped source and that `scripts/build-sw.ts` stamps `__SW_VERSION__` into `public/sw.js`; after editing the template, `sw.js` must be regenerated and committed.
-- `apps/web/scripts/build-sw.ts:28-46` builds the version from `git rev-parse --short HEAD` plus `-p${IMAGE_PIPELINE_VERSION}`.
-- Current `HEAD` is `adb1ae67`, and `npm run build --workspace=apps/web` regenerated `sw.js` as `adb1ae67-p7`.
-- The committed `apps/web/public/sw.js:21-26` still contains `1e182969-p7`.
-- `apps/web/src/__tests__/sw-template-contract.test.ts:163-167` checks generated SW logic parity for the bounded HEAD probe, but it does not check that the generated version stamp matches the current commit/pipeline version.
+- `plan/plan-370-cycle9-fixes.md:128-133` requires a durable retry path for `processed=true` rows missing the active semantic embedding after restart/bootstrap.
+- `apps/web/src/lib/image-queue.ts:370-397` selects processed rows missing the active model embedding but hard-limits the scan to `BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE` (`50`).
+- `apps/web/src/lib/image-queue.ts:399-410` starts side effects for only those selected rows and has no cursor, loop, continuation, or reschedule based on whether the batch was full.
+- `apps/web/src/lib/image-queue.ts:935-940` calls `bootstrapMissingActiveEmbeddings(state)` during image queue bootstrap, but it does not await a drained result or feed back whether more missing rows remain.
+- `apps/web/src/lib/image-queue.ts:951-954` marks `state.bootstrapped = true` when the normal pending-image scan is empty on the first pass; after that, `apps/web/src/lib/image-queue.ts:861-864` returns early on future bootstrap calls while `state.bootstrapped` is true.
+- `apps/web/src/__tests__/image-queue-embed-wiring.test.ts:45-53` only source-checks that a bounded retry query exists. It does not cover the case where more than 50 processed rows are missing the active embedding.
 
 Concrete failure scenario:
 
-A reviewer or CI run can pass `sw-template-contract` while `public/sw.js` is stamped for an older commit. Production `npm run build` regenerates the artifact, so the normal deploy path self-heals, but the repository artifact is still out of contract. Any path that serves or inspects committed `public/sw.js` without running `prebuild` can ship an older `SW_VERSION`, causing clients to keep the previous `gk-images-*`, `gk-html-*`, and `gk-meta-*` cache namespace instead of activating a cache version for the current commit.
+Production semantic mode is enabled and the process restarts after an encoder outage, DB outage, model-path outage, or restored DB state leaves 75 processed photos without `PRODUCTION_MODEL_VERSION` rows. On bootstrap, the code retries only the first 50 by ascending image id. If there are no pending `processed=false` images, the normal bootstrap path sets `state.bootstrapped = true`. The remaining 25 photos are still visible in the gallery but absent from semantic and similar-image search until another process restart or a manual backfill.
 
-Suggested fix:
+Concrete fix:
 
-Regenerate and commit `apps/web/public/sw.js` for `adb1ae67-p7`. Add a test or lint assertion that computes the expected `${git short SHA}-p${IMAGE_PIPELINE_VERSION}` and checks `public/sw.js` contains it, so stale generated artifacts cannot pass review.
+Make missing-embedding bootstrap drain in bounded passes. For example, have `bootstrapMissingActiveEmbeddings` return the number of selected rows and schedule another bootstrap/embedding continuation when it equals `BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE`, or add a cursor loop that keeps issuing bounded batches until no missing rows remain. Lock it with a behavioral test or a stronger source contract proving a full batch cannot be the terminal state.
 
-## Likely Issues
-
-None found.
-
-## Risks Needing Manual Validation
-
-### R-001 - Sitemap runtime regeneration after DB-unavailable build was not proven against MySQL
+### F-002 - CLAUDE.md still documents the old git-SHA service-worker stamp contract
 
 Severity: Low
-Confidence: Medium
-Status: Risk needing manual validation, not a confirmed bug
+Confidence: High
+Status: Confirmed
 
 Evidence:
 
-- `apps/web/src/app/sitemap.ts:24-55` intentionally catches build-time DB failures, emits a minimal homepage-only sitemap, and says ISR will replace it on the first runtime hit.
-- The production build passed, but logged `ECONNREFUSED 127.0.0.1:3306` and `[sitemap] falling back to homepage-only sitemap` during static generation because no local MySQL was running.
+- `CLAUDE.md:407` says `scripts/build-sw.ts` stamps `__SW_VERSION__` as `git short-SHA + -p{IMAGE_PIPELINE_VERSION}`.
+- `apps/web/scripts/build-sw.ts:4-12` now documents a deterministic `<template hash>-p<IMAGE_PIPELINE_VERSION>` stamp to avoid the committed-artifact freshness loop.
+- `apps/web/scripts/build-sw.ts:27-34` implements the template-hash version, not a git-SHA version.
+- Current `HEAD` is `ee8e08af`, while `apps/web/public/sw.js:21-26` contains `858bc13e-p7`, matching the template-hash scheme rather than the git short SHA.
+- `apps/web/src/__tests__/sw-template-contract.test.ts:172-176` checks generated SW logic parity but not the version contract described in `CLAUDE.md`.
 
 Concrete failure scenario:
 
-If production runtime ISR does not regenerate `/sitemap.xml` successfully after deploy, crawlers may see only the homepage/feed entries until the next successful runtime generation. The source comments describe this as intentional, but this verifier lane did not have a live MySQL instance to prove the first runtime hit replaces the fallback with topic/photo URLs.
+A future verifier follows `CLAUDE.md` and treats any `sw.js` stamp that does not equal the current git short SHA as stale, re-opening the already-solved impossible freshness loop. Conversely, a maintainer may "fix" `build-sw.ts` back to commit-SHA stamping and reintroduce the generated-artifact drift that cycle 9 intentionally removed.
 
-Suggested validation:
+Concrete fix:
 
-After deploy, request `/sitemap.xml` with DB reachable and confirm topic/photo/feed URLs are present. If SEO freshness is considered critical, add a deploy smoke check or an integration test with MySQL for the sitemap route.
+Update `CLAUDE.md:407` to say `build-sw.ts` stamps a deterministic template hash plus `-p{IMAGE_PIPELINE_VERSION}`. Optionally extend `sw-template-contract.test.ts` to assert the generated `SW_VERSION` shape/derivation so docs, script, and artifact remain aligned.
 
-## False Positives / Already Fixed
+## Likely Findings
 
-- Migration contract: current journal has exactly one documented historical inversion at idx 7; entries from idx 18 onward exceed prior global maxima. `apps/web/scripts/migrate.js:170-183` hashes every SQL file, `apps/web/scripts/migrate.js:758-776` asserts every expected hash exists after Drizzle, and targeted migration tests passed.
-- Privacy select fields: `apps/web/src/lib/data.ts:375-405` omits sensitive fields from public selects, `apps/web/src/lib/data.ts:472-487` guards public/map select leakage, and targeted privacy/search/map tests passed.
-- Auth/origin/rate-limit lints: admin API routes are wrapped by `withAdminAuth`, mutating actions returned early on `requireSameOriginAdmin`, and mutating public POST routes used rate-limit helpers. All three architecture lints passed.
-- Image/color/HDR pipeline: targeted tests for `process-image`, `color-detection`, `gain-map-detection`, `icc-chromaticity`, `use-display-capability`, settings hash, and serve-upload passed. HDR public honesty and P3/HDR UI paths were covered by current tests.
-- Queue/restore behavior: targeted tests for image queue, admin backfill runner, sidecar backfill, restore maintenance, DB restore, upload tracker, advisory locks, deploy script, and nginx contract passed.
-- Service worker logic parity: template/generated logic for bounded HEAD revalidation and admin-rendered HTML exclusion passed. The remaining issue is only the generated version stamp.
-- i18n: message key parity is clean; English/Korean plural-shape asymmetry remains intentional per `CLAUDE.md:580`.
+None.
+
+## Risks / Manual Validation
+
+- Deferred C9-01, C9-11, and C9-13 remain as recorded in `plan/plan-371-cycle9-deferred.md`; this pass did not find new evidence that upgrades them beyond their existing deferred/risk status.
+- Production semantic-search health still needs operational smoke validation after deploy because it depends on DB mode, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, model weights under `CLIP_MODELS_ROOT`, and populated active-model embeddings. F-001 is a code-level retry gap inside that broader operational surface.
+
+## Non-Findings / Verified Correct
+
+- Analytics retention indexes are aligned across migration, journal, schema, and legacy reconcile: `apps/web/drizzle/0027_analytics_retention_indexes.sql:1-3`, `apps/web/drizzle/meta/_journal.json:194-199`, `apps/web/src/db/schema.ts:231-262`, and `apps/web/scripts/migrate.js:581-618`.
+- Failed-image retry now checks `enqueueImageProcessing` and restores visible failure state on rejection: `apps/web/src/app/actions/images.ts:1208-1263`.
+- Bulk image updates canonicalize to existing IDs inside the transaction and use that set for writes/audit/counts: `apps/web/src/app/actions/images.ts:1025-1146`.
+- Public analytics actions validate targets before reading headers or inserting durable rows: `apps/web/src/app/actions/public.ts:364-438`; shared-group page now uses the same selected-photo decision as `getSharedGroup`: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:117-130` and `apps/web/src/lib/data.ts:1316-1327`.
+- DB restore temp cleanup has one finalizer until ownership is transferred to the mysql child process: `apps/web/src/app/[locale]/admin/db-actions.ts:434-595`.
+- Docker native package install normalizes `TARGETARCH` to npm arch names and fails unsupported architectures: `apps/web/Dockerfile:44-56`.
+- Lightroom token UI now mints upload-only tokens and shows non-expiring copy: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:57-61` and `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:130-133`.
+- Semantic scan caps now clamp to `25_000`: `apps/web/src/lib/clip-embeddings.ts:31-44`, and both semantic routes apply `SEMANTIC_SCAN_LIMIT`.
 
 ## Validation Evidence
 
 Commands run:
 
-- `npm run lint:api-auth --workspace=apps/web` -> passed.
-- `npm run lint:action-origin --workspace=apps/web` -> passed.
+- `npm test --workspace=apps/web -- image-queue-embed-wiring.test.ts public-actions.test.ts failed-image-retry.test.ts bulk-update-images.test.ts db-restore.test.ts semantic-search-route.test.ts cycle-7-source-contracts.test.ts migration-journal.test.ts migrate-reconcile-coverage.test.ts` -> 9 files passed, 170 tests passed.
+- `npm run lint:api-auth --workspace=apps/web` -> passed; 2 admin routes OK.
+- `npm run lint:action-origin --workspace=apps/web` -> passed; all mutating server actions enforce same-origin provenance, public analytics actions recognized as rate-limited public actions.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` -> passed.
+- `npm run typecheck --workspace=apps/web` -> passed (`typecheck:app`, `check:js-scripts`, `typecheck:scripts`).
 - `npm run lint --workspace=apps/web` -> passed.
-- `npm run typecheck --workspace=apps/web` -> passed.
-- `npm test --workspace=apps/web` -> 252 test files passed, 2 skipped; 2330 tests passed, 4 skipped.
-- `npm run build --workspace=apps/web` -> passed; regenerated PWA icons and `sw.js`, then completed Next production build. The generated `sw.js` change was restored after recording F-001 so source artifacts stayed unchanged except this report.
 
-Targeted tests also passed before the full suite:
-
-- Migration/privacy/SW: 7 files, 105 tests.
-- Auth/rate-limit scanner coverage: 7 files, 105 tests.
-- Color/HDR/serve-upload: 23 files, 261 tests.
-- Queue/restore/deploy: 27 files, 144 tests.
-- i18n/sanitization/touch-target: 12 files, 149 tests.
-- Secrets/client-boundary/storage/upload/deploy smoke tests: 11 files, 55 tests.
-
-## Final Missed-Issue Sweep
+## Final Missed-Issues Sweep
 
 Final sweeps covered:
 
-- Migration journal file/tag parity, `when` ordering, reconcile coverage, dropped-table/column tripwires, and post-migration hash assertions.
-- Sensitive fields across public/timeline/map/search select surfaces.
-- Every API route export and server action export relevant to admin auth, same-origin enforcement, restore-maintenance checks, and rate limiting.
-- Color/HDR source metadata, settings hashing, cache headers, derivative cleanup, backfill update races, queue quiesce/resume, and restore locks.
-- Service worker cache strategy, generated artifact freshness, proxy admin marker, upload cache headers, deployment helper, compose mounts, nginx body-size ordering, health/live routes, i18n parity, tracked-secret scanner, and mandatory gates.
+- All files changed by `HEAD` and the cycle-9 scheduled work items.
+- Semantic embedding producer, bootstrap retry, public semantic search, and similar-image search cross-file flow.
+- Public analytics inserts against route-level photo/topic/shared-group behavior.
+- Migration journal monotonicity, schema/reconcile/index coverage, and retention comments.
+- Admin/action security scanners, same-origin/rate-limit guards, restore maintenance, temp-file cleanup, Lightroom token scope enforcement, Docker native packages, service worker docs/script/artifact/test, i18n key/copy changes, and tracked-secret scanning.
 
-No other confirmed issues were found.
+No other confirmed or likely correctness issues were found.
