@@ -26,7 +26,7 @@ import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SI
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
-import { LOCK_DB_RESTORE } from "@/lib/advisory-locks";
+import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE } from "@/lib/advisory-locks";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
@@ -282,6 +282,7 @@ export async function restoreDatabase(formData: FormData) {
     // different connections, making the lock unreliable.
     const conn = await connection.getConnection();
     let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> = null;
+    let backfillLockHeld = false;
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
@@ -307,6 +308,21 @@ export async function restoreDatabase(formData: FormData) {
             return { success: false, error: t('restoreInProgress') };
         }
 
+        const [backfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+            "SELECT GET_LOCK(?, 0) AS acquired",
+            [LOCK_COLOR_PIPELINE_BACKFILL]
+        );
+        const backfillLockAcquired = backfillLockRows[0]?.acquired;
+        if (backfillLockAcquired !== 1 && backfillLockAcquired !== BigInt(1)) {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
+                console.debug('RELEASE_LOCK (backfill-lock early-return) failed:', err);
+            });
+            await uploadContractLock.release();
+            uploadContractLock = null;
+            return { success: false, error: t('restoreInProgress') };
+        }
+        backfillLockHeld = true;
+
         if (!beginRestoreMaintenance()) {
             // C7R-RPL-02 / AGG7R-02: explicitly RELEASE_LOCK on this
             // early-return path. The original code skipped the inner
@@ -323,6 +339,12 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
             });
+            if (backfillLockHeld) {
+                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
+                    console.debug('RELEASE_LOCK (backfill maintenance-begin early-return) failed:', err);
+                });
+                backfillLockHeld = false;
+            }
             await uploadContractLock.release();
             uploadContractLock = null;
             return { success: false, error: t('restoreInProgress') };
@@ -349,6 +371,12 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (restore finally) failed:', err);
             });
+            if (backfillLockHeld) {
+                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
+                    console.debug('RELEASE_LOCK (backfill restore finally) failed:', err);
+                });
+                backfillLockHeld = false;
+            }
             await uploadContractLock?.release();
             uploadContractLock = null;
         }
@@ -495,6 +523,11 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             settled = true;
             await fs.unlink(tempPath).catch(() => {});
             if (code === 0) {
+                const migrationResult = await runPostRestoreMigrations(t);
+                if (!migrationResult.success) {
+                    resolve({ success: false, error: migrationResult.error ?? t('restoreFailed') });
+                    return;
+                }
                 // Audit logging is fire-and-forget; wrap in try-catch so a
                 // transient DB error doesn't prevent the success resolve.
                 try {
@@ -516,5 +549,51 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
 
         // Start piping after all handlers are registered
         readStream.pipe(restore.stdin);
+    });
+}
+
+async function resolveMigrationScriptPath(): Promise<string> {
+    const candidates = [
+        path.join(process.cwd(), 'scripts', 'migrate.js'),
+        path.join(process.cwd(), 'apps', 'web', 'scripts', 'migrate.js'),
+    ];
+    for (const candidate of candidates) {
+        try {
+            await fs.access(candidate);
+            return candidate;
+        } catch {
+            // Try the next layout. Local dev runs from apps/web; standalone
+            // production runs from /app with scripts under apps/web/scripts.
+        }
+    }
+    throw new Error(`Unable to locate scripts/migrate.js from ${process.cwd()}`);
+}
+
+async function runPostRestoreMigrations(t: Awaited<ReturnType<typeof getTranslations>>) {
+    const scriptPath = await resolveMigrationScriptPath();
+    return new Promise<{ success: boolean; error?: string }>((resolve) => {
+        const migrate = spawn(process.execPath, [scriptPath], {
+            env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+        });
+
+        migrate.stdout.on('data', (data: Buffer) => {
+            console.log(`post-restore migrate stdout: ${data.toString('utf8').trimEnd()}`);
+        });
+        migrate.stderr.on('data', (data: Buffer) => {
+            const sensitiveValues = [process.env.DB_USER, process.env.DB_HOST, process.env.DB_NAME]
+                .filter((value): value is string => Boolean(value));
+            console.error(`post-restore migrate stderr: ${sanitizeStderr(data, process.env.DB_PASSWORD, sensitiveValues)}`);
+        });
+        migrate.on('close', (code: number) => {
+            if (code === 0) {
+                resolve({ success: true });
+            } else {
+                resolve({ success: false, error: t('restoreExitedWithCode', { code }) });
+            }
+        });
+        migrate.on('error', (err: Error) => {
+            console.error('post-restore migrate spawn error:', err);
+            resolve({ success: false, error: t('restoreFailed') });
+        });
     });
 }
