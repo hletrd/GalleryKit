@@ -1,9 +1,9 @@
-# Code Reviewer - Cycle 11
+# Code Reviewer - Cycle 12
 
 **Date:** 2026-06-29  
-**HEAD reviewed:** `d5d79e17d1097ae902893cc6c92f2fe8458123dc` (`d5d79e17 fix(cycle-10): 🐛 close review findings`)  
+**HEAD reviewed:** `155f684f4ee8ad3ab5949ad4b00de9ab34c62081` (`155f684f docs(review): preserve cycle 12 verifier evidence`)  
 **Role:** code-reviewer  
-**Scope:** whole current repository at HEAD from code quality, logic, SOLID, maintainability, cross-file contracts, guardrails, and operational correctness. Review-only: no production code edited; only this report artifact was written.
+**Scope:** whole current repository at HEAD from code quality, logic, SOLID, maintainability, correctness, cross-file contracts, guardrails, privacy, and operational behavior. Review-only: no production code was changed.
 
 ## Required Context Read
 
@@ -13,80 +13,89 @@
 
 ## Inventory Built Before Findings
 
-Review-relevant active surface, excluding `node_modules`, `.next`, uploads, runtime data, screenshots, reports, and archived review-only history:
+Review-relevant active surface was enumerated before deep review, excluding dependency/build/runtime blobs (`node_modules`, `.next`, coverage, uploads/data, `.git`, `.claude`, `.omx`, and generated reports). The resulting inventory contained 621 files:
 
-- 558 files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`.
-- Extension mix: 413 `ts`, 104 `tsx`, 28 `sql`, 6 `json`, 4 `mjs`, 3 `js`.
-- Runtime app: localized public/admin App Router pages, API routes, server actions, shared UI components, middleware/proxy, i18n, metadata, OG, feed, sitemap, upload serving.
-- Core logic: auth/session/rate-limit, data access/privacy projections, schema/migrations/reconcile, upload/original storage, image processing, queue/bootstrap/shutdown, backfill runners, DB restore/backup, analytics, smart collections, semantic search, CLIP model paths.
-- Quality surfaces: lint-gate scripts, migration journal, tests, Playwright e2e, deploy/Docker/nginx config, prior current-cycle review history enough to avoid stale duplicate claims.
+- `apps/web/src/app`: 77 App Router pages, route handlers, layouts, metadata, and server action exports.
+- `apps/web/src/components`: 57 client/server UI components.
+- `apps/web/src/lib`: 96 shared modules for auth, rate limiting, data access, privacy projections, upload serving, image processing, queues, smart collections, semantic search, settings, and deployment/runtime helpers.
+- `apps/web/src/db`: 3 schema/connection modules.
+- `apps/web/src/__tests__`: 262 Vitest files.
+- `apps/web/scripts`: 27 operational, lint, migration, backfill, and build scripts.
+- `apps/web/drizzle`: 31 migrations and journal/snapshot files.
+- `apps/web/e2e`: 8 Playwright specs/fixtures/helpers.
+- Plus root/project docs and config: 30 markdown files, 14 JSON files, 6 JS, 6 MJS, 3 shell scripts, 1 nginx conf, 1 CSS file, 1 YAML file, and 6 binary JPEG fixtures.
 
-Sweeps included action/API auth gates, same-origin ordering, public route/action rate limits, env parsing, raw SQL and child-process sites, JSON parsing, detached promises, audit logging, cleanup paths, advisory locks, migration/journal drift, privacy-sensitive select contracts, public search enrichment fields, upload path containment, queue/backfill contracts, TODO/FIXME/high-risk catch sites, and prior Cycle 10 findings.
+Coverage approach: text files in the product inventory were covered by repository-wide static sweeps plus direct reads of risk-bearing regions. Sweeps included admin/API auth wrappers, same-origin ordering, public route/action rate limits, CSP/proxy headers, service worker caching, DB projections, GPS/privacy gates, smart collection visibility, uploads/path containment, image queue/retry/cleanup, backfill scripts, migrations/journal/reconcile logic, raw SQL, child-process sites, JSON parsing, detached promises, audit logging, advisory locks, i18n route behavior, and prior-cycle finding status. Binary fixtures were inventory-only.
 
 ## Findings
 
-### C11-CQ-01 - Same-origin checks still run after session/auth work in many mutating admin actions
-
-**Severity:** Low  
-**Confidence:** High  
-**Classification:** Confirmed guardrail / maintainability issue; not a confirmed CSRF bypass.
-
-**File/region:**
-
-- `apps/web/src/app/actions/settings.ts:40-47` calls `isAdmin()` before `requireSameOriginAdmin()`.
-- `apps/web/src/app/actions/seo.ts:54-61` has the same ordering.
-- `apps/web/src/app/actions/collections.ts:15-21`, `64-70`, and `112-118` repeat it for smart collection mutations.
-- `apps/web/src/app/actions/topics.ts:85-92`, `182-189`, `409-416`, `470-477`, `537-544`, and `594-601` repeat it across topic mutations.
-- `apps/web/src/app/actions/tags.ts:42-49`, `99-106`, `139-146`, `205-212`, `265-272`, and `350-361` repeat it across tag mutations.
-- `apps/web/src/app/actions/sharing.ts:84-91`, `185-192`, `306-313`, and `346-353` repeat it across share mutations.
-- `apps/web/src/app/actions/admin-users.ts:75-82` and `182-191` do auth/user lookup before same-origin rejection.
-
-**Issue:** The same-origin check is present, and `npm run lint:action-origin --workspace=apps/web` passes, but the provenance boundary is not fail-fast. Cross-site requests carrying an admin cookie are rejected eventually, yet many actions first verify the session through `isAdmin()` and some fetch the current user before rejecting. This is the still-open Cycle 10 low-severity scanner-quality finding: the scanner proves a check exists, not that it is the first meaningful trust-boundary gate.
-
-**Concrete failure scenario:** A malicious site causes an authenticated admin browser to submit repeated cross-site server-action requests. The mutations are blocked, but each request still drives session verification and, in `deleteAdminUser`, a current-user lookup before origin rejection. The larger maintainability risk is future drift: a developer can add validation, rate-limit increments, DB reads, audit work, or other side effects between `isAdmin()` and `requireSameOriginAdmin()` while the lint gate still reports success.
-
-**Suggested fix:** Standardize mutating admin action prologues as: maintenance check if needed, `requireSameOriginAdmin()` return-early, then `isAdmin()` / `getCurrentUser()`, then validation and mutation. Strengthen `scripts/check-action-origin.ts` fixtures so mutating actions fail lint when `isAdmin`, `getCurrentUser`, `db.*`, audit logging, rate-limit increments, or other awaited side effects appear before the same-origin return path.
-
-### C11-CQ-02 - Sidecar backfill scripts still accept unbounded and non-integer concurrency
+### C12-CQ-01 - Offline HTML cache can outlive smart-collection revoke/delete
 
 **Severity:** Medium  
 **Confidence:** High  
-**Classification:** Confirmed operational reliability issue.
+**Classification:** Confirmed cross-file privacy/revocation bug.
 
 **File/region:**
 
-- `apps/web/scripts/backfill-color-pipeline.ts:370-371` parses `BACKFILL_CONCURRENCY` with `Math.max(1, Number(...) || 2)` and passes it directly to `new PQueue({ concurrency })`.
-- `apps/web/scripts/backfill-cicp-recheck.ts:80-81` uses the same parse shape.
-- The repo already has a safer helper at `apps/web/src/lib/env.ts:1-24`, used by runtime queue/CLIP/cleanup paths.
-- Local dependency validation confirms `p-queue` accepts `Infinity` and fractional values: `node_modules/p-queue/dist/index.js:296-300` only checks `typeof number && >= 1`.
+- `apps/web/public/sw.template.js:61-63` and generated `apps/web/public/sw.js:61-63` define `isRevocableShareHtmlRoute(...)` to match only `/s/{key}` and `/g/{key}` paths.
+- `apps/web/public/sw.template.js:370-376` and generated `apps/web/public/sw.js:370-376` bypass only those share pages before sending all other HTML through `networkFirstHtml(...)`.
+- `apps/web/public/sw.template.js:275-295` caches any successful non-admin HTML response and deliberately ignores normal HTML `Cache-Control` for the offline fallback path.
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:78-84` enforces `collection.is_public` at render time, then embeds the collection page and first page of matching images in SSR HTML at `:100-150`.
+- `apps/web/src/app/actions/collections.ts:93-101` can make a collection private, and `:112-126` can delete it; both only call `revalidateAllAppData()`, which cannot purge already-installed browser service-worker caches.
+- `apps/web/src/__tests__/sw-template-contract.test.ts:71-79` locks only the share-page bypass contract and has no equivalent assertion for `/c/{slug}`.
 
-**Issue:** The main runtime queue and CLIP limiter now use bounded positive integer parsing, and the in-app backfill runner clamps via `resolveBackfillConcurrency`. The sidecar scripts remain on the older unbounded parse. `BACKFILL_CONCURRENCY=Infinity`, `1e309`, or a very large number disables the intended queue bound; fractional values such as `2.5` are accepted with surprising scheduling behavior. This is especially risky because CLAUDE.md documents sidecar backfill as the production operational path for color/CLIP maintenance.
+**Issue:** Smart collections are revocable public resources, but the service worker treats them as ordinary cacheable HTML. The app correctly rejects private/deleted collections on the server, yet a browser that previously loaded a public `/c/{slug}` route can keep the old SSR page in `gk-html-*` for up to `HTML_MAX_AGE_MS` and receive that page when offline. The existing service-worker comment explicitly recognizes this revoke/delete class for share pages, but the same class exists for public smart collections.
 
-**Concrete failure scenario:** During a production sidecar re-encode, an operator mistypes `BACKFILL_CONCURRENCY=1e309` or copies `Infinity` from a shell variable. `Number(...)` becomes `Infinity`, `PQueue` accepts it, and the script can start every candidate row concurrently. Each worker may run Sharp AVIF/WebP/JPEG fan-out, hold image-processing/advisory-lock work, perform filesystem cleanup, and use a separate MySQL pool. On a large gallery this can saturate CPU, memory, disk I/O, and DB connections, turning an offline maintenance task into a host-level outage.
+**Concrete failure scenario:** An admin publishes `/ko/c/client-preview`, a visitor opens it once, and the service worker stores the HTML. The admin then sets `is_public=false` or deletes the collection. Online requests now 404, but if the visitor is offline within the 24-hour HTML fallback window, `networkFirstHtml` catches the failed network request and returns the cached collection page, including collection name and the first page of photo metadata/thumbnails from before revocation.
 
-**Suggested fix:** Reuse `parseBoundedPositiveInteger` or add a script-local equivalent that requires `Number.isFinite`, floors fractions intentionally, and clamps to an explicit sidecar maximum. If sidecars must remain more aggressive than in-app backfill, choose a documented cap higher than the default, but still finite. Add tests or source-contract coverage for `BACKFILL_CONCURRENCY='Infinity'`, `'1e309'`, `'2.5'`, `0`, negative values, and very large integers in both sidecar scripts.
+**Suggested fix:** Replace `isRevocableShareHtmlRoute` with a broader revocable-public-route predicate that also matches localized `/c/{slug}` pages, or make route responses for smart collections carry an explicit header that the service worker honors before HTML caching. Add a service-worker contract test proving `/c/foo` and `/ko/c/foo` bypass `networkFirstHtml` before the generic HTML branch.
+
+### C12-CQ-02 - Offline HTML cache can preserve GPS map markers after topic visibility is disabled
+
+**Severity:** Medium  
+**Confidence:** High  
+**Classification:** Confirmed privacy stale-cache bug.
+
+**File/region:**
+
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:9-10` documents that the public map must reflect GPS visibility changes immediately.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:31-50` fetches `getMapImages()` and serializes marker latitude/longitude into the SSR page passed to `MapLoader`.
+- `apps/web/src/lib/data.ts:1651-1687` correctly filters GPS rows to `topics.map_visible = true` and throws if a hidden topic leaks through.
+- `apps/web/src/app/actions/topics.ts:593-618` lets an admin toggle `map_visible` and calls `revalidateAllAppData()`.
+- `apps/web/public/sw.template.js:370-376` sends `/map` and localized `/ko/map` HTML through the generic 24-hour offline fallback; the bypass regex at `:61-63` does not match map routes.
+- `apps/web/src/__tests__/map-privacy.test.ts:80-130` covers DB/runtime GPS filtering, but there is no test that the service worker refuses to cache the GPS-bearing map HTML.
+
+**Issue:** The DB layer and map action preserve the `map_visible` invariant for online SSR, but the service-worker HTML cache is outside that invariant. `/map` contains location data by design, and the page itself says visibility toggles must reflect immediately. Once cached, the service worker can serve the old HTML offline for 24 hours even after a topic is hidden from the map, bypassing the fresh `getMapImages()` filter entirely.
+
+**Concrete failure scenario:** A topic is temporarily enabled on the public map for a client review. A visitor opens `/map`, causing the service worker to cache the rendered markers. The admin later disables `map_visible` for that topic. Fresh online requests omit those GPS coordinates, but the same visitor can go offline and reopen `/map`; the service worker returns the stale SSR payload with the hidden topic's marker coordinates and photo links.
+
+**Suggested fix:** Treat public map HTML as privacy-sensitive and bypass offline HTML caching for localized `/map` routes, or emit a route-level `no-store`/sensitive marker that `networkFirstHtml` checks before caching. Add contract coverage in `sw-template-contract.test.ts` that `/map` and `/ko/map` bypass the generic HTML cache, and consider a named predicate such as `isRevocableOrSensitiveHtmlRoute` so future privacy-sensitive public pages are forced through the same decision point.
 
 ## No Additional Findings After Final Sweep
 
-- Cycle 10 analytics-rate-limit finding is fixed: `recordPhotoView`, `recordTopicView`, and `recordSharedGroupView` now build request params and apply `isViewRecordRateLimited(...)` before their DB validation queries (`apps/web/src/app/actions/public.ts:364-430`).
-- Admin API routes remain wrapped by `withAdminAuth`, and the public mutating API scanner reports only the semantic search route as mutating and rate-limited.
-- Privacy-sensitive public projections remain protected by omit objects, compile-time guards, `SENSITIVE_KEYS`, and the separate search-enrichment guard.
-- Migration journal latest entry has a `when` greater than the prior max; the historical non-monotonic journal remains handled by the custom migrator/reconcile postconditions.
-- Upload/original storage, derivative cleanup, queue claim/retry, restore maintenance checks, smart-collection compiler, and semantic/similar search privacy paths did not yield a new non-duplicate finding at this review threshold.
+- No critical or high-severity confirmed findings were identified in this cycle.
+- Cycle 11 sidecar concurrency findings are fixed: `backfill-color-pipeline.ts:371-374` and `backfill-cicp-recheck.ts:81-84` now use `parseBoundedPositiveInteger(..., { fallback: 2, max: 8 })`.
+- Cycle 11 same-origin ordering findings are fixed for sampled prior examples: settings and SEO now call `requireSameOriginAdmin()` before `isAdmin()`, and the lint gate still passes.
+- Admin API routes remain wrapped by `withAdminAuth`, and public mutating API scanning passes.
+- Privacy-sensitive public projections, smart-collection query compilation, semantic/similar search response shaping, upload path containment, derivative cleanup, image queue claim/retry, migration journal postconditions, and restore-maintenance gates did not yield a non-duplicate finding at this review threshold.
+- Final hygiene sweep found ignored local env/build artifacts (`.env.deploy`, `apps/web/.env.local`, `apps/web/tsconfig.tsbuildinfo`) and historical tracked review logs/pids under `.context`; these were not treated as product behavior defects.
 
 ## Validation Evidence
 
 Commands run:
 
-- `npm run lint:action-origin --workspace=apps/web` - passed; confirms the ordering issue is not caught by the current scanner.
 - `npm run lint:api-auth --workspace=apps/web` - passed.
+- `npm run lint:action-origin --workspace=apps/web` - passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
 - `npm run lint --workspace=apps/web` - passed.
-- `npm test --workspace=apps/web -- env admin-backfill-concurrency-cap` - passed; 5 files, 43 tests. Confirms the shared env helper and in-app backfill cap are covered.
-- Static inventory and sweeps with `rg --files`, `find`, `wc`, `rg`, `nl -ba`, package/config reads, current HEAD checks, and a Node spot-check that `p-queue` accepts `Infinity` and `2.5` concurrency.
+- `npm run typecheck --workspace=apps/web` - passed.
+- `npm test --workspace=apps/web -- migration-journal migration-journal-monotonicity` - passed; 2 files, 10 tests.
+- `npm test --workspace=apps/web -- sw-template-contract map-privacy` - passed; 2 files, 26 tests. This confirms existing tests cover only the current share-page SW bypass and DB-level map privacy, not the stale HTML cache cases above.
+- Node regex spot-check of the shipped SW bypass pattern: `/s/abc`, `/ko/s/abc`, `/g/abc`, and `/ko/g/abc` match; `/map`, `/ko/map`, `/c/wedding`, and `/ko/c/wedding` do not.
+- Static inventory and sweeps with `rg --files`, `find`, `git ls-files`, `rg`, `nl -ba`, direct source reads, config/package reads, and current HEAD checks.
 
-I did not run full typecheck, build, full Vitest, or Playwright because this was a review-only artifact and no executable source changed.
+I did not run full `npm run build` or Playwright e2e because this was a review-only artifact and no executable source was changed. Binary JPEG fixtures were inventoried but not semantically inspected beyond their fixture role.
 
 ## Recommendation
 
-Request changes for C11-CQ-02 before relying on sidecar backfills as robust production maintenance under misconfiguration. Treat C11-CQ-01 as low-severity but worthwhile guardrail hardening: it narrows the trust boundary and prevents future same-origin ordering regressions that the current lint gate would miss.
+Comment / request follow-up fixes for the two medium privacy-cache findings before relying on offline PWA HTML fallback for revocable or sensitive public pages. The common fix is to move route sensitivity into an explicit service-worker predicate or response marker, then add contract tests for every public route whose visibility can be revoked or whose SSR payload contains location-sensitive data.
