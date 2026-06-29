@@ -315,7 +315,7 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
         expect(blockStr).toMatch(/capture_date:\s*exifDb\.capture_date/);
     });
 
-    // CR-R9C7-01 — the 6 admin processing settings must be forwarded from
+    // CR-R9C7-01 / C1 AGG-M4 — the admin processing/search settings must be forwarded from
     // `config` on the LR publish enqueue, exactly as the browser path does
     // (CR-R9C6-01). Because this path always supplies a truthy `quality`
     // object, the queue handler's `if (!quality && !imageSizes)` config-load
@@ -323,7 +323,7 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
     // process-image default instead of the admin's configured value. This
     // source-contract assertion is the regression lock the c6 fix lacked for
     // the LR path (the c6 wiring test covers only the browser path).
-    it('forwards all 6 admin processing settings from config in the enqueue payload (CR-R9C7-01)', () => {
+    it('forwards all admin processing and semantic settings from config in the enqueue payload (CR-R9C7-01)', () => {
         const enqueueBlock = LR_SRC.match(/enqueueImageProcessing\(\{[\s\S]*?\}\);/);
         expect(enqueueBlock).not.toBeNull();
         const blockStr = enqueueBlock?.[0] ?? '';
@@ -333,6 +333,7 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
         expect(blockStr).toMatch(/sdrJpegChroma:\s*config\.sdrJpegChroma/);
         expect(blockStr).toMatch(/wideGamutMaxSourcePixels:\s*config\.wideGamutMaxSourcePixels/);
         expect(blockStr).toMatch(/autoAltTextEnabled:\s*config\.autoAltTextEnabled/);
+        expect(blockStr).toMatch(/semanticSearchMode:\s*config\.semanticSearchMode/);
     });
 });
 

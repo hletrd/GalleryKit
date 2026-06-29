@@ -452,6 +452,7 @@ export const POST = withAdminAuth(
             sdrJpegChroma: config.sdrJpegChroma,
             wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
             autoAltTextEnabled: config.autoAltTextEnabled,
+            semanticSearchMode: config.semanticSearchMode,
             // R4C1 COR-R4C1-05: forward EXIF caption inputs, mirroring the
             // browser path. Without these the auto alt-text stub
             // (caption-generator.ts) emits the generic "[AUTO] Photo" for
