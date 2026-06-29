@@ -1,89 +1,128 @@
-# Document-Specialist Review - Review-Plan-Fix Cycle 7
+# Cycle 9 Document-Specialist Review
 
 **Date:** 2026-06-29
-**HEAD reviewed:** `17124135999a3d7cb4f5262e8b2b5917503088ae`
-**Role:** documentation/code consistency reviewer.
-**Boundary:** Reviewed current `HEAD` only. This artifact is the only intended write for this lane. Existing unrelated modified review files from other lanes were not touched.
+**HEAD reviewed:** `0d00ba667d1eb228eb5e06fd22ba549a761fbf0b`
+**Role:** documentation/code mismatch reviewer.
+**Boundary:** Review-only lane. This artifact is the only intended write. Application source, migration files, plans, and other reviewer artifacts were not edited.
 
 ## Inventory Coverage
 
-Read `AGENTS.md` and `CLAUDE.md` first, then built the review inventory from tracked docs, config, source, and contract tests.
+Read `AGENTS.md` and `CLAUDE.md` first, then built a review inventory from the repo's authoritative docs, operational scripts, package commands, migration state, security lint contracts, production semantic-search path, service-worker generation path, upload limits, admin navigation, and public behavior.
+
+Primary inventory reviewed:
 
 - Governing docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
-- Context docs/plans/reviews: `.context/plans/README.md`, active/deferred `.context/plans/*.md`, top-level `.context/reviews/*.md`, and targeted archive/done plans only where current docs referenced their contracts.
-- Deploy/runbook/env surfaces: `.env.deploy.example`, `apps/web/.env.local.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`, package manifests, and lockfile headers.
-- Schema/migration/security contract surfaces: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, auth/origin/rate-limit scanners, privacy guards, and migration/source-contract tests.
-- Feature docs and contract-bearing comments: CLIP semantic search docs/scripts/routes, Lightroom token docs/actions/page, storage quarantine, service worker docs/template/generated file, backup/restore code, upload/original path code, site-config/SEO code, and comments containing operational `MUST`/`not wired`/`not implemented` contracts.
+- Deploy/env/runtime docs and scripts: `.env.deploy.example`, `apps/web/.env.local.example`, `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`.
+- Migration/schema contracts: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, privacy omit guards in `apps/web/src/lib/data.ts`, and privacy/migration tests.
+- Security/lint contracts: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, relevant server actions, admin API routes, public API routes, and action-origin fixtures.
+- Semantic-search production state: gallery config resolver, admin settings, CLIP path/inference code, semantic and similar API routes, embedding actions/backfill scripts, production-mode tests, and public demo behavior.
+- Service-worker generation: `apps/web/scripts/build-sw.ts`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, PWA contract tests, `next.config.ts`, and README/CLAUDE PWA text.
+- Upload/admin/public behavior: upload limit helper, upload actions, Lightroom upload route, nginx body caps, admin nav/messages/pages, share/public pages, public actions, proxy, and public route tests.
 
-## Findings
+I did not sample only a subset of the requested surfaces. Generated/binary assets and historical archived reviews were inventoried/search-swept where they related to current contracts, but not read line-by-line as authoritative current behavior.
 
-### DOC-C7-01 - Lightroom token docs point admins to Settings, but the live token page is separate and not discoverable in admin nav
+## Confirmed Issues
 
-**Status:** Confirmed issue
+### DOC-C9-01 - Action-origin docs still say `public.ts` is excluded, but the scanner now includes it
+
 **Severity:** Medium
 **Confidence:** High
-**Classification:** confirmed documentation/code mismatch with admin UX impact
+**Classification:** Confirmed documentation/source-comment mismatch against an active security lint contract.
 
-**Mismatched regions:**
+**Evidence:**
 
-- `CLAUDE.md:152` says Lightroom tokens "can be rotated or revoked from the admin Settings panel."
-- The actual token UI is a dedicated page at `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx:11-24`, rendering `TokensClient`.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:45-83` implements create/revoke behavior there, not in Settings.
-- The admin nav currently lists dashboard/categories/tags/SEO/settings/password/users/db/analytics at `apps/web/src/components/admin-nav.tsx:15-25`; it has no `/admin/tokens` entry, and `apps/web/messages/en.json:2-14` has no `nav.tokens` label.
+- `CLAUDE.md:590-592` documents `lint:action-origin` as scanning `apps/web/src/app/actions/` while "excluding basenames `auth` and `public`".
+- `CLAUDE.md:602` partly contradicts that by saying `public.ts` is scanned with the narrower public-rate-limit contract.
+- `apps/web/src/app/actions/public.ts:311-314` repeats the stale source comment: "These live in public.ts (excluded from the action-origin gate by name)".
+- `apps/web/scripts/check-action-origin.ts:49` actually excludes only `auth`.
+- `apps/web/scripts/check-action-origin.ts:360-364` special-cases `actions/public.ts` only when a public mutating action has a rate-limit call before mutation.
+- `apps/web/scripts/check-action-origin.ts:488-490` runs the scanner over the discovered action files.
+- Validation: `npm run lint:action-origin --workspace=apps/web` reported `public.ts` entries as scanned and passed.
 
-**Why this is a problem:** The authoritative docs send operators to Settings, but the current Settings page does not own token management. The real page exists but is not linked from the admin navigation, so an admin following the docs has no obvious way to find the credential-management surface.
+**Concrete failure scenario:** A contributor adds an unauthenticated mutating server action to `public.ts` and follows the stale docs/comment, believing the file is outside the action-origin gate. They may skip running the relevant lint gate or misread a failure as a scanner bug. The implementation is safer than the docs, but the docs make the security boundary harder to maintain.
 
-**Concrete failure scenario:** An operator needs to revoke a compromised Lightroom Classic token. They open Admin -> Settings as documented, find only gallery/color/privacy/slideshow/semantic controls, and miss the unlinked `/admin/tokens` page. The compromised token remains usable until someone knows or guesses the direct URL.
+**Suggested fix:** Update `CLAUDE.md:591` and `apps/web/src/app/actions/public.ts:313` to say only `auth` is excluded by basename. Document `public.ts` as included by `lint:action-origin` with a narrower requirement: intentionally public mutating actions must carry the exempt comment and prove rate-limit-before-mutation.
 
-**Suggested fix:** Update `CLAUDE.md` to name the dedicated Tokens page and add a visible `/admin/tokens` entry with localized `nav.tokens` labels, or intentionally relocate token management into Settings. If the page remains separate, document "Admin -> Tokens" instead of "Settings panel."
+### DOC-C9-02 - `.env.deploy.example` tells operators to copy outside the repo while README/AGENTS use root `.env.deploy`
 
-### DOC-C7-02 - Semantic-search route header still describes the old stub-only/random behavior
-
-**Status:** Confirmed issue
 **Severity:** Low
 **Confidence:** High
-**Classification:** confirmed source-comment/code mismatch
+**Classification:** Confirmed deploy-runbook mismatch.
 
-**Mismatched regions:**
+**Evidence:**
 
-- `apps/web/src/app/api/search/semantic/route.ts:8-10` says the endpoint embeds queries via the stub CLIP text encoder and returns scores above `COSINE_THRESHOLD` (`0.18`).
-- `apps/web/src/app/api/search/semantic/route.ts:19-20` describes stub output as "random output."
-- Current implementation branches to the real CLIP encoder in production at `apps/web/src/app/api/search/semantic/route.ts:232-235` and scans only the active model version at `apps/web/src/app/api/search/semantic/route.ts:242-251`.
-- The stub implementation is deterministic, not random: `apps/web/src/lib/clip-inference.ts:6-13` and `apps/web/src/lib/clip-inference.ts:63-72` state and implement deterministic hash-based embeddings. User-facing docs agree at `apps/web/README.md:57-60` and `apps/web/messages/en.json:717-719`.
+- `AGENTS.md:17-18` says root `npm run deploy` reads gitignored root `.env.deploy` copied from `.env.deploy.example`.
+- `README.md:108-116` gives the same default workflow: `cp .env.deploy.example .env.deploy`, edit it, then run `npm run deploy`.
+- `.env.deploy.example:1-4` instead says to copy the file outside the repository, defaulting to `~/.gallerykit-secrets/gallery-deploy.env`, and only mentions `DEPLOY_ENV_FILE` as an override.
+- `scripts/deploy-remote.sh:22-29` resolves the file in this order: explicit `DEPLOY_ENV_FILE`, root `.env.deploy` if present, otherwise `~/.gallerykit-secrets/gallery-deploy.env`.
+- `scripts/deploy-remote.sh:55-58` also tells users to copy to either `.env.deploy` or the external default.
 
-**Why this is a problem:** The route header is a contract-style comment at the top of a public API implementation. Future maintainers can incorrectly reason that production search is not active on this route, or that stub tests are nondeterministic, despite the code and public docs saying the opposite.
+**Concrete failure scenario:** A new operator follows README and creates root `.env.deploy`, while another follows the example header and creates only the external file. Both can work, but the contradictory "default" location complicates onboarding and makes troubleshooting "which env file did deploy read?" unnecessarily error-prone.
 
-**Concrete failure scenario:** A maintainer debugging production search reads the header, assumes only the stub path can run, and changes threshold/model-version logic around `COSINE_THRESHOLD` instead of the production `PRODUCTION_COSINE_THRESHOLD` path. That can produce a bad fix or an incomplete test.
+**Suggested fix:** Change `.env.deploy.example:1-4` to name root `.env.deploy` as the README/AGENTS default and the external path as the supported fallback/alternative. Alternatively, change README/AGENTS if the desired policy is external-only, but that would require matching `scripts/deploy-remote.sh`.
 
-**Suggested fix:** Rewrite the header summary to match the lower "Serving gate" section: stub mode uses deterministic non-semantic embeddings and `COSINE_THRESHOLD`; production mode uses `embedTextReal`, `PRODUCTION_MODEL_VERSION`, and `PRODUCTION_COSINE_THRESHOLD`.
+### DOC-C9-03 - Checked-in `public/sw.js` carries an old build stamp even though docs describe build-time stamping from current git SHA
+
+**Severity:** Low
+**Confidence:** High for the mismatch, Medium for user impact
+**Classification:** Confirmed generated-artifact/docs mismatch.
+
+**Evidence:**
+
+- `CLAUDE.md:402-403` says `apps/web/public/sw.template.js` is the source and `scripts/build-sw.ts` stamps `__SW_VERSION__` into `public/sw.js` using the git short SHA plus image pipeline version.
+- `apps/web/scripts/build-sw.ts:28-47` computes `git rev-parse --short HEAD` and writes `${sha}-p${IMAGE_PIPELINE_VERSION}` into the generated service worker.
+- `apps/web/package.json:10` runs `tsx scripts/build-sw.ts` in `prebuild`, so production builds regenerate it.
+- Current reviewed HEAD short SHA is `0d00ba66`.
+- `apps/web/public/sw.js:21,26` still contains `1e182969-p7`.
+
+**Concrete failure scenario:** Production builds are probably safe because `prebuild` regenerates the file. The mismatch matters for development and review: `npm run dev` does not run `prebuild`, so a browser can be served a checked-in service worker with a stale cache namespace after a template or pipeline change. Reviewers also cannot tell from the committed artifact whether the generated service worker corresponds to the reviewed source revision.
+
+**Suggested fix:** Regenerate `apps/web/public/sw.js` before commits that affect service-worker or image-pipeline behavior, or adjust the docs/generator contract so the checked-in artifact uses a source-content or pipeline-version stamp instead of a commit-SHA stamp that is expected to drift after every commit.
 
 ## Likely Issues
 
-None found.
+None found beyond the confirmed issues and manual-validation risk below.
 
 ## Risks Needing Manual Validation
 
-None found.
+### DOC-C9-RISK-01 - Sidecar runbooks pin `tsx@4.21.0` while repo scripts test against `tsx ^4.22.4`
 
-## Verified Non-Findings
+**Severity:** Low
+**Confidence:** Medium
+**Classification:** Operator-runbook drift risk; may be intentional pinning, but not documented as such.
 
-- The prior document-specialist finding about `data/originals` is fixed: current `CLAUDE.md:209` names `data/uploads/original`, matching `apps/web/src/lib/upload-paths.ts`, `apps/web/Dockerfile`, and restore/backfill docs.
-- Deploy docs match implementation: root `.env.deploy` is supported by `scripts/deploy-remote.sh`, the external default env path remains supported, remote deploy uses `apps/web/deploy.sh`, compose bind-mounts `./data`, `./public/uploads`, `./public/resources`, and `./src/site-config.json`, and auto-prune runs only after `docker compose ... up -d --build`.
-- Migration docs match current guardrails: new migrations must advance `_journal.json` `when`, `migrate.js` baselines by committed hashes, and reconcile/post-condition tests cover the current schema.
-- Site-config and SEO docs match code: `seo_og_image_url` exists in admin actions/UI/messages and is consumed by public metadata/OG routes; static links/analytics still come from `site-config.json`.
-- Storage docs match quarantine: `@/lib/storage` remains local-only and is not wired into upload/processing/serving paths; `storage-quarantine.test.ts` pins that contract.
-- CLIP setup docs match current activation path: production mode is env-gated, weights load offline from `CLIP_MODELS_ROOT`, model rows are segregated by `model_version`, and the admin UI intentionally offers only Disabled/Stub.
-- Version claims match manifests: Node `>=24`, Next `^16.2.9`, React `^19.2.5`, and TypeScript `^6` align with README/CLAUDE badges and tech-stack text.
+**Evidence:**
 
-## Final Missed-Issues Sweep
+- `CLAUDE.md:349` runs the color backfill sidecar with `npx --yes tsx@4.21.0`.
+- `CLAUDE.md:506` runs the CLIP model download sidecar with `npx --yes tsx@4.21.0`.
+- `CLAUDE.md:521` runs the CLIP embedding backfill sidecar with `npx --yes tsx@4.21.0`.
+- `apps/web/package.json:82` uses repo dev dependency `tsx: ^4.22.4`.
 
-Final targeted sweeps covered stale route names, deploy helper defaults, Docker bind mounts, nginx body caps, CLIP/stub/production wording, Settings-vs-SEO-vs-Tokens admin surfaces, storage/S3 wording, site-config keys, backup/restore file scopes, service-worker docs, migration journal guidance, paid-download removal, and source comments containing `MUST`, `not implemented`, `not wired`, `random`, or `Settings panel`.
+**Concrete failure scenario:** Local scripts and tests execute under the package-managed `tsx` range, but production sidecar runbooks fetch an older exact version. If a script starts depending on behavior fixed in the newer `tsx`, the documented sidecar command can fail only during operator maintenance work. If `4.21.0` is intentionally pinned for production reproducibility, the docs do not say that.
 
-Intentionally not inspected line-by-line: binary/image assets, generated screenshots, full historical `.context/reviews/archive/` contents, and old archived implementation plans not referenced by current authoritative docs. They were inventoried and searched where current docs/contracts pointed at them.
+**Suggested fix:** Either update the sidecar commands to the repo-tested `tsx` version/range, or add a short note that the exact `tsx@4.21.0` pin is intentional and covered by manual operator validation.
+
+## False Positives / Already Fixed
+
+- Semantic-search production state is consistent. `CLAUDE.md:151` says production is active only when the DB row and `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` opt-in agree; the code enforces this in `apps/web/src/lib/gallery-config-shared.ts:102-104`, `apps/web/src/lib/gallery-config.ts:123-141`, `apps/web/src/app/api/search/semantic/route.ts:232-249`, and `apps/web/src/app/api/search/similar/[id]/route.ts:97-113`. Live validation against `https://gallery.atik.kr/en` showed `semanticSearchMode:"production"` and `totalCount:445`; a POST to `/api/search/semantic` returned HTTP 200 with results.
+- The prior route-header mismatch for semantic search is fixed. `apps/web/src/app/api/search/semantic/route.ts:8-26` now documents active stub-or-production encoders, model-version filtering, and production threshold behavior.
+- The prior Tokens navigation mismatch is fixed. `apps/web/src/components/admin-nav.tsx:15-25` includes `/admin/tokens` between Settings and Password.
+- Deploy prune and persistence docs match implementation. `apps/web/deploy.sh:31-58` prunes after `docker compose ... up -d --build`, and `apps/web/docker-compose.yml:23-27` bind-mounts persistent `data`, `public/uploads`, `public/resources`, and read-only site config.
+- Upload limit docs match code and nginx. `apps/web/src/lib/upload-limits.ts:1-35`, `apps/web/src/app/actions/images.ts:162-228`, `apps/web/src/app/api/admin/lr/upload/route.ts:91-118`, `apps/web/nginx/default.conf:89-93`, and `apps/web/nginx/default.conf:122-132` align with the documented 200 MiB per file, 2 GiB total upload window, 100 files per window, 250 MiB DB restore, and 216 MiB admin/LR upload proxy caps.
+- Migration docs match the current migrator. `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js:170-185`, `apps/web/scripts/migrate.js:293-673`, and `apps/web/scripts/migrate.js:719-760` support the documented hash-based postcondition, journal `when` caveat, and reconcile baseline behavior.
+- Public/share behavior matches docs. Locale share pages are dynamic/noindex and rate-limited where expected; the service worker excludes share pages from offline HTML caching in `apps/web/public/sw.template.js:61-63`, and `apps/web/src/__tests__/sw-template-contract.test.ts` covers that contract.
+- Security lint contracts are otherwise aligned. `npm run lint:api-auth --workspace=apps/web` and `npm run lint:public-route-rate-limit --workspace=apps/web` both passed during this review.
+
+## Final Missed-Issue Sweep
+
+Final sweeps rechecked README/CLAUDE/AGENTS against package scripts, deploy helper defaults, `.env` examples, Docker/nginx body caps, migration journal behavior, privacy omit guards, security scanner behavior, CLIP activation and offline model loading, service-worker template/generated output, upload limits, admin nav/messages, public routes/actions, and current comments containing contract language such as `MUST`, `excluded`, `production`, `stub`, `deploy`, and `not wired`.
+
+I found 3 confirmed issues, 0 additional likely issues, 1 manual-validation risk, and 7 false positives/already-fixed items. The only file changed by this lane is this report.
 
 ## Validation
 
-- `git diff --check -- .context/reviews/document-specialist.md` — passed.
-- No application tests were run in this lane; this was a review-only documentation/source-contract pass.
-
-**Disposition:** 2 confirmed findings, 0 likely findings, 0 manual-validation-only risks. No application-code fixes, commits, pushes, or deploys performed by this lane.
+- `npm run lint:action-origin --workspace=apps/web` - passed; output showed `public.ts` is scanned.
+- `npm run lint:api-auth --workspace=apps/web` - passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
+- Live semantic smoke check: `POST https://gallery.atik.kr/api/search/semantic` returned HTTP 200 results; `https://gallery.atik.kr/en` rendered production semantic mode with 445 total images.
+- Not run: full lint, typecheck, build, or full test suite. This was a review-only documentation/source-contract lane.
