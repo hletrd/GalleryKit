@@ -18,7 +18,7 @@
  *  - /admin/*, /[locale]/admin/*, and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * __SW_VERSION__ is replaced at build time by scripts/build-sw.ts.
+ * SW_VERSION is stamped at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */

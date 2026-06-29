@@ -245,7 +245,7 @@ export function TokensClient() {
                         <DialogDescription>{t('lrToken.revokeDesc')}</DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setConfirmRevokeId(null)} className="min-h-[44px]">
+                        <Button variant="outline" onClick={() => setConfirmRevokeId(null)} disabled={isPending} className="min-h-[44px]">
                             {t('common.cancel')}
                         </Button>
                         <Button

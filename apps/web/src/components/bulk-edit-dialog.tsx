@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -63,7 +63,7 @@ export interface BulkEditDialogProps {
     selectedIds: number[];
     availableTags: { id: number; name: string; slug: string }[];
     availableTopics: { slug: string; label: string }[];
-    onSubmit: (input: BulkUpdateImagesInput) => Promise<void>;
+    onSubmit: (input: BulkUpdateImagesInput) => Promise<boolean | void>;
 }
 
 export function BulkEditDialog({
@@ -89,7 +89,7 @@ export function BulkEditDialog({
     const [removeTagNames, setRemoveTagNames] = useState<string[]>([]);
     const [applyAltSuggested, setApplyAltSuggested] = useState<ApplyAltTarget | null>(null);
 
-    const resetState = () => {
+    const resetState = useCallback(() => {
         setTopicMode('leave');
         setTitleMode('leave');
         setDescMode('leave');
@@ -100,7 +100,7 @@ export function BulkEditDialog({
         setRemoveTagNames([]);
         setApplyAltSuggested(null);
         setValidationError(null);
-    };
+    }, []);
 
     const handleClose = (nextOpen: boolean) => {
         if (!isSubmitting) {
@@ -154,7 +154,10 @@ export function BulkEditDialog({
 
         setIsSubmitting(true);
         try {
-            await onSubmit(input);
+            const submitted = await onSubmit(input);
+            if (submitted !== false) {
+                resetState();
+            }
         } finally {
             setIsSubmitting(false);
         }

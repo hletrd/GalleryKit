@@ -5,6 +5,7 @@ import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { OptimisticImage } from '@/components/optimistic-image';
+import { getLocalMonthDay } from '@/lib/on-this-day-date';
 
 /**
  * Server component — rendered as part of the home page SSR pass.
@@ -12,9 +13,7 @@ import { OptimisticImage } from '@/components/optimistic-image';
  * across all years. Photos with NULL capture_date are excluded.
  */
 export async function OnThisDayWidget() {
-    const now = new Date();
-    const month = now.getMonth() + 1; // 1–12
-    const day = now.getDate();        // 1–31
+    const { month, day } = getLocalMonthDay();
 
     const [t, locale, photos] = await Promise.all([
         getTranslations('onThisDay'),

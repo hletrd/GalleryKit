@@ -204,7 +204,7 @@ export default async function TimelinePage({
                             <section key={month} aria-labelledby={`month-${month}`}>
                                 <h2
                                     id={`month-${month}`}
-                                    className="text-xl font-semibold mb-3 sticky top-0 bg-background/90 backdrop-blur-sm py-2 z-10"
+                                    className="text-xl font-semibold mb-3 sticky top-16 bg-background/90 backdrop-blur-sm py-2 z-10"
                                 >
                                     {t('monthHeading', { month: monthName, year: selectedYear ?? '' })}
                                     <span className="ml-2 text-sm font-normal text-muted-foreground">

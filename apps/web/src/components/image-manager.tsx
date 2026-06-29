@@ -230,12 +230,15 @@ export function ImageManager({
                 setSelectedIds(new Set());
                 setIsBulkEditDialogOpen(false);
                 router.refresh();
+                return true;
             } else {
                 toast.error(res?.error || t('imageManager.bulkEditFailed'));
+                return false;
             }
         } catch (err) {
             console.error('Failed to bulk edit images:', err);
             toast.error(t('imageManager.bulkEditFailed'));
+            return false;
         }
     };
 

@@ -245,7 +245,7 @@
     "latestUploads": "Latest",
     "metaTitle": "{count} photos",
     "noImages": "No photos.",
-    "emptyHint": "Upload photos from the admin dashboard to start the gallery.",
+    "emptyHint": "Photos will appear here when this gallery is ready.",
     "clearFilter": "Clear",
     "loadingMore": "Loading more images…",
     "loadedMore": "Loaded {count} more images.",
@@ -417,7 +417,8 @@
     "semanticExperimentalHint": "Experimental — results may not match your query.",
     "semanticProductionHint": "Semantic search scans the newest embeddings first. Older photos may not appear until the gallery is fully backfilled or re-embedded.",
     "similarPhotos": "Similar photos",
-    "similarEmpty": "No similar photos found."
+    "similarEmpty": "No similar photos found.",
+    "similarError": "Similar photos are temporarily unavailable while the gallery finishes preparing recommendations."
   },
   "notFound": {
     "description": "Page not found.",
@@ -784,7 +785,7 @@
     "description": "How GalleryKit handles visitor analytics and photo metadata.",
     "intro": "GalleryKit is a self-hosted photo gallery. This site publishes processed photo derivatives and the public metadata needed to browse them.",
     "analyticsTitle": "Analytics",
-    "analyticsEnabled": "This site loads Google Analytics to measure visits and interactions. Google may receive request and device information according to its own policies.",
+    "analyticsEnabled": "This site loads Google Analytics to measure visits and interactions. Google may receive request and device information according to its own policies. GalleryKit also stores first-party photo, topic, and shared-gallery view events for local analytics, including timestamps, bot classification, country and referrer summaries when available, and a short client fingerprint for rate-limited counting. Full IP addresses are not stored in these analytics tables. View events are retained for the configured VIEW_RETENTION_DAYS window, defaulting to 395 days.",
     "analyticsDisabled": "Google Analytics is not configured on this site.",
     "metadataTitle": "Photo Metadata",
     "metadataBody": "Standard gallery and photo pages exclude GPS coordinates. The public map can show coordinates only for topics an admin explicitly marks as map-visible. Upload settings can strip location data from original files before storage when that privacy option is enabled."

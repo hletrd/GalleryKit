@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,12 +14,13 @@ interface PhotoNavigationProps {
     disabled?: boolean;
     buildPhotoPath?: (id: number) => string;
     onSelectId?: (id: number) => void;
+    swipeTargetRef: RefObject<HTMLElement | null>;
 }
 
 const SWIPE_THRESHOLD = 80;
 const VERTICAL_LIMIT = 30;
 
-export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSelectId }: PhotoNavigationProps) {
+export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSelectId, swipeTargetRef }: PhotoNavigationProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
@@ -43,6 +44,8 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
     useEffect(() => {
         // Skip touch handling when lightbox is open — it handles its own navigation
         if (disabled) return;
+        const swipeTarget = swipeTargetRef.current;
+        if (!swipeTarget) return;
 
         const handleTouchStart = (e: TouchEvent) => {
             touchStartX.current = e.changedTouches[0].clientX;
@@ -128,16 +131,16 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             isSwiping.current = false;
         };
 
-        window.addEventListener('touchstart', handleTouchStart, { passive: true });
-        window.addEventListener('touchmove', handleTouchMove, { passive: false });
-        window.addEventListener('touchend', handleTouchEnd, { passive: true });
+        swipeTarget.addEventListener('touchstart', handleTouchStart, { passive: true });
+        swipeTarget.addEventListener('touchmove', handleTouchMove, { passive: false });
+        swipeTarget.addEventListener('touchend', handleTouchEnd, { passive: true });
 
         return () => {
-            window.removeEventListener('touchstart', handleTouchStart);
-            window.removeEventListener('touchmove', handleTouchMove);
-            window.removeEventListener('touchend', handleTouchEnd);
+            swipeTarget.removeEventListener('touchstart', handleTouchStart);
+            swipeTarget.removeEventListener('touchmove', handleTouchMove);
+            swipeTarget.removeEventListener('touchend', handleTouchEnd);
         };
-    }, [goToPhoto, locale, prevId, nextId, router, disabled]);
+    }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef]);
 
     // Opacity of swipe indicators proportional to displacement
     const prevIndicatorOpacity = swipeOffset > 0

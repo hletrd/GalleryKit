@@ -8,11 +8,12 @@ import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, ancho
 interface ImageZoomProps {
     children: React.ReactNode;
     className?: string;
+    accessibleName?: string;
 }
 
 const DOUBLE_TAP_MS = 300;
 
-export function ImageZoom({ children, className }: ImageZoomProps) {
+export function ImageZoom({ children, className, accessibleName }: ImageZoomProps) {
     const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement>(null);
     const innerRef = useRef<HTMLDivElement>(null);
@@ -339,6 +340,8 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     const cursorClass = isZoomed
         ? (isMouseDragging ? 'cursor-grabbing' : 'cursor-grab')
         : 'cursor-zoom-in';
+    const zoomActionLabel = isZoomed ? t('aria.zoomOut') : t('aria.zoomIn');
+    const zoomAriaLabel = accessibleName ? `${accessibleName}. ${zoomActionLabel}` : zoomActionLabel;
 
     return (
         <div
@@ -358,7 +361,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             onTouchEnd={handleTouchEnd}
             role="button"
             tabIndex={0}
-            aria-label={isZoomed ? t('aria.zoomOut') : t('aria.zoomIn')}
+            aria-label={zoomAriaLabel}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleKeyboardToggle(); } }}
         >
             <div

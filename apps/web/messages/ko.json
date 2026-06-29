@@ -245,7 +245,7 @@
     "latestUploads": "최근 사진",
     "metaTitle": "사진 {count}장",
     "noImages": "사진이 없습니다.",
-    "emptyHint": "관리자 대시보드에서 사진을 업로드하면 갤러리가 시작됩니다.",
+    "emptyHint": "갤러리가 준비되면 사진이 여기에 표시됩니다.",
     "clearFilter": "필터 해제",
     "loadingMore": "더 많은 이미지 로드 중…",
     "loadedMore": "이미지 {count}장을 더 불러왔습니다.",
@@ -417,7 +417,8 @@
     "semanticExperimentalHint": "실험적 기능입니다. 검색 결과가 질의와 일치하지 않을 수 있습니다.",
     "semanticProductionHint": "시맨틱 검색은 최신 임베딩부터 제한된 범위로 스캔합니다. 오래된 사진은 전체 백필이나 재임베딩 전까지 검색되지 않을 수 있습니다.",
     "similarPhotos": "비슷한 사진",
-    "similarEmpty": "비슷한 사진을 찾지 못했습니다."
+    "similarEmpty": "비슷한 사진을 찾지 못했습니다.",
+    "similarError": "갤러리가 추천을 준비하는 동안 비슷한 사진을 잠시 사용할 수 없습니다."
   },
   "notFound": {
     "description": "페이지를 찾을 수 없습니다.",
@@ -784,7 +785,7 @@
     "description": "GalleryKit이 방문자 분석과 사진 메타데이터를 처리하는 방식입니다.",
     "intro": "GalleryKit은 직접 호스팅하는 사진 갤러리입니다. 이 사이트는 탐색에 필요한 처리된 사진 파일과 공개 메타데이터만 게시합니다.",
     "analyticsTitle": "분석",
-    "analyticsEnabled": "이 사이트는 방문과 상호작용을 측정하기 위해 Google Analytics를 불러옵니다. Google은 자체 정책에 따라 요청 및 기기 정보를 받을 수 있습니다.",
+    "analyticsEnabled": "이 사이트는 방문과 상호작용을 측정하기 위해 Google Analytics를 불러옵니다. Google은 자체 정책에 따라 요청 및 기기 정보를 받을 수 있습니다. GalleryKit은 로컬 분석을 위해 사진, 토픽, 공유 갤러리 조회 이벤트도 자체 저장합니다. 저장 항목에는 시각, 봇 판정, 가능한 경우 국가와 리퍼러 요약, 그리고 제한된 집계를 위한 짧은 클라이언트 지문이 포함됩니다. 전체 IP 주소는 이 분석 테이블에 저장하지 않습니다. 조회 이벤트 보관 기간은 VIEW_RETENTION_DAYS 설정을 따르며 기본값은 395일입니다.",
     "analyticsDisabled": "이 사이트에는 Google Analytics가 설정되어 있지 않습니다.",
     "metadataTitle": "사진 메타데이터",
     "metadataBody": "일반 갤러리와 사진 페이지에는 GPS 좌표가 포함되지 않습니다. 공개 지도는 관리자가 지도 표시를 명시적으로 켠 토픽의 좌표만 보여 줄 수 있습니다. 개인정보 옵션이 켜져 있으면 업로드 설정에서 원본 파일을 저장하기 전에 위치 정보를 제거할 수 있습니다."

@@ -339,29 +339,29 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                         </h3>
 
                         {/* EXIF grid */}
-                        <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
+                        <dl className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                             {hasExifData(image.camera_model) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.camera')}</p>
-                                    <p className="font-medium truncate" title={nu(image.camera_model)}>{image.camera_model}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.camera')}</dt>
+                                    <dd className="font-medium truncate" title={nu(image.camera_model)}>{image.camera_model}</dd>
                                 </div>
                             )}
                             {hasExifData(image.lens_model) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.lens')}</p>
-                                    <p className="font-medium truncate" title={nu(image.lens_model)}>{image.lens_model}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.lens')}</dt>
+                                    <dd className="font-medium truncate" title={nu(image.lens_model)}>{image.lens_model}</dd>
                                 </div>
                             )}
                             {hasExifData(image.focal_length) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.focalLength')}</p>
-                                    <p className="font-medium">{image.focal_length}mm</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.focalLength')}</dt>
+                                    <dd className="font-medium">{image.focal_length}mm</dd>
                                 </div>
                             )}
                             {hasExifData(image.f_number) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.aperture')}</p>
-                                    <p className="font-medium">f/{Number(image.f_number).toFixed(1)}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.aperture')}</dt>
+                                    <dd className="font-medium">f/{Number(image.f_number).toFixed(1)}</dd>
                                 </div>
                             )}
                             {/* C8-MED-01: use hasExifData guard matching desktop sidebar pattern
@@ -369,77 +369,77 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                 returning a falsy value for invalid input. */}
                             {hasExifData(image.exposure_time) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.shutterSpeed')}</p>
-                                    <p className="font-medium">{formattedShutterSpeed}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.shutterSpeed')}</dt>
+                                    <dd className="font-medium">{formattedShutterSpeed}</dd>
                                 </div>
                             )}
                             {hasExifData(image.iso) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.iso')}</p>
-                                    <p className="font-medium">{image.iso}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.iso')}</dt>
+                                    <dd className="font-medium">{image.iso}</dd>
                                 </div>
                             )}
                             {/* P3-32 / C4-A1: ICC profile name and gamut chip live
                                 exclusively in the Color Details accordion. */}
                             {(image.width > 0 && image.height > 0) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.dimensions')}</p>
-                                    <p className="font-medium">
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.dimensions')}</dt>
+                                    <dd className="font-medium">
                                         {image.width} × {image.height}
                                         <span className="text-muted-foreground text-xs ml-1">
                                             ({(image.width * image.height / 1000000).toFixed(1)} MP)
                                         </span>
-                                    </p>
+                                    </dd>
                                 </div>
                             )}
                             {hasExifData(image.original_format) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.format')}</p>
-                                    <p className="font-medium">
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.format')}</dt>
+                                    <dd className="font-medium">
                                         {image.original_format}
                                         {image.original_file_size && (
                                             <span className="text-muted-foreground text-xs ml-1">
                                                 ({(image.original_file_size / (1024 * 1024)).toFixed(1)} MB)
                                             </span>
                                         )}
-                                    </p>
+                                    </dd>
                                 </div>
                             )}
                             {hasExifData(image.white_balance) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.whiteBalance')}</p>
-                                    <p className="font-medium">{image.white_balance}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.whiteBalance')}</dt>
+                                    <dd className="font-medium">{image.white_balance}</dd>
                                 </div>
                             )}
                             {hasExifData(image.metering_mode) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.meteringMode')}</p>
-                                    <p className="font-medium">{image.metering_mode}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.meteringMode')}</dt>
+                                    <dd className="font-medium">{image.metering_mode}</dd>
                                 </div>
                             )}
                             {hasExifData(image.exposure_compensation) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.exposureComp')}</p>
-                                    <p className="font-medium">{image.exposure_compensation}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.exposureComp')}</dt>
+                                    <dd className="font-medium">{image.exposure_compensation}</dd>
                                 </div>
                             )}
                             {hasExifData(image.exposure_program) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.exposureProgram')}</p>
-                                    <p className="font-medium">{image.exposure_program}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.exposureProgram')}</dt>
+                                    <dd className="font-medium">{image.exposure_program}</dd>
                                 </div>
                             )}
                             {hasExifData(image.flash) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.flash')}</p>
-                                    <p className="font-medium">{image.flash}</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.flash')}</dt>
+                                    <dd className="font-medium">{image.flash}</dd>
                                 </div>
                             )}
                             {/* R15C15 SEC-15-01: bit_depth is admin-only — gate on isAdmin. */}
                             {isAdmin && hasExifData(image.bit_depth) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
-                                    <p className="font-medium">{image.bit_depth}-bit</p>
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</dt>
+                                    <dd className="font-medium">{image.bit_depth}-bit</dd>
                                 </div>
                             )}
                             {/* GPS coordinates: this block is currently unreachable from public photo
@@ -448,19 +448,21 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                 data accessor explicitly includes these fields. See SEC-38-01. */}
                             {(isAdmin && image.latitude != null && image.longitude != null) && (
                                 <div className="col-span-2">
-                                    <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
-                                    <a
+                                    <dt className="text-muted-foreground text-xs">{t('viewer.location')}</dt>
+                                    <dd>
+                                             <a
                                         href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     >
-                                        <MapPin className="h-3 w-3" />
-                                        {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
-                                    </a>
-                                </div>
+	                                        <MapPin className="h-3 w-3" />
+	                                        {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
+	                                    </a>
+                                    </dd>
+	                                </div>
                             )}
-                        </div>
+                        </dl>
                         {!hasAnyCameraExifData(image) && (
                             <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                         )}

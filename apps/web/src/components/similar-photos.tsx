@@ -47,10 +47,9 @@ interface SimilarPhotosProps {
  * AGG-C10-07 (run-6 cycle-1): the `/api/search/similar/[id]` endpoint serves ONLY
  * in production mode (503 otherwise), so in every UI-reachable config (disabled /
  * stub) the toggle would always 503, vanish, and shift the layout below it. The
- * whole control is therefore gated on `semanticSearchMode === 'production'` and
- * renders nothing otherwise — no dead control, no CLS. With the dark default this
- * means the panel is correctly absent in normal deploys. The on-error null return
- * remains as defense-in-depth for a transient 404/429 once production is active.
+ * whole control is therefore gated on `semanticSearchMode === 'production'`. Once
+ * production is active, transient setup/rate-limit/fetch failures stay visible as
+ * localized inline feedback instead of silently removing the panel.
  *
  * Touch targets: the toggle button uses `min-h-11` (44 px), each thumbnail
  * link wraps a 96 px image but the Link itself spans `min-h-11` — both meet
@@ -63,7 +62,7 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
 
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
-    // null = not yet fetched; [] = fetched, empty; [...] = fetched with results; 'error' = hide
+    // null = not yet fetched; [] = fetched, empty; [...] = fetched with results; 'error' = fetched with failure feedback
     const [results, setResults] = useState<SimilarResult[] | null | 'error'>(null);
     const fetchedRef = useRef(false);
 
@@ -77,18 +76,15 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
             try {
                 const res = await fetch(`/api/search/similar/${imageId}`);
                 if (!res.ok) {
-                    // 503 (stub/disabled mode), 404 (no embedding), 429, etc.
-                    // Render nothing — non-production and error cases stay silent.
+                    // 503 (setup/backfill), 404 (no embedding), 429, etc.
                     setResults('error');
-                    setOpen(false);
                     return;
                 }
                 const json = await res.json() as { results?: SimilarResult[] };
                 setResults(json.results ?? []);
             } catch {
-                // Network error — hide panel
+                // Network error — keep panel visible with localized feedback.
                 setResults('error');
-                setOpen(false);
             } finally {
                 setLoading(false);
             }
@@ -99,9 +95,6 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
     // other mode (disabled/stub) so the control is never a dead 503-ing toggle that
     // shifts the layout. Hooks above always run, so this conditional return is safe.
     if (semanticSearchMode !== 'production') return null;
-
-    // If a previous fetch errored, don't render at all
-    if (results === 'error') return null;
 
     const thumbnailSize = imageSizes.includes(128) ? 128 : (imageSizes[0] ?? 640);
 
@@ -131,6 +124,8 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                         <div className="flex items-center justify-center py-4" role="status" aria-live="polite">
                             <span className="text-sm text-muted-foreground animate-pulse motion-reduce:animate-none">{tCommon('loading')}</span>
                         </div>
+                    ) : results === 'error' ? (
+                        <p className="text-sm text-muted-foreground py-2" role="status">{t('similarError')}</p>
                     ) : Array.isArray(results) && results.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-2">{t('similarEmpty')}</p>
                     ) : Array.isArray(results) && results.length > 0 ? (
