@@ -61,6 +61,7 @@ jobs:
         run: |
           npm run lint:api-auth
           npm run lint:action-origin
+          npm run lint:public-route-rate-limit
 
       - name: Unit tests
         run: npm test
