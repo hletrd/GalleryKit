@@ -380,7 +380,6 @@ export function UploadDropzone({
                             className="flex h-11 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
-                            disabled={uploading}
                         >
                             {topics.map(t => (
                                 <option key={t.slug} value={t.slug}>{t.label}</option>
@@ -395,7 +394,6 @@ export function UploadDropzone({
                             selectedTags={selectedTags}
                             onTagsChange={setSelectedTags}
                             placeholder={t('upload.addExistingTag')}
-                            disabled={uploading}
                         />
                         </div>
                     </div>

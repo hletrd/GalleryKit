@@ -41,10 +41,10 @@ export async function cleanupOriginalIfRestoreMaintenanceBegan(
     return true;
 }
 
-export function beginRestoreMaintenance() {
+export function beginRestoreMaintenance(options: { allowExisting?: boolean } = {}) {
     const state = getRestoreMaintenanceState();
     if (state.active) {
-        return false;
+        return options.allowExisting === true;
     }
 
     state.active = true;

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { checkRouteSource } from '../../scripts/check-api-auth';
 
@@ -107,6 +109,14 @@ describe('checkRouteSource — .ts route files', () => {
         const report = checkRouteSource(src, 'api/admin/foo/route.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: api/admin/foo/route.ts']);
+    });
+});
+
+describe('check-api-auth CLI discovery guard', () => {
+    it('fails closed when admin route discovery finds zero files', () => {
+        const source = readFileSync(path.join(process.cwd(), 'scripts/check-api-auth.ts'), 'utf8');
+        expect(source).toContain('No admin API route files found under');
+        expect(source).toContain('process.exit(1)');
     });
 });
 

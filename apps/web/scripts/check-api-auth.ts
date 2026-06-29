@@ -187,8 +187,8 @@ const isCliEntry = require.main === module || (typeof require === 'undefined' &&
 if (isCliEntry) {
     const routeFiles = findRouteFiles(API_ADMIN_DIR);
     if (routeFiles.length === 0) {
-        console.log('No admin API route files found — skipping check.');
-        process.exit(0);
+        console.error(`No admin API route files found under ${API_ADMIN_DIR}; route discovery likely broke.`);
+        process.exit(1);
     }
 
     let failed = false;

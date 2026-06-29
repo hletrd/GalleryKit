@@ -13,7 +13,7 @@ describe('restore/upload writer coordination', () => {
         expect(dbRestoreLockIdx).toBeGreaterThan(-1);
         expect(source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)'))
             .toBeGreaterThan(dbRestoreLockIdx);
-        expect(source.indexOf('if (!beginRestoreMaintenance())'))
+        expect(source.indexOf('if (!beginRestoreMaintenance({ allowExisting: true }))'))
             .toBeGreaterThan(source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)'));
         expect(source).toContain('await uploadContractLock?.release()');
     });
@@ -23,7 +23,7 @@ describe('restore/upload writer coordination', () => {
 
         const uploadLockIdx = source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)');
         const backfillGetLockIdx = source.indexOf('[LOCK_COLOR_PIPELINE_BACKFILL]');
-        const maintenanceIdx = source.indexOf('if (!beginRestoreMaintenance())');
+        const maintenanceIdx = source.indexOf('if (!beginRestoreMaintenance({ allowExisting: true }))');
         expect(uploadLockIdx).toBeGreaterThan(-1);
         expect(backfillGetLockIdx).toBeGreaterThan(uploadLockIdx);
         expect(maintenanceIdx).toBeGreaterThan(backfillGetLockIdx);
@@ -74,6 +74,16 @@ describe('restore/upload writer coordination', () => {
         expect(failRestoreIdx).toBeGreaterThan(-1);
         expect(failResolveIdx).toBeGreaterThan(failRestoreIdx);
         expect(nonzeroWindow).toContain('keepMaintenance: true');
+    });
+
+    it('does not reject corrective restore attempts before advisory-lock acquisition while maintenance is active', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+        const functionStart = source.indexOf('export async function restoreDatabase');
+        const getConnectionIdx = source.indexOf('const conn = await connection.getConnection()', functionStart);
+        const setupWindow = source.slice(functionStart, getConnectionIdx);
+
+        expect(setupWindow).not.toContain('getRestoreMaintenanceMessage');
+        expect(source).toContain('beginRestoreMaintenance({ allowExisting: true })');
     });
 
     it('resumes quiesced image-processing rows when restore exits maintenance after failure', () => {

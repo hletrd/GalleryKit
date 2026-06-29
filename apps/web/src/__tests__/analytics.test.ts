@@ -130,6 +130,17 @@ describe('sanitizeReferrerHost', () => {
         expect(sanitizeReferrerHost('https://gallery.example.com/')).toBe('self');
     });
 
+    it('uses BASE_URL as the same-site host when configured', async () => {
+        vi.resetModules();
+        vi.stubEnv('BASE_URL', 'https://photos.example.net');
+        const { sanitizeReferrerHost: sanitizeWithBaseUrl } = await import('@/lib/analytics');
+
+        expect(sanitizeWithBaseUrl('https://photos.example.net/p/42')).toBe('self');
+        expect(sanitizeWithBaseUrl('https://gallery.example.com/p/42')).toBe('example.com');
+
+        vi.unstubAllEnvs();
+    });
+
     it('normalizes to lowercase', () => {
         expect(sanitizeReferrerHost('https://WWW.GOOGLE.COM/search')).toBe('google.com');
     });

@@ -150,6 +150,37 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when a local helper hides a DB mutation before the same-origin guard', () => {
+        const src = withApprovedActionGuard(`
+            async function writeAuditBeforeGuard() {
+                await db.insert(auditLog).values({ ok: true });
+            }
+            export async function updateFoo(id) {
+                await writeAuditBeforeGuard();
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('fails public exempt actions when a rate-limit result is ignored before mutation', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics action, rate-limited before write */
+            export async function recordThing() {
+                isViewRecordRateLimited('1.2.3.4', Date.now());
+                await db.insert(views).values({ ok: true });
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
     // R15C15 TE-15-03: the raw Next.js cache primitives (not just the project's
     // revalidate* wrappers) must count as mutations so an action calling them
     // before the same-origin guard is flagged.

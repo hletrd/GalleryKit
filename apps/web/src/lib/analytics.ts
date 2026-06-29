@@ -11,6 +11,7 @@
  */
 
 import siteConfig from '@/site-config.json';
+import { BASE_URL } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
 // Bot detection — uses isbot (lightweight, well-maintained UA list)
@@ -138,6 +139,15 @@ function isPrivateHost(host: string): boolean {
 }
 
 function getSiteHost(): string {
+    const configuredUrl = BASE_URL?.trim();
+    if (configuredUrl) {
+        try {
+            return new URL(configuredUrl).hostname.toLowerCase();
+        } catch {
+            // Fall back to the checked-in/runtime site config below.
+        }
+    }
+
     try {
         const url = new URL(siteConfig.url as string);
         return url.hostname.toLowerCase();

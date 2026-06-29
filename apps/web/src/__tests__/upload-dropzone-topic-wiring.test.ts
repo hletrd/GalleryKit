@@ -44,4 +44,13 @@ describe('upload-dropzone topic wiring: latest-wins via ref (R4C7 COR-R4C7-04)',
         // The closure-read regression shape must not come back.
         expect(source).not.toMatch(/formData\.append\(\s*['"]topic['"]\s*,\s*topic\s*\)/);
     });
+
+    it('keeps batch metadata controls interactive while uploading', () => {
+        const source = readSource();
+        const topicSelect = source.slice(source.indexOf('id="upload-topic"'), source.indexOf('</select>', source.indexOf('id="upload-topic"')));
+        const globalTagInput = source.slice(source.indexOf('<TagInput'), source.indexOf('/>', source.indexOf('<TagInput')));
+
+        expect(topicSelect).not.toContain('disabled={uploading}');
+        expect(globalTagInput).not.toContain('disabled={uploading}');
+    });
 });

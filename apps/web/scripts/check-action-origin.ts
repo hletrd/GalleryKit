@@ -231,13 +231,21 @@ const PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES = new Set([
     'isAdmin',
 ]);
 
+const PUBLIC_RATE_LIMIT_HELPER_NAMES = new Set([
+    'checkLoadMoreRateLimit',
+    'preIncrementLoadMoreAttempt',
+    'rollbackLoadMoreAttempt',
+    'rollbackSearchAttempt',
+    'isViewRecordRateLimited',
+]);
+
 /**
  * R4C2 SEC-R4C2-02: generic walker — true when any node in the subtree is a
  * DIRECT mutating call (`.insert(...)` / `.update(...)` / `logAuditEvent(...)`
  * / `revalidate*(...)` etc.). Used both for the pre-guard-mutation ordering
  * check and to reject `@action-origin-exempt` comments on mutating bodies.
  */
-function nodeContainsMutatingCall(root: ts.Node): boolean {
+function nodeContainsMutatingCall(root: ts.Node, localMutatingFunctions: Set<string> = new Set()): boolean {
     let found = false;
     const visit = (node: ts.Node) => {
         if (found) return;
@@ -251,6 +259,10 @@ function nodeContainsMutatingCall(root: ts.Node): boolean {
                 found = true;
                 return;
             }
+            if (ts.isIdentifier(callee) && localMutatingFunctions.has(callee.text)) {
+                found = true;
+                return;
+            }
         }
         ts.forEachChild(node, visit);
     };
@@ -258,8 +270,8 @@ function nodeContainsMutatingCall(root: ts.Node): boolean {
     return found;
 }
 
-function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
-    return nodeContainsMutatingCall(statement);
+function statementContainsPreGuardMutation(statement: ts.Statement, localMutatingFunctions: Set<string>): boolean {
+    return nodeContainsMutatingCall(statement, localMutatingFunctions);
 }
 
 function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
@@ -282,39 +294,119 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
 
 function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     if (!ts.isBlock(body)) return false;
-    let sawRateLimit = false;
+    let sawRateLimitGate = false;
     let sawMutationBeforeRateLimit = false;
-    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt']);
+    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt', 'checkLoadMoreRateLimit']);
+    const rateLimitResultNames = new Set<string>();
 
-    const visit = (node: ts.Node) => {
+    const expressionCallsRateLimit = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (
+                ts.isCallExpression(current)
+                && ts.isIdentifier(current.expression)
+                && publicRateLimitNames.has(current.expression.text)
+            ) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const returnsEarly = (statement: ts.Statement): boolean => {
+        if (ts.isReturnStatement(statement)) return true;
+        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
+        return false;
+    };
+
+    const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
+        if (ts.isVariableStatement(statement)) {
+            for (const decl of statement.declarationList.declarations) {
+                if (
+                    ts.isIdentifier(decl.name)
+                    && decl.initializer
+                    && expressionCallsRateLimit(decl.initializer)
+                ) {
+                    rateLimitResultNames.add(decl.name.text);
+                }
+            }
+            return false;
+        }
+        if (ts.isIfStatement(statement)) {
+            return (
+                (expressionCallsRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
+                && returnsEarly(statement.thenStatement)
+            );
+        }
+        return false;
+    };
+
+    const visitMutation = (node: ts.Node) => {
         if (sawMutationBeforeRateLimit) return;
+        if (ts.isFunctionLike(node)) return;
 
         if (ts.isCallExpression(node)) {
             const callee = node.expression;
-            if (ts.isIdentifier(callee) && publicRateLimitNames.has(callee.text)) {
-                sawRateLimit = true;
-            }
-            if (ts.isPropertyAccessExpression(callee) && MUTATING_METHOD_NAMES.has(callee.name.text) && !sawRateLimit) {
+            if (ts.isPropertyAccessExpression(callee) && MUTATING_METHOD_NAMES.has(callee.name.text) && !sawRateLimitGate) {
                 sawMutationBeforeRateLimit = true;
                 return;
             }
-            if (ts.isIdentifier(callee) && MUTATING_FUNCTION_NAMES.has(callee.text) && !sawRateLimit) {
+            if (ts.isIdentifier(callee) && MUTATING_FUNCTION_NAMES.has(callee.text) && !sawRateLimitGate) {
                 sawMutationBeforeRateLimit = true;
                 return;
             }
         }
 
-        ts.forEachChild(node, visit);
+        ts.forEachChild(node, visitMutation);
+    };
+
+    const processStatement = (statement: ts.Statement) => {
+        if (sawMutationBeforeRateLimit) return;
+
+        if (ts.isBlock(statement)) {
+            for (const nested of statement.statements) processStatement(nested);
+            return;
+        }
+
+        if (ts.isTryStatement(statement)) {
+            for (const nested of statement.tryBlock.statements) processStatement(nested);
+            return;
+        }
+
+        if (statementHasRateLimitGate(statement)) {
+            sawRateLimitGate = true;
+        }
+        visitMutation(statement);
     };
 
     for (const statement of body.statements) {
-        visit(statement);
+        processStatement(statement);
     }
 
-    return sawRateLimit && !sawMutationBeforeRateLimit;
+    return sawRateLimitGate && !sawMutationBeforeRateLimit;
 }
 
-function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set<string>): boolean {
+function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set<string>, localMutatingFunctions: Set<string>): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
     // calling it is not sufficient because callers must return early on that
@@ -331,7 +423,7 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
 
         const preGuardStatements = body.statements.slice(0, index);
         if (
-            preGuardStatements.some(statementContainsPreGuardMutation)
+            preGuardStatements.some((statement) => statementContainsPreGuardMutation(statement, localMutatingFunctions))
             || preGuardStatements.some(statementContainsPreOriginAuthRead)
         ) {
             return false;
@@ -342,7 +434,7 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
                 return true;
             }
             if (
-                statementContainsPreGuardMutation(followingStatement)
+                statementContainsPreGuardMutation(followingStatement, localMutatingFunctions)
                 || statementContainsPreOriginAuthRead(followingStatement)
             ) {
                 return false;
@@ -379,6 +471,31 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const report: CheckReport = { passed: [], failed: [], skipped: [] };
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
+    const localMutatingFunctions = new Set<string>();
+
+    for (const statement of sourceFile.statements) {
+        if (
+            ts.isFunctionDeclaration(statement)
+            && statement.name
+            && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(statement.name.text)
+            && statement.body
+            && nodeContainsMutatingCall(statement.body)
+        ) {
+            localMutatingFunctions.add(statement.name.text);
+            continue;
+        }
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const decl of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
+            if (
+                (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
+                && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(decl.name.text)
+                && nodeContainsMutatingCall(decl.initializer.body)
+            ) {
+                localMutatingFunctions.add(decl.name.text);
+            }
+        }
+    }
 
     const lineOf = (node: ts.Node) =>
         sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
@@ -391,7 +508,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             // entirely — the guard could later be refactored away with the
             // gate still green. An exempt comment on a body containing a
             // direct mutating call is therefore a hard failure, not a skip.
-            if (body && nodeContainsMutatingCall(body)) {
+            if (body && nodeContainsMutatingCall(body, localMutatingFunctions)) {
                 if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body)) {
                     report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);
                     return;
@@ -410,7 +527,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             return;
         }
 
-        if (!functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports)) {
+        if (!functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports, localMutatingFunctions)) {
             report.failed.push(
                 `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
             );

@@ -310,7 +310,19 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             { imageId: 1, embedding: 'c29tZV9iYXNlNjRfc3RyaW5nX3RoYXRfaXNfZW5jb3VnaF9sb25nX2Zvcg==' },
         ];
         const mockImageRows = [
-            { id: 1, title: 'Mountain', description: 'A mountain', filename_jpeg: 'mountain.jpg', width: 1920, height: 1080, topic: 'nature', topic_label: 'Nature', camera_model: 'Sony A7IV' },
+            {
+                id: 1,
+                title: 'Mountain',
+                description: 'A mountain',
+                filename_jpeg: 'mountain.jpg',
+                width: 1920,
+                height: 1080,
+                topic: 'nature',
+                topic_label: 'Nature',
+                camera_model: 'Sony A7IV',
+                lens_model: 'FE 35mm f/1.4',
+                capture_date: '2026-02-03 04:05:06',
+            },
         ];
 
         // AGG-R5C3-07 (TEST-R5C3-07): table-keyed dispatch (mirrors the
@@ -361,6 +373,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(json.results.length).toBeGreaterThan(0);
         expect(json.results[0].imageId).toBe(1);
         expect(json.results[0].filename_jpeg).toBe('mountain.jpg');
+        expect(json.results[0]).toHaveProperty('lens_model', 'FE 35mm f/1.4');
+        expect(json.results[0]).toHaveProperty('capture_date', '2026-02-03 04:05:06');
     });
 
     it('skips malformed scanned embedding rows without failing the whole query', async () => {

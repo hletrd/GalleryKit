@@ -287,10 +287,6 @@ export async function dumpDatabase() {
 
 export async function restoreDatabase(formData: FormData) {
     const t = await getTranslations('serverActions');
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { success: false, error: maintenanceError };
-    }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { success: false, error: originError };
@@ -352,7 +348,7 @@ export async function restoreDatabase(formData: FormData) {
         }
         backfillLockHeld = true;
 
-        if (!beginRestoreMaintenance()) {
+        if (!beginRestoreMaintenance({ allowExisting: true })) {
             // C7R-RPL-02 / AGG7R-02: explicitly RELEASE_LOCK on this
             // early-return path. The original code skipped the inner
             // try/finally whose RELEASE_LOCK statement is the only one

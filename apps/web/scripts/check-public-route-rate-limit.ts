@@ -129,14 +129,12 @@ function isKnownMutationCall(node: ts.CallExpression): boolean {
 function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
     if (!body) return false;
 
-    let sawRateLimit = false;
+    let sawRateLimitGate = false;
     let sawMutation = false;
+    const rateLimitResultNames = new Set<string>();
 
     const inspectExpression = (node: ts.Node) => {
         if (ts.isCallExpression(node)) {
-            if (isRateLimitHelperCall(node, approvedRateLimitImports)) {
-                sawRateLimit = true;
-            }
             if (isKnownMutationCall(node)) {
                 sawMutation = true;
             }
@@ -159,23 +157,47 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRat
         return found;
     };
 
-    const statementHasExecutedRateLimit = (statement: ts.Statement): boolean => {
-        if (ts.isExpressionStatement(statement)) {
-            return expressionHasTopLevelRateLimit(statement.expression);
-        }
+    const conditionReturnsEarly = (statement: ts.Statement): boolean => {
+        if (ts.isReturnStatement(statement)) return true;
+        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
+        return false;
+    };
+
+    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
         if (ts.isVariableStatement(statement)) {
-            return statement.declarationList.declarations.some((decl) => (
-                decl.initializer ? expressionHasTopLevelRateLimit(decl.initializer) : false
-            ));
+            for (const decl of statement.declarationList.declarations) {
+                if (
+                    ts.isIdentifier(decl.name)
+                    && decl.initializer
+                    && expressionHasTopLevelRateLimit(decl.initializer)
+                ) {
+                    rateLimitResultNames.add(decl.name.text);
+                }
+            }
+            return false;
         }
         if (ts.isIfStatement(statement)) {
-            // Only the condition dominates the following statements. A helper
-            // hidden in the then/else body may be unreachable or branch-only,
-            // so it cannot satisfy the pre-mutation gate.
-            return expressionHasTopLevelRateLimit(statement.expression);
-        }
-        if (ts.isReturnStatement(statement) && statement.expression) {
-            return expressionHasTopLevelRateLimit(statement.expression);
+            // The helper result must dominate subsequent mutation by returning
+            // early on over-limit. A bare helper call is not enough.
+            return (
+                (expressionHasTopLevelRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
+                && conditionReturnsEarly(statement.thenStatement)
+            );
         }
         return false;
     };
@@ -190,11 +212,11 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRat
             ts.forEachChild(node, visit);
         };
         visit(statement);
-        if (statementHasMutation && !sawRateLimit) {
+        if (statementHasMutation && !sawRateLimitGate) {
             sawMutation = true;
         }
-        if (statementHasExecutedRateLimit(statement)) {
-            sawRateLimit = true;
+        if (statementHasRateLimitGate(statement)) {
+            sawRateLimitGate = true;
         }
     };
 
@@ -206,7 +228,7 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRat
         inspectExpression(body);
     }
 
-    return sawRateLimit && !sawMutation;
+    return sawRateLimitGate && !sawMutation;
 }
 
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {
@@ -326,8 +348,8 @@ const isCliEntry = (typeof require !== 'undefined' && require.main === module) |
 if (isCliEntry) {
     const allRoutes = findRouteFiles(API_DIR).filter((f) => !f.startsWith(ADMIN_PREFIX));
     if (allRoutes.length === 0) {
-        console.log('No public API route files found — skipping check.');
-        process.exit(0);
+        console.error(`No public API route files found under ${API_DIR}; route discovery likely broke.`);
+        process.exit(1);
     }
     let failed = false;
     for (const file of allRoutes) {

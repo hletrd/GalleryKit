@@ -473,9 +473,6 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                         setUseSemanticSearch(checked);
                                         setResults([]);
                                         setSearchStatus(null);
-                                        if (query.trim()) {
-                                            performSearch(query, checked);
-                                        }
                                     }}
                                     aria-describedby={semanticSearchMode === 'stub' ? 'semantic-search-hint' : undefined}
                                     aria-label={t('search.semanticToggle')}
