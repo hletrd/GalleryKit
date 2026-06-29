@@ -1,8 +1,8 @@
-# Cycle 11 Critic Review
+# Cycle 12 Critic Review
 
-Review target: current `master` HEAD `5fa4a5a6`.
+Review target: current `master` HEAD `155f684f`.
 
-Scope: PROMPT 1 / Cycle 11 critic lane. I did not edit production code. This report is the only intended output.
+Scope: review-plan-fix cycle 12 critic lane. I did not implement fixes, delete files, or revert other work. This report is the intended output.
 
 ## Inventory and Evidence
 
@@ -10,50 +10,28 @@ Repository guidance reviewed:
 - `AGENTS.md`
 - `CLAUDE.md`
 - Code-review skill instructions
-- Prior top-level critic report at `.context/reviews/critic.md` and recent cycle review history under `.context/reviews/`
-
-Baseline and change surface:
-- `git status --short --branch` was clean before writing this report.
-- There was no uncommitted diff, so I treated current `master` as the review surface.
-- Recent runtime change surface is concentrated in commit `d5d79e17 fix(cycle-10): close review findings`, with changes across upload actions, semantic search, image queue bootstrap, image derivative cleanup, delete cleanup, UI copy, and privacy/footer/shared-group pages.
+- Prior committed review/plan history under `.context/reviews/` and `.context/plans/`
+- Existing top-level critic report at this path before replacement
 
 Inventory built before findings:
-- App routes/pages: `apps/web/src/app/**`
-- Public/admin actions: `apps/web/src/app/actions/**`, `apps/web/src/app/[locale]/admin/db-actions.ts`
-- Public/admin APIs: `apps/web/src/app/api/**`
-- Core libraries: `apps/web/src/lib/**`, especially queue, image processing, upload paths, rate limits, semantic search, tags, and data privacy selectors
-- Schema/migrations: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`
-- Runtime/deploy surfaces: `apps/web/Dockerfile`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/scripts/**`
-- Tests and source-contract gates: `apps/web/src/__tests__/**`
-- Localization/UI copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, changed public/admin components
+- 568 files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`
+- 2324 tracked review-relevant paths after adding deploy/config/docs/history surfaces and excluding dependency/build/test-output artifacts
+- App routes/pages/API handlers: `apps/web/src/app/**`
+- Server actions and admin flows: `apps/web/src/app/actions/**`, admin page/action files
+- Core libraries: `apps/web/src/lib/**`
+- Schema/migration path: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`
+- Runtime/deploy: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, root/app package/config files
+- Tests/source-contract gates: `apps/web/src/__tests__/**`, `apps/web/e2e/**`, lint scripts
+- Docs/review history: `CLAUDE.md`, `AGENTS.md`, `.context/**`
 
-Focused files examined:
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/clip-model.ts`
-- `apps/web/src/db/index.ts`
-- `apps/web/src/__tests__/image-queue-embed-wiring.test.ts`
-- `apps/web/src/__tests__/image-queue-bootstrap.test.ts`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/__tests__/semantic-search-route.test.ts`
-- `apps/web/src/__tests__/cycle-10-source-contracts.test.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/lib/tag-records.ts`
-- `apps/web/src/components/upload-dropzone.tsx`
-- `apps/web/src/components/image-manager.tsx`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/upload-paths.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/__tests__/public-actions.test.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/components/footer.tsx`
+Review method:
+- No random sampling: every path in the inventory was included in repo-wide scans for auth/origin/rate-limit guards, migration/schema drift, unsafe HTML/script sinks, file IO, process execution, uploads, env/config, public projections, TODOs, and source-contract tests.
+- High-risk surfaces were then read directly: semantic search, similar search, public pages with JSON-LD, public actions, admin image actions, LR upload, image queue, image processing, upload limits/tracker, data privacy selectors, analytics, schema, all migration SQL, migration runner, nginx, Next config, deploy contracts, and the relevant tests.
+- Excluded as non-review source: `node_modules`, `.next`, `.claude/worktrees`, `test-results`, screenshots, generated build artifacts, and binary/media payloads.
 
 ## Findings
 
-### C11-CRIT-01 - Confirmed: missing-embedding bootstrap now schedules an unbounded number of side effects
+### C12-CRIT-01 - Confirmed: current schema columns still do not have a journaled migration applier, and journal-covered databases can skip the only repair path
 
 Severity: High
 
@@ -62,72 +40,89 @@ Confidence: High
 Status: Confirmed
 
 Code regions:
-- `apps/web/src/lib/image-queue.ts:370-420` changed `bootstrapMissingActiveEmbeddings` from one bounded `limit(50)` retry batch into a cursor loop that keeps selecting batches until every processed row missing the active model embedding has been visited.
-- `apps/web/src/lib/image-queue.ts:402-412` launches each row through `trackQueueSideEffect(...)` immediately and does not await the batch before fetching/scheduling the next batch.
-- `apps/web/src/lib/image-queue.ts:326-330` only records those promises for drain/shutdown; it is not a concurrency limiter.
-- `apps/web/src/lib/image-queue.ts:333-367` each side effect eventually writes to `image_embeddings` through the shared DB pool.
-- `apps/web/src/db/index.ts:23-34` the shared MySQL pool has `connectionLimit: 10` and `queueLimit: 20`.
-- `apps/web/src/lib/clip-model.ts:53-70` limits real CLIP inference, but the waiter queue is unbounded; in stub mode there is no inference slot before the DB insert.
-- `apps/web/src/__tests__/image-queue-embed-wiring.test.ts:45-52` still only source-checks that a `limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE)` exists; it does not assert that only one batch is in flight, that side effects are awaited, or that DB writes are bounded.
+- `apps/web/src/db/schema.ts:73-75` declares `images.was_downscaled`.
+- `apps/web/src/db/schema.ts:102-108` declares `processing_error`, `failed_at`, and `processing_settings_json`.
+- `apps/web/scripts/migrate.js:418` adds `was_downscaled` only through `reconcileLegacySchema`.
+- `apps/web/scripts/migrate.js:424-426` adds `processing_error`, `failed_at`, and `processing_settings_json` only through `reconcileLegacySchema`.
+- `apps/web/scripts/migrate.js:748-753` returns early when every journal hash is already recorded, so the reconcile repair path does not run for a journal-covered database.
+- `apps/web/drizzle/0025_processing_settings_snapshot.sql:1-2` adds `processing_settings_json AFTER failed_at`, but no earlier journaled SQL migration creates `failed_at`.
+- `apps/web/src/app/actions/images.ts:451` writes `processing_settings_json` during upload insert.
+- `apps/web/src/lib/image-queue.ts:655-657` writes `was_downscaled`, `avif_10bit`, `processing_error`, `failed_at`, and clears `processing_settings_json` on successful processing.
+- `apps/web/src/lib/image-queue.ts:796-798` persists `processing_error` and `failed_at` after retry exhaustion.
+- `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-102` only asserts that `migrate.js` mentions every schema column; it does not prove a journaled applier or a guaranteed reconcile trigger exists.
+- `apps/web/src/__tests__/migration-journal.test.ts:108-114` asserts journal tag to SQL file coverage, while the file comments at `apps/web/src/__tests__/migration-journal.test.ts:37-40` explicitly note the reverse direction is not asserted.
 
 Failure scenario:
-An operator enables stub semantic search on a gallery with hundreds or thousands of processed photos that do not yet have stub embeddings, or production mode after rows are missing the active production model version. On bootstrap, the loop pages through all missing rows and starts one promise per image. In stub mode those promises synchronously create embeddings and then all hit the DB insert path concurrently; with a 10-connection pool and queue limit 20, most writes beyond the first small wave can reject with pool queue exhaustion. The catch at `image-queue.ts:409-410` logs and drops the failure, while the bootstrap state can still be marked complete by the main bootstrap path. The result is a noisy startup and a partially populated embedding table that may not be retried until a later bootstrap/reset.
+Any database whose `__drizzle_migrations` table contains every current journal hash but whose `images` table lacks one of these reconcile-only columns will pass `prepareLegacyDatabaseIfNeeded` without repair. The next upload or queue pass can then fail with an unknown-column error, for example when upload insert writes `processing_settings_json` or when the queue updates `was_downscaled`, `processing_error`, or `failed_at`.
 
-In production mode, `CLIP_INFERENCE_CONCURRENCY` prevents simultaneous model execution, but the code still creates an unbounded waiter/promise set for every missing image, outside the image-processing queue and outside the backfill concurrency budget described in `CLAUDE.md`. If a model-version bump or table repair makes thousands of rows missing, startup can accumulate thousands of long-lived side-effect promises and duplicate work can be scheduled by later bootstrap passes before earlier side effects finish.
+This is not only theoretical drift. The committed SQL chain is not self-contained: direct replay of journaled SQL reaches `0025_processing_settings_snapshot.sql`, which depends on `failed_at` even though no prior journaled migration creates it. The supported `migrate.js` fresh path currently avoids that by reconciling and baselining, but the early-return branch leaves journal-covered drift invisible.
 
-Concrete fix:
-Keep the cursor loop, but make the retry work bounded and awaited. For example, process each selected batch with a small concurrency limiter that is no larger than the DB/CLIP budget, `await Promise.allSettled(...)` for that batch, then fetch the next batch. Alternatively, enqueue missing-embedding retries onto the existing queue or a dedicated `PQueue` with explicit concurrency. Add a behavioral test that simulates more than 50 missing rows and asserts the second page is not scheduled until the first page's side effects have settled, and that active embedding writes never exceed the intended concurrency.
+Suggested fix:
+Add a new post-`0027` journaled repair migration that idempotently creates the missing columns before any dependent column placement, using `INFORMATION_SCHEMA`-guarded dynamic SQL or another MySQL-safe idempotent pattern. Alternatively, move a cheap current-schema drift assertion before the `journalCovered` early return and fail deploy loudly if any schema column required by current code is missing. Add a regression test that models a journal-covered database missing these columns and asserts migration does not return cleanly without applying or reporting the repair. Also add a schema-to-applier tripwire: every current Drizzle column must be backed by either journaled SQL or an explicit tested reconcile trigger.
 
-### C11-CRIT-02 - Confirmed: pre-body semantic aborts are charged against the public search rate limit
+Cross-perspective impact:
+- Architecture/correctness: schema truth is split between Drizzle schema, journal SQL, and reconcile side effects.
+- Operations: deploy can report migrations complete while runtime writes fail.
+- Tests: existing tripwires validate source shape, not the journal-covered drift branch that matters here.
+
+### C12-CRIT-02 - Confirmed risk: the Lightroom upload route parses oversized files before enforcing the 200 MiB per-file cap
 
 Severity: Medium
 
 Confidence: High
 
-Status: Confirmed
+Status: Confirmed risk
 
 Code regions:
-- `apps/web/src/app/api/search/semantic/route.ts:186-200` pre-increments the semantic rate-limit bucket, then returns `499` if `request.signal.aborted` is already true.
-- `apps/web/src/app/api/search/semantic/route.ts:202-205` reads the body only after that abort check, so this branch can consume a rate-limit token before the request body, embedding CPU, or vector scan is admitted.
-- `apps/web/src/app/api/search/semantic/route.ts:37` imports only `preIncrementSemanticAttempt`, not `rollbackSemanticAttempt`.
-- `apps/web/src/lib/rate-limit.ts:340-343` still documents `rollbackSemanticAttempt` for requests that exit before the guarded embedding/vector-scan resource is consumed.
-- `apps/web/src/components/search.tsx:181-190` intentionally aborts the prior semantic fetch whenever a newer semantic request starts, and `apps/web/src/components/search.tsx:258-261` aborts on unmount.
-- `apps/web/src/__tests__/cycle-10-source-contracts.test.ts:58-66` source-checks that client/server abort handling exists but does not assert refund/charging behavior for a pre-body abort.
+- `apps/web/src/lib/upload-limits.ts:1-3` defines a 2 GiB rolling upload window and a 200 MiB per-file upload cap.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:85-98` validates `Content-Length` only against `MAX_TOTAL_UPLOAD_BYTES`, not `MAX_UPLOAD_FILE_BYTES`.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:115-123` pre-claims the rolling byte window using the declared request size.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:139-144` calls `await request.formData()` before any per-file size check can run.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:147-152` reads `fileEntry.size` but does not reject when it exceeds the 200 MiB cap.
+- `apps/web/src/lib/process-image.ts:887-890` eventually rejects files larger than `MAX_FILE_SIZE`, but only after the route has already materialized the multipart body into a `File`.
+- `apps/web/src/components/upload-dropzone.tsx:151-156` filters oversized files on the browser path before upload, so LR is the parity outlier.
+- `apps/web/nginx/default.conf:122-132` gives the documented production LR route a 216 MiB edge cap, which masks the route bug only when this exact nginx layer is present and correctly ordered.
+- `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:237-247` source-checks pre-body cumulative-window enforcement but imports/asserts only `MAX_TOTAL_UPLOAD_BYTES` and `UPLOAD_MAX_FILES_PER_WINDOW`, not `MAX_UPLOAD_FILE_BYTES`.
 
 Failure scenario:
-A visitor uses semantic search and types or toggles quickly enough that the client aborts stale requests. If the server observes the abort at the first check, the route returns 499 before `request.text()`, before embedding, and before the DB scan, but the request still burns one of the 30/min semantic attempts. A normal user can therefore be pushed into 429s by canceled stale searches that the new abort path was supposed to make cheap. This also contradicts the helper contract that exits before the guarded semantic resource can be rolled back.
+A valid PAT caller, an internal client, a local/dev caller, or a deployment that reaches the Next process without the documented nginx cap can send a multipart body well above 200 MiB but below the 2 GiB rolling window. The LR route accepts the declared size, pre-claims quota, and asks Next to parse the full multipart body before `saveOriginalAndGetMetadata` rejects the file. That turns an intended application-level per-file cap into a post-parse validation, consuming memory/temp storage/CPU and creating operational DoS risk on the upload worker.
 
-Concrete fix:
-Check `isRequestAborted(request)` before `preIncrementSemanticAttempt`, or call `rollbackSemanticAttempt(ip)` on the specific line-198 pre-body abort branch. Keep later abort branches charged after body admission or embedding/scan admission if that is the intended DoS posture. Add a route test with an already-aborted `NextRequest` that asserts status 499 and either no pre-increment or an explicit rollback before `request.text()` is called.
+The current production nginx config reduces the blast radius, but the route comments say the LR path reuses the same upload infrastructure and enforces the app-level 200 MiB cap. That claim is only true after body parsing.
 
-### C11-CRIT-03 - Risk: upload tag records can be created before any image is accepted
+Suggested fix:
+Import `MAX_UPLOAD_FILE_BYTES` in the LR route and reject declared `Content-Length` values above `MAX_UPLOAD_FILE_BYTES + SERVER_ACTION_BODY_OVERHEAD_BYTES` before `request.formData()`. After parsing, immediately reject `fileEntry.size > MAX_UPLOAD_FILE_BYTES` before filename/topic/settings work and before image processing. If multipart overhead makes a strict pre-body cap awkward, use a route-local constant aligned with the nginx 216 MiB budget and keep the exact `fileEntry.size` check after parse. Add a route/source test that the LR path imports `MAX_UPLOAD_FILE_BYTES`, performs a pre-`formData()` declared-size guard, and performs a post-parse file-size guard.
 
-Severity: Low
+Cross-perspective impact:
+- Security/operations: proxy configuration is currently carrying the primary protection for one upload ingress.
+- UX/correctness: browser uploads silently skip oversized files before transfer, while LR can spend the whole upload only to fail after parsing.
+- Tests/maintainability: existing source-contract coverage checks cumulative quota but omits the per-file invariant that the product docs rely on.
 
-Confidence: Medium
+## Cross-Agent-Style Agreement Signals
 
-Status: Risk
+I independently saw the same pattern from multiple review lenses:
+- Migration drift is called out repeatedly in code comments and tests, yet the current assertion set still permits schema columns that are reconcile-only and invisible to journal-covered databases. Architecture, operations, and test lenses converge on the same failure mode.
+- Browser/LR upload parity is a repeated explicit goal in the LR route comments, nginx comments, and source-contract tests. The omitted per-file pre-parse guard is therefore not a stylistic preference; it is a missed invariant across security, UX, and operational boundaries.
 
-Code regions:
-- `apps/web/src/app/actions/images.ts:295-323` now resolves and creates requested tag records before entering the per-file processing loop.
-- `apps/web/src/app/actions/images.ts:339-360` can then reject the file before any image row is inserted, for example on HDR rejection when `allow_hdr_ingest` is off.
-- `apps/web/src/lib/tag-records.ts:66-68` `ensureTagRecord` performs an `insert(tags).ignore().values(...)` before selecting the tag record.
-- The normal browser uploader sends one file per action (`apps/web/src/components/upload-dropzone.tsx:219-239`), so this is not a large batch problem in the current UI, but the server action still accepts multiple files and this path is reachable for a single rejected file.
-- `apps/web/src/__tests__/images-actions.test.ts:422-458` covers HDR rejection but uses empty tags, so it does not lock the "no tag side effect on rejected upload" contract.
+## Final Sweep
 
-Failure scenario:
-An admin submits a file with a new tag, but the file is rejected before image insertion, such as an HDR file while HDR ingest is disabled or a later metadata/save failure. The upload returns an error and no photo exists, but the new tag row can remain in the admin tag list with count 0. That is not data loss, but it is surprising persistent state from a failed upload and differs from the previous per-file/per-success tag creation posture.
+Commonly missed issue classes checked:
+- Admin API auth wrapping through `withAdminAuth`.
+- Mutating server action same-origin guards.
+- Public mutating API rate-limit pre-increment helpers and documented exemptions.
+- Public privacy projections for admin-only fields.
+- JSON-LD injection sites and CSP nonce use.
+- Upload filename/path traversal and original-file serving controls.
+- Semantic-search body caps, same-origin checks, and expensive-resource rate-limit posture.
+- Public analytics pre-lookup rate limiting and crawler behavior.
+- Deployment/body-size contracts across Next config and nginx.
+- Migration journal monotonicity, reconcile coverage, and schema-runtime write sites.
+- Touch-target/a11y-related test surfaces and localized public copy surfaces.
 
-Concrete fix:
-Resolve existing tags before the loop with `findTagRecordByNameOrSlug`, but defer creation of missing tags until after a file has passed the pre-insert rejection gates or until the image insert transaction. For multi-file server-action callers, create tags lazily on first successful image and reuse the resolved records for later successful files. Add a regression that uploads a rejected HDR file with a new tag and asserts `ensureTagRecord` is not called, or explicitly document that failed uploads may create empty tags if that tradeoff is intentional.
+No additional high-confidence findings were promoted from that sweep. One low-risk documentation wart remains: `apps/web/src/lib/safe-json-ld.ts:4` says ``<` -> `<`` even though the implementation at `apps/web/src/lib/safe-json-ld.ts:15-19` correctly escapes to `\\u003c` / `\\u003e`; that comment should be fixed when nearby security-helper docs are touched, but I did not treat it as a cycle-blocking product issue.
 
-## Missed-Issues Sweep Notes
-
-No additional confirmed findings from the final sweep:
-- The Cycle 10 analytics limiter fix is present: `recordPhotoView`, `recordTopicView`, and `recordSharedGroupView` now call `headers()` / `buildViewParams()` / `isViewRecordRateLimited()` before public-target DB lookups, and the public-actions tests were updated to expect pre-lookup header reads.
-- The derivative re-encode cleanup was changed from `writtenSizedPaths` deletion to backup/restore of pre-existing final paths. I did not find a direct correctness break in the new restore logic, though its source-contract test is mostly string-shape based rather than an end-to-end failure simulation.
-- Delete cleanup now surfaces strict unlink failures through `cleanupFailureCount`, and `ImageManager` shows warning toasts for single and bulk deletes.
-- The LR upload route comments were corrected away from claiming GalleryKit bundles a Lightroom plugin; the route still reuses upload infrastructure and remains wrapped by `withAdminAuth`.
-- Shared-group grid dimensions now guard zero width/height before constructing `aspect-ratio` and `contain-intrinsic-size`.
-- The privacy page/footer addition is gated on configured Google Analytics and does not expose admin-only fields.
-- Existing lint-gate/source-contract coverage is broad, but several of the newest checks are source-shape assertions rather than behavioral tests; the two highest-risk findings above both pass those current source-shape checks.
+Verification performed for this review:
+- Read project guidance and code-review skill.
+- Built the review inventory before findings.
+- Ran repository-wide scans for guard coverage, unsafe sinks, upload limits, schema/migration drift, env/config, and TODO/source-contract patterns.
+- Read the high-risk files and all migration SQL relevant to the findings.
+- No lint/typecheck/test suite was run because this was a review-only artifact and no production code was modified.
