@@ -1,141 +1,64 @@
-# Cycle 9 Performance Review
+# Cycle 10 Performance Review
 
 Date: 2026-06-29
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `adb1ae67 build(pwa): refresh service worker version`
-Role: cycle 9 `perf-reviewer`
+HEAD reviewed: `4fd8bf3b docs(review): preserve cycle 10 verifier evidence`
+Role: cycle 10 `perf-reviewer`
 
 ## Scope And Method
 
-I read `AGENTS.md` and `CLAUDE.md` first, then reviewed the repository performance surface directly rather than sampling only a subset. The review covered public and admin request paths, database access shape and indexes, upload and image processing, queues and async side effects, service worker caching, client rendering, network payloads, memory pressure, and concurrency/race hazards.
+This was a read-only performance, concurrency, CPU, memory, and UI responsiveness review of the current repository. The only file modified by this prompt is this report.
 
-Review evidence came from direct source inspection with line-numbered reads across `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/public`, `apps/web/deploy.sh`, package/config files, and prior review/plan context under `.context/reviews` and `.context/plans`.
+I read `AGENTS.md` and `CLAUDE.md`, built a repository inventory, then reviewed cross-file behavior across request paths, DB access, upload/processing queues, CLIP search, image encoding, admin maintenance, client rendering, and existing tests/review context. Classifications:
+
+- Confirmed: directly present in the current code path.
+- Likely: code path is present and failure depends on realistic configuration, traffic, or data size.
+- Risk: scale- or operator-dependent issue worth addressing before growth, but not a default-path failure.
 
 ## Review-Relevant Inventory
 
-### Public read paths
+Configuration and runtime: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/meta/_journal.json`, current migrations, `apps/web/scripts/migrate.js`, `CLAUDE.md`.
 
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/image/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
-- `apps/web/src/app/[locale]/(public)/rss.xml/route.ts`
-- `apps/web/src/app/api/images/route.ts`
-- `apps/web/src/app/api/topic-images/[topic]/route.ts`
-- `apps/web/src/app/api/smart-collections/[slug]/images/route.ts`
-- `apps/web/src/app/api/search/route.ts`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/app/api/images/[id]/view/route.ts`
-- `apps/web/src/app/api/topics/[topic]/view/route.ts`
-- `apps/web/src/app/api/shared-groups/[key]/view/route.ts`
+Public pages and API paths: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `c/[slug]/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `map/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, OG routes, feed/sitemap routes, health/live routes.
 
-### Database and query modules
+Data/query layer: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `smart-collections.ts`, `analytics-data.ts`, `view-retention.ts`, `rate-limit.ts`, `bounded-map.ts`, `gallery-config.ts`, `gallery-config-shared.ts`, `tag-records.ts`, `tag-slugs.ts`, `serve-upload.ts`, `og-photo-fetch.ts`.
 
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/data-timeline.ts`
-- `apps/web/src/lib/analytics-data.ts`
-- `apps/web/src/lib/view-retention.ts`
-- `apps/web/src/lib/view-tracker.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/db/schema.ts`
-- `apps/web/src/db/index.ts`
-- `apps/web/drizzle/*.sql`
-- `apps/web/drizzle/meta/_journal.json`
-- `apps/web/scripts/migrate.js`
+Upload, image, queue, and CLIP surfaces: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/lib/image-queue.ts`, `admin-backfill-runner.ts`, `process-image.ts`, `upload-limits.ts`, `upload-processing-contract-lock.ts`, `upload-tracker-state.ts`, `clip-model.ts`, `clip-embeddings.ts`, `clip-captions.ts`, `clip-weights.ts`, `upload-paths.ts`, storage helpers, and related scripts under `apps/web/scripts`.
 
-### Upload, image processing, queues, and CPU-heavy work
+Client/UI responsiveness: `home-client.tsx`, `load-more.tsx`, `search.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `similar-photos.tsx`, `histogram.tsx`, `public/histogram-worker.js`, map components, navigation components, upload/admin components, display-capability hooks, and service worker files.
 
-- `apps/web/src/components/upload-dropzone.tsx`
-- `apps/web/src/app/api/admin/upload/route.ts`
-- `apps/web/src/lib/upload-tracker.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/blur-placeholder.ts`
-- `apps/web/src/lib/server-action-throttle.ts`
-- `apps/web/src/lib/clip-model.ts`
-- `apps/web/src/lib/clip-embeddings.ts`
-- `apps/web/src/lib/clip-captions.ts`
-- `apps/web/src/lib/clip-weights.ts`
-
-### Client rendering, payload, and perceived performance
-
-- `apps/web/src/components/grid-picture.tsx`
-- `apps/web/src/components/infinite-grid.tsx`
-- `apps/web/src/components/admin/image-manager.tsx`
-- `apps/web/src/components/site-header.tsx`
-- `apps/web/src/components/service-worker-register.tsx`
-- `apps/web/src/components/share-actions.tsx`
-- `apps/web/public/sw.template.js`
-- `apps/web/public/sw.js`
-- `apps/web/scripts/generate-sw.mjs`
-
-### Configuration and operational files
-
-- `apps/web/next.config.ts`
-- `apps/web/package.json`
-- root `package.json`
-- `apps/web/deploy.sh`
-- `apps/web/Dockerfile`
-- `apps/web/src/middleware.ts`
-- `apps/web/src/lib/runtime-config.ts`
+Tests and static review anchors: searched `apps/web/src/__tests__` for existing performance, queue, privacy, semantic, timeline, smart collection, upload, and lock coverage; reviewed prior `.context/reviews/perf-reviewer.md` to avoid carrying fixed findings blindly.
 
 ## Findings
 
-### PERF-C9-01: First-page public listing queries still aggregate and count the full matched set
-
-Status: Confirmed issue
-Severity: High
-Confidence: High
-
-Code regions:
-
-- `apps/web/src/lib/data.ts:877-905` in `getImagesLitePage`
-- `apps/web/src/lib/data.ts:1437-1452` in `getImagesForSmartCollection`
-- `apps/web/src/app/[locale]/(public)/page.tsx:149-166`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-176`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`
-
-The first-page public listing query still joins `images` to `imageTags` and `tags`, selects `tag_names: tagNamesAgg`, groups by `images.id`, and computes `total_count: COUNT(*) OVER()` before applying `limit(normalizedPageSize + 1).offset(offset)` in `getImagesLitePage` (`apps/web/src/lib/data.ts:877-905`). The smart collection initial path repeats the same query shape with `COUNT(*) OVER()` and tag aggregation in `getImagesForSmartCollection` (`apps/web/src/lib/data.ts:1437-1452`).
-
-The later cursor-based load-more APIs are bounded and avoid the exact count, but the initial public home, topic, and smart collection routes call these first-page functions (`page.tsx:149-166`, `[topic]/page.tsx:163-176`, `c/[slug]/page.tsx:100-101`). That means a visitor or crawler hitting the first page of a broad listing can force MySQL to join and group the whole matched image set, aggregate tag names, and calculate an exact count even though only 31 cards are rendered.
-
-Concrete failure scenario:
-
-A gallery grows to tens of thousands of processed images with several tags per image. A crawler or several users request `/`, a popular topic, or a broad smart collection. MySQL must build a grouped joined result and exact window count for the whole matching set before returning the first page. The expected symptoms are elevated DB CPU, temp table/filesort pressure, slower public TTFB, and queue/API contention against uploads or analytics writes.
-
-Suggested fix:
-
-Split the initial listing into two bounded phases. First select only the page of image IDs with the relevant filters and ordering using image-side indexes. Then aggregate tags for just those IDs. Replace exact `totalCount` with the already available `hasMore` behavior where the UI does not need an exact count, or run a separate cheap count over `images` only when an exact count is truly displayed. Apply the same two-phase pattern to smart collection first pages. Validate with `EXPLAIN ANALYZE` on home, topic, and broad smart collection queries before and after the change.
-
-### PERF-C9-02: Analytics retention deletes do not have viewed_at-leading indexes
+### PERF-C10-01: Image queue jobs can starve the shared DB pool while holding advisory locks across Sharp work
 
 Status: Likely issue
 Severity: Medium
-Confidence: Medium-High
+Confidence: High
 
 Code regions:
 
-- `apps/web/src/lib/view-retention.ts:56-81`
-- `apps/web/src/db/schema.ts:231-233`
-- `apps/web/src/db/schema.ts:244-246`
-- `apps/web/src/db/schema.ts:257-259`
+- `apps/web/src/lib/image-queue.ts:86-89`
+- `apps/web/src/lib/image-queue.ts:430-447`
+- `apps/web/src/lib/image-queue.ts:503-621`
+- `apps/web/src/lib/image-queue.ts:797-799`
+- `apps/web/src/db/index.ts:23-33`
+- `apps/web/src/lib/data.ts:1107-1153`
 
-The retention worker deletes old analytics rows with predicates of the form `viewed_at < cutoff` and a 5000-row batch limit in `pruneTable` (`apps/web/src/lib/view-retention.ts:64-81`). The nearby comment says deletes use existing `(image_id/topic/group_id/bot, viewed_at)` indexes (`apps/web/src/lib/view-retention.ts:56-59`).
+`QUEUE_CONCURRENCY` is operator-configurable up to 8 (`image-queue.ts:86-89`). Each queue job acquires a pooled MySQL connection with `connection.getConnection()` and `GET_LOCK` (`image-queue.ts:430-447`), then keeps that connection until the `finally` block releases the lock (`image-queue.ts:797-799`). The same critical section includes the expensive Sharp derivative generation (`image-queue.ts:606-621`).
 
-The current indexes are not led by `viewed_at`: `image_views` has `(image_id, viewed_at)`, `(bot, viewed_at, country_code)`, `(bot, viewed_at, referrer_host)`, and `(bot, viewed_at, image_id)` (`apps/web/src/db/schema.ts:231-233`); `topic_views` has `(topic, viewed_at)` and `(bot, viewed_at, topic)` (`apps/web/src/db/schema.ts:244-246`); `shared_group_views` has `(group_id, viewed_at)` and `(bot, viewed_at, group_id)` (`apps/web/src/db/schema.ts:257-259`). For a predicate on `viewed_at` alone, MySQL generally cannot use the second column of a composite index as an efficient range access path unless the leading column is constrained. Even when an optimizer can attempt skip-scan-like behavior, delete workload can still degrade into large index/table scans.
+The app's shared pool is only 10 connections with `queueLimit: 20` (`db/index.ts:23-33`). Live public photo pages also fan out three DB reads in parallel for tags, previous image, and next image (`data.ts:1107-1153`). With `QUEUE_CONCURRENCY=8`, long-running encodes can pin most of the shared pool for seconds or minutes, leaving too little headroom for public pages, admin actions, semantic routes, and analytics writes.
 
 Concrete failure scenario:
 
-After a traffic spike or bot crawl, old analytics rows accumulate. The hourly retention job starts deleting old rows and has to scan a large append-only table to find `viewed_at < cutoff`. It repeats up to 200 batches per table, causing sustained IO and lock pressure while public view endpoints continue inserting into the same tables. On a small host this can show up as periodic latency spikes, slow analytics pages, and delayed upload/image processing.
+An operator raises `QUEUE_CONCURRENCY` to speed up backlog processing after a bulk upload. Eight queue jobs start on large originals, each holding one DB pool connection while Sharp encodes AVIF/WebP/JPEG variants. Public users open photo pages or load-more endpoints; those requests need DB connections, queue behind the two remaining pool slots, then hit pool queue pressure or timeouts. Symptoms are slow TTFB, intermittent 500s, and an apparently "CPU-bound" image queue causing DB-facing request stalls.
 
-Suggested fix:
+Concrete fix:
 
-Add dedicated purge indexes led by `viewed_at`, ideally `(viewed_at, id)` or equivalent primary-key suffixes for stable chunking, on `image_views`, `topic_views`, and `shared_group_views`. Consider deleting in `ORDER BY viewed_at, id LIMIT ?` batches if the dialect/runtime supports it cleanly. Add the migration journal entry with a strictly increasing `when`, mirror the schema in `reconcileLegacySchema`, then validate using `EXPLAIN DELETE` or a transaction-safe equivalent on production-sized data.
+Do not hold shared request-pool connections across CPU/image work. Use a short DB row claim/status transition instead of a connection-bound advisory lock, or use a separate small lock-only pool that cannot consume public request capacity. At minimum, clamp `QUEUE_CONCURRENCY` against shared pool headroom, following the budgeted approach already present in `admin-backfill-runner`, and emit a startup warning when the configured queue concurrency would leave fewer than several request connections available.
 
-### PERF-C9-03: Upload preview still renders and object-URLs every selected file at once
+### PERF-C10-02: Batch upload resolves the same tag set once per file with serial DB round trips
 
 Status: Confirmed issue
 Severity: Medium
@@ -143,120 +66,161 @@ Confidence: High
 
 Code regions:
 
-- `apps/web/src/components/upload-dropzone.tsx:45-49`
-- `apps/web/src/components/upload-dropzone.tsx:95-123`
-- `apps/web/src/components/upload-dropzone.tsx:458-490`
+- `apps/web/src/app/actions/images.ts:154-164`
+- `apps/web/src/app/actions/images.ts:308-319`
+- `apps/web/src/app/actions/images.ts:436-469`
+- `apps/web/src/lib/tag-records.ts:66-69`
 
-The upload dropzone still allows large local selections by default: `maxFiles: 100`, `maxFileBytes: 200 * 1024 * 1024`, and `maxTotalBytes: 2 * 1024 * 1024 * 1024` (`apps/web/src/components/upload-dropzone.tsx:45-49`). For every file in `files`, it creates a browser object URL and stores it in state (`apps/web/src/components/upload-dropzone.tsx:95-123`). The preview area then maps every file to a card and `img` element (`apps/web/src/components/upload-dropzone.tsx:458-490`).
-
-The current code has useful mitigations: preview images now use `loading="lazy"` and `decoding="async"` (`apps/web/src/components/upload-dropzone.tsx:484-489`). That reduces immediate decode pressure, but it does not avoid creating all object URLs, rendering all preview cards, or exposing the browser to many huge local image resources in a single React render.
+The upload action parses one batch-level tag list (`images.ts:154-164`), then loops over every selected file (`images.ts:308-319`). Inside that per-file loop, it recomputes the unique tag list and serially calls `ensureTagRecord` for every tag (`images.ts:436-459`). `ensureTagRecord` performs an insert-ignore plus lookup work for each tag (`tag-records.ts:66-69`). Only after that does the action insert `imageTags` rows for the one image (`images.ts:462-469`).
 
 Concrete failure scenario:
 
-An admin selects 100 large camera exports. Before upload starts, the browser creates 100 object URLs, React renders 100 preview cards, and the browser may still inspect or decode enough image metadata/content to create severe main-thread jank and memory pressure. On memory-constrained laptops or mobile admin sessions, the page can stall, discard tabs, or become unresponsive before the server-side queue becomes the bottleneck.
+An admin uploads 100 files with 10 tags. Before returning from the server action, the code can execute roughly 1000 tag ensure operations plus 100 separate `imageTags` batch inserts, even though the tag set is identical for the whole batch. This increases admin upload latency, ties up the DB pool, and delays queue enqueueing for the actual image processing work.
 
-Suggested fix:
+Concrete fix:
 
-Bound preview work independently from upload capacity. Render only the first small preview window plus a count for the remaining files, or virtualize the preview list. Generate small preview thumbnails off the main rendering path with `createImageBitmap`/canvas or a worker, then release original object URLs promptly. Keep the existing `loading="lazy"` and `decoding="async"` attributes as a secondary mitigation.
+Resolve and validate `uniqueTagNames` once before the file loop, after the batch tag validation and topic/config checks. Reuse the resulting `tagRecords` for each inserted image. Then either insert per-image tag rows using the precomputed records, or collect all `{ imageId, tagId }` rows and insert them in bounded chunks after successful image inserts. Preserve collision warnings, but make collisions a batch-level warning instead of repeating the same work per file.
 
-### PERF-C9-04: Semantic search scan limit has an unsafe hard maximum if misconfigured
+### PERF-C10-03: GPS stripping reintroduces whole-file heap pressure after the upload path streams originals to disk
 
-Status: Risk needing manual validation
+Status: Likely issue
 Severity: Medium
-Confidence: Medium
+Confidence: High
 
 Code regions:
 
-- `apps/web/src/lib/clip-embeddings.ts:36-44`
-- `apps/web/src/app/api/search/semantic/route.ts:242-280`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
+- `apps/web/src/lib/upload-limits.ts:1-3`
+- `apps/web/src/lib/process-image.ts:862-879`
+- `apps/web/src/lib/process-image.ts:1673-1699`
+- `apps/web/src/app/actions/images.ts:350-356`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:137-145`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:344-358`
 
-`SEMANTIC_SCAN_LIMIT` defaults to 2000, which is reasonable for the current brute-force SQL-plus-JS scoring design. However, the environment parser accepts values up to `ENV_INT_MAX = 1_000_000` (`apps/web/src/lib/clip-embeddings.ts:36-44`). Both semantic search and similar-image search select up to that many rows with embeddings and then decode/score them in-process (`apps/web/src/app/api/search/semantic/route.ts:242-280`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`).
+The upload file cap permits 200 MiB files (`upload-limits.ts:1-3`). `saveOriginalAndGetMetadata` intentionally streams the uploaded file to disk to avoid materializing the whole file in JS heap (`process-image.ts:862-879`). If `stripGpsOnUpload` is enabled, both browser uploads and Lightroom uploads call `stripGpsFromOriginal` (`actions/images.ts:350-356`, `lr/upload/route.ts:344-358`).
 
-At 512 float32 dimensions, each stored embedding is roughly 2048 bytes before row/object overhead. A misconfigured scan limit of 1,000,000 can request roughly 2 GB of embedding bytes from MySQL, then allocate JS arrays/objects and scoring buffers around that payload. This is not a default-path failure, but the allowed maximum is high enough to turn one public search request into an out-of-memory or long CPU event.
+`stripGpsFromOriginal` reads the entire saved original into memory (`process-image.ts:1673-1678`) and then writes a scrubbed buffer before renaming it over the original (`process-image.ts:1696-1699`). The Lightroom route also obtains the multipart body through `request.formData()` (`lr/upload/route.ts:137-145`), so the GPS strip can stack with multipart buffering and Sharp metadata work.
 
 Concrete failure scenario:
 
-An operator increases `SEMANTIC_SCAN_LIMIT` to improve recall after enabling CLIP search on a larger library. A public semantic request or similar-image request pulls a huge embedding result set into the Next.js process, causing long event-loop stalls, memory pressure, or worker termination. Repeated requests can create a denial-of-service condition even without high request volume.
+An admin enables GPS stripping and uploads large JPEG/HEIC/TIFF exports near the 200 MiB cap. Each file can allocate the whole source buffer plus the scrubbed output buffer, while the request already carries multipart/form data and metadata extraction has run. On a disk- or memory-constrained host this can cause long GC pauses, RSS spikes, or worker termination during upload. The public gallery may remain privacy-safe because DB GPS columns are nulled, but the admin upload UX and process stability are at risk.
 
-Suggested fix:
+Concrete fix:
 
-Lower the hard maximum to an operationally bounded value that matches the host memory budget, such as 10k or 25k until a vector index/ANN path exists. Add a startup warning or failure when the configured limit exceeds the validated safe threshold. Longer term, stream batches or move nearest-neighbor search to a vector index instead of materializing the candidate set in one request.
+Replace buffer-wide GPS stripping with streaming/container-aware rewriting for the supported formats, especially JPEG APP1/EXIF segment rewriting and ISOBMFF box traversal. If a fully streaming scrubber is not feasible immediately, add an explicit memory budget gate: serialize GPS-strip work globally, reject or defer stripping for files above a safe threshold with a clear admin-facing error, and avoid holding both original and scrubbed buffers at once.
 
-## False Positives And Already Fixed Items
+### PERF-C10-04: Stale semantic search requests are ignored in the UI but not aborted on the server
 
-### FP-C9-01: Admin top analytics indexes from cycle 7 are now present
-
-Status: Already fixed
+Status: Likely issue
+Severity: Medium
 Confidence: High
 
-Prior review flagged top image/topic/group analytics queries that grouped by image/topic/group over a `bot + viewed_at` range without matching composite indexes. Current schema includes `idx_image_views_bot_viewed_at_image_id`, `idx_topic_views_bot_viewed_at_topic`, and `idx_shared_group_views_bot_viewed_at_group_id` (`apps/web/src/db/schema.ts:231-232`, `apps/web/src/db/schema.ts:244-245`, `apps/web/src/db/schema.ts:257-258`). Migration `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3` adds them, and `apps/web/scripts/migrate.js:579-612` reconciles them for legacy databases.
+Code regions:
 
-The hot analytics query shapes in `apps/web/src/lib/analytics-data.ts:28-46`, `apps/web/src/lib/analytics-data.ts:62-79`, and `apps/web/src/lib/analytics-data.ts:161-180` now have matching indexes for the bot/date/grouping dimensions. I am not carrying the cycle 7 finding forward.
+- `apps/web/src/components/search.tsx:143-152`
+- `apps/web/src/components/search.tsx:154-238`
+- `apps/web/src/components/search.tsx:240-253`
+- `apps/web/src/app/api/search/semantic/route.ts:232-251`
+- `apps/web/src/app/api/search/semantic/route.ts:264-283`
 
-### FP-C9-02: CLIP inference and image preprocessing now share a process-wide limiter
+The search component uses `requestIdRef` to ignore stale responses (`search.tsx:143-152`, `search.tsx:183-199`), and the debounce cleanup only clears pending timers (`search.tsx:240-253`). It does not keep an `AbortController` for the in-flight semantic `fetch` (`search.tsx:177-194`). That means typing a new query or closing the dialog prevents stale UI commits, but the old semantic request can still run to completion.
 
-Status: Already fixed
-Confidence: High
+The semantic route performs production CLIP embedding (`semantic/route.ts:232-235`), selects up to `SEMANTIC_SCAN_LIMIT` embeddings (`semantic/route.ts:242-251`), then decodes and scores the scanned rows in JS (`semantic/route.ts:264-283`). Ignoring a stale response on the client does not recover that server CPU and DB work.
 
-Prior reviews flagged CLIP inference and image preprocessing as fire-and-forget work without a process-wide CPU/memory admission gate. Current `apps/web/src/lib/clip-model.ts:53-71` defines `CLIP_INFERENCE_CONCURRENCY` and `withInferenceSlot`. Text embedding wraps the model call in that slot (`apps/web/src/lib/clip-model.ts:143-146`), and image embedding wraps the Sharp preprocessing plus model inference inside the slot (`apps/web/src/lib/clip-model.ts:171-222`).
+Concrete failure scenario:
 
-`apps/web/src/lib/image-queue.ts:623-683` still starts semantic side effects after the processed image is marked complete, but the expensive preprocessing and inference admission is now gated in `embedImageReal`. I am treating the prior C7/C8 CLIP limiter findings as fixed.
+A user types several semantic queries with pauses longer than the 300 ms debounce. Each intermediate query starts a server request. The browser eventually shows only the newest result, but previous requests still consume CLIP inference, DB reads, and JS scoring. Under multiple users, this makes final-query latency worse and can fill the CLIP inference wait queue.
 
-### FP-C9-03: Grid card hydration fallback from cycle 8 is fixed
+Concrete fix:
 
-Status: Already fixed
-Confidence: High
+Add an `AbortController` ref in `Search`, abort the prior semantic fetch before starting a new one, and abort on dialog close/unmount/query clear. Pass `signal` to `fetch` and treat `AbortError` as a silent stale request. On the route side, check `request.signal.aborted` at cheap boundaries before embedding, before DB scan, and before result enrichment; return early where the runtime allows. Consider a longer debounce or explicit submit for production semantic search if CLIP CPU remains a bottleneck.
 
-Prior review flagged the `GridPicture` fallback as hydrating every archive/share card. Current `apps/web/src/components/grid-picture.tsx:1-52` is a server-rendered static picture component with no client state or per-card timer. It renders AVIF/WebP/JPEG sources directly and no longer creates a client component per image. I am not carrying the cycle 8 hydration finding forward.
+### PERF-C10-05: CLIP inference has a concurrency cap but no global backlog cap or timeout
 
-### FP-C9-04: Service worker cache growth is bounded
-
-Status: No current finding
+Status: Risk
+Severity: Medium
 Confidence: Medium-High
 
-The service worker uses explicit caps: image cache max bytes is 50 MB and HTML entries are capped at 50 (`apps/web/public/sw.template.js:31-33`). Image LRU cleanup sums entries and deletes oldest items until under budget (`apps/web/public/sw.template.js:99-130`). HTML cleanup enforces the entry cap (`apps/web/public/sw.template.js:132-149`). Runtime navigation handling also keeps network timeout low for `HEAD` checks (`apps/web/public/sw.template.js:237-260`). I did not find an unbounded service-worker cache or obvious UI responsiveness bug in the current generated worker.
+Code regions:
 
-### FP-C9-05: In-memory rate-limit and queue maps are bounded or pruned
+- `apps/web/src/lib/clip-model.ts:53-70`
+- `apps/web/src/app/api/search/semantic/route.ts:181-189`
+- `apps/web/src/app/api/search/semantic/route.ts:232-239`
+- `apps/web/src/app/actions/embeddings.ts:129-169`
+- `apps/web/src/lib/image-queue.ts:333-367`
 
-Status: No current finding
-Confidence: Medium
+`withInferenceSlot` limits active CLIP inference to `CLIP_INFERENCE_CONCURRENCY` (max 4), but pending work is stored in an unbounded `inferenceWaiters` array (`clip-model.ts:53-70`). Public semantic search rate limiting is per IP (`semantic/route.ts:181-189`) and then can wait on `embedTextReal` (`semantic/route.ts:232-239`). Admin embedding backfill uses bounded chunks (`actions/embeddings.ts:129-169`), and queue-side image embedding enters the same CLIP path after image processing (`image-queue.ts:333-367`).
 
-The shared bounded map implementation evicts oldest entries when it exceeds its configured size (`apps/web/src/lib/rate-limit.ts:91-99`). Queue status maps are periodically pruned (`apps/web/src/lib/image-queue.ts:178-204`), and the permanent failure tracker is capped (`apps/web/src/lib/image-queue.ts:706-718`). I did not find an unbounded Map growth issue that warrants a current finding.
+Concrete failure scenario:
 
-### FP-C9-06: Timeline date extraction remains bounded by documented limits
+Production semantic search is enabled and a traffic burst arrives from many IPs, or stale client requests accumulate because they are not aborted. Active inference remains capped, but every excess request still keeps a promise, request/response state, and route work queued in memory. Latency grows without a clear rejection boundary, and the server can run out of memory or spend most of its time completing obsolete requests.
 
-Status: Accepted risk / no current finding
-Confidence: Medium
+Concrete fix:
 
-The timeline aggregation still uses year/month extraction rather than a dedicated generated column, but the path has a documented scan cap and defaults (`apps/web/src/lib/data-timeline.ts:159`, `apps/web/src/lib/data-timeline.ts:178-184`). This may remain a future scaling target, but it is not a fresh cycle 9 finding because the implementation intentionally bounds the archive scope.
+Replace the hand-rolled waiter array with a queue that has `concurrency`, `timeout`, and `queueSize` limits. Return `503` or `429` with `Retry-After` once the global CLIP queue is full. Track queue depth in logs/health output so operators can tune `CLIP_INFERENCE_CONCURRENCY`, semantic route rate limits, and scan limits with evidence. Share that same queue for public text search, similar-photo work if it ever needs inference, image embedding side effects, and admin backfill.
+
+### PERF-C10-06: Infinite masonry keeps every loaded card mounted, so long browse sessions can create client jank
+
+Status: Risk
+Severity: Low-Medium
+Confidence: Medium-High
+
+Code regions:
+
+- `apps/web/src/components/home-client.tsx:127-130`
+- `apps/web/src/components/home-client.tsx:195-210`
+- `apps/web/src/components/home-client.tsx:286-360`
+- `apps/web/src/components/load-more.tsx:41-96`
+- `apps/web/src/components/load-more.tsx:122-132`
+
+`HomeClient` stores all loaded images in one state array and appends every load-more page (`home-client.tsx:127-130`). The masonry render maps every item in that accumulated array to a card and picture (`home-client.tsx:286-360`). `LoadMore` automatically fetches more content as the sentinel enters the viewport (`load-more.tsx:122-132`) and appends returned pages (`load-more.tsx:41-96`). The page has useful mitigations such as lazy images, fixed dimensions, and intrinsic size estimates (`home-client.tsx:195-210`, `home-client.tsx:357-359`), but it does not virtualize or prune older cards.
+
+Concrete failure scenario:
+
+A visitor scrolls through a large gallery or public smart collection for many pages. Thousands of card nodes, picture/source/img elements, hover layers, and layout boxes remain mounted. Even with lazy decoding, React updates, browser layout, accessibility tree size, and memory use grow linearly. The visible symptom is scroll jank, delayed taps, and slower search/nav interactions in long sessions.
+
+Concrete fix:
+
+Introduce virtualization/windowing for the masonry list, or switch automatic infinite loading to a hybrid model that requires explicit user action after a threshold. If CSS masonry makes virtualization difficult, keep recent pages mounted and replace far-off pages with stable-height placeholders that can be restored when scrolling back. Validate with a browser trace after loading 1000+ images.
+
+### PERF-C10-07: Public archive and smart-collection predicates are intentionally non-sargable, but growth turns them into CPU scan paths
+
+Status: Risk
+Severity: Low-Medium
+Confidence: High
+
+Code regions:
+
+- `apps/web/src/lib/data-timeline.ts:88-116`
+- `apps/web/src/lib/data-timeline.ts:129-141`
+- `apps/web/src/lib/data-timeline.ts:172-207`
+- `apps/web/src/lib/smart-collections.ts:217-220`
+- `apps/web/src/lib/smart-collections.ts:259-266`
+- `apps/web/src/lib/data.ts:1437-1451`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:62-84`
+
+The code already documents that `MONTH()`, `DAY()`, and `YEAR()` filters on `capture_date` are not sargable and are accepted at personal-gallery scale (`data-timeline.ts:88-116`, `data-timeline.ts:172-207`). The timeline year list also uses `YEAR(capture_date)` for distinct years (`data-timeline.ts:129-141`). Smart collections support `%...%` contains predicates on image fields (`smart-collections.ts:217-220`) and tag names (`smart-collections.ts:259-266`), while public first-page smart collections still use aggregation plus `COUNT(*) OVER()` (`data.ts:1437-1451`) from the public route (`c/[slug]/page.tsx:100-101`). Timeline pages are uncached dynamic pages (`timeline/page.tsx:62-84`).
+
+Concrete failure scenario:
+
+The gallery grows beyond personal scale, or public smart collections are promoted and crawled. Repeated `/timeline`, `/year/{year}`, and broad `/c/{slug}` requests evaluate functions or `%LIKE%` predicates over many processed rows before grouping and ordering. This creates DB CPU and temp-table pressure even though each page renders a bounded number of images.
+
+Concrete fix:
+
+For timeline, replace `YEAR(capture_date) = ?` with range predicates (`capture_date >= Y-01-01 AND capture_date < Y+1-01-01`) and add generated/indexed month/day columns if On This Day remains public. For smart collections, either restrict public collection predicates to indexable operations, materialize collection membership/counts after admin edits, or add a search index for contains-style predicates. Keep current comments, but add operational thresholds or tests that make the "personal-gallery scale" assumption explicit.
+
+## Existing Safeguards Observed
+
+- Public load-more paths use bounded page sizes and cursor pagination in `actions/public.ts` and `data.ts`.
+- `getMapImages` caps public GPS markers at 10000 and documents the future clustering requirement (`data.ts:1648-1683`).
+- Shared group view count buffering is bounded with retry caps and cleanup (`data.ts:17-34`, `data.ts:155-218`).
+- Admin color backfill computes a pool-aware concurrency budget (`admin-backfill-runner.ts:129-142`), which is the pattern the image queue should reuse.
+- Sharp global concurrency and cache behavior are explicitly controlled (`process-image.ts:36-57`), and derivative generation avoids unbounded configured output sizes through `gallery-config-shared.ts`.
+- Histogram work is offloaded to a worker and bounded by a small canvas sample.
+- Service worker and rate-limit maps were not re-flagged in this cycle; the searched code showed explicit caps/pruning on the relevant paths.
 
 ## Final Missed-Issue Sweep
 
-I did a final pass over the reviewed hot surfaces after drafting findings:
+After drafting findings, I re-searched for `Promise.all`, timers, `readFile`, `toBuffer`, `formData`, `COUNT(*) OVER`, `offset`, advisory locks, unbounded-map comments, and client event/listener patterns across `apps/web/src` and `apps/web/scripts`. I also re-read the current hot files with line numbers for the findings above.
 
-- Public cursor load-more APIs are bounded and do not repeat the exact total-count behavior from first pages.
-- Map marker loading has an explicit marker cap and bounded payload path.
-- Search APIs apply pagination/rate-limit controls; the main current concern is the semantic scan limit maximum, not the default path.
-- Sharp processing is controlled through configured concurrency and output-size limits; no new image-processing CPU finding was confirmed.
-- Upload server-side work is queue-mediated; the remaining confirmed issue is the client preview fanout before queue submission.
-- Deployment disk pruning is intentional and outside this review's performance source-change scope.
-- No source code or plan files were edited for this review.
-
-## Summary
-
-Current cycle 9 findings:
-
-- `PERF-C9-01` High: first-page public listing and smart collection queries still aggregate tags and count the full matched set.
-- `PERF-C9-02` Medium: analytics retention deletes need `viewed_at`-leading purge indexes.
-- `PERF-C9-03` Medium: upload preview still creates and renders every selected file at once.
-- `PERF-C9-04` Medium risk: semantic scan hard maximum is unsafe if misconfigured.
-
-Already fixed or not carried forward:
-
-- `FP-C9-01`: admin top analytics indexes are present.
-- `FP-C9-02`: CLIP preprocessing and inference are process-limited.
-- `FP-C9-03`: grid card hydration fallback is fixed.
-- `FP-C9-04`: service worker caches are bounded.
-- `FP-C9-05`: in-memory rate-limit and queue maps are bounded or pruned.
-- `FP-C9-06`: timeline extraction is bounded and treated as accepted risk.
+I did not find a new default-path unbounded public result set: home/topic/smart listings cap rendered rows, map caps markers, shared groups cap images, timeline caps year results with a visible truncation notice, and semantic search has default scan/rate limits. The remaining concerns are the seven findings above, with the highest practical risk concentrated in shared DB pool contention, repeated upload tag work, large-file GPS scrubbing memory, and semantic search cancellation/backpressure.

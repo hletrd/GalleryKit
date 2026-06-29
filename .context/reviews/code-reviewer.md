@@ -1,123 +1,95 @@
-# Code Reviewer - cycle 9
+# Code Reviewer - cycle 10
 
 **Date:** 2026-06-29
-**HEAD reviewed:** `adb1ae67204a364a7ad6c9a9cd6398aeed39151b` (`adb1ae67 build(pwa): refresh service worker version`)
+**HEAD reviewed:** `ee8e08afee1d2a9c7e5f6c2b7cead05670d514d7` (`ee8e08af fix(cycle9): 🐛 harden review findings`)
 **Role:** code-reviewer
-**Scope:** whole current repository inventory with deep code-quality, logic, SOLID/maintainability, state-consistency, race-condition, error-handling, and cross-file contract review. Source code and plans were not edited.
+**Scope:** whole current repository at HEAD, prompt 1 only. Deep code quality, logic, SOLID/maintainability, cross-file contract, security-adjacent guardrail, state consistency, race-condition, error-handling, and missed-issue review. No source files were edited; only this report artifact was written.
 
 ## Required Context Read
 
-- Read `AGENTS.md` first.
-- Read `CLAUDE.md` for architecture, security, migration, deploy, upload, queue, restore, privacy, and review conventions.
+- Read the project `AGENTS.md` instructions supplied for `/Users/hletrd/flash-shared/gallery`.
+- Read `CLAUDE.md` for architecture, deploy, schema, security, privacy, upload, restore, analytics, CLIP/search, i18n, and quality-gate context.
 - Loaded the local `code-review` skill instructions before reviewing.
 
 ## Inventory Built Before Findings
 
-Review-relevant tracked surface, excluding `node_modules`, build outputs, coverage, screenshots/fixtures, and generated local artifacts:
+Review-relevant tracked surface, excluding `node_modules`, `.next`, coverage, screenshots/fixtures, generated local artifacts, and old archived-only review assets:
 
-- 557 review-relevant files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, `docs`, and `scripts`.
-- Extension mix: 411 `ts`, 103 `tsx`, 27 `sql`, 5 `json`, 4 `mjs`, 3 `js`, 2 `sh`, 2 `md`.
-- Runtime app: Next.js app routes, API routes, server actions, shared components, admin/public surfaces, i18n provider usage, service worker/cache helpers.
-- Core data and state: `data.ts`, `data-timeline.ts`, `smart-collections.ts`, schema, migrations, migration journal, migration/reconcile scripts, analytics, privacy field contracts.
-- Mutations and trust boundaries: auth/session/admin-users, admin tokens, upload/browser/LR ingest, image delete/bulk edit/retry, tags, topics, sharing, settings, SEO, embeddings, public actions.
-- Processing and background work: upload path handling, process-image/topic-image, image queue, queue shutdown, backfill runner, restore maintenance, DB restore, advisory locks.
-- Serving and public reads: upload serving, OG/photo OG, feed/sitemap, semantic/similar search, public pages, map/timeline/topic/smart collection routes.
-- Config/docs/tests: package scripts, Next/Vitest/Playwright/ESLint config, Docker/deploy/nginx surfaces, scanner tests and lint-gate scripts, prior review aggregate/current cycle lineage enough to avoid stale duplicate findings.
+- 560 review-relevant files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, `docs`, and `scripts`.
+- Extension mix: 412 `ts`, 103 `tsx`, 28 `sql`, 6 `json`, 4 `mjs`, 3 `js`, 2 `sh`, 2 `md`.
+- Runtime application: Next.js app routes, public/admin pages, API routes, server actions, shared components, i18n routing/provider code, metadata/OG/sitemap/feed paths.
+- Core data/state: schema, migrations/journal, migration/reconcile scripts, `data.ts`, timeline/public query helpers, analytics, smart collections, privacy field contracts, CLIP/search data paths.
+- Mutations/trust boundaries: auth/session, admin-users, LR tokens, uploads, image delete/bulk/retry/update, tags, topics, sharing, settings, SEO, embeddings, public actions, route scanner scripts.
+- Processing/ops: upload path handling, image/topic processing, queue and shutdown handling, backfill runner, restore maintenance, DB restore/download, advisory locks, deploy/Docker/nginx surfaces.
+- Tests/config: Vitest/Playwright/ESLint/Next/TypeScript configs, lint-gate scripts, scanner tests, privacy/touch-target tests, and prior review lineage enough to avoid stale duplicate findings.
 
-Broad sweeps included route/action auth gates, mutating action origin gates, public mutating route rate-limit gates, raw SQL uses, advisory locks, detached/background work, cleanup/finally paths, upload/restore temp files, privacy-sensitive select fields, JSON-LD/HTML injection surfaces, file serving path traversal, schema/journal drift, TODO/FIXME/high-risk catch sites, and prior-cycle false positives.
+Broad sweeps covered action/API auth gates, origin checks, public mutating route rate limits, public server-action rate limits, raw SQL and child-process call sites, detached background work, advisory locks, temp-file cleanup, upload serving traversal/symlink protection, schema/journal drift, cache/revalidation contracts, privacy-sensitive select fields, JSON-LD/HTML injection surfaces, rate-limit rollback semantics, and TODO/FIXME/high-risk catch sites.
 
 ## Findings
 
-### Confirmed Issues
-
-#### CR9-CQ-01 - `setTopicMapVisible` trusts a compile-time boolean on a runtime server-action boundary
-
-**File/region:** `apps/web/src/app/actions/topics.ts:594-614`; backing column at `apps/web/src/db/schema.ts:4-12`; caller at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:66` and `:244-245`.
+### C10-CQ-01 - Analytics view recording rate limit runs after unauthenticated DB validation
 
 **Severity:** Medium
 **Confidence:** High
 **Classification:** Confirmed issue
 
-**Issue:** `setTopicMapVisible(topicSlug: string, mapVisible: boolean)` validates the slug but never validates `mapVisible` before writing it to `topics.map_visible` and logging it. TypeScript only protects the normal in-repo caller; the server action remains a runtime boundary and can receive malformed serialized data. This is inconsistent with nearby action hardening such as `bulkUpdateImages`, which validates nested runtime payload shape before reading or writing values.
+**File/region:**
 
-**Concrete failure scenario:** A malformed admin client, stale bundled UI, or crafted same-origin authenticated server-action request sends `"false"`, `"1"`, `null`, or an object for `mapVisible`. The action reaches `.set({ map_visible: mapVisible })` and either lets MySQL/Drizzle coerce a non-boolean into the tinyint-backed boolean column or throws a generic failure. Because this flag is the explicit opt-in for public GPS map exposure, an invalid payload can silently flip or fail the privacy gate instead of being rejected before persistence. The exact coercion behavior should be validated against the production driver, but the missing runtime guard is source-confirmed.
+- `apps/web/src/app/actions/public.ts:323-341` defines the in-memory per-IP view-recording rate limit.
+- `apps/web/src/app/actions/public.ts:364-374` validates `imageId` with a DB `SELECT` before calling `headers()`, `buildViewParams`, and `isViewRecordRateLimited`.
+- `apps/web/src/app/actions/public.ts:387-402` validates `topicSlug` with a DB `SELECT` before applying the same rate limit.
+- `apps/web/src/app/actions/public.ts:414-430` validates `groupId` with a `sharedGroups`/`sharedGroupImages`/`images` join before applying the same rate limit.
 
-**Suggested fix:** Add a fail-closed guard immediately after auth/origin checks:
+**Issue:** The C9 rate limit protects the durable analytics `INSERT`, but it is applied only after each public view-recording action performs target validation against the database. These actions are intentionally public and `@action-origin-exempt`; the only per-IP abuse control should happen before avoidable database work. As written, over-limit traffic still forces a DB read, including the heavier shared-group join.
 
-```ts
-if (typeof mapVisible !== 'boolean') return { error: t('invalidInput') };
-```
+**Concrete failure scenario:** A bot repeatedly calls the photo, topic, or shared-group view server actions for valid public IDs/slugs from one IP. After 120 requests/minute, inserts stop, but every over-limit request still performs the validation query first. For shared groups, the attacker can continue driving a join across `sharedGroups`, `sharedGroupImages`, and `images` even while nominally rate-limited, creating avoidable database load on unauthenticated public endpoints.
 
-Then add a focused action test that passes malformed non-boolean values and asserts no update/audit call is made.
+**Concrete fix:** Move request header/IP extraction and `isViewRecordRateLimited(params.ip, Date.now())` before the validation `SELECT`/join in all three actions. Keep the cheap syntactic checks first. Prefer charging invalid-but-well-formed target probes too, so rate-limited clients cannot bypass the budget by alternating invalid IDs/slugs. Add focused tests that push an IP over the limit and assert the database validation query is not called after the limiter rejects.
 
-#### CR9-CQ-02 - DB restore temp dump can survive validation/read exceptions after upload is saved
-
-**File/region:** `apps/web/src/app/[locale]/admin/db-actions.ts:434-493`, `:499-585`.
-
-**Severity:** Low
-**Confidence:** High
-**Classification:** Confirmed issue
-
-**Issue:** `runRestore` writes the uploaded SQL dump to a mode-0600 temp file, but cleanup after the successful write is distributed across expected validation branches and the mysql child-process close/error handlers. There is no outer `try/finally` covering the header read, `fs.stat`, scan open/read loop, DB-env validation, and child-process setup. If one of those operations throws before reaching a branch that explicitly unlinks, the promise rejects and the temp SQL dump remains in `os.tmpdir()`.
-
-**Concrete failure scenario:** An admin uploads a restore file; `pipeline` succeeds at `db-actions.ts:437-439`. Then `fs.open(tempPath, 'r')`, `fs.stat(tempPath)`, `fs.open` for the scan, or `scanFd.read` throws due to `EMFILE`, transient disk I/O, permissions, or a host-level temp directory issue. The exception bypasses the explicit invalid-header/dangerous-SQL/missing-env unlinks and never reaches the child-process close handler. A plaintext DB dump remains on disk until manual cleanup or host temp purging. Mode `0600` limits exposure, but this is still avoidable sensitive-data retention.
-
-**Suggested fix:** Wrap the entire post-write restore flow in a single cleanup owner, for example a `let tempUnlinked = false` helper plus `finally { if (!tempUnlinked) await fs.unlink(tempPath).catch(() => {}) }`. The child-process branch can still unlink on close, but cleanup should be idempotent and guaranteed for every thrown validation/setup path.
-
-### Likely Issues
-
-#### CR9-CQ-03 - `bulkUpdateImages` reports requested IDs, not existing or changed rows
-
-**File/region:** `apps/web/src/app/actions/images.ts:940-963`, `:1024-1037`, `:1091-1103`, `:1120-1134`; contrast with stale-ID handling in `apps/web/src/app/actions/tags.ts:304-343`.
+### C10-CQ-02 - Many mutating admin server actions authenticate before same-origin rejection
 
 **Severity:** Low
-**Confidence:** Medium
-**Classification:** Likely issue
+**Confidence:** High on the pattern, Medium on exploitability
+**Classification:** Risk / maintainability issue
 
-**Issue:** `bulkUpdateImages` validates that IDs are positive integers, but it does not verify that all selected images still exist before applying scalar updates, tag inserts/removals, audit logging, and success reporting. It returns `count: ids.length` regardless of how many rows were actually updated or linked. This differs from `batchAddTags`, which pre-selects existing image IDs and warns about missing images before inserting links.
+**File/region:**
 
-**Concrete failure scenario:** Admin A opens the dashboard and selects 20 images. Admin B deletes 3 of them before Admin A submits a scalar-only bulk edit, such as clearing descriptions or changing topic. The update at `images.ts:1035-1037` affects only 17 rows, but the action logs all 20 requested IDs and returns `{ success: true, count: 20 }`; the UI shows a 20-image success toast. With tag additions, stale IDs can be silently skipped by `INSERT IGNORE` FK behavior just as `tags.ts:304-307` warns, while the bulk edit path still reports the requested count.
+- `apps/web/src/app/actions/settings.ts:40-47` calls `isAdmin()` before `requireSameOriginAdmin()`.
+- `apps/web/src/app/actions/seo.ts:54-61` calls `isAdmin()` before `requireSameOriginAdmin()`.
+- `apps/web/src/app/actions/collections.ts:15-21`, `:64-70`, and `:112-118` call `isAdmin()` before `requireSameOriginAdmin()`.
+- `apps/web/src/app/actions/topics.ts:85-92` and `:182-189` show the same ordering for topic create/update, with the pattern repeated across topic mutations.
+- `apps/web/src/app/actions/tags.ts:42-49` and `:99-106` show the same ordering for tag mutations.
+- `apps/web/src/app/actions/sharing.ts:84-91` calls `isAdmin()` before the same-origin check for share-link creation.
+- `apps/web/src/app/actions/admin-users.ts:75-82` calls `isAdmin()` before origin validation, and `apps/web/src/app/actions/admin-users.ts:182-190` calls both `isAdmin()` and `getCurrentUser()` before origin validation.
 
-**Suggested fix:** Inside the transaction, select existing IDs with `inArray(images.id, ids)` before any mutation. Use that canonical set for scalar updates, tag insert values, tag removals, audit metadata, and the returned count. If some requested IDs are missing, return a warning/count consistent with `batchAddTags`, or fail the operation if partial success is not desired.
+**Issue:** The required same-origin check exists, and `npm run lint:action-origin --workspace=apps/web` passes, but the ordering is inconsistent with a fail-fast provenance boundary. Cross-site requests with an admin cookie are rejected eventually, yet many actions first perform session/auth work, and in `deleteAdminUser` also fetch the current user, before rejecting on origin. This is not a confirmed CSRF bypass; it is a guardrail and maintainability gap. The scanner proves presence of `requireSameOriginAdmin`, not that it is the first meaningful trust-boundary check.
 
-### Risks Needing Manual Validation
+**Concrete failure scenario:** A malicious site causes an authenticated admin browser to submit repeated cross-site server-action requests. Mutations are blocked by `requireSameOriginAdmin`, but each request can still drive session verification and, in some paths, user lookup before the request is rejected. More importantly, the mixed ordering makes future action edits easier to get wrong: developers can add validation, rate-limit, audit, or DB work between `isAdmin()` and origin rejection while still passing the current lint gate.
 
-- **CR9-RISK-01:** For `CR9-CQ-01`, manually validate the exact Drizzle/mysql2/MySQL coercion for non-boolean values written through a boolean column. The source bug is the missing guard; the production failure mode determines whether this should be treated as privacy-impacting or generic invalid-input hardening.
-- **CR9-RISK-02:** For `CR9-CQ-02`, validate host temp-dir retention behavior and permissions in production. The file is created with `0600`, so the risk is primarily same-user/process/ops exposure and disk hygiene rather than cross-user world-readable leakage.
+**Concrete fix:** Standardize mutating admin action prologues as: maintenance check if needed, `requireSameOriginAdmin()`, then `isAdmin()`/`getCurrentUser()`, then runtime payload validation and mutation. Strengthen `scripts/check-action-origin.ts` so it flags mutating actions where `isAdmin`, `getCurrentUser`, `db.*`, audit logging, rate-limit increments, or other awaited side effects appear before the same-origin return path. Add fixtures that cover both accepted and rejected ordering.
 
-## False Positives / Already Fixed
+## No Additional Findings After Final Sweep
 
-- **FP-CR9-01:** The previous tag-filter state split is fixed. Current `HomeClient` passes canonical `currentTags` into `TagFilter` (`home-client.tsx:271-273`), and `TagFilter` uses that prop for active state and URL construction (`tag-filter.tsx:10-45`).
-- **FP-CR9-02:** The cycle-8 hardcoded retry error string is fixed. `retryFailedImage` now returns `t('imageNotInFailedState')` at `apps/web/src/app/actions/images.ts:1182-1184`.
-- **FP-CR9-03:** Browser upload, Lightroom upload, retry, bootstrap, and internal queue re-enqueue settings wiring were re-checked against the cycle-8 focus. The current enqueue sites forward or reload the processing snapshot as intended; no third settings-bypass consumer was found.
-- **FP-CR9-04:** Admin API exports are wrapped with `withAdminAuth`, mutating server actions call `requireSameOriginAdmin`, and public mutating API routes carry rate-limit helpers or documented exemptions. I did not find a current gate bypass.
-- **FP-CR9-05:** Public upload serving is already hardened against traversal and symlink swaps via safe segment validation, directory/extension matching, `lstat`, `realpath`, root containment, conditional ETags, and abort cleanup in `serve-upload.ts`.
-- **FP-CR9-06:** Privacy-sensitive public selects remain guarded by omit objects/type guards/tests, and the public map path joins only `topics.map_visible = true` plus a runtime GPS leak assertion.
-- **FP-CR9-07:** Upload quota preclaim/settle, restore maintenance guards, queue quiesce, and post-restore migration flow were checked. I did not find a live rollback/lock leak in those paths beyond the temp-file cleanup gap reported as `CR9-CQ-02`.
+I did not find additional current issues in these reviewed areas:
 
-## Final Missed-Issue Sweep
-
-Final sweep covered:
-
-- All review-relevant file inventory and extension/category counts.
-- App routes/actions, admin/public API routes, server actions, route scanners, action-origin scanner, public mutating route scanner, auth/session/token helpers, rate limits, and same-origin/proxy handling.
-- Core data access, pagination/cursors, tag/topic/share state, public map/timeline/search/smart collection data flows, JSON-LD and OG rendering surfaces.
-- Upload/browser/LR ingest, original-file storage, derivative serving, process-image, topic-image processing, image queue, shutdown, restore, backfill, advisory locks, and temp-file cleanup paths.
-- Schema/migrations/journal/reconcile script, privacy field contracts, generated/current docs, deploy helper constraints, and prior review aggregate to avoid stale re-reports.
-- High-risk pattern greps for raw SQL, child processes, HTML injection, unguarded mutations, broad catches, TODO/FIXME, environment/config assumptions, and stale deferred issues.
-
-Files intentionally excluded from deep manual reading:
-
-- `node_modules`, `.next`, coverage/test output, binary images, screenshots, generated local artifacts, and historical archived review screenshots.
-- Historical `.context/reviews/archive/**` and completed old plan artifacts except where needed for current-lineage false-positive checks.
+- Admin API routes are wrapped by `withAdminAuth`, and public mutating API routes are covered by the public-route rate-limit scanner.
+- Privacy-sensitive public selects remain guarded by omit objects, type guards, and the dedicated privacy fixture.
+- Upload serving still validates safe path segments, extension/directory contracts, `lstat`, `realpath`, root containment, conditional headers, and stream abort cleanup.
+- Browser upload, Lightroom upload, retry, queue, processing-setting snapshots, restore maintenance, upload quota claim/settle, and post-restore migration flows did not show a current lock/rollback leak in this pass.
+- Search route rate-limit rollback/charging behavior appears intentional in the current tests: disabled semantic search is refunded, while post-body validation and embedding/search setup failures are charged.
+- Schema/migration journal and reconcile behavior were checked for drift-sensitive patterns; no new migration/journal issue was found.
 
 ## Validation Evidence
 
-- Static review only; no source or plan files were edited.
-- Report artifact written to `.context/reviews/code-reviewer.md`.
-- Evidence gathered with `rg --files`, `rg` sweeps, `nl -ba` line inspections, package/config reads, current HEAD checks, and cross-file tracing.
-- I did not run full lint/typecheck/build/test because this lane requested review findings only and no executable source changed.
+Commands run during this review:
+
+- `npm run lint:api-auth --workspace=apps/web` - passed; admin API routes reported OK.
+- `npm run lint:action-origin --workspace=apps/web` - passed; all mutating server actions reported same-origin coverage or documented exemption.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed; public mutating API route scanner reported OK.
+- Static evidence gathered with `rg --files`, `rg` sweeps, `find` inventory counts, `nl -ba` line inspections, package/config reads, current HEAD checks, and cross-file tracing.
+
+I did not run full lint, typecheck, build, or the full Vitest suite because this prompt requested a review-only artifact and no executable source changed. The three targeted guardrails above were run to validate the reviewed trust-boundary claims.
 
 ## Recommendation
 
-**REQUEST CHANGES** for `CR9-CQ-01` and `CR9-CQ-02`; treat `CR9-CQ-03` as a low-severity consistency fix or add an explicit product decision that bulk edits are allowed to report requested counts under concurrent deletion.
+Request changes for `C10-CQ-01` before treating the analytics rate limit as complete. Treat `C10-CQ-02` as low-severity hardening and scanner-quality work: not an emergency, but worth fixing because it narrows the server-action trust boundary and prevents future same-origin ordering regressions.
