@@ -997,7 +997,14 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
 }
 
 // R10-H2: admin-only query for permanently-failed images (processing_error set).
-export async function getFailedImages() {
+// Dashboard-only surface: cap the query so a large failure storm cannot make the
+// admin home page fan-out fetch every historical failed row.
+const FAILED_IMAGES_DASHBOARD_LIMIT = 50;
+
+export async function getFailedImages(limit: number = FAILED_IMAGES_DASHBOARD_LIMIT) {
+    const effectiveLimit = Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.floor(limit), FAILED_IMAGES_DASHBOARD_LIMIT)
+        : FAILED_IMAGES_DASHBOARD_LIMIT;
     return db.select({
         id: images.id,
         filename_jpeg: images.filename_jpeg,
@@ -1010,7 +1017,8 @@ export async function getFailedImages() {
     })
         .from(images)
         .where(and(eq(images.processed, false), isNotNull(images.processing_error)))
-        .orderBy(desc(images.failed_at));
+        .orderBy(desc(images.failed_at))
+        .limit(effectiveLimit);
 }
 
 export async function getImage(id: number) {

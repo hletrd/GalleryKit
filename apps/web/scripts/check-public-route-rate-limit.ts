@@ -106,8 +106,9 @@ function collectApprovedRateLimitImports(sourceFile: ts.SourceFile): Set<string>
             continue;
         }
         for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
             const localName = element.name.text;
-            if (RATE_LIMIT_NAME_PREFIXES.some((prefix) => localName.startsWith(prefix))) {
+            if (RATE_LIMIT_NAME_PREFIXES.some((prefix) => importedName.startsWith(prefix))) {
                 approved.add(localName);
             }
         }

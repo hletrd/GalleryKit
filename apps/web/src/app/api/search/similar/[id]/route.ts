@@ -45,6 +45,7 @@ import {
 import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { parseSafePositiveInteger } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 // Pin to Node runtime: imports mysql2 (Node-only), Buffer, and in-process
@@ -73,11 +74,8 @@ export async function GET(
     // Gate 3: validate the id param as a positive integer.
     // Next.js 15/16 passes route params as a Promise.
     const { id: idStr } = await params;
-    if (!/^\d+$/.test(idStr)) {
-        return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE_HEADERS });
-    }
-    const id = parseInt(idStr, 10);
-    if (!Number.isFinite(id) || id <= 0) {
+    const id = parseSafePositiveInteger(idStr);
+    if (id === null) {
         return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 

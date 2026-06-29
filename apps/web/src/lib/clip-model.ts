@@ -67,8 +67,13 @@ type InferenceWaiter = {
     resolve: () => void;
     reject: (err: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
+    abort?: () => void;
 };
 const inferenceWaiters: InferenceWaiter[] = [];
+
+type InferenceSlotOptions = {
+    signal?: AbortSignal;
+};
 
 export class ClipInferenceQueueFullError extends Error {
     constructor() {
@@ -84,14 +89,33 @@ export class ClipInferenceQueueTimeoutError extends Error {
     }
 }
 
+export class ClipInferenceQueueAbortError extends Error {
+    constructor() {
+        super('clip-model: inference queue wait aborted');
+        this.name = 'ClipInferenceQueueAbortError';
+    }
+}
+
 function removeInferenceWaiter(waiter: InferenceWaiter): void {
     const index = inferenceWaiters.indexOf(waiter);
     if (index >= 0) {
         inferenceWaiters.splice(index, 1);
     }
+    if (waiter.abort) {
+        waiter.abort();
+        waiter.abort = undefined;
+    }
+    clearTimeout(waiter.timeout);
 }
 
-async function waitForInferenceSlot(): Promise<void> {
+function throwIfInferenceAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+        throw new ClipInferenceQueueAbortError();
+    }
+}
+
+async function waitForInferenceSlot(signal?: AbortSignal): Promise<void> {
+    throwIfInferenceAborted(signal);
     if (inferenceWaiters.length >= CLIP_INFERENCE_MAX_PENDING) {
         throw new ClipInferenceQueueFullError();
     }
@@ -100,23 +124,33 @@ async function waitForInferenceSlot(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
         waiter = {
             resolve: () => {
-                clearTimeout(waiter.timeout);
+                removeInferenceWaiter(waiter);
                 resolve();
             },
-            reject,
-            timeout: setTimeout(() => {
+            reject: (err: Error) => {
                 removeInferenceWaiter(waiter);
-                reject(new ClipInferenceQueueTimeoutError());
+                reject(err);
+            },
+            timeout: setTimeout(() => {
+                waiter.reject(new ClipInferenceQueueTimeoutError());
             }, CLIP_INFERENCE_QUEUE_TIMEOUT_MS),
         };
+        if (signal) {
+            const onAbort = () => waiter.reject(new ClipInferenceQueueAbortError());
+            signal.addEventListener('abort', onAbort, { once: true });
+            waiter.abort = () => signal.removeEventListener('abort', onAbort);
+        }
         inferenceWaiters.push(waiter);
     });
+    throwIfInferenceAborted(signal);
 }
 
-async function withInferenceSlot<T>(fn: () => Promise<T>): Promise<T> {
+async function withInferenceSlot<T>(fn: () => Promise<T>, options: InferenceSlotOptions = {}): Promise<T> {
+    throwIfInferenceAborted(options.signal);
     if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
-        await waitForInferenceSlot();
+        await waitForInferenceSlot(options.signal);
     }
+    throwIfInferenceAborted(options.signal);
     activeInferenceCount++;
     try {
         return await fn();
@@ -191,7 +225,7 @@ function getModelBundle(): Promise<ModelBundle> {
  * Embed a text query using the jina-clip-v2 text tower.
  * Returns a 512-dim L2-normalized Float32Array (Matryoshka truncation of 1024).
  */
-export async function embedTextReal(query: string): Promise<Float32Array> {
+export async function embedTextReal(query: string, options: InferenceSlotOptions = {}): Promise<Float32Array> {
     const { model, tokenizer } = await getModelBundle();
 
     const inputs = await tokenizer(query, { padding: true, truncation: true });
@@ -199,7 +233,7 @@ export async function embedTextReal(query: string): Promise<Float32Array> {
     const out = (await withInferenceSlot(() => model({
         input_ids: inputs['input_ids'],
         attention_mask: inputs['attention_mask'],
-    }))) as Record<string, { data: Float32Array }>;
+    }), options)) as Record<string, { data: Float32Array }>;
 
     const embedding = out['l2norm_text_embeddings'];
     if (!embedding) {

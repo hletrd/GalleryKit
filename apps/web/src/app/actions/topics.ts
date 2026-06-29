@@ -444,7 +444,11 @@ export async function deleteTopic(slug: string) {
             return { error: t('topicNotFound') };
         }
         if (deletedImageFilename) {
-            await deleteTopicImage(deletedImageFilename);
+            try {
+                await deleteTopicImage(deletedImageFilename);
+            } catch (cleanupError) {
+                console.warn('Topic deleted but topic image cleanup failed', cleanupError);
+            }
         }
         // Log audit event — the early return above guarantees deletedRows >= 1 here.
         // C15-AGG-01: removed the redundant `if (deletedRows > 0)` guard which was

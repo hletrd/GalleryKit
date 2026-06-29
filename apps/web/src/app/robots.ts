@@ -7,18 +7,16 @@ const localeDisallowPaths = LOCALES.flatMap((locale) => [
   `/${locale}/admin/`,
 ]);
 // R18-L5: disallow `/api/` for cooperative bots (GPTBot, ClaudeBot, CCBot,
-// Brave, Perplexity all respect robots.txt). The OG-image endpoint at
-// `/api/og/photo/[id]` is CPU-intensive (Satori PNG → Sharp re-encode) and
-// already rate-limited; preventing well-behaved bots from crawling it
-// saves origin CPU without affecting SEO (the feed/sitemap/manifest/og
-// metadata are all outside `/api/` and remain crawlable).
+// Brave, Perplexity all respect robots.txt). Explicitly allow OG image
+// endpoints first because social crawlers fetch those URLs from metadata.
 const apiDisallowPaths = ['/api/'];
+const apiAllowPaths = ['/api/og', '/api/og/', '/api/og/photo/'];
 
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: '*',
-      allow: '/',
+      allow: ['/', ...apiAllowPaths],
       disallow: [...adminDisallowPaths, ...localeDisallowPaths, ...apiDisallowPaths],
     },
     sitemap: `${BASE_URL}/sitemap.xml`,

@@ -72,9 +72,14 @@ describe('robots route', () => {
     it('allows public pages while disallowing admin and API crawl surfaces', () => {
         const result = robots();
         const disallow = Array.isArray(result.rules) ? result.rules[0]?.disallow : result.rules.disallow;
+        const allow = Array.isArray(result.rules) ? result.rules[0]?.allow : result.rules.allow;
 
         expect(result.sitemap).toBe(`${TEST_BASE_URL}/sitemap.xml`);
-        expect(result.rules).toMatchObject({ userAgent: '*', allow: '/' });
+        expect(result.rules).toMatchObject({ userAgent: '*' });
+        expect(allow).toContain('/');
+        expect(allow).toContain('/api/og');
+        expect(allow).toContain('/api/og/');
+        expect(allow).toContain('/api/og/photo/');
         expect(disallow).toContain('/admin');
         expect(disallow).toContain('/api/');
         for (const locale of LOCALES) {

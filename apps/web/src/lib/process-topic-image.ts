@@ -26,6 +26,17 @@ const RESOURCES_ROOT = (() => {
 })();
 
 const RESOURCES_DIR = RESOURCES_ROOT;
+const TOPIC_TMP_ROOT = (() => {
+    const envRoot = process.env.TOPIC_RESOURCES_TMP_ROOT?.trim();
+    if (envRoot) return envRoot;
+
+    const monorepoPath = path.join(process.cwd(), 'apps/web/data/tmp/topic-resources');
+    const simplePath = path.join(process.cwd(), 'data/tmp/topic-resources');
+    if (process.cwd().endsWith('apps/web')) {
+        return simplePath;
+    }
+    return monorepoPath;
+})();
 
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
 
@@ -51,6 +62,18 @@ const ensureDir = () => {
     return dirPromise;
 };
 
+let tmpDirPromise: Promise<void> | null = null;
+const ensureTmpDir = () => {
+    if (!tmpDirPromise) {
+        const p = fs.mkdir(TOPIC_TMP_ROOT, { recursive: true }).then(() => {}).catch((e) => {
+            if (tmpDirPromise === p) tmpDirPromise = null;
+            throw e;
+        });
+        tmpDirPromise = p;
+    }
+    return tmpDirPromise;
+};
+
 function isAllowedExtension(filename: string): boolean {
     const ext = path.extname(filename).toLowerCase();
     return ALLOWED_EXTENSIONS.has(ext);
@@ -69,14 +92,15 @@ export async function processTopicImage(file: File): Promise<string> {
         throw new Error('File type not allowed');
     }
 
-    await ensureDir();
+    await Promise.all([ensureDir(), ensureTmpDir()]);
 
     const id = randomUUID();
     const filename = `${id}.webp`;
     const outputPath = path.join(RESOURCES_DIR, filename);
 
-    // Stream to temp file first, then pass path to Sharp
-    const tempPath = path.join(RESOURCES_DIR, `tmp-${id}`);
+    // Stream to a private temp file first, then pass path to Sharp. Legacy
+    // public/resources/tmp-* files are still cleaned by cleanOrphanedTopicTempFiles().
+    const tempPath = path.join(TOPIC_TMP_ROOT, `tmp-${id}`);
     try {
         const webStream = file.stream();
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
@@ -103,20 +127,21 @@ export async function deleteTopicImage(filename: string) {
 }
 
 /**
- * Remove orphaned tmp-* files from RESOURCES_DIR.
- * These are created during processTopicImage and may persist if the
- * process crashes between writing the temp file and renaming/deleting it.
+ * Remove orphaned tmp-* files from the private topic temp dir and the legacy
+ * public resources dir. Legacy public tmp files may exist from older releases.
  * Called at startup from bootstrapImageProcessingQueue (image-queue.ts),
  * similar to cleanOrphanedTmpFiles for image upload directories.
  */
 export async function cleanOrphanedTopicTempFiles(): Promise<void> {
     try {
-        const entries = await fs.readdir(RESOURCES_DIR);
-        const tmpFiles = entries.filter(f => f.startsWith('tmp-'));
-        if (tmpFiles.length > 0) {
-            console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned temp files from ${RESOURCES_DIR}`);
-            await Promise.all(tmpFiles.map(f => fs.unlink(path.join(RESOURCES_DIR, f)).catch(() => {})));
-        }
+        await Promise.all([TOPIC_TMP_ROOT, RESOURCES_DIR].map(async (dir) => {
+            const entries = await fs.readdir(dir).catch(() => []);
+            const tmpFiles = entries.filter(f => f.startsWith('tmp-'));
+            if (tmpFiles.length > 0) {
+                console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned temp files from ${dir}`);
+                await Promise.all(tmpFiles.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
+            }
+        }));
     } catch {
         // Directory may not exist yet — skip
     }

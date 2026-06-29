@@ -9,6 +9,7 @@ import { sanitizeForOg } from '@/lib/og-sanitize';
 import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
 import { BASE_URL } from '@/lib/constants';
 import siteConfig from '@/site-config.json';
+import { parseSafePositiveInteger } from '@/lib/validation';
 
 export const runtime = 'nodejs';
 
@@ -48,13 +49,8 @@ export async function GET(
         return new Response('Rate limited', { status: 429, headers: { 'Cache-Control': 'no-store' } });
     }
 
-    // Validate id is a positive integer
-    if (!/^\d+$/.test(id)) {
-        rollbackOgAttempt(ip);
-        return buildFallbackResponse(BASE_URL, OG_ERROR_CACHE_CONTROL);
-    }
-    const imageId = parseInt(id, 10);
-    if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+    const imageId = parseSafePositiveInteger(id);
+    if (imageId === null) {
         rollbackOgAttempt(ip);
         return buildFallbackResponse(BASE_URL, OG_ERROR_CACHE_CONTROL);
     }

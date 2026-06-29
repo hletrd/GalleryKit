@@ -281,6 +281,21 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when a rollback helper is aliased as a pre-increment helper', () => {
+        const source = `
+            import { rollbackSemanticAttempt as preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                const overLimit = preIncrementSemanticAttempt('1.2.3.4');
+                if (overLimit) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('passes when rate-limit helper is actually called (not commented)', () => {
         const source = `
             import { preIncrementSemanticAttempt } from '@/lib/rate-limit';

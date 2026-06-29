@@ -56,16 +56,16 @@ describe('/api/og/photo/[id] R24-M1 fallback contract (route source)', () => {
         // (og-route-source-contracts.test.ts). The previous contract refunded
         // them, so the 30/min budget bound only for cacheable successes and
         // nonexistent-id probes got unlimited free DB lookups (enumeration
-        // oracle + unmetered DB load). Rollback remains ONLY for the two
-        // syntactic id-validation rejections that consumed no work.
+        // oracle + unmetered DB load). Rollback remains ONLY for syntactic
+        // id-validation rejection before any DB work is consumed.
         const rollbackOccurrences = (source.match(/rollbackOgAttempt\(ip\)/g) || []).length;
-        expect(rollbackOccurrences).toBe(2);
+        expect(rollbackOccurrences).toBe(1);
 
         const dbCallIndex = source.indexOf('getImageCached(imageId)');
         expect(dbCallIndex).toBeGreaterThan(-1);
-        // Both remaining rollbacks sit ABOVE the DB lookup…
+        // The remaining rollback sits ABOVE the DB lookup…
         const beforeDbCall = source.slice(0, dbCallIndex);
-        expect((beforeDbCall.match(/rollbackOgAttempt\(ip\)/g) || []).length).toBe(2);
+        expect((beforeDbCall.match(/rollbackOgAttempt\(ip\)/g) || []).length).toBe(1);
         // …and NOTHING after the DB lookup refunds the attempt.
         const afterDbCall = source.slice(dbCallIndex);
         expect(afterDbCall).not.toContain('rollbackOgAttempt');

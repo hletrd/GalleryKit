@@ -35,7 +35,18 @@ describe('clip-model module contract', () => {
     expect(src).toContain('ClipInferenceQueueFullError');
     expect(src).toContain('ClipInferenceQueueTimeoutError');
     expect(src).toMatch(/inferenceWaiters\.length\s*>=\s*CLIP_INFERENCE_MAX_PENDING/);
-    expect(src).toMatch(/setTimeout\(\(\)\s*=>\s*\{[\s\S]*removeInferenceWaiter\(waiter\)/);
+    expect(src).toMatch(/setTimeout\(\(\)\s*=>\s*\{[\s\S]*ClipInferenceQueueTimeoutError/);
+    expect(src).toContain('removeInferenceWaiter(waiter)');
+  });
+
+  it('threads AbortSignal through queued text inference', () => {
+    expect(src).toContain('ClipInferenceQueueAbortError');
+    expect(src).toMatch(/signal\?:\s*AbortSignal/);
+    expect(src).toMatch(/waitForInferenceSlot\(signal\?:\s*AbortSignal\)/);
+    expect(src).toContain("signal.addEventListener('abort'");
+    expect(src).toMatch(/embedTextReal\(query:\s*string,\s*options:\s*InferenceSlotOptions/);
+    expect(src).toContain('model({');
+    expect(src).toContain('}), options)');
   });
 
   it('pins a real HF revision (defined in clip-model-id.ts)', () => {

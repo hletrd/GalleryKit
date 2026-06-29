@@ -16,6 +16,7 @@ import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-confi
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 import { isBase56 } from '@/lib/base56';
+import { parseSafePositiveInteger } from '@/lib/validation';
 
 export const revalidate = 0;
 
@@ -95,13 +96,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return notFound();
     }
 
-    let photoId: number | null = null;
-    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
-        const parsed = parseInt(photoIdParam, 10);
-        if (parsed > 0) {
-            photoId = parsed;
-        }
-    }
+    const photoId = parseSafePositiveInteger(photoIdParam);
 
     const [group, seo, t, tAria, config] = await Promise.all([
         getSharedGroupCached(key, { selectedPhotoId: photoId }),

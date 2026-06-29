@@ -20,6 +20,7 @@ import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { recordPhotoView } from '@/app/actions/public';
+import { parseSafePositiveInteger } from '@/lib/validation';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <PhotoViewerLoading />,
@@ -39,14 +40,8 @@ export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-    // Validate that id is a purely numeric positive integer before parseInt
-    // (matches the default export's validation pattern)
-    if (!/^\d+$/.test(id)) {
-        const t = await getTranslations('photo');
-        return { title: t('notFoundTitle') };
-    }
-    const imageId = parseInt(id, 10);
-    if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+    const imageId = parseSafePositiveInteger(id);
+    if (imageId === null) {
         const t = await getTranslations('photo');
         return { title: t('notFoundTitle') };
     }
@@ -130,12 +125,8 @@ export default async function PhotoPage({ params }: {
     params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-    // Validate that id is a purely numeric positive integer
-    if (!/^\d+$/.test(id)) {
-        return notFound();
-    }
-    const imageId = parseInt(id, 10);
-    if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+    const imageId = parseSafePositiveInteger(id);
+    if (imageId === null) {
         return notFound();
     }
 

@@ -9,11 +9,12 @@
  *   - Scans up to SEMANTIC_SCAN_LIMIT most-recent embeddings
  *   - Returns enriched top-K image results above the active cosine threshold
  *
- * Rate-limit posture: disabled mode returns before body reads or rate-limit
- * charging. Serving modes consume the counter before reading the body; missing
- * Content-Length and chunked requests fail before charging so they cannot
- * materialize arbitrary payloads for free. Post-read malformed bodies stay
- * charged because the memory/CPU cost was already consumed.
+ * Rate-limit posture: syntactically invalid requests that fail before shared
+ * work (origin, maintenance, content-type, Content-Length, chunked transfer,
+ * already-aborted requests) are not charged. Every request that reaches the
+ * DB-backed semantic-mode lookup is charged, including disabled-mode responses
+ * and invalid query lengths, because the endpoint has consumed shared server
+ * work by then.
  *
  * Serving gate: this endpoint SERVES requests in two modes:
  *   - 'stub'       — demo/experimental posture. Embeds via deterministic `embedTextStub`.
@@ -49,7 +50,7 @@ import {
     PRODUCTION_COSINE_THRESHOLD,
 } from '@/lib/clip-embeddings';
 import { embedTextStub } from '@/lib/clip-inference';
-import { embedTextReal } from '@/lib/clip-model';
+import { ClipInferenceQueueAbortError, embedTextReal } from '@/lib/clip-model';
 import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
@@ -249,8 +250,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         if (isRequestAborted(request)) {
             return abortResponse();
         }
-        queryEmbedding = isProd ? await embedTextReal(query) : embedTextStub(query);
-    } catch {
+        queryEmbedding = isProd ? await embedTextReal(query, { signal: request.signal }) : embedTextStub(query);
+    } catch (err) {
+        if (err instanceof ClipInferenceQueueAbortError || isRequestAborted(request)) {
+            return abortResponse();
+        }
         // AGG-12: do NOT rollback after expensive work begins. The rate-limit
         // budget was consumed fairly; refunding would amplify DoS cost.
         return NextResponse.json({ error: 'Server error' }, { status: 503, headers: NO_STORE_HEADERS });

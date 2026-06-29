@@ -88,6 +88,7 @@ function mockRequest(body: unknown, headersInit: Record<string, string> = {}): N
             'content-length': String(Buffer.byteLength(rawBody, 'utf8')),
             ...headersInit,
         }),
+        signal: new AbortController().signal,
         text: async () => rawBody,
     } as unknown as NextRequest;
 }
@@ -99,6 +100,7 @@ function mockRawRequest(rawBody: string, headersInit: Record<string, string> = {
             'content-length': String(Buffer.byteLength(rawBody, 'utf8')),
             ...headersInit,
         }),
+        signal: new AbortController().signal,
         text: async () => rawBody,
     } as unknown as NextRequest;
 }
@@ -232,6 +234,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
         expect(response.status).toBe(400);
         await expect(response.json()).resolves.toEqual({ error: 'Query must be at least 3 characters' });
+        expect(preIncrementSemanticAttemptMock).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 
     it('returns 400 for query longer than 200 code points', async () => {
@@ -239,6 +243,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
         expect(response.status).toBe(400);
         await expect(response.json()).resolves.toEqual({ error: 'Query must be 200 characters or fewer' });
+        expect(preIncrementSemanticAttemptMock).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 
     it('returns 503 when semantic search mode is disabled', async () => {
@@ -289,6 +295,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             code: 'semantic_no_embeddings',
         });
         expect(embedTextRealMock).toHaveBeenCalledOnce();
+        expect(embedTextRealMock).toHaveBeenCalledWith(
+            'mountain landscape',
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
         expect(embedTextStubMock).not.toHaveBeenCalled();
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });

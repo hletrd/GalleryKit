@@ -36,6 +36,13 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
     return RESERVED_TOPIC_ROUTE_SEGMENTS.has(segment.trim().toLowerCase());
 }
 
+export function parseSafePositiveInteger(value: string | null | undefined): number | null {
+    if (!value || !/^[0-9]+$/.test(value)) return null;
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) return null;
+    return parsed;
+}
+
 // Defense-in-depth Unicode-formatting policy applied to every admin-controlled
 // string surface that is rendered back to admins or end users:
 // - U+202A-202E LRE/RLE/PDF/LRO/RLO and U+2066-2069 LRI/RLI/FSI/PDI

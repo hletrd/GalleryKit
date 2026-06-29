@@ -4,7 +4,7 @@ import { db, connection } from "@/db";
 import type { RowDataPacket } from "mysql2/promise";
 import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { spawn } from "child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import fs from "fs/promises";
 import { createWriteStream, createReadStream } from "fs";
 import { Readable } from "stream";
@@ -32,6 +32,35 @@ import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE } from "@/lib/advisory-lo
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
 // Re-import here to keep the existing call site unchanged.
 import { escapeCsvField } from "@/lib/csv-escape";
+
+const DB_CHILD_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
+const DB_CHILD_PROCESS_KILL_GRACE_MS = 5000;
+
+function armDbChildProcessWatchdog(
+    child: ChildProcessWithoutNullStreams,
+    label: string,
+    onTimeout: (err: Error) => void,
+): () => void {
+    let fired = false;
+    const timeout = setTimeout(() => {
+        fired = true;
+        const err = new Error(`${label} timed out after ${DB_CHILD_PROCESS_TIMEOUT_MS}ms`);
+        onTimeout(err);
+        child.stdin.destroy(err);
+        child.stdout.destroy(err);
+        child.stderr.destroy(err);
+        child.kill('SIGTERM');
+        const forceKill = setTimeout(() => {
+            if (!child.killed) child.kill('SIGKILL');
+        }, DB_CHILD_PROCESS_KILL_GRACE_MS);
+        forceKill.unref?.();
+    }, DB_CHILD_PROCESS_TIMEOUT_MS);
+    timeout.unref?.();
+
+    return () => {
+        if (!fired) clearTimeout(timeout);
+    };
+}
 
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
     // C3-F01: Memory profile — materializes up to 50K rows as a CSV string
@@ -185,6 +214,14 @@ export async function dumpDatabase() {
         const writeStream = createWriteStream(outputPath, { mode: 0o600 });
         let settled = false;
         let writeStreamHadError = false;
+        const clearWatchdog = armDbChildProcessWatchdog(dump, 'mysqldump backup', (err) => {
+            if (settled) return;
+            settled = true;
+            console.error('mysqldump backup timeout:', err);
+            writeStream.destroy(err);
+            fs.unlink(outputPath).catch(() => {});
+            resolve({ success: false, error: t('backupFailed') });
+        });
 
         dump.stdout.pipe(writeStream);
 
@@ -192,6 +229,7 @@ export async function dumpDatabase() {
             writeStreamHadError = true;
             if (settled) return;
             settled = true;
+            clearWatchdog();
             console.error('Backup writeStream error:', err);
             dump.kill();
             fs.unlink(outputPath).catch(() => {});
@@ -205,6 +243,7 @@ export async function dumpDatabase() {
         dump.on('close', async (code: number) => {
             if (settled) return;
             settled = true;
+            clearWatchdog();
             if (code === 0) {
                 // Wait for writeStream to finish flushing before resolving —
                 // the 'close' event fires when the process exits, but the piped
@@ -284,6 +323,7 @@ export async function dumpDatabase() {
         dump.on('error', (err: Error) => {
             if (settled) return;
             settled = true;
+            clearWatchdog();
             console.error('mysqldump spawn error:', err);
             fs.unlink(outputPath).catch(() => {});
             resolve({ success: false, error: t('backupFailed') });
@@ -573,10 +613,12 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
 
         const readStream = createReadStream(tempPath);
         let settled = false;
+        let clearRestoreWatchdog = () => {};
 
         const failRestore = (error: string, logLabel: string, reason: unknown) => {
             if (settled) return;
             settled = true;
+            clearRestoreWatchdog();
             console.error(logLabel, reason);
             readStream.destroy();
             restore.stdin.destroy();
@@ -584,6 +626,9 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             cleanupTempFile();
             resolve({ success: false, error, keepMaintenance: true });
         };
+        clearRestoreWatchdog = armDbChildProcessWatchdog(restore, 'mysql restore import', (err) => {
+            failRestore(t('restoreFailed'), 'mysql restore timeout:', err);
+        });
 
         // Register all event handlers BEFORE piping to prevent missed events
         readStream.on('error', (err) => {
@@ -605,6 +650,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         restore.on('close', async (code: number) => {
             if (settled) return;
             settled = true;
+            clearRestoreWatchdog();
             await cleanupTempFile();
             if (code === 0) {
                 let migrationResult: { success: boolean; error?: string };
@@ -670,6 +716,13 @@ async function runPostRestoreMigrations(t: Awaited<ReturnType<typeof getTranslat
         const migrate = spawn(process.execPath, [scriptPath], {
             env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
         });
+        let settled = false;
+        const clearWatchdog = armDbChildProcessWatchdog(migrate, 'post-restore migration', (err) => {
+            if (settled) return;
+            settled = true;
+            console.error('post-restore migrate timeout:', err);
+            resolve({ success: false, error: t('restoreFailed') });
+        });
 
         migrate.stdout.on('data', (data: Buffer) => {
             console.log(`post-restore migrate stdout: ${data.toString('utf8').trimEnd()}`);
@@ -680,6 +733,9 @@ async function runPostRestoreMigrations(t: Awaited<ReturnType<typeof getTranslat
             console.error(`post-restore migrate stderr: ${sanitizeStderr(data, process.env.DB_PASSWORD, sensitiveValues)}`);
         });
         migrate.on('close', (code: number) => {
+            if (settled) return;
+            settled = true;
+            clearWatchdog();
             if (code === 0) {
                 resolve({ success: true });
             } else {
@@ -687,6 +743,9 @@ async function runPostRestoreMigrations(t: Awaited<ReturnType<typeof getTranslat
             }
         });
         migrate.on('error', (err: Error) => {
+            if (settled) return;
+            settled = true;
+            clearWatchdog();
             console.error('post-restore migrate spawn error:', err);
             resolve({ success: false, error: t('restoreFailed') });
         });
