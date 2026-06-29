@@ -55,6 +55,19 @@ function resolveUploadRoots(appRoot) {
     };
 }
 
+function hashFileSync(filepath) {
+    return crypto.createHash('sha256').update(fs.readFileSync(filepath)).digest('hex');
+}
+
+function areSameFileBytes(source, target) {
+    const sourceStat = fs.statSync(source);
+    const targetStat = fs.statSync(target);
+    if (sourceStat.size !== targetStat.size) {
+        return false;
+    }
+    return hashFileSync(source) === hashFileSync(target);
+}
+
 function migrateLegacyOriginalUploads(appRoot) {
     const { legacyOriginalRoot, privateOriginalRoot } = resolveUploadRoots(appRoot);
     if (legacyOriginalRoot === privateOriginalRoot || !fs.existsSync(legacyOriginalRoot)) {
@@ -72,6 +85,13 @@ function migrateLegacyOriginalUploads(appRoot) {
         const target = path.join(privateOriginalRoot, entry.name);
 
         if (fs.existsSync(target)) {
+            if (!areSameFileBytes(source, target)) {
+                throw new Error(
+                    `[Migration] Refusing to delete legacy original upload ${source} because ` +
+                    `the private target ${target} already exists with different bytes. ` +
+                    `Move one file aside manually, then restart.`
+                );
+            }
             fs.unlinkSync(source);
             continue;
         }
@@ -81,6 +101,12 @@ function migrateLegacyOriginalUploads(appRoot) {
         } catch (error) {
             if (error && typeof error === 'object' && error.code === 'EXDEV') {
                 fs.copyFileSync(source, target);
+                if (!areSameFileBytes(source, target)) {
+                    throw new Error(
+                        `[Migration] Refusing to delete legacy original upload ${source} because ` +
+                        `the copied private target ${target} does not match the source bytes.`
+                    );
+                }
                 fs.unlinkSync(source);
             } else {
                 throw error;
@@ -768,7 +794,7 @@ async function seedAdmin(connection) {
     console.log('[Migration] Admin user created.');
 }
 
-(async () => {
+async function main() {
     const appRoot = resolveAppRoot();
     migrateLegacyOriginalUploads(appRoot);
     assertLegacyOriginalUploadsCleared(appRoot);
@@ -799,4 +825,19 @@ async function seedAdmin(connection) {
     if (process.exitCode) {
         process.exit(process.exitCode);
     }
-})();
+}
+
+if (require.main === module) {
+    main().catch((error) => {
+        console.error('[Migration] Failed:', formatError(error));
+        process.exit(1);
+    });
+}
+
+module.exports = {
+    areSameFileBytes,
+    hashFileSync,
+    main,
+    migrateLegacyOriginalUploads,
+    resolveUploadRoots,
+};
