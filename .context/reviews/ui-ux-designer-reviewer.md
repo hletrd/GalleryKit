@@ -1,175 +1,159 @@
-# UI/UX Designer Reviewer - Cycle 7/100
+# UI/UX Designer Reviewer - Cycle 10
 
-Role: `ui-ux-designer-reviewer` custom reviewer, adapted from the registered BurstPick prompt to GalleryKit's Next.js web photo-gallery/admin product. Scope: PROMPT 1 reviewer-style UI/UX/design-system critique focused on public photo browsing, photographer-facing filter clarity, navigation state, accessibility semantics, responsive behavior, admin surfaces, i18n, and existing design-system guardrails.
+Role: `ui-ux-designer-reviewer` registered at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`.
 
-No fixes implemented. No commit, push, or deploy performed. Review is against current HEAD `17124135`.
+Profile note: the registered local profile is BurstPick/SwiftUI-specific. This repository is GalleryKit, a Next.js photographer gallery and admin tool, so I adapted only the professional creative-tool UI/UX review lens and did not inspect absent BurstPick Swift files.
+
+Scope: PROMPT 1 only. Review report artifact only. No application source edits. No deploy.
+
+Current HEAD reviewed: `630ae1ce` (`docs(review): record cycle 10 architect review`).
 
 ## Executive Summary
 
-GalleryKit's current UI is generally disciplined for a photo gallery: 44 px touch targets are broadly enforced, public photo surfaces have keyboard shortcuts and reduced-motion handling, and prior mobile/color/detail issues appear closed. The biggest current interaction failure is tag-filter state honesty: a URL containing only invalid tag slugs renders the unfiltered gallery while every filter chip, including `All`, reports inactive. Design quality score: 7/10 for the public gallery, with the score capped by this state-visibility bug because filter state is a primary trust contract for browsing.
+GalleryKit is in a strong UI state for a self-hosted photographer gallery: the public gallery is photo-first, touch targets are guarded by tests, keyboard navigation exists on the viewer and lightbox, reduced-motion paths are present, and Korean/English message parity is covered. Design quality score: 8/10 for public viewing and 7/10 for admin tooling. The biggest remaining UI/UX problem is repeated collection actions with non-unique accessible names: shared-group photo cards and admin row action buttons do not consistently include the target photo/tag/category in the control name, which makes screen-reader and voice-control workflows ambiguous.
 
-## Context Loaded
+## Inventory Reviewed
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md` (installed prompt; project-local `.codex/agents/ui-ux-designer-reviewer.md` does not exist)
-- Agent-browser skills: core navigation, query, visual, interact, wait, debug, config
-- Relevant `.context/plans/README.md` and previous `.context/reviews/ui-ux-designer-reviewer.md`
-- Current cycle sibling review notifications already written under `.context/reviews/`
+Primary UI inventory:
 
-The installed reviewer prompt is authored for BurstPick/SwiftUI. I applied its professional creative-tool criteria to this repository's actual Next.js web gallery/admin UI.
+- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared group, shared photo, photo detail, timeline, year, map, loading and layout surfaces.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected layout/loading/error, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, analytics.
+- Shared UI under `apps/web/src/components/`: nav, search, masonry cards, tag filter/input, load-more, photo viewer, image zoom, lightbox, info bottom sheet, color details, histogram, upload, image manager, bulk edit, admin header/nav/user manager, map, footer, and shadcn/Radix primitives.
+- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Tests/evidence: `apps/web/src/__tests__`, `apps/web/e2e`, with focus on touch targets, focus rings, source contracts, i18n, shared routes, and public navigation.
 
-## Inventory Before Findings
-
-Inventory examined before filing findings:
-
-- Public route pages: home, topic, smart collection, shared group, shared photo, photo detail, timeline, year, map, loading/error/not-found/layout surfaces under `apps/web/src/app/[locale]/(public)/`.
-- Admin route pages: login, protected layout/loading/error, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, analytics under `apps/web/src/app/[locale]/admin/`.
-- Shared components: nav/search/home masonry/load-more/tag filter/photo viewer/photo navigation/lightbox/info bottom sheet/color details/histogram/map/similar photos/upload/image manager/bulk edit/admin header/nav/user manager/tag input/footer/UI primitives under `apps/web/src/components/`.
-- Translation files: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Test/evidence sweep: `apps/web/src/__tests__`, `apps/web/e2e`, with special attention to tag/filter tests, touch target/focus-visible patterns, ARIA state, motion, and i18n.
-
-Static inventory count for the primary UI/app/admin source sweep: 16,454 lines across `apps/web/src/components`, `apps/web/src/app/[locale]/(public)`, and `apps/web/src/app/[locale]/admin`.
+Static inventory count: 103 primary UI/app/admin files across `apps/web/src/components` and `apps/web/src/app/[locale]`.
 
 ## Browser Evidence
 
-Local browser attempt:
+Browser evidence used deployed `https://gallery.atik.kr` because it has representative production data. Source citations below are from current local HEAD.
 
-- Existing Next dev server was running on `localhost:3017`.
-- `agent-browser open http://localhost:3017/en` rendered the route error shell because local MySQL was unavailable: `.next/dev/logs/next-development.log` showed `ECONNREFUSED` for DB queries in `Nav` and queue bootstrap.
-- Because local runtime state could not render representative data, I used the deployed gallery target for DOM/accessibility evidence while keeping source citations anchored to current HEAD.
+- Desktop home `/en`: accessibility tree exposes main nav, tag filter group, active `All` chip, load-more, footer; no horizontal overflow observed. Screenshot: `/tmp/gallery-home-desktop-cycle10.png`.
+- Mobile home `/en` at 390 x 844: collapsed nav exposes only title, topics, and 44 x 44 expand button; expanded nav exposes search/theme/locale controls at 44 x 44; no horizontal overflow. Screenshots: `/tmp/gallery-home-mobile-cycle10.png`, `/tmp/gallery-home-mobile-expanded-cycle10.png`.
+- Search dialog on mobile: focus lands on `#search-input`; body scroll is locked; combobox/listbox semantics are present; no horizontal overflow. Screenshot: `/tmp/gallery-search-mobile-cycle10.png`.
+- Photo page `/en/p/348` at mobile width: sr-only H1 exists, visible toolbar controls are at least 44 px, shortcut help remains in the accessibility tree while visually hidden on mobile, no horizontal overflow. Screenshot: `/tmp/gallery-photo-mobile-cycle10-real.png`.
 
-Deployed public evidence collected with `agent-browser`:
+Focused validation run:
 
-- `https://gallery.atik.kr/en` accessibility snapshot exposes `group "Filter by tag"` with buttons `All`, `Color in Music Festival (276)`, `SHINYU (174)`, etc.
-- Clicking `Color in Music Festival` navigates to `https://gallery.atik.kr/en?tags=color-in-music-festival` and sets that chip to `aria-pressed="true"`.
-- Opening `https://gallery.atik.kr/en?tags=not-a-real-tag` returns the unfiltered page (`h1="Latest"`, paragraph `445 photos`, first masonry links unchanged from the unfiltered latest view), but DOM extraction shows all chips report inactive:
-  - `All`: `aria-pressed="false"`
-  - every concrete tag chip: `aria-pressed="false"`
+- `npm test --workspace=apps/web -- client-source-contracts.test.ts focus-visible-rings-cycle20.test.ts touch-target-audit.test.ts`
+- Result: 3 test files passed, 31 tests passed.
 
-## Confirmed Issues
+## Findings
 
-### UIUX-C7-01 - Invalid tag URLs produce an impossible filter state where unfiltered results show with no active chip
+### UIUX-C10-01 - Shared-group grid photo links lack the action-oriented accessible label used by other gallery grids
+
+Classification: Confirmed
 
 Severity: Medium
+
 Confidence: High
-Classification: Confirmed UI state / accessibility semantics bug
 
 Evidence:
 
-- Server canonicalization filters the requested query down to existing tags:
-  - `apps/web/src/app/[locale]/(public)/page.tsx:161-166` parses and filters `tagsParam` through `filterExistingTagSlugs(...)`, then queries unfiltered results when `tagSlugs.length === 0`.
-  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:172-176` does the same on topic pages.
-  - `apps/web/src/lib/tag-slugs.ts:37-48` drops slugs that do not exist in the available tag list.
-- The canonical server state is passed to `HomeClient`:
-  - `apps/web/src/app/[locale]/(public)/page.tsx:222`
-  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:214`
-- `HomeClient` uses the canonical `currentTags` for heading text, empty-state copy, and load-more requests:
-  - `apps/web/src/components/home-client.tsx:241-250`
-  - `apps/web/src/components/home-client.tsx:259-263`
-  - `apps/web/src/components/home-client.tsx:438-447`
-- But `HomeClient` renders `<TagFilter tags={tags} />` without passing canonical `currentTags` at `apps/web/src/components/home-client.tsx:269-270`.
-- `TagFilter` reconstructs active state and next URLs from raw `useSearchParams()` instead:
-  - `apps/web/src/components/tag-filter.tsx:13-15`
-  - `apps/web/src/components/tag-filter.tsx:18-39`
-  - `apps/web/src/components/tag-filter.tsx:61-72`
-  - `apps/web/src/components/tag-filter.tsx:80-92`
-- No direct `TagFilter` behavioral test exists; `rg` found no `render(<TagFilter...)` or equivalent coverage in `apps/web/src/__tests__` / `apps/web/e2e`.
+- Shared-group grid cards are links at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:186-225`. The `<Link>` has `href`, class, and styling, but no `aria-label`; the wrapped `GridPicture` supplies only image `alt={altText}` at lines 212-215, and visible overlay text is rendered separately at lines 196-198 and 221-224.
+- The main gallery already uses an action-oriented label: `apps/web/src/components/home-client.tsx:323-326` sets `aria-label={t('aria.viewPhoto', { title: displayTitle })}`.
+- Timeline and year grids also use localized action labels: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:233-236` and `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:191-194`.
+- Existing source-contract coverage only locks this for timeline/year: `apps/web/src/__tests__/client-source-contracts.test.ts:130-143`; it does not include `g/[key]/page.tsx`.
 
-Browser/DOM evidence:
+Failure scenario:
 
-- On `https://gallery.atik.kr/en?tags=not-a-real-tag`, the browser DOM reported `h1: "Latest"`, `paragraph: "445 photos"`, and normal latest-photo links, proving the server rendered the unfiltered gallery.
-- The same DOM reported every filter chip with `aria-pressed="false"`, including `All`, even though the effective result set is all photos.
+A shared-gallery recipient using a screen reader or voice-control command sees a collection of image links named only by title/alt content rather than "View photo: {title}". In a grid with similar titles, the action is less explicit than the main gallery and timeline, and any visible overlay text that remains in the accessibility tree can make the link name noisier than the canonical public grid.
 
-Why this is a problem:
+Concrete fix:
 
-The filter bar is the user's primary state indicator. The UI currently has a third state that should not exist: results are unfiltered, but `All` is not selected and no concrete tag is selected. Sighted users see no highlighted filter; screen-reader users hear no pressed toggle in the filter group. That breaks state visibility and makes the page look like filtering is neither active nor cleared.
+Load `getTranslations('aria')` in `g/[key]/page.tsx` and add `aria-label={tAria('viewPhoto', { title: altText })}` to the shared-grid `<Link>`. Add `g/[key]/page.tsx` to the existing `client-source-contracts.test.ts` action-label coverage so shared routes cannot drift from the main gallery again.
 
-Concrete failure scenario:
+### UIUX-C10-02 - Repeated admin row actions use generic "Edit" and "Delete" accessible names
 
-A visitor follows a stale or manually edited URL such as `/en?tags=not-a-real-tag`. The gallery shows all 445 photos, but the filter group communicates that `All` is not active. If the visitor then toggles real tags, `TagFilter` composes the next query from the stale raw value, so invalid slug state can continue to influence URL writes until a clear action removes it.
+Classification: Confirmed
 
-Suggested fix:
+Severity: Medium
 
-Make `TagFilter` consume the canonical tag list from the server, not raw query params. A narrow fix is:
+Confidence: High
 
-- Change `TagFilter` props to accept `currentTags: string[]`.
-- Pass `currentTags` from `HomeClient` into `TagFilter`.
-- Derive `aria-pressed`, active variants, and `handleTagClick` additions/removals from that canonical list.
-- When writing the next URL, write only canonical slugs plus the clicked valid slug; if the canonical list is empty, `All` should be active even when the URL contains junk.
-- Add a regression test covering `?tags=not-a-real-tag` and `?tags=valid,not-a-real-tag`, asserting canonical chip state and URL writes.
+Evidence:
 
-## Information Architecture Assessment
+- Image rows render repeated icon buttons with generic labels at `apps/web/src/components/image-manager.tsx:546-552`: `aria-label={t('aria.editItem')}` and `aria-label={t('aria.deleteItem')}`.
+- Tag rows do the same at `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:104-113`.
+- Category rows do the same at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:228-254`.
+- The translation values are generic in both locales: `apps/web/messages/en.json:640-641` is "Edit" / "Delete"; `apps/web/messages/ko.json:640-641` is "편집" / "삭제".
+- The user manager shows the intended pattern: `apps/web/src/components/admin-user-manager.tsx:156-162` labels the repeated delete button with `t('aria.deleteUser', { username: user.username })`.
 
-The public information architecture is sound: persistent global nav, topic pills, gallery heading, filter group, masonry links, load-more, and photo detail/lightbox all form a coherent browsing model. The defect above is an IA/state-visibility issue, not a page-structure issue: the canonical result set and the filter control can diverge.
+Failure scenario:
 
-## Visual Design Audit
+On the admin dashboard, tags page, or categories page, a keyboard/screen-reader/voice-control admin encounters many buttons named exactly "Edit" and "Delete". They must infer the target from table position, which is slow and error-prone in dense management tables. Voice users also cannot reliably say "click Delete" when every row has the same command name.
 
-No new confirmed visual-system defects found. The source sweep shows consistent use of `min-h-11`/44 px targets, focus-visible rings, dark/OLED tokens, forced-colors handling, reduced-motion suppression, and photo-first black surfaces in the viewer/lightbox. Existing comments document prior tradeoffs such as masonry hover scale, color badges, and mobile toolbar constraints.
+Concrete fix:
 
-## Interaction Design Critique
+Add contextual i18n keys, for example `aria.editImage`, `aria.deleteImage`, `aria.editTag`, `aria.deleteTag`, `aria.editCategory`, and `aria.deleteCategory`. Use stable row labels:
 
-Keyboard and pointer handling is generally robust on the reviewed surfaces: search has combobox semantics and IME guards, photo viewer/lightbox handle arrows and shortcut keys outside editable targets, and controls expose titles/ARIA shortcuts where appropriate. The current interaction failure is specific to tag filtering: the chip group does not have a single source of truth for active state and URL mutation.
+- Images: `image.title || image.user_filename || image.filename_avif || image.id`
+- Tags: `tag.name`
+- Categories: `topic.label`
 
-## Workflow Design Evaluation
+Then update the row buttons to include the target in the accessible name, mirroring `deleteUser`. Add a source-contract test that repeated admin row action buttons do not use `aria.editItem` / `aria.deleteItem` in table rows.
 
-For public browsing, the standard workflow of choosing a topic/tag, opening a photo, using viewer/lightbox navigation, and returning to the grid is supported. The invalid-tag state bug can degrade trust in filtered browsing and load-more continuation, especially from shared/stale URLs, but does not block normal valid-tag browsing.
+### UIUX-C10-03 - Shared-group masonry cards do not use the dimension guard used by the main gallery
 
-## Accessibility Report
+Classification: Risk
 
-Confirmed WCAG-relevant issue:
+Severity: Low
 
-- `aria-pressed` state on the tag-filter toggle group can become false for every option while the page is effectively in the `All` state. This violates state communication expectations for toggle controls and leaves assistive-technology users without a reliable indication of the active result scope.
+Confidence: Medium
 
-No additional confirmed accessibility defects found in this pass. Focus-visible, reduced-motion, forced-colors, and touch-target handling have explicit source/test coverage across many surfaces.
+Evidence:
 
-## Platform Fidelity Check
+- Shared-group card layout builds CSS directly from image dimensions at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:190-194`: `aspectRatio: ${image.width} / ${image.height}` and `containIntrinsicSize: Math.round(300 * image.height / image.width)`.
+- The main gallery has an explicit non-positive-dimension guard at `apps/web/src/components/home-client.tsx:298-309`, falling back to `1 / 1` and a square intrinsic reservation if either dimension is invalid.
 
-The web UI uses standard browser patterns and Radix/shadcn primitives where appropriate. Search, dialogs, select/switch controls, and links mostly carry familiar semantics. No new platform-fidelity findings filed.
+Failure scenario:
 
-## Competitive UX Comparison
+If a legacy or partially repaired shared-group image ever carries width or height `0`, the shared group can emit invalid aspect-ratio/intrinsic-size CSS. The result is a masonry card with poor layout reservation and possible visual jump, while the same image path in the main gallery would degrade to a square placeholder.
 
-| Feature | Lightroom / Photo Mechanic expectation | GalleryKit current HEAD | Verdict |
-| --- | --- | --- | --- |
-| Active filter visibility | Filter state is always explicit and canonical | Invalid tag URLs can show all photos with no active chip | Worse |
-| Keyboard photo navigation | Arrow-key movement in viewer/lightbox | Implemented with editable-target guards | Same for public viewer |
-| Touch target sizing | Large enough for repeated use | 44 px policy broadly enforced by source/tests | Same/better for web touch |
-| Reduced motion | Optional/nonessential animation suppressed | Global reduced-motion CSS plus component checks | Same |
+Concrete fix:
 
-## Design System Assessment
+Reuse the `hasValidDims` pattern from `HomeClient` in `g/[key]/page.tsx`: fallback to `1 / 1` and a fixed intrinsic height when `image.width <= 0 || image.height <= 0`. Add shared-group source coverage beside the existing grid-picture fallback tests.
 
-The design system is coherent for the current product scale: Tailwind tokens, shadcn/Radix primitives, lucide icons, CSS variables for light/dark/OLED, and source-level touch-target/focus-visible tests. The bug is not token drift; it is state-source drift between server-canonical filters and a client component reading raw URL params independently.
+## Information Architecture
 
-## Prioritized Design Recommendations
+The public IA is sound: global nav, topic links, tag filters, gallery heading, masonry cards, load-more, detail viewer, lightbox, and info sheet form a coherent browsing flow. The previous cycle 7 tag-filter source-of-truth issue is fixed: `TagFilter` now accepts `currentTags` at `apps/web/src/components/tag-filter.tsx:10-22`, and `HomeClient` passes the canonical server state at `apps/web/src/components/home-client.tsx:271-273`.
 
-Tier 0 - Blocking:
+Admin IA is functional and appropriately dense for a self-hosted tool. The main weakness is not structure; it is repeated row action naming in dense tables.
 
-- None found in this UI/UX lane.
+## Visual Design
 
-Tier 1 - High impact:
+No new confirmed visual-system defects found. The source and browser pass show consistent 44 px controls, focus-visible rings, photo-first dark viewer surfaces, responsive masonry columns, and a restrained admin style. The public photo viewer avoids showing keyboard shortcut copy visually on mobile while keeping it available to assistive tech.
 
-- Fix `TagFilter` to use server-canonical `currentTags` for active state and URL writes.
+## Interaction Design
 
-Tier 2 - Polish:
+Public browsing supports pointer, keyboard, and touch interactions well: search has combobox/listbox behavior, photo viewer/lightbox support arrow/F/I/C/H/Space shortcuts, and image zoom has a dedicated keyboard handler. The main interaction defect is repeated/ambiguous control names in collection contexts, which slows assistive and voice-driven workflows.
 
-- Add direct component/e2e coverage for malformed tag URLs so the filter group cannot re-enter an impossible visual/ARIA state.
+## Accessibility
 
-Tier 3 - Refinement:
+Confirmed issues:
 
-- Consider canonicalizing or replacing malformed `?tags=` URLs in-place after render so copied links also converge to the state the page is actually showing.
+- Shared-group photo links do not use the same action-oriented accessible label as other public gallery grids.
+- Repeated admin row action buttons do not include target names.
 
-## Final Missed-Issues Sweep
+Positive evidence:
 
-Final sweep covered:
+- Touch-target audit passed in the focused run.
+- Focus-visible ring source contracts passed.
+- Mobile nav/search/photo controls observed at 44 px or larger.
+- `aria-pressed` tag state is canonical on the deployed home page.
 
-- Public masonry, topic, smart collection, shared group/photo, timeline/year/map, photo detail, lightbox, search, tag-filter, load-more, and empty/error/loading surfaces.
-- Admin login/dashboard/categories/tags/settings/SEO/DB/password/users/tokens/analytics/upload/image-manager surfaces.
-- UI primitives for buttons, dialogs, alert dialogs, select, switch, input, tooltip, sheet, badge, table, progress, and global CSS.
-- English/Korean message surfaces where they intersected reviewed UI.
-- Existing test coverage for tag slugs, public actions, focus-visible links, touch target policy, i18n parity, and source contracts.
+## Responsive Behavior
 
-No additional confirmed UI/UX findings were found in current HEAD.
+Desktop and mobile browser checks showed no horizontal overflow on home, expanded mobile nav, search dialog, or photo viewer. Mobile nav controls appear only when expanded, and the photo viewer toolbar preserves 44 px targets.
+
+## i18n
+
+English/Korean message files have the relevant base keys for current UI. The admin row-action fix should add contextual keys in both locales rather than concatenating English-only fragments. Existing `aria.viewPhoto` already supports the shared-group link fix in both locales.
+
+## Photographer Intent
+
+GalleryKit continues to respect the documented product boundary: it presents finished photos accurately and does not introduce culling/scoring/editing UX. Color/HDR indicators and download choices are visible without taking over the primary photo surface.
 
 ## Final Verdict
 
-Score: 7/10. GalleryKit's UI mostly helps the photographer/viewer by staying photo-first and maintaining strong accessibility guardrails, but the tag filter currently gets in the way when URLs contain stale or invalid tag state. Fixing that canonical-state split should be the cycle 7 UI priority.
+GalleryKit mostly helps the photographer/viewer: the public browsing and photo-detail surfaces are efficient, accessible, and responsive. The remaining UI debt is concentrated in repeated collection controls where accessible names are less precise than the visual layout. Fix the shared-group link label and contextual admin row labels before treating the UI as fully polished for assistive-tech and voice-control users.
