@@ -7,11 +7,8 @@
  */
 
 import {
-    COSINE_THRESHOLD,
     EMBEDDING_BYTES,
     EMBEDDING_DIM,
-    SEMANTIC_TOP_K_DEFAULT,
-    STUB_MODEL_VERSION,
 } from './clip-embedding-constants';
 
 export {
