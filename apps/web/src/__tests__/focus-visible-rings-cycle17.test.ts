@@ -122,8 +122,8 @@ describe('nav-client.tsx mobile hamburger focus-visible ring (R17C17 WCAG 2.4.11
 // ---------------------------------------------------------------------------
 describe('nav-client.tsx theme + locale focus-visible rings (R18C18 WCAG 2.4.7)', () => {
     it('theme toggle button carries the focus-visible ring-2 / ring-ring pair', () => {
-        // className precedes aria-label={t('aria.toggleTheme')} in JSX order.
-        const idx = navSrc.indexOf("aria.toggleTheme");
+        // className precedes aria-label={themeAriaLabel} in JSX order.
+        const idx = navSrc.indexOf('aria-label={themeAriaLabel}');
         expect(idx).toBeGreaterThan(-1);
         const surrounding = navSrc.slice(Math.max(0, idx - 400), idx + 50);
         expect(surrounding).toContain('focus-visible:ring-2');
