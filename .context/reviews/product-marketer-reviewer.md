@@ -1,253 +1,248 @@
-# Product Marketer Review - Cycle 10
+# Product Marketer Review - Cycle 11
 
 Date: 2026-06-29
 Reviewer: product-marketer-reviewer
 Repository: GalleryKit
-Scope: Product, positioning, market-readiness, UI/docs claim accuracy, and trust signals for GalleryKit as a self-hosted photographer gallery web app. This is Prompt 1 only; no implementation changes were made.
+Scope: Product, marketing, public docs, privacy/footer/site config, admin copy, public pages, and implementation truth for `/Users/hletrd/flash-shared/gallery`. This review is adapted to GalleryKit, not BurstPick. No production code was edited.
 
 ## Executive Summary
 
-GalleryKit's core positioning is credible: the repo consistently presents a self-hosted photographer gallery, not an editing/culling/scoring tool, and the strongest claims around color management, semantic search, admin scope, SQL-only restore, and public GPS privacy are mostly backed by code. The main actionable trust gap is that the admin UI and server comments tell operators to connect a "GalleryKit Lightroom Classic publish plugin," but this repository contains no installable plugin, setup guide, or plugin download surface. Two secondary risks remain around third-party analytics disclosure and the first-upload GPS retention decision.
+GalleryKit mostly tells the truth about its product surface: this is a self-hosted photographer gallery with serious color delivery, admin-owned infrastructure, and no payment, culling, scoring, or image-editing product surface. The main trust problem in this cycle is not overbroad positioning; it is privacy and AI wording that contradicts implementation details. The public privacy page says public pages exclude GPS coordinates, but the public `/map` route intentionally exposes opted-in latitude/longitude markers. The footer also hides the privacy page unless Google Analytics is configured, even though the page discloses metadata behavior too. Separately, the bulk editor still says "AI-suggested alt text" while the generator is explicitly an EXIF-derived stub.
 
-Finding count: 1 confirmed issue, 1 likely issue, 1 risk, 6 aligned/no-action checks.
+Finding count: 3 confirmed issues, 1 risk, 5 aligned/no-action checks.
 
 | Severity | Confirmed | Likely | Risk |
 | --- | ---: | ---: | ---: |
 | Critical | 0 | 0 | 0 |
-| High | 0 | 0 | 0 |
-| Medium | 1 | 1 | 0 |
-| Low | 0 | 0 | 1 |
+| High | 1 | 0 | 0 |
+| Medium | 2 | 0 | 1 |
+| Low | 0 | 0 | 0 |
 
 ## Profile Adaptation Note
 
-The local agent profile at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` is BurstPick-specific and asks for Swift/BurstPick source files. This repository is GalleryKit, so I used only the role's product-marketing and claim-verification stance. I did not look for absent BurstPick Swift files beyond noting the mismatch, and I prioritized `AGENTS.md`, `CLAUDE.md`, and GalleryKit source/docs.
+The registered local profile at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` is BurstPick-specific and asks for Swift, ML scoring, pricing, and culling surfaces that do not exist in this repository. I used the role's senior product-marketing claim-verification stance, but followed `AGENTS.md`, `CLAUDE.md`, and GalleryKit source truth. I did not invent BurstPick scope.
 
 ## Inventory Summary
 
 Product/docs/marketing surfaces reviewed:
 
 - `README.md`
-- `apps/web/README.md`
 - `CLAUDE.md`
-- `AGENTS.md`
-- `apps/web/src/site-config.example.json`
+- `AGENTS.md` instructions supplied in the prompt
+- `apps/web/package.json`
 - `apps/web/src/site-config.json`
+- `apps/web/src/site-config.example.json`
 - `apps/web/messages/en.json`
 - `apps/web/messages/ko.json`
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
 - `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/components/nav.tsx`
-- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
 - `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/similar-photos.tsx`
+- `apps/web/src/components/nav-client.tsx`
 - `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/color-details-section.tsx`
-- `apps/web/src/components/lightbox-color-pip.tsx`
-- `apps/web/src/components/wide-gamut-hint.tsx`
-- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/bulk-edit-dialog.tsx`
 - `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
 
 Implementation claim checks reviewed:
 
 - `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/caption-generator.ts`
+- `apps/web/src/lib/bulk-edit-types.ts`
 - `apps/web/src/lib/gallery-config-shared.ts`
 - `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/search-enrichment-fields.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/lib/admin-tokens.ts`
 - `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/seo.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/app/actions/topics.ts`
 - `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/lib/admin-tokens.ts`
 - `apps/web/src/db/schema.ts`
-- `apps/web/src/__tests__/privacy-fields.test.ts`
-- `apps/web/src/__tests__/map-privacy.test.ts`
-- `apps/web/src/__tests__/search-route-privacy.test.ts`
-- `apps/web/src/__tests__/semantic-route-production.test.ts`
-- `apps/web/src/__tests__/similar-route.test.ts`
-- `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts`
-- `apps/web/src/__tests__/lr-tokens-action.test.ts`
+- `apps/web/src/components/map/map-client.tsx`
+- `apps/web/src/components/map/map-loader.tsx`
 
-Inventory searches:
+Focused searches:
 
-- `rg --files` for docs/UI/code surfaces.
-- `rg --files | rg -i "lightroom|lrplugin|lua|plugin|publish"` found only server/token/test files: `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, and related tests. No `.lrplugin`, Lua plugin source, plugin package, or plugin setup doc was present.
-- `rg --files | rg -i "privacy|terms|policy|consent|cookie"` found privacy tests and analytics code, but no public privacy/terms/cookie/consent page.
+- `rg` for `payment`, `Stripe`, `checkout`, `pricing`, `paid`, `culling`, `scoring`, `edit`, `editing`, `S3`, `MinIO`, `semantic`, `AI`, `HDR`, `Lightroom`, `privacy`, `analytics`, `GPS`, `footer`, and `site-config`.
+- i18n key parity check with a small Node script over `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
+- Current worktree status before writing showed an unrelated modified `.context/reviews/critic.md`; this review did not touch it.
 
 ## Confirmed Findings
 
-### PMR-C10-01 - Lightroom plugin is marketed in-product, but no plugin artifact or setup path exists
+### PMR-C11-01 - Privacy page falsely says public pages exclude GPS coordinates
+
+Severity: High
+Confidence: High
+Classification: Confirmed trust/privacy copy issue
+
+Exact regions:
+
+- `apps/web/messages/en.json:773-781` defines the public Privacy page copy, including `metadataBody`: "Public pages exclude GPS coordinates."
+- `apps/web/messages/ko.json:773-781` repeats the same claim in Korean.
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx:21-28` renders that metadata claim on the public privacy page.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:38-50` builds public markers containing `latitude` and `longitude`.
+- `apps/web/src/components/map/map-client.tsx:15-22` defines the client marker shape with `latitude` and `longitude`, and `apps/web/src/components/map/map-client.tsx:120-123` renders those coordinates into Leaflet markers.
+- `apps/web/src/lib/data.ts:1658-1684` documents and implements `getMapImages()` as the public latitude/longitude path for processed images in `map_visible` topics.
+- `apps/web/src/db/schema.ts:9-11` shows `topics.map_visible` defaults to false so the GPS map is opt-in.
+- `apps/web/src/app/actions/topics.ts:593-618` exposes the admin action that toggles the public map GPS view.
+
+Why this is a problem:
+
+The implementation is intentionally privacy-aware: GPS is public only on the `/map` route and only for topics the admin opted into. The privacy copy is still false because it uses an absolute claim. A visitor reading the privacy page is told public pages exclude GPS, while another public page can publish exact map coordinates. For a client gallery, venue, home, school, wildlife location, or private event, that contradiction is a direct trust failure.
+
+Concrete failure scenario:
+
+A photographer enables "Show on Map" for a travel category, then sends the gallery to a client. The client opens the Privacy page and sees that public pages exclude GPS coordinates, then finds exact markers on `/map`. The product did the admin-requested thing, but the disclosure makes the operator look careless or deceptive.
+
+Suggested fix:
+
+Change both English and Korean privacy copy to a scoped statement. Example: "Standard gallery and photo pages exclude GPS coordinates. The public Map page can display coordinates for categories an admin explicitly marks as Show on Map. Disable map visibility or enable GPS stripping before upload if locations should stay private." Consider linking to `/map` only when marker count is non-zero, but do not make the disclosure depend on analytics.
+
+### PMR-C11-02 - Footer hides the privacy page unless Google Analytics is configured
 
 Severity: Medium
 Confidence: High
-Classification: Confirmed product/trust issue
+Classification: Confirmed trust/disclosure discoverability issue
 
 Exact regions:
 
-- `apps/web/messages/en.json:782-787` labels the admin page "Lightroom Tokens" and says admins can generate tokens for the "GalleryKit Lightroom Classic publish plugin."
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx:11-24` renders that token page and description directly in the admin UI.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:1-16` documents the upload endpoint as the server-side counterpart to the Lightroom plugin and specifically references the plugin's `GalleryKitAPI.lua`.
-- `CLAUDE.md:152` describes "Lightroom Classic publish-plugin PATs" and says the plugin accepts `X-GalleryKit-Token`.
-- `README.md:148` and `apps/web/README.md:46` mention `/api/admin/lr/upload` so Lightroom publishes bypass the generic admin upload body cap.
-- Inventory evidence: no `.lrplugin`, Lua file, install package, or user-facing setup document exists in the repo. The only Lightroom-matching source files are the server route, token actions, and tests.
+- `apps/web/src/components/footer.tsx:6` computes `hasGoogleAnalytics` from `siteConfig.google_analytics_id`.
+- `apps/web/src/components/footer.tsx:44-48` renders the Privacy link only inside `{hasGoogleAnalytics && (...)}`.
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx:21-28` shows the page discloses both analytics and photo metadata behavior, not analytics alone.
+- `apps/web/messages/en.json:773-781` and `apps/web/messages/ko.json:773-781` include metadata/GPS disclosure copy that remains relevant when GA is disabled.
+- `apps/web/src/site-config.json:10` and `apps/web/src/site-config.example.json:10` default `google_analytics_id` to an empty string, so the default public footer hides Privacy.
 
 Why this is a problem:
 
-The UI creates an expectation that a user can generate a token and connect Lightroom Classic. The backend route appears real and well-hardened, but the product surface does not provide the thing the user needs next: where to get the plugin, how to install it, what server URL/header it uses, what topic field is required, and what errors Lightroom will show. For a photographer evaluating a self-hosted workflow, this reads as a partially shipped integration.
+The footer treats privacy as an analytics-only disclosure. In the actual product, privacy also covers processed derivatives, public metadata, GPS stripping, and the public map boundary. On the default self-hosted install, visitors see GitHub and Admin footer links but no Privacy link, even though the site may still publish photo metadata and opted-in GPS map markers.
 
 Concrete failure scenario:
 
-A photographer installs GalleryKit, opens Admin -> Tokens, generates an LR token, then cannot find the Lightroom publish plugin or setup instructions. They either abandon the integration or try to reverse-engineer the API. The gap damages trust because the UI implied a complete Lightroom workflow.
+An operator leaves Google Analytics disabled, enables map visibility for a topic, and shares the site. Visitors have no footer path to the only page that explains metadata behavior. If a visitor later discovers GPS markers, the absence of an obvious privacy link compounds the trust issue from PMR-C11-01.
 
-Concrete fix:
+Suggested fix:
 
-Ship one of these before presenting the integration as a plugin:
+Always render the Privacy link in the public footer. If the goal is to avoid a dead analytics notice on default installs, keep the existing dynamic analytics paragraph inside the page, but do not hide the entire route. A stronger fix is to rename the section to "Privacy and Metadata" in footer/UI copy if the product wants to emphasize that it is broader than GA.
 
-- Add the Lightroom plugin artifact/source and a clear install guide, linked from the Tokens page.
-- Add a "Setup Lightroom Classic" help block beside token creation with plugin download path, server URL, token header, topic mapping, file limits, and troubleshooting.
-- If the plugin is not ready to distribute, relabel the page to "Upload API Tokens" and change the copy to "Lightroom plugin support is server-ready; plugin distribution is not included yet."
-
-## Likely Findings
-
-### PMR-C10-02 - Google Analytics can be enabled without any public privacy/disclosure surface
+### PMR-C11-03 - Bulk editor claims AI-suggested alt text, but implementation is an EXIF stub
 
 Severity: Medium
-Confidence: Medium
-Classification: Likely trust/compliance issue
+Confidence: High
+Classification: Confirmed AI/message honesty issue
 
 Exact regions:
 
-- `README.md:46-58` documents `google_analytics_id` as part of the file-backed site configuration.
-- `apps/web/src/site-config.example.json:9-10` ships `footer_text` and `google_analytics_id` defaults, with analytics empty by default.
-- `apps/web/src/app/[locale]/layout.tsx:147-155` injects `https://www.googletagmanager.com/gtag/js` and runs `gtag('config', ...)` whenever `siteConfig.google_analytics_id` matches the allowed pattern.
-- `apps/web/src/components/footer.tsx:42-54` renders only GitHub and Admin links; there is no privacy/cookie link in the default public footer.
-- Inventory evidence: no public privacy, terms, cookie, or consent route/page was found.
+- `apps/web/messages/en.json:233-234` says "Apply suggested alt text" and "Copies AI-suggested alt text..."
+- `apps/web/messages/ko.json:233-234` says the same in Korean: "AI가 제안한..."
+- `apps/web/src/components/bulk-edit-dialog.tsx:241-257` renders the bulk apply control and hint.
+- `apps/web/src/lib/caption-generator.ts:1-18` states the caption generator is a stub and Florence-2 ONNX inference is deferred.
+- `apps/web/src/lib/caption-generator.ts:33-43` generates deterministic EXIF-derived strings such as "Photo taken with {camera_model}".
+- `apps/web/src/lib/caption-generator.ts:54-64` returns that stub when auto alt text is enabled.
+- `apps/web/messages/en.json:721-724` correctly says auto alt text creates EXIF-derived placeholders and real model-generated descriptions are future work.
+- `apps/web/messages/ko.json:721-724` correctly says the same in Korean.
+- `apps/web/src/app/actions/images.ts:1058-1107` copies `alt_text_suggested` into title or description without adding any model inference step.
 
 Why this is a problem:
 
-The default is privacy-preserving because analytics is empty, but the documented config makes third-party Google tracking a one-line switch. Once enabled, visitors receive third-party analytics scripts without an included privacy notice, disclosure link, or consent strategy. That is a trust problem for client galleries and a compliance risk for operators serving EU/UK/KR visitors.
+The settings page is honest, but the bulk editor is not. "AI-suggested" is a material product claim. In this repo, auto alt text is an EXIF-derived placeholder, not a vision model result. This matters because GalleryKit also has a real CLIP semantic-search implementation; loose AI wording in a separate admin flow weakens trust in the real AI claim.
 
 Concrete failure scenario:
 
-A photographer sets `google_analytics_id` to measure client gallery traffic. The site starts loading Google Tag Manager/Analytics on every public page, but there is no public privacy notice explaining visitor tracking or data transfer. A client or venue objects, or the photographer has to disable analytics after sharing galleries.
+An admin enables Auto Alt-Text, bulk-applies "AI-suggested" text into titles/descriptions, and publishes generic captions like "Photo taken with Canon EOS R5" believing a model inspected the image content. The published gallery looks low-quality and the operator loses confidence in GalleryKit's AI features.
 
-Concrete fix:
+Suggested fix:
 
-Add a minimal privacy/analytics disclosure path and link it from the footer when GA is configured. At minimum, document that enabling `google_analytics_id` adds third-party tracking and that operators are responsible for consent/legal notices. A stronger product fix is a built-in privacy page template with configurable owner/contact text and a "no third-party analytics" default posture.
+Change the bulk hint in both locales to "Copies EXIF-derived suggested alt text..." until real inference ships. If real Florence-2 support is added later, update the settings and bulk copy together and include a model/version disclosure.
 
 ## Risk Findings
 
-### PMR-C10-RISK-01 - GPS stripping is a locked first-upload decision, but the default retains GPS
+### PMR-C11-RISK-01 - README "batch editing" wording can imply photo editing despite the product boundary
 
-Severity: Low
+Severity: Medium
 Confidence: Medium
-Classification: Product trust risk, not a confirmed public leak
+Classification: Risk, not a confirmed false claim
 
 Exact regions:
 
-- `apps/web/src/lib/gallery-config-shared.ts:91-97` sets `strip_gps_on_upload` to `false` by default.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:543-567` renders the privacy setting and disables it when `hasExistingImages` is true.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:569-572` tells admins the upload contract is locked for an existing gallery.
-- `apps/web/src/app/actions/images.ts:347-357` removes DB GPS fields and strips retained originals only when `uploadConfig.stripGpsOnUpload` is true.
-- Positive boundary evidence: `apps/web/src/lib/data.ts:367-407` omits latitude/longitude from normal public fields, and `apps/web/src/lib/data.ts:1658-1683` exposes coordinates only through the map query when `topics.map_visible = true`.
+- `README.md:40` markets the Admin Dashboard with "batch editing."
+- `CLAUDE.md:260` defines the product premise: photos arrive after editing and no edit, culling, or scoring features ship.
+- `apps/web/src/lib/bulk-edit-types.ts:1-19` scopes bulk editing to metadata fields: topic, title, description, tag add/remove, and suggested alt text copy.
+- `apps/web/src/app/actions/images.ts:949-1112` implements `bulkUpdateImages()` for topic/title/description/tag/alt-text metadata only.
+- `apps/web/messages/en.json:218-237` labels the UI "Bulk edit" but the description says only toggled fields, tags, and suggested alt text are changed.
 
-Why this matters:
+Why this is a problem:
 
-The code has a good public GPS boundary, so this is not a confirmed public leak. The risk is the first-run product experience: a new operator can upload photos before noticing the privacy setting, and after photos exist the setting is locked. At that point retained originals and admin metadata may already contain GPS unless the operator regenerates or manually cleans the library.
+"Batch editing" is common photography language for editing images, presets, exposure, color, crops, or culling decisions. In GalleryKit, the feature is batch metadata management. The README does not explicitly say metadata, so a prospective operator could misread the feature list as violating GalleryKit's own no-editing boundary.
 
 Concrete failure scenario:
 
-A photographer uploads a first client set from GPS-enabled camera files, then later discovers the "Do Not Store GPS Coordinates" switch. The switch is disabled because images already exist. Public pages still avoid GPS unless map topics are opted in, but the operator has already retained location metadata in private originals contrary to their later privacy intent.
+A photographer evaluating GalleryKit sees "batch editing" and expects photo-editing workflow features. They install it, find only metadata bulk updates, and conclude the README overpromised. The product did not ship a forbidden feature, but the wording makes the boundary less clear than the implementation.
 
-Concrete fix:
+Suggested fix:
 
-Make the GPS decision explicit before first upload. Options: default `strip_gps_on_upload` to `true` for fresh installs, add a first-run privacy step before enabling uploads, or show a blocking/strong warning on the upload page until the operator confirms GPS retention vs stripping. Keep the current map-visible public guard.
+Change `README.md:40` from "batch editing" to "batch metadata editing" or "batch title, description, category, and tag updates." Consider adding a short README note near the feature list: "GalleryKit is a publishing/gallery tool, not an editor, culler, or scoring system."
 
 ## Aligned / No Action Checks
 
-### PMR-C10-OK-01 - Semantic search honesty is strong
+### PMR-C11-OK-01 - Payment surfaces are not marketed
 
 Evidence:
 
-- `README.md:37` says semantic search is disabled by default and requires operator setup.
-- `apps/web/README.md:53-73` documents model, modes, offline weights, production honesty gate, bounded scan, and operator activation.
-- `apps/web/src/lib/gallery-config.ts:123-142` heals stored production mode to disabled unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
-- `apps/web/src/app/api/search/semantic/route.ts:156-176` rejects disabled mode.
-- `apps/web/src/app/api/search/semantic/route.ts:242-260` filters by active model version and returns 503 if production has no rows.
-- `apps/web/src/components/search.tsx:462-469` shows an experimental disclaimer for stub mode only.
+- `rg` over current `README.md`, `apps/web/messages`, and `apps/web/src` found no live Stripe, checkout, pricing, billing, or paid-download product surface outside historical comments and tests.
+- `README.md:201-203` presents the repository license, not a monetized gallery feature.
 
-Assessment: No actionable issue.
+Assessment: No overclaim found. This respects the project ban on reintroducing payment surfaces without a product decision.
 
-### PMR-C10-OK-02 - Similar photos is production-only, not stub-hyped
+### PMR-C11-OK-02 - Lightroom token page now avoids claiming a bundled plugin
 
 Evidence:
 
-- `apps/web/src/app/api/search/similar/[id]/route.ts:97-113` serves only when `semanticSearchMode === 'production'`.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:115-150` requires a production embedding and scans production model rows.
+- `apps/web/messages/en.json:800-805` labels the page "Upload API Tokens" and says GalleryKit does not bundle or distribute a Lightroom Classic plugin.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:5-8` similarly states the server route does not distribute a Lightroom plugin.
+- `apps/web/src/lib/admin-tokens.ts:3-24` defines token mechanics and scopes; the UI copy does not claim a full client distribution.
 
-Assessment: No actionable issue.
+Assessment: No current product-marketing issue found in the token page copy.
 
-### PMR-C10-OK-03 - Public GPS privacy boundary is explicitly guarded
-
-Evidence:
-
-- `apps/web/src/lib/data.ts:367-407` omits coordinates from the canonical unauthenticated field set.
-- `apps/web/src/lib/data.ts:409-415` states the map field set is the only latitude/longitude public path.
-- `apps/web/src/lib/data.ts:1658-1683` enforces processed images, non-null coordinates, and `topics.map_visible = true`.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:38-50` passes only narrowed marker fields to the client.
-
-Assessment: No public GPS leak found.
-
-### PMR-C10-OK-04 - RBAC/admin-power claims are honest
+### PMR-C11-OK-03 - Semantic search copy is mostly honest
 
 Evidence:
 
-- `README.md:40` says "multiple root-admin accounts" and "no role separation yet."
-- `CLAUDE.md:5` repeats authentication-only admin accounts.
-- `CLAUDE.md:228` says any admin can upload, edit, restore/export, change settings, and manage admins.
-- `apps/web/messages/en.json:49-50` warns new admins are full-access root admins.
+- `README.md:37` says semantic search is self-hosted, operator-enabled, disabled by default, requires model download/backfill/env opt-in, and is live on the demo.
+- `apps/web/messages/en.json:725-728` explains stub mode is not meaningful and production mode is operator-gated.
+- `apps/web/messages/ko.json:725-728` mirrors the same warning.
+- `CLAUDE.md:151` says the code default is disabled and production mode requires the env gate plus production DB row.
+
+Assessment: No issue in the reviewed local copy. I did not use the live demo as implementation evidence for this artifact.
+
+### PMR-C11-OK-04 - Backup and restore copy does not overpromise full-site rollback
+
+Evidence:
+
+- `apps/web/messages/en.json:18-24` says backups are database rows only and files require host-level backups.
+- `CLAUDE.md:208-210` says DB restore does not snapshot or roll back original files, derivatives, or resources.
+
+Assessment: No actionable marketing mismatch found.
+
+### PMR-C11-OK-05 - Admin power/RBAC claims are honest
+
+Evidence:
+
+- `README.md:40` says there are multiple root-admin accounts with no role separation yet.
+- `CLAUDE.md:5` says authentication only, no role/capability separation yet.
+- `CLAUDE.md:228` says any admin can upload, edit metadata, export/restore DB backups, change settings, and manage admins.
+- `apps/web/messages/en.json:49-50` warns that new admins are full-access root admins.
 
 Assessment: No overclaim found.
 
-### PMR-C10-OK-05 - Backup/restore product copy does not overpromise full-site backups
+## Positioning Notes
 
-Evidence:
-
-- `apps/web/messages/en.json:18-24` says DB backups are rows only and files require host-level backups.
-- `CLAUDE.md:208-210` says DB restore does not snapshot or roll back host files.
-
-Assessment: No actionable issue in the reviewed copy.
-
-### PMR-C10-OK-06 - Unsupported storage/payment/editing/culling claims are not being marketed
-
-Evidence:
-
-- `CLAUDE.md:141` says S3/MinIO storage is not integrated and must not be documented as supported.
-- `CLAUDE.md:522` says paid downloads/Stripe were removed and must not be reintroduced without a product decision.
-- `CLAUDE.md:232` states the product has no edit/culling/scoring features.
-- README feature copy does not market editing, culling, scoring, payment, or S3 storage as product features.
-
-Assessment: No actionable issue.
-
-## Overall Positioning Notes
-
-GalleryKit's best current position is not "AI gallery" or "portfolio CMS." The defensible wedge is: self-hosted photographer gallery with unusually serious image-delivery fidelity, privacy controls, and operator-owned infrastructure. The README mostly supports that, especially with color pipeline specifics and operator-gated semantic search. The highest-leverage marketing improvements are trust infrastructure around integrations and visitor privacy, not more feature copy.
+GalleryKit's defensible position is: self-hosted photo publishing for photographers who care about color-faithful delivery, private originals, and owning the publishing stack. The strongest marketing assets are implementation-backed: color pipeline detail, private original storage, GPS controls, SQL-only restore honesty, root-admin honesty, and operator-gated semantic search. The product should avoid vague "AI" or "editing" language because the implementation is strongest when it is precise.
 
 Recommended one-sentence positioning:
 
-> GalleryKit is a self-hosted photo gallery for photographers who care about color-faithful delivery, private originals, and owning the full publishing stack.
+> GalleryKit is a self-hosted photo gallery for photographers who want color-faithful web delivery, private originals, and control over the full publishing stack.
 
 ## Verification Notes
 
-No source code was edited. This report is the only file intentionally changed. I did not run the full test suite because this was a read-only review/report task; verification consisted of source/docs inventory, line-level claim checks, and targeted repository searches.
+No production code was edited. This report is the only file intentionally changed. I did not run the full lint/typecheck/test suite because this was a review artifact task; verification consisted of source/docs inventory, line-level claim checks, i18n key parity check, and targeted repository searches.
