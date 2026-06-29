@@ -1,93 +1,94 @@
-# Designer Review - Review-Plan-Fix Cycle 4
+# Designer Review - Review-Plan-Fix Cycle 5
 
-Role: designer / UI-UX reviewer. Scope: information architecture, affordances, focus/keyboard navigation, WCAG 2.2 accessibility, contrast, ARIA, focus traps, reduced motion, responsive breakpoints, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL, and perceived performance. No application code was edited.
+Role: designer / UI-UX reviewer. Scope: information architecture, affordances, keyboard/focus navigation, WCAG 2.2 accessibility, responsive breakpoints, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL, and perceived performance. No application source was edited.
 
 ## Inventory Coverage
 
-Read `AGENTS.md` and `CLAUDE.md` first. Consulted current/recent `.context` history including `.context/reviews/designer.md` from cycle 3, `.context/reviews/ui-ux-designer-reviewer.md`, and recent run-9 designer reports to avoid stale duplicates.
+Read the supplied `AGENTS.md` contract and `CLAUDE.md` first. Loaded the `agent-browser` core, query, visual, interaction, and config skills before browser checks.
 
-Built a UI inventory of 104 relevant files under:
-- `apps/web/src/app/[locale]`
-- `apps/web/src/components`
-- `apps/web/messages`
-- `apps/web/src/i18n`
+Current UI inventory rebuilt before reviewing:
 
-Examined the UI inventory with source reads plus structural scans for interactive elements, labels, ARIA, focus traps, dialogs/sheets, loading states, reduced-motion hooks/classes, metadata, directional CSS, localized date formatting, and touch-target classes. Also checked adjacent tests and plans for stale findings.
+- 96 product-facing UI files under `apps/web/src/app/[locale]/(public)`, `apps/web/src/app/[locale]/admin`, and `apps/web/src/components`.
+- 2 locale files: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Relevant UI/a11y tests: touch target audit, focus-visible scans, route error shell tests, i18n key parity, theme resolution, bottom-sheet IA, lightbox control contracts, search disclaimer, HDR badge contrast.
+- Structural scan covered 314 interactive/control markers (`button`, `Button`, `Link`, anchors, inputs, selects, textareas, dialog/status/live-region roles, ARIA attributes, `tabIndex`, and autofocus).
 
 Browser evidence:
-- Used `agent-browser`; Chromium was already installed.
-- Reused existing Next dev server at `http://127.0.0.1:3014`.
-- Local MySQL was unavailable (`ECONNREFUSED 127.0.0.1:3306`), so DB-backed public pages rendered error boundaries or could not reach the intended 404 shell. This is recorded as a validation limitation.
-- Live-checked `/en/admin` and `/ko/admin` at desktop/mobile sizes with accessibility snapshots and DOM state. Both rendered one `main`, one skip link, localized titles (`Admin | GalleryKit`, `관리 | GalleryKit`), labelled username/password fields, 44 px password-toggle and submit controls, and working password reveal.
-- Live-checked `/en` under DB failure. It rendered a localized route error shell with one `main`, h1, 44 px action controls, and no browser page errors beyond the expected server query failure.
+
+- Started local dev server: `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3014`.
+- `agent-browser install` confirmed Chromium 150.0.7871.24 already installed.
+- The app loaded from `http://127.0.0.1:3014`, but local MySQL was unavailable: Next logged `Could not connect to database to bootstrap queue (ECONNREFUSED)`. DB-backed public pages and protected admin data views could not be fully browser-validated.
+- `/en/admin` initially rendered the admin login shell with title `Admin | GalleryKit`, one skip link, one `main`, visible username/password labels, required fields, password reveal button, and submit control in the accessibility tree.
+- `/ko/admin` rendered the localized login shell with title `관리 | GalleryKit`, Korean labels, and localized password reveal text.
+- Later `/en`, `/en/not-real-route`, and `/en/admin` fell through the localized route error shell because DB-backed route work failed. The error shell still exposed one skip link, one `main`, h1 `Error`, a retry button, and a return link at desktop/mobile and light/dark viewports.
+- Verified middleware redirect behavior with `agent-browser open http://127.0.0.1:3014/p/1`: final URL became `http://127.0.0.1:3014/en/p/1`, matching `localePrefix: 'always'` and default-locale fallback.
 
 ## Findings
 
-### DES-C4-01 - 404 pages render a duplicate skip link before navigation
+### DES-C5-01 - Admin analytics public links force default-locale pages and English accessible labels
 
 Severity: Low  
 Confidence: High  
-Status: confirmed by source; manual browser validation blocked because local DB failure crashes `Nav` before the intended not-found shell renders.
+Status: confirmed by source and browser redirect behavior.  
+Selector / region: analytics top-photo links `a[href="/p/${row.imageId}"]`; analytics shared-album links `a[href="/g/${row.shareKey}"]`.
 
 Evidence:
-- `apps/web/src/app/[locale]/layout.tsx:123-128` always renders a root skip link targeting `#main-content`.
-- `apps/web/src/app/[locale]/not-found.tsx:20-23` renders another identical skip link before its local `Nav`.
-- `apps/web/src/app/[locale]/not-found.tsx:24-51` intentionally reproduces the public shell (`Nav`, `main#main-content`, `Footer`) because the route-level 404 does not inherit the `(public)` layout. That makes the local `main` necessary, but the second skip link is now redundant because the root locale layout already provides one.
 
-Why this is a problem: keyboard users landing on a 404 encounter two identical "Skip to content" controls in sequence before the page navigation. The second control does not add a new bypass target or function; it lengthens the first-tab path on an error recovery page.
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:112-117` renders top-photo links with `href={`/p/${row.imageId}`}` and an `aria-label` suffix hard-coded as `(opens in new window)`.
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:194-200` comments that shared-album hrefs are intentionally locale-agnostic.
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:222-227` renders shared-album links with `href={`/g/${row.shareKey}`}` and the same hard-coded English `aria-label` suffix.
+- `apps/web/src/proxy.ts:7-12` configures `next-intl` with `localePrefix: 'always'` and `localeDetection: false`.
+- Browser confirmation: opening `/p/1` redirected to `/en/p/1`.
 
-Failure scenario: a keyboard user opens a dead URL, presses Tab expecting to move from the global skip link into the navigation or page action, and instead lands on a second visually identical skip link. Screen-reader link lists also contain duplicate same-name same-target links.
+Why this is a problem:
 
-Concrete fix: remove the local `<a href="#main-content">` from `not-found.tsx` and keep the local `main#main-content`, `Nav`, and `Footer`. Add a source or rendered test asserting that the not-found shell has exactly one `a[href="#main-content"]` and one `main#main-content`.
+The admin analytics page is localized, but these public-preview links do not preserve the admin's selected locale. A Korean admin reviewing analytics and opening a top photo or shared album gets the English public route by default. Screen-reader users on the Korean admin page also hear English text inside the link accessible name.
 
-### DES-C4-02 - Lightroom token dates ignore the selected app locale
+Failure scenario:
 
-Severity: Low  
-Confidence: High  
-Status: confirmed by source; protected route was not browser-authenticated locally.
+A Korean-speaking photographer opens `/ko/admin/analytics`, reviews the top shared albums table, and opens a shared album in a new tab to check what a client saw. The link points to `/g/{key}`, which middleware resolves to `/en/g/{key}` rather than `/ko/g/{key}`; assistive tech also announces `{key} (opens in new window)` in English.
 
-Evidence:
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:22` destructures only `t` from `useTranslation()`, dropping the current `locale`.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:123`, `:125`, and `:128` format created/last-used/expiry dates with bare `toLocaleDateString()`.
-- Nearby admin surfaces already pass the app locale explicitly, e.g. `apps/web/src/components/admin-user-manager.tsx:153` and `apps/web/src/components/image-manager.tsx:536`.
+Concrete fix:
 
-Why this is a problem: the admin UI supports explicit English/Korean locale switching, but token dates fall back to the browser or OS locale. That can make a Korean admin page show English/US date formatting, or vice versa.
+Pass `locale` into `AnalyticsClient` from `analytics/page.tsx` (or read it with the existing i18n client provider), import `localizePath`, and use:
 
-Failure scenario: an admin switches GalleryKit to Korean on an English-configured browser and opens the Lightroom token page. Labels are Korean, but token dates can still appear as `6/29/2026`, making the row feel partially untranslated and harder to scan consistently.
+- `href={localizePath(locale, `/p/${row.imageId}`)}`
+- `href={localizePath(locale, `/g/${row.shareKey}`)}`
 
-Concrete fix: destructure `locale` from `useTranslation()` and call `toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })` or a shared date formatter for all three token dates. Add a small source/test guard rejecting bare `toLocaleDateString()` in UI files except where explicitly justified.
+Add a localized message such as `common.opensInNewWindow` or `analytics.opensInNewWindow`, and build the aria-label from that key instead of inline English. While touching this component, consider formatting `viewCount.toLocaleString(locale)` because the same client currently lacks locale-aware number formatting.
 
-### DES-C4-03 - Lightroom token list loading state is a silent spinner
+## Rechecked Non-Findings
 
-Severity: Low  
-Confidence: High  
-Status: confirmed by source; protected route was not browser-authenticated locally.
+- Cycle 4 duplicate 404 skip link is fixed: `not-found.tsx` now relies on the root locale-layout skip link and keeps only the local `main#main-content`.
+- Cycle 4 Lightroom token date/loading findings are fixed: `tokens-client.tsx` uses `locale` in `formatTokenDate()` and the initial spinner has `role="status"` plus localized hidden text.
+- Admin login has visible labels, required/autocomplete attributes, password reveal `aria-pressed`, localized reveal labels, and a `role="alert"` error path.
+- Search overlay has a dialog role, focus trap, `aria-activedescendant`, live result/status announcements, keyboard navigation, IME guards, and 44 px close/trigger controls.
+- Photo viewer/lightbox/bottom sheet expose reduced-motion branches, focus management, modal semantics, live-region counters, keyboard shortcuts, 44 px controls, and mobile/desktop info-panel transfer logic.
+- Upload flow has no-topic recovery, disabled dropzone semantics, progressbar values, per-file `role="alert"` errors, object URL cleanup, and 44 px destructive file-remove targets.
+- Admin dashboard failed-image retry now announces success via toast and keeps retry failures visible.
+- Analytics table headers use `scope="col"` on the raw tables.
+- Touch-target policy remains broadly enforced by primitives plus `touch-target-audit.test.ts`.
+- RTL is not a shipped locale; `layout.tsx` sets `dir="ltr"`. This remains an explicit support constraint rather than a current defect for the English/Korean locale set.
 
-Evidence:
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:107-110` renders the initial token-list loading state as a centered `Loader2` icon only.
-- The wrapper has no `role="status"`, no `aria-live`, and no text alternative; the SVG also is not explicitly `aria-hidden`.
-- Other loading surfaces in this repo expose status semantics, e.g. `apps/web/src/app/[locale]/loading.tsx:8`, `apps/web/src/components/photo-viewer-loading.tsx:11-13`, and `apps/web/src/components/optimistic-image.tsx:71`.
+## Validation
 
-Why this is a problem: visual users see an activity indicator while `listLrTokens()` runs, but screen-reader users receive no loading announcement and no textual state for the panel.
+Passed:
 
-Failure scenario: an admin opens the token page over a slow DB connection. The list area appears empty to assistive tech until either the token rows or empty state arrive, making the page feel stalled.
+- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/error-shell.test.ts src/__tests__/error-shell-heading.test.ts`
+  - 6 files passed, 60 tests passed.
+- `npm test --workspace=apps/web -- --run src/__tests__/i18n-key-parity.test.ts src/__tests__/info-bottom-sheet-ia.test.ts src/__tests__/lightbox-controls-contract.test.ts src/__tests__/search-disclaimer.test.ts src/__tests__/theme-resolve.test.ts src/__tests__/hdr-badge-contrast.test.ts`
+  - 6 files passed, 33 tests passed.
 
-Concrete fix: wrap the loading state in `role="status" aria-live="polite"` with localized loading text, and mark the spinner `aria-hidden="true"`. Example shape: `<div role="status" aria-live="polite"> <Loader2 aria-hidden="true" ... /> <span className="sr-only">{t('common.loading')}</span> </div>`.
+Browser artifacts captured in `/tmp/`:
 
-## Non-Findings Rechecked
+- `/tmp/gallery-admin-desktop-light.png`
+- `/tmp/gallery-admin-mobile-320.png`
+- `/tmp/gallery-home-error-dark.png`
 
-- Cycle-3 duplicate document-title finding is fixed for timeline/map/year. Current source lets the layout title template append the site name while OpenGraph/Twitter titles remain explicit.
-- Cycle-3 theme-toggle finding is fixed. `nav-client.tsx` now computes `aria.cycleTheme` with current and next theme labels, and `en.json` / `ko.json` contain the key.
-- Cycle-3 map loading fallback is fixed. `MapLoader` now wraps the client-only map in `Suspense` with a fixed-size `role="status"` fallback.
-- Admin login form has visible labels, required attributes, proper autocomplete, localized password-toggle labels, 44 px controls, and working reveal behavior in both English and Korean.
-- Public route error shell under DB failure has one `main`, one h1, 44 px action controls, and task-specific title `Error | GalleryKit`.
-- Reduced-motion coverage is present globally in `globals.css:291-297`, with component-specific handling in lightbox/photo-viewer/home surfaces. No new unbounded motion defect was found.
-- Dialog, alert-dialog, sheet, search overlay, lightbox, and bottom-sheet patterns expose focus traps or Radix-managed modal behavior where applicable.
-- Touch-target source patterns remain broadly enforced through component primitives and `touch-target-audit.test.ts`.
-- RTL is not a shipped locale (`html dir="ltr"`), and no new RTL-specific regression was filed. Directional utility use remains an LTR-only support constraint rather than a current defect.
+Validation limitation:
 
-## Missed-Issues Sweep
+The local DB was not reachable, so real gallery grids, real photo records, map markers, authenticated admin tables, dashboard uploads, search results, and protected analytics rows were validated by source/tests rather than live data interaction.
 
-Final sweep covered public/admin metadata, skip-link targets, not-found/error/loading states, dialog/sheet focus patterns, search and tag comboboxes, admin forms, Lightroom token UI, upload controls, map shell, photo/lightbox/color surfaces, dark/light/OLED token usage, reduced-motion hooks/global CSS, i18n key parity risks, localized date formatting, and prior cycle findings.
+## Final Missed-Issues Sweep
 
-Coverage limitation: without a local MySQL service or authenticated admin session, loaded gallery grids, photo records, map markers, authenticated token rows, dashboard tables, and real search results could not be fully browser-validated. For those surfaces, this pass used source, tests, DOM/error-shell evidence, and prior review history.
+Final sweep covered localized route construction, hard-coded visible/accessibility strings, table headings, image alt text, decorative SVG/image hiding, focus-visible coverage, touch target classes, loading/status/live regions, dialog/sheet focus patterns, form validation feedback, dark/light/OLED tokens, reduced-motion handling, responsive admin headers, public error/not-found/loading shells, and prior designer/UI findings. No additional current-cycle actionable UI/UX defects were found beyond `DES-C5-01`.
