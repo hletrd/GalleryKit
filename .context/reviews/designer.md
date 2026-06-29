@@ -1,152 +1,235 @@
-# Designer Review - Cycle 15
+# Designer Review - Cycle 16
 
-Role: cycle-15 designer reviewer for GalleryKit. Scope is current HEAD only:
-`d401dd68`.
-
-I read the repo instructions and `CLAUDE.md`, inventoried the UI surface, used
-`agent-browser` against a local Next dev server where feasible, and reviewed
-data-backed UI from source where the local database blocked runtime flows. No
-production source code was changed and no commit was made.
+Role: designer lane for cycle 16/100 review-plan-fix loop. Scope: UI/UX,
+accessibility, responsive behavior, i18n, perceived performance, and form/dialog
+affordances in the current working tree.
 
 ## Inventory
 
-Inventory command used before inspection:
+Reviewed UI surface:
 
-```sh
-git ls-tree -r --name-only HEAD apps/web/src/app apps/web/src/components apps/web/messages apps/web/src/i18n apps/web/e2e | rg '\.(tsx|css|json|ts)$' | sort
+- Public routes: home, topic, smart collection, shared link/group, map, timeline,
+  year archive, privacy, photo detail/loading, root loading/error/not-found,
+  localized layout, public layout, upload proxy route metadata surfaces.
+- Admin routes: login, protected layout, dashboard/upload/image manager, failed
+  image retry, categories, tags, settings, SEO, password, users, tokens, DB,
+  analytics, admin loading/error.
+- Shared components: nav, footer, search, masonry/home client, load-more,
+  photo viewer, photo navigation, lightbox, image zoom, bottom sheet, color
+  details, histogram, map client/loader, upload dropzone, tag input, admin nav,
+  admin header, user manager, Radix/shadcn UI primitives.
+- Localization/tests: `apps/web/messages/en.json`, `apps/web/messages/ko.json`,
+  i18n direction helpers, Playwright e2e specs, touch-target/focus/theme/a11y
+  tests.
+
+I did a final missed-issues sweep over `aria-*`, `role=`, `tabIndex`,
+`DialogContent`, `AlertDialogContent`, `sr-only`, `focus-visible`,
+`overflow-x`, `truncate`, `placeholder`, `required`, `aria-invalid`,
+`aria-describedby`, `toast`, loading/empty/error keys, and RTL/direction code.
+
+## Browser Evidence And Blockers
+
+Local dev server started on `http://127.0.0.1:3001` because port 3000 was already
+serving a different Next app (`ccusage`). GalleryKit dev server reported:
+
+```text
+Could not connect to database to bootstrap queue (ECONNREFUSED).
 ```
 
-Result: 143 UI-adjacent files.
+Agent-browser evidence:
 
-Covered:
+- `agent-browser install` confirmed Chrome was installed.
+- `/en/privacy` rendered at 390x844 with a clean accessibility tree: skip link,
+  `navigation "Main navigation"`, `main`, h1 `Privacy`, h2 `Analytics`, h2
+  `Photo Metadata`, `contentinfo`, and notifications region. Screenshot:
+  `/tmp/gallerykit-privacy-mobile.png`.
+- `/en/admin` rendered the unauthenticated login shell with skip link, main,
+  h1 `Admin`, username textbox, password textbox, `Show password`, and
+  `Sign in`. Screenshot: `/tmp/gallerykit-admin-login-mobile.png`.
+- `/en` returned HTTP 200 but the RSC payload contained `Error: Failed query`
+  for latest-image/topic data and only the loading/error shell was extractable.
 
-- Public App Router pages and shells: home, topic, smart collection, shared link/group, map, timeline, year archive, privacy, photo detail/loading, not-found, error, loading, root layout, metadata/icon/manifest routes.
-- Admin App Router pages and client surfaces: login, protected layout, dashboard, upload/image manager, categories, tags, settings, SEO, password, users, tokens, DB, analytics, admin error/loading.
-- Shared UI: nav, footer, search, masonry, photo viewer, lightbox, image zoom, info bottom sheet, map client, color/histogram/details, upload dropzone, tag input, admin header/nav/user manager, Radix/shadcn primitives.
-- Localization and tests: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, i18n request setup, Playwright e2e specs, and a11y/touch/focus/theme tests.
+Runtime interaction blocker:
 
-I did not intentionally skip any file from that inventory.
-
-## Browser Evidence
-
-Local server:
-
-```sh
-PORT=3001 npm run dev --workspace=apps/web
-```
-
-Agent-browser samples:
-
-- `/en` at 1440x900 loaded the route-level error boundary instead of the gallery. Accessibility tree exposed skip link, `main`, region `Error`, button `Try again`, link `Return to Gallery`, and Sonner notifications. Screenshot: `/tmp/gallery-c15-en-desktop.png`.
-- Server logs for `/en` confirmed the blocker: `connect ECONNREFUSED 127.0.0.1:3306` while reading `topics` and latest image metadata. Browser console showed the same failed topic query handled by the `Home` error boundary.
-- `/en/admin` rendered the unauthenticated login shell. Accessibility snapshot exposed skip link, `main`, heading `Admin`, username textbox, password reveal button, and sign-in button. Screenshot: `/tmp/gallery-c15-admin-desktop.png`.
-- `/ko/admin` at 390x844 rendered the Korean login shell with no horizontal overflow. Runtime eval: `htmlLang: "ko"`, `dir: "ltr"`, `overflowX: false`, title `관리 | GalleryKit`, h1 `관리자 로그인`. Screenshot: `/tmp/gallery-c15-ko-admin-mobile.png`.
-- Login form target-size check via browser eval: `#login-password` was 334x44 and the reveal button was 44x44. Source labels are `label for="login-password"` / `id="login-password"` at `apps/web/src/app/[locale]/admin/login-form.tsx:63-80`.
-- Dark-theme smoke check: `agent-browser set media dark` did not change `matchMedia('(prefers-color-scheme: dark)')` in this browser session, so I forced the app preference with `localStorage.gallery_theme = "dark"` and reloaded. Runtime eval then showed `<html class="dark">`, `body` background `rgb(9, 9, 11)`, foreground `rgb(250, 250, 250)`. Screenshot: `/tmp/gallery-c15-ko-admin-mobile-forced-dark.png`.
+- Agent-browser semantic and coordinate clicks did not trigger React handlers
+  in this local dev session. Cross-checking with Playwright produced the same
+  result: mobile nav stayed `aria-expanded="false"` after click and the admin
+  password field stayed `type="password"` after clicking `Show password`.
+- Playwright console showed HMR WebSocket handshake errors:
+  `/_next/webpack-hmr ... net::ERR_INVALID_HTTP_RESPONSE`.
+- Static script requests returned no 4xx/5xx, so this is recorded as a runtime
+  validation blocker, not as a product interaction defect by itself.
 
 ## Findings
 
-### DES-C15-01 - Root layout still hard-codes document direction
+### DES16-01 - Home route fails to a broken/loading experience when the DB is unavailable
 
-Severity: Low
+Severity: High
 Confidence: High
-Classification: likely issue, latent i18n risk
-Status: current
-
-Evidence:
-
-- `apps/web/src/app/[locale]/layout.tsx:95-99` renders `lang={locale}` but always sets `dir="ltr"`.
-- The adjacent comment at `apps/web/src/app/[locale]/layout.tsx:96-98` says the explicit direction improves screen-reader flow and future-proofs RTL locales.
-- Runtime `/ko/admin` confirmed the current shipped Korean locale is correctly LTR (`htmlLang: "ko"`, `dir: "ltr"`), so this is not a Korean defect today.
+Selectors/files: `/en`, `main`; `apps/web/src/app/[locale]/(public)/page.tsx:18-147`,
+`apps/web/src/app/[locale]/(public)/page.tsx:149-166`,
+`apps/web/src/lib/data.ts:933-946`, `apps/web/src/lib/data.ts:1720-1744`
 
 Failure scenario:
 
-If an RTL locale is added later, the document will still expose LTR reading
-direction. Screen-reader speech flow, punctuation order, horizontal layout,
-scroll assumptions, and directional controls can all be wrong before component
-translations are reviewed.
+The site can still render static public surfaces like `/en/privacy` from
+site-config fallbacks when MySQL is unavailable, but the home page calls
+`getLatestImageForOgCached()` in metadata and `getImagesLitePage()`/tag/topic
+queries in the page body without a graceful fallback. In the observed runtime,
+`/en` returned a 200 response containing a failed query stack and left the
+browser at a loading/error shell rather than a stable gallery outage state.
 
-Fix:
+Suggested fix:
 
-Derive direction from locale, for example `rtlLocales.has(locale) ? "rtl" :
-"ltr"`, and add a layout/i18n test that fails if a future RTL locale does not
-change `dir`. If RTL is intentionally out of scope, update the comment so it no
-longer claims future-proofing.
+Catch non-critical OG latest-image failures in `generateMetadata()` and fall
+back to no `og:image` or the configured static OG image. For the page body,
+render an explicit public maintenance/unavailable state when listing queries
+fail, with a retry affordance and normal nav/footer, instead of relying on the
+route error boundary. Keep true schema/programming errors loud in logs.
 
-### DES-C15-R1 - Data-backed UI flows could not be browser-tested locally
+### DES16-02 - Search result keyboard highlight can move off-screen
 
 Severity: Medium
 Confidence: High
-Classification: validation risk
-Status: confirmed blocker
-
-Evidence:
-
-- `/en` browser snapshot reached only the route error shell, not the gallery.
-- Server logs showed `connect ECONNREFUSED 127.0.0.1:3306` for topic and latest-image queries.
-- The same DB blocker prevents runtime inspection of masonry images, search results, photo viewer/lightbox with real images, map markers, authenticated admin pages, upload, and mutation validation states.
+Selectors/files: `#search-dialog`, `#search-input`, `#search-results [role=option]`;
+`apps/web/src/components/search.tsx:390-399`,
+`apps/web/src/components/search.tsx:428-444`
 
 Failure scenario:
 
-Runtime-only defects in data-backed UI could remain hidden: keyboard result
-navigation in search, photo/lightbox focus return, map marker affordances,
-image-manager tables, upload validation, real empty states, and authenticated
-admin dialogs.
+The search dialog uses `aria-activedescendant` and arrow keys to move
+`activeIndex`, but it never scrolls the active option into the `sm:max-h-[60vh]`
+scroll container. With enough results, a sighted keyboard user can keep pressing
+ArrowDown and move the active row below the visible viewport. The screen reader
+state changes, but the visible highlight is lost.
 
-Fix:
+Suggested fix:
 
-Repeat this browser pass with a seeded local MySQL database and cover:
+Add an effect on `activeIndex` that calls
+`resultRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' })`.
+Keep the `aria-activedescendant` pattern; just synchronize the visual viewport
+with the active option.
 
-- Public home with real masonry images at desktop and mobile.
-- Search open/type/keyboard navigation/loading/empty/error states.
-- Photo detail, lightbox next/previous, zoom, metadata sheet, and focus return.
-- Map page with markers.
-- Admin login plus categories/tags/images/settings form validation.
-- Light, dark, OLED, system-theme, and reduced-motion modes.
-- `npm run test:e2e --workspace=apps/web` once the DB/browser fixture is available.
+### DES16-03 - Map marker click bypasses the popup affordance
 
-## Resolved Since Prior Designer Cycle
+Severity: Medium
+Confidence: Medium
+Selectors/files: Leaflet marker/popup button; `apps/web/src/components/map/map-client.tsx:97-105`,
+`apps/web/src/components/map/map-client.tsx:120-141`,
+`apps/web/src/app/[locale]/(public)/map/page.tsx:59-89`
 
-- The search dialog input now keeps a 44 px height: `apps/web/src/components/search.tsx:372-402` uses `className="h-11 ..."` and the shared input primitive floors controls at `min-h-11` in `apps/web/src/components/ui/input.tsx:10-14`.
-- The mobile nav expand button now exposes both controlled regions:
-  `apps/web/src/components/nav-client.tsx:105-107` has
-  `aria-controls="primary-nav-topics primary-nav-controls"`.
-- Admin form dialogs now include descriptions, including category create/edit and tag edit dialogs.
+Failure scenario:
+
+Each marker has a `click` handler that immediately navigates to the photo, while
+the marker also contains a popup with a thumbnail button labeled `Open photo`.
+Mouse users who click the marker never get to inspect the popup preview. The
+accessible fallback list below the map helps, but the primary map affordance is
+internally inconsistent.
+
+Suggested fix:
+
+Let the marker click open the Leaflet popup by default, and reserve navigation
+for the explicit popup button and the accessible list links. If direct marker
+navigation is intentional, remove the unused popup UI and make the marker
+navigation semantics explicit.
+
+### DES16-04 - Login errors are announced twice
+
+Severity: Low
+Confidence: Medium
+Selectors/files: admin login form; `apps/web/src/app/[locale]/admin/login-form.tsx:28-31`,
+`apps/web/src/app/[locale]/admin/login-form.tsx:97-100`
+
+Failure scenario:
+
+On a failed login, the same server error is sent to Sonner via `toast.error()`
+and rendered inline as `role="alert"`. Screen-reader users can hear duplicate
+announcements for one validation failure, and sighted users see both a toast and
+an inline error competing for attention.
+
+Suggested fix:
+
+Use the inline alert as the primary form-validation surface and reserve toast
+for non-field infrastructure errors, or suppress the toast when `state.error`
+is already displayed inline.
+
+### DES16-05 - RTL remains only partially future-proofed
+
+Severity: Low
+Confidence: High
+Selectors/files: `html[dir]`; `apps/web/src/app/[locale]/layout.tsx:94-110`,
+`apps/web/src/components/nav-client.tsx:90-178`,
+`apps/web/src/components/home-client.tsx:442-455`,
+`apps/web/src/components/photo-navigation.tsx:156-244`
+
+Failure scenario:
+
+The root layout derives `dir` through `getLocaleDirection()`, which is good for
+future RTL locales, but major UI controls still use physical direction classes
+and assumptions: `left-*`, `right-*`, `ml-*`, `mr-*`, left/right swipe language,
+and fixed right-side floating buttons. Today only English and Korean are shipped
+and both are LTR, so users are not affected now. If an RTL locale is added, the
+document direction can flip while navigation, floating controls, and photo
+previous/next affordances still behave visually LTR.
+
+Suggested fix:
+
+Before adding any RTL locale, convert exposed physical positioning/margins to
+logical utilities or locale-aware variants, and define whether photo previous
+/ next follows chronology or reading direction. Add at least one RTL layout
+fixture test before enabling the locale.
 
 ## Areas Reviewed With No New Finding
 
-- IA and wayfinding: public/admin route inventory, nav, footer, login, not-found, error, loading shells, topic/photo/shared surfaces.
-- Affordances and touch targets: shared `Button` floors default/sm/icon variants at 44 px (`apps/web/src/components/ui/button.tsx:23-29`); focused tests passed.
-- Focus and keyboard: skip link, login focus, search dialog, lightbox focus trap/return focus (`apps/web/src/components/lightbox.tsx:430-456`), mobile info sheet focus trap (`apps/web/src/components/info-bottom-sheet.tsx:190-244`), combobox/listbox patterns.
-- WCAG 2.2 and ARIA: target size, labels, landmarks, dialogs, live regions, disabled states, `aria-current`, `aria-controls`, `aria-expanded`, `aria-invalid`, and alert/status usage.
-- Contrast and themes: token comments and tests cover muted/destructive/HDR contrast; forced dark theme applied expected dark tokens in browser.
-- Responsive breakpoints: mobile Korean login had no horizontal overflow; source review covered nav wrapping, masonry reservations, dialogs/sheets, table overflow wrappers, and photo viewer breakpoints.
-- Loading, empty, and error states: route loading/status, home empty/filter-empty, search empty/error/loading, upload progress/errors, admin loading/error, and not-found/error shells.
-- Validation UX: visible labels, required fields, max lengths, inline alert text for edit forms, toasts for async failures, and pending/disabled controls.
-- Korean/i18n: English/Korean messages are parity-tested; Korean login rendered correctly in browser. The remaining direction issue is future RTL only.
-- Perceived performance: masonry aspect-ratio/contain-intrinsic-size, eager above-fold images, blur placeholders, async image decoding, bounded loading shells, and reduced-motion source handling were reviewed.
+- Landmark and heading structure: public privacy, admin login, root layout,
+  public/admin error and loading shells.
+- Touch targets: shared `Button` variants floor at 44 px in
+  `apps/web/src/components/ui/button.tsx:23-29`; upload, nav, footer, login,
+  image-manager, and map controls mostly use explicit 44 px floors or are
+  covered by the existing audit.
+- Focus indicators: focus-visible scanner exists and covers `components/` plus
+  the app tree; source review did not find a fresh unguarded hover-only control.
+- Loading/empty/error states: route loading, not-found/error shells, home empty,
+  search loading/empty/status, load-more live region, upload progress/errors,
+  admin loading/error, tokens empty/loading, map empty state.
+- Forms and validation UX: visible labels on login/upload/settings/password,
+  required/max-length constraints, inline error alerts for edit/password flows,
+  pending/disabled states for async actions.
+- Dark/light mode: root theme provider, theme tokens, and `color-scheme` metadata
+  are wired; runtime theme interaction could not be clicked because of the local
+  hydration blocker.
+- Korean i18n: Korean messages are present and key parity is tested; no Korean
+  text overflow was confirmed in the renderable browser pages.
+- Perceived performance: masonry reserves aspect ratio/intrinsic size, above-fold
+  image priority is bounded by column count, image decoding is async, map client
+  is dynamically loaded, and photo neighbor preloads are data-saver aware.
 
 ## Validation
 
-Focused test command:
+Commands/evidence used:
 
 ```sh
-npm test --workspace=apps/web -- touch-target-audit i18n focus-visible hdr-badge-contrast theme-token-contract error-shell
+npm run dev --workspace=apps/web -- -p 3001
+curl -L http://127.0.0.1:3001/en
+curl -L http://127.0.0.1:3001/en/privacy
+curl -L http://127.0.0.1:3001/en/admin
+agent-browser install
+agent-browser set viewport 390 844
+agent-browser open http://127.0.0.1:3001/en/privacy
+agent-browser snapshot -C
+agent-browser screenshot /tmp/gallerykit-privacy-mobile.png --full
+agent-browser open http://127.0.0.1:3001/en/admin
+agent-browser snapshot -C
 ```
 
-Result: 12 test files passed, 124 tests passed.
-
-Browser validation was partial because MySQL was unavailable locally. The
-unauthenticated admin login shell was tested at desktop and mobile/Korean;
-data-backed public/admin flows were source-reviewed and recorded under
-`DES-C15-R1`.
+I did not run the full test suite because this lane is review-only and the local
+database was unavailable. Browser coverage for data-backed and interactive
+flows is incomplete until MySQL and the dev-client/HMR issue are fixed.
 
 ## Final Missed-Issues Sweep
 
-Final sweeps covered `dir="ltr"`, `aria-controls`, `aria-expanded`,
-`aria-modal`, dialog/sheet/alert-dialog content, compact sizing tokens,
-placeholders/required/invalid/alert/live states, disabled/pending states, and
-reduced-motion handling across `apps/web/src/app` and `apps/web/src/components`.
-
-No additional current UI/UX findings were confirmed beyond `DES-C15-01` and
-the runtime validation blocker `DES-C15-R1`.
+Final source sweeps covered information architecture, affordances,
+keyboard/focus, WCAG 2.2 target/focus/labels, responsive breakpoints, loading
+/ empty / error states, form validation UX, dark/light mode hooks, i18n/RTL,
+and perceived performance. No additional confirmed findings were found beyond
+DES16-01 through DES16-05 and the explicit runtime interaction blocker above.

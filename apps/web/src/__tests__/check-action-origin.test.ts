@@ -181,6 +181,28 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
 
+    it('fails public exempt actions when catch/finally mutates before a rate-limit gate', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics action, rate-limited before write */
+            export async function recordThing() {
+                try {
+                    doSomething();
+                } catch {
+                    await db.insert(errors).values({ ok: true });
+                } finally {
+                    await logAuditEvent(1, 'x', 'y', 'z');
+                }
+                const overLimit = isViewRecordRateLimited('1.2.3.4', Date.now());
+                if (overLimit) return { error: 'rateLimited' };
+                await db.insert(views).values({ ok: true });
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
     // R15C15 TE-15-03: the raw Next.js cache primitives (not just the project's
     // revalidate* wrappers) must count as mutations so an action calling them
     // before the same-origin guard is flagged.

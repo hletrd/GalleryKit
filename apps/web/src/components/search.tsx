@@ -312,6 +312,14 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         }
     }, [isOpen]);
 
+    useEffect(() => {
+        if (activeIndex < 0) return;
+        resultRefs.current[activeIndex]?.scrollIntoView({
+            block: 'nearest',
+            inline: 'nearest',
+        });
+    }, [activeIndex]);
+
     // Lock body scroll when the search overlay is open. Must be declared
     // before any early return so the hook order stays stable across renders
     // (rules-of-hooks), then no-ops when the overlay is closed.

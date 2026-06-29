@@ -126,7 +126,11 @@ function isKnownMutationCall(node: ts.CallExpression): boolean {
     return ts.isPropertyAccessExpression(callee) && MUTATING_CALL_METHOD_NAMES.has(callee.name.text);
 }
 
-function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
+function bodyCallsRateLimitBeforeMutation(
+    body: ts.Node | undefined,
+    approvedRateLimitImports: Set<string>,
+    localRateLimitGateFunctions: Set<string> = new Set(),
+): boolean {
     if (!body) return false;
 
     let sawRateLimitGate = false;
@@ -148,6 +152,14 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined, approvedRat
             if (found) return;
             if (ts.isFunctionLike(current)) return;
             if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
+                found = true;
+                return;
+            }
+            if (
+                ts.isCallExpression(current)
+                && ts.isIdentifier(current.expression)
+                && localRateLimitGateFunctions.has(current.expression.text)
+            ) {
                 found = true;
                 return;
             }
@@ -256,6 +268,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             localBodies.set(decl.name.text, expressionBody(decl.initializer));
         }
     }
+    const localRateLimitGateFunctions = new Set<string>();
+    for (const [name, body] of localBodies) {
+        if (bodyCallsRateLimitBeforeMutation(body, approvedRateLimitImports)) {
+            localRateLimitGateFunctions.add(name);
+        }
+    }
 
     const mutatingHandlers: HandlerBody[] = [];
     for (const statement of sourceFile.statements) {
@@ -324,7 +342,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports))) {
+    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localRateLimitGateFunctions))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else {
         report.failed.push(

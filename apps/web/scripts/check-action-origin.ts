@@ -390,6 +390,12 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
 
         if (ts.isTryStatement(statement)) {
             for (const nested of statement.tryBlock.statements) processStatement(nested);
+            if (statement.catchClause) {
+                for (const nested of statement.catchClause.block.statements) processStatement(nested);
+            }
+            if (statement.finallyBlock) {
+                for (const nested of statement.finallyBlock.statements) processStatement(nested);
+            }
             return;
         }
 

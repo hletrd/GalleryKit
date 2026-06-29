@@ -1,144 +1,158 @@
-# Cycle 15 Critic Review
+# Cycle 16 Critic Review
 
-Review target: current HEAD `e87d1bc2` in `/Users/hletrd/flash-shared/gallery`.
+Review target: current HEAD `3da74946a7e7a198041bf6067a0192411d61a860` in `/Users/hletrd/flash-shared/gallery`.
 
-Role: cycle 15/100 reviewer lane, critic. I reviewed the repository for product invariants, architecture, operational risk, UX, tests, docs, and maintainability. I did not modify source code, migrations, runtime data, dependencies, or deployment configuration. This file is the requested review artifact.
+Role: cycle 16/100 reviewer lane, critic. I reviewed current HEAD only for product correctness, maintainability, security, UX, operational risk, and project policy drift. This is a review artifact only; no production source, migrations, dependencies, runtime data, or deployment state were changed.
 
-## Inventory First
+## Inventory Summary
 
 Required guidance read:
 - `AGENTS.md` from the task prompt.
 - `CLAUDE.md`.
 - Code-review skill instructions.
 
-Repository inventory before findings:
-- `git ls-files`: 2554 tracked paths.
-- Current source footprint inspected by category: 506 files under `apps/web/src`; 275 test/E2E files under `apps/web/src/__tests__` and `apps/web/e2e`; Drizzle schema/migrations; root and app package/config files; deploy/nginx/Docker scripts; README/CLAUDE docs; current `.context/reviews/*` summaries.
-- Working-tree note: other review-lane artifacts were dirty during this pass (`.context/reviews/security-reviewer.md` and `.context/reviews/verifier.md` are currently modified). I did not edit them. Source/docs/tests relevant to the findings were inspected at the current HEAD/worktree state, and source code was otherwise not edited.
+Repository inventory at this HEAD:
+- `git ls-tree -r --name-only HEAD`: 2557 tracked paths.
+- Top-level footprint: `.context` 1755 files; `apps/web/src` 505 files; `apps/web/drizzle` 31 files; `apps/web/scripts` 27 files; `apps/web/public` 9 files; `apps/web/e2e` 8 files; plus root/app configs, deploy scripts, docs, and package metadata.
+- Extension footprint: 1806 Markdown files, 425 TypeScript files, 104 TSX files, 80 PNG files, 28 SQL migrations, 22 JSON files, 20 log files, 12 PID files, 6 JS/MJS files each, 6 JPG files, 5 ICC profiles, and supporting shell/YAML/config files.
 
-Primary source/docs/tests examined:
-- Data/query layer: `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`, Drizzle migrations.
-- Admin recovery and delete paths: `apps/web/src/app/[locale]/admin/(protected)/dashboard/*`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/process-image.ts`, failed-image and cleanup tests.
-- Public map path: `apps/web/src/app/[locale]/(public)/map/page.tsx`, `apps/web/src/components/map/*`, map privacy tests.
-- Search/semantic path: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/components/search.tsx`, CLIP constants/tests, i18n strings, semantic docs.
-- Safety surfaces swept: public/admin action exemptions, public route rate-limit annotations, dangerous HTML sinks, test skips/only markers, original upload path helpers, restore scanner, deploy docs, CI workflow.
+Review-relevant current surfaces inspected:
+- Product/public routes: home, photo, share, group, map, search, Open Graph, service worker registration and cache policy.
+- Admin routes/actions/API: image upload/delete/retry, Lightroom upload, DB backup/restore, settings, users/tokens, protected dashboard flows.
+- Data/security boundaries: `apps/web/src/lib/data.ts`, schema/migrations, privacy omit guards, rate limiting, origin checks, API auth, CSP, upload path containment, restore SQL scanner.
+- Operational/deploy surfaces: `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `.env.deploy.example`, README/CLAUDE runbooks.
+- Test/policy surfaces: custom auth/origin/rate-limit linters, Vitest privacy/touch/security/source-contract tests, Playwright E2E inventory, historical `.context/reviews` and `.context/plans` for recurring policy drift.
 
 Validation evidence:
-- Static source/doc/test inspection and pattern sweeps only.
-- I did not run full lint/typecheck/build/test gates because this was a read-only critique pass with no production code change.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- `npm test --workspace=apps/web` passed: 260 test files passed, 2 skipped; 2418 tests passed, 4 skipped.
 
 ## Findings
 
-Finding count: 4 total.
-- Confirmed: 3
-- Risk: 1
+Finding count: 5 total.
+- Confirmed issues: 1
+- Likely issues: 2
+- Manual-validation risks: 2
 
-### CRIT15-01 - Admin failed-image recovery can become unbounded and unindexed
+### Confirmed Issues
 
-Severity: Medium
-
-Confidence: High
-
-Status: Confirmed
-
-Category: Operational recovery / UX / performance / tests
-
-Code regions:
-- `apps/web/src/lib/data.ts:999-1013` defines `getFailedImages()` with `processed = false`, `processing_error IS NOT NULL`, `ORDER BY failed_at DESC`, and no `LIMIT` or pagination.
-- `apps/web/src/db/schema.ts:114-120` indexes `images` by processed/capture date, processed/created date, topic, user filename, and uploader, but not by the failed-image recovery predicate/order.
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27` fetches `getFailedImages()` in the initial dashboard `Promise.all`.
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:73-120` renders every failed image row and retry button in one panel.
-- `apps/web/src/__tests__/failed-image-retry.test.ts:55-68` only source-pins the existence, predicate, and ordering of `getFailedImages`; it does not pin a limit, pagination, count, or index contract.
-
-Failure scenario:
-A bad import, unsupported format batch, missing original directory, or corrupted processing setting can permanently fail thousands of rows. The admin dashboard then has to load the full failed set, sort it without a recovery-specific index, serialize all rows to the client, and render one retry control per row before the operator can recover. The page most needed for recovery becomes slow or unusable exactly when failure volume is high.
-
-Fix:
-Make failed-image recovery paginated or capped. Return a bounded first page plus a total failed count, add a "view more" or dedicated failed-images route, and add a migration-backed index that supports the predicate and ordering after checking `EXPLAIN` on MySQL. A practical first index to validate is `(processed, failed_at)` or a more selective equivalent that fits MySQL's handling of `processing_error IS NOT NULL`. Add tests that fail if `getFailedImages` loses the limit/pagination contract.
-
-### CRIT15-02 - Public map still ships and mounts up to 10,000 markers in one request
+#### CRIT16-01 - Checked-in nginx collapses real client identity when actually deployed behind the documented TLS edge/load balancer
 
 Severity: Medium
 
 Confidence: High
 
-Status: Confirmed
-
-Category: Public UX / architecture / operational risk
+Category: Security operations / availability / rate limiting / documentation-contract drift
 
 Code regions:
-- `apps/web/src/lib/data.ts:1640-1649` documents `MAP_MAX_MARKERS = 10000` as a personal-gallery cap and says viewport filtering/clustering is out of scope.
-- `apps/web/src/lib/data.ts:1658-1676` queries all map-visible GPS images up to that cap, joining topics, filtering processed/GPS/map-visible rows, sorting by capture/created/id, and returning the full result.
-- `apps/web/src/db/schema.ts:114-120` has no GPS/map-oriented image index and no index that directly serves the joined map predicate/order.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:31-50` loads all map images and maps the entire result into marker props during the RSC render.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:67-79` server-renders one list link per marker below the map.
-- `apps/web/src/components/map/map-client.tsx:76-93` computes fit bounds over every marker, and `apps/web/src/components/map/map-client.tsx:119-143` mounts one Leaflet `Marker` and `Popup` per marker.
-- `apps/web/src/__tests__/map-privacy.test.ts:1-90` verifies privacy filtering but does not exercise the marker-count, payload-size, or DOM-mount budget.
+- `apps/web/nginx/default.conf:1-4` keys nginx connection and request zones by `$binary_remote_addr`.
+- `apps/web/nginx/default.conf:25-29` says this nginx file is intended to run behind a TLS-terminating edge/load balancer.
+- `apps/web/nginx/default.conf:67-70`, `apps/web/nginx/default.conf:83-87`, `apps/web/nginx/default.conf:100-104`, `apps/web/nginx/default.conf:116-120`, `apps/web/nginx/default.conf:140-144`, `apps/web/nginx/default.conf:157-161`, `apps/web/nginx/default.conf:179-183`, and `apps/web/nginx/default.conf:191-196` overwrite `X-Real-IP` and `X-Forwarded-For` with `$remote_addr` for all proxied traffic.
+- `apps/web/docker-compose.yml:19-21` forces `TRUST_PROXY=true` for the app.
+- `apps/web/src/lib/rate-limit.ts:163-193` trusts `X-Forwarded-For`/`X-Real-IP` only when `TRUST_PROXY=true`, then derives all app-level rate-limit identity from those headers.
+- `README.md:152-154` documents the intended host-network + nginx deployment and notes that CDN/LB topologies require trusted-header normalization first.
 
 Failure scenario:
-If a travel/event gallery opts a large GPS-bearing topic into the public map, every `/map` hit can perform an expensive query/sort, ship a large marker payload, server-render thousands of fallback links, then mount thousands of Leaflet markers on the client. On mobile this can look like a blank or frozen page; on the server it is a public unauthenticated route that can generate repeated DB and rendering pressure.
+In the topology described by the nginx file itself, a TLS edge or load balancer forwards traffic to this local nginx listener. Because nginx does not configure `real_ip_header` / `set_real_ip_from` and instead writes `$remote_addr` into both trusted client-IP headers, the app sees the edge/LB address, not the browser address. The nginx zones also key on that same edge/LB address. One abusive client can therefore consume login, admin, semantic search, share, upload, and connection budgets shared by legitimate users behind the same edge. This is an availability failure for public search/share and admin login, and it weakens forensic/IP attribution. The README contains the needed caveat, but the checked-in nginx comment and default headers still make the deployable template unsafe for the stated behind-edge topology unless operators know to add real-IP normalization.
 
-Fix:
-Move from "all public markers at once" to a viewport/bounds API with clustering or tile-like pagination. Keep an explicit small SSR fallback list, and fetch markers for the visible bounds client-side with a hard per-request cap. Add database support for the chosen access pattern, such as a denormalized map-visible image projection or indexes validated with `EXPLAIN`. Add tests/source contracts that pin the lower SSR payload cap and clustering/bounds behavior so the route cannot silently return to a 10k all-at-once model.
+Suggested fix:
+Make the template encode one unambiguous topology. If nginx is behind a trusted TLS edge/LB, add a documented `real_ip_header X-Forwarded-For` plus explicit `set_real_ip_from` entries for trusted edge networks, then pass a normalized chain (`$proxy_add_x_forwarded_for`) or normalized client (`$realip_remote_addr`) consistently and set `TRUSTED_PROXY_HOPS` to the matching value. If the checked-in file is direct-edge-only, remove the "behind TLS-terminating edge/load balancer" claim from `default.conf` and fail loudly when `TRUSTED_PROXY_HOPS` is configured for a topology the template does not implement. Add a source/config test that ties `TRUST_PROXY`, nginx `X-Forwarded-For`, and the documented topology together.
 
-### CRIT15-03 - Batch delete repeats full derivative-directory scans per image and format
+### Likely Issues
 
-Severity: Medium
+#### CRIT16-02 - Lightroom upload cookie fallback loses uploader and audit attribution
+
+Severity: Low
+
+Confidence: Medium-High
+
+Category: Auditability / maintainability
+
+Code regions:
+- `apps/web/src/app/api/admin/lr/upload/route.ts:67-73` accepts the request through `withAdminAuth(..., { allowTokenScope: 'lr:upload' })` and reads only `getAdminAuthToken(request)?.userId`.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:433-441` stores `uploaded_by: tokenUserId`, explicitly degrading cookie-fallback requests to `NULL`.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:518-525` logs the `lr_token_used` audit event with `tokenUserId`.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:547` enables token scope auth but does not disable the wrapper's normal cookie fallback.
+- `apps/web/src/lib/api-auth.ts:69-83` sets request token context only for valid token-authenticated requests.
+- `apps/web/src/lib/api-auth.ts:111-131` then falls through to same-origin cookie admin auth and calls the handler without exposing the authenticated admin id.
+
+Failure scenario:
+The primary Lightroom publish path is token-authenticated and gets correct attribution. However, the route also supports same-origin cookie admin auth through the shared wrapper. A browser/manual/admin-side request to the same endpoint can successfully create an image, but `uploaded_by` and the audit-log user id are `NULL` because the route only reads token context. That makes a supported admin-authenticated upload path less attributable than the normal browser upload path, and it contradicts the multi-admin audit model described in the route comments.
+
+Suggested fix:
+Expose authenticated admin identity from `withAdminAuth` to handlers for cookie-authenticated API requests, or call the existing current-user helper inside the LR route when `getAdminAuthToken(request)` is absent. Use the resolved actor id for `uploaded_by`, audit event `user_id`, and warning payloads. Add a route/unit test covering same-origin cookie fallback attribution separately from PAT attribution.
+
+#### CRIT16-03 - Checked-in nginx hardcodes the production hostname inside an otherwise reusable deploy template
+
+Severity: Low
 
 Confidence: High
 
-Status: Confirmed
-
-Category: Maintainability / filesystem operations / admin UX
+Category: Project policy drift / portability / operations
 
 Code regions:
-- `apps/web/src/lib/process-image.ts:586-627` performs a full `fs.opendir` scan whenever `sizes` is empty, collecting old size variants by filename prefix.
-- `apps/web/src/lib/process-image.ts:632-643` documents that empty `sizes` intentionally triggers the full directory scan to catch orphaned variants from old configurations.
-- `apps/web/src/app/actions/images.ts:688-698` passes `[]` for webp, avif, and jpeg cleanup after a single delete, causing three directory scans for one image.
-- `apps/web/src/app/actions/images.ts:807-845` batch deletion bounds image concurrency, but each image still runs three full derivative directory scans; the comments acknowledge the fan-out but only reduce concurrency.
+- `apps/web/nginx/default.conf:21-23` hardcodes `server_name gallery.atik.kr`.
+- `README.md:148-154` and `.env.deploy.example:6-14` present production URL/host/deploy values as environment- or operator-configured.
 
 Failure scenario:
-An admin selects 200 old images for deletion from a gallery with thousands of derivative files. The batch path can run 600 full directory scans across the derivative directories, plus unlink work. Bounded concurrency protects the host from a total stampede, but it does not reduce the repeated O(selected images * directory size) work. On the documented disk-constrained/NAS-style deployment this can make a routine admin cleanup slow, tie up the Next worker, and increase I/O contention with uploads or image processing.
+The repository otherwise treats deployment identity as config-driven, with production origins and remote deploy fields coming from environment or gitignored deploy files. The checked-in nginx template is the exception: a fresh operator, fork, or restored host can deploy the template with the wrong virtual host. Depending on the edge configuration, that can reject the intended host, serve this app for an unintended host, or cause confusing TLS/Host debugging during recovery.
 
-Fix:
-Batch derivative cleanup by directory. For `deleteImages`, scan each derivative directory once, build the selected base-name prefixes for all images in the batch, and unlink matching files with bounded unlink concurrency. Keep the strict failure aggregation semantics. For single delete, either keep the current simple scan or route through the same batch helper with one image. Add a unit/source test that batch delete does not call the per-image full-scan helper once per image/format.
+Suggested fix:
+Convert `server_name` to a neutral placeholder (`_` or `example.com`) plus explicit deployment instructions, or generate nginx config from the same configured canonical host used by the build/deploy flow. Add a small static check that the checked-in template does not contain a site-specific hostname unless this repo intentionally remains single-site/non-template.
 
-### CRIT15-04 - Production semantic search silently searches only the newest capped embedding window
+### Manual-Validation Risks
 
-Severity: Medium
+#### CRIT16-04 - Deploy command override is a trusted arbitrary-shell escape hatch
 
-Confidence: High
+Severity: Low
 
-Status: Risk
+Confidence: Medium
 
-Category: Product invariant / UX honesty / architecture
+Category: Operational safety / secrets hygiene
 
 Code regions:
-- `apps/web/src/lib/clip-embeddings.ts:36-44` defaults `SEMANTIC_SCAN_LIMIT` to 2000 and clamps it to a hard max of 25,000.
-- `apps/web/src/app/api/search/semantic/route.ts:261-273` explicitly scans only the most-recent embeddings for the active model and applies `.limit(SEMANTIC_SCAN_LIMIT)` before scoring.
-- `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-56` source-pins the scan cap as a DoS/performance protection, not a recall guarantee.
-- `apps/web/src/components/search.tsx:460-494` shows a semantic-search toggle and only displays the honesty disclaimer in `stub` mode; production mode has no UI signal that the search scope may be partial.
-- `apps/web/messages/en.json:401-416` presents search generally as "Search photos..." and the semantic toggle simply as "Semantic search"; no production string indicates "newest N photos" or incomplete recall.
-- `CLAUDE.md:537` documents the runtime limit as a capped newest-first brute-force vector scan, but that operational caveat is not surfaced to visitors or admins at query time.
+- `scripts/deploy-remote.sh:61-72` sources `.env.deploy`, accepts `DEPLOY_CMD`, and executes it through `exec bash -lc "$deploy_cmd"`.
+- `.env.deploy.example:13-14` documents `DEPLOY_CMD` as an optional complete override of the derived SSH command.
 
 Failure scenario:
-Once the gallery has more production embeddings than `SEMANTIC_SCAN_LIMIT`, a visitor searches for an older photo by concept. The photo can be correctly embedded and public, but it is outside the newest capped scan window, so it is impossible for the semantic route to return it. The UI presents production semantic search as real semantic search, not as a bounded newest-window search, so users and operators can misinterpret missing results as "the gallery does not contain this" or "CLIP failed." This weakens the photographer-facing invariant that search should faithfully retrieve already-delivered work.
+This is not a confirmed vulnerability because `.env.deploy` is gitignored and operator-controlled. The risk is operational: if that file is created by automation, copied from chat, committed elsewhere, or made writable by an untrusted local process, `npm run deploy` becomes arbitrary local shell execution with the developer's credentials and SSH keys. The project policy says deploy credentials are config-driven, but the override broadens the trust boundary beyond typed deploy fields.
 
-Fix:
-Either make the production behavior match the product promise or make the scope visible. The stronger fix is a vector index/candidate store that searches the full embedded corpus within a bounded budget. The incremental fix is to return scan metadata (`scanned`, `totalEmbeddings`, `scanLimit`, maybe `partial: true`) and show a production-mode note when the corpus exceeds the scan window. Add a route test for metadata and a client/i18n test that production mode communicates partial scope when applicable.
+Suggested fix:
+Keep the derived SSH command as the normal path and document `chmod 600 .env.deploy` plus "do not generate this file from untrusted input." Consider printing a prominent warning when `DEPLOY_CMD` is set, or replacing it with narrower fields unless a truly arbitrary local command is required.
+
+#### CRIT16-05 - Admin SQL restore safety remains dependent on regex scanning and should stay covered by real-dump drills
+
+Severity: Low
+
+Confidence: Medium
+
+Category: Operational recovery / database safety
+
+Code regions:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:491-519` scans uploaded SQL dump chunks before restore and rejects detected dangerous SQL.
+- `apps/web/src/lib/sql-restore-scan.ts:113-155` strips comments/literals and checks regex patterns over sanitized SQL forms.
+
+Failure scenario:
+The current scanner is materially hardened and covered by tests, so I am not promoting a specific bypass. The residual risk is that SQL restore is a destructive admin operation and the safety layer is necessarily heuristic: MySQL dump syntax, conditional comments, encodings, or future backup-format changes can create parser gaps or false positives. A false negative can execute unsafe SQL during restore; a false positive can block the emergency restore path when it is needed most.
+
+Suggested fix:
+Keep the scanner tests, but add a periodic manual restore drill with a current production-shaped dump into a disposable database, plus a small corpus of malicious/edge-case dump fragments. If restore remains a core admin feature, consider replacing regex screening with a stricter allowlist restore pipeline or parser-backed validation for the subset of SQL this app's own backup command emits.
 
 ## Final Missed-Issues Sweep
 
 Checked and not promoted:
-- Original upload path containment: current `apps/web/src/lib/upload-paths.ts` now validates filenames and proves realpath containment before returning originals; the older traversal finding is not current.
-- Semantic request admission: current semantic POST handling checks content type/length/transfer-encoding and rate-limits before body materialization; I did not find a current body-admission regression.
-- Restore SQL scanning: current restore scanner handles comment-removal and comment-as-space forms; no new restore bypass was promoted.
-- Public/admin auth wrappers: custom lint scripts and source sweeps show the expected guard model and explicit read-only/public exemptions; no new auth-wrapper finding was promoted in this lane.
-- HTML sinks: `dangerouslySetInnerHTML` usages found in public pages are JSON-LD patterns, not arbitrary user HTML sinks.
-- Privacy projection: public selectors, map GPS selectors, and search enrichment fields are guarded by source/type tests; no new PII leak was promoted.
-- Test hygiene: no `.only` markers found. Existing skips are environment/model gated (`admin`, `origin-guard`, CLIP model weights) and are known coverage risks, but not stronger than the findings above for this cycle.
-- Recent cycle fixes: LR upload semantic-mode forwarding, semantic body caps, upload path containment, and SQL restore scanner hardening all appear present at HEAD.
+- Auth wrappers and origin/rate-limit policy: custom lint gates passed for admin API auth, mutating server action origin checks, and public mutating route rate limits.
+- Type/test health: typecheck passed and the full Vitest suite passed, including privacy-field guards and touch-target audit coverage.
+- Product policy drift: source and docs sweeps did not find reintroduced paid-download/Stripe flows, culling/scoring features, or photo-editing tools. Existing edit language is metadata/topic/tag/admin editing, not photographer image editing.
+- Privacy projections: public data selectors, map GPS selectors, search enrichment fields, and sensitive-key tests remain in place; no new public PII leak was promoted.
+- HTML/script sinks: `dangerouslySetInnerHTML` usage found in current source is structured JSON-LD/CSP-related, not arbitrary user HTML rendering.
+- Upload/path containment: current upload/original path helpers and LR/browser upload paths include filename sanitization, body caps, contract locking, maintenance guards, and current tests/source contracts.
+- Service worker: current cache rules exclude admin and sensitive dynamic surfaces and honor no-store/admin-render headers; no cache leak was promoted.
+- Migration/journal state: Drizzle journal and migration files are present through the current schema; no missing current migration file was promoted.
 
 Residual gaps:
-- I did not run production-scale `EXPLAIN ANALYZE`, browser performance profiling, or full CI gates.
-- I did not line-read every historical `.context/reviews/**` archive artifact; archives were used for context and pattern sweeps, while direct inspection focused on current source, tests, docs, and operational playbooks.
+- I did not run production-scale browser profiling, MySQL `EXPLAIN ANALYZE`, or a live restore/deploy drill in this review lane.
+- Historical `.context/**` archives were inventoried and searched for recurring policy drift, while direct current-behavior inspection focused on HEAD source, tests, configs, docs, and operational scripts.

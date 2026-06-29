@@ -126,8 +126,9 @@ describe('lr upload metadata/parity source-contract (cycle 3)', () => {
         expect(LR_SRC).not.toMatch(/color_space:\s*data\.iccProfileName/);
     });
 
-    it('attributes the upload via uploaded_by from the token user (SEC-C3-02)', () => {
-        expect(LR_SRC).toMatch(/uploaded_by:\s*tokenUserId/);
+    it('attributes the upload via uploaded_by from the resolved actor user (SEC-C3-02)', () => {
+        expect(LR_SRC).toMatch(/const actorUserId = tokenUserId \?\? cookieUser\?\.id \?\? null/);
+        expect(LR_SRC).toMatch(/uploaded_by:\s*actorUserId/);
     });
 
     it('acquires the upload-processing-contract lock (CR-C3-01)', () => {

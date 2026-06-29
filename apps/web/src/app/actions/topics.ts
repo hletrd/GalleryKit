@@ -26,7 +26,7 @@ import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
 import { revalidateAllAppData } from '@/lib/revalidation';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
+import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { parseSmartCollectionQuery, remapTopicSlugInQuery } from '@/lib/smart-collections';
 import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
@@ -460,6 +460,9 @@ export async function deleteTopic(slug: string) {
         return { success: true };
     } catch (e) {
          if (e instanceof TopicHasImagesError) {
+             return { error: t('cannotDeleteCategoryWithImages') };
+         }
+         if (hasMySQLErrorCode(e, 'ER_ROW_IS_REFERENCED_2')) {
              return { error: t('cannotDeleteCategoryWithImages') };
          }
          console.error('Failed to delete topic', e);

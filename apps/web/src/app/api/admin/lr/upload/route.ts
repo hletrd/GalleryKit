@@ -50,6 +50,7 @@ import {
     SERVER_ACTION_BODY_OVERHEAD_BYTES,
     UPLOAD_MAX_FILES_PER_WINDOW,
 } from '@/lib/upload-limits';
+import { getCurrentUser } from '@/app/actions/auth';
 
 const NO_CACHE = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -70,6 +71,8 @@ export const POST = withAdminAuth(
         // accepted token through request-scoped context. Using that avoids re-verifying
         // and double-touching last_used_at on successful PAT uploads.
         const tokenUserId = getAdminAuthToken(request)?.userId ?? null;
+        const cookieUser = tokenUserId === null ? await getCurrentUser() : null;
+        const actorUserId = tokenUserId ?? cookieUser?.id ?? null;
         const ip = getClientIp(request.headers);
 
         if (isRestoreMaintenanceActive()) {
@@ -108,7 +111,7 @@ export const POST = withAdminAuth(
             );
         }
 
-        const trackerKey = `lr:${tokenUserId ?? ip}`;
+        const trackerKey = `lr:${actorUserId ?? ip}`;
         const uploadTracker = getUploadTracker();
         pruneUploadTracker();
         let tracker = uploadTracker.get(trackerKey);
@@ -432,13 +435,12 @@ export const POST = withAdminAuth(
             has_gain_map: data.colorSignals?.hasGainMap ?? false,
             pipeline_version: IMAGE_PIPELINE_VERSION,
             // Run-3 RPF cycle 3 / F2 (SEC-C3-02): attribute the upload to the
-            // verified PAT user for admin/audit linkage, mirroring the browser
-            // path. Public Atom currently uses the configured feed-level
-            // author; per-entry public attribution requires a future safe
-            // display-name column. Cookie-fallback requests
-            // (tokenUserId === null) degrade gracefully to NULL, same as a
-            // legacy upload.
-            uploaded_by: tokenUserId,
+            // verified PAT user, or the cookie-session admin used by the
+            // documented fallback test path, for admin/audit linkage.
+            // Public Atom currently uses the configured feed-level author;
+            // per-entry public attribution requires a future safe display-name
+            // column.
+            uploaded_by: actorUserId,
             original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
             original_file_size: fileEntry.size,
             processing_settings_json: serializeProcessingSettingsSnapshot(processingSettingsSnapshot),
@@ -516,7 +518,7 @@ export const POST = withAdminAuth(
         // studios. Structured payload mirrors the cycle 5-8 webhook log
         // shape so operators can grep by imageId during forensics.
         await logAuditEvent(
-            tokenUserId,
+            actorUserId,
             'lr_token_used',
             'image',
             String(imageId),
@@ -525,7 +527,7 @@ export const POST = withAdminAuth(
             { topic: topicSlug, filename: safeUserFilename },
         ).catch((err) => {
             console.warn('LR upload: audit log insert failed', {
-                userId: tokenUserId,
+                userId: actorUserId,
                 imageId,
                 action: 'lr_token_used',
                 err,

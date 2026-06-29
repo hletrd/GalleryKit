@@ -163,7 +163,17 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
-  const { images, totalCount, hasMore } = await getImagesLitePage(undefined, filterTags, PAGE_SIZE, 0);
+  let images: Awaited<ReturnType<typeof getImagesLitePage>>['images'] = [];
+  let totalCount = 0;
+  let hasMore = false;
+  try {
+    const page = await getImagesLitePage(undefined, filterTags, PAGE_SIZE, 0);
+    images = page.images;
+    totalCount = page.totalCount;
+    hasMore = page.hasMore;
+  } catch (err) {
+    console.warn('[home] falling back to empty gallery after image query failure:', err);
+  }
 
   // AGG8F-19 / plan-238: skip JSON-LD on `noindex` page variants. Filtered
   // tag-slug views set `robots: { index: false, follow: true }`, so search

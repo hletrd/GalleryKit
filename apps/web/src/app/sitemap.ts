@@ -7,8 +7,8 @@ import { MetadataRoute } from 'next';
 // rerun the full sitemap query against the live DB. ISR with hourly
 // revalidation keeps freshness within the bound expected by Googlebot for
 // content this stable and protects the DB from sustained crawler bursts.
-// Image lastModified continues to come from persisted `created_at` timestamps,
-// not request time, so cached responses do not lie about freshness.
+// Image lastModified comes from persisted row timestamps, not request time, so
+// cached responses do not lie about freshness.
 export const revalidate = 3600;
 
 import siteConfig from "@/site-config.json";
@@ -76,7 +76,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const imageEntries: MetadataRoute.Sitemap = images.flatMap((image) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, `/p/${image.id}`),
-      lastModified: image.created_at ? new Date(image.created_at) : undefined,
+      lastModified: (image.updated_at ?? image.created_at)
+        ? new Date(image.updated_at ?? image.created_at)
+        : undefined,
       changeFrequency: 'weekly' as const,
       priority: 0.7,
     }))

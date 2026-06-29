@@ -323,6 +323,43 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
     });
 
+    it('passes when a local helper wraps an approved rate-limit gate before mutation', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            async function enforceQuota(ip) {
+                const overLimit = preIncrementShareAttempt(ip);
+                if (overLimit) return true;
+                return false;
+            }
+            export async function POST(request) {
+                if (await enforceQuota('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails when a local helper wraps an ignored rate-limit call before mutation', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            async function enforceQuota(ip) {
+                preIncrementShareAttempt(ip);
+                return false;
+            }
+            export async function POST(request) {
+                if (await enforceQuota('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('passes when no mutating handlers exist', () => {
         const source = `
             export async function GET(request) {

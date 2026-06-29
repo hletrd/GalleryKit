@@ -140,6 +140,9 @@ export class SmartCollectionQueryError extends Error {
 }
 
 const MAX_DEPTH = 4;
+const MAX_QUERY_JSON_BYTES = 64 * 1024;
+const MAX_AST_NODES = 512;
+const MAX_GROUP_CHILDREN = 64;
 /** Maximum number of values in an IN predicate. */
 const MAX_IN_VALUES = 100;
 
@@ -311,13 +314,43 @@ const VALID_COLUMNS = new Set<AllowedColumn>([
  * @throws SmartCollectionQueryError on parse or structural errors.
  */
 export function parseSmartCollectionQuery(json: string): SmartCollectionQuery {
+    if (new TextEncoder().encode(json).length > MAX_QUERY_JSON_BYTES) {
+        throw new SmartCollectionQueryError(`query_json may be at most ${MAX_QUERY_JSON_BYTES} bytes`);
+    }
     let raw: unknown;
     try {
         raw = JSON.parse(json);
     } catch {
         throw new SmartCollectionQueryError('query_json is not valid JSON');
     }
+    assertSmartCollectionShapeBudget(raw, 0, { nodes: 0 });
     return validateNode(raw, 0);
+}
+
+function assertSmartCollectionShapeBudget(
+    node: unknown,
+    depth: number,
+    state: { nodes: number },
+) {
+    if (depth > MAX_DEPTH) {
+        throw new SmartCollectionDepthError(depth);
+    }
+    state.nodes += 1;
+    if (state.nodes > MAX_AST_NODES) {
+        throw new SmartCollectionQueryError(`AST may contain at most ${MAX_AST_NODES} nodes`);
+    }
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+        return;
+    }
+    const n = node as Record<string, unknown>;
+    if ((n.type === 'and' || n.type === 'or') && Array.isArray(n.children)) {
+        if (n.children.length > MAX_GROUP_CHILDREN) {
+            throw new SmartCollectionQueryError(`${n.type} group may contain at most ${MAX_GROUP_CHILDREN} children`);
+        }
+        for (const child of n.children) {
+            assertSmartCollectionShapeBudget(child, depth + 1, state);
+        }
+    }
 }
 
 /**
@@ -416,6 +449,9 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
     if (n.type === 'and' || n.type === 'or') {
         if (!Array.isArray(n.children) || n.children.length === 0) {
             throw new SmartCollectionQueryError(`${n.type} group must have at least one child`);
+        }
+        if (n.children.length > MAX_GROUP_CHILDREN) {
+            throw new SmartCollectionQueryError(`${n.type} group may contain at most ${MAX_GROUP_CHILDREN} children`);
         }
         const children = n.children.map((c: unknown) => validateNode(c, depth + 1));
         return { type: n.type, children } as AndGroup | OrGroup;

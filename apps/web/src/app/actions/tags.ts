@@ -191,6 +191,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
         // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
         // the tag was already linked — no tag_add event occurred.
         if (linkResult.affectedRows > 0) {
+            await db.update(images)
+                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                .where(eq(images.id, imageId));
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: resolvedTag.tag.name }).catch(console.debug);
         }
@@ -251,6 +254,9 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         // DELETE returns affectedRows === 0 when the tag was not linked to the
         // image (no-op), meaning no tag_remove event occurred.
         if (deleteResult.affectedRows > 0) {
+            await db.update(images)
+                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                .where(eq(images.id, imageId));
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
         }
@@ -325,6 +331,9 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
         // no tags_batch_add event occurred.
         if (batchInsertResult.affectedRows > 0) {
+            await db.update(images)
+                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                .where(inArray(images.id, [...existingIds]));
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: batchInsertResult.affectedRows, tag: cleanName }).catch(console.debug);
         }
@@ -466,6 +475,9 @@ export async function batchUpdateImageTags(
     // AGG12-01 but with lower severity because the metadata is accurate
     // (no false positive count) — the event is just unnecessary noise.
     if (added > 0 || removed > 0) {
+        await db.update(images)
+            .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+            .where(eq(images.id, imageId));
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
     }

@@ -132,6 +132,30 @@ describe('parseSmartCollectionQuery', () => {
         expect(() => parseSmartCollectionQuery('42')).toThrow();
         expect(() => parseSmartCollectionQuery('[]')).toThrow();
     });
+
+    it('rejects oversized serialized queries before validation', () => {
+        const ast = {
+            type: 'predicate',
+            column: 'camera_model',
+            operator: 'contains',
+            value: 'x'.repeat(70 * 1024),
+        };
+
+        expect(() => parseSmartCollectionQuery(JSON.stringify(ast)))
+            .toThrow(/query_json may be at most/);
+    });
+
+    it('rejects groups with too many direct children', () => {
+        const children = Array.from({ length: 65 }, () => ({
+            type: 'predicate',
+            column: 'iso',
+            operator: 'eq',
+            value: 100,
+        }));
+
+        expect(() => parseSmartCollectionQuery(JSON.stringify({ type: 'or', children })))
+            .toThrow(/may contain at most 64 children/);
+    });
 });
 
 // R4C4 HARD-R4C4-07 / TEST-R4C4-14: runtime scalar enforcement for predicate

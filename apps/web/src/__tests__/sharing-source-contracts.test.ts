@@ -21,7 +21,7 @@ describe('sharing action source contracts', () => {
             source.indexOf('retries++;', source.indexOf('if (refreshedImage.share_key)')),
         );
 
-        expect(branch).toContain("rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart)");
+        expect(branch).toContain("rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented)");
         expect(branch).toContain('return { success: true, key: refreshedImage.share_key }');
     });
 });

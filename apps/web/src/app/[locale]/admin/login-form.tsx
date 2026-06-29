@@ -6,8 +6,6 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { useActionState, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { toast } from 'sonner';
-import { useEffect } from 'react';
 
 import { useTranslations } from 'next-intl';
 import { useTranslation } from '@/components/i18n-provider';
@@ -24,12 +22,6 @@ export function LoginForm() {
     // what they typed (especially relevant on mobile keyboards with
     // autocorrect). Default to masked.
     const [showPassword, setShowPassword] = useState(false);
-
-    useEffect(() => {
-        if (state?.error) {
-            toast.error(state.error);
-        }
-    }, [state]);
 
     return (
         <div className="flex items-center justify-center min-h-[60vh]">

@@ -387,7 +387,7 @@ describe('bulkUpdateImages — tri-state diff applier', () => {
                     ignore: vi.fn(() => ({
                         values: vi.fn((rows: Array<{ imageId: number }>) => {
                             insertedImageIds = rows.map((row) => row.imageId);
-                            return Promise.resolve([]);
+                            return Promise.resolve([{ affectedRows: insertedImageIds.length }]);
                         }),
                     })),
                 })),
@@ -537,7 +537,7 @@ describe('bulkUpdateImages — tag mutations', () => {
             insertValuesCalled = false;
             const tx = {
                 update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) })),
-                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn(() => { insertValuesCalled = true; return Promise.resolve([]); }) })) })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn(() => { insertValuesCalled = true; return Promise.resolve([{ affectedRows: 3 }]); }) })) })),
                 delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
                 select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
             };

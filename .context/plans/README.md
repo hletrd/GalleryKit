@@ -2,13 +2,13 @@
 
 ## Active Plans
 
-- Cycle 15/100 Implementation Plan — IN PROGRESS (`cycle-15-2026-06-30-plan.md`)
+- Cycle 16/100 Implementation Plan — TODO (`cycle-16-2026-06-30-plan.md`)
+- Cycle 16/100 Deferred Findings — TODO / deferred (`cycle-16-2026-06-30-deferred.md`)
 - Cycle 15/100 Deferred Findings — TODO / deferred (`cycle-15-2026-06-30-deferred.md`)
 - Cycle 14/100 Deferred Findings — TODO / deferred (`cycle-14-2026-06-30-deferred.md`)
 - Cycle 12/100 Deferred Findings — TODO / deferred (`cycle-12-2026-06-29-deferred.md`)
 - Cycle 11/100 Deferred Findings — TODO / deferred (`cycle-11-2026-06-29-deferred.md`)
 - Cycle 10/100 Deferred Findings — TODO / deferred (`cycle-10-2026-06-29-deferred.md`)
-- Cycle 7/100 Implementation Plan — DONE (`cycle-7-2026-06-29-plan.md`)
 - Cycle 7/100 Deferred Findings — TODO / deferred (`cycle-7-2026-06-29-deferred.md`)
 - Cycle 6/100 Deferred Findings — TODO / deferred (`cycle-6-2026-06-29-deferred.md`)
 - Cycle 5/100 Deferred Findings — TODO / deferred (`cycle-5-2026-06-29-deferred.md`)
@@ -37,6 +37,7 @@
 
 ## Completed Plans (Cycle 6 Loop)
 
+- Cycle 15/100 Implementation Plan — DONE / archived under `archive/cycle-15-2026-06-30-plan.md`
 - Cycle 14/100 Implementation Plan — DONE (`cycle-14-2026-06-30-plan.md`)
 - Cycle 12/100 Implementation Plan — DONE (`cycle-12-2026-06-29-plan.md`)
 - Cycle 3/100 Implementation Plan — DONE / deployment completed by later cycles (`cycle-3-2026-06-29-plan.md`)
@@ -44,6 +45,7 @@
 - Cycle 10/100 Implementation Plan — DONE / archived under `archive/cycle-10-2026-06-29-plan.md`
 
 - Cycle 6/100 Implementation Plan — DONE (`cycle-6-2026-06-29-plan.md`)
+- Cycle 7/100 Implementation Plan — DONE / archived under `archive/cycle-7-2026-06-29-plan.md`
 - Cycle 5/100 Implementation Plan — DONE / archived under `archive/cycle-5-2026-06-29-plan.md`
 - Cycle 2/100 Implementation Plan — DONE / archived under `archive/cycle-2-2026-06-29-plan.md`
 - 236 — Cycle 6 Loop: SEO Unicode-Formatting Parity + `containsUnicodeFormatting` Helper — DONE / archived under `done/236-cycle6-loop-seo-unicode-and-helper.md`

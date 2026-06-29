@@ -52,11 +52,13 @@ function rollbackUserCreateRateLimitAttempt(ip: string) {
     }
 }
 
-async function rollbackUserCreateRateLimit(ip: string, reason: string, bucketStart?: number) {
+async function rollbackUserCreateRateLimit(ip: string, reason: string, bucketStart?: number, dbIncremented: boolean = false) {
     rollbackUserCreateRateLimitAttempt(ip);
-    await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS, bucketStart).catch((err) => {
-        console.debug(`Failed to roll back user_create DB rate limit after ${reason}:`, err);
-    });
+    if (dbIncremented) {
+        await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS, bucketStart).catch((err) => {
+            console.debug(`Failed to roll back user_create DB rate limit after ${reason}:`, err);
+        });
+    }
 }
 
 // Admin User Management
@@ -127,11 +129,13 @@ export async function createAdminUser(formData: FormData) {
     // This ensures concurrent requests both increment the counter before
     // either can proceed, preventing burst attacks that exploit the gap
     // between check and increment.
+    let userCreateDbIncremented = false;
     try {
         await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS, userCreateBucketStart);
+        userCreateDbIncremented = true;
         const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS, userCreateBucketStart);
         if (isRateLimitExceeded(dbLimit.count, USER_CREATE_MAX_ATTEMPTS, true)) {
-            await rollbackUserCreateRateLimit(ip, 'over-limit', userCreateBucketStart);
+            await rollbackUserCreateRateLimit(ip, 'over-limit', userCreateBucketStart, userCreateDbIncremented);
             return { error: t('tooManyAttempts') };
         }
     } catch {
@@ -168,13 +172,13 @@ export async function createAdminUser(formData: FormData) {
             // by AGG10R-RPL-01 (validation-before-increment) and AGG9R-RPL-01
             // (updatePassword validation ordering): legitimate user errors
             // must not consume rate-limit slots.
-            await rollbackUserCreateRateLimit(ip, 'duplicate username', userCreateBucketStart);
+            await rollbackUserCreateRateLimit(ip, 'duplicate username', userCreateBucketStart, userCreateDbIncremented);
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
         // Roll back DB rate limit on unexpected errors — the user didn't
         // fail due to brute-force, the infrastructure did.
-        await rollbackUserCreateRateLimit(ip, 'unexpected create failure', userCreateBucketStart);
+        await rollbackUserCreateRateLimit(ip, 'unexpected create failure', userCreateBucketStart, userCreateDbIncremented);
         return { error: t('failedToCreateUser') };
     }
 }

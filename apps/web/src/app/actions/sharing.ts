@@ -74,11 +74,18 @@ function rollbackShareRateLimit(ip: string, scope: ShareRateLimitScope) {
  * where the DB counter was pre-incremented but the action did not
  * ultimately execute.
  */
-async function rollbackShareRateLimitFull(ip: string, scope: ShareRateLimitScope, bucketStart?: number) {
+async function rollbackShareRateLimitFull(
+    ip: string,
+    scope: ShareRateLimitScope,
+    bucketStart?: number,
+    dbIncremented: boolean = false,
+) {
     rollbackShareRateLimit(ip, scope);
-    await decrementRateLimit(ip, scope, SHARE_RATE_LIMIT_WINDOW_MS, bucketStart).catch((err) => {
-        console.debug(`Failed to roll back DB share rate limit for scope ${scope}:`, err);
-    });
+    if (dbIncremented) {
+        await decrementRateLimit(ip, scope, SHARE_RATE_LIMIT_WINDOW_MS, bucketStart).catch((err) => {
+            console.debug(`Failed to roll back DB share rate limit for scope ${scope}:`, err);
+        });
+    }
 }
 
 export async function createPhotoShareLink(imageId: number) {
@@ -114,13 +121,15 @@ export async function createPhotoShareLink(imageId: number) {
         return { error: t('tooManyShareRequests') };
     }
     // DB-backed check for accuracy across restarts (pre-increment before check)
+    let shareDbIncremented = false;
     try {
         await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        shareDbIncremented = true;
         const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_WRITE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
         if (isRateLimitExceeded(dbLimit.count, SHARE_WRITE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters so the DB counter doesn't
             // drift ahead of the in-memory counter over the window.
-            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented);
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -154,12 +163,12 @@ export async function createPhotoShareLink(imageId: number) {
 
             // Image may have been deleted between the initial check and now
             if (!refreshedImage) {
-                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented);
                 return { error: t('imageNotFound') };
             }
 
             if (refreshedImage.share_key) {
-                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented);
                 return { success: true, key: refreshedImage.share_key };
             }
 
@@ -173,12 +182,12 @@ export async function createPhotoShareLink(imageId: number) {
             // Non-retryable error — roll back both rate-limit counters
             // so the admin isn't charged for an infrastructure failure
             // (C7R-RPL-03 / AGG7R-03).
-            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented);
             return { error: t('failedToGenerateKey') };
         }
     }
     // Exhausted retries — roll back both counters for the same reason.
-    await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+    await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart, shareDbIncremented);
     return { error: t('failedToGenerateKey') };
 }
 
@@ -228,12 +237,14 @@ export async function createGroupShareLink(imageIds: number[]) {
         return { error: t('tooManyShareRequests') };
     }
     // DB-backed check for accuracy across restarts (pre-increment before check)
+    let shareDbIncremented = false;
     try {
         await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        shareDbIncremented = true;
         const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_WRITE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
         if (isRateLimitExceeded(dbLimit.count, SHARE_WRITE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters.
-            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
+            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart, shareDbIncremented);
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -288,18 +299,18 @@ export async function createGroupShareLink(imageIds: number[]) {
                 // roll back the DB rate-limit counter so the admin isn't
                 // penalized for a deleted image. In-memory counter rolled
                 // back symmetrically.
-                await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
+                await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart, shareDbIncremented);
                 return { error: t('imagesNotFound') };
             }
             // Non-retryable error — roll back both rate-limit counters
             // so the admin isn't charged for an infrastructure failure
             // (C7R-RPL-03 / AGG7R-03).
-            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
+            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart, shareDbIncremented);
             return { error: t('failedToCreateGroup') };
         }
     }
     // Exhausted retries — roll back both counters for the same reason.
-    await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
+    await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart, shareDbIncremented);
     return { error: t('failedToCreateGroup') };
 }
 

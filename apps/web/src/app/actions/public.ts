@@ -29,16 +29,18 @@ export type SearchImagesResult =
     | { status: 'ok'; results: PublicSearchItem[] }
     | { status: 'maintenance' | 'rateLimited' | 'error' | 'invalid'; results: [] };
 
-async function rollbackSearchAttempt(ip: string, bucketStart: number) {
+async function rollbackSearchAttempt(ip: string, bucketStart: number, dbIncremented: boolean) {
     const currentEntry = searchRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
         searchRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
     } else {
         searchRateLimit.delete(ip);
     }
-    await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS, bucketStart).catch((err) => {
-        console.debug('Failed to roll back search DB rate limit:', err);
-    });
+    if (dbIncremented) {
+        await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS, bucketStart).catch((err) => {
+            console.debug('Failed to roll back search DB rate limit:', err);
+        });
+    }
 }
 
 const LOAD_MORE_WINDOW_MS = 60 * 1000;
@@ -61,7 +63,7 @@ function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
     return (loadMoreRateLimit.get(ip)?.count ?? 0) > LOAD_MORE_MAX_REQUESTS;
 }
 
-function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
+function rollbackLoadMoreAttempt(ip: string, bucketStart?: number, dbIncremented: boolean = false) {
     const currentEntry = loadMoreRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
         loadMoreRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
@@ -71,7 +73,7 @@ function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
     // C16-MED-01: symmetric rollback of in-memory and DB counters, matching
     // the searchImagesAction rollback pattern. The DB decrement is best-effort
     // so a transient DB failure does not prevent the in-memory rollback.
-    if (bucketStart !== undefined) {
+    if (dbIncremented && bucketStart !== undefined) {
         decrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart).catch((err) => {
             console.debug('Failed to roll back load_more DB rate limit:', err);
         });
@@ -85,12 +87,14 @@ function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
 async function checkLoadMoreRateLimit(
     ip: string,
     now: number,
-): Promise<{ status: 'ok' | 'rateLimited' | 'dbError' }> {
+): Promise<{ status: 'ok' | 'rateLimited' | 'dbError'; bucketStart: number; dbIncremented: boolean }> {
     const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
     const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
+    let dbIncremented = false;
 
     try {
         await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
+        dbIncremented = true;
     } catch {
         // DB unavailable — keep the in-memory pre-increment
     }
@@ -98,19 +102,19 @@ async function checkLoadMoreRateLimit(
     try {
         const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
         if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited' };
+            rollbackLoadMoreAttempt(ip, bucketStart, dbIncremented);
+            return { status: 'rateLimited', bucketStart, dbIncremented };
         }
     } catch {
         if (overLimitInMemory) {
-            rollbackLoadMoreAttempt(ip, bucketStart);
-            return { status: 'rateLimited' };
+            rollbackLoadMoreAttempt(ip, bucketStart, dbIncremented);
+            return { status: 'rateLimited', bucketStart, dbIncremented };
         }
         // DB check failed but in-memory passed — proceed with caution
-        return { status: 'dbError' };
+        return { status: 'dbError', bucketStart, dbIncremented };
     }
 
-    return { status: 'ok' };
+    return { status: 'ok', bucketStart, dbIncremented };
 }
 
 /** @action-origin-exempt: public read-only pagination action with its own rate limit */
@@ -151,7 +155,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
             hasMore: rows.length > safeLimit,
         };
     } catch (err) {
-        rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
+        rollbackLoadMoreAttempt(ip, rateLimitResult.bucketStart, rateLimitResult.dbIncremented);
         // C2-MED-02: return a structured error response instead of throwing.
         // Throwing from a server action sends a generic error to the client
         // and can leave the Load More button in a broken state. Returning a
@@ -203,7 +207,7 @@ export async function loadMoreSmartCollectionImages(
     try {
         const collection = await getSmartCollectionBySlugCached(slug);
         if (!collection || !collection.is_public) {
-            rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
+            rollbackLoadMoreAttempt(ip, rateLimitResult.bucketStart, rateLimitResult.dbIncremented);
             return { status: 'invalid', images: [], hasMore: false };
         }
 
@@ -223,7 +227,7 @@ export async function loadMoreSmartCollectionImages(
             hasMore,
         };
     } catch (err) {
-        rollbackLoadMoreAttempt(ip, getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS));
+        rollbackLoadMoreAttempt(ip, rateLimitResult.bucketStart, rateLimitResult.dbIncremented);
         console.error('loadMoreSmartCollectionImages failed:', err);
         return { status: 'error', images: [], hasMore: true };
     }
@@ -273,8 +277,10 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     // DB-backed increment BEFORE the check (matches sharing.ts and admin-users.ts pattern).
     // Use one pinned bucketStart for increment/check/rollback so a request that
     // crosses a minute boundary cannot decrement the wrong MySQL bucket.
+    let searchDbIncremented = false;
     try {
         await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS, bucketStart);
+        searchDbIncremented = true;
     } catch {
         // DB unavailable — keep the in-memory pre-increment so the in-memory
         // rate limit remains effective during DB outages. The in-memory map
@@ -285,7 +291,7 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS, bucketStart);
         if (isRateLimitExceeded(dbLimit.count, SEARCH_MAX_REQUESTS, true)) {
-            await rollbackSearchAttempt(ip, bucketStart);
+            await rollbackSearchAttempt(ip, bucketStart, searchDbIncremented);
             return { status: 'rateLimited', results: [] };
         }
     } catch {
@@ -299,7 +305,7 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     try {
         return { status: 'ok', results: await searchImages(sanitizedQuery, 20) };
     } catch (err) {
-        await rollbackSearchAttempt(ip, bucketStart);
+        await rollbackSearchAttempt(ip, bucketStart, searchDbIncremented);
         // C18-MED-01: return a structured error response instead of throwing.
         // Throwing from a server action sends a generic error to the client
         // and can leave the search UI in a broken state. Returning a

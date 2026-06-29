@@ -120,9 +120,6 @@ export function MapClient({ markers, locale, openPhotoLabel, imageSizes }: MapCl
                 <Marker
                     key={marker.id}
                     position={[marker.latitude, marker.longitude]}
-                    eventHandlers={{
-                        click: () => handleMarkerClick(marker.id),
-                    }}
                 >
                     <Popup>
                         <button

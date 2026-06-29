@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     selectMock,
+    updateMock,
     insertMock,
     deleteMock,
     transactionMock,
@@ -14,6 +15,7 @@ const {
     maintenanceMessageMock,
 } = vi.hoisted(() => ({
     selectMock: vi.fn(),
+    updateMock: vi.fn(),
     insertMock: vi.fn(),
     deleteMock: vi.fn(),
     transactionMock: vi.fn(),
@@ -63,6 +65,7 @@ function makeDeleteChain<T>(result: T) {
 vi.mock('@/db', () => ({
     db: {
         select: selectMock,
+        update: updateMock,
         insert: insertMock,
         delete: deleteMock,
         transaction: transactionMock,
@@ -79,6 +82,7 @@ vi.mock('@/db', () => ({
     images: {
         id: 'images.id',
         topic: 'images.topic',
+        updated_at: 'images.updated_at',
     },
 }));
 
@@ -115,6 +119,7 @@ import { addTagToImage, batchAddTags, batchUpdateImageTags } from '@/app/actions
 describe('tag actions', () => {
     beforeEach(() => {
         selectMock.mockReset();
+        updateMock.mockReset();
         insertMock.mockReset();
         deleteMock.mockReset();
         transactionMock.mockReset();
@@ -128,6 +133,11 @@ describe('tag actions', () => {
         logAuditEventMock.mockReset();
         logAuditEventMock.mockResolvedValue(undefined);
         maintenanceMessageMock.mockReturnValue(null);
+        updateMock.mockReturnValue({
+            set: vi.fn().mockReturnValue({
+                where: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+            }),
+        });
     });
 
     it('returns imageNotFound before tagging when the target image no longer exists', async () => {

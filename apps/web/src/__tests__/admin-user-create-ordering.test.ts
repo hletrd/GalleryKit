@@ -140,6 +140,6 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
         // don't burn the current attempt, without deleting concurrent pressure
         // from the whole bucket.
         const dupBranchBody = body.slice(dupBranchStart, usernameExistsReturn);
-        expect(dupBranchBody).toMatch(/rollbackUserCreateRateLimit\(ip,\s*'duplicate username',\s*userCreateBucketStart\)/);
+        expect(dupBranchBody).toMatch(/rollbackUserCreateRateLimit\(ip,\s*'duplicate username',\s*userCreateBucketStart,\s*userCreateDbIncremented\)/);
     });
 });

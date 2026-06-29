@@ -3,7 +3,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
-import { eq, inArray, and, isNotNull } from 'drizzle-orm';
+import { eq, inArray, and, isNotNull, sql } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariantsStrict, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, deleteOriginalUploadFileStrict, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
@@ -1055,6 +1055,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             if (Object.keys(setClause).length > 0) {
                 await tx.update(images).set(setClause).where(inArray(images.id, existingImageIds));
             }
+            let tagMutationRows = 0;
 
             // US-P52: Apply suggested alt text → title or description.
             // Copies alt_text_suggested into the chosen field ONLY when the
@@ -1118,9 +1119,10 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 if (!isValidTagSlug(slug)) continue;
                 const resolved = await ensureTagRecord(tx, cleanName, slug);
                 if (resolved.kind !== 'found') continue;
-                await tx.insert(imageTags).ignore().values(
+                const [insertResult] = await tx.insert(imageTags).ignore().values(
                     existingImageIds.map(imageId => ({ imageId, tagId: resolved.tag.id }))
                 );
+                tagMutationRows += Number(insertResult.affectedRows ?? 0);
             }
 
             // Tag removals: look up tag by exact name (then slug fallback), then
@@ -1131,9 +1133,15 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 if (rejected || !cleanName) continue;
                 const resolved = await findTagRecordByNameOrSlug(tx, cleanName);
                 if (resolved.kind !== 'found') continue;
-                await tx.delete(imageTags).where(
+                const [deleteResult] = await tx.delete(imageTags).where(
                     and(inArray(imageTags.imageId, existingImageIds), eq(imageTags.tagId, resolved.tag.id))
                 );
+                tagMutationRows += Number(deleteResult.affectedRows ?? 0);
+            }
+            if (tagMutationRows > 0 && Object.keys(setClause).length === 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(inArray(images.id, existingImageIds));
             }
             return existingImageIds;
         });

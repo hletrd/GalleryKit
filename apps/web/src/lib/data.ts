@@ -1624,16 +1624,17 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     return combined.slice(0, effectiveLimit);
 }
 
-/** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns */
+/** Lightweight query for sitemap: only id + timestamps, no JOINs, no TEXT columns */
 export async function getImageIdsForSitemap(limit: number = 24000) {
     const safeLimit = Math.min(Math.max(limit, 1), 50000);
     return db.select({
         id: images.id,
         created_at: images.created_at,
+        updated_at: images.updated_at,
     })
     .from(images)
     .where(eq(images.processed, true))
-    .orderBy(desc(images.created_at))
+    .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
     .limit(safeLimit);
 }
 

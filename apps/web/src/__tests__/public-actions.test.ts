@@ -377,4 +377,14 @@ describe('searchImagesAction', () => {
         expect(searchRateLimit.has('203.0.113.42')).toBe(false);
         expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'search', 60_000, 1_700_000_000);
     });
+
+    it('does not decrement the DB search bucket when the DB increment failed first', async () => {
+        incrementRateLimitMock.mockRejectedValue(new Error('db offline'));
+        searchImagesMock.mockRejectedValue(new Error('db query failed'));
+
+        await expect(searchImagesAction('landscape')).resolves.toEqual({ status: 'error', results: [] });
+
+        expect(searchRateLimit.has('203.0.113.42')).toBe(false);
+        expect(decrementRateLimitMock).not.toHaveBeenCalled();
+    });
 });

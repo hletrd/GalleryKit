@@ -26,7 +26,7 @@ describe('sitemap route', () => {
         ]);
         dataMocks.getLatestImageUpdatedAt.mockResolvedValue(new Date('2026-01-03T00:00:00Z'));
         dataMocks.getImageIdsForSitemap.mockResolvedValue([
-            { id: 7, created_at: new Date('2026-01-01T00:00:00Z') },
+            { id: 7, created_at: new Date('2026-01-01T00:00:00Z'), updated_at: new Date('2026-01-04T00:00:00Z') },
         ]);
     });
 
@@ -48,6 +48,13 @@ describe('sitemap route', () => {
             expect(urls).toContain(`${TEST_BASE_URL}/${locale}/landscape/feed.xml`);
         }
         expect(urls).toContain(`${TEST_BASE_URL}/feed.xml`);
+    });
+
+    it('uses image updated_at for photo lastModified when available', async () => {
+        const entries = await sitemap();
+        const photoEntry = entries.find((entry) => entry.url === `${TEST_BASE_URL}/${LOCALES[0]}/p/7`);
+
+        expect(photoEntry?.lastModified).toEqual(new Date('2026-01-04T00:00:00Z'));
     });
 
     it('falls back to localized homepages when sitemap data queries fail', async () => {

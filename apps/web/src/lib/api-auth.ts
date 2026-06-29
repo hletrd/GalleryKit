@@ -49,8 +49,11 @@ export interface WithAdminAuthOptions {
  *
  * US-P53: when the optional `allowTokenScope` is supplied via the second
  * positional argument, requests carrying a valid `X-GalleryKit-Token`
- * header may authenticate without a cookie or same-origin context. This
- * is required for non-browser integrations (e.g. the Lightroom plugin).
+ * header may authenticate without a cookie or same-origin context. The
+ * verified token is exposed via `getAdminAuthToken(request)` while the
+ * handler runs, then cleared immediately after the handler settles. Cookie
+ * fallback handlers that need attribution should call `getCurrentUser()`.
+ * This is required for non-browser integrations (e.g. the Lightroom plugin).
  */
 export function withAdminAuth<T extends unknown[]>(
     handler: (...args: T) => Promise<Response>,
