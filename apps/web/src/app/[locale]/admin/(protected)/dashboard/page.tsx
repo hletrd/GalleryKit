@@ -39,6 +39,8 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
             imageSizes={config.imageSizes}
             shareBaseUrl={seo.url}
             uploadLimits={{ maxFiles: UPLOAD_MAX_FILES_PER_WINDOW, maxFileBytes: MAX_UPLOAD_FILE_BYTES, maxTotalBytes: MAX_TOTAL_UPLOAD_BYTES }}
+            stripGpsOnUpload={config.stripGpsOnUpload}
+            hasExistingImages={totalCount > 0}
         />
     );
 }

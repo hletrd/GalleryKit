@@ -95,6 +95,14 @@ export function clampSemanticTopK(raw: unknown): number {
 const MAX_SEMANTIC_BODY_BYTES = 8192;
 const MAX_SEMANTIC_QUERY_CODE_POINTS = 200;
 
+function abortResponse() {
+    return NextResponse.json({ error: 'Request aborted' }, { status: 499, headers: NO_STORE_HEADERS });
+}
+
+function isRequestAborted(request: NextRequest) {
+    return request.signal?.aborted === true;
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
     // Same-origin check
     if (!hasTrustedSameOrigin(request.headers)) {
@@ -187,6 +195,9 @@ export async function POST(request: NextRequest): Promise<Response> {
             { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
         );
     }
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
 
     // Parse body — read as text first with explicit byte cap.
     let rawBody: string;
@@ -232,6 +243,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Embed query — production uses the real CLIP encoder (async); stub uses the sync stub.
     let queryEmbedding: Float32Array;
     try {
+        if (isRequestAborted(request)) {
+            return abortResponse();
+        }
         queryEmbedding = isProd ? await embedTextReal(query) : embedTextStub(query);
     } catch {
         // AGG-12: do NOT rollback after expensive work begins. The rate-limit
@@ -243,6 +257,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // The model_version filter ensures stub rows never appear in production results and vice-versa.
     let rows: { imageId: number; embedding: string | null }[];
     try {
+        if (isRequestAborted(request)) {
+            return abortResponse();
+        }
         rows = await db
             .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })
             .from(imageEmbeddings)
@@ -287,6 +304,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // bare imageId+score pairs.
     let enrichedResults: Array<{ imageId: number; score: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null; lens_model: string | null; capture_date: string | null }> = [];
     if (results.length > 0) {
+        if (isRequestAborted(request)) {
+            return abortResponse();
+        }
         const resultIds = results.map(r => r.imageId);
         const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
         try {

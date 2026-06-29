@@ -32,6 +32,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 | `npm run init` | Apply committed migrations, then seed admin |
 | `npm test` | Vitest unit suite (2000+ tests) |
 | `npm run typecheck` | Type gate (app + scripts) |
+| `npm run test:e2e` | Playwright end-to-end tests |
 | `npx tsx scripts/download-clip-models.ts` | Seed CLIP model weights into the models volume (sidecar) |
 | `npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Pre-enable production CLIP backfill for existing photos (sidecar); omit `--force` only after semantic search mode is already active |
 | `npx tsx scripts/backfill-color-pipeline.ts` | Re-encode derivatives at the current pipeline/settings (sidecar) |

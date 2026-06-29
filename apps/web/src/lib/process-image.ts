@@ -101,6 +101,20 @@ async function safeUnlink(filePath: string): Promise<void> {
     }
 }
 
+async function strictUnlink(filePath: string): Promise<void> {
+    try {
+        await fs.unlink(filePath);
+    } catch (err) {
+        const code = err && typeof err === 'object' && 'code' in err
+            ? (err as { code?: string }).code
+            : null;
+        if (code === 'ENOENT') {
+            return;
+        }
+        throw err;
+    }
+}
+
 /** Safely close a directory handle, ignoring only ENOENT (already closed). */
 async function safeCloseDirHandle(handle: Awaited<ReturnType<typeof fs.opendir>>): Promise<void> {
     try {
@@ -558,19 +572,12 @@ function parseExifDateTime(value: unknown): string | null {
 // Default output sizes — shared with gallery-config-shared.ts for client components
 const DEFAULT_OUTPUT_SIZES = DEFAULT_IMAGE_SIZES;
 
-/**
- * Delete all sized variants for a given base filename deterministically.
- *
- * When `sizes` is provided, deletes the base file plus `{name}_{size}{ext}`
- * for each configured size. When `sizes` is empty, performs a full directory
- * scan to catch orphaned variants from prior size configurations.
- *
- * @param dir The directory containing the derivatives (e.g. UPLOAD_DIR_WEBP)
- * @param baseFilename The base filename (e.g. "photo_abc123.webp")
- * @param sizes Optional array of configured sizes. Defaults to DEFAULT_OUTPUT_SIZES.
- *   Pass an empty array to trigger a full directory scan for orphaned variants.
- */
-export async function deleteImageVariants(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
+async function collectImageVariantFilenames(
+    dir: string,
+    baseFilename: string,
+    sizes: number[] = DEFAULT_OUTPUT_SIZES,
+    options: { strictScan?: boolean } = {},
+) {
     const ext = path.extname(baseFilename);
     const name = path.basename(baseFilename, ext);
     const filesToDelete = new Set([
@@ -608,16 +615,52 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
             // (first upload, or the directory was removed). The known
             // filesToDelete set above (base file + size variants) is sufficient
             // for cleanup in this case. Non-ENOENT errors (EACCES, EIO, EMFILE)
-            // are logged so disk/permission issues don't go silently unnoticed.
+            // are either logged by the tolerant helper or surfaced by the strict
+            // helper used after committed image deletions.
             if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                if (options.strictScan) {
+                    throw err;
+                }
                 console.warn(`[deleteImageVariants] Directory scan failed for ${dir}:`, err);
             }
         }
     }
 
+    return filesToDelete;
+}
+
+/**
+ * Delete all sized variants for a given base filename deterministically.
+ *
+ * When `sizes` is provided, deletes the base file plus `{name}_{size}{ext}`
+ * for each configured size. When `sizes` is empty, performs a full directory
+ * scan to catch orphaned variants from prior size configurations.
+ *
+ * @param dir The directory containing the derivatives (e.g. UPLOAD_DIR_WEBP)
+ * @param baseFilename The base filename (e.g. "photo_abc123.webp")
+ * @param sizes Optional array of configured sizes. Defaults to DEFAULT_OUTPUT_SIZES.
+ *   Pass an empty array to trigger a full directory scan for orphaned variants.
+ */
+export async function deleteImageVariants(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
+    const filesToDelete = await collectImageVariantFilenames(dir, baseFilename, sizes);
     await Promise.all(
         [...filesToDelete].map(f => safeUnlink(path.join(dir, f))),
     );
+}
+
+export async function deleteImageVariantsStrict(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
+    const filesToDelete = await collectImageVariantFilenames(dir, baseFilename, sizes, { strictScan: true });
+    const failures: unknown[] = [];
+    await Promise.all([...filesToDelete].map(async (f) => {
+        try {
+            await strictUnlink(path.join(dir, f));
+        } catch (err) {
+            failures.push(err);
+        }
+    }));
+    if (failures.length > 0) {
+        throw new AggregateError(failures, `Failed to delete ${failures.length} image variant file(s) for ${baseFilename}`);
+    }
 }
 
 export interface ImageProcessingResult {
@@ -1113,16 +1156,65 @@ export async function processImageFormats(
     // unless the admin opts into a different value via sdr_jpeg_chroma.
     const effectiveSdrChroma: JpegChromaSubsampling = sdrJpegChroma ?? '4:2:0';
 
-    // R10-L11: per-format set of sized variant paths written so far.
-    // Used by the catch/finally cleanup below: if any format throws mid-
-    // way through the size loop, the partial files for THAT format
-    // should be removed so the next retry (or backfill run) doesn't see
-    // a half-written ladder of size-suffixed JPEGs/WebPs/AVIFs claiming
-    // to be valid.
-    const writtenSizedPaths: Record<'webp' | 'avif' | 'jpeg', Set<string>> = {
-        webp: new Set(),
-        avif: new Set(),
-        jpeg: new Set(),
+    const createdFinalPaths = new Set<string>();
+    const backupFinalPaths = new Map<string, string>();
+
+    const backupExistingFinalPath = async (outputPath: string) => {
+        if (createdFinalPaths.has(outputPath)) return null;
+        const existingBackupPath = backupFinalPaths.get(outputPath);
+        if (existingBackupPath) return existingBackupPath;
+        const backupPath = `${outputPath}.${randomUUID()}.bak`;
+        try {
+            await fs.copyFile(outputPath, backupPath);
+            backupFinalPaths.set(outputPath, backupPath);
+            return backupPath;
+        } catch (err) {
+            const code = err && typeof err === 'object' && 'code' in err
+                ? (err as { code?: string }).code
+                : null;
+            if (code === 'ENOENT') {
+                return null;
+            }
+            throw err;
+        }
+    };
+
+    const writeFinalPathAtomically = async (
+        outputPath: string,
+        writeTemp: (tmpPath: string) => Promise<void>,
+    ) => {
+        const tmpPath = `${outputPath}.${randomUUID()}.tmp`;
+        try {
+            await writeTemp(tmpPath);
+            const backupPath = await backupExistingFinalPath(outputPath);
+            await fs.rename(tmpPath, outputPath);
+            if (!backupPath) {
+                createdFinalPaths.add(outputPath);
+            }
+        } finally {
+            await safeUnlink(tmpPath);
+        }
+    };
+
+    const restorePreviousFinalPaths = async () => {
+        for (const outputPath of createdFinalPaths) {
+            await safeUnlink(outputPath);
+        }
+        for (const [outputPath, backupPath] of Array.from(backupFinalPaths).reverse()) {
+            try {
+                await fs.rename(backupPath, outputPath);
+            } catch {
+                try {
+                    await fs.copyFile(backupPath, outputPath);
+                } finally {
+                    await safeUnlink(backupPath);
+                }
+            }
+        }
+    };
+
+    const removeBackupFinalPaths = async () => {
+        await Promise.all([...backupFinalPaths.values()].map((backupPath) => safeUnlink(backupPath)));
     };
 
     const generateForFormat = async (
@@ -1133,18 +1225,6 @@ export async function processImageFormats(
         const ext = path.extname(baseFilename);
         const name = path.basename(baseFilename, ext);
         let lastRendered: { resizeWidth: number; filePath: string } | null = null;
-        const writeSizedVariantAtomically = async (
-            outputPath: string,
-            writeTemp: (tmpPath: string) => Promise<void>,
-        ) => {
-            const tmpPath = `${outputPath}.${randomUUID()}.tmp`;
-            try {
-                await writeTemp(tmpPath);
-                await fs.rename(tmpPath, outputPath);
-            } finally {
-                await safeUnlink(tmpPath);
-            }
-        };
 
         for (const size of sortedSizes) {
             // Don't upscale if original is smaller.
@@ -1160,7 +1240,7 @@ export async function processImageFormats(
                 // copyFile for same-size variant dedup, matching the atomic
                 // link pattern used for the base filename (line 507). Falls
                 // back to copyFile on cross-device or link failure.
-                await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                await writeFinalPathAtomically(outputPath, async (tmpPath) => {
                     try {
                         await fs.link(duplicateSourcePath, tmpPath);
                     } catch {
@@ -1200,7 +1280,7 @@ export async function processImageFormats(
                     // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives
                     // is false (default). P3-capable browsers render full gamut;
                     // non-capable browsers safely fall back to sRGB clipping.
-                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                    await writeFinalPathAtomically(outputPath, async (tmpPath) => {
                         await base
                             .toColorspace(targetIcc)
                             .withIccProfile(targetIcc)
@@ -1222,7 +1302,7 @@ export async function processImageFormats(
                     // ~30% extra CPU; encode time is amortized over many
                     // views on a self-hosted gallery.
                     const wantHighBitdepth = isWideGamutSource && await canUseHighBitdepthAvif();
-                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                    await writeFinalPathAtomically(outputPath, async (tmpPath) => {
                         try {
                             await base
                                 .toColorspace(avifIcc)
@@ -1276,7 +1356,7 @@ export async function processImageFormats(
                     // C3-A6: chromaSubsampling type now flows through end-to-end
                     // as JpegChromaSubsampling; the runtime cast at this site is
                     // no longer required.
-                    await writeSizedVariantAtomically(outputPath, async (tmpPath) => {
+                    await writeFinalPathAtomically(outputPath, async (tmpPath) => {
                         await base
                             .toColorspace(targetIcc)
                             .withIccProfile(targetIcc)
@@ -1297,7 +1377,6 @@ export async function processImageFormats(
 
                 lastRendered = { resizeWidth, filePath: outputPath };
             }
-            writtenSizedPaths[format].add(outputPath);
 
             // The largest configured size serves as the "base" filename to satisfy existing schema.
             // Use atomic rename via .tmp file to eliminate the window where the base
@@ -1311,34 +1390,33 @@ export async function processImageFormats(
             //      where both link and rename fail)
             if (size === sortedSizes[sortedSizes.length - 1]) {
                 const basePath = path.join(dir, baseFilename);
-                const tmpPath = basePath + '.tmp';
-                try {
-                    await fs.link(outputPath, tmpPath);
-                    await fs.rename(tmpPath, basePath);
-                } catch {
-                    // Fallback: copy to tmp then rename (covers cross-device or link failure)
-                    await fs.copyFile(outputPath, tmpPath).catch((err) => {
-                        const code = err && typeof err === 'object' && 'code' in err
-                            ? (err as { code?: string }).code
-                            : null;
-                        if (code !== 'ENOENT') {
-                            console.debug('[process-image] copyFile fallback failed:', err);
-                        }
-                    });
+                await writeFinalPathAtomically(basePath, async (tmpPath) => {
                     try {
-                        await fs.rename(tmpPath, basePath);
+                        await fs.link(outputPath, tmpPath);
+                        return;
                     } catch {
-                        // Final fallback: direct copy if rename fails
-                        // C6-AGG6R-11: warn so operators know the filesystem
-                        // cannot do atomic rename — signals a severely broken
-                        // filesystem that may need attention.
+                        // Fall back below.
+                    }
+                    // Fallback: copy to tmp then rename (covers cross-device or link failure)
+                    await fs.copyFile(outputPath, tmpPath);
+                }).catch(async (err) => {
+                    // Final fallback: direct copy if rename fails after the temp
+                    // was written. Preserve the same previous-file backup
+                    // contract before taking the non-atomic branch.
+                    const code = err && typeof err === 'object' && 'code' in err
+                        ? (err as { code?: string }).code
+                        : null;
+                    if (code === 'EXDEV' || code === 'EPERM' || code === 'EACCES') {
+                        const backupPath = await backupExistingFinalPath(basePath);
                         console.warn(`[process-image] Atomic rename fallback reached for ${basePath} — using non-atomic copyFile`);
                         await fs.copyFile(outputPath, basePath);
+                        if (!backupPath) {
+                            createdFinalPaths.add(basePath);
+                        }
+                    } else {
+                        throw err;
                     }
-                } finally {
-                    await safeUnlink(tmpPath);
-                }
-                writtenSizedPaths[format].add(basePath);
+                });
             }
         }
     };
@@ -1383,23 +1461,10 @@ export async function processImageFormats(
             await _verifyWebpIccChunk(webpPath);
         }
     } catch (err) {
-        // R10-L11: clean up any partial sized variants written so far across
-        // ALL three formats. Without this, a mid-size failure (e.g. AVIF
-        // encoder OOM at size index 3 of 4) leaves the smaller AVIF
-        // variants on disk; the next retry then sees `_640.avif` etc.
-        // present and a backfill operator inspecting the filesystem
-        // would think the encode partially succeeded. Failed encodes
-        // must leave the variant directory in the same state it was in
-        // before the call (modulo files that were already there from a
-        // prior successful run, which we intentionally do not touch —
-        // we only delete paths WE wrote in this invocation).
-        await Promise.all([
-            ...Array.from(writtenSizedPaths.webp).map((p) => safeUnlink(p)),
-            ...Array.from(writtenSizedPaths.avif).map((p) => safeUnlink(p)),
-            ...Array.from(writtenSizedPaths.jpeg).map((p) => safeUnlink(p)),
-        ]);
+        await restorePreviousFinalPaths();
         throw err;
     } finally {
+        await removeBackupFinalPaths();
         // WI-15: clean up downscaled intermediate if one was created.
         if (processingInputPath !== inputPath) {
             await safeUnlink(processingInputPath);

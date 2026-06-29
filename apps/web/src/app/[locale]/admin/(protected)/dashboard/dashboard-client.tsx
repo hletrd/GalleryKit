@@ -32,9 +32,11 @@ interface DashboardClientProps {
     imageSizes: number[];
     shareBaseUrl: string;
     uploadLimits: { maxFiles: number; maxFileBytes: number; maxTotalBytes: number };
+    stripGpsOnUpload: boolean;
+    hasExistingImages: boolean;
 }
 
-export function DashboardClient({ images, failedImages: initialFailed, topics, tags, page, totalPages, imageSizes, shareBaseUrl, uploadLimits }: DashboardClientProps) {
+export function DashboardClient({ images, failedImages: initialFailed, topics, tags, page, totalPages, imageSizes, shareBaseUrl, uploadLimits, stripGpsOnUpload, hasExistingImages }: DashboardClientProps) {
     const { t, locale } = useTranslation();
     const [failedImages, setFailedImages] = useState<FailedImage[]>(initialFailed);
     const [retryingId, setRetryingId] = useState<number | null>(null);
@@ -121,7 +123,7 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
             <div className="grid min-w-0 gap-8 2xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
                 <div className="min-w-0">
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.uploadNew')}</h2>
-                    <UploadDropzone topics={topics} availableTags={tags} uploadLimits={uploadLimits} />
+                    <UploadDropzone topics={topics} availableTags={tags} uploadLimits={uploadLimits} stripGpsOnUpload={stripGpsOnUpload} hasExistingImages={hasExistingImages} />
                 </div>
                 <div className="min-w-0">
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.recentUploads')}</h2>

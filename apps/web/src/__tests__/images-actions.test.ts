@@ -98,7 +98,7 @@ vi.mock('next-intl/server', () => ({
 vi.mock('@/lib/process-image', () => ({
     saveOriginalAndGetMetadata: saveOriginalAndGetMetadataMock,
     extractExifForDb: extractExifForDbMock,
-    deleteImageVariants: vi.fn(),
+    deleteImageVariantsStrict: vi.fn(),
     IMAGE_PIPELINE_VERSION: 5,
 }));
 

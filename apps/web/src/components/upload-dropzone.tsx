@@ -46,10 +46,14 @@ export function UploadDropzone({
     topics,
     availableTags,
     uploadLimits = { maxFiles: 100, maxFileBytes: 200 * 1024 * 1024, maxTotalBytes: 2 * 1024 * 1024 * 1024 },
+    stripGpsOnUpload = true,
+    hasExistingImages = true,
 }: {
     topics: { slug: string, label: string }[];
     availableTags: { id: number, name: string, slug: string }[];
     uploadLimits?: UploadLimits;
+    stripGpsOnUpload?: boolean;
+    hasExistingImages?: boolean;
 }) {
     const router = useRouter();
     const [uploading, setUploading] = useState(false);
@@ -64,6 +68,7 @@ export function UploadDropzone({
     const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
     const { t, locale } = useTranslation();
     const hasTopics = topics.length > 0;
+    const showFirstUploadGpsWarning = !stripGpsOnUpload && !hasExistingImages;
 
     // Refs for accessing latest state during async upload loop
     const selectedTagsRef = useRef(selectedTags);
@@ -358,6 +363,11 @@ export function UploadDropzone({
                     </div>
                 ) : (
                 <div className="flex flex-col gap-4">
+                    {showFirstUploadGpsWarning && (
+                        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/35 dark:text-amber-100" role="status">
+                            {t('upload.gpsRetentionWarning')}
+                        </div>
+                    )}
                     <div>
                         <label htmlFor="upload-topic" className="text-sm font-medium mb-1 block">{t('upload.topic')}</label>
                         <select

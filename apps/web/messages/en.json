@@ -102,7 +102,9 @@
     "placeholderOrder": "Order (e.g. 1)",
     "mapVisible": "Show on Map",
     "mapVisibleToggle": "Toggle map visibility for {label}",
-    "mapVisibleUpdated": "Map visibility updated"
+    "mapVisibleUpdated": "Map visibility updated",
+    "editTopicAria": "Edit category {label}",
+    "deleteTopicAria": "Delete category {label}"
   },
   "tags": {
     "title": "Tags",
@@ -114,7 +116,9 @@
     "deleteConfirm": "Delete this tag? This cannot be undone.",
     "updated": "Saved",
     "deleted": "Deleted",
-    "noTags": "No tags yet."
+    "noTags": "No tags yet.",
+    "editTagAria": "Edit tag {name}",
+    "deleteTagAria": "Delete tag {name}"
   },
   "tagInput": {
     "noMatches": "No matching tags",
@@ -154,6 +158,7 @@
     "warningSuccess": "Uploaded {count} file(s), with {warnings} warning(s).",
     "hdrWarning": "{count, plural, one {1 HDR image uploaded. Current pipeline delivers SDR only — HDR highlights have been tone-mapped to SDR range.} other {# HDR images uploaded. Current pipeline delivers SDR only — HDR highlights have been tone-mapped to SDR range.}}",
     "wideGamutDownscaleWarning": "{count, plural, one {1 wide-gamut image exceeds 50 MP — will be downscaled during processing.} other {# wide-gamut images exceed 50 MP — will be downscaled during processing.}}",
+    "gpsRetentionWarning": "GPS stripping is off. If these first uploads contain location metadata, the original files will retain it.",
     "dropzoneLabel": "Upload photos: drop files here or press Enter to browse"
   },
   "imageManager": {
@@ -178,6 +183,8 @@
     "noImages": "No images.",
     "deleteImageConfirmTitle": "Delete this image?",
     "deleteImageConfirmDesc": "The image and all its files will be permanently deleted.",
+    "editImageAria": "Edit image {title}",
+    "deleteImageAria": "Delete image {title}",
     "imageDeleted": "Deleted",
     "deleteFailed": "Delete failed",
     "deleteCleanupWarning": "Deleted, but {count} file cleanup steps failed. Check server logs.",
@@ -760,7 +767,18 @@
     "backfillLastRunError": "Last error: {error}"
   },
   "footer": {
-    "admin": "Admin"
+    "admin": "Admin",
+    "privacy": "Privacy"
+  },
+  "privacy": {
+    "title": "Privacy",
+    "description": "How GalleryKit handles visitor analytics and photo metadata.",
+    "intro": "GalleryKit is a self-hosted photo gallery. This site publishes processed photo derivatives and the public metadata needed to browse them.",
+    "analyticsTitle": "Analytics",
+    "analyticsEnabled": "This site loads Google Analytics to measure visits and interactions. Google may receive request and device information according to its own policies.",
+    "analyticsDisabled": "Google Analytics is not configured on this site.",
+    "metadataTitle": "Photo Metadata",
+    "metadataBody": "Public pages exclude GPS coordinates. Upload settings can strip location data from original files before storage when that privacy option is enabled."
   },
   "onThisDay": {
     "title": "On This Day",
@@ -780,15 +798,15 @@
     "openPhoto": "Open photo"
   },
   "lrToken": {
-    "title": "Lightroom Tokens",
-    "description": "Generate personal access tokens for the GalleryKit Lightroom Classic publish plugin.",
-    "generateButton": "Generate LR token",
-    "loading": "Loading Lightroom tokens",
-    "empty": "No tokens yet. Generate one to connect Lightroom Classic.",
+    "title": "Upload API Tokens",
+    "description": "Generate personal access tokens for server-side upload integrations. GalleryKit does not bundle or distribute a Lightroom Classic plugin.",
+    "generateButton": "Generate upload token",
+    "loading": "Loading upload tokens",
+    "empty": "No tokens yet. Generate one before configuring an external upload client.",
     "labelRequired": "Token label is required.",
     "labelField": "Label",
-    "labelPlaceholder": "e.g. Lightroom Classic – MacBook",
-    "createTitle": "Generate Lightroom Token",
+    "labelPlaceholder": "e.g. Studio laptop upload client",
+    "createTitle": "Generate upload token",
     "createDesc": "Give this token a memorable label. Upload access is granted automatically.",
     "createButton": "Generate",
     "plaintextTitle": "Your new token",
@@ -798,7 +816,7 @@
     "copyFailed": "Could not copy — please copy manually.",
     "copyAria": "Copy token to clipboard",
     "revokeTitle": "Revoke token?",
-    "revokeDesc": "Revoking this token will immediately block all Lightroom connections using it.",
+    "revokeDesc": "Revoking this token will immediately block upload clients using it.",
     "revokeButton": "Revoke",
     "revokeSuccess": "Token revoked.",
     "revokeAria": "Revoke token {label}",

@@ -14,19 +14,22 @@
  *    retry — the 15-minute window is generous.
  *    Use for: security-critical write paths (auth, credential changes).
  *
- * 2. **Rollback on infrastructure error** (public.ts loadMore/search;
- *    /api/search/semantic):
+ * 2. **Rollback on infrastructure error** (public.ts loadMore/search):
  *    The pre-incremented counter IS rolled back when the underlying
- *    operation throws — or, for semantic, on any early return
- *    that never reached the limiter's GUARDED RESOURCE. Rationale: the
- *    user should not be penalized for server errors on public read
- *    paths; and where the limiter exists to protect a specific expensive
- *    resource (semantic guards embedding CPU), branches that never
- *    consume that resource are fairly refunded. SEC-R4C18-04
- *    adjudicated this as deliberate, NOT a Pattern-3 violation: there is
- *    no enumeration value and no amplification analogue on these paths.
- *    Use for: public read paths, and routes whose guarded resource is a
- *    downstream API/CPU stage the refunded branches never reach.
+ *    operation throws. Rationale: the user should not be penalized for
+ *    server errors on public read paths.
+ *    Use for: public read paths whose limiter is not guarding a specific
+ *    expensive downstream CPU/API stage.
+ *
+ * 2b. **No rollback after semantic body admission** (/api/search/semantic):
+ *    The route performs cheap origin/header/config checks first, then
+ *    pre-increments before body materialization and keeps the charge for
+ *    malformed bodies, aborts, encoder failures, DB failures, and empty
+ *    production embeddings. Rationale: once request-body memory, embedding
+ *    CPU, or bounded embedding scans are admitted, refunding lets a client
+ *    amplify the protected cost.
+ *    Use for: public read paths whose protected resource is expensive
+ *    per admitted request.
  *
  * 3. **Rollback on over-limit / FK violation only** (sharing.ts):
  *    The counter is rolled back when the action did NOT execute (e.g.,

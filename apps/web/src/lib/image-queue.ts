@@ -380,33 +380,43 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
     const activeModelVersion = semanticMode === 'production'
         ? PRODUCTION_MODEL_VERSION
         : STUB_MODEL_VERSION;
-    const rows = await db.select({
-        id: images.id,
-        filename_original: images.filename_original,
-    })
-        .from(images)
-        .leftJoin(imageEmbeddings, and(
-            eq(imageEmbeddings.imageId, images.id),
-            eq(imageEmbeddings.modelVersion, activeModelVersion),
-        ))
-        .where(and(
-            eq(images.processed, true),
-            isNull(imageEmbeddings.imageId),
-        ))
-        .orderBy(asc(images.id))
-        .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
+    let cursorId = 0;
+    for (;;) {
+        const rows = await db.select({
+            id: images.id,
+            filename_original: images.filename_original,
+        })
+            .from(images)
+            .leftJoin(imageEmbeddings, and(
+                eq(imageEmbeddings.imageId, images.id),
+                eq(imageEmbeddings.modelVersion, activeModelVersion),
+            ))
+            .where(and(
+                eq(images.processed, true),
+                gt(images.id, cursorId),
+                isNull(imageEmbeddings.imageId),
+            ))
+            .orderBy(asc(images.id))
+            .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
 
-    for (const row of rows) {
-        trackQueueSideEffect(state, (async () => {
-            try {
-                if (!row.filename_original) return;
-                const originalPath = await resolveOriginalUploadPath(row.filename_original);
-                if (!originalPath) return;
-                await storeImageEmbeddingForMode(row.id, originalPath, semanticMode);
-            } catch (err) {
-                console.warn(`[Queue] Failed to retry missing embedding for image ${row.id}:`, err);
-            }
-        })());
+        for (const row of rows) {
+            trackQueueSideEffect(state, (async () => {
+                try {
+                    if (!row.filename_original) return;
+                    const originalPath = await resolveOriginalUploadPath(row.filename_original);
+                    if (!originalPath) return;
+                    await storeImageEmbeddingForMode(row.id, originalPath, semanticMode);
+                } catch (err) {
+                    console.warn(`[Queue] Failed to retry missing embedding for image ${row.id}:`, err);
+                }
+            })());
+        }
+
+        const lastRow = rows.at(-1);
+        if (!lastRow || rows.length < BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE) {
+            break;
+        }
+        cursorId = lastRow.id;
     }
 }
 

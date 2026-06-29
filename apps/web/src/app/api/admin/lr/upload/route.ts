@@ -1,8 +1,10 @@
 /**
  * POST /api/admin/lr/upload
  *
- * Accepts a multipart upload from the GalleryKit Lightroom Classic publish
- * plugin and creates a new image record. Authentication is via the
+ * Accepts a multipart upload from external upload clients, including a
+ * Lightroom Classic publish-client implementation, and creates a new image
+ * record. GalleryKit exposes the server-side API only; it does not bundle or
+ * distribute a Lightroom plugin. Authentication is via the
  * `X-GalleryKit-Token` header (PAT with scope `lr:upload`); ordinary browser
  * admin-session cookies are also accepted as a fallback for testing.
  *
@@ -10,8 +12,8 @@
  * (cross-origin integration is the point of PATs). The `withAdminAuth` wrapper
  * handles both auth paths when `allowTokenScope` is set.
  *
- * US-P53: this route is the server-side counterpart to the Lightroom plugin's
- * GalleryKitAPI.lua. It re-uses the existing upload infrastructure
+ * US-P53: this route is the server-side upload API for API-token clients. It
+ * re-uses the existing upload infrastructure
  * (saveOriginalAndGetMetadata, enqueueImageProcessing) so image processing,
  * EXIF extraction, and revalidation are identical to the browser upload path.
  */
@@ -349,9 +351,8 @@ export const POST = withAdminAuth(
             // original, mirroring the browser upload path (app/actions/images.ts
             // PP-BUG-3). Nulling the DB columns alone leaves GPS at rest in the
             // retained original on disk, against the admin's explicit
-            // strip_gps_on_upload intent. The Lightroom publish-plugin is the
-            // primary non-browser ingest and its exports commonly retain GPS,
-            // so this divergence is the high-likelihood leak path.
+            // strip_gps_on_upload intent. Non-browser ingest clients commonly
+            // retain GPS, so this divergence is the high-likelihood leak path.
             // Best-effort: stripGpsFromOriginal catches its own errors and never
             // throws, so a strip failure logs and keeps the image (parity with
             // the browser path) rather than aborting the upload.

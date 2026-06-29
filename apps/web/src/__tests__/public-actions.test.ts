@@ -263,7 +263,7 @@ describe('searchImagesAction', () => {
         await recordSharedGroupView(11);
 
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
-        expect(headersMock).not.toHaveBeenCalled();
+        expect(headersMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
@@ -298,6 +298,7 @@ describe('searchImagesAction', () => {
         await recordPhotoView(999);
 
         expect(dbInsertMock).toHaveBeenCalledTimes(120);
+        expect(dbSelectMock).toHaveBeenCalledTimes(120);
         expect(dbValuesMock).not.toHaveBeenCalledWith(expect.objectContaining({ imageId: 999 }));
     });
 

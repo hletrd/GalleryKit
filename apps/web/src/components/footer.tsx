@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
 import { localizePath } from '@/lib/locale-path';
 
+const hasGoogleAnalytics = /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id ?? '');
 
 function GithubIcon({ className }: { className?: string }) {
     return (
@@ -40,6 +41,11 @@ export async function Footer() {
                     on every public page's mobile footer must present the 44 px
                     floor. The md:h-24 desktop footer absorbs the height. */}
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {hasGoogleAnalytics && (
+                        <Link href={localizePath(locale, '/privacy')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                            {t('privacy')}
+                        </Link>
+                    )}
                     <Link
                         href="https://github.com/hletrd/gallerykit"
                         target="_blank"

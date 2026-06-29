@@ -142,10 +142,13 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
     const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const requestIdRef = useRef(0);
+    const semanticAbortRef = useRef<AbortController | null>(null);
     const wasOpenRef = useRef(false);
 
     const clearSearchState = useCallback(() => {
         requestIdRef.current++;
+        semanticAbortRef.current?.abort();
+        semanticAbortRef.current = null;
         setLoading(false);
         setResults([]);
         setSearchStatus(null);
@@ -159,6 +162,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             return;
         }
         const requestId = ++requestIdRef.current;
+        let activeSemanticAbortController: AbortController | null = null;
         setLoading(true);
         setSearchStatus(null);
         try {
@@ -174,11 +178,16 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     setSearchStatus('invalidSemantic');
                     return;
                 }
+                semanticAbortRef.current?.abort();
+                const abortController = new AbortController();
+                activeSemanticAbortController = abortController;
+                semanticAbortRef.current = abortController;
                 // Semantic search: POST to /api/search/semantic
                 const resp = await fetch('/api/search/semantic', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query: searchQuery, topK: SEMANTIC_TOP_K_DEFAULT }),
+                    signal: abortController.signal,
                 });
                 if (requestId !== requestIdRef.current) return;
                 if (resp.status === 429) {
@@ -225,17 +234,32 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     }
                 }
             }
-        } catch {
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                return;
+            }
             if (requestId === requestIdRef.current) {
                 setResults([]);
                 setSearchStatus('error');
             }
         } finally {
+            if (
+                activeSemanticAbortController
+                && semanticAbortRef.current === activeSemanticAbortController
+            ) {
+                semanticAbortRef.current = null;
+            }
             if (requestId === requestIdRef.current) {
                 setLoading(false);
             }
         }
     }, [clearSearchState]);
+
+    useEffect(() => {
+        return () => {
+            semanticAbortRef.current?.abort();
+        };
+    }, []);
 
     useEffect(() => {
         if (debounceRef.current) clearTimeout(debounceRef.current);

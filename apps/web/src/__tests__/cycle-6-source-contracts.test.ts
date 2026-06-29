@@ -17,7 +17,7 @@ describe('cycle 6 source contracts', () => {
     it('process-image writes sized derivatives through temp files before rename', () => {
         const source = read('src/lib/process-image.ts');
 
-        expect(source).toContain('writeSizedVariantAtomically');
+        expect(source).toContain('writeFinalPathAtomically');
         expect(source).toContain('await writeTemp(tmpPath)');
         expect(source).toContain('await fs.rename(tmpPath, outputPath)');
         expect(source).not.toContain('.toFile(outputPath);');

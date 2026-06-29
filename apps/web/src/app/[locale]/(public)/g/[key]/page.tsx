@@ -98,10 +98,11 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         }
     }
 
-    const [group, seo, t, config] = await Promise.all([
+    const [group, seo, t, tAria, config] = await Promise.all([
         getSharedGroupCached(key, { selectedPhotoId: photoId }),
         getSeoSettings(),
         getTranslations('sharedGroup'),
+        getTranslations('aria'),
         getGalleryConfig(),
     ]);
 
@@ -176,6 +177,8 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             <GridPictureFallbackBoundary className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
                 {group.images.map((image, index) => {
                     const altText = getPhotoDisplayTitle(image, t('photo'));
+                    const aspectWidth = image.width > 0 ? image.width : 1;
+                    const aspectHeight = image.height > 0 ? image.height : 1;
                     // Above-the-fold detection: in a CSS `columns` masonry layout,
                     // images flow top-to-bottom then left-to-right. The max column
                     // count is 4 (xl: breakpoint). Mark the first 4 images as eager
@@ -187,10 +190,11 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             key={image.id}
                             href={`${localizePath(locale, `/g/${key}`)}?photoId=${image.id}`}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                            aria-label={tAria('viewPhoto', { title: altText })}
                             style={{
-                                aspectRatio: `${image.width} / ${image.height}`,
+                                aspectRatio: `${aspectWidth} / ${aspectHeight}`,
                                 backgroundColor: 'hsl(var(--muted))',
-                                containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
+                                containIntrinsicSize: `auto ${Math.round(300 * aspectHeight / aspectWidth)}px`,
                             }}
                         >
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">

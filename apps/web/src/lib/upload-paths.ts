@@ -79,6 +79,34 @@ export async function deleteOriginalUploadFile(filename: string) {
     ]);
 }
 
+async function unlinkOriginalCandidateStrict(filePath: string) {
+    try {
+        await fs.unlink(filePath);
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            return;
+        }
+        throw err;
+    }
+}
+
+export async function deleteOriginalUploadFileStrict(filename: string) {
+    const failures: unknown[] = [];
+    await Promise.all([
+        path.join(UPLOAD_DIR_ORIGINAL, filename),
+        path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename),
+    ].map(async (candidate) => {
+        try {
+            await unlinkOriginalCandidateStrict(candidate);
+        } catch (err) {
+            failures.push(err);
+        }
+    }));
+    if (failures.length > 0) {
+        throw new AggregateError(failures, `Failed to delete ${failures.length} original upload file candidate(s) for ${filename}`);
+    }
+}
+
 export async function assertNoLegacyPublicOriginalUploads(options: { failInProduction?: boolean } = {}) {
     let fileCount = 0;
     try {

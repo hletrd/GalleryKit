@@ -364,14 +364,14 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     const [visibleImage] = await db.select({ id: images.id })
         .from(images)
         .where(and(eq(images.id, imageId), eq(images.processed, true)))
         .limit(1);
     if (!visibleImage) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     // Fire-and-forget: swallow errors so analytics never blocks page render
     db.insert(imageViews).values({
         imageId,
@@ -392,14 +392,14 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     // and keeps the validation posture identical across the public actions.
     if (!isValidSlug(topicSlug)) return;
     if (isRestoreMaintenanceActive()) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     const [visibleTopic] = await db.select({ slug: topics.slug })
         .from(topics)
         .where(eq(topics.slug, topicSlug))
         .limit(1);
     if (!visibleTopic) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     db.insert(topicViews).values({
         topic: topicSlug,
         referrer_host: params.referrer_host,
@@ -414,6 +414,9 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
 export async function recordSharedGroupView(groupId: number): Promise<void> {
     if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     const [visibleGroup] = await db.select({ id: sharedGroups.id })
         .from(sharedGroups)
         .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
@@ -425,9 +428,6 @@ export async function recordSharedGroupView(groupId: number): Promise<void> {
         ))
         .limit(1);
     if (!visibleGroup) return;
-    const requestHeaders = await headers();
-    const params = await buildViewParams(requestHeaders);
-    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     db.insert(sharedGroupViews).values({
         groupId,
         referrer_host: params.referrer_host,

@@ -434,8 +434,11 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             ? document.activeElement
             : null;
         document.body.style.overflow = 'hidden';
-        closeButtonRef.current?.focus();
+        const focusFrame = window.requestAnimationFrame(() => {
+            (closeButtonRef.current ?? dialogRef.current)?.focus();
+        });
         return () => {
+            window.cancelAnimationFrame(focusFrame);
             document.body.style.overflow = prev;
             if (previouslyFocusedRef.current && document.body.contains(previouslyFocusedRef.current)) {
                 previouslyFocusedRef.current.focus();
@@ -444,10 +447,11 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     }, []);
 
     return (
-        <FocusTrap focusTrapOptions={{ allowOutsideClick: true, fallbackFocus: () => closeButtonRef.current || document.body }}>
+        <FocusTrap focusTrapOptions={{ allowOutsideClick: true, initialFocus: () => closeButtonRef.current || dialogRef.current || document.body, fallbackFocus: () => closeButtonRef.current || dialogRef.current || document.body }}>
         <div
             ref={dialogRef}
             role="dialog"
+            tabIndex={-1}
             aria-modal="true"
             aria-label={t('aria.lightbox')}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black overflow-hidden"

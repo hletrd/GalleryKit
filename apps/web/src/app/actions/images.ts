@@ -4,8 +4,8 @@ import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, inArray, and, isNotNull } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
+import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariantsStrict, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, deleteOriginalUploadFileStrict, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -292,6 +292,37 @@ export async function uploadImages(formData: FormData) {
             return { error: t('topicNotFound') };
         }
 
+        const uniqueTagNames = Array.from(new Set(tagNames))
+            .map(tagName => tagName.trim())
+            .filter(Boolean);
+        const resolvedTagRecords: Array<{ id: number }> = [];
+        const skippedTagNames: string[] = [];
+        let tagResolutionFailed = false;
+        if (uniqueTagNames.length > 0) {
+            try {
+                for (const cleanName of uniqueTagNames) {
+                    const slug = getTagSlug(cleanName);
+                    if (!isValidTagSlug(slug)) {
+                        console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
+                        skippedTagNames.push(cleanName);
+                        continue;
+                    }
+                    const resolvedTag = await ensureTagRecord(db, cleanName, slug);
+                    if (resolvedTag.kind === 'collision') {
+                        console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
+                        skippedTagNames.push(cleanName);
+                        continue;
+                    }
+                    if (resolvedTag.kind === 'found') {
+                        resolvedTagRecords.push(resolvedTag.tag);
+                    }
+                }
+            } catch (err) {
+                tagResolutionFailed = true;
+                console.error('Failed to resolve upload tags', err);
+            }
+        }
+
         let successCount = 0;
         let uploadedBytes = 0;
         const failedFiles: string[] = [];
@@ -437,39 +468,17 @@ export async function uploadImages(formData: FormData) {
                     // Phase 3: Process Tags (batched)
                     if (tagNames.length > 0) {
                         try {
-                            const uniqueTagNames = Array.from(new Set(tagNames))
-                                .map(t => t.trim()).filter(Boolean);
-                            const skippedTagNames: string[] = [];
-                            if (uniqueTagNames.length > 0) {
-                                const tagRecords = [];
-                                for (const cleanName of uniqueTagNames) {
-                                    const slug = getTagSlug(cleanName);
-                                    if (!isValidTagSlug(slug)) {
-                                        console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
-                                        skippedTagNames.push(cleanName);
-                                        continue;
-                                    }
-                                    const resolvedTag = await ensureTagRecord(db, cleanName, slug);
-                                    if (resolvedTag.kind === 'collision') {
-                                        console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
-                                        skippedTagNames.push(cleanName);
-                                        continue;
-                                    }
-                                    if (resolvedTag.kind === 'found') {
-                                        tagRecords.push(resolvedTag.tag);
-                                    }
-                                }
-                                if (tagRecords.length > 0) {
-                                    // Single batch insert for all imageTags
-                                    await db.insert(imageTags).ignore().values(
-                                        tagRecords.map(tagRecord => ({
-                                            imageId: insertedImage.id,
-                                            tagId: tagRecord.id,
-                                        }))
-                                    );
-                                }
+                            if (resolvedTagRecords.length > 0) {
+                                // Single batch insert for this image using the
+                                // tag records resolved once for the whole upload.
+                                await db.insert(imageTags).ignore().values(
+                                    resolvedTagRecords.map(tagRecord => ({
+                                        imageId: insertedImage.id,
+                                        tagId: tagRecord.id,
+                                    }))
+                                );
                             }
-                            if (skippedTagNames.length > 0) {
+                            if (skippedTagNames.length > 0 || tagResolutionFailed) {
                                 warnings.push(t('tagPersistenceWarning', { file: file.name }));
                             }
                         } catch (err) {
@@ -679,12 +688,12 @@ export async function deleteImage(id: number) {
     // derivatives so variants generated under older image-size settings are
     // removed too, not only variants from the current config.
     const cleanupFailures = await collectImageCleanupFailures([
-        { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
+        { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFileStrict(image.filename_original) },
         // Pass empty sizes [] to trigger directory scan and remove ALL
         // size variants, including those from prior image-size configs.
-        { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-        { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-        { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
+        { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+        { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+        { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
     ]);
 
     if (cleanupFailures.length > 0) {
@@ -814,10 +823,10 @@ export async function deleteImages(ids: number[]) {
             // Pass empty sizes [] to scan directory and remove ALL size variants,
             // including those from prior image-size configs.
             const failures = await collectImageCleanupFailures([
-                { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
-                { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-                { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-                { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
+                { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFileStrict(image.filename_original) },
+                { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+                { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+                { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
             ]);
 
             if (failures.length > 0) {
