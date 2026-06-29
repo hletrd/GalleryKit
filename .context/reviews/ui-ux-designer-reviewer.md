@@ -1,46 +1,51 @@
-# UI/UX Designer Reviewer - Cycle 10
+# UI/UX Designer Reviewer - Cycle 11
 
 Role: `ui-ux-designer-reviewer` registered at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`.
 
-Profile note: the registered local profile is BurstPick/SwiftUI-specific. This repository is GalleryKit, a Next.js photographer gallery and admin tool, so I adapted only the professional creative-tool UI/UX review lens and did not inspect absent BurstPick Swift files.
+Profile note: the registered local profile is BurstPick/SwiftUI-specific. This repository is GalleryKit, a Next.js photographer gallery and admin tool, so I adapted the professional creative-tool UI/UX, accessibility, interaction, and perceived-performance lens to this web gallery surface.
 
-Scope: PROMPT 1 only. Review report artifact only. No application source edits. No deploy.
+Scope: PROMPT 1 / Cycle 11 deep review. Review artifact only. No production code edits. No deploy.
 
-Current HEAD reviewed: `630ae1ce` (`docs(review): record cycle 10 architect review`).
+Current HEAD reviewed: `36694ea1` (`docs(review): record cycle 11 debugger review`).
 
 ## Executive Summary
 
-GalleryKit is in a strong UI state for a self-hosted photographer gallery: the public gallery is photo-first, touch targets are guarded by tests, keyboard navigation exists on the viewer and lightbox, reduced-motion paths are present, and Korean/English message parity is covered. Design quality score: 8/10 for public viewing and 7/10 for admin tooling. The biggest remaining UI/UX problem is repeated collection actions with non-unique accessible names: shared-group photo cards and admin row action buttons do not consistently include the target photo/tag/category in the control name, which makes screen-reader and voice-control workflows ambiguous.
+GalleryKit remains strong for a self-hosted photographer gallery: the primary home grid, shared-group grid, photo viewer, search overlay, lightbox, mobile nav, touch-target policy, focus rings, and EN/KO message surfaces are substantially hardened. Design quality score: 8/10 for public viewing and 7/10 for admin tooling. The biggest remaining UI/UX weakness I found in this pass is that the archive surfaces (`/timeline` and `/year/[year]`) lag behind the main gallery/shared-grid interaction contracts: they lazy-load every visible photo and still build card geometry from raw dimensions without the defensive guards already added elsewhere. That creates avoidable perceived-performance and layout-reservation risk on photo-dense archive pages.
 
 ## Inventory Reviewed
 
-Primary UI inventory:
+Primary UI inventory built before findings:
 
-- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared group, shared photo, photo detail, timeline, year, map, loading and layout surfaces.
-- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected layout/loading/error, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, analytics.
+- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared group, shared photo, photo detail, timeline, year-in-review, map, privacy, loading, and layout surfaces.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected layout/loading/error, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, and analytics.
 - Shared UI under `apps/web/src/components/`: nav, search, masonry cards, tag filter/input, load-more, photo viewer, image zoom, lightbox, info bottom sheet, color details, histogram, upload, image manager, bulk edit, admin header/nav/user manager, map, footer, and shadcn/Radix primitives.
-- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Tests/evidence: `apps/web/src/__tests__`, `apps/web/e2e`, with focus on touch targets, focus rings, source contracts, i18n, shared routes, and public navigation.
+- Design/CSS/i18n: `apps/web/src/app/[locale]/globals.css`, `apps/web/tailwind.config.ts`, `apps/web/messages/en.json`, and `apps/web/messages/ko.json`.
+- Tests/evidence: `apps/web/src/__tests__` and `apps/web/e2e`, focused on touch targets, focus rings, source contracts, map wiring, timeline/year cards, i18n, public navigation, and visual/perceived-performance coverage.
 
-Static inventory count: 103 primary UI/app/admin files across `apps/web/src/components` and `apps/web/src/app/[locale]`.
+Previous Cycle 10 UI findings were rechecked and appear fixed in current source:
+
+- Shared-group links now use `aria-label={tAria('viewPhoto', { title: altText })}` at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:189-194`.
+- Shared-group dimensions now guard width/height before aspect ratio and intrinsic size at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:179-197`.
+- Image, tag, and category row actions now include target names at `apps/web/src/components/image-manager.tsx:546-552`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:109-112`, and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:251-254`.
 
 ## Browser Evidence
 
 Browser evidence used deployed `https://gallery.atik.kr` because it has representative production data. Source citations below are from current local HEAD.
 
-- Desktop home `/en`: accessibility tree exposes main nav, tag filter group, active `All` chip, load-more, footer; no horizontal overflow observed. Screenshot: `/tmp/gallery-home-desktop-cycle10.png`.
-- Mobile home `/en` at 390 x 844: collapsed nav exposes only title, topics, and 44 x 44 expand button; expanded nav exposes search/theme/locale controls at 44 x 44; no horizontal overflow. Screenshots: `/tmp/gallery-home-mobile-cycle10.png`, `/tmp/gallery-home-mobile-expanded-cycle10.png`.
-- Search dialog on mobile: focus lands on `#search-input`; body scroll is locked; combobox/listbox semantics are present; no horizontal overflow. Screenshot: `/tmp/gallery-search-mobile-cycle10.png`.
-- Photo page `/en/p/348` at mobile width: sr-only H1 exists, visible toolbar controls are at least 44 px, shortcut help remains in the accessibility tree while visually hidden on mobile, no horizontal overflow. Screenshot: `/tmp/gallery-photo-mobile-cycle10-real.png`.
+- Mobile home `/en` at 390 x 844: no horizontal overflow; tab order starts with skip link, title, expand button, topic links, then tag chips; hidden mobile controls are not in the keyboard path while collapsed.
+- Mobile search overlay: opening search from expanded nav focuses `#search-input`; computed input and close button boxes were both 44 px high; dialog has `role="dialog"` and combobox/listbox source semantics.
+- Mobile timeline `/en/timeline`: first visible archive images were text-extractably present with `loading="lazy"` and no `fetchpriority`; first image rect was inside the first viewport at `y=400`, `w=358`, `h=238`.
+- Map `/en/map`: current production data has the no-geotagged-photos empty state, so marker/popup behavior was assessed from source. The empty state has no horizontal overflow and normal tab order.
 
-Focused validation run:
+Focused source/test evidence:
 
-- `npm test --workspace=apps/web -- client-source-contracts.test.ts focus-visible-rings-cycle20.test.ts touch-target-audit.test.ts`
-- Result: 3 test files passed, 31 tests passed.
+- `apps/web/src/__tests__/client-source-contracts.test.ts:130-143` locks timeline/year accessible labels, but not above-the-fold loading priority or dimension guards.
+- `apps/web/src/__tests__/grid-picture-fallback-boundary.test.ts:25-35` only asserts the delegated image fallback wrapper is present on timeline/year.
+- `apps/web/src/__tests__/map-thumb-wiring.test.ts:61-66` locks the map dynamic fallback as an ARIA status, but does not require visible loading text.
 
 ## Findings
 
-### UIUX-C10-01 - Shared-group grid photo links lack the action-oriented accessible label used by other gallery grids
+### UIUX-C11-01 - Timeline and year grids lazy-load their first visible photos
 
 Classification: Confirmed
 
@@ -50,50 +55,21 @@ Confidence: High
 
 Evidence:
 
-- Shared-group grid cards are links at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:186-225`. The `<Link>` has `href`, class, and styling, but no `aria-label`; the wrapped `GridPicture` supplies only image `alt={altText}` at lines 212-215, and visible overlay text is rendered separately at lines 196-198 and 221-224.
-- The main gallery already uses an action-oriented label: `apps/web/src/components/home-client.tsx:323-326` sets `aria-label={t('aria.viewPhoto', { title: displayTitle })}`.
-- Timeline and year grids also use localized action labels: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:233-236` and `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:191-194`.
-- Existing source-contract coverage only locks this for timeline/year: `apps/web/src/__tests__/client-source-contracts.test.ts:130-143`; it does not include `g/[key]/page.tsx`.
+- Timeline cards render every `GridPicture` with `loading="lazy"` at `apps/web/src/app/[locale]/(public)/timeline/page.tsx:238-258`; there is no `fetchPriority` prop.
+- Year-in-review cards do the same at `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:196-215`.
+- The main gallery already treats above-the-fold cards as first-class LCP candidates: `apps/web/src/components/home-client.tsx:296` computes `isAboveFold`, then passes `loading={isAboveFold ? "eager" : "lazy"}` and `fetchPriority={isAboveFold ? "high" : "auto"}` at `apps/web/src/components/home-client.tsx:357-359`.
+- The shared-group grid follows the same pattern at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:182-186` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:221-222`.
+- Playwright text-extractable runtime check on production `/en/timeline` found the first eight `main img` elements all had `loading="lazy"` and no `fetchpriority`, including the first image inside the initial mobile viewport.
 
 Failure scenario:
 
-A shared-gallery recipient using a screen reader or voice-control command sees a collection of image links named only by title/alt content rather than "View photo: {title}". In a grid with similar titles, the action is less explicit than the main gallery and timeline, and any visible overlay text that remains in the accessibility tree can make the link name noisier than the canonical public grid.
+A visitor opens `/timeline` or a year-in-review page from the nav. The first visible photo is the core content, but the browser is told it is lazy and not high priority. On mobile or a slower connection, the archive page can paint heading/chrome first and defer the photo that visually defines the page, while the home and shared-gallery surfaces do the right thing for comparable masonry grids.
 
 Concrete fix:
 
-Load `getTranslations('aria')` in `g/[key]/page.tsx` and add `aria-label={tAria('viewPhoto', { title: altText })}` to the shared-grid `<Link>`. Add `g/[key]/page.tsx` to the existing `client-source-contracts.test.ts` action-label coverage so shared routes cannot drift from the main gallery again.
+Port the home/shared-grid above-the-fold priority logic into the archive pages. Compute the first visible count from the grid column count or use a conservative server-safe first-N heuristic (`index < 1` mobile, first 4 or 5 desktop if client measurement is unavailable). Pass `loading={isAboveFold ? "eager" : "lazy"}` and `fetchPriority={isAboveFold ? "high" : "auto"}` to `GridPicture`. Add a source-contract test beside the existing timeline/year label test so archive grids cannot regress to all-lazy loading.
 
-### UIUX-C10-02 - Repeated admin row actions use generic "Edit" and "Delete" accessible names
-
-Classification: Confirmed
-
-Severity: Medium
-
-Confidence: High
-
-Evidence:
-
-- Image rows render repeated icon buttons with generic labels at `apps/web/src/components/image-manager.tsx:546-552`: `aria-label={t('aria.editItem')}` and `aria-label={t('aria.deleteItem')}`.
-- Tag rows do the same at `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:104-113`.
-- Category rows do the same at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:228-254`.
-- The translation values are generic in both locales: `apps/web/messages/en.json:640-641` is "Edit" / "Delete"; `apps/web/messages/ko.json:640-641` is "편집" / "삭제".
-- The user manager shows the intended pattern: `apps/web/src/components/admin-user-manager.tsx:156-162` labels the repeated delete button with `t('aria.deleteUser', { username: user.username })`.
-
-Failure scenario:
-
-On the admin dashboard, tags page, or categories page, a keyboard/screen-reader/voice-control admin encounters many buttons named exactly "Edit" and "Delete". They must infer the target from table position, which is slow and error-prone in dense management tables. Voice users also cannot reliably say "click Delete" when every row has the same command name.
-
-Concrete fix:
-
-Add contextual i18n keys, for example `aria.editImage`, `aria.deleteImage`, `aria.editTag`, `aria.deleteTag`, `aria.editCategory`, and `aria.deleteCategory`. Use stable row labels:
-
-- Images: `image.title || image.user_filename || image.filename_avif || image.id`
-- Tags: `tag.name`
-- Categories: `topic.label`
-
-Then update the row buttons to include the target in the accessible name, mirroring `deleteUser`. Add a source-contract test that repeated admin row action buttons do not use `aria.editItem` / `aria.deleteItem` in table rows.
-
-### UIUX-C10-03 - Shared-group masonry cards do not use the dimension guard used by the main gallery
+### UIUX-C11-02 - Timeline and year card geometry lacks the dimension guard used by home/shared grids
 
 Classification: Risk
 
@@ -103,57 +79,83 @@ Confidence: Medium
 
 Evidence:
 
-- Shared-group card layout builds CSS directly from image dimensions at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:190-194`: `aspectRatio: ${image.width} / ${image.height}` and `containIntrinsicSize: Math.round(300 * image.height / image.width)`.
-- The main gallery has an explicit non-positive-dimension guard at `apps/web/src/components/home-client.tsx:298-309`, falling back to `1 / 1` and a square intrinsic reservation if either dimension is invalid.
+- Timeline cards build `aspectRatio: \`${photo.width} / ${photo.height}\`` directly at `apps/web/src/app/[locale]/(public)/timeline/page.tsx:225-231`.
+- Year cards build the same raw aspect ratio at `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:183-189`.
+- The main gallery has the defensive contract at `apps/web/src/components/home-client.tsx:298-309`: `hasValidDims`, `1 / 1` fallback, and a square intrinsic reservation when either dimension is non-positive.
+- The shared-group page now has a lighter version of the same guard at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:179-197`.
+- Existing archive source contracts cover label localization at `apps/web/src/__tests__/client-source-contracts.test.ts:130-143` and delegated fallback wrapping at `apps/web/src/__tests__/grid-picture-fallback-boundary.test.ts:25-35`, but do not cover non-positive dimension handling.
 
 Failure scenario:
 
-If a legacy or partially repaired shared-group image ever carries width or height `0`, the shared group can emit invalid aspect-ratio/intrinsic-size CSS. The result is a masonry card with poor layout reservation and possible visual jump, while the same image path in the main gallery would degrade to a square placeholder.
+If a legacy, partially repaired, or hand-imported archive row ever carries width or height `0`, the timeline/year card emits invalid CSS such as `0 / 0` or a divide-by-zero-derived reservation. Browsers silently drop or misinterpret that layout hint, causing a masonry jump or collapsed reservation on archive pages. The same bad row is already protected on the main gallery and shared-group grid, so this is inconsistent resilience across equivalent photo grids.
 
 Concrete fix:
 
-Reuse the `hasValidDims` pattern from `HomeClient` in `g/[key]/page.tsx`: fallback to `1 / 1` and a fixed intrinsic height when `image.width <= 0 || image.height <= 0`. Add shared-group source coverage beside the existing grid-picture fallback tests.
+Reuse the `hasValidDims` pattern from `HomeClient` in both archive pages: derive `cardAspectRatio = hasValidDims ? \`${photo.width} / ${photo.height}\` : '1 / 1'` and, ideally, add `containIntrinsicSize` with a square fallback. Add source coverage that timeline/year pages include `hasValidDims` or equivalent guard before constructing `aspectRatio`.
+
+### UIUX-C11-03 - Map dynamic-loading fallback is visually blank
+
+Classification: Confirmed
+
+Severity: Low
+
+Confidence: High
+
+Evidence:
+
+- `MapLoadingFallback` receives a localized loading label, but renders only an empty bordered muted box at `apps/web/src/components/map/map-loader.tsx:24-31`.
+- The fallback has `role="status"`, `aria-live="polite"`, and `aria-label={label}` at `apps/web/src/components/map/map-loader.tsx:26-31`, so assistive tech gets the label, but sighted users see no visible "Loading map" text or spinner.
+- The map page passes the localized label at `apps/web/src/app/[locale]/(public)/map/page.tsx:59-65`.
+- The current test only asserts `role="status"` and `aria-label={label}` at `apps/web/src/__tests__/map-thumb-wiring.test.ts:61-66`; it does not assert visible loading copy.
+
+Failure scenario:
+
+On a slow connection, cold browser cache, or delayed Leaflet chunk, a visitor opens the map page and sees a large 520 px blank muted rectangle. Because the fallback has no visible text, a sighted user cannot distinguish "the map is loading" from "the map failed but left an empty panel" until the dynamic import resolves or never does.
+
+Concrete fix:
+
+Render the label visibly inside the fallback, for example a centered `Loader2` plus `{label}` text, while keeping `role="status"` and `aria-live`. Add a source test that `MapLoadingFallback` includes visible `{label}` or a visible text node, not just an ARIA label.
 
 ## Information Architecture
 
-The public IA is sound: global nav, topic links, tag filters, gallery heading, masonry cards, load-more, detail viewer, lightbox, and info sheet form a coherent browsing flow. The previous cycle 7 tag-filter source-of-truth issue is fixed: `TagFilter` now accepts `currentTags` at `apps/web/src/components/tag-filter.tsx:10-22`, and `HomeClient` passes the canonical server state at `apps/web/src/components/home-client.tsx:271-273`.
+The public IA is coherent: nav, topic pills, tag filters, masonry grid, load-more, timeline/year archives, detail viewer, lightbox, and info sheet all lead to the same photo-viewing task. The archive pages are structurally sound, but they should inherit the same grid-performance and geometry-resilience contracts as the home/shared grids because they are alternate entry points into the same photo corpus.
 
-Admin IA is functional and appropriately dense for a self-hosted tool. The main weakness is not structure; it is repeated row action naming in dense tables.
+Admin IA remains dense and appropriate for a self-hosted operational tool. Cycle 10's repeated-row-action labeling issue appears closed.
 
 ## Visual Design
 
-No new confirmed visual-system defects found. The source and browser pass show consistent 44 px controls, focus-visible rings, photo-first dark viewer surfaces, responsive masonry columns, and a restrained admin style. The public photo viewer avoids showing keyboard shortcut copy visually on mobile while keeping it available to assistive tech.
+No new confirmed theme/token contrast failure found. The UI remains photo-first, with dark/oled modes, focus-visible rings, 44 px controls, and reduced-motion overrides. The map fallback is the main visual-state weakness in this pass: it reserves the correct space but communicates loading only to assistive tech.
 
 ## Interaction Design
 
-Public browsing supports pointer, keyboard, and touch interactions well: search has combobox/listbox behavior, photo viewer/lightbox support arrow/F/I/C/H/Space shortcuts, and image zoom has a dedicated keyboard handler. The main interaction defect is repeated/ambiguous control names in collection contexts, which slows assistive and voice-driven workflows.
+Search, nav, photo viewer, lightbox, and image zoom have strong interaction contracts in current source. Browser checks confirmed the mobile nav tab order and search focus behavior. The archive-grid issue is more about perceived performance than direct manipulation: users see slower first-photo readiness on timeline/year surfaces than on the main gallery.
 
 ## Accessibility
 
-Confirmed issues:
-
-- Shared-group photo links do not use the same action-oriented accessible label as other public gallery grids.
-- Repeated admin row action buttons do not include target names.
-
 Positive evidence:
 
-- Touch-target audit passed in the focused run.
-- Focus-visible ring source contracts passed.
-- Mobile nav/search/photo controls observed at 44 px or larger.
-- `aria-pressed` tag state is canonical on the deployed home page.
+- Search dialog uses dialog + combobox/listbox semantics and focuses the input on open.
+- Mobile nav hidden controls are not in the tab path while collapsed.
+- Timeline/year photo links use action-oriented localized labels.
+- Admin row actions now include target names.
+- Map fallback has an ARIA live status.
+
+Remaining issue:
+
+- Map loading state needs visible feedback parity with its accessible status label.
 
 ## Responsive Behavior
 
-Desktop and mobile browser checks showed no horizontal overflow on home, expanded mobile nav, search dialog, or photo viewer. Mobile nav controls appear only when expanded, and the photo viewer toolbar preserves 44 px targets.
+Mobile home, timeline, photo, and map checks showed no horizontal overflow. Archive pages use responsive masonry columns, but their first visible image priority does not adapt to the viewport the way `HomeClient` does.
 
 ## i18n
 
-English/Korean message files have the relevant base keys for current UI. The admin row-action fix should add contextual keys in both locales rather than concatenating English-only fragments. Existing `aria.viewPhoto` already supports the shared-group link fix in both locales.
+No EN/KO key-parity problem found in this pass. The proposed map fallback fix can reuse the existing `map.loading` key already passed through `MapLoader`.
 
 ## Photographer Intent
 
-GalleryKit continues to respect the documented product boundary: it presents finished photos accurately and does not introduce culling/scoring/editing UX. Color/HDR indicators and download choices are visible without taking over the primary photo surface.
+GalleryKit continues to respect the documented product boundary: it presents finished photos accurately and does not add culling/scoring/editing workflows. The archive findings are in service of the same photographer intent: first visible photos should appear promptly and layout should stay stable even around unusual legacy metadata.
 
 ## Final Verdict
 
-GalleryKit mostly helps the photographer/viewer: the public browsing and photo-detail surfaces are efficient, accessible, and responsive. The remaining UI debt is concentrated in repeated collection controls where accessible names are less precise than the visual layout. Fix the shared-group link label and contextual admin row labels before treating the UI as fully polished for assistive-tech and voice-control users.
+GalleryKit helps the photographer/viewer today. The core viewing surface is polished, and the prior assistive-tech naming issues are fixed. For Cycle 11, I would prioritize bringing timeline/year grids up to the same loading-priority and geometry-resilience standard as the home/shared grids, then make the map loading state visibly self-explanatory.
