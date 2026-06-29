@@ -799,7 +799,11 @@
     "description": "Browse geotagged photos on a map",
     "loading": "Loading map",
     "noPhotos": "No geotagged photos are available on the map.",
-    "openPhoto": "Open photo"
+    "openPhoto": "Open photo",
+    "skipToPhotoList": "Skip map to photo list",
+    "mapRegionLabel": "Photo map",
+    "mapInstructions": "Use the map markers to open geotagged photos, or skip to the accessible photo list below.",
+    "photoListLabel": "Geotagged photo list"
   },
   "lrToken": {
     "title": "Upload API Tokens",

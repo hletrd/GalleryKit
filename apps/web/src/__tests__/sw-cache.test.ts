@@ -91,8 +91,17 @@ describe('sw-cache: isImageDerivative', () => {
     expect(isImageDerivative('http://localhost/uploads/jpeg/foo.jpg')).toBe(true);
   });
 
+  it('matches locale-prefixed upload derivatives', () => {
+    expect(isImageDerivative('http://localhost/en/uploads/jpeg/foo.jpg')).toBe(true);
+    expect(isImageDerivative('http://localhost/ko/uploads/avif/foo.avif')).toBe(true);
+  });
+
   it('does NOT match /uploads/original/foo.jpg', () => {
     expect(isImageDerivative('http://localhost/uploads/original/foo.jpg')).toBe(false);
+  });
+
+  it('does NOT match locale-prefixed originals', () => {
+    expect(isImageDerivative('http://localhost/ko/uploads/original/foo.jpg')).toBe(false);
   });
 
   it('does NOT match /icons/icon-192.png', () => {

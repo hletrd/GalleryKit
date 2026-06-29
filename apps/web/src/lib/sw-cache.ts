@@ -74,11 +74,7 @@ export function isImageDerivative(url: string): boolean {
   try {
     const parsed = new URL(url);
     const pathname = parsed.pathname;
-    return (
-      pathname.startsWith('/uploads/avif/') ||
-      pathname.startsWith('/uploads/webp/') ||
-      pathname.startsWith('/uploads/jpeg/')
-    );
+    return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?uploads\/(?:avif|webp|jpeg)\//.test(pathname);
   } catch {
     return false;
   }

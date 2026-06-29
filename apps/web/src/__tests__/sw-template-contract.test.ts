@@ -88,6 +88,16 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(adminFn).toMatch(/\^\\\/\[a-z\]\{2\}/);
         expect(adminFn).toMatch(/\^\\\/api\\\/admin/);
     });
+
+    it('classifies root and locale-prefixed upload derivatives identically', () => {
+        const imageFn = TEMPLATE.slice(
+            TEMPLATE.indexOf('function isImageDerivative'),
+            TEMPLATE.indexOf('function isHtmlRoute'),
+        );
+        expect(imageFn).toContain('uploads\\/(?:avif|webp|jpeg)');
+        expect(imageFn).toContain('(?:[a-z]{2}(?:-[A-Z]{2})?\\/)?');
+        expect(imageFn).not.toContain("pathname.startsWith('/uploads/avif/')");
+    });
 });
 
 describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11)', () => {

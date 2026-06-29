@@ -105,7 +105,7 @@ git values must be treated as compromised and must not be reused.
 | `AUDIT_LOG_RETENTION_DAYS` | `90` | How many days of audit log entries to keep |
 | `VIEW_RETENTION_DAYS` | `395` | Analytics view-event retention (default 13 months / 395 days) |
 | `ADMIN_BACKFILL_CONCURRENCY` | `1` | In-app color-pipeline backfill concurrency (capped by pool budget; see Operational Playbook) |
-| `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (uncapped; separate MySQL pool) |
+| `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (default 2, max 8; separate MySQL pool, not capped by the live web pool-budget formula) |
 | `UPLOAD_ORIGINAL_ROOT` | — | Override path for private original uploads (used by sidecar scripts) |
 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION` | — | Operator-only opt-in for production CLIP semantic search (requires model weights) |
 | `CLIP_MODELS_ROOT` | `/app/data/models/clip` | Bind-mount path for CLIP model weights (production) |
@@ -330,7 +330,7 @@ All admin tunables flow through `gallery-config-shared.ts` (validation) → `gal
 
 **Concurrency env vars (distinct — AGG-R7-08):** the two entry points read DIFFERENT env vars with DIFFERENT budgeting:
 - **In-app** `ADMIN_BACKFILL_CONCURRENCY` (default 1) is clamped at runner start to a connection-budget cap so a background re-encode cannot starve live request traffic on the shared 10-connection pool. The cap (`resolveBackfillConcurrency` in `admin-backfill-runner.ts`) is `max(1, floor((POOL_CONNECTION_LIMIT − RESERVED − 1) / 2))` with `RESERVED = max(3, ceil(POOL_CONNECTION_LIMIT / 2))` — at the shipped pool of 10 this is **2** (a backfill pins ≤ 1 advisory-lock + 2×2 worker connections = 5, leaving ≥ 5 free so a live photo/gallery render's multi-query `Promise.all` doesn't queue behind encode-duration holds; AGG-5 raised the reserve from the prior 1-free cap of 4). Requests above the cap are clamped DOWN with a warning log.
-- **Sidecar** `BACKFILL_CONCURRENCY` (default 2, see the `--rm` command below) is **uncapped** — it runs in a separate `--rm` container with its own MySQL pool, so it is not bound by the live web instance's pool budget.
+- **Sidecar** `BACKFILL_CONCURRENCY` (default 2, max 8; see the `--rm` command below) runs in a separate `--rm` container with its own MySQL pool, so it is not bound by the live web instance's pool-budget formula. It is still capped by the sidecar script to avoid overwhelming DB and filesystem I/O during long maintenance runs.
 
 **Operational pattern (production)** — the production runtime container has prod-deps only and lacks `tsx` + the TypeScript source files. Running the backfill safely:
 

@@ -350,9 +350,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         };
     }, [forceShowColorChips]);
 
-    // R8-M3: set data-display-gamut on <html> so CSS can show the P3 badge on
-    // Firefox (which lacks `(color-gamut: p3)` MQ support but resolves P3 via
-    // the canvas-P3 probe in useDisplayCapability).
+    // R8-M3: set data-display-gamut on <html> so CSS can show the P3 badge
+    // when the display-gamut signals report a wide-gamut screen.
     const { colorGamut: displayGamut } = useDisplayCapability();
     useEffect(() => {
         document.documentElement.setAttribute('data-display-gamut', displayGamut);

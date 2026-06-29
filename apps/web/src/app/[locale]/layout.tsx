@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { IMAGE_BASE_URL, LOCALES } from '@/lib/constants';
-import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
+import { buildHreflangAlternates, getAlternateOpenGraphLocales, getLocaleDirection, getOpenGraphLocale } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
 import siteConfig from "@/site-config.json";
 import { getCspNonce } from '@/lib/csp-nonce';
@@ -96,7 +96,7 @@ export default async function RootLayout({
       // Explicit `dir` improves SR speech-flow heuristics and future-proofs for
       // RTL locales. Currently only LTR locales are shipped (C3R-RPL-05 /
       // AGG3R-05).
-      dir="ltr"
+      dir={getLocaleDirection(locale)}
       suppressHydrationWarning
       data-gallery-title={seo.title}
       data-gallery-nav-title={seo.nav_title || seo.title}

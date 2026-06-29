@@ -495,12 +495,9 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
 
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
     // P4-B1 / R4-M1: route the P3-display decision through the unified
-    // `useDisplayCapability` hook so Firefox 124+ on macOS internal P3 lights
-    // up the AVIF preference. Previously the gate used `getSupportsCanvasP3()`
-    // alone, which works for Chrome / Safari / Edge (where canvas P3 is
-    // gated on a P3 display) but was conservative on Firefox where the
-    // canvas P3 context is available regardless of display gamut. The hook
-    // adds `screen.colorGamut` + MQ + canvas-P3 layered detection.
+    // `useDisplayCapability` hook. It checks `screen.colorGamut`, then
+    // color-gamut media queries, then falls back conservatively to sRGB.
+    // Canvas-P3 support remains a separate rendering-capability gate below.
     const { colorGamut } = useDisplayCapability();
     const isP3Display = colorGamut !== 'srgb';
     const preferAvif = isWideGamut && avifSupported === true && isP3Display && getSupportsCanvasP3() && Boolean(avifUrl);

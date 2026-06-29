@@ -799,7 +799,11 @@
     "description": "지도에서 위치 정보가 있는 사진 찾아보기",
     "loading": "지도를 불러오는 중",
     "noPhotos": "지도에 표시할 위치 정보가 있는 사진이 없습니다.",
-    "openPhoto": "사진 열기"
+    "openPhoto": "사진 열기",
+    "skipToPhotoList": "지도를 건너뛰고 사진 목록으로 이동",
+    "mapRegionLabel": "사진 지도",
+    "mapInstructions": "지도 마커로 위치 정보가 있는 사진을 열거나 아래의 접근 가능한 사진 목록으로 이동하세요.",
+    "photoListLabel": "위치 정보가 있는 사진 목록"
   },
   "timeline": {
     "title": "타임라인",

@@ -404,8 +404,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </p>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <Label htmlFor="force-srgb-derivatives">{t('settings.forceSrgbDerivatives')}</Label>
                             <p id="force-srgb-derivatives-help" className="text-xs text-muted-foreground">
                                 {t('settings.forceSrgbDerivativesHint')}
@@ -413,6 +413,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Switch
                             id="force-srgb-derivatives"
+                            className="shrink-0"
                             checked={settings.force_srgb_derivatives === 'true'}
                             onCheckedChange={(checked) => handleChange('force_srgb_derivatives', checked ? 'true' : 'false')}
                             aria-describedby="force-srgb-derivatives-help"
@@ -420,8 +421,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         />
                     </div>
 
-                    <div className="flex items-center justify-between">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <Label htmlFor="allow-hdr-ingest">{t('settings.allowHdrIngest')}</Label>
                             <p id="allow-hdr-ingest-help" className="text-xs text-muted-foreground">
                                 {t('settings.allowHdrIngestHint')}
@@ -429,6 +430,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Switch
                             id="allow-hdr-ingest"
+                            className="shrink-0"
                             checked={settings.allow_hdr_ingest === 'true'}
                             onCheckedChange={(checked) => handleChange('allow_hdr_ingest', checked ? 'true' : 'false')}
                             aria-describedby="allow-hdr-ingest-help"
@@ -436,8 +438,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         />
                     </div>
 
-                    <div className="flex items-center justify-between">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <Label htmlFor="force-show-color-chips">{t('settings.forceShowColorChips')}</Label>
                             <p id="force-show-color-chips-help" className="text-xs text-muted-foreground">
                                 {t('settings.forceShowColorChipsHint')}
@@ -445,6 +447,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Switch
                             id="force-show-color-chips"
+                            className="shrink-0"
                             checked={settings.force_show_color_chips === 'true'}
                             onCheckedChange={(checked) => handleChange('force_show_color_chips', checked ? 'true' : 'false')}
                             aria-describedby="force-show-color-chips-help"
@@ -550,8 +553,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     <CardDescription>{t('settings.privacyDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-	                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+	                        <div className="min-w-0">
 	                            <Label htmlFor="strip-gps">{t('settings.stripGps')}</Label>
 	                            <p id="strip-gps-help" className="text-xs text-muted-foreground">
 	                                {hasExistingImages ? t('settings.uploadContractLocked') : t('settings.stripGpsHint')}
@@ -559,6 +562,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
 	                        </div>
 	                        <Switch
 	                            id="strip-gps"
+	                            className="shrink-0"
 	                            checked={settings.strip_gps_on_upload === 'true'}
 	                            onCheckedChange={(checked) => handleChange('strip_gps_on_upload', checked ? 'true' : 'false')}
 	                            disabled={hasExistingImages}
@@ -611,8 +615,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     <CardDescription>{t('settings.autoAltTextDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                             <Label htmlFor="auto-alt-text-enabled">{t('settings.autoAltTextEnabled')}</Label>
                             <p id="auto-alt-text-enabled-help" className="text-xs text-muted-foreground">
                                 {t('settings.autoAltTextEnabledHint')}
@@ -620,6 +624,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Switch
                             id="auto-alt-text-enabled"
+                            className="shrink-0"
                             checked={settings.auto_alt_text_enabled === 'true'}
                             onCheckedChange={(checked) => handleChange('auto_alt_text_enabled', checked ? 'true' : 'false')}
                             aria-describedby="auto-alt-text-enabled-help"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { absoluteUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
+import { absoluteUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getLocaleDirection, getOpenGraphLocale, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
 
 describe('stripLocalePrefix', () => {
     it('removes supported locale prefixes and keeps non-locale paths intact', () => {
@@ -67,6 +67,13 @@ describe('Open Graph locale helpers', () => {
         expect(getOpenGraphLocale('ko', 'fr_FR')).toBe('ko_KR');
         // Unsupported route locale + invalid override → en default.
         expect(getOpenGraphLocale('unknown', 'fr_FR')).toBe('en_US');
+    });
+});
+
+describe('getLocaleDirection', () => {
+    it('returns ltr for currently supported locales', () => {
+        expect(getLocaleDirection('en')).toBe('ltr');
+        expect(getLocaleDirection('ko')).toBe('ltr');
     });
 });
 

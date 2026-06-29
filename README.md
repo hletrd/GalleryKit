@@ -31,13 +31,13 @@
 - **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
 - **Multi-Format Optimization** -- wide-gamut-aware AVIF/WebP/JPEG conversion via Sharp, with 10-bit AVIF when the deployed libheif stack supports it and explicit 8-bit fallback when it does not
 - **Photographer-grade color management** -- ICC profile honored, NCLX `colr` ISOBMFF detection, ICC chromaticity-based gamut detection (Eizo / BenQ / X-Rite custom monitor profiles), Display P3 / DCI-P3 / Adobe RGB / ProPhoto / Rec.2020 sources mapped to Display P3 with 4:4:4 chroma JPEG, DCI-P3 white-point Bradford-adapted to D65. Apple HDR gain map detection (admin audit only). PQ / HLG ingest gated behind admin opt-in. See `CLAUDE.md` "Color & HDR Pipeline" for the full decision matrix
-- **Categories & Albums** -- organize photos into categories with slug aliases
+- **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
 - **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. Live on the [demo](https://gallery.atik.kr)
 - **Progressive Web App** -- installable PWA with a service worker for visited image caching and an offline HTML fallback; it is not a full offline gallery sync
 - **Sharing** -- per-photo and group share links with Base56 short keys
-- **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, Lightroom-compatible token upload API, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
+- **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
 
 GalleryKit is not a photo editor, culler, or scoring tool. Photos are expected to arrive after editing; admin batch operations change metadata only.
 - **Internationalization** -- English and Korean (next-intl), incl. localized color metadata

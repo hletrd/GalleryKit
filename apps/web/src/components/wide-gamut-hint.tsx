@@ -66,11 +66,9 @@ function writeLocalDismiss(gamut: string): void {
 }
 
 // P4-B1 / R4-M1: replaced the inline `(color-gamut: p3)` MQ subscription
-// with the unified `useDisplayCapability` hook. The hook covers the same
-// browsers via the same MQ + adds `screen.colorGamut` (Chromium 121+,
-// Safari 18+ TP) for the most accurate signal, plus a canvas-P3 probe so
-// Firefox 124+ on macOS internal-P3 displays no longer falsely flags
-// 'sRGB' (no MQ support in Firefox today).
+// with the unified `useDisplayCapability` hook. The hook checks
+// `screen.colorGamut` first, then color-gamut media queries, then falls
+// back conservatively to sRGB when neither display-gamut signal exists.
 //
 // R5-H1: suppress rendering until after client-side hydration to avoid
 // SSR→client mismatch + CLS. The SERVER_DEFAULT in useDisplayCapability

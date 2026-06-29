@@ -34,6 +34,10 @@ export function isSupportedLocale(value: string): value is Locale {
     return (LOCALES as readonly string[]).includes(value);
 }
 
+export function getLocaleDirection(_locale: string): 'ltr' | 'rtl' {
+    return 'ltr';
+}
+
 export function absoluteUrl(baseUrl: string, path: string): string {
     return new URL(path, baseUrl).toString();
 }

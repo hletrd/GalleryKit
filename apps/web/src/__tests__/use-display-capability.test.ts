@@ -2,13 +2,13 @@
  * useDisplayCapability tests (P4-B1 / R4-M1 / R9-R1).
  *
  * Pure-function tests for the underlying detection. These mock
- * `window`, `screen.colorGamut`, `matchMedia`, and the canvas-P3
- * probe to cover each browser path:
+ * `window`, `screen.colorGamut`, and `matchMedia` to cover each
+ * browser path:
  *
  *   - Chromium 121+ via `screen.colorGamut`.
  *   - Chrome / Safari / Edge via `(color-gamut: p3)` MQ.
- *   - Firefox — defaults to 'srgb' because canvas-P3 probe is not
- *     display-gated (R9-R1).
+ *   - Firefox — defaults to 'srgb' when neither screen nor MQ exposes
+ *     display-gamut support (R9-R1).
  *   - Pure sRGB displays — no signal indicates P3.
  *   - Rec.2020 advertised via `screen.colorGamut`.
  */
@@ -70,7 +70,8 @@ function installMockWindow(opts: MockWindowOptions = {}): void {
         win.matchMedia = matchMedia;
     }
     (globalThis as Record<string, unknown>).window = win;
-    // Document is needed for the canvas-P3 probe inside detect()
+    // Document is intentionally ignored by display detection; keep this mock
+    // so regressions that reintroduce canvas probing remain visible.
     (globalThis as Record<string, unknown>).document = {
         createElement: () => ({
             getContext: () => ({
@@ -186,8 +187,8 @@ describe('useDisplayCapability detection', () => {
     });
 
     it('defaults Firefox to srgb when neither screen.colorGamut nor MQ is available (R9-R1)', async () => {
-        // Firefox: no screen.colorGamut, no MQ support, canvas-P3 probe
-        // would return true but is not display-gated — must default to 'srgb'.
+        // Firefox: no screen.colorGamut and no MQ support. Canvas-P3 capability
+        // is not a display-gamut signal, so detection must default to 'srgb'.
         installMockWindow({
             omitScreenColorGamut: true,
             matchMediaResults: {

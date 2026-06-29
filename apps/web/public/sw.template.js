@@ -48,11 +48,7 @@ function isAdminRoute(pathname) {
 }
 
 function isImageDerivative(pathname) {
-  return (
-    pathname.startsWith('/uploads/avif/') ||
-    pathname.startsWith('/uploads/webp/') ||
-    pathname.startsWith('/uploads/jpeg/')
-  );
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?uploads\/(?:avif|webp|jpeg)\//.test(pathname);
 }
 
 function isHtmlRoute(request) {

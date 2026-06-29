@@ -18,12 +18,12 @@
  *  - /admin/*, /[locale]/admin/*, and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 290e794e-p7 is replaced at build time by scripts/build-sw.ts.
+ * 47a9cb1a-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '290e794e-p7';
+const SW_VERSION = '47a9cb1a-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -48,11 +48,7 @@ function isAdminRoute(pathname) {
 }
 
 function isImageDerivative(pathname) {
-  return (
-    pathname.startsWith('/uploads/avif/') ||
-    pathname.startsWith('/uploads/webp/') ||
-    pathname.startsWith('/uploads/jpeg/')
-  );
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?uploads\/(?:avif|webp|jpeg)\//.test(pathname);
 }
 
 function isHtmlRoute(request) {

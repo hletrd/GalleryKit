@@ -56,15 +56,25 @@ export default async function MapPage() {
                 <p className="text-muted-foreground">{t('noPhotos')}</p>
             ) : (
                 <>
-                    <MapLoader
-                        markers={markers}
-                        locale={locale}
-                        noPhotosLabel={t('noPhotos')}
-                        openPhotoLabel={t('openPhoto')}
-                        loadingLabel={t('loading')}
-                        imageSizes={config.imageSizes}
-                    />
-                    <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label={t('openPhoto')}>
+                    <a
+                        href="#map-photo-list"
+                        className="sr-only focus-visible:not-sr-only focus-visible:mb-3 focus-visible:inline-flex focus-visible:min-h-11 focus-visible:items-center focus-visible:rounded-md focus-visible:bg-primary focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground"
+                    >
+                        {t('skipToPhotoList')}
+                    </a>
+                    <section aria-labelledby="map-region-title" aria-describedby="map-region-help">
+                        <h2 id="map-region-title" className="sr-only">{t('mapRegionLabel')}</h2>
+                        <p id="map-region-help" className="sr-only">{t('mapInstructions')}</p>
+                        <MapLoader
+                            markers={markers}
+                            locale={locale}
+                            noPhotosLabel={t('noPhotos')}
+                            openPhotoLabel={t('openPhoto')}
+                            loadingLabel={t('loading')}
+                            imageSizes={config.imageSizes}
+                        />
+                    </section>
+                    <ul id="map-photo-list" className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label={t('photoListLabel')}>
                         {markers.map((marker) => (
                             <li key={marker.id}>
                                 <Link
