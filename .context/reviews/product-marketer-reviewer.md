@@ -1,54 +1,43 @@
-# Product Marketer Review - Cycle 9
+# Product Marketer Review - Cycle 10
 
 Date: 2026-06-29
 Reviewer: product-marketer-reviewer
 Repository: GalleryKit
-Scope: README onboarding, positioning accuracy, public/admin feature expectations, semantic-search claims, backup/restore warnings, self-hosting/deploy docs, photographer-intent promises, no-edit/no-scoring rule, and docs/UI claims versus code.
+Scope: Product, positioning, market-readiness, UI/docs claim accuracy, and trust signals for GalleryKit as a self-hosted photographer gallery web app. This is Prompt 1 only; no implementation changes were made.
 
 ## Executive Summary
 
-GalleryKit's current product story is mostly coherent: it is positioned as a self-hosted, photographer-trust-first gallery with explicit operator controls, honest semantic-search gates, SQL-only backup/restore warnings, and no public promise of unsupported S3/MinIO, paid downloads, RBAC, photo editing, culling, or scoring.
+GalleryKit's core positioning is credible: the repo consistently presents a self-hosted photographer gallery, not an editing/culling/scoring tool, and the strongest claims around color management, semantic search, admin scope, SQL-only restore, and public GPS privacy are mostly backed by code. The main actionable trust gap is that the admin UI and server comments tell operators to connect a "GalleryKit Lightroom Classic publish plugin," but this repository contains no installable plugin, setup guide, or plugin download surface. Two secondary risks remain around third-party analytics disclosure and the first-upload GPS retention decision.
 
-The main trust issue I found is in the Lightroom token surface. The admin UI mints every token with `lr:upload`, `lr:read`, and `lr:delete`, while the codebase currently exposes only the Lightroom upload token route. That creates a future-permission surprise: old tokens will automatically gain read/delete capability if those routes are added later. The same surface supports optional expiry at the server-action/library layer, but the UI offers no expiry field and does not clearly say created tokens are non-expiring unless revoked.
+Finding count: 1 confirmed issue, 1 likely issue, 1 risk, 6 aligned/no-action checks.
 
-Finding count: 1 confirmed issue, 1 likely issue, 1 manual-validation risk, 7 false positives/already-fixed checks.
-
-| Severity | Confirmed | Likely | Manual-validation risk |
+| Severity | Confirmed | Likely | Risk |
 | --- | ---: | ---: | ---: |
 | Critical | 0 | 0 | 0 |
 | High | 0 | 0 | 0 |
-| Medium | 1 | 0 | 0 |
-| Low | 0 | 1 | 1 |
+| Medium | 1 | 1 | 0 |
+| Low | 0 | 0 | 1 |
 
-## Prompt/Context Notes
+## Profile Adaptation Note
 
-- Required repo context read first: `AGENTS.md`, `CLAUDE.md`.
-- The installed product-marketer prompt was for another product, so this review used only its market/product/documentation critique stance and applied it to GalleryKit's actual docs, UI, and implementation.
-- No source code or plan files were edited. This report is the only intended artifact.
+The local agent profile at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` is BurstPick-specific and asks for Swift/BurstPick source files. This repository is GalleryKit, so I used only the role's product-marketing and claim-verification stance. I did not look for absent BurstPick Swift files beyond noting the mismatch, and I prioritized `AGENTS.md`, `CLAUDE.md`, and GalleryKit source/docs.
 
-## Review-Relevant Inventory
+## Inventory Summary
 
-Docs, repo metadata, and operator files inspected:
+Product/docs/marketing surfaces reviewed:
 
 - `README.md`
 - `apps/web/README.md`
-- `AGENTS.md`
 - `CLAUDE.md`
-- `.env.deploy.example`
-- `apps/web/.env.local.example`
+- `AGENTS.md`
 - `apps/web/src/site-config.example.json`
-- `apps/web/docker-compose.yml`
-- `apps/web/nginx/default.conf`
-- `apps/web/deploy.sh`
-- `scripts/deploy-remote.sh`
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-
-Public/admin UX and copy surfaces inspected:
-
+- `apps/web/src/site-config.json`
 - `apps/web/messages/en.json`
 - `apps/web/messages/ko.json`
-- `apps/web/src/app/[locale]/(public)/**`
-- `apps/web/src/app/[locale]/admin/(protected)/**`
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx`
 - `apps/web/src/components/nav.tsx`
 - `apps/web/src/components/nav-client.tsx`
 - `apps/web/src/components/footer.tsx`
@@ -60,283 +49,205 @@ Public/admin UX and copy surfaces inspected:
 - `apps/web/src/components/wide-gamut-hint.tsx`
 - `apps/web/src/components/upload-dropzone.tsx`
 - `apps/web/src/components/image-manager.tsx`
-- `apps/web/src/components/admin-nav.tsx`
-- `apps/web/src/components/admin-header.tsx`
-- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
 
-Implementation claim checks inspected:
+Implementation claim checks reviewed:
 
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/data.ts`
 - `apps/web/src/lib/gallery-config.ts`
 - `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/search-enrichment-fields.ts`
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/admin-tokens.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/actions/lr-tokens.ts`
 - `apps/web/src/app/api/search/semantic/route.ts`
 - `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/lib/db-restore.ts`
-- `apps/web/src/__tests__/storage-quarantine.test.ts`
-- `apps/web/src/__tests__/search-disclaimer.test.ts`
-- `apps/web/src/__tests__/similar-route.test.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/db/schema.ts`
 - `apps/web/src/__tests__/privacy-fields.test.ts`
-- `apps/web/src/__tests__/touch-target-audit.test.ts`
+- `apps/web/src/__tests__/map-privacy.test.ts`
+- `apps/web/src/__tests__/search-route-privacy.test.ts`
+- `apps/web/src/__tests__/semantic-route-production.test.ts`
+- `apps/web/src/__tests__/similar-route.test.ts`
+- `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts`
+- `apps/web/src/__tests__/lr-tokens-action.test.ts`
 
-## Confirmed Issues
+Inventory searches:
 
-### PMR-C9-01 - Lightroom token UI grants unimplemented future scopes and obscures non-expiring default
+- `rg --files` for docs/UI/code surfaces.
+- `rg --files | rg -i "lightroom|lrplugin|lua|plugin|publish"` found only server/token/test files: `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, and related tests. No `.lrplugin`, Lua plugin source, plugin package, or plugin setup doc was present.
+- `rg --files | rg -i "privacy|terms|policy|consent|cookie"` found privacy tests and analytics code, but no public privacy/terms/cookie/consent page.
+
+## Confirmed Findings
+
+### PMR-C10-01 - Lightroom plugin is marketed in-product, but no plugin artifact or setup path exists
 
 Severity: Medium
 Confidence: High
-Classification: Confirmed product/trust defect
+Classification: Confirmed product/trust issue
 
 Exact regions:
 
-- `apps/web/messages/en.json:781-806` defines the Lightroom token copy. `apps/web/messages/en.json:791` tells admins: "Scopes lr:upload, lr:read, lr:delete are granted automatically."
-- `apps/web/messages/ko.json:831-856` mirrors the same Korean copy. `apps/web/messages/ko.json:841` says the same three permissions are automatically granted.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:57-61` calls `createLrToken({ label, scopes: ['lr:upload', 'lr:read', 'lr:delete'] })` with no user choice.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:128-137` displays an expiry only when `token.expiresAt` exists, but there is no "never expires" label for tokens without expiry.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:154-181` renders only a label field and create/cancel controls. There is no scope selector and no expiry input.
-- `apps/web/src/app/actions/lr-tokens.ts:28-32` accepts `scopes` and optional `expiresAt`; `apps/web/src/app/actions/lr-tokens.ts:75-85` validates expiry only when supplied; `apps/web/src/app/actions/lr-tokens.ts:88-93` passes `expiresAt` through as `null` when omitted.
-- `apps/web/src/lib/admin-tokens.ts:24-25` defines all available token scopes as `lr:upload`, `lr:read`, and `lr:delete`.
-- `apps/web/src/lib/api-auth.ts:21-34` and `apps/web/src/lib/api-auth.ts:68-95` enforce route-specific token scopes when a route opts into `allowTokenScope`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:1-7` documents the Lightroom upload token path, and `apps/web/src/app/api/admin/lr/upload/route.ts:527` opts into only `{ allowTokenScope: 'lr:upload' }`.
-- A repo search for `allowTokenScope|lr:read|lr:delete|lr:upload` found no non-test `lr:read` or `lr:delete` route. The only current route using token auth is the upload route.
-- `CLAUDE.md:152` describes the broader token model and optional expiry, but the active admin UI currently exposes neither scope choice nor expiry choice.
+- `apps/web/messages/en.json:782-787` labels the admin page "Lightroom Tokens" and says admins can generate tokens for the "GalleryKit Lightroom Classic publish plugin."
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx:11-24` renders that token page and description directly in the admin UI.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:1-16` documents the upload endpoint as the server-side counterpart to the Lightroom plugin and specifically references the plugin's `GalleryKitAPI.lua`.
+- `CLAUDE.md:152` describes "Lightroom Classic publish-plugin PATs" and says the plugin accepts `X-GalleryKit-Token`.
+- `README.md:148` and `apps/web/README.md:46` mention `/api/admin/lr/upload` so Lightroom publishes bypass the generic admin upload body cap.
+- Inventory evidence: no `.lrplugin`, Lua file, install package, or user-facing setup document exists in the repo. The only Lightroom-matching source files are the server route, token actions, and tests.
 
 Why this is a problem:
 
-The UI trains admins to accept three automatic permissions for a token whose only implemented integration need is upload. That weakens the least-privilege story and creates a deferred authorization surprise. If future Lightroom read/delete routes are added using the already-defined `lr:read` or `lr:delete` scopes, every token minted today will silently receive those new powers because the UI has already granted them.
-
-The expiry posture is also unclear. The server supports optional expiry, but the UI does not expose it and creates non-expiring tokens by default. The list only shows an expiry when one exists, so an admin may not realize "blank expiry" means "valid until revoked."
+The UI creates an expectation that a user can generate a token and connect Lightroom Classic. The backend route appears real and well-hardened, but the product surface does not provide the thing the user needs next: where to get the plugin, how to install it, what server URL/header it uses, what topic field is required, and what errors Lightroom will show. For a photographer evaluating a self-hosted workflow, this reads as a partially shipped integration.
 
 Concrete failure scenario:
 
-An operator creates a Lightroom token in 2026 for one machine to publish uploads only. In a later release, GalleryKit adds `/api/admin/lr/delete` guarded by `allowTokenScope: 'lr:delete'`. The old token already carries `lr:delete`, so the old Lightroom credential can delete photos without the operator ever making a new access decision.
+A photographer installs GalleryKit, opens Admin -> Tokens, generates an LR token, then cannot find the Lightroom publish plugin or setup instructions. They either abandon the integration or try to reverse-engineer the API. The gap damages trust because the UI implied a complete Lightroom workflow.
 
-Suggested fix:
+Concrete fix:
 
-Until read/delete endpoints and a real scope picker exist, mint only `['lr:upload']` from the admin UI and change the copy to "Upload access only." Also show explicit lifetime copy such as "Never expires; revoke to disable" for tokens without `expiresAt`.
+Ship one of these before presenting the integration as a plugin:
 
-If the product intends to keep all three scopes, add visible scope checkboxes and an expiry field before creation, default to upload-only, and add regression tests that the UI either mints only implemented scopes or requires an explicit admin choice for every granted scope.
+- Add the Lightroom plugin artifact/source and a clear install guide, linked from the Tokens page.
+- Add a "Setup Lightroom Classic" help block beside token creation with plugin download path, server URL, token header, topic mapping, file limits, and troubleshooting.
+- If the plugin is not ready to distribute, relabel the page to "Upload API Tokens" and change the copy to "Lightroom plugin support is server-ready; plugin distribution is not included yet."
 
-## Likely Issues
+## Likely Findings
 
-### PMR-C9-02 - Deploy env-file docs present two competing defaults
+### PMR-C10-02 - Google Analytics can be enabled without any public privacy/disclosure surface
 
-Severity: Low
+Severity: Medium
 Confidence: Medium
-Classification: Likely documentation consistency issue
+Classification: Likely trust/compliance issue
 
 Exact regions:
 
-- `README.md:106-116` tells operators to keep target SSH config in a gitignored root `.env.deploy`, then run `cp .env.deploy.example .env.deploy`.
-- `CLAUDE.md:648-657` repeats that the repo-level deploy helper reads a gitignored root `.env.deploy` by default.
-- `.env.deploy.example:1-4` instead says to copy the file outside the repository, with a default path of `~/.gallerykit-secrets/gallery-deploy.env`.
-- `scripts/deploy-remote.sh:22-29` implements both behaviors: `DEPLOY_ENV_FILE` wins, then root `.env.deploy` if it exists, otherwise `~/.gallerykit-secrets/gallery-deploy.env`.
-- `scripts/deploy-remote.sh:55-58` also tells operators either `.env.deploy` or the external default path is acceptable.
+- `README.md:46-58` documents `google_analytics_id` as part of the file-backed site configuration.
+- `apps/web/src/site-config.example.json:9-10` ships `footer_text` and `google_analytics_id` defaults, with analytics empty by default.
+- `apps/web/src/app/[locale]/layout.tsx:147-155` injects `https://www.googletagmanager.com/gtag/js` and runs `gtag('config', ...)` whenever `siteConfig.google_analytics_id` matches the allowed pattern.
+- `apps/web/src/components/footer.tsx:42-54` renders only GitHub and Admin links; there is no privacy/cookie link in the default public footer.
+- Inventory evidence: no public privacy, terms, cookie, or consent route/page was found.
 
 Why this is a problem:
 
-Both locations work, but the docs disagree about which path is the normal path. For a self-hosted deploy helper that stores SSH host/user/key settings, path ambiguity is a trust and onboarding issue: operators may wonder whether they followed the supported runbook, whether their deploy automation will pick up the expected file, or whether the root README is stale.
+The default is privacy-preserving because analytics is empty, but the documented config makes third-party Google tracking a one-line switch. Once enabled, visitors receive third-party analytics scripts without an included privacy notice, disclosure link, or consent strategy. That is a trust problem for client galleries and a compliance risk for operators serving EU/UK/KR visitors.
 
 Concrete failure scenario:
 
-An operator follows `.env.deploy.example` and stores secrets under `~/.gallerykit-secrets/gallery-deploy.env`. Later they return to `README.md:106-116`, which says the config should live in root `.env.deploy`. They create a second file with different values or debug the wrong file when `npm run deploy` uses the root file preferentially.
+A photographer sets `google_analytics_id` to measure client gallery traffic. The site starts loading Google Tag Manager/Analytics on every public page, but there is no public privacy notice explaining visitor tracking or data transfer. A client or venue objects, or the photographer has to disable analytics after sharing galleries.
 
-Suggested fix:
+Concrete fix:
 
-Pick one canonical recommendation and make all three surfaces match. For example: "Recommended: root `.env.deploy` for this repo; advanced/external path: set `DEPLOY_ENV_FILE` or use the fallback `~/.gallerykit-secrets/gallery-deploy.env`." If the external path is preferred for secret hygiene, update `README.md` and `CLAUDE.md` to make that the primary path and document root `.env.deploy` as a convenience override.
+Add a minimal privacy/analytics disclosure path and link it from the footer when GA is configured. At minimum, document that enabling `google_analytics_id` adds third-party tracking and that operators are responsible for consent/legal notices. A stronger product fix is a built-in privacy page template with configurable owner/contact text and a "no third-party analytics" default posture.
 
-## Risks Needing Manual Validation
+## Risk Findings
 
-### PMR-C9-RISK-01 - Live demo semantic-search claim cannot be proven from repo state alone
+### PMR-C10-RISK-01 - GPS stripping is a locked first-upload decision, but the default retains GPS
 
 Severity: Low
 Confidence: Medium
-Classification: Manual validation risk, not a confirmed repo defect
+Classification: Product trust risk, not a confirmed public leak
 
 Exact regions:
 
-- `README.md:37` says semantic search is disabled by default and requires setup, then says it is live on the demo at `https://gallery.atik.kr`.
-- `apps/web/README.md:53-73` documents the operator-only production path: seed model weights, backfill, set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, and set `admin_settings.semantic_search_mode='production'`.
-- `CLAUDE.md:151` records that the real production deployment is intentionally activated with a production DB row, env opt-in, and real embeddings.
-- `apps/web/src/lib/gallery-config.ts:123-142` heals stored `production` mode to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
-- `apps/web/src/app/api/search/semantic/route.ts:156-176` serves only `stub` or `production`; `apps/web/src/app/api/search/semantic/route.ts:242-260` filters by active `model_version` and returns 503 when production has no rows.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:97-113` serves similar photos only in production semantic mode.
+- `apps/web/src/lib/gallery-config-shared.ts:91-97` sets `strip_gps_on_upload` to `false` by default.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:543-567` renders the privacy setting and disables it when `hasExistingImages` is true.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:569-572` tells admins the upload contract is locked for an existing gallery.
+- `apps/web/src/app/actions/images.ts:347-357` removes DB GPS fields and strips retained originals only when `uploadConfig.stripGpsOnUpload` is true.
+- Positive boundary evidence: `apps/web/src/lib/data.ts:367-407` omits latitude/longitude from normal public fields, and `apps/web/src/lib/data.ts:1658-1683` exposes coordinates only through the map query when `topics.map_visible = true`.
 
-Why this remains a manual validation risk:
+Why this matters:
 
-The repo documents the conditions correctly and the code gates are honest, but the current runtime state of the public demo cannot be proven from committed files. The demo claim should be periodically smoke-tested against the deployed site after deploys or DB restores.
+The code has a good public GPS boundary, so this is not a confirmed public leak. The risk is the first-run product experience: a new operator can upload photos before noticing the privacy setting, and after photos exist the setting is locked. At that point retained originals and admin metadata may already contain GPS unless the operator regenerates or manually cleans the library.
 
 Concrete failure scenario:
 
-The demo loses the env opt-in, model bind mount, or production embedding rows after a host migration. The README still claims "Live on the demo", but visitors see semantic search disabled or similar-photo panels absent.
+A photographer uploads a first client set from GPS-enabled camera files, then later discovers the "Do Not Store GPS Coordinates" switch. The switch is disabled because images already exist. Public pages still avoid GPS unless map topics are opted in, but the operator has already retained location metadata in private originals contrary to their later privacy intent.
 
-Suggested validation:
+Concrete fix:
 
-Add a release checklist or smoke script that verifies the deployed demo has `semanticSearchMode === 'production'`, at least one active `jina-clip-v2-d512-q8` embedding row, semantic query returns results for a known term, and similar photos returns non-503 for a known embedded image.
+Make the GPS decision explicit before first upload. Options: default `strip_gps_on_upload` to `true` for fresh installs, add a first-run privacy step before enabling uploads, or show a blocking/strong warning on the upload page until the operator confirms GPS retention vs stripping. Keep the current map-visible public guard.
 
-## False Positives / Already Fixed
+## Aligned / No Action Checks
 
-### PMR-C9-FP-01 - Fresh-install upload onboarding is already fixed
+### PMR-C10-OK-01 - Semantic search honesty is strong
 
-Severity: None
-Confidence: High
-Classification: False positive/already fixed
+Evidence:
 
-Exact regions:
+- `README.md:37` says semantic search is disabled by default and requires operator setup.
+- `apps/web/README.md:53-73` documents model, modes, offline weights, production honesty gate, bounded scan, and operator activation.
+- `apps/web/src/lib/gallery-config.ts:123-142` heals stored production mode to disabled unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
+- `apps/web/src/app/api/search/semantic/route.ts:156-176` rejects disabled mode.
+- `apps/web/src/app/api/search/semantic/route.ts:242-260` filters by active model version and returns 503 if production has no rows.
+- `apps/web/src/components/search.tsx:462-469` shows an experimental disclaimer for stub mode only.
 
-- `README.md:100-104` now tells the operator to create a category before uploading one photo.
-- `apps/web/README.md:17-21` now repeats the category-before-upload instruction.
-- `apps/web/src/components/upload-dropzone.tsx:347-357` still correctly blocks upload when no category exists and links the admin toward category creation.
+Assessment: No actionable issue.
 
-Failure scenario avoided:
+### PMR-C10-OK-02 - Similar photos is production-only, not stub-hyped
 
-A fresh evaluator no longer follows the README straight into a disabled upload control without knowing the category prerequisite.
+Evidence:
 
-Suggested fix:
+- `apps/web/src/app/api/search/similar/[id]/route.ts:97-113` serves only when `semanticSearchMode === 'production'`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:115-150` requires a production embedding and scans production model rows.
 
-None for current docs.
+Assessment: No actionable issue.
 
-### PMR-C9-FP-02 - Semantic search is described with appropriate setup and honesty gates
+### PMR-C10-OK-03 - Public GPS privacy boundary is explicitly guarded
 
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
+Evidence:
 
-Exact regions:
+- `apps/web/src/lib/data.ts:367-407` omits coordinates from the canonical unauthenticated field set.
+- `apps/web/src/lib/data.ts:409-415` states the map field set is the only latitude/longitude public path.
+- `apps/web/src/lib/data.ts:1658-1683` enforces processed images, non-null coordinates, and `topics.map_visible = true`.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:38-50` passes only narrowed marker fields to the client.
 
-- `README.md:37` says semantic search is self-hosted, operator-enabled, disabled by default, and requires model download/backfill/env opt-in.
-- `apps/web/README.md:53-73` documents model, modes, offline weights, production honesty gate, bounded scan, and operator-only activation.
-- `apps/web/src/lib/gallery-config.ts:64-69` documents the disabled/stub/production contract, and `apps/web/src/lib/gallery-config.ts:123-142` enforces the production env gate.
-- `apps/web/src/app/api/search/semantic/route.ts:156-176` rejects disabled mode and uses real production embedding only in production mode.
-- `apps/web/src/app/api/search/semantic/route.ts:242-260` filters rows by active model version and returns 503 when production rows are missing.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:97-113` gates similar photos to production mode.
+Assessment: No public GPS leak found.
 
-Failure scenario avoided:
+### PMR-C10-OK-04 - RBAC/admin-power claims are honest
 
-Fresh installs are not marketed as having one-click production AI search, and production mode does not serve stub rows under a production label.
+Evidence:
 
-Suggested fix:
+- `README.md:40` says "multiple root-admin accounts" and "no role separation yet."
+- `CLAUDE.md:5` repeats authentication-only admin accounts.
+- `CLAUDE.md:228` says any admin can upload, edit, restore/export, change settings, and manage admins.
+- `apps/web/messages/en.json:49-50` warns new admins are full-access root admins.
 
-None. Keep the setup caveats near any future marketing or demo copy.
+Assessment: No overclaim found.
 
-### PMR-C9-FP-03 - Backup/restore warnings accurately say SQL-only and file storage unchanged
+### PMR-C10-OK-05 - Backup/restore product copy does not overpromise full-site backups
 
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
+Evidence:
 
-Exact regions:
+- `apps/web/messages/en.json:18-24` says DB backups are rows only and files require host-level backups.
+- `CLAUDE.md:208-210` says DB restore does not snapshot or roll back host files.
 
-- `apps/web/messages/en.json:16-24` says backups are database rows only and files under originals/uploads/resources require host-level backups.
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:144-175` renders the backup/restore descriptions in the admin DB page.
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:199-230` adds danger-zone and confirmation copy before restore.
-- `CLAUDE.md:208-210` repeats that admin DB backup/restore is SQL-only and does not snapshot or roll back host files.
+Assessment: No actionable issue in the reviewed copy.
 
-Failure scenario avoided:
+### PMR-C10-OK-06 - Unsupported storage/payment/editing/culling claims are not being marketed
 
-An operator is not led to believe an SQL restore will recover originals, derivatives, resources, or upload files.
+Evidence:
 
-Suggested fix:
+- `CLAUDE.md:141` says S3/MinIO storage is not integrated and must not be documented as supported.
+- `CLAUDE.md:522` says paid downloads/Stripe were removed and must not be reintroduced without a product decision.
+- `CLAUDE.md:232` states the product has no edit/culling/scoring features.
+- README feature copy does not market editing, culling, scoring, payment, or S3 storage as product features.
 
-None for the admin UI. A short reminder in the deployment section would still improve operator onboarding, but the active warning is accurate.
+Assessment: No actionable issue.
 
-### PMR-C9-FP-04 - Admin-account positioning does not overpromise RBAC
+## Overall Positioning Notes
 
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
+GalleryKit's best current position is not "AI gallery" or "portfolio CMS." The defensible wedge is: self-hosted photographer gallery with unusually serious image-delivery fidelity, privacy controls, and operator-owned infrastructure. The README mostly supports that, especially with color pipeline specifics and operator-gated semantic search. The highest-leverage marketing improvements are trust infrastructure around integrations and visitor privacy, not more feature copy.
 
-Exact regions:
+Recommended one-sentence positioning:
 
-- `README.md:40` says "multiple root-admin accounts" and explicitly notes "no role separation yet."
-- `CLAUDE.md:5` defines multiple root-admin accounts with authentication only and no role/capability separation.
-- `CLAUDE.md:228` says any admin can upload, edit, export/restore DB backups, change settings, and manage other admins.
-- `apps/web/messages/en.json:45-50` and `apps/web/messages/ko.json:45-50` warn in the create-admin copy that new admins are full-access root admins.
+> GalleryKit is a self-hosted photo gallery for photographers who care about color-faithful delivery, private originals, and owning the full publishing stack.
 
-Failure scenario avoided:
+## Verification Notes
 
-The docs/UI do not sell multi-user administration as roles, teams, or permissions.
-
-Suggested fix:
-
-None unless RBAC is introduced later.
-
-### PMR-C9-FP-05 - Storage backend/S3/MinIO is not exposed as a supported product feature
-
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
-
-Exact regions:
-
-- `CLAUDE.md:141` says the storage abstraction is not integrated and the product currently supports local filesystem storage only.
-- `apps/web/src/__tests__/storage-quarantine.test.ts:1-27` documents the quarantine rationale.
-- `apps/web/src/__tests__/storage-quarantine.test.ts:111-143` statically asserts no source file outside `lib/storage/` imports the storage abstraction.
-- A docs/source sweep found no active public README claim of S3 or MinIO support.
-
-Failure scenario avoided:
-
-Operators are not told they can switch storage backends when the upload/processing/serving pipeline is still local-filesystem only.
-
-Suggested fix:
-
-None. Keep the quarantine test until storage is intentionally wired end-to-end.
-
-### PMR-C9-FP-06 - Photographer-intent and no-edit/no-scoring contract remains intact
-
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
-
-Exact regions:
-
-- `CLAUDE.md:258-260` states the product premise: photos arrive after editing, and no edit/culling/scoring features ship.
-- `README.md:32-40` frames processing as color/HDR fidelity, metadata, tagging/search, and admin upload/batch editing rather than image editing or culling.
-- `apps/web/src/components/image-manager.tsx` exposes metadata/admin management editing, not destructive image editing or culling/scoring workflow.
-- `apps/web/src/components/similar-photos.tsx` uses internal similarity `score` data for ranking but does not expose a user-facing score/rating control.
-
-Failure scenario avoided:
-
-GalleryKit does not drift into a Lightroom/DAM editing or culling promise that would conflict with the photographer-intent model.
-
-Suggested fix:
-
-None. Continue using "metadata edit" or "batch metadata editing" when describing admin operations, not generic "photo editing."
-
-### PMR-C9-FP-07 - Search and deployment claims mostly match code
-
-Severity: None
-Confidence: High
-Classification: Already fixed/aligned
-
-Exact regions:
-
-- `README.md:36` says metadata search covers titles, descriptions, cameras, and tags.
-- `apps/web/src/lib/data.ts:1515-1555` searches title, description, camera/lens/topic fields.
-- `apps/web/src/lib/data.ts:1589-1619` includes tag and alias matching.
-- `README.md:145-149` documents production public URL requirements, upload/proxy caps, and single-writer topology.
-- `apps/web/scripts/ensure-site-config.mjs:14-42` rejects placeholder/missing production URLs.
-- `apps/web/docker-compose.yml:1-27` matches the documented single Linux host-network deployment with bind-mounted data, uploads, resources, and site config.
-- `apps/web/nginx/default.conf:21-31`, `apps/web/nginx/default.conf:72-104`, and `apps/web/nginx/default.conf:122-144` match the documented request-size caps for general traffic, DB restore, dashboard uploads, and Lightroom uploads.
-
-Failure scenario avoided:
-
-The public feature list is not materially ahead of the implementation for keyword search, production URL checks, or documented request-size limits.
-
-Suggested fix:
-
-None.
-
-## Final Missed-Issue Sweep
-
-I ran a final text sweep across the active docs, locale strings, public/admin app routes, components, and core libs for terms tied to the requested review areas: semantic search, similar photos, backup/restore, self-host/deploy/Docker, root admin/roles, Lightroom token scopes, expiry, scoring/rating/culling/editing, S3/MinIO/storage backend, payment/Stripe/license/entitlement, and photographer-intent language.
-
-No additional confirmed product/documentation/trust issue was found. The only promoted findings are:
-
-- `PMR-C9-01` confirmed: Lightroom tokens over-grant future read/delete scopes and hide non-expiring default.
-- `PMR-C9-02` likely: deploy env-file docs disagree on canonical secret path.
-- `PMR-C9-RISK-01` manual validation: live demo semantic-search claim depends on current production runtime state.
+No source code was edited. This report is the only file intentionally changed. I did not run the full test suite because this was a read-only review/report task; verification consisted of source/docs inventory, line-level claim checks, and targeted repository searches.
