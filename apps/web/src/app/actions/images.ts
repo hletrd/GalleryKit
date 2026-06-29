@@ -927,6 +927,10 @@ export async function updateImageMetadata(id: number, title: string | null, desc
 
 export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     // US-P41: requireSameOriginAdmin first, then isAdmin (matches existing action pattern).
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };

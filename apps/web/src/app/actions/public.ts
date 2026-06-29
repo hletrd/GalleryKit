@@ -356,6 +356,7 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
  */
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
+    if (isRestoreMaintenanceActive()) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;
@@ -378,6 +379,7 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     // but failing fast here saves a doomed INSERT round-trip per junk call
     // and keeps the validation posture identical across the public actions.
     if (!isValidSlug(topicSlug)) return;
+    if (isRestoreMaintenanceActive()) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;
@@ -394,6 +396,7 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
 // @action-origin-exempt: public analytics endpoint — no admin auth needed
 export async function recordSharedGroupView(groupId: number): Promise<void> {
     if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
+    if (isRestoreMaintenanceActive()) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;

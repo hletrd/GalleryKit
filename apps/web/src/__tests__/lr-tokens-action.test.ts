@@ -13,17 +13,21 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { createTokenMock } = vi.hoisted(() => ({
+const { createTokenMock, revokeTokenMock, requireSameOriginAdminMock, isAdminMock, getRestoreMaintenanceMessageMock } = vi.hoisted(() => ({
     createTokenMock: vi.fn(async () => ({ plaintext: 'gk_test', id: 7 })),
+    revokeTokenMock: vi.fn(async () => true),
+    requireSameOriginAdminMock: vi.fn(async () => null),
+    isAdminMock: vi.fn(async () => true),
+    getRestoreMaintenanceMessageMock: vi.fn(() => null),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
-    isAdmin: vi.fn(async () => true),
+    isAdmin: isAdminMock,
     getCurrentUser: vi.fn(async () => ({ id: 1, username: 'admin' })),
 }));
 
 vi.mock('@/lib/action-guards', () => ({
-    requireSameOriginAdmin: vi.fn(async () => null),
+    requireSameOriginAdmin: requireSameOriginAdminMock,
 }));
 
 vi.mock('@/lib/admin-tokens', async (importOriginal) => {
@@ -31,7 +35,7 @@ vi.mock('@/lib/admin-tokens', async (importOriginal) => {
     return {
         ...actual,
         createToken: createTokenMock,
-        revokeToken: vi.fn(async () => true),
+        revokeToken: revokeTokenMock,
         listTokensForUser: vi.fn(async () => []),
     };
 });
@@ -52,7 +56,11 @@ vi.mock('next-intl/server', () => ({
     getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
-import { createLrToken } from '@/app/actions/lr-tokens';
+vi.mock('@/lib/restore-maintenance', () => ({
+    getRestoreMaintenanceMessage: getRestoreMaintenanceMessageMock,
+}));
+
+import { createLrToken, revokeLrToken } from '@/app/actions/lr-tokens';
 
 // R4C4 I18N-R4C4-05: the action's error strings are localized via
 // getTranslations('serverActions'); this suite's next-intl mock returns the
@@ -61,6 +69,27 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
     beforeEach(() => {
         createTokenMock.mockClear();
         createTokenMock.mockResolvedValue({ plaintext: 'gk_test', id: 7 });
+        revokeTokenMock.mockClear();
+        revokeTokenMock.mockResolvedValue(true);
+        requireSameOriginAdminMock.mockClear();
+        requireSameOriginAdminMock.mockResolvedValue(null);
+        isAdminMock.mockClear();
+        isAdminMock.mockResolvedValue(true);
+        getRestoreMaintenanceMessageMock.mockClear();
+        getRestoreMaintenanceMessageMock.mockReturnValue(null);
+    });
+
+    it('short-circuits token create and revoke during restore maintenance', async () => {
+        getRestoreMaintenanceMessageMock.mockReturnValue('restoreInProgress');
+
+        await expect(createLrToken({ label: 'Lightroom on my Mac', scopes: ['lr:upload'] }))
+            .resolves.toEqual({ error: 'restoreInProgress' });
+        await expect(revokeLrToken(7)).resolves.toEqual({ error: 'restoreInProgress' });
+
+        expect(requireSameOriginAdminMock).not.toHaveBeenCalled();
+        expect(isAdminMock).not.toHaveBeenCalled();
+        expect(createTokenMock).not.toHaveBeenCalled();
+        expect(revokeTokenMock).not.toHaveBeenCalled();
     });
 
     it('creates a token for a clean label', async () => {

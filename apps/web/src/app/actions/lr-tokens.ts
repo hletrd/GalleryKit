@@ -16,6 +16,7 @@ import { sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { headers } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 export type LrTokenListItem = Omit<AdminTokenRecord, 'tokenHash'>;
 
@@ -29,10 +30,15 @@ export async function createLrToken(opts: {
     scopes: string[];
     expiresAt?: string | null;
 }): Promise<{ plaintext: string; id: number } | { error: string }> {
+    const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
+
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
 
-    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();
     if (!user) return { error: t('unauthorized') };
@@ -100,10 +106,15 @@ export async function createLrToken(opts: {
 }
 
 export async function revokeLrToken(tokenId: number): Promise<{ success: boolean } | { error: string }> {
+    const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
+
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
 
-    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();
     if (!user) return { error: t('unauthorized') };

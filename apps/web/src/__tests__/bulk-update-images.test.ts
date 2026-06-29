@@ -26,6 +26,7 @@ const {
     getCurrentUserMock,
     ensureTagRecordMock,
     findTagRecordByNameOrSlugMock,
+    getRestoreMaintenanceMessageMock,
 } = vi.hoisted(() => ({
     isAdminMock: vi.fn(),
     getTranslationsMock: vi.fn(),
@@ -40,6 +41,7 @@ const {
     getCurrentUserMock: vi.fn(),
     ensureTagRecordMock: vi.fn(),
     findTagRecordByNameOrSlugMock: vi.fn(),
+    getRestoreMaintenanceMessageMock: vi.fn(),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
@@ -65,7 +67,7 @@ vi.mock('@/lib/audit', () => ({
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
-    getRestoreMaintenanceMessage: vi.fn().mockReturnValue(null),
+    getRestoreMaintenanceMessage: getRestoreMaintenanceMessageMock,
 }));
 
 vi.mock('@/lib/tag-records', () => ({
@@ -138,6 +140,7 @@ beforeEach(() => {
     dbSelectMock.mockReset();
     ensureTagRecordMock.mockReset();
     findTagRecordByNameOrSlugMock.mockReset();
+    getRestoreMaintenanceMessageMock.mockReset();
 
     isAdminMock.mockResolvedValue(true);
     getCurrentUserMock.mockResolvedValue({ id: 1 });
@@ -147,6 +150,7 @@ beforeEach(() => {
     logAuditEventMock.mockResolvedValue(undefined);
     ensureTagRecordMock.mockResolvedValue({ kind: 'found', tag: { id: 10, name: 'nature', slug: 'nature' } });
     findTagRecordByNameOrSlugMock.mockResolvedValue({ kind: 'found', tag: { id: 10, name: 'nature', slug: 'nature' } });
+    getRestoreMaintenanceMessageMock.mockReturnValue(null);
 
     // Default: transaction executes the callback
     transactionMock.mockImplementation(async (cb: (tx: unknown) => Promise<void>) => {
@@ -169,6 +173,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('bulkUpdateImages — auth guards', () => {
+    it('short-circuits during restore maintenance before origin/auth or writes', async () => {
+        getRestoreMaintenanceMessageMock.mockReturnValue('restore in progress');
+
+        const res = await bulkUpdateImages(makeInput());
+
+        expect(res).toEqual({ error: 'restore in progress' });
+        expect(requireSameOriginAdminMock).not.toHaveBeenCalled();
+        expect(isAdminMock).not.toHaveBeenCalled();
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
+
     it('returns error when requireSameOriginAdmin fails', async () => {
         requireSameOriginAdminMock.mockResolvedValue('cross-origin');
         const res = await bulkUpdateImages(makeInput());

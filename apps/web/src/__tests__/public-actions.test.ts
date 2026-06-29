@@ -11,6 +11,8 @@ const {
     pruneSearchRateLimitMock,
     getRateLimitBucketStartMock,
     isRestoreMaintenanceActiveMock,
+    dbInsertMock,
+    dbValuesMock,
     searchRateLimit,
 } = vi.hoisted(() => ({
     headersMock: vi.fn(),
@@ -23,6 +25,8 @@ const {
     pruneSearchRateLimitMock: vi.fn(),
     getRateLimitBucketStartMock: vi.fn(),
     isRestoreMaintenanceActiveMock: vi.fn(),
+    dbInsertMock: vi.fn(),
+    dbValuesMock: vi.fn(),
     searchRateLimit: new Map<string, { count: number; resetAt: number }>(),
 }));
 
@@ -49,6 +53,11 @@ vi.mock('@/lib/data', () => ({
     searchImages: searchImagesMock,
 }));
 
+vi.mock('@/lib/smart-collections', () => ({
+    parseSmartCollectionQuery: vi.fn(),
+    compileSmartCollection: vi.fn(),
+}));
+
 vi.mock('@/lib/restore-maintenance', () => ({
     isRestoreMaintenanceActive: isRestoreMaintenanceActiveMock,
 }));
@@ -69,7 +78,16 @@ vi.mock('@/lib/rate-limit', () => ({
     ),
 }));
 
-import { loadMoreImages, searchImagesAction } from '@/app/actions/public';
+vi.mock('@/db', () => ({
+    db: {
+        insert: dbInsertMock,
+    },
+    imageViews: { table: 'image_views' },
+    topicViews: { table: 'topic_views' },
+    sharedGroupViews: { table: 'shared_group_views' },
+}));
+
+import { loadMoreImages, recordPhotoView, recordSharedGroupView, recordTopicView, searchImagesAction } from '@/app/actions/public';
 
 describe('searchImagesAction', () => {
     beforeEach(() => {
@@ -77,6 +95,8 @@ describe('searchImagesAction', () => {
         getImagesLiteMock.mockReset();
         searchImagesMock.mockReset();
         getClientIpMock.mockReset();
+        dbInsertMock.mockReset();
+        dbValuesMock.mockReset();
         checkRateLimitMock.mockReset();
         incrementRateLimitMock.mockReset();
         decrementRateLimitMock.mockReset();
@@ -96,6 +116,8 @@ describe('searchImagesAction', () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
         getImagesLiteMock.mockResolvedValue([{ id: 1 }]);
         searchImagesMock.mockResolvedValue([{ id: 1 }]);
+        dbValuesMock.mockResolvedValue(undefined);
+        dbInsertMock.mockReturnValue({ values: dbValuesMock });
     });
 
     it('preserves unicode tag slugs when loading more images', async () => {
@@ -200,6 +222,29 @@ describe('searchImagesAction', () => {
         expect(checkRateLimitMock).not.toHaveBeenCalled();
         expect(searchImagesMock).not.toHaveBeenCalled();
         expect(searchRateLimit.size).toBe(0);
+    });
+
+    it('records public analytics views without blocking on the insert promise', async () => {
+        await recordPhotoView(7);
+        await recordTopicView('seoul');
+        await recordSharedGroupView(11);
+
+        expect(dbInsertMock).toHaveBeenCalledTimes(3);
+        expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 7 }));
+        expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ topic: 'seoul' }));
+        expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ groupId: 11 }));
+    });
+
+    it('skips public analytics writes during restore maintenance before header or DB work', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        await recordPhotoView(7);
+        await recordTopicView('seoul');
+        await recordSharedGroupView(11);
+
+        expect(headersMock).not.toHaveBeenCalled();
+        expect(getClientIpMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
     it('rolls back the in-memory pre-increment when the DB bucket is already over the limit', async () => {
