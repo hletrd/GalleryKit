@@ -1,90 +1,108 @@
-# Debugger Review - Cycle 7/100
+# Debugger Review - Cycle 9
 
-Scope: latent bug surfaces, failure modes, regressions, exception paths, race boundaries, and edge cases in current `HEAD` (`17124135999a3d7cb4f5262e8b2b5917503088ae`) for `/Users/hletrd/flash-shared/gallery`.
+Scope: latent bugs, failure modes, regressions, exception cleanup, races, stale artifacts, queue/backfill/restore behavior, upload/delete retry edges, API route error behavior, client state, and tests that can mask failures in `/Users/hletrd/flash-shared/gallery`.
 
 Constraints honored:
-- Read `AGENTS.md` and `CLAUDE.md` before reviewing code.
-- Review-only lane: no implementation, commit, push, or deploy.
-- Existing worktree changes in sibling review files were left untouched.
+- Read `AGENTS.md` and `CLAUDE.md` before repository review.
+- Review-only lane: no source-code or plan edits.
+- Existing dirty sibling review files were left untouched.
 
-## Inventory Before Findings
+## Inventory
 
-Review-relevant inventory examined:
-- Project rules/docs/config: `AGENTS.md`, `CLAUDE.md`, root and app `package.json`, Next/Vitest/TypeScript/ESLint/Drizzle/deploy config.
-- App surface: 75 route/action/page files under `apps/web/src/app`.
-- Runtime libraries: 94 files under `apps/web/src/lib`.
-- Components/UI: 55 files under `apps/web/src/components`.
-- DB layer: 3 files under `apps/web/src/db`, 24 migration SQL files, Drizzle journal/meta.
-- Operational scripts: 22 files under `apps/web/scripts`.
-- Regression surface: 251 files under `apps/web/src/__tests__`.
-
-High-risk paths traced:
-- Upload -> original save -> DB insert -> queue processing -> derivative write -> processed update.
-- Sidecar and in-app color backfill -> advisory locks -> per-image encode -> detection -> DB update -> delete-race cleanup.
-- Public gallery/tag filtering -> server canonicalization -> client URL state -> load-more action.
-- Admin mutation guards, public route rate-limit contracts, restore/maintenance boundaries, and filesystem cleanup paths.
+Built a review-relevant inventory before findings:
+- `554` review-relevant tracked files across `apps/web/src`, `apps/web/scripts`, `apps/web/e2e`, migrations, app configs, and committed context docs/plans/reviews.
+- Approx. `83,287` lines in the code/script/test/migration inventory.
+- Key surfaces traced: upload/LR upload, queue bootstrap and retry, delete cleanup, restore maintenance, in-app and sidecar backfills, public/admin API routes, semantic/OG rate-limit contracts, client search/load-more/admin state, service worker generation, tests that rely on source-grep fixtures.
 
 ## Confirmed Issues
 
-### DBG-C7-01 - Backfill can generate undersized derivatives when stored width is stale
+### DBG9-01 - `retryFailedImage` reports success after a rejected queue enqueue
 
-Severity: High
-Confidence: High
-Status: Confirmed
-
-Code regions:
-- `apps/web/src/lib/process-image.ts:1002-1017` accepts `baseWidth` from the caller.
-- `apps/web/src/lib/process-image.ts:1049-1064` initializes `processingBaseWidth` from `baseWidth`, then reads fresh Sharp metadata.
-- `apps/web/src/lib/process-image.ts:1058-1060` says the upload flow's `baseWidth` is ignored, but the code only uses `freshBaseWidth` for pixel-count/downscale math.
-- `apps/web/src/lib/process-image.ts:1145-1148` picks every derivative width from `processingBaseWidth`.
-- `apps/web/src/lib/admin-backfill-runner.ts:400-403` and `apps/web/scripts/backfill-color-pipeline.ts:337-340` select stored `images.width`; both pass `row.width` into `processImageFormats` at `admin-backfill-runner.ts:502-517` and `backfill-color-pipeline.ts:206-221`.
-
-Problem:
-`processImageFormats` reads fresh metadata, but on the normal non-downscale path it leaves `processingBaseWidth = baseWidth`. That makes the derivative ladder depend on the database/caller width even after the function has already read the actual source dimensions. The inline comment says the stale caller width is ignored, but the resize loop still uses it.
-
-Concrete failure scenario:
-An old row has `images.width = 640` because metadata was imported incorrectly, repaired incompletely, or points at an original whose actual width is 4096. A color-pipeline backfill re-encodes it. `freshBaseWidth` becomes 4096, but because the image is not over the wide-gamut downscale cap, `processingBaseWidth` remains 640. For configured sizes `[640, 1536, 2048, 4096]`, line 1147 makes every larger variant resize to 640, and the base filename copied at line 1308 is also the largest configured slot backed by a 640 px file. The DB can then say the image is processed at the current pipeline version while the gallery serves undersized derivatives.
-
-Suggested fix:
-After validating fresh metadata, set `processingBaseWidth = freshBaseWidth` for the default path and reject missing/zero fresh dimensions before the size loop. Keep the downscale branch overriding it with `targetWidth`. Add a regression test that calls `processImageFormats` with a deliberately stale `baseWidth` smaller than the real fixture width and asserts larger configured variants use the fresh width.
-
-### DBG-C7-02 - Tag filter client state can diverge from canonical server filters
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
+Severity: Medium  
+Confidence: High  
+Status: Confirmed issue
 
 Code regions:
-- `apps/web/src/lib/tag-slugs.ts:6-15` caps and canonicalizes requested tag slugs.
-- `apps/web/src/lib/tag-slugs.ts:37-48` filters requested slugs to tags that actually exist.
-- `apps/web/src/app/[locale]/(public)/page.tsx:161-166` filters the page data query to canonical existing tag slugs, then passes `currentTags={tagSlugs}` at `page.tsx:222`.
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:172-176` does the same for topic pages, then passes `currentTags={tagSlugs}` at `[topic]/page.tsx:214`.
-- `apps/web/src/components/tag-filter.tsx:14-15` ignores that canonical server state and reparses raw `useSearchParams().get('tags')`.
-- `apps/web/src/components/tag-filter.tsx:24-35`, `61-65`, `80-92`, and `104-110` derive next URLs, active chips, `aria-pressed`, and chip count styling from the raw query tokens.
-
-Problem:
-The server canonicalizes the requested tag list before querying data and rendering the heading/load-more props. `TagFilter` then recomputes active state from the raw browser query instead of consuming the canonical `currentTags` already passed into `HomeClient`. Invalid, over-limit, duplicate, or deleted tag slugs are dropped by the data path but remain active in the chip logic and next URL construction.
+- `apps/web/src/app/actions/images.ts:1196-1199` clears `processing_error`, `failed_at`, and writes a fresh `processing_settings_json`.
+- `apps/web/src/app/actions/images.ts:1203-1207` clears in-memory permanent-failure/retry state.
+- `apps/web/src/app/actions/images.ts:1210-1239` calls `enqueueImageProcessing(...)` but ignores its boolean result and always returns `{ success: true }`.
+- `apps/web/src/lib/image-queue.ts:388-400` documents and implements `false` returns for rejected jobs: shutdown, restore maintenance, invalid filenames, or permanently failed state.
+- `apps/web/src/lib/image-queue.ts:828` makes bootstrap select only `processed=false AND processing_error IS NULL`, so a retry that cleared the error but failed to enqueue moves the row out of the failed-images surface.
+- `apps/web/src/__tests__/failed-image-retry.test.ts:99-105` only source-greps that an enqueue call exists and that success can be returned; it does not assert rejected enqueue behavior.
+- `apps/web/src/__tests__/retry-failed-image-auth.test.ts:125-157` covers auth gates only, so it cannot catch this queue-return regression.
 
 Concrete failure scenario:
-Visit `/?tags=deleted-slug`. The server drops `deleted-slug`, so the gallery renders the unfiltered image set and `HomeClient` receives `currentTags=[]`. `TagFilter` still sees `currentTags=['deleted-slug']` from the raw URL, marks "All" inactive (`variant="outline"`), and when the user clicks a real `landscape` chip it sets `?tags=deleted-slug,landscape`. The next server render filters only by `landscape`, but the UI keeps carrying a non-existent active token. This creates misleading active-state/ARIA output and can leave stale query garbage through pagination and sharing.
+A restored or repaired DB row is in the failed state but carries invalid derivative filename metadata. The admin clicks Retry. `retryFailedImage` clears the failure columns and local retry maps, then `enqueueImageProcessing` rejects the job at `image-queue.ts:398-400`. The action still returns success. The row is no longer visible in `getFailedImages()` because `processing_error` is now null, yet it is not queued. Future bootstrap scans can rediscover it, but the same filename guard rejects it again without restoring a visible failure state, leaving an admin-facing "retry succeeded" result for a still-unprocessed image.
 
 Suggested fix:
-Make `TagFilter` accept the canonical active slug list from `HomeClient` and use that for active state and URL mutation. When constructing the next query, start from the canonical list rather than the raw query, so unknown tokens are dropped on the first interaction. Add a component or source-contract test proving `TagFilter` does not parse `useSearchParams().get('tags')` as its active source.
+Validate the job filenames before clearing failure state, or capture the `enqueueImageProcessing` return value and return an error while preserving/restoring `processing_error` when enqueue is rejected. Add a behavioral test where `enqueueImageProcessingMock.mockReturnValue(false)` asserts the action does not return success and does not silently remove the row from the failed state.
 
-## Non-Findings / Ruled Out
+## Likely Issues
 
-- Fresh upload processing mostly avoids DBG-C7-01 because `saveOriginalAndGetMetadata` writes dimensions from Sharp metadata at `process-image.ts:899-904` and `images.ts:360-389` before enqueueing. The bug is still reachable through backfill and any legacy/repair path with stale DB width.
-- Backfill delete-mid-reencode cleanup is present in both in-app and sidecar paths: `admin-backfill-runner.ts:574-612` and `backfill-color-pipeline.ts:437-460`.
-- Queue delete-during-processing cleanup uses full variant scans for non-default size ladders at `image-queue.ts:469-485`.
-- Public load-more sanitizes tag arrays again at `actions/public.ts:129-131`; this limits query abuse but does not fix the client/server active-state divergence in DBG-C7-02.
-- Restore-maintenance, upload quota rollback, admin API auth, mutating action origin checks, and public mutating route rate-limit gates were inspected by source and did not produce a new confirmed debugger finding in this pass.
+### DBG9-02 - Sidecar deleted-mid-reencode cleanup can make a committed batch fail
 
-## Final Missed-Issues Sweep
+Severity: Low  
+Confidence: Medium  
+Status: Likely issue
 
-Final sweeps run:
-- `rg --files` inventory across app, lib, components, scripts, migrations, and tests.
-- Targeted searches for `processImageFormats`, `baseWidth`, `freshBaseWidth`, `processingBaseWidth`, tag filter/query handling, `GET_LOCK`/`RELEASE_LOCK`, fire-and-forget `void`, cleanup/unlink/rename paths, broad catches, and known risk markers.
-- Cross-checked existing review files already written this cycle to avoid stale pre-cycle assumptions while independently validating current code.
+Code regions:
+- `apps/web/scripts/backfill-color-pipeline.ts:400-436` commits the DB batch transaction.
+- `apps/web/scripts/backfill-color-pipeline.ts:439-459` detects rows deleted mid-reencode and then awaits cleanup after the DB transaction.
+- `apps/web/scripts/backfill-color-pipeline.ts:127-132` implements `cleanupDeletedMidReencodeVariants` as raw `Promise.all(...)` with no local catch.
+- `apps/web/src/lib/admin-backfill-runner.ts:430-439` has the safer sibling behavior: cleanup errors are caught and logged because this cleanup is best-effort.
 
-Result:
-No additional higher-confidence latent bug was found beyond the two confirmed issues above. This lane did not run the full quality gates because it was review-only; validation was static source tracing plus exact line-region inspection.
+Concrete failure scenario:
+During a sidecar run, an image is deleted after its derivatives are re-encoded but before the sidecar `UPDATE images ... WHERE id = ?` batch commits. The batch correctly records `affectedRows=0` and attempts orphan derivative cleanup. If one unlink path throws anything other than the ENOENT-tolerant path, for example EACCES/EPERM from a filesystem permission drift, the post-commit `Promise.all` rejects. The DB updates for sibling rows are already committed, but the sidecar treats the cleanup miss as a fatal flush failure and can abort the remaining run. The in-app runner explicitly avoids this escalation for the same cleanup class.
+
+Suggested fix:
+Mirror `admin-backfill-runner.ts`: catch cleanup failures inside `cleanupDeletedMidReencodeVariants`, log a warning with enough filename/id context, and continue the sidecar summary. If the operator needs non-zero visibility for incomplete cleanup, track a separate cleanup failure counter rather than throwing after committed DB work.
+
+## Stale Artifacts / Tests That Can Mislead
+
+### DBG9-03 - Semantic/OG rate-limit comments disagree with current locked behavior
+
+Severity: Low  
+Confidence: High  
+Status: Stale artifact / test-contract risk
+
+Code regions:
+- `apps/web/src/lib/rate-limit.ts:17-30` describes `/api/search/semantic` as Pattern 2 rollback for branches that never reach the guarded resource.
+- `apps/web/src/lib/rate-limit.ts:323-340` says callers must rollback on early returns before expensive work and names invalid body/query-too-short as rollback examples.
+- `apps/web/src/app/api/search/semantic/route.ts:12-16` says malformed post-read bodies intentionally stay charged.
+- `apps/web/src/app/api/search/semantic/route.ts:181-230` pre-increments before body read and returns malformed-body/invalid-query errors without `rollbackSemanticAttempt`.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:187`, `:237`, `:249`, and `:344` assert no rollback on several semantic route branches, matching the route rather than the old `rate-limit.ts` prose.
+- `apps/web/src/__tests__/og-photo-fallback.test.ts:9-10` says all-sizes-fail fallback rolls back the OG rate-limit budget.
+- `apps/web/src/__tests__/og-photo-fallback.test.ts:53-75` and `apps/web/src/app/api/og/photo/[id]/route.tsx:126-131` correctly lock the opposite: all-sizes-fail remains charged after DB/internal fetch work.
+
+Concrete failure scenario:
+A future maintainer follows the central `rate-limit.ts` docstring and adds semantic rollbacks for invalid post-read bodies or restores OG all-sizes-fail rollback. The existing source-grep tests partially protect the actual behavior, but the top-level comments point in the other direction and make the failure mode look like a fix. This is especially risky because both routes are unauthenticated public surfaces where rollback policy is part of the DoS/enumeration boundary.
+
+Suggested fix:
+Update the `rate-limit.ts` semantic pattern docs to distinguish pre-body/pre-config refunds from post-body charged malformed requests, or move `/api/search/semantic` into a distinct "charged after body materialization" pattern. Update the `og-photo-fallback.test.ts` header so it matches the actual assertions at lines 53-75. Prefer behavioral route tests over source-grep where practical.
+
+## Risks Needing Manual Validation
+
+- `apps/web/scripts/backfill-color-pipeline.ts:36-43` documents a known per-image-lock gap for the sidecar. Current predicates reduce the live retry collision: the sidecar selects already-processed rows, while `retryFailedImage` selects `processed=false AND processing_error IS NOT NULL` at `apps/web/src/app/actions/images.ts:1179`. I did not find a current retry-vs-sidecar double-encode path, but the sidecar still lacks the in-app runner's per-image claim and remains worth operator validation before any future predicate broadening.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:238-523` has deeply nested cleanup scopes and indentation that makes review difficult, but the route preserves quota settling, original cleanup, late restore checks, lock release in `finally`, and JSON error responses across the traced throw paths. No confirmed bug found; keep this path under focused tests when touched.
+
+## False Positives / Already Fixed
+
+- Prior `DBG-C7-01` is fixed. `apps/web/src/lib/process-image.ts:1061-1068` now reads fresh dimensions and assigns `processingBaseWidth = freshBaseWidth`; the derivative loop uses `processingBaseWidth` at `apps/web/src/lib/process-image.ts:1149-1152`.
+- Prior `DBG-C7-02` is fixed. `apps/web/src/components/tag-filter.tsx:10-22` accepts canonical `currentTags` and derives `canonicalTags` from props, not raw `useSearchParams().get('tags')`; active state and URL mutation use `canonicalTags` at lines `29-40` and `64-97`.
+- The service worker stamp lag is still a non-finding. `apps/web/package.json:10` runs `scripts/build-sw.ts` in prebuild, and `apps/web/public/sw.js` differs from the template only by the expected stamped version marker.
+- Restore upload/processing lock sequencing was rechecked around `apps/web/src/app/[locale]/admin/db-actions.ts` and the queue restore helpers; no new restore-maintenance regression was confirmed in this pass.
+
+## Verification Evidence
+
+Commands run:
+- `npm run lint:api-auth --workspace=apps/web` — passed.
+- `npm run lint:action-origin --workspace=apps/web` — passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` — passed.
+- `npm test --workspace=apps/web -- failed-image-retry retry-failed-image-auth semantic-search-route og-photo-fallback sw-template-contract` — 5 files passed, 61 tests passed.
+
+Final missed-issue sweep:
+- Full inventory via `rg --files` over app/lib/components/scripts/tests/migrations/config/context.
+- Targeted sweeps for `KNOWN GAP`, `TODO`, `FIXME`, `rollback`, `retryFailedImage`, queue/bootstrap retry maps, cleanup/unlink paths, sidecar/in-app backfill differences, generated service worker drift, API route auth/rate-limit gates, and source-grep tests that can mask behavior.
+- Reviewed dirty sibling review artifacts only as context; did not edit or stage them.
+
+No new Critical or High findings were confirmed in this lane.
