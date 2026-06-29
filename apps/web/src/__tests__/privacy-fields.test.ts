@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { images } from '@/db/schema';
 import { adminSelectFieldKeys, publicSelectFieldKeys } from '@/lib/data';
 import { timelineSelectFieldKeys } from '@/lib/data-timeline';
+import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 
 const SENSITIVE_KEYS = [
     'latitude',
@@ -25,9 +26,9 @@ const SENSITIVE_KEYS = [
     'bit_depth',
     // WI-15: downscale flag is a processing detail, not public metadata.
     'was_downscaled',
-    // R17-L2: raw admin user id that performed the upload is PII. Per-entry
-    // Atom <author> uses a JOIN-derived display name in getImagesForFeed;
-    // the raw column itself never reaches public queries.
+    // R17-L2: raw admin user id that performed the upload is PII. Atom uses
+    // the configured feed-level author; the raw column itself never reaches
+    // public queries.
     'uploaded_by',
     // R10-H2: processing diagnostics — admin-only retry surface.
     'processing_error',
@@ -120,5 +121,12 @@ describe('Privacy field separation', () => {
         expect(timelineSelectFieldKeys).toContain('filename_jpeg');
         expect(timelineSelectFieldKeys).toContain('capture_date');
         expect(timelineSelectFieldKeys).toContain('title');
+    });
+
+    it('search enrichment fields omit every sensitive contract key', () => {
+        const enrichmentKeys = Object.keys(searchEnrichmentSelectFields);
+        for (const key of SENSITIVE_KEYS) {
+            expect(enrichmentKeys).not.toContain(key);
+        }
     });
 });

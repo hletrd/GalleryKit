@@ -15,7 +15,7 @@ export default async function PrivacyPage() {
     const hasGoogleAnalytics = /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id ?? '');
 
     return (
-        <main className="container mx-auto max-w-3xl px-4 py-12">
+        <div className="mx-auto max-w-3xl">
             <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
             <div className="mt-6 space-y-5 text-sm leading-7 text-muted-foreground">
                 <p>{t('intro')}</p>
@@ -28,6 +28,6 @@ export default async function PrivacyPage() {
                     <p>{t('metadataBody')}</p>
                 </section>
             </div>
-        </main>
+        </div>
     );
 }

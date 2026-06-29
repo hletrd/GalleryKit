@@ -33,6 +33,14 @@ describe('nginx production edge hardening', () => {
         expect(forwardedForHeaders.length).toBeGreaterThanOrEqual(5);
     });
 
+    it('overwrites forwarded host on every proxied location and documents TLS edge ownership', () => {
+        expect(nginxConfig).toContain('Do not expose');
+        expect(nginxConfig).toContain('public cleartext edge');
+        const proxyPasses = nginxConfig.match(/proxy_pass http:\/\/nextjs;/g) ?? [];
+        const forwardedHostHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-Host \$host;/g) ?? [];
+        expect(forwardedHostHeaders.length).toBe(proxyPasses.length);
+    });
+
     it('proxies uploads instead of rooting host-side nginx at the container path', () => {
         const uploadsLocation = nginxConfig.match(/location ~ \^\(\?:\/\[a-z\]\{2\}\)\?\/uploads\/\(jpeg\|webp\|avif\)[\s\S]*?\n    \}/)?.[0] ?? '';
         expect(uploadsLocation).toContain('proxy_pass http://nextjs;');

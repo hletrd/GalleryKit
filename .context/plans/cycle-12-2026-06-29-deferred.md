@@ -10,6 +10,14 @@ Security, correctness, privacy, and data-loss findings are not deferred here unl
 
 ## Deferred Items
 
+### C12-GW01 - Local build emits homepage-only sitemap fallback when MySQL is unavailable
+
+- Gate: `npm run build --workspace=apps/web`.
+- File+line: `apps/web/src/app/sitemap.ts` database-backed topic lookup; build log shows `connect ECONNREFUSED 127.0.0.1:3306`.
+- Original severity/confidence: Warning / High.
+- Reason for deferral: The production build completed successfully and the sitemap route intentionally falls back when the local build environment has no MySQL listener. This is an environment warning, not a code failure in the final tree.
+- Exit criterion: Re-open if CI/prod builds run with an expected database and still fall back, or if the sitemap fallback starts failing the build.
+
 ### C12-D01 - Admin dashboard loads every permanently failed image in one query/render
 
 - Aggregate finding: AGG-C12-06.

@@ -1,9 +1,9 @@
 /**
  * Caption generator for US-P52 (Auto alt-text via local Florence-2).
  *
- * STUB IMPLEMENTATION: The full ONNX Florence-2 inference is deferred because:
- *   1. The Florence-2-base ONNX model is multi-GB and requires an HF token download.
- *   2. onnxruntime-node adds ~150 MB of native binaries — deferred until real inference ships.
+ * STUB IMPLEMENTATION: The full vision-captioning path is deferred because the
+ * repo currently ships CLIP inference only; no Florence-2 model weights or
+ * captioning runner are wired into the runtime image.
  *
  * When `auto_alt_text_enabled` is true, this stub generates a deterministic
  * EXIF-derived hint string (e.g. "Photo taken with Canon EOS R5") rather than
@@ -11,10 +11,8 @@
  * fallback resolver, and admin bulk-editor surfaces while keeping the binary
  * footprint zero.
  *
- * DEFERRED-FIX: Swap `generateCaptionStub` for real ONNX inference once:
- *   - `onnxruntime-node` is added as a dependency
- *   - Florence-2-base ONNX weights are downloaded to data/models/florence2/
- *   - The download script (scripts/download-florence2.ts) is run by the operator
+ * DEFERRED-FIX: Swap `generateCaptionStub` for real caption inference only after
+ * a model, download script, runtime path, and operator runbook are added.
  */
 import 'server-only';
 
@@ -32,7 +30,7 @@ const ALT_TEXT_MAX_CHARS = 140;
 
 /**
  * STUB: Produce an EXIF-derived caption placeholder.
- * Real ONNX Florence-2 inference replaces this in a future cycle.
+ * Real caption inference replaces this in a future cycle.
  */
 function generateCaptionStub(input: CaptionInput): string {
     if (input.camera_model) {
