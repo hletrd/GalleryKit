@@ -1,3 +1,158 @@
+# Critic Review - Cycle 4
+
+Role: `critic`
+Scope: current HEAD only
+HEAD: `0fa5beb1`
+Timestamp: 2026-06-29 KST
+Status: review artifact written for review-plan-fix cycle 4
+
+## Inventory And Method
+
+Required context read first:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `~/.agents/skills/code-review/SKILL.md`
+- `.context/reviews/_aggregate.md`
+- current `.context/reviews/architect.md`
+- prior `.context/reviews/critic.md`
+- `.context/plans/cycle-3-2026-06-29-plan.md`
+- `.context/plans/cycle-3-2026-06-29-deferred.md`
+- recent deferred/plan records including `plan/plan-365-run6-cycle11-fixes.md`, `plan/plan-366-run6-cycle11-deferred.md`, and `.context/deferred-cycle7-r2.md`
+
+Repository inventory:
+- 2,497 tracked files at current HEAD.
+- 475 tracked TypeScript/TSX files under `apps/web/src`.
+- 288 tracked files across the review-relevant app, component, library, script, e2e, and migration surfaces (`apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/e2e`, `apps/web/drizzle`).
+- Current route/action surface inventoried: 8 API route files and 12 server-action files.
+- Current cycle-3 implementation commits reviewed: restore-maintenance guards, rate-limit scanner hardening, UI/e2e-adjacent label changes, upload-format copy, map fallback, Docker/Compose public mount change, and semantic constant split.
+
+Review-relevant files examined by surface:
+- Runtime/deploy: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/package.json`.
+- Auth/origin/rate-limit gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, public/admin API routes.
+- Restore/upload/data paths: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`.
+- Semantic/search surface: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-embedding-constants.ts`, `apps/web/src/components/search.tsx`, semantic route tests.
+- UI/e2e surface: `apps/web/src/components/nav-client.tsx`, `apps/web/src/components/map/map-loader.tsx`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/e2e/nav-visual-check.spec.ts`, `apps/web/e2e/test-fixes.spec.ts`, client source-contract tests.
+- Migration/schema/privacy docs: `apps/web/drizzle/meta/_journal.json`, migration journal tests, `apps/web/src/db/schema.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/lib/safe-json-ld.ts`, README/CLAUDE deployment guidance.
+
+Validation evidence gathered:
+- PASS `npm run lint:api-auth --workspace=apps/web`.
+- PASS `npm run lint:action-origin --workspace=apps/web`.
+- PASS `npm run lint:public-route-rate-limit --workspace=apps/web` against current route files.
+- PASS targeted Vitest: `client-source-contracts.test.ts`, `map-thumb-wiring.test.ts`, `check-public-route-rate-limit.test.ts`, `semantic-search-route.test.ts`.
+- Manual scanner proof: `checkPublicRouteSource(...)` accepts an unreachable `if (false) { preIncrementSemanticAttempt(...) }` fixture before `db.insert(...)`, returning `OK: route.ts (uses rate-limit helper)`.
+
+Recurring-pattern handling:
+- I did not re-file deferred cycle-3 architecture/performance items: semantic vector recall/windowed scan, process-local topology, upload quota scoped-claim refactor, timeline generated-column redesign, public-map scalability, topic mutable-natural-key migration, selector consolidation, auth helper layering, or storage abstraction cleanup.
+- I did not re-file the old semantic missing-Content-Length streaming cap as a new finding; it remains a known historical/deferred body-size hardening issue. I did note that the route-level comment now overstates the protection, but the cleaner schedulable issue found this cycle is the rate-limit scanner partial-fix miss below.
+- I rechecked fixed cycle-3 findings before excluding them: restore guards now exist for `bulkUpdateImages`, LR token create/revoke, and public analytics writes; upload picker no longer advertises `.arw`, `.heic`, `.heif`, or `.bmp`; Docker/Compose loopback and public-upload mount tests exist; map fallback source contract exists; semantic client constants were split.
+
+## Findings
+
+### CRIT-C4-01 - Public route rate-limit lint still accepts unreachable helper calls before mutation
+
+Severity: Medium  
+Confidence: High  
+Risk type: Confirmed gate blind spot  
+Validation status: Confirmed
+
+Location/code region:
+- `apps/web/scripts/check-public-route-rate-limit.ts:125-153`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:167-193`
+- Cycle-3 plan expectation: `.context/plans/cycle-3-2026-06-29-plan.md:112-119`
+
+Why this is a problem:
+- Cycle 3 explicitly scheduled a fix for unreachable limiter calls and uncalled nested helper calls. The implementation closes nested function/callback cases by skipping function-like descendants, but it still treats any top-level statement containing a helper call as proof that the handler is charged.
+- `inspectStatement()` marks `statementHasRateLimit = true` even when the call sits inside an unreachable branch such as `if (false) { ... }`; later mutation statements see `sawRateLimit = true`, so the scanner returns pass.
+- The current tests cover nested functions and callbacks, but there is no `if (false)` / unreachable branch fixture despite the aggregate naming that exact failure scenario.
+
+Concrete failure scenario:
+- A future public mutating route is committed with:
+  ```ts
+  export async function POST() {
+    if (false) preIncrementSemanticAttempt(ip, Date.now());
+    await db.insert(rows).values({ ok: true });
+  }
+  ```
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passes, but the route mutates public state without charging a rate-limit bucket.
+
+Concrete fix:
+- Add fixtures for `if (false)`, `if (DEBUG_DISABLED)`, and branch-only helper calls before mutation.
+- Make the scanner statement/control-flow aware enough to require an executable guard on all paths before the first known mutation, or fail closed for control-flow shapes it cannot prove. At minimum, do not let helper calls inside conditional blocks satisfy the gate unless the branch is the actual rate-limit early-return guard.
+
+Evidence:
+- Direct proof run against current scanner:
+  ```json
+  {
+    "passed": ["OK: route.ts (uses rate-limit helper)"],
+    "failed": []
+  }
+  ```
+  for a fixture with `if (false) { preIncrementSemanticAttempt(...) }` before `db.insert(...)`.
+
+### CRIT-C4-02 - Playwright nav specs still query the removed static theme-toggle accessible name
+
+Severity: Medium  
+Confidence: High  
+Risk type: Confirmed test drift / CI failure risk  
+Validation status: Confirmed by source inspection
+
+Location/code region:
+- `apps/web/src/components/nav-client.tsx:41-46`, `apps/web/src/components/nav-client.tsx:161-165`
+- `apps/web/messages/en.json:608-612`
+- `apps/web/e2e/test-fixes.spec.ts:24-40`
+- `apps/web/e2e/nav-visual-check.spec.ts:66-76`
+
+Why this is a problem:
+- Cycle 3 correctly changed the theme button from a static label to a stateful label: `aria-label={themeAriaLabel}`, with English text `"Theme: {theme}. Switch to {nextTheme}."`.
+- The Playwright specs still locate the button by the old exact accessible name `"Toggle theme"`.
+- The old translation key remains in `en.json`, so string search alone can miss the drift, but the component no longer renders that key.
+
+Concrete failure scenario:
+- `npm run test:e2e --workspace=apps/web` runs the nav specs after the stateful-label change. The desktop checks execute `nav.getByRole('button', { name: 'Toggle theme' })`; the actual initial accessible name is `Theme: System. Switch to Light.`. The locator does not match, so the e2e suite fails even though the UI behavior is correct.
+
+Concrete fix:
+- Update e2e locators to use a regex such as `/^Theme: .* Switch to .*[.]$/`, or expose a stable test id only for test selection while keeping the accessible name stateful.
+- Add one e2e assertion that the accessible name changes after clicking, which would make the test align with the product accessibility contract instead of the obsolete static label.
+- Remove the unused `aria.toggleTheme` key if no caller remains, or keep it only if another visible UI still uses it.
+
+Evidence:
+- Source search found stale exact locators in `apps/web/e2e/test-fixes.spec.ts:24`, `:28`, `:40`, and `apps/web/e2e/nav-visual-check.spec.ts:74`.
+- The component computes `themeAriaLabel` from `aria.cycleTheme`, and the initial English label resolves to `Theme: System. Switch to Light.`, not `Toggle theme`.
+
+## Missed-Issues Sweep
+
+Security posture:
+- Admin API auth gate passed for both current admin API routes.
+- Server-action same-origin gate passed for mutating actions, including the newly guarded `bulkUpdateImages`, LR token mutations, and restore paths.
+- Public mutating route rate-limit lint passes against current route files; the finding above is about the scanner's future-regression blind spot, not an unmetered current route.
+- Search enrichment selectors remain compile-guarded against `PrivacySensitiveKeys`; no public PII leak was found in semantic/similar result enrichment.
+- JSON-LD emitters continue to route through `safeJsonLd` / sanitized paths in inspected public pages.
+
+Operator/deploy posture:
+- Docker/Compose loopback binding is now source-tested.
+- The public mount change now mounts only `./public/uploads`; `entrypoint.sh` chowns that bind mount before dropping to `node`, so I did not file a write-permission issue.
+- Nginx LR upload exception, upload proxying, and body caps are tested in `nginx-config.test.ts`.
+
+Product/UX posture:
+- The map dynamic chunk fallback exists and is localized via a prop.
+- The upload picker format list now aligns better with runtime-supported first-class browser uploads.
+- The stateful theme label improves accessibility, but stale e2e selectors now need to follow it.
+
+Known deferred items not re-filed:
+- Timeline/year/on-this-day sargability and calendar timezone semantics.
+- Semantic/similar search newest-first scan recall and request-path vector architecture.
+- CLIP embedding queue/backpressure.
+- Process-local topology enforcement.
+- Upload quota scoped-claim refactor.
+- Visual snapshot baseline policy for nav artifacts.
+
+Coverage statement:
+- This was a repository-wide skeptical review of current HEAD with line-level inspection of the changed cycle-3 surfaces plus high-risk cross-file invariants. Generated/binary/image assets, `node_modules`, live production, and destructive/external operations were not exercised. Full `lint`, `typecheck`, `build`, full Vitest, and e2e were not run; targeted tests and lint gates listed above were run to ground the findings.
+
+Finding count: 2 total — 2 Medium, 0 High/Critical.
+
+---
+
 # Critic Review - Cycle 3
 
 Role: `critic`
