@@ -1,134 +1,127 @@
-# Architect Review - Cycle 10
+# Architect Review - Cycle 11
 
-Review target: current `HEAD`, `42c5b2269473cac2dea172cd993cd0d8a4933f45`.
+Review target: current `master` HEAD `a4af799209d51c5b8972d39747ab185346ed0eac`. Recent commits on top of `d5d79e17` are review-artifact commits; I treated the production source as the active implementation surface and did not edit production code.
 
-I read `AGENTS.md` and `CLAUDE.md` before inspecting the repository. This is Prompt 1 only: I did not edit source, plans, migrations, tests, or deploy files. The only intended change from this lane is this review artifact.
+Role: architectural/design risks, coupling, layering, and boundary ownership.
 
 ## Inventory Built Before Findings
 
-Review-relevant inventory at current `HEAD`:
+I read the workspace instructions and `CLAUDE.md` first, then inventoried the current repo before forming findings.
 
-- Operating authority and architecture docs: `AGENTS.md`, `CLAUDE.md`, root package/deploy files, schema/deploy runbooks, and `.context/reviews/**` conventions.
-- App/request surface: all 75 TypeScript/TSX files under `apps/web/src/app`, including admin/public pages, route handlers, server actions, and API routes.
-- Domain/data layer: all 95 TypeScript/TSX files under `apps/web/src/lib`, plus `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, and shared select/privacy helpers.
-- UI/client boundary: all 57 TypeScript/TSX files under `apps/web/src/components`, with focus on client/server import boundaries and action callers.
-- Schema, migrations, operations: Drizzle SQL and journal files, `apps/web/scripts/migrate.js`, operational scripts under `apps/web/scripts/**`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, and `apps/web/next.config.ts`.
-- Tests/contracts: 256 test files under `apps/web/src/__tests__`, with targeted reads of migration/reconcile, privacy fields, public route rate limiting, action-origin, upload/restore locks, queue failures, semantic search, generated artifact, and restore scanner coverage.
-- Total reviewed source/config artifact set for the live app/deploy/schema surface: 290 files under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/src/components`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx`, and `apps/web/public` with relevant source/config extensions.
+Review-relevant inventory:
 
-I excluded `.next/`, `node_modules/`, binary fixtures/screenshots, secrets, and historical scratch material that does not define current behavior. Cross-file paths traced: upload -> original file -> DB insert -> queue -> derivatives -> public serving; restore/maintenance; analytics writes/retention; semantic-search embedding/backfill/query; topic rename/alias/smart-collection invariants; admin/public auth boundaries; migration baselining; Docker/deploy topology; generated artifact contracts.
+- Governance and architecture docs: `AGENTS.md`, `CLAUDE.md`, root/package deploy scripts, and current `.context/reviews/*.md` artifacts.
+- App/request surface: all App Router pages, route handlers, API routes, and server actions under `apps/web/src/app`.
+- Core architecture modules: `apps/web/src/lib/**`, especially auth/session, action guards, rate limits, data selectors/privacy guards, upload paths, image processing, queue/bootstrap/shutdown, restore maintenance, DB restore, storage quarantine, semantic search, and CLIP model paths.
+- Schema and migration surface: `apps/web/src/db/schema.ts`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, and `apps/web/scripts/migrate.js`.
+- Operations surface: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, and sidecar scripts under `apps/web/scripts`.
+- Contract tests: privacy field guards, action/API/rate-limit scanners, Lightroom upload source contracts, storage quarantine tests, upload path tests, migration/journal tests, queue/backfill tests, semantic-search tests, and recent current-cycle review artifacts.
 
-## Confirmed Issues
+Counted active source/config files under the app/lib/component/script/schema/nginx review roots: 286 files with source/config extensions. Excluded `node_modules`, binary fixtures, screenshots, runtime data, and historical archived review material except where needed to avoid stale duplicate claims.
 
-None found.
+## Confirmed Findings
 
-Evidence supporting that conclusion:
+### ARCH-C11-01 - Mutating admin actions do same-origin checks after auth/session work
 
-- Admin API auth boundary passed: `npm run lint:api-auth --workspace=apps/web` reported both admin API routes wrapped correctly.
-- Mutating server action origin boundary passed: `npm run lint:action-origin --workspace=apps/web` reported all mutating actions enforce same-origin provenance or carry explicit read-only/public exemptions.
-- Public mutating route rate-limit boundary passed: `npm run lint:public-route-rate-limit --workspace=apps/web` reported semantic search uses a rate-limit helper and the other public API routes have no mutating handlers.
-- Public privacy fields are compile-guarded: `apps/web/src/lib/data.ts:458-506` defines the sensitive-key and large-payload guards for public select shapes.
-- The cycle 9 confirmed analytics-retention index issue is fixed in HEAD: `apps/web/src/db/schema.ts:232-233`, `apps/web/src/db/schema.ts:247-248`, and `apps/web/src/db/schema.ts:260-261` define `viewed_at, id` indexes; `apps/web/drizzle/0027_analytics_retention_indexes.sql:1-3` ships them; `apps/web/drizzle/meta/_journal.json:197-198` journals the migration; `apps/web/scripts/migrate.js:581-618` mirrors the indexes for legacy/fresh reconciliation.
-
-## Likely Issues
-
-None found.
-
-## Risks Needing Manual Validation
-
-### ARCH-C10-RISK-01 - Horizontal scaling would break process-local coordination assumptions
-
-Severity: Medium  
-Confidence: High  
-Status: Risk, not a confirmed defect under the documented single-web-instance deployment  
-Area: deployment topology, consistency boundaries, runtime coordination
+Severity: Low
+Confidence: High
+Status: Confirmed layering/guardrail issue, not a confirmed CSRF bypass
 
 Evidence:
 
-- The shipped deploy topology defines one long-lived web container with bind-mounted app data: `apps/web/docker-compose.yml:11-27`.
-- Restore maintenance is a `globalThis` boolean local to one Node process: `apps/web/src/lib/restore-maintenance.ts:1-22`, with begin/end transitions at `apps/web/src/lib/restore-maintenance.ts:44-56`.
-- The image-processing queue, dedupe sets, retry maps, bootstrap cursor, and side-effect drain set are also process-local: `apps/web/src/lib/image-queue.ts:274-324`.
-- Restore quiescence only pauses and clears that process's queue before resetting local queue state: `apps/web/src/lib/image-queue.ts:1019-1073`.
-- Shared-group view increments buffer in module-local `Map`s and timers: `apps/web/src/lib/data.ts:12-34`, drained by a local flush loop at `apps/web/src/lib/data.ts:74-112`.
-- Several abuse/limit/status fast paths are process-local: OG/share/search/semantic limit maps at `apps/web/src/lib/rate-limit.ts:74-109` and `apps/web/src/lib/rate-limit.ts:312-346`, upload claims at `apps/web/src/lib/upload-tracker-state.ts:7-20`, and admin backfill status at `apps/web/src/lib/admin-backfill-runner.ts:219-230`.
+- `apps/web/src/app/actions/settings.ts:40-47` checks maintenance, then calls `isAdmin()`, then calls `requireSameOriginAdmin()`.
+- `apps/web/src/app/actions/seo.ts:54-61` has the same ordering.
+- `apps/web/src/app/actions/topics.ts:85-92` repeats the same trust-boundary order for topic creation, with the same pattern repeated across other topic mutations.
+- `apps/web/src/app/actions/admin-users.ts:75-82` calls `isAdmin()` before same-origin rejection on admin creation; `apps/web/src/app/actions/admin-users.ts:182-190` calls `isAdmin()` and `getCurrentUser()` before origin rejection on deletion.
+- The broader sweep shows many similar sequences in `apps/web/src/app/actions/tags.ts`, `sharing.ts`, `collections.ts`, `settings.ts`, `seo.ts`, and `topics.ts`.
+- The guard helper itself is documented as the server-action provenance boundary at `apps/web/src/lib/action-guards.ts:19-37`.
 
 Failure scenario:
 
-An operator adds a second web process, enables Node clustering, or runs a blue/green pair against the same MySQL database and bind-mounted upload tree. Process A begins restore maintenance and quiesces only its queue while process B still accepts uploads, holds its own upload tracker, maintains its own semantic/public rate-limit buckets, and can enqueue/encode against the same filesystem. The DB advisory locks cover some critical sections, but they do not propagate the restore-maintenance flag, queue pause, view buffer drain, or public limiter budgets. The result can be inconsistent restore/upload interleaving, duplicate CPU work, lost buffered analytics increments on process death, and weakened unauthenticated rate limits.
+A malicious site triggers cross-site server-action requests from an authenticated admin browser. Mutations are eventually blocked, but each request can still force session verification and, on some paths, current-user lookup before the provenance check rejects it. More importantly, this ordering teaches future maintainers that auth/session work is acceptable before the origin boundary; a later edit can add validation, DB reads, rate-limit increments, audit work, or other side effects before `requireSameOriginAdmin()` while the current lint gate still passes because it only proves the guard exists.
 
-Concrete fix:
+Suggested fix:
 
-Keep the single-web-instance invariant explicit in deploy/runbooks and add a startup guard that fails closed when a multi-replica deployment is detected unless a shared coordination backend is configured. Before scaling out, move restore maintenance, queue state/claims, upload counters, shared-group view buffering, admin backfill status, and public/semantic limiter state into shared primitives such as MySQL lease rows, durable job tables, Redis, or another single source of truth. Add an integration test or smoke script that asserts a restore/upload lock is visible across two independently started processes.
+Standardize mutating admin action prologues so `requireSameOriginAdmin()` is the first trust-boundary check after cheap maintenance/read-only preconditions, then run `isAdmin()` / `getCurrentUser()`, validation, rate limits, and DB work. Strengthen `apps/web/scripts/check-action-origin.ts` so it fails if `isAdmin`, `getCurrentUser`, `db.*`, audit logging, or rate-limit pre-increments appear before the same-origin return path in mutating exports.
 
-### ARCH-C10-RISK-02 - Database restore remains SQL-only while media/resources are filesystem state
+### ARCH-C11-02 - Sidecar backfill scripts bypass the bounded-concurrency architecture
 
-Severity: Medium  
-Confidence: High  
-Status: Risk, documented architecture gap rather than a current code regression  
-Area: restore semantics, data/file consistency, recovery operations
+Severity: Medium
+Confidence: High
+Status: Confirmed operational architecture issue
 
 Evidence:
 
-- Restore serializes with upload/backfill locks and starts local maintenance before quiescing buffered view counts and the local image queue: `apps/web/src/app/[locale]/admin/db-actions.ts:304-365`.
-- The actual restore imports the submitted SQL into MySQL via `mysql --one-database`; it does not restore or validate `data/uploads`, public derivatives, or resources: `apps/web/src/app/[locale]/admin/db-actions.ts:520-526`.
-- A successful SQL import then runs post-restore migrations and resumes app data without a filesystem reconciliation phase: `apps/web/src/app/[locale]/admin/db-actions.ts:563-578`.
-- The deploy model persists media outside the image via bind mounts: `apps/web/docker-compose.yml:23-27`.
-- Queue processing fails if a restored DB row references an original file that is not present on disk: `apps/web/src/lib/image-queue.ts:546-557`.
+- `apps/web/scripts/backfill-color-pipeline.ts:27-32` documents `BACKFILL_CONCURRENCY` as a cap to avoid overwhelming the server and uses a global MySQL advisory lock.
+- `apps/web/scripts/backfill-color-pipeline.ts:370-371` parses `BACKFILL_CONCURRENCY` as `Math.max(1, Number(...) || 2)` and passes it straight to `new PQueue({ concurrency })`.
+- `apps/web/scripts/backfill-cicp-recheck.ts:80-81` uses the same unbounded parse shape.
+- The app already has a safer finite integer helper at `apps/web/src/lib/env.ts:1-24`.
+- The in-app runner explicitly clamps its concurrency to the DB pool budget at `apps/web/src/lib/admin-backfill-runner.ts:662-673`.
 
 Failure scenario:
 
-An operator downloads a database dump, later restores it after originals, derivatives, or resources have been pruned, moved, or replaced independently. The restored SQL can reference `images.filename_original`, derivative filenames, shared resources, or processed flags whose files do not exist in the bind-mounted filesystem. `processed = false` rows repeatedly fail queue processing because the original is missing; `processed = true` rows can remain publicly visible while their derivative paths 404; resource links can point to absent files. The restore itself can report success because the SQL and migrations succeeded.
+An operator runs the documented sidecar backfill with `BACKFILL_CONCURRENCY=Infinity`, `1e309`, or a very large value. The script bypasses the intended PQueue cap, can schedule a large gallery's re-encode work at once, and each task can drive Sharp AVIF/WebP/JPEG fan-out plus MySQL updates from a separate sidecar pool. That undermines the architecture that reserves pool/CPU budget for the live web process and can turn maintenance into host-level CPU, memory, disk I/O, and DB saturation. Fractional values such as `2.5` are also accepted, which makes the operational contract ambiguous.
 
-Concrete fix:
+Suggested fix:
 
-Define restore as a paired DB+filesystem snapshot operation or make SQL-only restore explicitly verify media consistency before re-enabling the site. A practical implementation is to emit a manifest during backup, restore the matching `data/uploads`, `public/uploads`, and `public/resources` trees with the SQL dump, then run a post-restore integrity scanner that checks every referenced original/derivative/resource. For mismatches, either block restore completion in maintenance mode or atomically mark affected images/resources unavailable with an operator report. Add a test fixture that restores a DB referencing a missing original and verifies the site remains in a safe maintenance/remediation state.
+Reuse `parseBoundedPositiveInteger` or add a script-local equivalent for sidecars: require finite values, intentionally floor or reject fractions, and clamp to a documented maximum. Keep sidecar defaults more aggressive than in-app if desired, but still finite. Add coverage for `Infinity`, `1e309`, fractional, zero, negative, and very large `BACKFILL_CONCURRENCY` values in both scripts.
 
-### ARCH-C10-RISK-03 - Production semantic search depends on a manual three-part rollout invariant
+## Risks
 
-Severity: Low  
-Confidence: Medium  
-Status: Risk, guarded by fail-closed behavior but still operationally easy to mis-sequence  
-Area: semantic search activation, model/version coupling, operator workflow
+### ARCH-C11-RISK-01 - The quarantined storage backend still maps private originals under the public upload root
+
+Severity: Medium
+Confidence: High
+Status: Risk; confirmed design mismatch in a quarantined module, not a live path today
 
 Evidence:
 
-- Production semantic mode heals to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` is set: `apps/web/src/lib/gallery-config.ts:123-142`.
-- The real CLIP loader is offline-only and reads the pinned model from `CLIP_MODELS_ROOT`: `apps/web/src/lib/clip-model.ts:77-82` and `apps/web/src/lib/clip-model.ts:105-114`.
-- The pinned Hugging Face model/revision is centralized in `apps/web/src/lib/clip-model-id.ts:12-25`.
-- Production embeddings are versioned with `PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8'`: `apps/web/src/lib/clip-embeddings.ts:171-173`.
-- The backfill script selects and upserts rows at the active target version, replacing stale rows only when it is run with the intended mode: `apps/web/scripts/backfill-clip-embeddings.ts:77-79` and `apps/web/scripts/backfill-clip-embeddings.ts:130-177`.
-- The live semantic route scans only rows matching the active model version and returns 503 when production has no rows: `apps/web/src/app/api/search/semantic/route.ts:242-261`.
+- Current canonical paths split processed derivatives under `UPLOAD_ROOT` from originals under `UPLOAD_ORIGINAL_ROOT`: `apps/web/src/lib/upload-paths.ts:11-46`.
+- Legacy public originals are explicitly treated as unsafe and fail production startup when present: `apps/web/src/lib/upload-paths.ts:24-25`, `apps/web/src/lib/upload-paths.ts:110-130`, and `apps/web/src/instrumentation.ts:1-5`.
+- The local storage backend imports only `UPLOAD_ROOT`: `apps/web/src/lib/storage/local.ts:14-15`.
+- It includes `original` in directories it creates under `UPLOAD_ROOT`: `apps/web/src/lib/storage/local.ts:17-20` and `apps/web/src/lib/storage/local.ts:50-59`.
+- All keys, including `original/foo`, resolve under `UPLOAD_ROOT`: `apps/web/src/lib/storage/local.ts:40-47`; writes use that resolver at `apps/web/src/lib/storage/local.ts:62-84`.
+- `getUrl()` refuses `original/*` URLs at `apps/web/src/lib/storage/local.ts:130-138`, but that is only an API-level URL guard, not a storage-location guard.
+- CI currently quarantines imports from `@/lib/storage` outside the storage module: `apps/web/src/__tests__/storage-quarantine.test.ts:1-25` and `apps/web/src/__tests__/storage-quarantine.test.ts:116-129`.
+- Nginx blocks `/uploads/original/` in the documented deployment at `apps/web/nginx/default.conf:163-165`, but the app-level static/public file model still treats `public/uploads` as public infrastructure.
 
 Failure scenario:
 
-An operator sets the production env gate and DB setting before seeding the exact pinned weights or before completing the production backfill. The route fails closed with 503 for semantic search, and similar-image search will not find production-version rows for affected images. That is safer than returning mixed stub/production results, but it still presents as an avoidable feature outage and can be mistaken for an app regression.
+A future storage-integration change removes or relaxes the quarantine and saves originals through `getStorage().writeStream('original/name.jpg', ...)`. The file lands in `public/uploads/original` rather than `data/uploads/original`. In the running process, the startup guard has already run, so it does not catch the new file until restart. Depending on serving layer and environment, the original can be reachable under `/uploads/original/name.jpg`, or the next production boot fails closed because `assertNoLegacyPublicOriginalUploads()` sees a file in the legacy public original directory. Either outcome violates the private-originals architecture.
 
-Concrete fix:
+Suggested fix:
 
-Add an explicit readiness/activation command for semantic production mode. It should verify the pinned model files are present and loadable from `CLIP_MODELS_ROOT`, confirm at least one or all expected `image_embeddings.model_version = PRODUCTION_MODEL_VERSION` rows exist, and only then set the DB setting or produce the exact operator command to do so. Also expose a read-only admin health indicator showing env gate, DB mode, model-load status, production row count, and last backfill result.
+Do not integrate `@/lib/storage` until the keyspace explicitly models privacy domains. Map `original/*` to `UPLOAD_ORIGINAL_ROOT`, map derivative keys to `UPLOAD_ROOT`, and map `resources/*` to the resources root. Alternatively remove original support from the storage abstraction until the full upload/processing/serving pipeline is migrated. Add a storage test that writes `original/foo.jpg` and asserts the resolved file is under `UPLOAD_ORIGINAL_ROOT`, not `UPLOAD_ROOT/original`.
 
-## Notable Non-Issues Verified
+### ARCH-C11-RISK-02 - Browser and Lightroom uploads duplicate the same ingest pipeline instead of sharing an upload service
 
-- Uploads snapshot processing settings before enqueueing and pass those snapshots into queue jobs, avoiding one upload straddling later admin settings changes: `apps/web/src/app/actions/images.ts:183-190`, `apps/web/src/app/actions/images.ts:481-513`, `apps/web/src/lib/image-queue.ts:559-621`.
-- Delete-mid-processing cleanup now scans all configured derivative sizes instead of only defaults: `apps/web/src/lib/image-queue.ts:637-660`.
-- Restore no longer has the earlier paused-queue/onIdle deadlock shape; the quiesce path pauses, clears, awaits idle, drains side effects, and resets bootstrap state: `apps/web/src/lib/image-queue.ts:1019-1073`.
-- Topic slug rename keeps dependent rows and smart-collection filters aligned in the same transaction: `apps/web/src/app/actions/topics.ts:255-338`.
-- Semantic search and similar search filter by active model version, so stub and production rows are not co-ranked: `apps/web/src/app/api/search/semantic/route.ts:242-261`, `apps/web/src/app/api/search/similar/[id]/route.ts:123-148`.
+Severity: Medium
+Confidence: High
+Status: Risk; current behavior is heavily guarded, but the architecture is brittle
+
+Evidence:
+
+- Browser upload owns the full ingest sequence in `apps/web/src/app/actions/images.ts:114-612`: auth/origin, upload tracker, upload-processing contract lock, config snapshot, disk preflight, topic check, save original, HDR gate, GPS strip, late restore check, DB insert, tags, enqueue, audit, and revalidation.
+- Lightroom upload independently reimplements the same sequence in `apps/web/src/app/api/admin/lr/upload/route.ts:62-531`.
+- The LR route comments repeatedly call out parity with the browser path, for example filename validation at `apps/web/src/app/api/admin/lr/upload/route.ts:154-161`, contract locking at `apps/web/src/app/api/admin/lr/upload/route.ts:222-238`, disk preflight at `apps/web/src/app/api/admin/lr/upload/route.ts:256-284`, HDR gating at `apps/web/src/app/api/admin/lr/upload/route.ts:327-344`, GPS strip at `apps/web/src/app/api/admin/lr/upload/route.ts:346-359`, and enqueue snapshot parity at `apps/web/src/app/api/admin/lr/upload/route.ts:456-493`.
+- The regression test is largely a source-text parity net because the route is expensive to exercise end-to-end: `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-16`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:166-174`, and `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:281-387`.
+
+Failure scenario:
+
+A future feature adds a new ingest invariant to `uploadImages()` such as a new processing setting snapshot, metadata column, privacy scrub, queue payload field, cleanup branch, or rate-limit rollback. Unless the author remembers to duplicate the same change in `/api/admin/lr/upload` and add another source-contract assertion, browser uploads and PAT uploads drift again. Prior comments in the LR route already document several such drift classes: HDR gate, GPS strip, ICC column, upload attribution, contract lock, disk preflight, quota settlement, and queue payload settings. The result can be path-dependent privacy behavior, inconsistent color processing, orphaned originals, missing attribution, or uploads that ignore admin settings on the primary non-browser ingest path.
+
+Suggested fix:
+
+Extract a server-only ingest orchestration service that accepts an authenticated actor, a file, sanitized metadata, a topic, client identity, and an auth mode, then owns the shared sequence once: quota claim/settle, upload-processing contract lock, strict config snapshot, disk preflight, save/original cleanup, metadata extraction, HDR/GPS policy, DB insert, enqueue payload, audit event hooks, and revalidation. Keep browser action and Lightroom route as thin adapters for auth, input parsing, response formatting, and i18n. Replace most source-text parity tests with behavior tests against the shared service and a small adapter contract for token-specific behavior.
 
 ## Final Missed-Issue Sweep
 
-I ran repository-wide sweeps for:
+Final sweeps covered:
 
-- Raw SQL/advisory-lock/destructive statements: `db.execute`, `connection.query`, `GET_LOCK`, `RELEASE_LOCK`, `DROP`, `TRUNCATE`, `DELETE FROM`, `CREATE INDEX`, and `ALTER TABLE`.
-- Process-local state: `globalThis`, `Map`, timers, buffers, queues, bootstrap cursors, and in-memory rate limits.
-- Restore/maintenance/orphan/invariant comments and TODO/FIXME markers.
-- Migration/schema parity for retention indexes, embedding indexes, sensitive-field guards, and legacy reconciler coverage.
-- Public/admin boundary scripts for admin API auth, action origin checks, and public mutating-route rate limits.
+- Trust boundaries: server actions, API auth wrappers, same-origin ordering, public mutating route rate limits, and semantic/OG/share rollback patterns.
+- Data/privacy boundaries: public/admin select shapes, map GPS opt-in, timeline/search enrichment mirrors, sensitive-key guards, and public route consumers.
+- Upload/storage boundaries: browser upload, Lightroom upload, private original paths, legacy public original guard, derivative serving, static-vs-route upload serving, and storage quarantine.
+- Runtime coordination: restore maintenance, DB/advisory locks, image queue, backfill runners, process-local maps/timers, upload tracker, shared-group view buffering, and single-instance assumptions.
+- Schema/ops: migration journal/reconcile, Docker/nginx body-size and upload path policies, deploy persistence, sidecar scripts, CLIP model seeding and semantic mode gates.
 
-Validation run:
-
-- `npm run lint:api-auth --workspace=apps/web` - passed.
-- `npm run lint:action-origin --workspace=apps/web` - passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-
-Full application `lint`, `typecheck`, `build`, and `npm test` were not run because this prompt was a review-only architecture pass and no source behavior was changed.
+No additional architect-level findings survived the final sweep beyond the four items above. I did not run full lint/typecheck/build/Vitest because this was a review-only artifact and no executable source changed. Validation performed for this artifact: `git diff --check -- .context/reviews/architect.md` passed after the markdown whitespace fix.
