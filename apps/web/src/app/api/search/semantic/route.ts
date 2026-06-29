@@ -155,9 +155,31 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
     }
 
+    // Check semantic search mode before body materialization. Disabled mode is
+    // the normal fresh-install state, so it should not let repeated requests
+    // consume JSON parse/config work while refunding the rate-limit token.
+    // 'stub' and 'production' serve public requests; 'production' uses the real
+    // CLIP encoder and scans only rows matching PRODUCTION_MODEL_VERSION.
+    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+    try {
+        const config = await getGalleryConfig();
+        semanticMode = config.semanticSearchMode;
+    } catch {
+        // fail closed — config unavailable means disabled
+    }
+    if (semanticMode !== 'stub' && semanticMode !== 'production') {
+        return NextResponse.json(
+            { error: 'Semantic search is not fully configured' },
+            { status: 503, headers: NO_STORE_HEADERS },
+        );
+    }
+    const isProd = semanticMode === 'production';
+    const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
+    const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
+
     // AGG-C1/M5: charge before reading the body. This is still after cheap
-    // same-origin/maintenance/content-header gates, but before potentially large
-    // body materialization.
+    // same-origin/maintenance/content-header/config gates, but before
+    // potentially large body materialization.
     const ip = getClientIp(request.headers);
     const now = Date.now();
     const overLimit = preIncrementSemanticAttempt(ip, now);
@@ -205,27 +227,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (countCodePoints(query) < 3) {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
-
-    // Check semantic search mode — 'stub' and 'production' serve public requests;
-    // 'disabled' and any other value return 503. 'production' uses the real CLIP
-    // encoder (embedTextReal) and scans only rows matching PRODUCTION_MODEL_VERSION.
-    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
-    try {
-        const config = await getGalleryConfig();
-        semanticMode = config.semanticSearchMode;
-    } catch {
-        // fail closed — config unavailable means disabled
-    }
-    if (semanticMode !== 'stub' && semanticMode !== 'production') {
-        rollbackSemanticAttempt(ip);
-        return NextResponse.json(
-            { error: 'Semantic search is not fully configured' },
-            { status: 503, headers: NO_STORE_HEADERS },
-        );
-    }
-    const isProd = semanticMode === 'production';
-    const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
-    const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
 
     // Embed query — production uses the real CLIP encoder (async); stub uses the sync stub.
     let queryEmbedding: Float32Array;

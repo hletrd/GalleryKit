@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const {
     hasTrustedSameOriginMock,
@@ -73,6 +75,11 @@ vi.mock('@/db', () => ({
 
 import { POST } from '@/app/api/search/semantic/route';
 
+const semanticRouteSource = readFileSync(
+    resolve(__dirname, '../app/api/search/semantic/route.ts'),
+    'utf8',
+);
+
 function mockRequest(body: unknown, headersInit: Record<string, string> = {}): NextRequest {
     return {
         headers: new Headers({ 'content-type': 'application/json', ...headersInit }),
@@ -92,7 +99,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         vi.clearAllMocks();
         hasTrustedSameOriginMock.mockReturnValue(true);
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
-        // CRT-R5C1-01: 'stub' is the only mode that serves public requests.
+        // Stub is the default test mode. Stub and operator-gated production
+        // both serve public requests; disabled fails closed before body reads.
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'stub' });
         getClientIpMock.mockReturnValue('203.0.113.50');
         preIncrementSemanticAttemptMock.mockReturnValue(false);
@@ -207,14 +215,19 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
     it('returns 503 when semantic search mode is disabled', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'disabled' });
+        const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));
+        const request = {
+            headers: new Headers({ 'content-type': 'application/json' }),
+            text: textMock,
+        } as unknown as NextRequest;
 
-        const response = await POST(mockRequest({ query: 'mountain landscape' }));
+        const response = await POST(request);
 
         expect(response.status).toBe(503);
         await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
-        // COR-R5C1-04: rate limit was incremented then rolled back on disabled path
-        expect(preIncrementSemanticAttemptMock).toHaveBeenCalled();
-        expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
+        expect(textMock).not.toHaveBeenCalled();
+        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 
     it('returns 503 in production mode when no production embeddings exist', async () => {
@@ -322,5 +335,12 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Server error' });
         // AGG-12: rate-limit budget is NOT refunded after expensive work begins
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
+    it('filters scanned embeddings by the active model version', () => {
+        expect(semanticRouteSource).toContain('const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION');
+        expect(semanticRouteSource).toContain('.where(eq(imageEmbeddings.modelVersion, activeModelVersion))');
+        expect(semanticRouteSource.indexOf('const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION'))
+            .toBeLessThan(semanticRouteSource.indexOf('.where(eq(imageEmbeddings.modelVersion, activeModelVersion))'));
     });
 });

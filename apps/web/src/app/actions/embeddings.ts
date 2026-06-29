@@ -3,9 +3,11 @@
 /**
  * US-P51: Backfill server action for CLIP semantic search embeddings.
  *
- * Iterates processed images that lack an embedding row, generates embeddings
- * via the stub inference (or real ONNX when replaced), and upserts them.
- * Concurrency is bounded at 2 to avoid overloading the server.
+ * Iterates processed images that lack an embedding row for the active model
+ * version and upserts embeddings. Disabled mode is a no-op, stub mode writes
+ * deterministic stub vectors, and operator-gated production mode uses the real
+ * local CLIP encoder with PRODUCTION_MODEL_VERSION. Concurrency is bounded at 2
+ * to avoid overloading the server.
  */
 
 import { db, images, imageEmbeddings } from '@/db';
