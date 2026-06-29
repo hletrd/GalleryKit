@@ -2,7 +2,8 @@
 
 ## Active Plans
 
-- Cycle 17/100 Implementation Plan — implemented, gates passed (`cycle-17-2026-06-30-plan.md`)
+- Cycle 18/100 Implementation Plan — TODO (`../../plan/plan-374-cycle18-fixes.md`)
+- Cycle 18/100 Deferred Findings — TODO / deferred (`../../plan/plan-375-cycle18-deferred.md`)
 - Cycle 17/100 Deferred Findings — deferred (`cycle-17-2026-06-30-deferred.md`)
 - Cycle 16/100 Implementation Plan — TODO (`cycle-16-2026-06-30-plan.md`)
 - Cycle 16/100 Deferred Findings — TODO / deferred (`cycle-16-2026-06-30-deferred.md`)
@@ -39,6 +40,7 @@
 
 ## Completed Plans (Cycle 6 Loop)
 
+- Cycle 17/100 Implementation Plan — DONE / archived under `archive/cycle-17-2026-06-30-plan.md`
 - Cycle 15/100 Implementation Plan — DONE / archived under `archive/cycle-15-2026-06-30-plan.md`
 - Cycle 14/100 Implementation Plan — DONE (`cycle-14-2026-06-30-plan.md`)
 - Cycle 12/100 Implementation Plan — DONE (`cycle-12-2026-06-29-plan.md`)

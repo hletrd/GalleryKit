@@ -568,4 +568,32 @@ describe('bulkUpdateImages — tag mutations', () => {
         expect(findTagRecordByNameOrSlugMock).toHaveBeenCalledOnce();
         expect(deleteCalled).toBe(true);
     });
+
+    it('touches image freshness for tag mutations even when a scalar update is present', async () => {
+        const updateSets: unknown[] = [];
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const tx = {
+                update: vi.fn(() => ({
+                    set: vi.fn((value: unknown) => {
+                        updateSets.push(value);
+                        return { where: vi.fn().mockResolvedValue([]) };
+                    }),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([{ affectedRows: 3 }]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: vi.fn(() => makeSelectChain([{ id: 1 }, { id: 2 }, { id: 3 }])),
+            };
+            return await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({
+            topic: { mode: 'set', value: 'travel' },
+            addTagNames: ['nature'],
+        }));
+
+        expect(res).toEqual({ success: true, count: 3 });
+        expect(updateSets).toHaveLength(2);
+        expect(updateSets[0]).toEqual({ topic: 'travel' });
+        expect(updateSets[1]).toHaveProperty('updated_at');
+    });
 });

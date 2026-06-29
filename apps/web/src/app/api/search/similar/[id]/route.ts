@@ -10,10 +10,9 @@
  *   1. Same-origin check (hasTrustedSameOrigin) → 403 else.
  *   2. Restore-maintenance guard → 503 else.
  *   3. Positive-integer id validation → 400 else.
- *   4. Rate-limit pre-increment (Pattern 2 — rolled back on every early-return
- *      before expensive DB work begins) → 429 if over limit.
+ *   4. Rate-limit pre-increment before DB-backed config work → 429 if over limit.
  *   5. Production-only mode gate: semanticSearchMode must be 'production' →
- *      503 else (rollback). Stub vectors are random, so "similar" would be
+ *      503 else. Stub vectors are random, so "similar" would be
  *      meaningless in stub mode.
  *   6. Target embedding lookup for (id, PRODUCTION_MODEL_VERSION) → 404 if absent
  *      (no rollback; DB work was already consumed).
@@ -23,17 +22,17 @@
  *   9. Return { results: enriched } with NO_STORE_HEADERS.
  *
  * Rate-limit posture: Pattern 2 until protected DB work begins. Shares the
- * same `preIncrementSemanticAttempt` / `rollbackSemanticAttempt` budget as the
- * semantic text-search endpoint — both are embedding-scan operations. Once this
- * route reaches target lookup or scan DB work, failures stay charged to avoid
- * turning missing/corrupt embeddings or transient DB errors into free probes.
+ * same `preIncrementSemanticAttempt` budget as the semantic text-search
+ * endpoint — both are embedding-scan operations. Once this route reaches the
+ * DB-backed mode lookup, failures stay charged to avoid turning disabled-mode
+ * probes, missing/corrupt embeddings, or transient DB errors into free probes.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db, imageEmbeddings, images, topics } from '@/db';
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
-import { getClientIp, preIncrementSemanticAttempt, rollbackSemanticAttempt } from '@/lib/rate-limit';
+import { getClientIp, preIncrementSemanticAttempt } from '@/lib/rate-limit';
 import {
     dotProduct,
     decodeEmbeddingColumn,
@@ -96,7 +95,8 @@ export async function GET(
 
     // Gate 5: production-only mode gate. Stub vectors are random; cosine
     // similarity over random vectors is meaningless, so we serve only when the
-    // real CLIP encoder is active.
+    // real CLIP encoder is active. The DB-backed config lookup is protected
+    // work, so disabled/stub responses keep the pre-incremented budget.
     let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
     try {
         const config = await getGalleryConfig();
@@ -105,7 +105,6 @@ export async function GET(
         // fail closed — config unavailable means disabled
     }
     if (semanticMode !== 'production') {
-        rollbackSemanticAttempt(ip);
         return NextResponse.json(
             { error: 'Similar photos requires production semantic search mode' },
             { status: 503, headers: NO_STORE_HEADERS },

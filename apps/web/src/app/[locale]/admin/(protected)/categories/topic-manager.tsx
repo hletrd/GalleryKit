@@ -228,6 +228,20 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
+                    {initialTopics.length === 0 && (
+                        <TableRow>
+                            <TableCell colSpan={6} className="py-10 text-center">
+                                <div className="mx-auto flex max-w-md flex-col items-center gap-2">
+                                    <p className="font-medium">{t('categories.empty')}</p>
+                                    <p className="text-sm text-muted-foreground">{t('categories.emptyDescription')}</p>
+                                    <Button onClick={() => setIsCreateOpen(true)} className="mt-2">
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        {t('categories.add')}
+                                    </Button>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    )}
                     {initialTopics.map((topic) => (
                         <TableRow key={topic.slug}>
                             <TableCell>{topic.order}</TableCell>

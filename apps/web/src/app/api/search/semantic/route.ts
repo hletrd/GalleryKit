@@ -165,11 +165,26 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
     }
 
-    // Check semantic search mode before body materialization. Disabled mode is
-    // the normal fresh-install state, so it should not let repeated requests
-    // consume JSON parse/config work while refunding the rate-limit token.
-    // 'stub' and 'production' serve public requests; 'production' uses the real
-    // CLIP encoder and scans only rows matching PRODUCTION_MODEL_VERSION.
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
+    // AGG-C18-02: charge before the DB-backed config mode lookup. Disabled
+    // mode is the normal fresh-install state, but the lookup still consumes
+    // shared MySQL work and should remain visible to the semantic limiter.
+    const ip = getClientIp(request.headers);
+    const now = Date.now();
+    const overLimit = preIncrementSemanticAttempt(ip, now);
+    if (overLimit) {
+        return NextResponse.json(
+            { error: 'Rate limited' },
+            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+        );
+    }
+
+    // Check semantic search mode before body materialization. 'stub' and
+    // 'production' serve public requests; 'production' uses the real CLIP
+    // encoder and scans only rows matching PRODUCTION_MODEL_VERSION.
     let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
     try {
         const config = await getGalleryConfig();
@@ -186,23 +201,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     const isProd = semanticMode === 'production';
     const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
     const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
-
-    if (isRequestAborted(request)) {
-        return abortResponse();
-    }
-
-    // AGG-C1/M5: charge before reading the body. This is still after cheap
-    // same-origin/maintenance/content-header/config gates, but before
-    // potentially large body materialization.
-    const ip = getClientIp(request.headers);
-    const now = Date.now();
-    const overLimit = preIncrementSemanticAttempt(ip, now);
-    if (overLimit) {
-        return NextResponse.json(
-            { error: 'Rate limited' },
-            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
-        );
-    }
 
     // Parse body — read as text first with explicit byte cap.
     let rawBody: string;

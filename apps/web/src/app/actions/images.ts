@@ -1149,7 +1149,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 );
                 tagMutationRows += Number(deleteResult.affectedRows ?? 0);
             }
-            if (tagMutationRows > 0 && Object.keys(setClause).length === 0) {
+            if (tagMutationRows > 0) {
                 await tx.update(images)
                     .set({ updated_at: sql`CURRENT_TIMESTAMP` })
                     .where(inArray(images.id, existingImageIds));

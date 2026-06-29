@@ -70,8 +70,10 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         }).catch(console.debug);
 
         // Stream from the resolved (realpath) path, not the original path, to
-        // close the TOCTOU gap where a file could be replaced by a symlink
-        // between realpath() validation and createReadStream().
+        // reduce the path-replacement race where the original segment could
+        // be swapped before createReadStream(). This is not descriptor-backed
+        // validation; backup storage is still a same-host filesystem trust
+        // boundary.
         const stream = createReadStream(resolvedFilePath);
         const webStream = Readable.toWeb(stream) as ReadableStream;
 

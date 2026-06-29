@@ -106,7 +106,9 @@
     "mapVisibleToggle": "Toggle map visibility for {label}",
     "mapVisibleUpdated": "Map visibility updated",
     "editTopicAria": "Edit category {label}",
-    "deleteTopicAria": "Delete category {label}"
+    "deleteTopicAria": "Delete category {label}",
+    "empty": "No categories yet",
+    "emptyDescription": "Create a category before uploading photos so new images have a destination."
   },
   "tags": {
     "title": "Tags",
@@ -823,6 +825,7 @@
     "plaintextTitle": "Your new token",
     "plaintextDesc": "Copy this bearer token now and store it like a password. It will not be shown again after you close this dialog.",
     "plaintextDone": "I have copied the token",
+    "plaintextAcknowledge": "I copied this token or stored it somewhere safe. I understand it cannot be shown again.",
     "copied": "Token copied to clipboard.",
     "copyFailed": "Could not copy — please copy manually.",
     "copyAria": "Copy token to clipboard",

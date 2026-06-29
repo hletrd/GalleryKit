@@ -1,87 +1,62 @@
-# Verifier Review - Cycle 17/100
+# Verifier Review - Cycle 18/100
 
 Date: 2026-06-30 KST
-HEAD reviewed: `5e054f80f646cbcd16c7aae5412aa29424e05032` (`fix(cycle16): 🐛 close review-plan-fix findings`)
-Scope: evidence-based correctness review against `AGENTS.md`, `CLAUDE.md`, committed `.context` plan/review history, tests, and current HEAD implementation. This review did not implement fixes.
+HEAD reviewed: `88706b96d90e7cd3bab9006fc6797e88ef737200` (`fix(review): close cycle 17 findings`)
+Scope: evidence-check current HEAD against `AGENTS.md`, `CLAUDE.md`, cycle-17 plan/review claims, implementation, tests, lint gates, deploy assumptions, and runtime/build behavior. This review did not implement fixes.
 
-## Contract Inventory And Evidence
+## Inventory
 
-Reviewed `AGENTS.md` and `CLAUDE.md` first, then inventoried the current contract surfaces:
+Read first:
 
-- Auth guards: `withAdminAuth(...)` route wrapper, same-origin cookie auth, token scope support, scanner `lint:api-auth`, server-action origin scanner `lint:action-origin`.
-- Upload limits: 200 MiB file cap, 2 GiB rolling app quota, 100-file batch cap, Next action/proxy 266 MiB effective cap, nginx 216M upload route cap, LR route behavior, restore-maintenance guards.
-- Color/HDR: `IMAGE_PIPELINE_VERSION = 7`, no culling/scoring, admin-only HDR delivery, color metadata persistence, derivative cache/ETag/SW freshness, backfill parity.
-- Migrations: journal monotonicity after historical inversions, hash postconditions, `reconcileLegacySchema` coverage, legacy schema cleanup.
-- Privacy: public/admin field separation, GPS/map gating, search enrichment sensitive-field guard.
-- Rate limits: public action/API pre-increment contracts, rollback only when DB increment succeeded, analytics/IP privacy.
-- Deploy/service worker/semantic search/analytics: deployment rules, generated `sw.js`, semantic production gate, analytics retention and no full IP persistence.
+- `AGENTS.md`
+- `CLAUDE.md`
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-Evidence commands/read-only probes:
+Inventoried and inspected:
 
-- Verified current HEAD and clean starting state with `git rev-parse HEAD`, `git log -1`, and `git status --short`.
-- Read key source/test regions in `apps/web/src/lib/api-auth.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, upload actions/routes, service worker template/generated file, migration runner/journal, privacy/data selectors, semantic routes, analytics/rate-limit modules, and relevant tests.
-- Confirmed generated `public/sw.js` matches `scripts/build-sw.ts` output for the current template and `IMAGE_PIPELINE_VERSION`.
-- Ran a targeted `tsx` probe against `checkPublicRouteSource()` to confirm the public route scanner false negative described below.
+- Cycle-17 contracts: `.context/reviews/_aggregate.md`, `.context/reviews/verifier.md`, `.context/plans/cycle-17-2026-06-30-plan.md`, `.context/plans/cycle-17-2026-06-30-deferred.md`
+- Fix diff from `5e054f80..88706b96`
+- Auth/origin/rate-limit gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`
+- Changed action/API paths: `apps/web/src/app/actions/tags.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/app/api/search/semantic/route.ts`
+- Runtime/deploy/cache paths: `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/settings-hash.ts`
+- Validation and route behavior: `apps/web/src/lib/validation.ts`, `apps/web/src/lib/locale-path.ts`, public home/timeline/year pages, touched unit tests, package scripts/config
+
+Validation evidence:
+
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+- Focused regression tests: `npm test --workspace=apps/web -- check-public-route-rate-limit.test.ts check-action-origin.test.ts tags-actions.test.ts strip-gps-from-original.test.ts images-action-gps-toggle-wiring.test.ts lr-upload-hdr-gate.test.ts sw-template-contract.test.ts validation.test.ts locale-path.test.ts nginx-config.test.ts`: 12 files passed, 259 tests passed.
+- `npm run lint --workspace=apps/web`: passed.
+- `npm run typecheck --workspace=apps/web`: passed.
+- `npm test --workspace=apps/web`: 260 files passed, 2 skipped; 2432 tests passed, 4 skipped.
+- `npm run build --workspace=apps/web`: passed. Warning observed: sitemap fell back to homepage-only because local MySQL at `127.0.0.1:3306` refused connection; this matches the cycle-17 plan's known local-build warning.
+- `git diff --check`: passed.
+- Probe: direct `checkPublicRouteSource()` invocation still passes a two-hop local mutator before a limiter; details below.
 
 ## Findings
 
-### V17-01 - Confirmed - Tag-link freshness postcondition is not atomic
+### V18-01 - Public route rate-limit scanner still misses transitive local mutators
 
 Severity: Medium
 Confidence: High
-Files:
 
-- `apps/web/src/app/actions/tags.ts:176-196`
-- `apps/web/src/app/actions/tags.ts:238-259`
-- `apps/web/src/app/actions/tags.ts:328-336`
-- `apps/web/src/app/actions/tags.ts:396-480`
-- `.context/plans/cycle-16-2026-06-30-plan.md:13-17`
-- `apps/web/src/__tests__/tags-actions.test.ts:119-256`
+Files and regions:
 
-Contract:
+- `apps/web/scripts/check-public-route-rate-limit.ts:124-145`
+- `apps/web/scripts/check-public-route-rate-limit.ts:212-241`
+- `apps/web/scripts/check-public-route-rate-limit.ts:269-285`
+- `apps/web/scripts/check-public-route-rate-limit.ts:355-360`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-381`
+- `.context/plans/cycle-17-2026-06-30-plan.md:14`
 
-Cycle 16 marked the feed/sitemap freshness fix complete: tag-only changes must touch the parent image's `updated_at` when tag links are actually inserted/deleted, to prevent stale `lastModified` and false feed 304 behavior (`.context/plans/cycle-16-2026-06-30-plan.md:13-17`). `CLAUDE.md:400` also states public gallery/photo surfaces are freshness-sensitive and should show async processing/metadata updates immediately.
+Issue:
 
-Implementation mismatch:
-
-The tag-link mutation and the parent-image timestamp touch are separate writes in every tag-link path:
-
-- `addTagToImage()` inserts into `imageTags` at `tags.ts:176-179`, then updates `images.updated_at` later at `tags.ts:193-196`.
-- `removeTagFromImage()` deletes from `imageTags` at `tags.ts:238-242`, then updates `images.updated_at` later at `tags.ts:256-259`.
-- `batchAddTags()` inserts links at `tags.ts:328`, then updates `images.updated_at` at `tags.ts:333-336`.
-- `batchUpdateImageTags()` commits all add/remove work inside `db.transaction()` at `tags.ts:396-460`, then updates `images.updated_at` outside that transaction at `tags.ts:477-480`.
+Cycle 17 scheduled `AGG-C17-03` as done: local-helper false negatives should be closed by treating local mutator helpers as mutations. The implementation now detects direct local mutators (`localMutatingFunctions`) and the tests cover an exported helper that directly calls a direct mutator. It does not compute the transitive call graph. A helper that calls another helper that performs the DB mutation is not marked mutating, so the exported route can still mutate before rate limiting while the blocking lint gate passes.
 
 Concrete failure scenario:
 
-An admin adds or removes a tag. The `imageTags` write succeeds, but the subsequent `db.update(images).set({ updated_at: CURRENT_TIMESTAMP })` fails because of a transient DB error, connection interruption, lock timeout, or because the row was concurrently deleted after the tag-link write. In the single/batch-add paths, the action can return an error after already changing tags; in `batchUpdateImageTags()`, the action can throw after the transaction has committed. In both cases, the feed/sitemap freshness postcondition can be false: tags changed, but `images.updated_at` did not advance, so consumers using `updated_at` can miss the change or keep a false 304.
-
-The unit coverage currently exercises validation/collision/no-op audit behavior, but does not simulate `images.updated_at` update failure or assert rollback/postcondition behavior (`tags-actions.test.ts:119-256`). That leaves the "DONE" freshness fix under-proven.
-
-Suggested fix:
-
-Make the tag-link mutation and `images.updated_at` touch one atomic DB unit for each path. For `batchUpdateImageTags()`, move the timestamp update inside the existing transaction when `added > 0 || removed > 0`. For the single and batch-add paths, wrap the link mutation plus timestamp update in a transaction or explicitly verify/update the parent image before returning success. Add tests where the timestamp update fails and assert either the tag-link mutation rolls back or the action reports a clearly partial failure with a repair path.
-
-### V17-02 - Confirmed false-confidence risk - Public API rate-limit scanner still passes a helper that mutates before limiting
-
-Severity: Medium
-Confidence: High
-Files:
-
-- `apps/web/scripts/check-public-route-rate-limit.ts:124-127`
-- `apps/web/scripts/check-public-route-rate-limit.ts:129-244`
-- `apps/web/scripts/check-public-route-rate-limit.ts:271-276`
-- `apps/web/scripts/check-public-route-rate-limit.ts:345-349`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-361`
-
-Contract:
-
-`AGENTS.md` and `CLAUDE.md` make `npm run lint:public-route-rate-limit --workspace=apps/web` a blocking gate: every public API route exporting a mutating handler must call a rate-limit pre-increment helper before mutation, unless it carries an explicit exemption. Cycle 16 specifically scheduled the "public API scanner local-helper blind spot" as fixed (`.context/plans/cycle-16-2026-06-30-plan.md:17`).
-
-Implementation mismatch:
-
-The checker only classifies direct property-access DB calls as mutations (`isKnownMutationCall()` at `check-public-route-rate-limit.ts:124-127`). It builds `localRateLimitGateFunctions` by accepting any local function whose own body appears to contain a rate-limit gate before a known mutation (`check-public-route-rate-limit.ts:271-276`), then treats calls to those local functions as satisfying exported handlers (`check-public-route-rate-limit.ts:345-349`).
-
-Because `bodyCallsRateLimitBeforeMutation()` does not treat calls to local mutating helper functions as mutations (`check-public-route-rate-limit.ts:129-244`), this fixture incorrectly passes:
+This probe against the current scanner returned `OK: route.ts (uses rate-limit helper)`:
 
 ```ts
 import { preIncrementShareAttempt } from '@/lib/rate-limit';
@@ -90,70 +65,92 @@ async function writeFirst() {
   await db.insert(rows).values({ ok: true });
 }
 
-async function guarded() {
+async function helperA() {
   await writeFirst();
+}
+
+export async function POST() {
+  await helperA();
   const limit = preIncrementShareAttempt('1.2.3.4');
   if (limit.limited) return Response.json({}, { status: 429 });
   return Response.json({ ok: true });
 }
-
-export { guarded as POST };
 ```
 
-I confirmed the current scanner returns:
-
-```json
-{
-  "passed": ["OK: route.ts (uses rate-limit helper)"],
-  "failed": []
-}
-```
-
-Current tests cover a good local gate helper and an ignored-rate-limit helper (`check-public-route-rate-limit.test.ts:326-361`), but not a local helper that performs the mutation before the gate.
-
-Concrete failure scenario:
-
-A future public `POST` route factors its write into `writeFirst()` and calls that helper before rate limiting inside another local function. The blocking scanner passes, CI gives false confidence, and the deployed route accepts unlimited writes until a human notices.
+A future public API route can hide a write behind a two-hop local helper and still pass `npm run lint:public-route-rate-limit --workspace=apps/web`. That weakens the exact security invariant this lint gate is meant to enforce.
 
 Suggested fix:
 
-Mirror the stronger local-mutator analysis used by the action-origin scanner: collect local functions/variables whose bodies contain known mutations, treat calls to those functions as mutations while scanning both local gate helpers and exported handlers, and add a regression fixture matching the example above. Fail closed on unresolved local helper calls in mutating public route handlers if precision is uncertain.
+Build local mutator detection to a fixed point: a local function is mutating if it directly calls a known mutator or calls another local function already classified as mutating. Use that transitive set in both helper-body and exported-handler scans. Add a negative fixture matching the two-hop example above, plus a variable-function variant if the scanner intends to support variable local helpers.
 
-### V17-03 - Risk - Backup download still reopens by pathname after validation
+### V18-02 - `serve-upload` still documents a one-day cache lifetime beside a one-hour header
+
+Severity: Low
+Confidence: High
+
+Files and regions:
+
+- `apps/web/src/lib/serve-upload.ts:247-254`
+- `apps/web/next.config.ts:63-72`
+- `apps/web/nginx/default.conf:173-176`
+- `CLAUDE.md:204`
+- `CLAUDE.md:299`
+- `.context/plans/cycle-17-2026-06-30-plan.md:18`
+
+Issue:
+
+Cycle 17 scheduled cache-comment drift as done, and the docs/config consistently state derivative uploads use `Cache-Control: public, max-age=3600, must-revalidate`. One response-header comment in `serve-upload.ts` still says edge caches keep the file "fast for one day" immediately above the actual one-hour header.
+
+Concrete failure scenario:
+
+A future maintainer edits route-handler cache behavior and trusts the local comment instead of the header and cross-doc contract. They can reintroduce a 24-hour route-handler cache or make operational decisions assuming derivative freshness is one day, while the rest of the repo and tests assume one hour.
+
+Suggested fix:
+
+Change the stale comment at `serve-upload.ts:247-253` to "one hour" and keep it aligned with `next.config.ts`, nginx, and `CLAUDE.md`. A small source-contract test can grep this specific comment if repeated drift remains a problem.
+
+### V18-03 - Backup download still claims the TOCTOU gap is closed while reopening by pathname
 
 Severity: Low
 Confidence: Medium
-Files:
+
+Files and regions:
 
 - `apps/web/src/app/api/admin/db/download/route.ts:43-75`
+- `.context/plans/cycle-17-2026-06-30-deferred.md:10-16`
 
-Contract:
+Issue:
 
-The admin DB backup download route must confine downloads to `data/backups`, reject symlinks/non-files, and avoid path traversal. The route comment claims it streams from the resolved realpath to "close the TOCTOU gap" (`route.ts:72-74`).
-
-Implementation mismatch:
-
-The route validates containment with `lstat(filePath)` and `realpath(filePath)` (`route.ts:43-64`), then calls `createReadStream(resolvedFilePath)` (`route.ts:75`). That is safer than opening the original request path, but it is still a second pathname open after validation. If an attacker with same-host filesystem write access can replace the validated backup file between `realpath()` and `createReadStream()`, Node will open whatever path now exists at `resolvedFilePath`.
+The deferred plan correctly records this as open (`C17-D01`), but the implementation comment still says streaming from the resolved realpath closes the TOCTOU gap. The route validates `lstat(filePath)`, `realpath(filePath)`, and containment, then opens a new pathname with `createReadStream(resolvedFilePath)`. That is safer than opening the user-derived path, but it is still not descriptor-backed validation of the opened object.
 
 Concrete failure scenario:
 
-This is not an app-level unauthenticated exploit; it requires a local writer or compromised same-UID process that can race files under `data/backups`. Under that condition, an admin download request could validate one file and stream another same-path replacement. If the replacement is a symlink or hard link permitted by the filesystem context, the earlier checks no longer describe the opened object.
+An attacker with same-host write access to the backup directory, or a compromised same-UID process, races the interval between validation and `createReadStream()`. The route can validate one file object and then stream a replacement at the same resolved pathname. This is not an unauthenticated web exploit under the current operator-boundary model, which is why the deferred plan can reasonably keep it open, but the source comment overstates the guarantee.
 
 Suggested fix:
 
-Do not claim the gap is closed unless the opened file descriptor is the same object that was validated. Prefer opening a file descriptor with flags that reject symlinks where available, `fstat()` the fd, validate the fd's metadata/containment assumptions, and stream from the fd. At minimum, update the comment to describe the residual race and add a source-level regression test around the intended open/validate order.
+Either implement fd-based open/fstat/stream-from-fd semantics with symlink rejection where supported, or change the comment to say the route reduces but does not eliminate the race. Keep the deferral entry until descriptor-backed serving is implemented or backup storage changes.
 
-## Final Sweep
+## Verified Closures
 
-No additional confirmed mismatches found in these contracts during this pass:
+I did not find current mismatches for these cycle-17 scheduled fixes:
 
-- Admin API auth scanner: admin routes are wrapped with `withAdminAuth(...)`, and the scanner fails closed on alias/star export patterns.
-- Server-action same-origin scanner: current scanner covers mutating exports, public-action rate-limit-before-mutation exemptions, and the cycle-16 catch/finally traversal hardening.
-- Upload limits and LR upload: current caps and nginx/Next limits match the documented proxy-vs-rolling-quota distinction; LR upload resolves cookie actor attribution and PAT scope paths.
-- Privacy selectors: public/search/map selectors exclude the sensitive fields guarded by `privacy-fields.test.ts`.
-- Migrations: current journal has the expected historical non-monotonic section and newer monotonic entries; `migrate.js` retains hash postconditions and legacy reconciliation coverage.
-- Color/HDR and service worker: generated `sw.js` matches the template/pipeline version; HEAD timeout/offline exclusions are represented in template tests.
-- Semantic search: production mode remains opt-in by `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, and public semantic routes gate same-origin, body size, query length, and rate limits.
-- Analytics: current view-event paths rate-limit without persisting full IPs, and retention purge code is present.
+- Tag freshness: tag rename/delete and direct/batch tag link mutations now update affected `images.updated_at` inside transactions (`apps/web/src/app/actions/tags.ts:82-98`, `apps/web/src/app/actions/tags.ts:130-144`, `apps/web/src/app/actions/tags.ts:201-212`, `apps/web/src/app/actions/tags.ts:269-281`, `apps/web/src/app/actions/tags.ts:365-373`, `apps/web/src/app/actions/tags.ts:438-508`).
+- Action-origin try/catch: catch/finally branches are processed independently before the try block can set a later rate-limit gate (`apps/web/scripts/check-action-origin.ts:391-404`), and the current probe fails unsafe catch mutation.
+- GPS stripping: browser and Lightroom uploads now reject/clean up originals when `strip_gps_on_upload` is enabled and `stripGpsFromOriginal()` returns false (`apps/web/src/app/actions/images.ts:382-395`, `apps/web/src/app/api/admin/lr/upload/route.ts:367-385`, `apps/web/src/lib/process-image.ts:1733-1818`).
+- Home list DB failure: the home page no longer catches the image-list query as an empty success; it awaits `getImagesLitePage()` directly (`apps/web/src/app/[locale]/(public)/page.tsx:149-167`).
+- Reserved topic route segments: `c`, `privacy`, `timeline`, and `year` are now reserved (`apps/web/src/lib/validation.ts:4-24`) with tests.
+- Service worker photo pages: `/p/:id` is excluded from offline HTML cache (`apps/web/public/sw.template.js:58-64`), and generated `sw.js` was regenerated during build.
+- Proxy chain preservation: nginx now uses `$proxy_add_x_forwarded_for` on proxied locations (`apps/web/nginx/default.conf:67-70`, repeated across the file), and docs/tests describe the trusted-hop topology.
 
-Residual risk is concentrated in scanner precision and postcondition atomicity rather than missing top-level guards.
+## Final Missed-Issues Sweep
+
+Final sweeps covered:
+
+- The full `5e054f80..HEAD` fix diff and all files touched by the cycle-17 implementation commit.
+- Cycle-17 scheduled vs deferred findings, checking whether DONE claims match code and tests.
+- Current custom lint gates, standard ESLint, typecheck, full unit tests, production build, and `git diff --check`.
+- Docs vs code for upload cache headers, proxy trust, semantic production setup/copy, GPS stripping, route reservations, and service-worker offline exclusions.
+- Security-critical scanner behavior using both committed tests and direct probes.
+
+No additional confirmed critical or high-severity issues were found. Remaining risk is concentrated in security-tooling precision and low-severity doc/comment drift, plus the intentionally deferred backup TOCTOU hardening.

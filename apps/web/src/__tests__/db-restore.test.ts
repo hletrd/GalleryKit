@@ -50,6 +50,19 @@ describe('restore temp-file cleanup ownership', () => {
 });
 
 describe('backup dump validation', () => {
+    it('serializes backup creation with restore using LOCK_DB_RESTORE', () => {
+        const dumpDatabaseSource = DB_ACTIONS_SRC.slice(
+            DB_ACTIONS_SRC.indexOf('export async function dumpDatabase()'),
+            DB_ACTIONS_SRC.indexOf('// Restore intentionally uses'),
+        );
+
+        expect(dumpDatabaseSource).toContain('connection.getConnection()');
+        expect(dumpDatabaseSource).toContain('SELECT GET_LOCK(?, 0) AS acquired');
+        expect(dumpDatabaseSource).toContain('[LOCK_DB_RESTORE]');
+        expect(dumpDatabaseSource).toContain('SELECT RELEASE_LOCK(?)');
+        expect(dumpDatabaseSource).toMatch(/finally\s*\{[\s\S]*RELEASE_LOCK[\s\S]*conn\.release\(\)/);
+    });
+
     it('validates the generated backup header before returning a downloadable filename', () => {
         const dumpDatabaseSource = DB_ACTIONS_SRC.slice(
             DB_ACTIONS_SRC.indexOf('export async function dumpDatabase()'),

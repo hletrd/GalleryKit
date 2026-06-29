@@ -1,197 +1,140 @@
-# Cycle 17 Document-Specialist Review
+# Cycle 18 Document-Specialist Review
 
-Date: 2026-06-30
-Reviewed HEAD: `5e054f80`
-Scope: documentation-vs-code review of authoritative docs, README surfaces, package scripts, deploy/migration docs, comments that encode contracts, i18n copy, config examples, nginx/Docker/deploy files, and tests-as-contract. This pass is read-only except for writing this report.
+Date: 2026-06-30 KST
+HEAD reviewed: `4ad6a394453fac80cc29aacc6f93eab3ed8c12ca`
+Scope: documentation, README/CLAUDE/AGENTS, deploy/env examples, comments, tests-as-docs, `.context` plans/reviews, and implementation contracts. Review-only except for writing this report.
 
 ## Inventory
 
-Required context read first: `AGENTS.md` and `CLAUDE.md`.
+Read first: `AGENTS.md`, then `CLAUDE.md`.
 
-Authoritative and contract surfaces reviewed:
+Inventoried and inspected:
 
-- Repository docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
-- Package/script contracts: root `package.json`, `apps/web/package.json`, script guards under `apps/web/scripts/` and `scripts/`.
-- Deploy/config surfaces: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`.
-- Migration/schema docs: `apps/web/drizzle/meta/_journal.json`, committed SQL migrations, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
-- Source comments that encode behavior: cache/ETag, service-worker, color/HDR, analytics, rate-limit, admin-auth, same-origin, privacy, image processing, and deploy-contract comments.
-- I18n/copy surfaces: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, settings/admin UI copy, upload/color-details copy.
-- Tests that claim contracts: privacy, deploy script, migration journal, route lint, cache/color, analytics, upload, touch-target, and related unit/e2e tests.
+- Canonical docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
+- Deploy/config surfaces: `.env.deploy.example`, `apps/web/.env.local.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, site-config examples.
+- Historical/planning docs: `.context/plans/README.md`, `.context/plans/cycle-18-plan.md`, current `.context/reviews/*.md`, current aggregate, and relevant archived/done plans.
+- External-doc-dependent claims: no new framework/API claim required current external verification; findings are repo-internal doc/comment/test-vs-implementation mismatches.
+- Implementation and tests-as-docs anchors: package scripts, Next config, upload serving, backup download, settings hash, process-image pipeline version comments, migration/index docs, semantic/CLIP docs, deploy-script contract tests, resolved-stream source test, service-worker/cache tests, privacy/search tests.
 
-No critical or high-severity documentation mismatches were confirmed in this pass.
+Several cycle-17 document findings are now fixed at current HEAD: settings-hash comments are scoped to the route-handler fallback, analytics indexes are listed in `CLAUDE.md`, HDR copy now says SDR delivery rather than tone-mapping, and README/CLAUDE document the deploy helper's home-directory fallback. Those are not refiled below.
 
 ## Findings
 
-### DOC17-01 - Settings-hash comments overclaim cache invalidation for static upload files
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-Category: operational comment/runbook drift
-
-Evidence:
-
-- `apps/web/src/lib/settings-hash.ts:14-24` says the settings hash is folded into the served ETag so a settings change "forces a must-revalidate 304 -> 200 cycle on every cached client even when file mtime has not changed."
-- `apps/web/src/lib/serve-upload.ts:197-207` repeats the same broad claim for color-impacting settings.
-- `apps/web/src/lib/serve-upload.ts:214-215` only constructs that settings-hash ETag inside `serveUploadFile`.
-- `apps/web/src/app/uploads/[...path]/route.ts:4-27` routes missing/static-fallback upload requests through `serveUploadFile`.
-- `apps/web/next.config.ts:56-63` documents that existing files under `public/uploads/` are served by Next's static file server; those static responses do not use `serveUploadFile`'s settings-hash ETag.
-- `CLAUDE.md:296-298` correctly warns that the static path is the overwhelming majority path and that flipping a color-impacting setting does not invalidate already-served static derivatives until a backfill rewrites files.
-
-Mismatch:
-
-The authoritative runbook is accurate, but the code comments in the cache helpers state a wider guarantee than the implementation provides. The settings hash only applies to the route-handler path, not to ordinary static delivery of existing derivative files.
-
-Failure scenario:
-
-An operator or future maintainer flips `force_srgb_derivatives`, derivative size, quality, or another color-impacting setting and trusts the helper comments that every cached client will revalidate to new bytes. They skip the documented derivative backfill. Most clients continue receiving old static derivative bytes because their static-file ETags are not keyed by the settings hash.
-
-Suggested fix:
-
-Update `settings-hash.ts` and `serve-upload.ts` comments to scope the guarantee to route-handler responses only. Add a short pointer to the CLAUDE static-path warning: static derivatives require a backfill/rewrite to change the bytes and static validators.
-
-### DOC17-02 - `serve-upload` cache comment says one day, but every configured header is one hour
+### DS18-01 - `serve-upload` cache comment still says one day while all derivative headers are one hour
 
 Severity: Low
 Confidence: High
-Status: Confirmed
-Category: cache-policy comment drift
 
-Evidence:
-
-- `apps/web/src/lib/serve-upload.ts:245-252` says "`public` + `max-age` + `must-revalidate`: edge caches keep the file fast for one day" but sets `Cache-Control: public, max-age=3600, must-revalidate`.
-- `apps/web/next.config.ts:69-72` sets upload headers to `public, max-age=3600, must-revalidate`.
-- `apps/web/nginx/default.conf:173-176` sets the same one-hour policy.
-- `CLAUDE.md:204` documents the deployed static upload cache policy as `public, max-age=3600, must-revalidate`.
+Files and regions:
+- `apps/web/src/lib/serve-upload.ts:247-254`
+- `apps/web/next.config.ts:69-72`
+- `apps/web/nginx/default.conf:173-176`
+- `CLAUDE.md:204`, `CLAUDE.md:299`
 
 Mismatch:
+The hot-path response-header comment says edge caches keep upload derivatives "fast for one day", but the actual route-handler header is `Cache-Control: public, max-age=3600, must-revalidate`. Next static upload headers, nginx, and CLAUDE all document the same one-hour policy.
 
-The implementation and operational docs agree on one hour. The source comment still describes a one-day cache window.
-
-Failure scenario:
-
-During a cache incident or future cache-policy edit, a maintainer reads the hot-path comment and assumes clients/edges can hold upload responses fresh for a day. That can lead to incorrect incident timing, stale-byte analysis, or a mistaken edit that changes headers to match the stale comment instead of the current policy.
+Concrete failure scenario:
+A maintainer debugging stale derivative bytes or editing cache policy trusts the local `serve-upload.ts` comment and assumes a 24-hour fresh window. They can make an incident timeline wrong or "correct" the header back toward the stale comment, contradicting the one-hour freshness contract.
 
 Suggested fix:
+Change the comment to "one hour" or remove the prose duration and let the `max-age=3600` literal be the local source of truth. Keep it aligned with Next config, nginx, and CLAUDE.
 
-Change the comment at `serve-upload.ts:245-252` to "one hour" or remove the duration from the prose and let the header value be the source of truth.
-
-### DOC17-03 - CLAUDE analytics index runbook omits current top-view and retention indexes
+### DS18-02 - Resolved-path streaming comments/tests overstate TOCTOU closure
 
 Severity: Low
-Confidence: High
-Status: Confirmed
-Category: migration/runbook drift
-
-Evidence:
-
-- `CLAUDE.md:232-245` lists database indexes and names only the older image-view analytics indexes: `image_views(image_id, viewed_at)`, `image_views(bot, viewed_at, country_code)`, and `image_views(bot, viewed_at, referrer_host)`.
-- `apps/web/src/db/schema.ts:232-236` also defines `idx_image_views_viewed_at_id` and `idx_image_views_bot_viewed_image`.
-- `apps/web/src/db/schema.ts:247-249` defines topic-view indexes: `idx_topic_views_topic_viewed`, `idx_topic_views_viewed_at_id`, and `idx_topic_views_bot_viewed_topic`.
-- `apps/web/src/db/schema.ts:260-262` defines shared-group-view indexes: `idx_shared_group_views_group_viewed`, `idx_shared_group_views_viewed_at_id`, and `idx_shared_group_views_bot_viewed_group`.
-- `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3` and `apps/web/drizzle/0027_analytics_retention_indexes.sql:1-3` add indexes that are not represented in the CLAUDE index section.
-- `apps/web/src/lib/view-retention.ts:56-62` explicitly relies on `(viewed_at, id)` indexes for chunked retention deletes.
-- `apps/web/src/lib/analytics-data.ts:1-5` documents the broader indexed analytics query model.
-
-Mismatch:
-
-The runbook presents the analytics index inventory as if it were current, but it omits the indexes added for topic/shared analytics, top-view queries, and retention deletion.
-
-Failure scenario:
-
-A future migration or performance review uses `CLAUDE.md` as the operational source of truth, misses the newer indexes, and either duplicates them, drops them during reconciliation, or fails to preserve them while changing analytics retention/top-view queries. That can turn retention cleanup or admin analytics into large scans on production data.
-
-Suggested fix:
-
-Update `CLAUDE.md:232-245` to either say it lists only selected indexes and points to `apps/web/src/db/schema.ts` as authoritative, or expand the section with the current image/topic/shared view indexes from migrations `0026` and `0027`.
-
-### DOC17-04 - Deploy helper's tested default secrets path is not documented in user-facing deploy docs
-
-Severity: Low
-Confidence: High
-Status: Confirmed
-Category: deploy documentation gap
-
-Evidence:
-
-- `scripts/deploy-remote.sh:4-29` defaults to `$HOME/.gallerykit-secrets/gallery-deploy.env` when `.env.deploy` is absent and `DEPLOY_ENV_FILE` is not set.
-- `scripts/deploy-remote.sh:55-58` includes that fallback path in the runtime error message.
-- `apps/web/src/__tests__/deploy-script-contract.test.ts:46-52` pins `DEFAULT_DEPLOY_ENV_FILE="$HOME/.gallerykit-secrets/gallery-deploy.env"` as a deploy-script contract.
-- `AGENTS.md:17-18`, `README.md:108-119`, `CLAUDE.md:653-660`, and `.env.deploy.example:1-4` document the root `.env.deploy` file and optional `DEPLOY_ENV_FILE`, but not the automatic home-directory fallback.
-
-Mismatch:
-
-The deploy script and a contract test support a default outside-repo secrets path, but the operator-facing docs and example config do not mention it.
-
-Failure scenario:
-
-An operator follows the docs and believes the only supported non-repo location is an explicitly set `DEPLOY_ENV_FILE`, while the script silently supports a conventional home path. Conversely, a maintainer may remove or break the fallback because it appears undocumented, only to trip the contract test later.
-
-Suggested fix:
-
-Either document `$HOME/.gallerykit-secrets/gallery-deploy.env` in README/CLAUDE/`.env.deploy.example` as the supported default external secrets path, or remove the fallback and its test if `DEPLOY_ENV_FILE` is intended to be mandatory for outside-repo config.
-
-### DOC17-05 - HDR i18n copy promises "SDR tone-mapped" derivatives, but code only documents SDR conversion/delivery
-
-Severity: Medium
 Confidence: Medium
-Status: Likely
-Category: user-facing copy drift
 
-Evidence:
-
-- `apps/web/messages/en.json:162` says HDR uploads are accepted but "public derivatives are SDR tone-mapped."
-- `apps/web/messages/en.json:740` says "public WebP/JPEG/AVIF derivatives are still SDR tone-mapped."
-- `apps/web/messages/ko.json:162` and `apps/web/messages/ko.json:740` make the same promise in Korean.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:348-356` says HDR source metadata is stored while `process-image` encodes SDR derivatives regardless.
-- `apps/web/src/components/color-details-section.tsx:552-558` says HDR sources are accepted for metadata/preservation and that delivery is currently SDR derivatives, with HDR AVIF output planned.
-- `apps/web/src/lib/process-image.ts:1251-1315` explicitly converts pixels to the target colorspace, attaches ICC profiles, and encodes WebP/AVIF/JPEG derivatives. The comments describe gamut/profile conversion and SDR/P3 delivery, not an explicit HDR-to-SDR tone-mapping algorithm or tested tone-map contract.
+Files and regions:
+- `apps/web/src/app/api/admin/db/download/route.ts:43-75`
+- `apps/web/src/lib/serve-upload.ts:175-217`, `apps/web/src/lib/serve-upload.ts:239-267`
+- `apps/web/src/__tests__/resolved-stream-source.test.ts:8-19`
+- `.context/plans/cycle-17-2026-06-30-deferred.md:10-16`
 
 Mismatch:
+The backup-download and upload-serving comments say streaming from the resolved realpath closes the symlink-replacement TOCTOU gap. The code validates `lstat()`/`realpath()` and containment, then opens a pathname with `createReadStream(resolvedFilePath)` or `createReadStream(resolvedPath)`. That is safer than opening the original unvalidated path, and the source-contract test pins that improvement, but it is not descriptor-backed validation of the object actually opened.
 
-The UI copy uses the stronger term "tone-mapped," which implies a deliberate HDR-to-SDR luminance mapping. The implementation and adjacent comments only establish that public derivatives are SDR/color-profile converted and encoded. If Sharp or the input pipeline performs an implicit transform, this repository does not document or test it as a tone-mapping contract.
-
-Failure scenario:
-
-A photographer enables HDR ingestion and relies on the admin copy as a quality promise. PQ/HLG/high-dynamic-range uploads may produce SDR derivatives whose highlights are clipped, compressed unpredictably, or merely converted into SDR/P3 output. The UI would have promised a more intentional visual transform than the code guarantees.
+Concrete failure scenario:
+A same-host process with write access to `data/backups` or `public/uploads` replaces a validated file after `realpath()` but before `createReadStream()`. The route can compute `Content-Length`, ETag, and audit size from the pre-open `stats` object while streaming a replacement at the same resolved pathname. This is not an unauthenticated web exploit under the current host/operator boundary, but the comments/tests can mislead future hardening review into believing the race is fully closed.
 
 Suggested fix:
+Either implement descriptor-backed open/fstat/stream-from-fd semantics, or weaken the comments and source-contract test wording to say resolved-path streaming reduces the original-path race but does not eliminate all local replacement races.
 
-If the product only guarantees SDR delivery today, change the copy to "public derivatives are delivered as SDR" or "encoded as SDR derivatives." If tone mapping is intended, document the exact transform, add regression coverage with HDR fixtures, and align process-image comments with that contract.
-
-### DOC17-06 - `process-image` pipeline-version history omits current v7
+### DS18-03 - `process-image` pipeline-version history omits current v7
 
 Severity: Low
 Confidence: High
-Status: Confirmed
-Category: source comment drift
 
-Evidence:
-
-- `apps/web/src/lib/process-image.ts:371-397` documents `IMAGE_PIPELINE_VERSION` history through version 6 and then re-exports the constant from `gallery-config-shared.ts`.
-- `apps/web/src/lib/gallery-config-shared.ts:10-21` defines the current `IMAGE_PIPELINE_VERSION = 7` and documents v7 as the fix for JPEG chroma subsampling tracking target gamut instead of source gamut when force-sRGB is enabled.
-- `CLAUDE.md:120` correctly lists the current pipeline version as 7.
+Files and regions:
+- `apps/web/src/lib/process-image.ts:371-397`
+- `apps/web/src/lib/gallery-config-shared.ts:10-22`
+- `CLAUDE.md:120`, `CLAUDE.md:171`
 
 Mismatch:
+`process-image.ts` carries a local pipeline-version history ending at v6, then re-exports `IMAGE_PIPELINE_VERSION`. The authoritative constant is v7 in `gallery-config-shared.ts`, and CLAUDE correctly documents the current version as 7.
 
-The authoritative constant and CLAUDE are current, but the nearby backward-compatible re-export comment in `process-image.ts` has a stale version history. This is easy to read as the local encoder history being complete.
-
-Failure scenario:
-
-A maintainer auditing pipeline-version bumps from `process-image.ts` misses the v7 rationale and may re-open or duplicate the fixed JPEG chroma decision, especially because the v7 behavior is implemented later in the same file at `apps/web/src/lib/process-image.ts:1363-1372`.
+Concrete failure scenario:
+A maintainer auditing encoder byte-output changes from `process-image.ts` misses the v7 rationale and reopens or duplicates already-shipped fixes around target-gamut JPEG chroma, sRGB blur pipeline, ICC preservation, or GPS stripping. The local comment looks like a complete history because it sits beside the re-export used by older imports.
 
 Suggested fix:
+Remove the duplicate history from `process-image.ts` and point to `gallery-config-shared.ts`, or add the v7 history line there as well.
 
-Either remove the duplicate history from `process-image.ts` and point to `gallery-config-shared.ts`, or add the v7 history line there as well.
+### DS18-04 - `.context` aggregate still identifies cycle 17 while cycle-18 artifacts depend on it as cycle 18
 
-## Coverage And Missed-Doc Sweep
+Severity: Medium
+Confidence: High
 
-Final sweep rechecked canonical docs, README files, package scripts, environment examples, deploy helpers, Docker/nginx config, migration journal and migration runner comments, schema/index declarations, public/admin route lint contracts, same-origin/admin-auth/privacy guards, color/HDR/cache comments, i18n message files, service-worker/cache claims, analytics docs, CLIP semantic-search docs, and tests that encode these contracts.
+Files and regions:
+- `.context/reviews/_aggregate.md:1-5`
+- `.context/plans/cycle-18-plan.md:1-7`
+- `.context/reviews/critic.md:1-5`
+- `.context/reviews/security-reviewer.md:1-5`
+- `.context/reviews/perf-reviewer.md:1-5`
 
-Known limits:
+Mismatch:
+The current aggregate file says "Cycle 17 Aggregate Review" and cites HEAD `5e054f80...`, while the cycle-18 plan says its source is `.context/reviews/_aggregate.md` as "cycle-18, 11/11 agents". Current per-agent review files identify themselves as cycle 18 and review later HEADs.
 
-- This was a source/documentation review at current HEAD. I did not run the full test suite or inspect live production state, untracked deploy env files, host nginx, remote Docker volumes, or seeded CLIP model files.
-- External browser/platform color behavior was not independently revalidated; this pass only checked committed claims against committed implementation.
-- Existing unrelated modified review files in `.context/reviews/` were left untouched.
+Concrete failure scenario:
+A future planner or verifier uses `.context/reviews/_aggregate.md` as the canonical cycle-18 source because `cycle-18-plan.md` names it that way, but receives cycle-17 findings and stale HEAD metadata. Work can be duplicated, current cycle-18 findings can be silently missed, and provenance checks become unreliable.
 
-No additional confirmed documentation/code mismatch survived the final evidence threshold beyond the findings above.
+Suggested fix:
+Archive the cycle-17 aggregate under an explicit archive path and write a real cycle-18 aggregate, or update `cycle-18-plan.md` to cite the actual per-agent files instead of a stale aggregate. Keep one unambiguous "current aggregate" convention.
+
+### DS18-05 - Cycle-18 plan/index completion state is internally inconsistent
+
+Severity: Low
+Confidence: High
+
+Files and regions:
+- `.context/plans/cycle-18-plan.md:1-9`, `.context/plans/cycle-18-plan.md:19`, `.context/plans/cycle-18-plan.md:24`, `.context/plans/cycle-18-plan.md:29`, `.context/plans/cycle-18-plan.md:39`, `.context/plans/cycle-18-plan.md:46`
+- `.context/plans/README.md:3-18`
+
+Mismatch:
+`cycle-18-plan.md` declares cycle 18 complete with pushed commits and green gates, but every scheduled task still has `Status: [ ]`. The plan index lists active cycle-17/16/15/etc. entries but does not list the cycle-18 plan at all, despite `cycle-18-plan.md` existing at the top level.
+
+Concrete failure scenario:
+An agent trying to resume review-plan-fix work sees the top banner and treats cycle 18 as complete, or sees the unchecked task statuses and treats the same work as pending. Another agent using `.context/plans/README.md` will not see cycle 18 in active or completed lists and may plan from stale cycle-17 state.
+
+Suggested fix:
+Set each completed cycle-18 task status to `[x]` or a clear `DONE/NO-OP` disposition, and update `.context/plans/README.md` to include cycle 18 under the correct completed/deferred section.
+
+## Missed-Issues Sweep
+
+Final sweep rechecked canonical docs, README files, package scripts, environment examples, deploy helpers, Docker/nginx config, site config examples, migration/schema/index docs, source comments for cache/ETag/TOCTOU/color/HDR/semantic-search behavior, i18n messages, current `.context` plans/reviews, and tests that encode documentation contracts.
+
+Not refiled because they matched current repo behavior or were intentionally historical:
+
+- Next/React/TypeScript/Node version claims align with `apps/web/package.json`.
+- Semantic-search activation docs align with production gating, `CLIP_MODELS_ROOT`, model version, and bounded scan behavior.
+- Deploy docs align with bind mounts, auto-prune behavior, host-network compose, liveness/readiness split, and upload body caps.
+- `CLAUDE.md` now scopes settings-hash invalidation to the serve-upload path and warns that static derivatives need re-encode for settings-only byte changes.
+- Storage backend quarantine is explicit in CLAUDE and pinned by `storage-quarantine.test.ts`.
+- HDR user-facing copy now says SDR delivery, matching the code's documented guarantee.
+
+Known limits: this pass did not run the full test suite, inspect live production/remote host state, inspect untracked `.env` files, or independently revalidate browser/platform color-support claims. No external API/framework fact was material to the confirmed findings.
+
+Total findings: 5
+- Critical: 0
+- High: 0
+- Medium: 1
+- Low: 4

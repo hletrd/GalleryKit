@@ -257,7 +257,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             code: 'semantic_not_configured',
         });
         expect(textMock).not.toHaveBeenCalled();
-        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+        expect(preIncrementSemanticAttemptMock).toHaveBeenCalledOnce();
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 

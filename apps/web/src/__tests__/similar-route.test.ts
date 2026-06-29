@@ -170,8 +170,8 @@ describe('GET /api/search/similar/[id]', () => {
         targetRows = [{ embedding: TARGET_EMBEDDING_B64 }];
         const res = await GET(req('42') as never, params('42'));
         expect(res.status).toBe(503);
-        // Rate-limit token must have been rolled back.
-        expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
+        expect(preIncrementSemanticAttempt).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
     });
 
     it('returns 503 when semanticSearchMode is "disabled"', async () => {
@@ -179,7 +179,8 @@ describe('GET /api/search/similar/[id]', () => {
         targetRows = [{ embedding: TARGET_EMBEDDING_B64 }];
         const res = await GET(req('7') as never, params('7'));
         expect(res.status).toBe(503);
-        expect(rollbackSemanticAttempt).toHaveBeenCalledOnce();
+        expect(preIncrementSemanticAttempt).toHaveBeenCalledOnce();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
     });
 
     it('returns 400 for a non-numeric id', async () => {

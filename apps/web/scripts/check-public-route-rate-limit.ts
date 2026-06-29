@@ -267,21 +267,32 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         }
     }
     const localMutatingFunctions = new Set<string>();
-    for (const [name, body] of localBodies) {
-        if (!body) continue;
-        let containsMutation = false;
-        const visit = (node: ts.Node) => {
-            if (containsMutation) return;
-            if (ts.isFunctionLike(node) && node !== body) return;
-            if (ts.isCallExpression(node) && isKnownMutationCall(node)) {
-                containsMutation = true;
-                return;
+    let mutatingSetChanged = true;
+    while (mutatingSetChanged) {
+        mutatingSetChanged = false;
+        for (const [name, body] of localBodies) {
+            if (!body || localMutatingFunctions.has(name)) continue;
+            let containsMutation = false;
+            const visit = (node: ts.Node) => {
+                if (containsMutation) return;
+                if (ts.isFunctionLike(node) && node !== body) return;
+                if (ts.isCallExpression(node)) {
+                    const callee = node.expression;
+                    if (
+                        isKnownMutationCall(node)
+                        || (ts.isIdentifier(callee) && localMutatingFunctions.has(callee.text))
+                    ) {
+                        containsMutation = true;
+                        return;
+                    }
+                }
+                ts.forEachChild(node, visit);
+            };
+            visit(body);
+            if (containsMutation) {
+                localMutatingFunctions.add(name);
+                mutatingSetChanged = true;
             }
-            ts.forEachChild(node, visit);
-        };
-        visit(body);
-        if (containsMutation) {
-            localMutatingFunctions.add(name);
         }
     }
 

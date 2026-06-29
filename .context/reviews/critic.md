@@ -1,264 +1,118 @@
-# Cycle 17 Critic Review
+# Cycle 18 Critic Review
 
-Scope: whole repository and current HEAD `5e054f80` on `master`.
+Scope: whole repository at current HEAD `4ad6a394453fac80cc29aacc6f93eab3ed8c12ca` on `master`.
 
-Role: critic reviewer. I did not implement fixes. This artifact is the only file I changed.
-
-## Executive Summary
-
-I found two current product/architecture issues worth fixing before another feature pass:
-
-1. **Confirmed MEDIUM:** the public home page catches image-query failures and renders a successful empty gallery, which can hide outages and mislead crawlers/users.
-2. **Confirmed MEDIUM:** admin topic slug validation does not reserve several existing public route segments (`timeline`, `year`, `privacy`, `c`), so admins can create canonical topic URLs that Next.js will route somewhere else.
-
-The repository has unusually strong defense-in-depth around admin APIs, server-action origin checks, public mutation rate limits, privacy field omission, share metadata lookup avoidance, semantic-search activation gates, upload serving containment, and DB restore scanning. The highest residual risks are mostly consistency gaps between route topology, operational documentation, and custom lint assumptions.
+Role: critic reviewer. I did not implement product/code fixes. This artifact is the only file I changed.
 
 ## Inventory Inspected
 
-Primary docs and policy:
+Read first:
 - `AGENTS.md`
 - `CLAUDE.md`
-- `README.md`
-- `.env.deploy.example`
-- `.context/plans/` and `.context/reviews/` inventory shape
+- `~/.agents/skills/code-review/SKILL.md`
 
-Deploy and operations surfaces:
-- `package.json`
-- `scripts/deploy-remote.sh`
-- `apps/web/package.json`
-- `apps/web/deploy.sh`
-- `apps/web/docker-compose.yml`
-- `apps/web/Dockerfile`
-- `apps/web/nginx/default.conf`
-- `apps/web/scripts/migrate.js`
-- `apps/web/scripts/restore-db.sh`
-- `apps/web/scripts/check-action-origin.ts`
-- `apps/web/scripts/check-admin-api-auth.ts`
-- `apps/web/scripts/check-public-route-rate-limit.ts`
-- `apps/web/scripts/check-prod-build-origin.ts`
-- `apps/web/scripts/check-legacy-public-originals.ts`
+Repository inventory:
+- 498 review-relevant app/lib/script/test/migration files under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/src/__tests__`.
+- Current review artifacts under `.context/reviews/`, including the current perf lane and the previous top-level critic/aggregate artifacts.
+- Prior blind-spot clusters from run-9 cycle 8, run-4 cycle 18, photographer-r18, and recent deferred plans.
 
-App routing surface:
-- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, photo, map, timeline, year, privacy, group share, set share, smart collection, uploads, robots, sitemap, feed, manifest, icons.
-- Admin routes under `apps/web/src/app/[locale]/admin/`: login, dashboard, categories, tags, users, tokens, settings, SEO, DB, password, analytics.
-- API routes under `apps/web/src/app/api/`: `health`, `live`, `og`, `og/photo/[id]`, `search/semantic`, `search/similar/[id]`, `admin/db/download`, `admin/lr/upload`.
-- Server actions under `apps/web/src/app/actions/`: auth, images, topics, tags, sharing, settings, SEO, public analytics, collections, embeddings, admin users, admin backfill, Lightroom tokens.
+High-risk code/docs inspected:
+- Public APIs/actions: semantic search, similar search, OG routes, load/search/share actions, public route rate-limit lint, same-origin/proxy helpers.
+- Admin/API surfaces: image uploads, Lightroom upload, DB backup/download, admin auth wrapper, server-action origin lint.
+- Image and semantic pipeline: upload enqueue sites, image queue, CLIP model loading/inference, embedding backfills, embedding schema, processing snapshots.
+- Data/schema/docs: `data.ts`, `data-timeline.ts`, sitemap/feed helpers, storage quarantine, migration journal/reconciler/tests, deploy/Docker/nginx docs.
 
-Components and client UX surface:
-- `apps/web/src/components/home-client.tsx`
-- `apps/web/src/components/photo-modal.tsx`
-- `apps/web/src/components/photo-card.tsx`
-- `apps/web/src/components/share-dialog.tsx`
-- `apps/web/src/components/map-*`
-- `apps/web/src/components/admin/*`
-- `apps/web/src/components/lightroom/*`
-- `apps/web/src/components/ui/*`
-
-Core libraries:
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/data-timeline.ts`
-- `apps/web/src/lib/gallery-config.ts`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/image-url.ts`
-- `apps/web/src/lib/serve-upload.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/lib/action-guards.ts`
-- `apps/web/src/lib/session.ts`
-- `apps/web/src/lib/validation.ts`
-- `apps/web/src/lib/smart-collections.ts`
-- `apps/web/src/lib/db-restore-scan.ts`
-- `apps/web/src/lib/search-enrichment-fields.ts`
-- `apps/web/src/lib/semantic-search-*`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/process-topic-image.ts`
-- `apps/web/src/lib/upload-limits.ts`
-
-Schema, tests, migrations:
-- `apps/web/src/db/schema.ts`
-- migrations `apps/web/drizzle/0000_*.sql` through `0027_*.sql`
-- `apps/web/drizzle/meta/_journal.json`
-- Unit tests under `apps/web/src/__tests__/`, including privacy, proxy/origin, nginx config, uploads, share metadata, semantic search, similar search, restore scan, action-origin lint, public-route rate-limit lint, touch-target audit.
-- E2E tests under `apps/web/e2e/`.
-
-Validation run this cycle:
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-
-Not run this cycle:
-- `npm run lint --workspace=apps/web`
-- `npm run typecheck --workspace=apps/web`
-- `npm run build --workspace=apps/web`
-- `npm test --workspace=apps/web`
-- `npm run test:e2e --workspace=apps/web`
+Validation stance:
+- Static review only. I did not run the full blocking gates because this was a critic-only pass and no product code was changed.
+- Existing unrelated worktree change observed: `.context/reviews/perf-reviewer.md` was already modified before this artifact write and was left untouched.
 
 ## Findings
 
-### C17-MED-01 - Confirmed: public home page masks image-query failures as a successful empty gallery
+### C18-CRIT-01 - Disabled/non-production semantic routes still do unmetered config DB work
 
 Severity: Medium
 Confidence: High
 Status: Confirmed
 
 Evidence:
-- `apps/web/src/app/[locale]/(public)/page.tsx:166-176` initializes `images`, `totalCount`, and `hasMore` to empty values, catches any `getImagesLitePage(...)` error, logs a warning, and continues rendering.
-- `apps/web/src/app/[locale]/(public)/page.tsx:231-233` passes those empty values to `HomeClient`, so the response is still a normal public page.
+- `apps/web/src/app/api/search/semantic/route.ts:168-185` calls `getGalleryConfig()` to resolve `semanticSearchMode` before the semantic rate limit is charged.
+- `apps/web/src/app/api/search/semantic/route.ts:194-205` increments the semantic rate limit only after the config gate passes.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:244-261` locks the current disabled-mode behavior: the route returns 503, does not read the body, and does not call `preIncrementSemanticAttempt`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:85-113` pre-increments, calls `getGalleryConfig()`, then rolls the token back when mode is not `production`.
+- `apps/web/src/lib/gallery-config.ts:34-39` shows `getGalleryConfig()` reads `admin_settings` from MySQL.
+- `apps/web/src/lib/request-origin.ts:79-106` checks only request headers. That is useful against browser cross-site calls, but non-browser clients can send matching `Origin`/`Referer` headers.
+- `apps/web/src/lib/gallery-config-shared.ts:103-104` makes `semantic_search_mode='disabled'` the default fresh-install state.
 
-Why it matters:
-- The public home page is the primary product surface. If the image query fails because of a migration bug, DB outage, bad deploy, or schema drift, visitors and crawlers see an apparently valid empty gallery instead of an error, maintenance state, or retryable failure.
-- Operators lose the strongest user-visible signal that the core gallery is broken. A warning in server logs is much weaker than a failed request or explicit degraded state.
-- SEO and social crawlers can cache or index an empty homepage while the database is transiently unavailable.
+Issue:
+The routes avoid JSON body work and embedding scans in disabled/non-production modes, but they still admit a database configuration read before retaining a rate-limit charge. For the text route, disabled mode is completely uncharged. For the similar route, the token is rolled back after the config read. The route comments describe this as avoiding charged disabled-mode work, but the protected work here is not only body parsing or CLIP CPU; it is also the shared MySQL config read on a public endpoint.
 
 Concrete failure scenario:
-- A deploy introduces an SQL regression in `getImagesLitePage`. Topic/tag config still loads, so `GalleryHome` reaches the `try` block, catches the thrown query error, logs once, and returns `200 OK` with no images and `totalCount=0`. Monitoring that checks only `/api/live` or page status does not fail, while the public site appears wiped.
+A scripted client sends many small `POST /api/search/semantic` requests with `Content-Type: application/json`, a valid `Content-Length`, and an `Origin` matching the host while semantic search is disabled. Each request returns 503 without consuming the semantic bucket, but still executes the `admin_settings` SELECT. A similar probe against `/api/search/similar/1` in disabled or stub mode also gets its token refunded after the config read. On the documented single-host deployment, this can consume DB connections/CPU while application-level telemetry shows no rate-limit pressure for the semantic bucket.
 
 Suggested fix:
-- Do not silently degrade the primary gallery to empty data on unexpected query errors. Prefer one of:
-  - Let the error propagate to the Next.js error boundary.
-  - Render an explicit unavailable/maintenance state with an error status where feasible.
-  - Gate the fallback behind a narrow, typed “no images exist” condition rather than `catch (err)`.
-- Add a regression test that mocks `getImagesLitePage` throwing and asserts the home route does not render a successful empty gallery.
+Charge the semantic bucket before the config DB read once the cheap syntactic gates pass, and do not roll back disabled/stub mode after the config read has been consumed. If product policy wants disabled-mode responses to remain effectively free, make the mode check non-DB on the hot path, for example a short-TTL in-process cached setting with bounded refresh. Add tests that assert disabled/stub semantic requests either retain a token after `getGalleryConfig()` or hit a cached no-DB mode path.
 
-### C17-MED-02 - Confirmed: topic slug reservation misses existing public route segments
+### C18-CRIT-02 - CLIP inference bounds active work but leaves pending public/background callers unbounded and abort-insensitive
+
+Severity: High
+Confidence: High
+Status: Confirmed
+
+Evidence:
+- `apps/web/src/lib/clip-model.ts:53-70` limits active CLIP inference with `CLIP_INFERENCE_CONCURRENCY`, but stores pending callers in an unbounded `inferenceWaiters` array.
+- `apps/web/src/app/api/search/semantic/route.ts:248-255` checks request abort before `embedTextReal(query)`, but once a caller waits inside `withInferenceSlot()` there is no abort signal to remove it.
+- `apps/web/src/lib/clip-model.ts:138-146` routes production text search through the same inference slot.
+- `apps/web/src/lib/clip-model.ts:171-222` routes image embedding, including Sharp preprocessing, through the same slot.
+- `apps/web/src/lib/image-queue.ts:272` and `apps/web/src/lib/image-queue.ts:327-332` track embedding/caption side effects in a process-local `Set` without a pending-depth cap.
+- `apps/web/src/lib/image-queue.ts:720-746` starts the post-upload embedding side effect and drains it only by completion.
+
+Issue:
+The active CLIP work is bounded, but the admission queue is not. Public production semantic searches and background post-upload embedding side effects share the same slot. Disconnected public requests remain represented by queued promises, and background side effects can keep accumulating while waiting. That turns a CPU protection mechanism into an unbounded memory/latency queue under burst load.
+
+Concrete failure scenario:
+Production semantic mode is enabled with the default CLIP concurrency of 1. A burst of public searches arrives while uploads are finishing and scheduling production image embeddings. Many browser requests disconnect after timing out, but their waiters remain in `inferenceWaiters`; when they eventually run, they still spend ONNX CPU. Meanwhile the image queue's side-effect set grows and restore/shutdown has more abandoned work to drain. Interactive search latency, background processing, and shutdown behavior all degrade together.
+
+Suggested fix:
+Replace the manual waiter array with a bounded semaphore or queue that supports max pending count, max wait time, and `AbortSignal` removal. Return 429 or 503 on saturation. Separate public interactive search admission from background image-embedding admission, or give them distinct quotas/priorities. Expose queue depth/wait time metrics so operators can see when the CLIP subsystem is saturated.
+
+### C18-CRIT-03 - Embedding rows are one-per-image, so model cutovers are destructive and hard to roll back
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
+Status: Confirmed design risk
 
 Evidence:
-- `apps/web/src/lib/validation.ts:4-21` reserves `admin`, `g`, `map`, `p`, `s`, `uploads`, public metadata files, and locale codes for topic slugs/aliases.
-- `apps/web/src/app/actions/topics.ts:115-120` rejects reserved topic slugs through `isReservedTopicRouteSegment(slug)`.
-- `apps/web/src/app/actions/topics.ts:500-505` rejects reserved topic aliases through the same helper.
-- Existing concrete public route segments include:
-  - `timeline`: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:16-25`
-  - `year`: `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:17-20`
-  - `privacy`: `apps/web/src/app/[locale]/(public)/privacy/page.tsx:5-14`
-  - `c`: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14-18`
-- The dynamic topic route has its own smaller static-file-only reserved list at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:19-31`, which is already divergent from `validation.ts`.
+- `apps/web/src/db/schema.ts:280-294` makes `image_embeddings.image_id` the primary key; `model_version` is only an indexed attribute.
+- `apps/web/scripts/backfill-clip-embeddings.ts:123-147` selects images missing an embedding row for the target model version.
+- `apps/web/scripts/backfill-clip-embeddings.ts:172-183` writes through `onDuplicateKeyUpdate`, replacing the existing row for that image with the target model version.
+- `apps/web/src/app/actions/embeddings.ts:103-124` mirrors the per-version missing-row selection.
+- `apps/web/src/app/actions/embeddings.ts:152-163` mirrors the destructive upsert.
+- `apps/web/src/app/api/search/semantic/route.ts:261-273` scans only rows matching the active model version.
 
-Why it matters:
-- Admins can create a topic slug or alias such as `timeline`, `year`, `privacy`, or `c`. The database will accept it, the admin UI can link to it as a normal topic, and SEO/canonical generation can treat it as valid content. But Next.js will route `/en/timeline`, `/en/privacy`, `/en/year/...`, and `/en/c/...` to the concrete route tree rather than the topic page.
-- This creates unreachable or misleading canonical URLs. It also makes future route additions dangerous because the slug guard has to be updated by memory.
+Issue:
+The read path is model-version aware, but the storage model cannot retain two embeddings for one image. Backfilling a new model overwrites the old vector. That makes a semantic model upgrade a destructive migration rather than a staged cutover. The code comments correctly distinguish stub and production rows, but the schema shape prevents side-by-side validation or quick rollback.
 
 Concrete failure scenario:
-- An admin creates a “Timeline” topic with slug `timeline`. The create action passes validation because `timeline` is not in `RESERVED_TOPIC_ROUTE_SEGMENTS`. Topic navigation links point to `/en/timeline`, but that URL renders the timeline feature page, not the topic gallery. The topic looks broken even though the DB row exists.
+An operator tries a new production CLIP model version and starts a backfill. Halfway through, quality regressions or a host restart interrupt the process. Rows already rewritten no longer exist for the previous model version, and rows not yet rewritten do not exist for the new version. Search either sees a partial corpus for the new model or loses rewritten rows when rolling back to the old model. Recovering requires a full re-embed from originals.
 
 Suggested fix:
-- Create one shared `RESERVED_PUBLIC_ROUTE_SEGMENTS` source of truth that covers all top-level concrete public segments: `admin`, `c`, `g`, `map`, `p`, `privacy`, `s`, `timeline`, `uploads`, `year`, metadata files, and locale codes.
-- Use it from both `validation.ts` and `[topic]/page.tsx`.
-- Add a test that enumerates concrete siblings of `[topic]` and fails if the reservation set is missing any slug-valid segment.
+Model embeddings as `(image_id, model_version)` with a composite primary/unique key, and make the active semantic model a separate setting. Backfill a candidate version side by side, verify coverage and quality, then flip the active model. If storage cost rules that out, document production model upgrades as destructive maintenance windows and gate production search until coverage for the active version is complete.
 
-### C17-LOW-03 - Confirmed: checked-in nginx template is production-host specific despite reusable deploy docs
+## Review Blind Spots Rechecked
 
-Severity: Low
-Confidence: Medium
-Status: Confirmed
+- Settings-forwarding regression class from run-9 is closed at current HEAD. Browser upload forwards all processing/search snapshot fields at `apps/web/src/app/actions/images.ts:500-526`, and `apps/web/src/__tests__/images-actions.test.ts:264-276` asserts the producer payload. Lightroom upload has a source-contract lock at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-394`.
+- The old `retryFailedImage` hardcoded English error is fixed: `apps/web/src/app/actions/images.ts:1194-1224` uses translation keys for invalid ID and non-failed-state errors.
+- The historical non-monotonic migration journal remains grandfathered, but deploy safety is guarded by the migrator baselining/post-condition and migration tests. I did not refile it as a current defect.
+- The storage backend still has a public-root `original/` mapping risk inside the quarantined abstraction (`apps/web/src/lib/storage/local.ts:20`, `apps/web/src/lib/storage/local.ts:130-135`), but it is not live product code today. The quarantine is executable at `apps/web/src/__tests__/storage-quarantine.test.ts:111-143`; re-open before the first real importer.
+- Older cycle-18 feed/sitemap items are fixed at current HEAD: sitemap homepage/topic `lastModified` exists at `apps/web/src/app/sitemap.ts:57-73`, topic feed locale validation exists at `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:34-47`, and Atom enclosure/title metadata exists at `apps/web/src/lib/atom-feed.ts:119-136`.
+- The cycle-17 home-page "successful empty gallery on image query failure" appears resolved at current HEAD: `apps/web/src/app/[locale]/(public)/page.tsx:149-167` now awaits `getImagesLitePage(...)` directly instead of catching it into an empty gallery.
 
-Evidence:
-- `apps/web/nginx/default.conf:21-29` hardcodes `server_name gallery.atik.kr`.
-- `README.md:173-184` documents Docker deployment as a generally adaptable path.
-- `.env.deploy.example:6-14` makes remote deployment host/path/user config-driven.
+## Final Missed-Issues Sweep
 
-Why it matters:
-- The deploy and README surfaces present this repository as configurable, but the checked-in nginx template still bakes one production hostname into the server block. Anyone adapting the repo can complete the documented env-driven deploy flow and still carry a stale server name.
-- In nginx, `server_name` interacts with host matching and virtual-host selection. On a shared host or future multi-domain setup, this can serve the app from the wrong default server or make a cloned deployment fail host routing.
+I re-swept public APIs/actions, semantic/similar routes, CLIP queueing, upload enqueue paths, backup/download containment, storage quarantine, migration journal guards, route-lint scanners, feed/sitemap current fixes, privacy select fields, and prior review registers. I did not find a new current critical vulnerability, public PII leak, schema deploy blocker, or color/HDR settings-forwarding regression beyond the three findings above.
 
-Concrete failure scenario:
-- A second gallery instance is deployed with a different public hostname using `.env.deploy`. The app boots, but nginx still only declares `gallery.atik.kr`; depending on other server blocks, the new host may hit the default server, receive wrong headers, or bypass intended host-specific policy.
-
-Suggested fix:
-- Template `server_name` from deploy configuration, use `_` for an explicitly internal-only default, or document that operators must rewrite this line before deployment.
-- Add a lightweight test that either permits only the chosen generic default or verifies the deployment docs mention the required edit.
-
-### C17-LOW-04 - Confirmed: upload cache comment contradicts the actual cache duration
-
-Severity: Low
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- `apps/web/src/lib/serve-upload.ts:245-249` says edge caches keep files fast “for one day”.
-- `apps/web/src/lib/serve-upload.ts:250-252` says the policy was reduced from `86400` to `3600`, and the actual header is `Cache-Control: public, max-age=3600, must-revalidate`.
-
-Why it matters:
-- This is not a runtime bug, but it is a documentation-code mismatch in a performance-sensitive path. Future operators or reviewers may reason about a 24-hour stale window when the application actually promises one hour.
-- Cache behavior is part of the color/HDR delivery contract. Incorrect comments make it easier to reintroduce stale derivative behavior during future pipeline work.
-
-Concrete failure scenario:
-- A color-pipeline fix is deployed and an operator expects old derivatives to remain edge-cached for one day because of the comment, delaying investigation in the wrong direction. In reality the browser/edge TTL is one hour plus revalidation behavior.
-
-Suggested fix:
-- Update the comment to say “within an hour” or remove the stale “one day” sentence. Keep the R8-R7 rationale next to the header.
-
-### C17-RISK-05 - Risk: custom action-origin lint advertises TSX/JSX coverage but parses every file as TypeScript
-
-Severity: Low
-Confidence: Medium
-Status: Risk
-
-Evidence:
-- `apps/web/scripts/check-action-origin.ts:47` includes `.tsx` and `.jsx` in `ACTION_FILE_EXTENSIONS`.
-- `apps/web/scripts/check-action-origin.ts:58-77` recursively discovers those files.
-- `apps/web/scripts/check-action-origin.ts:476-479` always creates the AST with `ts.ScriptKind.TS`.
-
-Why it matters:
-- The current action files are covered by the passing lint run, but the gate’s stated future coverage is wider than its parser mode. If a future server-action file uses TSX/JSX syntax, the scanner may parse it incorrectly and either fail noisily in an unexpected way or silently miss the structure it was meant to analyze.
-- Security lint gates should fail predictably. A misleading extension allowlist is a maintenance hazard because reviewers may believe `.tsx` actions are fully supported.
-
-Concrete failure scenario:
-- A future admin action is added in `app/actions/bulk-editor.tsx` with JSX used in a helper or returned fragment. Discovery includes the file, but `createSourceFile(..., ScriptKind.TS)` does not parse it as TSX. The scanner’s AST walk can produce false positives/negatives unrelated to the actual origin-guard contract.
-
-Suggested fix:
-- Select `ScriptKind.TSX` for `.tsx`, `ScriptKind.JSX` for `.jsx`, and JS/TS kinds for the other extensions.
-- Add fixture tests for guarded and unguarded `.tsx` action files so the claimed extension coverage is executable.
-
-### C17-RISK-06 - Risk: deploy escape hatch executes arbitrary shell from a gitignored env file
-
-Severity: Low
-Confidence: Medium
-Status: Risk
-
-Evidence:
-- `scripts/deploy-remote.sh:61-72` sources the selected env file, allows `DEPLOY_CMD`, and executes it with `bash -lc`.
-- `.env.deploy.example:13-14` documents `DEPLOY_CMD` as an optional override for the derived SSH command.
-
-Why it matters:
-- This is an intentional escape hatch, not a vulnerability by itself. The risk is operational: `.env.deploy` is gitignored and outside review, while `npm run deploy` is required per iteration. A compromised or accidentally edited env file can run any local shell command under the developer account.
-- Because deploy is habitual, this path deserves strong guardrails or at least loud documentation.
-
-Concrete failure scenario:
-- A local `.env.deploy` is copied from a shared note with a malformed `DEPLOY_CMD`, or is modified by unrelated tooling. The next routine `npm run deploy` executes the arbitrary command locally before any SSH boundary is reached.
-
-Suggested fix:
-- Prefer deriving the SSH command from structured fields and require an explicit `ALLOW_DEPLOY_CMD=1` for the escape hatch.
-- Print the resolved command and require an interactive confirmation only for `DEPLOY_CMD`, or restrict the override to commands beginning with `ssh`.
-- Document the local-code-execution property in `.env.deploy.example`.
-
-## Positive Contracts I Tried To Break But Did Not
-
-- Admin API authentication is currently enforced by the custom scanner; `npm run lint:api-auth --workspace=apps/web` passed.
-- Mutating server actions are currently covered by the same-origin guard scanner; `npm run lint:action-origin --workspace=apps/web` passed.
-- Public mutating API routes are currently covered by the rate-limit scanner; `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Lightroom upload attribution appears fixed in current HEAD: `apps/web/src/app/api/admin/lr/upload/route.ts:68-75` derives an authenticated token/cookie actor and `apps/web/src/app/api/admin/lr/upload/route.ts:443` persists `uploaded_by: actorUserId`.
-- Public share pages avoid token lookup in metadata and rate-limit before lookup on page render; I inspected `g/[key]` and `s/[key]` flows.
-- Semantic search and similar search have same-origin checks, activation gates, request-size checks, rate-limit pre-increment, and processed-image filtering.
-- Upload serving validates path segments, extensions, realpaths, containment, non-symlink files, ETags, and content type before streaming.
-- Privacy-sensitive fields have type/test guards around public data omission and search enrichment fields.
-
-## Final Missed-Issue Sweep
-
-I did a final sweep across:
-- Route conflicts and reserved segment validation.
-- Home/topic/photo/share/search public behavior.
-- Admin action/API guard coverage.
-- Nginx proxy trust and rate-limit IP derivation.
-- Upload serving and cache headers.
-- DB restore/backup surfaces and deploy helper behavior.
-- Schema migration journal conventions.
-- Existing test and lint gates.
-- Prior critic findings to avoid repeating issues already fixed at HEAD.
-
-Residual uncertainty:
-- I did not run the full unit suite, typecheck, build, or Playwright E2E in this critic pass.
-- I did not execute production deploy or destructive DB restore paths.
-- I sampled broad code regions rather than line-reading every component and every one of the 2000+ tests end to end.
+Total findings: 3
+- Critical: 0
+- High: 1
+- Medium: 2
+- Low: 0

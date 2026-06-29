@@ -26,6 +26,7 @@ export function TokensClient() {
     const [showCreate, setShowCreate] = useState(false);
     const [newLabel, setNewLabel] = useState('');
     const [createdPlaintext, setCreatedPlaintext] = useState<string | null>(null);
+    const [plaintextAcknowledged, setPlaintextAcknowledged] = useState(false);
     const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
 
     const fetchTokens = () => {
@@ -63,6 +64,7 @@ export function TokensClient() {
                 toast.error(result.error);
             } else {
                 setCreatedPlaintext(result.plaintext);
+                setPlaintextAcknowledged(false);
                 setShowCreate(false);
                 setNewLabel('');
                 fetchTokens();
@@ -85,6 +87,7 @@ export function TokensClient() {
 
     const handleCopy = (text: string) => {
         navigator.clipboard.writeText(text).then(() => {
+            setPlaintextAcknowledged(true);
             toast.success(t('lrToken.copied'));
         }).catch(() => {
             toast.error(t('lrToken.copyFailed'));
@@ -182,7 +185,15 @@ export function TokensClient() {
             </Dialog>
 
             {/* Show plaintext once */}
-            <Dialog open={!!createdPlaintext} onOpenChange={() => setCreatedPlaintext(null)}>
+            <Dialog
+                open={!!createdPlaintext}
+                onOpenChange={(open) => {
+                    if (!open && plaintextAcknowledged) {
+                        setCreatedPlaintext(null);
+                        setPlaintextAcknowledged(false);
+                    }
+                }}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{t('lrToken.plaintextTitle')}</DialogTitle>
@@ -202,8 +213,24 @@ export function TokensClient() {
                             <Copy className="h-4 w-4" />
                         </Button>
                     </div>
+                    <label className="flex min-h-11 items-center gap-3 rounded-md border px-3 py-2 text-sm">
+                        <input
+                            type="checkbox"
+                            checked={plaintextAcknowledged}
+                            onChange={(event) => setPlaintextAcknowledged(event.target.checked)}
+                            className="h-4 w-4"
+                        />
+                        <span>{t('lrToken.plaintextAcknowledge')}</span>
+                    </label>
                     <DialogFooter>
-                        <Button onClick={() => setCreatedPlaintext(null)} className="min-h-[44px]">
+                        <Button
+                            onClick={() => {
+                                setCreatedPlaintext(null);
+                                setPlaintextAcknowledged(false);
+                            }}
+                            disabled={!plaintextAcknowledged}
+                            className="min-h-[44px]"
+                        >
                             {t('lrToken.plaintextDone')}
                         </Button>
                     </DialogFooter>
@@ -211,7 +238,7 @@ export function TokensClient() {
             </Dialog>
 
             {/* Revoke confirm dialog */}
-            <Dialog open={confirmRevokeId !== null} onOpenChange={() => setConfirmRevokeId(null)}>
+            <Dialog open={confirmRevokeId !== null} onOpenChange={(open) => { if (!open && !isPending) setConfirmRevokeId(null); }}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{t('lrToken.revokeTitle')}</DialogTitle>

@@ -245,7 +245,7 @@ export async function serveUploadFile(
             'Content-Type': contentType,
             'Content-Length': stats.size.toString(),
             // public + max-age + must-revalidate: edge caches keep the file
-            // fast for one day, but every browser must revalidate on the
+            // fast for one hour, but every browser must revalidate on the
             // next request via If-None-Match. Combined with the
             // pipeline-version-bearing ETag, a pipeline change forces a
             // fresh fetch with no operator action required.
@@ -262,8 +262,10 @@ export async function serveUploadFile(
 
         // Create stream and convert to web ReadableStream for proper lifecycle management
         // Stream from the resolved (realpath) path, not the original path, to
-        // close the TOCTOU gap where a file could be replaced by a symlink
-        // between realpath() validation and createReadStream().
+        // reduce the path-replacement race where the original segment could
+        // be swapped before createReadStream(). This is not descriptor-backed
+        // validation; the opened object is still checked by the same-host
+        // filesystem trust boundary.
         fileStream = createReadStream(resolvedPath);
 
         // AGG-H5 (run-6 cycle-2): if the request is already aborted by the time

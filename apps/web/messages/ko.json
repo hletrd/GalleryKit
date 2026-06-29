@@ -106,7 +106,9 @@
     "mapVisibleToggle": "{label} 지도 표시 전환",
     "mapVisibleUpdated": "지도 표시 설정이 업데이트되었습니다",
     "editTopicAria": "{label} 카테고리 수정",
-    "deleteTopicAria": "{label} 카테고리 삭제"
+    "deleteTopicAria": "{label} 카테고리 삭제",
+    "empty": "아직 카테고리가 없습니다",
+    "emptyDescription": "사진을 업로드하기 전에 새 이미지가 들어갈 카테고리를 먼저 만드세요."
   },
   "tags": {
     "title": "태그 관리",
@@ -873,6 +875,7 @@
     "plaintextTitle": "새 토큰",
     "plaintextDesc": "지금 이 bearer 토큰을 복사하고 비밀번호처럼 보관하세요. 이 대화 상자를 닫으면 다시 표시되지 않습니다.",
     "plaintextDone": "확인",
+    "plaintextAcknowledge": "이 토큰을 복사했거나 안전한 곳에 보관했습니다. 다시 표시되지 않는다는 것을 이해합니다.",
     "copied": "토큰이 클립보드에 복사되었습니다.",
     "copyFailed": "복사할 수 없습니다. 직접 복사해 주세요.",
     "copyAria": "토큰을 클립보드에 복사",

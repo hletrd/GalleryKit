@@ -29,6 +29,15 @@ describe('clip-model module contract', () => {
     expect(src).toMatch(/toColourspace|info\.channels/);
   });
 
+  it('bounds queued CLIP inference waiters instead of retaining an unbounded array', () => {
+    expect(src).toContain('CLIP_INFERENCE_MAX_PENDING');
+    expect(src).toContain('CLIP_INFERENCE_QUEUE_TIMEOUT_MS');
+    expect(src).toContain('ClipInferenceQueueFullError');
+    expect(src).toContain('ClipInferenceQueueTimeoutError');
+    expect(src).toMatch(/inferenceWaiters\.length\s*>=\s*CLIP_INFERENCE_MAX_PENDING/);
+    expect(src).toMatch(/setTimeout\(\(\)\s*=>\s*\{[\s\S]*removeInferenceWaiter\(waiter\)/);
+  });
+
   it('pins a real HF revision (defined in clip-model-id.ts)', () => {
     expect(idSrc).toMatch(/JINA_CLIP_REVISION\s*=\s*['"][0-9a-f]{7,40}['"]/);
   });

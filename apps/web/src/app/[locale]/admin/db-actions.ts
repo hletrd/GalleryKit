@@ -154,20 +154,33 @@ export async function dumpDatabase() {
         return { success: false as const, error: t('backupFailed') };
     }
 
-    return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
-        // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
-        // to avoid exposing credentials in /proc/<pid>/cmdline
-        // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
-        // set to C.UTF-8 for deterministic output regardless of server locale,
-        // MYSQL_* vars required for auth (avoid exposing credentials in /proc/cmdline).
-        const dump = spawn('mysqldump', [
-            '--single-transaction', // Good for InnoDB
-            '--quick',
-            ...sslArgs,
-            DB_NAME
-        ], {
-            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
-        });
+    const conn = await connection.getConnection();
+    let dbRestoreLockHeld = false;
+    try {
+        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+            "SELECT GET_LOCK(?, 0) AS acquired",
+            [LOCK_DB_RESTORE],
+        );
+        const acquired = lockRows[0]?.acquired;
+        if (acquired !== 1 && acquired !== BigInt(1)) {
+            return { success: false as const, error: t('restoreInProgress') };
+        }
+        dbRestoreLockHeld = true;
+
+        return await new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
+            // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
+            // to avoid exposing credentials in /proc/<pid>/cmdline
+            // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
+            // set to C.UTF-8 for deterministic output regardless of server locale,
+            // MYSQL_* vars required for auth (avoid exposing credentials in /proc/cmdline).
+            const dump = spawn('mysqldump', [
+                '--single-transaction', // Good for InnoDB
+                '--quick',
+                ...sslArgs,
+                DB_NAME
+            ], {
+                env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
+            });
 
         const writeStream = createWriteStream(outputPath, { mode: 0o600 });
         let settled = false;
@@ -275,7 +288,15 @@ export async function dumpDatabase() {
             fs.unlink(outputPath).catch(() => {});
             resolve({ success: false, error: t('backupFailed') });
         });
-    });
+        });
+    } finally {
+        if (dbRestoreLockHeld) {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
+                console.debug('RELEASE_LOCK (backup finally) failed:', err);
+            });
+        }
+        conn.release();
+    }
 }
 
 // Restore intentionally uses a much smaller app-level cap than the generic

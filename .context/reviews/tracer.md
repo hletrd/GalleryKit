@@ -1,195 +1,114 @@
-# Cycle 17 Tracer Review
+# Cycle 18 Tracer Review
 
-Reviewer: tracer
-Scope: current HEAD `5e054f80f646cbcd16c7aae5412aa29424e05032`
-Write scope: `.context/reviews/tracer.md` only
+Scope: causal tracing across auth/session, upload processing, image queue/backfill, sharing, semantic search, DB restore/backup, route rate limits, service worker/cache, and deployment scripts.
 
-## Method
+Review posture: read-only. No implementation changes. Current HEAD: `4ad6a394453fac80cc29aacc6f93eab3ed8c12ca`.
 
-Read `AGENTS.md` and `CLAUDE.md` first, then traced current-HEAD causal flows with `rg`, line-anchored source reads, targeted gate scripts, and a final missed-flow sweep.
+## Inventory
 
-Repository inventory checked: `747` files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx`, `apps/web/public`, and `apps/web/e2e`.
+Relevant instructions/docs read first: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/prompts/tracer.md`, `.context/reviews/prompts/common_review_scope.md`.
 
-Flows traced:
+Relevant flow files examined:
 
-- Upload -> quota/transaction -> queue -> processing -> upload serving/cache invalidation.
-- Auth/session/token -> proxy fast guard -> `withAdminAuth` -> admin API route.
-- Public actions/API -> same-origin/public validation -> rate limit -> DB mutation/rollback.
-- Tag/topic/image mutations -> page/feed/sitemap freshness.
-- DB restore/migrate -> maintenance flag/locks/queue quiesce -> journal/hash post-condition.
-- Service worker caching -> admin/share/image/HTML routing.
-- Semantic search -> same-origin/body gates -> mode gate -> rate limit -> embedding scan.
-- Sharing -> share key/group creation/revoke -> shared routes -> view analytics.
-- Analytics -> page render trigger -> public server action -> DB insert/buffered counters.
+- Auth/session/admin API: `apps/web/src/lib/session.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`.
+- Upload processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-tracker-state.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/serve-upload.ts`, upload route handlers under `apps/web/src/app/**/uploads/[...path]/route.ts`.
+- Image queue/backfill: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/app/actions/admin-backfill.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/download-clip-models.ts`.
+- Sharing/public analytics: `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/lib/data.ts`.
+- Semantic search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-paths.ts`.
+- DB backup/restore/migrations: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/backup-filename.ts`, `apps/web/src/lib/mysql-cli-ssl.ts`, `apps/web/scripts/migrate.js`.
+- Public routes/rate limits/cache: all route handlers under `apps/web/src/app/api`, feed routes, upload routes, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/lib/sw-cache.ts`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/next.config.ts`.
+- Deployment: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `.dockerignore`, `apps/web/.dockerignore`.
+- Relevant tests/contracts checked: auth/session/rate-limit/upload/queue/backfill/sharing/semantic/restore/SW/deploy tests under `apps/web/src/__tests__/`, especially `db-restore.test.ts`, `restore-upload-lock.test.ts`, `backup-download-route.test.ts`, `check-public-route-rate-limit.test.ts`, `shared-route-rate-limit-source.test.ts`, `semantic-search-route.test.ts`, `sw-template-contract.test.ts`, and `deploy-script-contract.test.ts`.
 
-Validation evidence:
+Validation run:
 
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `apps/web/public/sw.template.js` and generated `sw.js` were compared behaviorally; only the generated version comment differs.
 
 ## Findings
 
-### T17-01 Likely: tag rename/delete can change public feed titles without advancing feed/sitemap freshness clocks
+### T18-01: DB backup creation is not serialized with restore
 
 Severity: Medium
-Confidence: High
-Status: Likely
 
-Regions:
+Confidence: Medium-high
 
-- `apps/web/src/app/actions/tags.ts:42-92`
-- `apps/web/src/app/actions/tags.ts:99-130`
-- `apps/web/src/app/actions/tags.ts:193-200`
-- `apps/web/src/app/actions/tags.ts:256-263`
-- `apps/web/src/app/feed.xml/route.ts:60-74`
-- `apps/web/src/app/feed.xml/route.ts:127-154`
-- `apps/web/src/app/sitemap.ts:57-80`
-- `apps/web/src/app/sitemap.ts:90-108`
+Files/regions:
 
-Causal chain:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:119-124` checks same-origin/admin and current restore-maintenance state before backup.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:157-170` starts `mysqldump` directly.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:286-351` documents restore's advisory-lock model, acquires `LOCK_DB_RESTORE`, upload-processing, and backfill locks, then starts restore maintenance.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:379-390` quiesces queue/view-count side effects only inside restore, not backup.
+- `apps/web/src/__tests__/db-restore.test.ts:52-64` locks backup header/delete behavior, but not backup-vs-restore serialization.
+- `apps/web/src/__tests__/restore-upload-lock.test.ts:7-32` locks restore/upload/backfill ordering, but not backup participation in the restore lock.
 
-`updateTag` validates/admin-checks, updates only the `tags` row, logs audit, then revalidates `/admin/tags`, `/admin/dashboard`, and `/` (`tags.ts:42-92`). `deleteTag` deletes `imageTags` and `tags`, then revalidates the same narrow paths (`tags.ts:99-130`). Neither action finds affected images nor bumps `images.updated_at`.
+Causality chain:
 
-The contrasting image-tag actions do bump the image row freshness clock when the image/tag relationship changes: `addTagToImage` updates `images.updated_at` after an inserted link (`tags.ts:193-196`), and `removeTagFromImage` does the same after a deleted link (`tags.ts:256-259`). That makes the omission in rename/delete causally significant, not just stylistic.
-
-Public feeds derive entry titles from current joined tag names (`getPhotoDisplayTitleFromTagNames`) but derive entry `<updated>` from `img.updated_at` (`feed.xml/route.ts:60-74`). The route also uses that same max entry timestamp for `Last-Modified` and returns `304` when `If-Modified-Since` is not older (`feed.xml/route.ts:127-154`). Sitemap homepage/topic/image/feed `<lastmod>` values likewise flow from image/topic `updated_at` data (`sitemap.ts:57-80`, `sitemap.ts:90-108`).
+1. `dumpDatabase()` rejects if restore maintenance is already active, but it does not acquire `LOCK_DB_RESTORE` or any backup/restore mutex.
+2. `restoreDatabase()` acquires `LOCK_DB_RESTORE` before `beginRestoreMaintenance()`, creating a window where a backup can pass the maintenance check while restore setup is already underway.
+3. Once `mysqldump` and restore overlap, MySQL metadata locks and DDL/import work can block each other; the code treats backup and restore as independent operations even though both operate on the same schema.
+4. Tests cover dump validity and restore/upload coordination, but no contract currently prevents backup creation during restore setup/import.
 
 Concrete failure scenario:
 
-An image has no explicit title, so the feed title falls back to tag names. Admin renames tag `wedding` to `ceremony` or deletes it. A freshly rendered feed body would now show a different title/tag-derived display name, but `images.updated_at`, feed `<updated>`, `Last-Modified`, and sitemap `<lastmod>` remain unchanged. RSS readers polling with `If-Modified-Since` can receive `304` and never fetch the changed title; crawlers also miss the freshness signal for affected photo/topic/feed URLs.
-
-Competing hypotheses considered:
-
-- Public pages are dynamic and re-query tags, so maybe no stale user-visible page. True for regular page rendering, but it does not cover Atom conditional requests or sitemap freshness.
-- Feed route cache is short (`max-age=600`, `s-maxage=1800`), so maybe readers eventually refresh. Conditional `304` is driven by `feedUpdated`, not only cache age; a reader can keep getting not-modified after cache expiry when the freshness clock is stale.
-- Foreign-key cascade on `imageTags` might be enough on delete. It removes relationships, but it does not update the parent `images.updated_at`.
+An admin starts a backup. Before or just after `mysqldump` begins, another admin starts a restore. The restore obtains `LOCK_DB_RESTORE`, enters maintenance, then the import/drop/recreate sequence competes with the dump's table reads and metadata locks. Depending on timing, the backup can fail after a long wait, restore can be delayed behind a dump, or the admin can receive a valid but stale pre-restore backup while the UI has moved into restore maintenance.
 
 Suggested fix:
 
-For `updateTag`, within the mutation flow collect affected image IDs from `imageTags` for the tag ID, update the tag, and bump `images.updated_at = CURRENT_TIMESTAMP` for affected IDs only when the tag update actually changes a row. For `deleteTag`, collect affected image IDs before deleting `imageTags`, delete the tag, then bump those image rows when deletion succeeds. Revalidate affected photo/topic/share paths if cheaply available; otherwise use the existing broader app-data revalidation helper for tag rename/delete. Add a focused regression covering feed `Last-Modified`/entry `<updated>` after tag rename/delete.
+Make backup and restore share the same DB-level serialization contract. The narrowest change is for `dumpDatabase()` to use a dedicated connection and non-blocking `GET_LOCK(LOCK_DB_RESTORE, 0)` for the whole dump, releasing it in `finally`; return a translated "restore/backup already running" error when unavailable. Add a source or behavior test that `dumpDatabase()` participates in `LOCK_DB_RESTORE`.
 
-### T17-02 Risk: restore/upload/queue/view-count coordination is process-local and depends on the documented single-web-instance topology
+### T18-02: Correctness depends on the documented single web-instance topology
 
-Severity: High if horizontally scaled; Low under current documented topology
+Severity: Medium if accidentally scaled horizontally; Low under the current documented Docker Compose topology
+
 Confidence: High
-Status: Risk
 
-Regions:
+Files/regions:
 
-- `apps/web/src/lib/restore-maintenance.ts:1-56`
-- `apps/web/src/lib/upload-tracker-state.ts:7-20`
-- `apps/web/src/lib/upload-tracker-state.ts:70-78`
-- `apps/web/src/lib/image-queue.ts:275-324`
-- `apps/web/src/lib/data.ts:13-63`
-- `apps/web/src/lib/data.ts:222-248`
-- `apps/web/src/lib/rate-limit.ts:112-121`
-- `apps/web/src/lib/rate-limit.ts:436-508`
+- `CLAUDE.md:227-230` explicitly documents single web-instance/single-writer topology and names process-local restore, upload quota, queue, backfill status, rate-limit, and view-count state.
+- `apps/web/docker-compose.yml:1-27` ships one `web` service/container.
+- `apps/web/src/lib/restore-maintenance.ts:1-56` stores restore maintenance in a process-global symbol.
+- `apps/web/src/lib/upload-tracker-state.ts:7-20` and `apps/web/src/lib/upload-tracker-state.ts:70-78` store upload quota state in a process-global `Map`.
+- `apps/web/src/lib/image-queue.ts:275-324` stores queue state in a process-global symbol.
+- `apps/web/src/lib/rate-limit.ts:112-121` keeps rate-limit fast-path maps in process memory.
+- `apps/web/src/lib/data.ts:13-63` buffers shared-group view counts in process memory before DB flush.
+- `apps/web/src/lib/upload-processing-contract-lock.ts:9-74` provides a DB advisory lock for upload/restore/backfill writer coordination, but the surrounding maintenance and quota states are still local.
 
-Causal chain:
+Causality chain:
 
-Restore maintenance is a `globalThis` boolean in one Node process (`restore-maintenance.ts:1-56`). Upload tracking is a `globalThis` `Map` used to detect active upload claims (`upload-tracker-state.ts:7-20`, `upload-tracker-state.ts:70-78`). The processing queue state is also stored on a process-global symbol and owns in-memory queue/enqueued/retry/side-effect state (`image-queue.ts:275-324`). Shared-group denormalized view counts buffer in process memory and flush later (`data.ts:13-63`, `data.ts:222-248`). Public rate-limit maps are explicitly process-local fast paths, with DB buckets used as the cross-process source for some public/admin attempts (`rate-limit.ts:112-121`, `rate-limit.ts:436-508`).
-
-Under the documented single web instance, this is coherent: one process owns maintenance, upload claims, queue state, and buffered counters. Under two app processes against the same DB/uploads directory, a restore in process A can set maintenance only in A while process B continues accepting uploads or processing queue jobs. Process B also would not see A's active upload claims, and its buffered shared-group view counts would flush independently.
+1. The shipped deployment is single-instance and the docs correctly warn not to scale it without moving coordination state.
+2. Several flows under this trace rely on process-local state for admission, visibility, retry, or accounting.
+3. DB advisory locks fence some shared writers, but they do not make all guards global: restore-maintenance rejection, upload quotas, public rate-limit fast paths, admin-backfill status, and shared-group view buffering remain per process.
+4. A second web process would therefore observe different coordination state even while sharing the same database and filesystem.
 
 Concrete failure scenario:
 
-An operator scales the web container to two replicas for availability. Admin starts DB restore through replica A. Replica B receives an upload or queued image job during the restore because its `isRestoreMaintenanceActive()` is false and its upload tracker is empty. The restore/import and concurrent upload/processing now race over DB rows and upload files, defeating the intended quiesce window.
-
-Competing hypotheses considered:
-
-- DB-backed rate-limit buckets might make all coordination cross-process. They cover selected rate-limit counters, but not restore maintenance, upload claim state, queue state, or buffered shared-group view-count state.
-- File/DB locks might still serialize everything. The traced restore/upload paths do take named locks in some actions, but process B still has independent in-memory maintenance/queue/upload state; lock coverage would have to be audited before any scale-out claim.
-- This may be acceptable because `CLAUDE.md` documents a single-web-instance topology. Yes; therefore this is a topology risk, not a current production defect.
+An operator runs a second `gallerykit-web` process or changes Compose/orchestration to two replicas. Restore starts on process A and sets process-local maintenance. Process B does not see that flag, so public actions and some uploads can continue until they hit a DB/filesystem/advisory-lock boundary. Public rate limits split across processes, so an abusive client gets roughly N times the intended budget. Shared-group view increments buffered in process B can be lost independently on crash or deploy, and admin-backfill status can disagree between replicas.
 
 Suggested fix:
 
-If scale-out remains out of scope, encode the invariant as an operational guard: document one web replica, fail boot or health-check if a scale-out marker is detected, and keep deploy scripts single-instance. If scale-out is planned, move maintenance state, upload claims, queue claims, and view-count buffering to shared DB/Redis primitives, and add restore-vs-upload integration coverage across two processes.
-
-### T17-03 Risk: analytics counters/events are intentionally best-effort and can undercount during render aborts, process exits, or DB outages
-
-Severity: Low to Medium, depending on analytics accuracy requirements
-Confidence: High
-Status: Risk
-
-Regions:
-
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:163-165`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-165`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:132-137`
-- `apps/web/src/app/actions/public.ts:363-395`
-- `apps/web/src/app/actions/public.ts:397-426`
-- `apps/web/src/app/actions/public.ts:428-461`
-- `apps/web/src/lib/data.ts:49-63`
-- `apps/web/src/lib/data.ts:75-145`
-- `apps/web/src/lib/data.ts:222-248`
-
-Causal chain:
-
-Photo, topic, and shared-group pages call their analytics recorders with `void`, explicitly not awaiting the server action (`p/[id]/page.tsx:163-165`, `[topic]/page.tsx:163-165`, `g/[key]/page.tsx:132-137`). The recorders validate/rate-limit/visibility-check and then fire DB inserts without awaiting them, swallowing insert errors so analytics never blocks rendering (`public.ts:363-395`, `public.ts:397-426`, `public.ts:428-461`). Shared-group denormalized `view_count` increments are buffered in memory and flushed later; failed flushes are retried up to a cap and then dropped (`data.ts:49-63`, `data.ts:75-145`). Shutdown has a flush helper (`data.ts:222-248`), but normal crashes, hard kills, or platform termination before the helper runs can still lose buffered counts.
-
-Concrete failure scenario:
-
-A popular shared group receives traffic while the DB is briefly unavailable. The page renders because analytics is best-effort. Durable `shared_group_views` inserts fail and are swallowed. Buffered denormalized counters retry, but after repeated failures or process termination the increments are dropped. Later admin analytics undercounts the traffic even though users successfully viewed the pages.
-
-Competing hypotheses considered:
-
-- This is probably intentional. Confirmed: comments explicitly say fire-and-forget and analytics should not block rendering.
-- Maybe shared-group views are double-counted. Not in the traced path: `getSharedGroup` buffers the denormalized `shared_groups.view_count`, while `recordSharedGroupView` inserts durable analytics rows; they are separate metrics, and `g/[key]` aligns selected-photo handling before recording.
-- Maybe shutdown flush makes the buffer durable. It helps graceful shutdown only; it cannot cover hard exits or swallowed insert failures.
-
-Suggested fix:
-
-If current analytics are intended as approximate telemetry, document the approximate SLO in admin analytics/help text and keep this behavior. If exact or billing-grade counts are required, replace fire-and-forget inserts with a durable queue/outbox or awaited write with tight timeout/backpressure, and make shared-group counter updates idempotent from the durable event stream.
+Either harden the deployment boundary or globalize the coordination. Boundary hardening: add an explicit deploy/boot assertion that rejects multi-replica operation unless a `GALLERYKIT_ALLOW_MULTIPLE_WEB_INSTANCES` style flag is set, and keep docs/tests around the single-instance contract. Globalization: move restore maintenance, upload quota, rate-limit buckets, backfill status, and shared view-count buffering to DB/Redis/shared advisory-lock-backed state.
 
 ## Confirmed Negative Traces
 
-These flows were traced end to end without a new confirmed defect.
+- Auth/session: production session secret is env-only and session verification checks HMAC, timing-safe equality, max age, and DB expiry (`apps/web/src/lib/session.ts:16-35`, `apps/web/src/lib/session.ts:94-150`). Admin API routes are wrapped by `withAdminAuth`, and the lint gate passed.
+- Upload processing: browser and Lightroom uploads check restore maintenance, same-origin/admin or token auth, size limits, upload quota claims, upload-processing advisory lock, disk precheck, and cleanup/settle paths. The upload-path delete helper intentionally does not throw in best-effort cleanup.
+- Image queue/backfill: queue jobs use per-image advisory claims, restore quiesce/resume, output verification, deleted-mid-processing cleanup, side-effect draining on shutdown, and dedicated color-backfill locks.
+- Sharing: share creation charges rate limits before protected DB mutation; public share pages validate Base56 keys before DB/rate-limit work and rate-limit only in page bodies, not metadata.
+- Semantic search: text search is same-origin, restore-guarded, content-type/content-length capped, rate-limited before body parsing, mode-gated, and uses compile-guarded enrichment fields. Similar search is same-origin, restore-guarded, rate-limited, production-only, and uses the same compile-guarded enrichment fields.
+- Route rate limits: the mutating public-route scanner passed. GET routes were manually swept because the scanner intentionally ignores GET; expensive OG and similar-search GET routes have manual rate limits/same-origin gates, and feed/upload/health/live routes are bounded or cacheable.
+- Service worker/cache: `sw.template.js` bypasses admin, revocable share/smart/photo/map HTML, and sensitive responses; upload derivative caching uses ETag/HEAD revalidation and LRU cleanup. Next upload headers use public max-age plus revalidation.
+- Deploy scripts: local deploy builds before pruning, prunes after `up -d`, keeps `docker volume prune` without `-a`, and bind-mounts only mutable data directories. Remote deploy target is config-driven.
 
-### Upload -> process -> serve
+## Missed-Issues Sweep
 
-Upload actions guard restore maintenance and same-origin/admin, claim quota before awaits, persist originals outside the public root, insert DB rows, enqueue processing, and roll back quota on failure (`apps/web/src/app/actions/images.ts:114-180`, `apps/web/src/app/actions/images.ts:238-293`, `apps/web/src/app/actions/images.ts:349-523`). The queue uses per-image advisory locking and skips work during restore/shutdown, verifies derivative outputs before marking rows processed, and cleans variants if an image disappears mid-processing (`apps/web/src/lib/image-queue.ts:446-473`, `apps/web/src/lib/image-queue.ts:489-675`). Serving is constrained to allowed upload directories with realpath containment and cache validators that include pipeline/settings state (`apps/web/src/lib/serve-upload.ts:127-258`).
+Rechecked the competing hypotheses after the first pass:
 
-### Auth/session/token -> admin route
+- No public PII leakage found in semantic enrichment; `searchEnrichmentSelectFields` carries a compile-time guard.
+- No obvious service-worker caching of admin or revocable share HTML found; admin-render HTML is also marked via `x-gk-admin-render`.
+- No unmetered CPU-heavy public GET found after manual sweep of OG/photo/similar/feed/upload routes.
+- No upload/restore writer race found in the main upload paths; restore holds the upload-processing contract lock before maintenance/import.
+- No deploy-prune data-loss issue found in the current script/compose/Dockerfile contract.
 
-Login applies same-origin, IP/account preincrement, Argon2 verification, transactional session insert/delete, and secure cookies (`apps/web/src/app/actions/auth.ts:70-258`). Session verification requires a real production `SESSION_SECRET`, validates HMAC/timing, and checks DB session expiry (`apps/web/src/lib/session.ts:16-35`, `apps/web/src/lib/session.ts:94-150`). The proxy is a fast cookie-shape guard for admin pages while API/server actions rely on full wrappers (`apps/web/src/proxy.ts:76-140`). `withAdminAuth` validates bearer token scopes or cookie admin state and sets no-store/nosniff headers (`apps/web/src/lib/api-auth.ts:58-144`). The static API-auth lint passed.
-
-### Public actions -> rate limit -> DB mutation
-
-Public load-more/search actions validate input before preincrementing rate limits, then roll back the consumed attempt on downstream data/search errors (`apps/web/src/app/actions/public.ts:120-167`, `apps/web/src/app/actions/public.ts:236-318`). The semantic search API charges before body materialization after cheap same-origin/header/config gates (`apps/web/src/app/api/search/semantic/route.ts:106-205`). DB-backed rate-limit increment/decrement helpers use atomic upsert/transactional decrement (`apps/web/src/lib/rate-limit.ts:436-508`). The public-route rate-limit lint passed.
-
-### Topic/image mutations -> freshness
-
-Image metadata, image tag add/remove, batch tag updates, and topic mutations have explicit revalidation or image `updated_at` advancement where the traced display data depends on those rows (`apps/web/src/app/actions/images.ts:872-948`, `apps/web/src/app/actions/tags.ts:193-200`, `apps/web/src/app/actions/tags.ts:256-263`, `apps/web/src/app/actions/topics.ts:85-180`, `apps/web/src/app/actions/topics.ts:182-407`). The one gap found in this family is T17-01 for tag rename/delete.
-
-### DB restore/migrate
-
-Restore enters process-local maintenance, takes DB restore/upload-processing/color-backfill locks, flushes shared-group counts, quiesces the processing queue, runs restore, then releases locks and resumes queue in `finally` paths (`apps/web/src/app/[locale]/admin/db-actions.ts:288-437`). Migration bootstrapping reconciles legacy/fresh schemas, baselines every journal hash individually, and fails loudly if any committed journal hash is missing after Drizzle migrate (`apps/web/scripts/migrate.js:731-808`).
-
-### Service worker caching
-
-The service worker bypasses admin routes, applies stale-while-revalidate only to image derivatives, bypasses revocable share HTML, and uses network-first HTML fallback for other pages (`apps/web/public/sw.template.js:366-399`). The image derivative cache path probes ETag with a bounded HEAD request and removes cached 404s (`apps/web/public/sw.template.js:183-290`). No generated-template behavioral drift was found.
-
-### Semantic search
-
-Semantic search enforces same-origin, restore-maintenance, JSON content-type, non-chunked transfer, content-length/body-size caps, production-mode gating, pre-body rate limiting, query length, model-version-scoped scans, and public-safe enrichment (`apps/web/src/app/api/search/semantic/route.ts:106-230`, `apps/web/src/lib/gallery-config.ts:123-142`, `apps/web/src/lib/clip-embeddings.ts:22-44`). Similar-image search follows the same same-origin/maintenance/rate-limit/model-version shape (`apps/web/src/app/api/search/similar/[id]/route.ts:60-242`).
-
-### Sharing
-
-Photo share creation validates the image before charging quota, no-ops existing keys before rate limit, conditionally writes `share_key`, and rolls back rate-limit claims on races/errors. Group sharing validates all IDs/processed images, inserts group rows transactionally, and rolls back on failures. Revoke/delete paths revalidate relevant public/admin surfaces (`apps/web/src/app/actions/sharing.ts:91-192`, `apps/web/src/app/actions/sharing.ts:194-315`, `apps/web/src/app/actions/sharing.ts:317-398`). Shared public routes validate base56 keys and rate-limit before resolving data (`apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:80-137`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:85-137`).
-
-## Final Missed-Flow Sweep
-
-Searched and traced the requested surfaces for hidden competing paths:
-
-- Upload endpoints/actions, queue enqueue/claim/process/delete cleanup, upload serving, Next static upload cache headers.
-- Admin login/session/token wrappers, proxy behavior, PAT upload route, admin DB download route.
-- Public server actions and public API route rate-limit gates.
-- Tag/topic/image mutations and their revalidation/freshness paths into sitemap and Atom feeds.
-- Restore and migrate scripts, including maintenance/lock/quiesce and migration hash assertions.
-- Service worker route classification, image cache strategy, share/admin bypasses, and generated SW drift.
-- Semantic text/similar APIs, CLIP config/model loading, scan caps, and public result shaping.
-- Share key/group creation/revocation, public share pages, shared data privacy selection, view analytics.
-
-No additional confirmed suspicious flows were found beyond T17-01 and the two documented risks above.
+Finding count: 2.

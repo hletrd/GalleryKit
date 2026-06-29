@@ -54,19 +54,75 @@ const CLIP_INFERENCE_CONCURRENCY = parseBoundedPositiveInteger(
     process.env.CLIP_INFERENCE_CONCURRENCY,
     { fallback: 1, max: 4 },
 );
+const CLIP_INFERENCE_MAX_PENDING = parseBoundedPositiveInteger(
+    process.env.CLIP_INFERENCE_MAX_PENDING,
+    { fallback: 32, max: 1000 },
+);
+const CLIP_INFERENCE_QUEUE_TIMEOUT_MS = parseBoundedPositiveInteger(
+    process.env.CLIP_INFERENCE_QUEUE_TIMEOUT_MS,
+    { fallback: 30_000, max: 300_000 },
+);
 let activeInferenceCount = 0;
-const inferenceWaiters: Array<() => void> = [];
+type InferenceWaiter = {
+    resolve: () => void;
+    reject: (err: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+};
+const inferenceWaiters: InferenceWaiter[] = [];
+
+export class ClipInferenceQueueFullError extends Error {
+    constructor() {
+        super('clip-model: inference queue is full');
+        this.name = 'ClipInferenceQueueFullError';
+    }
+}
+
+export class ClipInferenceQueueTimeoutError extends Error {
+    constructor() {
+        super('clip-model: inference queue wait timed out');
+        this.name = 'ClipInferenceQueueTimeoutError';
+    }
+}
+
+function removeInferenceWaiter(waiter: InferenceWaiter): void {
+    const index = inferenceWaiters.indexOf(waiter);
+    if (index >= 0) {
+        inferenceWaiters.splice(index, 1);
+    }
+}
+
+async function waitForInferenceSlot(): Promise<void> {
+    if (inferenceWaiters.length >= CLIP_INFERENCE_MAX_PENDING) {
+        throw new ClipInferenceQueueFullError();
+    }
+
+    let waiter!: InferenceWaiter;
+    await new Promise<void>((resolve, reject) => {
+        waiter = {
+            resolve: () => {
+                clearTimeout(waiter.timeout);
+                resolve();
+            },
+            reject,
+            timeout: setTimeout(() => {
+                removeInferenceWaiter(waiter);
+                reject(new ClipInferenceQueueTimeoutError());
+            }, CLIP_INFERENCE_QUEUE_TIMEOUT_MS),
+        };
+        inferenceWaiters.push(waiter);
+    });
+}
 
 async function withInferenceSlot<T>(fn: () => Promise<T>): Promise<T> {
     if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
-        await new Promise<void>((resolve) => inferenceWaiters.push(resolve));
+        await waitForInferenceSlot();
     }
     activeInferenceCount++;
     try {
         return await fn();
     } finally {
         activeInferenceCount--;
-        inferenceWaiters.shift()?.();
+        inferenceWaiters.shift()?.resolve();
     }
 }
 
