@@ -1,58 +1,56 @@
-# Cycle 10 Document-Specialist Review
+# Cycle 11 Document-Specialist Review
 
 **Date:** 2026-06-29
 **HEAD reviewed:** `944bbdb0e930c0f4b03bc09b240a2dfcb93935f2`
-**Scope:** PROMPT 1 documentation/code mismatch review only. This report is the only intended write.
+**Scope:** PROMPT 1 document/code mismatch review only. Production code was not edited; this report is the only intended write.
 
 ## Inventory Summary
 
-I reviewed the authoritative repo docs and their implementation touchpoints:
+I built the review inventory before evaluating mismatches. The current unignored repo inventory, excluding `node_modules`, `.next`, `.claude/worktrees`, and `.git`, contains 780 files. I inspected the canonical docs and their implementation touchpoints across:
 
 - Governing docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
-- Package and CI gates: root `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`, `.github/dependabot.yml`.
-- Deploy and operations: `.env.deploy.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`.
-- Migration/schema contracts: `apps/web/drizzle/meta/_journal.json`, migration SQL files, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, privacy/migration tests.
-- Security and lint contracts: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, public/admin API route files, mutating action files, and related tests.
-- Runtime/source behavior cited by docs: upload limits, health/live routes, trust-proxy rate limiting, CLIP semantic search routes/scripts/config, service-worker generation, generated `public/sw.js`, PWA tests, and operational sidecar scripts.
-- Current committed review/plan docs were inventory-swept for active references; historical archived artifacts were not treated as authoritative current behavior unless canonical docs pointed at them.
+- Package, CI, and quality-gate surfaces: root `package.json`, `apps/web/package.json`, lint/type/build/test scripts, and existing review artifacts for current claims.
+- Deploy/runtime contracts: `.env.deploy.example`, deploy scripts, Dockerfile/Compose, nginx config, health routes, and build-time guards.
+- Public-source contracts cited by docs: SEO/base URL handling, OpenGraph routes, feed routes, service-worker source/generated copy, public route freshness, semantic-search activation, migration/privacy contracts, and associated tests.
+- Final grep sweeps covered `BASE_URL`, `siteConfig.url`, `every public page`, `revalidate = 0`, `per-entry <author>`, and `author_name` references.
 
 ## Findings
 
-### CONFIRMED - MEDIUM - `AGENTS.md` omits the CI-blocking E2E gate from "all blocking" quality gates
+### CONFIRMED - MEDIUM - Base-URL docs say `site-config.url` must match `BASE_URL`, but the build guard permits a split-brain OG configuration
 
-**Files/regions:** `AGENTS.md:29-37`, `package.json:18`, `apps/web/package.json:20`, `.github/workflows/quality.yml:72-77`, `CLAUDE.md:575-578`, `apps/web/README.md:23-37`
-
-**Confidence:** High
-
-**Evidence:** `AGENTS.md:29` labels the listed commands as "Quality gates (all blocking)" but the list ends at ESLint, three security lints, typecheck, build, and Vitest (`AGENTS.md:31-37`). The repository does have a root `test:e2e` script (`package.json:18`) and app script (`apps/web/package.json:20`), and CI installs Playwright browsers and runs `npm run test:e2e` (`.github/workflows/quality.yml:72-77`). `CLAUDE.md` documents the E2E command in the testing section (`CLAUDE.md:575-578`), but the short-form agent gate list and `apps/web/README.md` script table (`apps/web/README.md:23-37`) do not present it as a normal gate.
-
-**Failure scenario:** An agent or contributor following `AGENTS.md` as the short canonical checklist can run every listed "blocking" gate locally, skip Playwright, and still get a CI failure on push/PR. This is especially likely for routing, auth-origin, navigation, and browser-only regressions that unit tests do not exercise.
-
-**Concrete fix:** Add `npm run test:e2e --workspace=apps/web` to `AGENTS.md` under Quality gates and add `npm run test:e2e` to the `apps/web/README.md` scripts table. If E2E is intentionally CI-only, rename the AGENTS heading so it does not claim the list is all blocking.
-
-### CONFIRMED - LOW - `CLAUDE.md` describes service-worker versions as git-SHA based, but the generator uses template hash plus pipeline version
-
-**Files/regions:** `CLAUDE.md:407`, `apps/web/scripts/build-sw.ts:4-12`, `apps/web/scripts/build-sw.ts:27-33`, `apps/web/public/sw.template.js:21-26`, `apps/web/public/sw.js:21-26`, `apps/web/package.json:10`
+**Files/regions:** `CLAUDE.md:214`, `CLAUDE.md:633-636`, `apps/web/scripts/ensure-site-config.mjs:11-40`, `apps/web/src/__tests__/ensure-site-config.test.ts:69-76`, `apps/web/src/lib/data.ts:1740-1747`, `apps/web/src/app/api/og/photo/[id]/route.tsx:51-58`, `apps/web/src/app/api/og/photo/[id]/route.tsx:112-131`, `apps/web/src/app/api/og/photo/[id]/route.tsx:252-297`
 
 **Confidence:** High
 
-**Evidence:** `CLAUDE.md:407` says `scripts/build-sw.ts` stamps `__SW_VERSION__` as `git short-SHA + -p{IMAGE_PIPELINE_VERSION}`. The generator says and does something different: it computes a SHA-256 hash over the service-worker template plus `PIPELINE=${IMAGE_PIPELINE_VERSION}`, slices it to 8 chars, and returns `<templateHash>-p<IMAGE_PIPELINE_VERSION>` (`apps/web/scripts/build-sw.ts:4-12`, `apps/web/scripts/build-sw.ts:27-33`). The current generated file contains `858bc13e-p7` (`apps/web/public/sw.js:21-26`). A read-only hash check of `sw.template.js` plus pipeline `7` also produced `858bc13e-p7`, while current HEAD short is `944bbdb0`.
+**Evidence:** `CLAUDE.md:636` documents `site-config.json.url` as the canonical base URL that "must match `BASE_URL` env var", while `CLAUDE.md:214` says production validates the effective canonical base URL as `BASE_URL || siteConfig.url` and also says per-photo OG derivative fetches are pinned to trusted `siteConfig.url`. The validator implements only the effective URL check: it reads `process.env.BASE_URL || siteConfig.url` (`apps/web/scripts/ensure-site-config.mjs:11-12`) and rejects missing, non-http(s), or placeholder effective hosts (`apps/web/scripts/ensure-site-config.mjs:23-40`). The test suite explicitly locks that split by expecting success when `BASE_URL` overrides a `site-config` value of `https://example.com` (`apps/web/src/__tests__/ensure-site-config.test.ts:69-76`). SEO settings then publish `url: process.env.BASE_URL || siteConfig.url` (`apps/web/src/lib/data.ts:1740-1747`), but the per-photo OG route still uses `new URL(siteConfig.url).origin` for internal derivative fetches (`apps/web/src/app/api/og/photo/[id]/route.tsx:112-125`) and falls back when those fetches fail (`apps/web/src/app/api/og/photo/[id]/route.tsx:126-131`). Invalid-ID fallback paths also use `siteConfig.url` directly (`apps/web/src/app/api/og/photo/[id]/route.tsx:51-58`), and the fallback builder redirects relative to whichever canonical base URL it receives (`apps/web/src/app/api/og/photo/[id]/route.tsx:252-297`).
 
-**Failure scenario:** An operator or reviewer reading CLAUDE expects every commit to produce a new service-worker cache namespace. The actual behavior invalidates SW caches only when the template content or image pipeline version changes. That current behavior is reasonable, but the stale doc can lead to false stale-artifact reports or wrong cache-invalidation expectations after non-PWA commits.
+**Failure scenario:** An operator follows the docs loosely, leaves `apps/web/src/site-config.json.url` at `https://example.com`, and sets `BASE_URL=https://gallery.example.com`. The production build passes because the validator and test accept the `BASE_URL` override, sitemap/metadata use `gallery.example.com`, but per-photo OG image generation attempts internal derivative fetches from `https://example.com/uploads/...`. Valid photo OG images then fall back to the site-default/root response instead of rendering the photo, and malformed-ID fallback can derive redirects from the stale `siteConfig.url`.
 
-**Concrete fix:** Update `CLAUDE.md:407` to say `scripts/build-sw.ts` stamps `__SW_VERSION__` from the service-worker template hash plus `IMAGE_PIPELINE_VERSION`, and that `public/sw.js` needs regeneration only when the template or pipeline version changes.
+**Concrete fix:** Pick one contract and align docs, guard, and route. If `siteConfig.url` must match `BASE_URL`, make `ensure-site-config.mjs` validate `siteConfig.url` itself when `BASE_URL` is set and update the override test. If `BASE_URL` is the intended runtime override, change the per-photo OG route to use the same centralized canonical URL (`seo.url` or a shared `BASE_URL` helper) for derivative fetch origin and fallback paths, then update `CLAUDE.md:636` to say `BASE_URL` overrides `site-config.url`.
 
-### CONFIRMED - LOW - Rate-limit convention docs classify semantic search as rollback-on-infrastructure-error, but the route intentionally does not rollback after expensive work begins
+### CONFIRMED - LOW - Service-worker docs claim every public page sets `revalidate = 0`, but the privacy page does not
 
-**Files/regions:** `apps/web/src/lib/rate-limit.ts:17-29`, `apps/web/src/app/api/search/semantic/route.ts:178-189`, `apps/web/src/app/api/search/semantic/route.ts:232-255`, `apps/web/src/__tests__/semantic-search-route.test.ts:182-187`, `apps/web/src/__tests__/semantic-search-route.test.ts:380-385`
+**Files/regions:** `CLAUDE.md:399-410`, `apps/web/public/sw.template.js:7-15`, `apps/web/public/sw.js:7-15`, `apps/web/src/__tests__/sw-template-contract.test.ts:6-11`, `apps/web/src/app/[locale]/(public)/privacy/page.tsx:1-15`, `apps/web/src/app/[locale]/(public)/page.tsx:16`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:38`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:19`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/map/page.tsx:10`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:16`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:17`
 
 **Confidence:** High
 
-**Evidence:** The rate-limit convention comment lists `/api/search/semantic` under "**Rollback on infrastructure error**" and says the pre-incremented counter is rolled back when the underlying operation throws (`apps/web/src/lib/rate-limit.ts:17-20`). The route imports only `preIncrementSemanticAttempt`, charges at `apps/web/src/app/api/search/semantic/route.ts:178-189`, and explicitly returns errors without rollback once embedding or DB scan work begins (`apps/web/src/app/api/search/semantic/route.ts:232-255`). Tests lock the no-rollback behavior for charged oversized bodies and post-work server errors (`apps/web/src/__tests__/semantic-search-route.test.ts:182-187`, `apps/web/src/__tests__/semantic-search-route.test.ts:380-385`).
+**Evidence:** `CLAUDE.md:399` accurately narrows freshness to public photo, topic, shared, and home pages, but `CLAUDE.md:410` broadens the service-worker rationale to "every public page sets `revalidate = 0`". The shipped service-worker template and generated copy repeat that broad statement (`apps/web/public/sw.template.js:7-15`, `apps/web/public/sw.js:7-15`), and the SW contract test preamble says every public page ships `no-store` (`apps/web/src/__tests__/sw-template-contract.test.ts:6-11`). Most public routes do export `revalidate = 0` at the cited route files, but `apps/web/src/app/[locale]/(public)/privacy/page.tsx:1-15` has metadata and render code without a `revalidate` export.
 
-**Failure scenario:** Future route authors use `rate-limit.ts` as the project pattern guide and copy the wrong rollback semantics for a public CPU/DB-expensive route. They may refund failures after the guarded resource was consumed, weakening the DoS budget that the semantic route deliberately protects.
+**Failure scenario:** A maintainer extending `networkFirstHtml` or the SW cache contract can rely on the broader doc/test/template claim and assume all public HTML is dynamic/no-store. The privacy page is a counterexample, so the stated Cache-Control premise is false for at least one public route. The current privacy page is static and low-risk, but the mismatch makes future offline-cache reasoning and route audits less reliable.
 
-**Concrete fix:** Rewrite the pattern-2 prose in `apps/web/src/lib/rate-limit.ts` to distinguish cheap public read actions from semantic search. For semantic search, document the current rule: charge before body materialization, refund none after the charged request consumes body parsing, embedding CPU, or DB scan work; only pre-charge disabled/config/header gates are free.
+**Concrete fix:** Update the service-worker docs, template comment, generated `sw.js`, and test preamble to match the narrower true contract: dynamic public gallery/photo/topic/share/map/timeline/year pages set `revalidate = 0`, while static public pages such as privacy may be cacheable. If the product intent really is "every public page", add `export const revalidate = 0` to the privacy route and keep the broad docs.
+
+### CONFIRMED - LOW - Atom feed route comments still describe per-entry admin authors even though data intentionally emits `NULL`
+
+**Files/regions:** `CLAUDE.md:171`, `apps/web/src/lib/data.ts:827-845`, `apps/web/src/app/feed.xml/route.ts:76-83`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`
+
+**Confidence:** High
+
+**Evidence:** `CLAUDE.md:171` documents the current privacy contract: `uploaded_by` is admin-only and public Atom uses the feed-level author until a safe public display-name exists. The data layer enforces that by selecting `author_name: sql<string | null>\`NULL\`` and explaining that public Atom must not expose the admin login username (`apps/web/src/lib/data.ts:827-845`). The route-level comments still say "per-entry `<author>` when the upload carries a known admin" and explain the `NULL` fallback (`apps/web/src/app/feed.xml/route.ts:76-83`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`). Because the helper always returns `NULL`, the per-entry author branch is currently dead for production feed data.
+
+**Failure scenario:** A future maintainer reads the route comments as the intended R17-L2 behavior and restores an admin-user join or otherwise wires `uploaded_by` into public feed entries, contradicting the documented privacy decision in `CLAUDE.md` and the data-layer security comment. That could expose valid admin identifiers through unauthenticated `feed.xml` endpoints.
+
+**Concrete fix:** Replace the stale route comments with the current invariant: `author_name` is intentionally `NULL`, so entries fall back to the feed-level author until a separate admin-set public display-name field exists. Alternatively, remove the dead per-entry branch from the routes until such a field is implemented.
 
 ## Likely Issues
 
@@ -60,13 +58,13 @@ None beyond the confirmed findings above.
 
 ## Final Missed-Issue Sweep
 
-Final sweeps rechecked canonical docs against package scripts, CI workflow, deploy helper resolution, Docker/nginx body caps, health/live route behavior, migration journal/runbook behavior, privacy omit guards, CLIP activation and offline model loading, service-worker generation, generated `sw.js`, upload limits, public/admin route scanner behavior, and contract comments containing terms such as `blocking`, `production`, `deploy`, `rollback`, `__SW_VERSION__`, `must`, and `not wired`.
+The final sweep rechecked canonical docs and code comments against implementation for base URL validation/OG origin selection, public route cache freshness, service-worker offline fallback rationale, Atom feed author privacy, semantic search activation, migration/hash contracts, upload/derivative limits, health/readiness behavior, Docker/nginx deploy assumptions, and privacy-sensitive field guards.
 
-Already-aligned areas included deploy pruning and bind mounts, `.env.local` and `site-config` examples, health/readiness docs, upload and nginx limits, semantic-search production gating, migration hash postconditions, privacy-sensitive field guards, and the three security lint scanners aside from the semantic rollback prose above.
+Already-aligned areas included Node/package script names, Docker bind mounts and prune-after-up policy, upload and nginx body-size limits, health/live route behavior, semantic-search stub/production gating, similar-search production-only UI gating, migration journal postconditions, and the `_PrivacySensitiveKeys`/`SENSITIVE_KEYS` privacy guard.
 
 ## Validation Evidence
 
-- `rg`/line-number sweeps over `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, package scripts, CI, deploy scripts, Docker/nginx config, source routes, tests, docs, and generated artifacts.
-- Read-only service-worker version check: hashing `apps/web/public/sw.template.js` plus `PIPELINE=7` produced `858bc13e-p7`, matching `apps/web/public/sw.js`.
-- `git status --short --branch` checked before writing. Pre-existing dirty files were `.context/reviews/code-reviewer.md`, `.context/reviews/perf-reviewer.md`, and `.context/reviews/security-reviewer.md`; this review did not touch them.
-- Not run: full lint, typecheck, build, unit suite, or E2E suite. This was a review-only documentation/source-contract task, and no application source was edited.
+- Inventory command: `rg --files -g '!node_modules/**' -g '!.next/**' -g '!.claude/worktrees/**' -g '!.git/**' | wc -l` returned 780 files.
+- Read-only line sweeps over `CLAUDE.md`, root/app READMEs, build guard tests, OG routes, service-worker template/generated copy, public route files, feed routes, and data helpers.
+- `git status --short` checked before writing; `.context/reviews/critic.md` was already dirty and was not touched.
+- Not run: lint, typecheck, build, unit tests, or E2E. This was a review-only document/source-contract task and no production source was edited.
