@@ -38,8 +38,9 @@ import * as path from 'path';
  *   - shadcn `<Button>` (capital B) is EXCLUDED — it bakes its own
  *     `focus-visible:ring` into the variant; only raw lowercase `<button>` is
  *     scanned.
- *   - `role="option"` elements (search combobox results managed via
- *     `aria-activedescendant`, not Tab focus) are EXCLUDED.
+     *   - `role="option"` elements are EXCLUDED only when explicitly removed
+     *     from Tab order with `tabIndex={-1}` (combobox results managed via
+     *     `aria-activedescendant`, not Tab focus).
  *
  * Why the entire `app/` tree (R22C22 T1b / critic M1): the cycle-21 scanner
  * walked only `app/[locale]/` and so MISSED `app/global-error.tsx`'s Try-again
@@ -86,6 +87,7 @@ const HOVER_TOKEN = /(?<![\w-])hover:/;
 const CURSOR_TOKEN = /(?<![\w-])cursor-(pointer|help)\b/;
 const FOCUS_INDICATOR = /focus-visible:|focus:ring|focus-within:/;
 const ROLE_OPTION = /\brole=["']option["']/;
+const TAB_INDEX_MINUS_ONE = /\btabIndex=\{-1\}|\btabIndex=["']-1["']/;
 const HAS_CLASSNAME = /\bclassName=/;
 // Standalone Tailwind `group` parent token (NOT `group-hover:` / `group-foo`):
 // such a parent deliberately delegates its focus ring to a child via
@@ -188,7 +190,7 @@ export function scanSource(relPath: string, source: string): FoundIssue[] {
         if (!HAS_CLASSNAME.test(line)) continue;
         if (!HOVER_TOKEN.test(line) && !CURSOR_TOKEN.test(line)) continue;
         if (FOCUS_INDICATOR.test(line)) continue;
-        if (ROLE_OPTION.test(line)) continue;
+        if (ROLE_OPTION.test(line) && TAB_INDEX_MINUS_ONE.test(line)) continue;
         // `group` parent whose focus ring is painted by a child via
         // `group-focus-visible:` within the element body (look ahead a small
         // window) — the affordance exists, just on the visible child, not the
@@ -250,7 +252,7 @@ describe('focus-visible scanner (interactive Link/a/button with hover styling)',
 
     // Self-checks: the predicate must FLAG a bare hover link and PASS the same
     // link once a focus-visible ring is added; and must NOT flag group-hover/
-    // shadcn <Button>/role=option shapes.
+    // shadcn <Button>/non-Tab-focusable role=option shapes.
     it('flags a hover-styled Link with no focus indicator', () => {
         const bad = `<Link href="/" className="hover:underline text-sm">x</Link>`;
         expect(scanSource('fixture.tsx', bad)).toHaveLength(1);
@@ -267,9 +269,13 @@ describe('focus-visible scanner (interactive Link/a/button with hover styling)',
         const btn = `<Button className="hover:bg-primary/90">x</Button>`;
         expect(scanSource('fixture.tsx', btn)).toHaveLength(0);
     });
-    it('does not flag role="option" combobox result rows', () => {
-        const opt = `<Link role="option" href="/" className="hover:bg-muted">x</Link>`;
+    it('does not flag role="option" combobox result rows removed from Tab order', () => {
+        const opt = `<Link role="option" tabIndex={-1} href="/" className="hover:bg-muted">x</Link>`;
         expect(scanSource('fixture.tsx', opt)).toHaveLength(0);
+    });
+    it('flags tab-focusable role="option" links without a focus indicator', () => {
+        const opt = `<Link role="option" href="/" className="hover:bg-muted">x</Link>`;
+        expect(scanSource('fixture.tsx', opt)).toHaveLength(1);
     });
     it('flags a multi-line hover-styled button after normalization', () => {
         const ml = `<button\n  onClick={() => x()}\n  className="hover:bg-muted px-2"\n>y</button>`;

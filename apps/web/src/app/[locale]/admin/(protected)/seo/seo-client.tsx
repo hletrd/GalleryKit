@@ -98,10 +98,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-title"
                             value={settings.seo_title}
                             onChange={(e) => handleChange('seo_title', e.target.value)}
-                            placeholder={t('seo.siteTitlePlaceholder')}
-                            maxLength={200}
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.siteTitleHint')}</p>
+	                            placeholder={t('seo.siteTitlePlaceholder')}
+	                            maxLength={200}
+	                            aria-describedby="seo-title-help"
+	                        />
+	                        <p id="seo-title-help" className="text-xs text-muted-foreground">{t('seo.siteTitleHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -110,10 +111,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-nav-title"
                             value={settings.seo_nav_title}
                             onChange={(e) => handleChange('seo_nav_title', e.target.value)}
-                            placeholder={t('seo.navTitlePlaceholder')}
-                            maxLength={100}
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.navTitleHint')}</p>
+	                            placeholder={t('seo.navTitlePlaceholder')}
+	                            maxLength={100}
+	                            aria-describedby="seo-nav-title-help"
+	                        />
+	                        <p id="seo-nav-title-help" className="text-xs text-muted-foreground">{t('seo.navTitleHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -123,10 +125,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             value={settings.seo_description}
                             onChange={(e) => handleChange('seo_description', e.target.value)}
                             placeholder={t('seo.siteDescriptionPlaceholder')}
-                            maxLength={500}
-                            rows={3}
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.siteDescriptionHint')}</p>
+	                            maxLength={500}
+	                            rows={3}
+	                            aria-describedby="seo-description-help"
+	                        />
+	                        <p id="seo-description-help" className="text-xs text-muted-foreground">{t('seo.siteDescriptionHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -135,10 +138,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-author"
                             value={settings.seo_author}
                             onChange={(e) => handleChange('seo_author', e.target.value)}
-                            placeholder={t('seo.authorPlaceholder')}
-                            maxLength={200}
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.authorHint')}</p>
+	                            placeholder={t('seo.authorPlaceholder')}
+	                            maxLength={200}
+	                            aria-describedby="seo-author-help"
+	                        />
+	                        <p id="seo-author-help" className="text-xs text-muted-foreground">{t('seo.authorHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -147,10 +151,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-locale"
                             value={settings.seo_locale}
                             onChange={(e) => handleChange('seo_locale', e.target.value)}
-                            placeholder="en_US"
-                            maxLength={10}
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.localeHint')}</p>
+	                            placeholder="en_US"
+	                            maxLength={10}
+	                            aria-describedby="seo-locale-help"
+	                        />
+	                        <p id="seo-locale-help" className="text-xs text-muted-foreground">{t('seo.localeHint')}</p>
                     </div>
                 </CardContent>
             </Card>
@@ -168,10 +173,11 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             value={settings.seo_og_image_url}
                             onChange={(e) => handleChange('seo_og_image_url', e.target.value)}
                             placeholder={t('seo.ogImageUrlPlaceholder')}
-                            maxLength={500}
-                            type="url"
-                        />
-                        <p className="text-xs text-muted-foreground">{t('seo.ogImageUrlHint')}</p>
+	                            maxLength={500}
+	                            type="url"
+	                            aria-describedby="seo-og-image-help"
+	                        />
+	                        <p id="seo-og-image-help" className="text-xs text-muted-foreground">{t('seo.ogImageUrlHint')}</p>
                     </div>
                 </CardContent>
             </Card>

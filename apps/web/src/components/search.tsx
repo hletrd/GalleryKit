@@ -73,6 +73,7 @@ function SearchResultItem({
             id={`search-result-${idx}`}
             role="option"
             aria-selected={idx === activeIndex}
+            tabIndex={-1}
             href={localizePath(locale, `/p/${image.id}`)}
             onClick={onClose}
             className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}

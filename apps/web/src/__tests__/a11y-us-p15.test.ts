@@ -38,6 +38,13 @@ describe('US-P15 a11y contracts', () => {
         expect(src).toMatch(/tabIndex=\{-1\}/);
     });
 
+    it('AC-6: localized error boundary preserves the skip link target', () => {
+        const src = readSrc('app/[locale]/error.tsx');
+        expect(src).toMatch(/id="main-content"/);
+        expect(src).toMatch(/tabIndex=\{-1\}/);
+        expect(src).toMatch(/document\.title\s*=\s*siteTitle/);
+    });
+
     it('AC-3: lightbox does NOT use aria-roledescription="slide" (dialog, not carousel)', () => {
         const src = readSrc('components/lightbox.tsx');
         // The lightbox is a dialog overlay showing one image at a time, not a
@@ -87,5 +94,20 @@ describe('US-P15 a11y contracts', () => {
         expect(src).toMatch(/getConcisePhotoAltText/);
         // The altText variable is used in the <img alt={altText}> attribute
         expect(src).toMatch(/alt=\{altText\}/);
+    });
+
+    it('admin SEO hints are programmatically associated with their fields', () => {
+        const src = readSrc('app/[locale]/admin/(protected)/seo/seo-client.tsx');
+        for (const id of [
+            'seo-title',
+            'seo-nav-title',
+            'seo-description',
+            'seo-author',
+            'seo-locale',
+            'seo-og-image',
+        ]) {
+            expect(src).toContain(`aria-describedby="${id}-help"`);
+            expect(src).toContain(`id="${id}-help"`);
+        }
     });
 });
