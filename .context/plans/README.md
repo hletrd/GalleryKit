@@ -2,7 +2,8 @@
 
 ## Active Plans
 
-- Cycle 10/100 Implementation Plan — TODO (`cycle-10-2026-06-29-plan.md`)
+- Cycle 11/100 Implementation Plan — TODO (`cycle-11-2026-06-29-plan.md`)
+- Cycle 11/100 Deferred Findings — TODO / deferred (`cycle-11-2026-06-29-deferred.md`)
 - Cycle 10/100 Deferred Findings — TODO / deferred (`cycle-10-2026-06-29-deferred.md`)
 - Cycle 7/100 Implementation Plan — DONE (`cycle-7-2026-06-29-plan.md`)
 - Cycle 7/100 Deferred Findings — TODO / deferred (`cycle-7-2026-06-29-deferred.md`)
@@ -33,6 +34,8 @@
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
 
 ## Completed Plans (Cycle 6 Loop)
+
+- Cycle 10/100 Implementation Plan — DONE / archived under `archive/cycle-10-2026-06-29-plan.md`
 
 - Cycle 6/100 Implementation Plan — DONE (`cycle-6-2026-06-29-plan.md`)
 - Cycle 5/100 Implementation Plan — DONE / archived under `archive/cycle-5-2026-06-29-plan.md`
