@@ -1,175 +1,65 @@
-# Cycle 22 Debugger Review
+# Debugger — review-plan-fix cycle 2
 
 **Date:** 2026-06-29
-**Reviewer:** oh-my-claudecode:debugger
-**Scope:** Latent-bug sweep — number/string parsing, null/undefined deref, integer overflow/NaN, async/await, off-by-one, date/time, resource cleanup, encoding/buffer parsing
+**HEAD:** `3d1387045e0d7f1e06fb48756e412228bbdaf08d`
+**Role:** debugger
+**Scope:** latent bugs, failure modes, edge cases, async/resource cleanup, parser/number/date behavior, and regression checks. No application code edited.
 
----
+## Inventory Coverage
 
-## DBG21-01 Regression Confirmation
+Debugger inventory was built before analysis from the same repository inventory as the code-review lane, then narrowed to failure-prone surfaces:
 
-**Status: CONFIRMED FIXED — no regression.**
+- Async/resource paths: image queue, backfill runner, restore actions, upload/save/delete flows, serve-upload streaming, shutdown hooks, timers, and DB pool initialization.
+- Parser/number/date paths: route params, env parsing, EXIF values, pagination, semantic limits, capture-date grouping, migration journal metadata, JSON parsing, and binary metadata readers.
+- Public abuse paths: semantic/similar search, OG rendering, share routes, analytics actions, public load-more/search.
+- Deployment failure paths: Docker build context, nginx upload proxy, compose bind mounts, entrypoint permissions, CI workflow.
+- Regression docs/plans: current top-level reports, latest run9/run10 review-plan-fix artifacts, and carry-forward deferred findings.
 
-`apps/web/src/app/actions/topics.ts` lines 108 and 214 both now read:
-```ts
-// R21C21 T2 (DBG21-01): Number() not parseInt()
-let order = Number(orderStr);
-if (!Number.isFinite(order)) order = 0;
-order = Math.max(-1000, Math.min(1000, order));
+Targeted validation evidence:
+
+```text
+npm test --workspace=apps/web -- similar-route semantic-search-route image-types-shutter pagination nginx-config
+7 files passed, 57 tests passed
 ```
-The cycle-reference comments are in place. `parseInt('1e3', 10)` truncation is no longer possible on either the `createTopic` or `updateTopic` path.
 
----
+## Confirmed Issues
 
-## New Findings — Cycle 22
+### DBG-01 — Docker builds can ingest local `.claude/` worktrees because the root Docker ignore misses a gitignored runtime directory
 
-### DBG22-01 — Local-time Date methods for timezone-sensitive display logic
-
-**Severity:** LOW
+**Severity:** Medium
 **Confidence:** High
-**Files:**
-- `apps/web/src/components/on-this-day-widget.tsx:16-17`
-- `apps/web/src/lib/data-timeline.ts:108-109, 241`
+**Status:** Confirmed
+**Location:** `.gitignore:30`, `.dockerignore:1-22`, `apps/web/docker-compose.yml:4-6`, `apps/web/Dockerfile:69`
 
-**Trigger:** Node.js process running in a non-UTC local timezone (or MySQL server timezone differing from Node.js timezone).
+Debugger view of the failure: the build pipeline has a reproducibility/resource failure mode. `.gitignore:30` excludes `.claude/`, and the current workspace contains `.claude/worktrees/...`; however `.dockerignore:1-22` excludes `.omx`, `.omc`, and `.agent` but not `.claude`. Because the compose build context is the repo root and the Dockerfile runs `COPY . .`, those local worktrees enter the Docker build context and builder filesystem.
 
-**Root cause — surface A (`on-this-day-widget.tsx:16-17`):**
-```ts
-const now = new Date();
-const month = now.getMonth() + 1;  // local time
-const day = now.getDate();          // local time
-```
-These values feed `getOnThisDayImages(month, day)` which queries:
-```sql
-MONTH(capture_date) = month AND DAY(capture_date) = day
-```
-MySQL's `MONTH()` and `DAY()` functions interpret the stored `DATETIME` in the MySQL server's timezone. If Node.js local time and MySQL server time are in different timezones, today's month/day on the JS side can differ from MySQL's interpretation — causing the wrong day's photos to appear.
+Concrete failure scenario: after several agent sessions, `.claude/` grows or contains nested worktrees with generated files. A deploy now sends and copies that tree. Best case: the build is slower and cache keys churn on unrelated local agent state. Worse case: a future `.claude` artifact contains local diagnostics or credentials and becomes available in builder-layer cache/history, despite being intentionally excluded from Git.
 
-**Root cause — surface B (`data-timeline.ts:241`):**
-```ts
-const monthNum = new Date(img.capture_date).getMonth() + 1;
-```
-`capture_date` is returned from Drizzle/mysql2 as a string (`'YYYY-MM-DD HH:mm:ss'`). `new Date('YYYY-MM-DD HH:mm:ss')` in V8 Node.js parses as **local time** (space-separated datetimes are not ISO 8601 and fall into implementation-defined behavior). `getMonth()` then returns a local-time month index. On a UTC server this is consistent, but on a non-UTC server a photo taken at 23:45 on June 30 could be bucketed to July.
+Suggested fix: add `.claude/` to root `.dockerignore`; keep it aligned with `.gitignore` local-agent/runtime excludes. Add a regression test or simple static check so any future gitignored local runtime directory is either intentionally dockerignored or explicitly documented as safe to include.
 
-**Failure mode:** Purely a display mismatch — no data corruption. The "On This Day" widget shows wrong-day photos, or the year-in-review month bucketing is off by one near midnight on day boundaries. Severity limited to non-UTC deployment or near-midnight photos.
+## Risks / Not Confirmed
 
-**In practice:** Standard Docker deployment runs both Node.js and MySQL in UTC (neither has explicit TZ config). The bug is latent and does not manifest in the current production environment.
+### RISK-01 — Server-local calendar semantics may surprise non-UTC/non-local deployments
 
-**Minimal fix:**
-```ts
-// on-this-day-widget.tsx:16-17 — use UTC to match EXIF datetime storage
-const month = now.getUTCMonth() + 1;
-const day = now.getUTCDate();
+**Severity:** Low risk
+**Confidence:** Medium
+**Location:** `apps/web/src/components/on-this-day-widget.tsx:15-17`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:67-70`, `apps/web/src/lib/data-timeline.ts:237-242`
 
-// data-timeline.ts:241 — explicit UTC parse
-const monthNum = new Date(img.capture_date + 'Z').getUTCMonth() + 1;
-// OR: new Date(img.capture_date).getUTCMonth() + 1
-// Both work when Node.js is UTC; the '+Z' form is more explicit.
-```
+`OnThisDayWidget` derives "today" from the Node process timezone, while timeline grouping parses timezone-less `capture_date` strings with local `Date` methods. This is not a confirmed bug because the code may intentionally define calendar views by server/operator timezone, and MySQL `DATETIME` plus camera EXIF timestamps are timezone-less. If the product wants viewer-local or fixed UTC/KST calendar semantics, these paths need an explicit helper instead of ad hoc `new Date().getMonth()/getDate()` usage.
 
----
+Suggested fix if semantics are intended to be fixed-zone: centralize capture-date parsing and "today" derivation in one calendar helper, with tests for midnight boundary dates and documented server/viewer timezone behavior.
 
-### DBG22-02 — Shutter-speed denominator "1/Infinity" for near-zero EXIF float
+## Regression Checks Cleared
 
-**Severity:** VERY LOW (cosmetic display only; crafted EXIF required)
-**Confidence:** High
-**File:** `apps/web/src/lib/image-types.ts:121`
+- Semantic route abuse paths: current tests passed; malformed/oversized post-read bodies and missing production embeddings are charged as intended.
+- Similar route abuse paths: current tests passed; missing/corrupt target embeddings no longer refund the limiter after DB work.
+- Numeric parsing regressions: pagination now uses `Number()` via `parsePageParam`; semantic env caps floor and clamp; upload/view/audit env parsing uses `Number()` guards.
+- EXIF shutter formatting: subnormal positive values no longer produce `1/Infinity`.
+- Binary parser sweep: current code retains explicit bounds checks in ICC, NCLX/color, gain-map, GPS strip, and embedding decode paths.
+- Streaming cleanup: `serveUploadFile` streams from `realpath`, handles HEAD without opening a stream, and destroys the stream on abort/error.
 
-**Trigger:** `ExposureTime` EXIF tag parses to a subnormal positive float (e.g., `5e-324`, the smallest representable positive `float64`).
+## Final Sweep
 
-**Root cause:**
-```ts
-if (val < 1 && val > 0) {
-    const denominator = Math.round(1 / val);            // line 121
-    if (Math.abs(1 / denominator - val) < 0.00001) {
-        return `1/${denominator}`;                       // returns "1/Infinity"
-    }
-}
-```
-For any `val` so small that `1/val` overflows IEEE 754 to `Infinity`:
-- `Math.round(Infinity)` = `Infinity`
-- `1 / Infinity` = `0`
-- `Math.abs(0 - val) < 0.00001` is true → returns the string `"1/Infinity"`
+Missed-issue sweep covered: parseInt/Number/date use, JSON.parse guards, raw Buffer/binary reads, timer cleanup, fire-and-forget promises, DB catch/rollback behavior, route runtime pins, Docker/nginx deploy failure modes, and stale prior findings against current HEAD.
 
-Real camera shutter speeds range from 1/32000 (≈3e-5) to 30 s — not near the float underflow boundary. Only a maliciously crafted EXIF value reaches this path. The rendered string "1/Infinity" appears in the photo viewer EXIF panel only; no injection risk.
-
-**Minimal fix (one line):**
-```ts
-const denominator = Math.round(1 / val);
-if (Number.isFinite(denominator) && Math.abs(1 / denominator - val) < 0.00001) {
-    return `1/${denominator}`;
-}
-```
-
----
-
-### DBG22-03 — Admin dashboard `parseInt` swallows scientific-notation page numbers
-
-**Severity:** LOW (cosmetic, admin-only)
-**Confidence:** High
-**File:** `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:12`
-
-**Trigger:** URL query string `?page=1e3` (or any scientific-notation integer representation).
-
-**Root cause:**
-```ts
-const page = Math.min(Math.max(1, parseInt(pageParam || '1', 10) || 1), 1000);
-```
-`parseInt('1e3', 10)` stops parsing at the `'e'` character and returns `1`, not `1000`. A direct URL like `?page=1e3` silently shows page 1 instead of page 1000. The `|| 1` NaN fallback and `Math.max/min` clamp are correct; only the parse step is wrong.
-
-This was noted in the cycle-21 sweep as a non-finding ("Safe; `|| 1` fallback catches NaN") — that analysis was correct for the NaN case, but missed the silent value truncation for scientific notation inputs.
-
-**Impact:** Admin-only pagination. No security risk, no data corruption. A bookmark or API script using scientific notation page numbers would receive the wrong page silently.
-
-**Minimal fix:**
-```ts
-const page = Math.min(Math.max(1, Number(pageParam || '1') || 1), 1000);
-```
-`Number('1e3')` = `1000` correctly. Non-integer and non-finite inputs fall through to the `|| 1` default (unchanged behavior for invalid inputs).
-
----
-
-## Prior-Cycle Finding Status
-
-| ID | Status |
-|---|---|
-| DBG21-01 (`topics.ts` parseInt→Number) | FIXED — confirmed, no regression |
-| DBG21-02 (hard-link O_TRUNC double-truncation) | DEFERRED — still present; broken-FS only; acceptable |
-
----
-
-## Surfaces Cleared — No New Findings
-
-| Surface | Files | Result |
-|---|---|---|
-| `session.ts:128` `parseInt(timestamp, 10)` | `lib/session.ts` | SAFE: operates on HMAC-verified token payload; always a decimal integer string |
-| Route-param `parseInt` callsites | `api/og/photo/[id]`, `api/search/similar/[id]`, `g/[key]/page`, `p/[id]/page` | SAFE: all preceded by `/^\d+$/` regex guards |
-| `year/[year]/page.tsx` year parameter | public route | SAFE: `Number()` + `Number.isInteger()` + `[1, 9999]` range guard |
-| `icc-extractor.ts` mluc/desc bounds | `lib/icc-extractor.ts` | SAFE: `Math.min(numRecords, 100)`, `Math.min(recLen, 1024)`, per-record bounds checks, outer try/catch |
-| `icc-chromaticity.ts` XYZ/chad parsing | `lib/icc-chromaticity.ts` | SAFE: `readXyzTag` size≥20 guard, `invert3x3` det<1e-12 guard, `xyzToXy` zero-sum guard |
-| `color-detection.ts` NCLX ISOBMFF walker | `lib/color-detection.ts` | SAFE: MAX_SCAN_BYTES=1MB, MAX_DEPTH=5, size=1 extended-box overflow handled via existing bounds check |
-| `gain-map-detection.ts` iinf/iref parser | `lib/gain-map-detection.ts` | SAFE: `inner + idSize + 2 > innerEnd` pre-check, per-element break, outer try/catch |
-| `clip-embeddings.ts` `bufferToEmbedding` | `lib/clip-embeddings.ts` | SAFE: `buf.length !== EMBEDDING_BYTES` early throw; `decodeEmbeddingColumn` handles Buffer/string polymorphism |
-| View count flush `currentFlushPromise` | `lib/data.ts` | SAFE: `resolveDrain` always called in `finally`; Promise executor is synchronous |
-| Fire-and-forget IIFEs (caption + embedding) | `lib/image-queue.ts:474,512` | SAFE: both IIFEs wrap all paths in try/catch with console.warn |
-| `gcInterval`/`bootstrapRetryTimer` lifecycle | `lib/image-queue.ts` | SAFE: `.unref?.()` on all creation sites, cleared in quiesce and shutdown |
-| `analytics-data.ts` `windowStart` | `lib/analytics-data.ts` | Safe for UTC Docker deployment; `setDate(getDate() - days)` handles month-boundary rollover correctly |
-| `exif-datetime.ts` timezone safety | `lib/exif-datetime.ts` | SAFE: uses `Date.UTC()` throughout; `timeZone: 'UTC'` on all formatting |
-| `gps-exif-strip.ts` buffer reads | `lib/gps-exif-strip.ts` | SAFE: all reads guarded by bounds checks; outer try/catch on each format path |
-| `image-queue.ts` `Promise.all` cleanup on failure | `lib/process-image.ts:1360` | SAFE: catch block uses `Promise.all(writtenSizedPaths.*.map(safeUnlink))` to clean partial writes |
-
----
-
-## Summary
-
-**DBG21-01 regression check:** PASS — fix confirmed present, no regression.
-
-**New findings:**
-
-| ID | File:Line | Class | Severity |
-|---|---|---|---|
-| DBG22-01 | `on-this-day-widget.tsx:16-17`, `data-timeline.ts:241` | Date/time timezone | LOW |
-| DBG22-02 | `image-types.ts:121` | Integer overflow / NaN | VERY LOW |
-| DBG22-03 | `dashboard/page.tsx:12` | parseInt scientific notation | LOW |
-
-DBG22-01 is the highest-priority: replacing `getMonth()`/`getDate()` with `getUTCMonth()`/`getUTCDate()` (and `getUTCMonth()` on the year-in-review bucketing path) eliminates a latent timezone dependency at zero behavioral cost in the current UTC deployment. DBG22-02 and DBG22-03 are both cosmetic, admin-visible at most, and neither affects data integrity or security.
+Verdict: **1 confirmed deploy/build failure mode, 1 low-risk calendar semantics concern, and no confirmed current runtime debugger defect beyond DBG-01.**

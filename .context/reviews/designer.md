@@ -1,112 +1,51 @@
-# Designer UI/UX Review — Cycle 1/100 Prompt 1
+# Designer Review - Review-Plan-Fix Cycle 2
 
-Scope: repository-wide GalleryKit UI/UX review for public, shared, photo-viewer, admin, UI primitive, styles, i18n, and UI/a11y tests. This is source-backed; live browser validation was attempted with the local app.
+Role: designer. Scope: UI architecture, page identity, localized interaction design, responsive/product-facing surfaces. No application code was edited.
 
-## Inventory Reviewed
+## Inventory Coverage
 
-- Project docs: `AGENTS.md`, `CLAUDE.md`.
-- Public routes: `apps/web/src/app/[locale]/(public)/**`, root localized `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `global-error.tsx`.
-- Admin routes: `apps/web/src/app/[locale]/admin/**`.
-- Components: all files under `apps/web/src/components/**`, including shadcn/Radix wrappers, photo viewer, lightbox, search, map, upload, image manager, bottom sheet, color/HDR surfaces, nav/footer.
-- Styles/config: `apps/web/src/app/[locale]/globals.css`, `apps/web/tailwind.config.ts`.
-- Messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- UI/a11y tests and e2e specs: `touch-target-audit`, `a11y-us-p15`, `focus-visible-*`, `info-bottom-sheet-ia`, `search-disclaimer`, `switch-geometry-contract`, `hdr-badge-contrast`, Playwright public/admin/nav specs.
+Built a UI/product inventory before reviewing: 132 files under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/i18n`, and `apps/web/messages`. Covered public routes, admin routes, localized messages, UI primitives, gallery/search/photo components, error/loading/not-found states, tests, package scripts, scripts, migrations, and current `.context` review/plan docs.
 
-## Validation Evidence
+Browser automation was feasible partially. I started `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3012` and inspected `/en`, `/ko`, and `/en/admin` at desktop and mobile widths. The DB-backed public gallery routes rendered the localized error boundary because local DB queries failed, so public gallery visual states were backed primarily by source/DOM evidence rather than full screenshot inspection. `/en/admin` rendered and exposed a generic document title.
 
-- `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3010`
-  - Server started, but logged `Could not connect to database to bootstrap queue (ECONNREFUSED)`.
-- `agent-browser` runtime checks:
-  - `/en/admin` rendered the login surface; DOM had `mainContentCount: 1`.
-  - `/en` and `/en/this-route-does-not-exist-xyz` fell into the localized error boundary because DB-backed page data was unavailable; accessibility tree exposed “Skip to content”, but DOM had `mainContentCount: 0`.
-- Targeted tests:
-  - `npm test --workspace=apps/web -- touch-target-audit a11y-us-p15 focus-visible-links-scan info-bottom-sheet-ia search-disclaimer switch-geometry-contract hdr-badge-contrast`
-  - Result: 7 files passed, 58 tests passed.
+Previously reported Cycle 1 issues were rechecked. Localized error skip targets, search option focus behavior, SEO-field descriptions, and the error document title are now covered in source/tests and were not re-filed.
 
 ## Findings
 
-### D1 — Localized Error Boundary Has a Broken Skip Link Target
+### DES-C2-01 - Admin pages do not provide route-specific document titles
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed
-- Files/regions:
-  - `apps/web/src/app/[locale]/layout.tsx:123-128` renders a global skip link to `#main-content`.
-  - `apps/web/src/app/[locale]/error.tsx:16-46` renders `<main role="main">` without `id="main-content"` or `tabIndex={-1}`.
-  - `apps/web/src/__tests__/a11y-us-p15.test.ts:29-37` only asserts the public sub-layout target, not the localized error boundary.
-- Evidence:
-  - Browser DOM on `/en` error state: `mainCount: 1`, `mainContentCount: 0`.
-  - Accessibility tree exposed `link "Skip to content"` followed by a main region, but the link target did not exist.
-- Failure scenario:
-  - During DB outage or route render failure, keyboard users tab to “Skip to content”, activate it, and focus does not move into the error page’s main content. This weakens WCAG 2.4.1 bypass behavior exactly when the user needs recovery controls.
-- Concrete fix:
-  - Change `error.tsx` to `<main id="main-content" tabIndex={-1} className="... focus:outline-none">`.
-  - Add a source test beside `a11y-us-p15.test.ts` asserting `[locale]/error.tsx` carries the target because it is rendered under the global localized layout.
+Severity: Medium
+Confidence: High
 
-### D2 — Search Results Are Tab-Focusable but the Focus Scanner Exempts Them
+Evidence:
+- Browser check of `http://127.0.0.1:3012/en/admin` returned document title `GalleryKit` while the visible heading was `Admin`.
+- `apps/web/src/app/[locale]/layout.tsx:22-27` sets a site-level title default/template.
+- `apps/web/src/app/[locale]/admin/page.tsx:6-15` renders the admin login form without `generateMetadata`.
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:5-17` wraps protected pages without metadata.
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx:6-9` is the only admin route currently exporting route-specific metadata.
+- Admin navigation labels already exist in `apps/web/messages/en.json:2-13` and `apps/web/messages/ko.json:2-13`.
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed from source; runtime search could not be loaded without DB.
-- Files/regions:
-  - `apps/web/src/components/search.tsx:71-79` renders each result as a real `<Link role="option" href=...>` with no `tabIndex={-1}` and no `focus-visible:*` style.
-  - `apps/web/src/components/search.tsx:345-376` uses input `role="combobox"` with `aria-activedescendant`.
-  - `apps/web/src/__tests__/focus-visible-links-scan.test.ts:41-42` and `:69-75` exempt `role="option"` because the test assumes result rows are “not Tab focus”.
-  - `apps/web/e2e/public.spec.ts:21-40` tests one Tab remains inside the dialog but does not create results or assert visible focus on a result row.
-- Evidence:
-  - Source contract mismatch: anchors with `href` are Tab-focusable unless removed from the tab order. The scanner’s documented premise does not match the component.
-- Failure scenario:
-  - A keyboard user opens search, types a query, presses Tab into a result row, and receives no visible focus indicator unless the row also happens to be the active descendant. This is a WCAG 2.4.7 / 2.4.11 regression hidden by the test exemption.
-- Concrete fix:
-  - Pick one pattern and make it consistent:
-    - Preferred combobox pattern: keep focus on the input, set result links `tabIndex={-1}`, navigate with arrow keys/Enter, and keep `aria-activedescendant`.
-    - Or link-list pattern: remove `role="option"`/`aria-activedescendant` coupling and add `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` plus `onFocus={() => setActiveIndex(idx)}` to result rows.
-  - Update `focus-visible-links-scan.test.ts` so `role="option"` is exempt only when the element is not Tab-focusable.
+Failure scenario: an admin user working across login, dashboard, analytics, settings, users, database, SEO, and token pages sees multiple browser tabs or screen-reader page-title entries collapse to the site title instead of the active task. This makes orientation weaker in a dense operational UI and undermines the otherwise localized admin navigation model.
 
-### D3 — Error States Can Render With an Empty Document Title
+Suggested fix: add localized `generateMetadata` for the admin login page and every protected admin page, using the existing `nav` message namespace. Example pattern: `Admin | GalleryKit`, `Dashboard | Admin | GalleryKit`, `Database | Admin | GalleryKit`. Add a source-level test that asserts all admin page modules except explicit redirects/export-only shells provide metadata or are covered by a metadata-bearing layout.
 
-- Severity: Medium
-- Confidence: Medium
-- Status: Confirmed runtime under DB-down dev environment; root cause likely spans metadata/error rendering.
-- Files/regions:
-  - `apps/web/src/app/[locale]/layout.tsx:17-58` owns localized metadata.
-  - `apps/web/src/app/[locale]/error.tsx:7-47` renders the visible error UI but cannot export static metadata as a client error boundary.
-  - `apps/web/src/lib/data.ts:1704-1725` catches SEO DB failures and falls back to `site-config`, so the empty title needs investigation at the boundary/metadata integration level rather than a simple missing fallback in `getSeoSettings`.
-- Evidence:
-  - `agent-browser eval` on `/en` after the DB-triggered error returned `"title": ""`, while the body showed the localized error UI.
-- Failure scenario:
-  - Screen-reader users and browser-tab users land on an error page with no meaningful document title, violating the intent of WCAG 2.4.2 Page Titled and making recovery tabs hard to distinguish.
-- Concrete fix:
-  - Add a regression test for DB/error-boundary rendering that asserts `document.title` is non-empty on the localized error page.
-  - Investigate why root metadata is not surviving this error path despite `getSeoSettings()` fallback; if Next cannot guarantee it, set a client-side fallback title in `error.tsx` via a guarded `useEffect` using the localized error title plus the stamped `data-gallery-title`.
+### DES-C2-02 - Timeline and year photo cards use non-localized, non-actionable link names
 
-### D4 — SEO Settings Hints Are Visual Only
+Severity: Medium
+Confidence: High
 
-- Severity: Low
-- Confidence: High
-- Status: Confirmed from source.
-- Files/regions:
-  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:95-174` renders hint paragraphs for site title, nav title, description, author, locale, and OG image URL, but the related inputs/textareas do not use `aria-describedby`.
-  - Contrast: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:347-400` correctly associates many setting hints via `aria-describedby`.
-- Evidence:
-  - Source has visible hints at `seo-client.tsx:104`, `:116`, `:129`, `:141`, `:153`, `:174`; corresponding fields at `:97-103`, `:109-115`, `:121-128`, `:134-140`, `:146-152`, `:166-173` lack descriptions.
-- Failure scenario:
-  - A screen-reader admin hears the field label but not important instructions like “leave empty for default”, expected locale format, or URL purpose. That weakens WCAG 1.3.1 / 3.3.2 instruction relationships and increases avoidable validation errors.
-- Concrete fix:
-  - Give each hint an id, for example `seo-title-help`, and add matching `aria-describedby` to its input/textarea.
-  - Add a source contract test similar to the settings-client hint coverage.
+Evidence:
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:192-193` passes hard-coded English fallback text, `Photo`, to photo title/alt helpers.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:209-212` sets the photo link accessible name to only `displayTitle`.
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:151-152` uses `monthName` for the display-title fallback but hard-codes `Photo` for alt fallback.
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:165-168` also labels the photo link with only `displayTitle`.
+- The home grid uses the stronger localized pattern in `apps/web/src/components/home-client.tsx:291-323`: localized untitled fallback plus `aria.viewPhoto`.
+- The On This Day widget follows the same localized action pattern in `apps/web/src/components/on-this-day-widget.tsx:49-59`.
 
-## Final Sweep
+Failure scenario: on Korean timeline/year pages, untitled or untagged photos can expose English fallback text such as `Photo` in image alt text or link names. Screen-reader users also hear bare titles rather than an action-oriented label equivalent to "View photo: {title}", which is inconsistent with the primary gallery grid.
 
-- Information architecture: public nav, admin nav, topic/year/map/share routes have landmarks and current-page states; localized error boundary is the main IA exception because its skip target is missing.
-- Affordances and touch targets: targeted touch audit passed; shadcn button/select/switch primitives enforce 44px floors. Remaining documented admin touch exceptions are intentional desktop-priority areas in the audit map.
-- Focus and keyboard: modal/search/lightbox/bottom-sheet traps and restoration have tests; search result focus is the notable unguarded mismatch.
-- WCAG contrast: core tokens include documented light/dark/OLED contrast adjustments; targeted HDR/destructive text tests passed.
-- ARIA: major dialogs and live regions are present; SEO hints need programmatic relationships.
-- Reduced motion: global `prefers-reduced-motion` rule suppresses transitions/animations and hover scale; photo viewer/lightbox/image zoom also have source-level reduced-motion handling.
-- Responsive breakpoints: public masonry, nav, photo viewer, bottom sheet, timeline/year grids were inspected; no new source-backed breakpoint defect found.
-- Loading/empty/error states: loading components use `role="status"`; empty states exist for public/admin surfaces. Error boundary has the skip-target/title gaps above.
-- Dark/light/OLED: theme tokens and global-error theme preservation were inspected; no new source-backed issue found.
-- i18n/RTL: English/Korean messages are present and `dir="ltr"` is explicit. RTL is not currently product-relevant because supported locales are LTR, but adding RTL locales will require making `dir` locale-derived.
-- Perceived performance: source shows LCP/eager logic, intrinsic-size/aspect-ratio reservations, sized derivatives, and reduced neighbor preloads. Live performance profiling was skipped because the local DB was unavailable and the gallery routes rendered error states.
-- Skipped/irrelevant live areas: DB-backed homepage/search/photo/map/share/admin protected flows could not be fully browser-tested locally due `ECONNREFUSED`; review falls back to source/test evidence for those areas. No raw-screenshot-only findings are included.
+Suggested fix: load localized `common`/`aria` strings, or add timeline-specific equivalents, then pass localized photo/untitled fallbacks into the helpers and set link labels through the same action template used by the home grid. Add a focused regression test that scans localized public photo-card routes for hard-coded `'Photo'` fallbacks and bare `aria-label={displayTitle}` links.
+
+## Missed-Issues Sweep
+
+I re-ran source searches around focusable `role="option"` links, error boundaries, touch target primitives, route metadata, hard-coded English fallbacks, and admin navigation/title coverage. No additional designer-level blockers were found within the inventory. Residual risk is concentrated in DB-backed public gallery states that could not be fully rendered locally because the dev server returned DB query errors for `/en` and `/ko`.

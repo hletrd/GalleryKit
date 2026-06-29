@@ -1,70 +1,59 @@
-# Repository Code Review — review-plan-fix cycle 1/100
+# Code Reviewer — review-plan-fix cycle 2
 
-**Date:** 2026-06-29  
-**Reviewer:** code-reviewer subagent  
-**Scope:** repository-wide static review of `/Users/hletrd/flash-shared/gallery` under `AGENTS.md` and `CLAUDE.md`.
+**Date:** 2026-06-29
+**HEAD:** `3d1387045e0d7f1e06fb48756e412228bbdaf08d` (`master`, clean at review start)
+**Role:** code-reviewer
+**Scope:** repository-wide code quality, logic, maintainability, failure-mode, and regression review. No application code edited.
 
-## Review Inventory
+## Inventory Coverage
 
-I built the inventory from `rg --files`, `find apps/web/src -type f`, targeted `rg` sweeps, and line-by-line inspection of the review-relevant runtime families. I treated the following as review-relevant:
+Inventory was built before review from `git status`, `git log`, package/config reads, source-tree enumeration, test/script/migration enumeration, and current `.context` review/plan docs.
 
-- Project instructions and operations: `AGENTS.md`, `CLAUDE.md`, root package metadata, deploy scripts, Docker/nginx config, Next/Vitest/ESLint/TS configs.
-- App routes and pages: all 73 files under `apps/web/src/app`, including public photo/topic/share pages, admin protected pages, metadata handlers, `api/search/*`, `api/og*`, upload/download routes, sitemap/robots/feed, and server actions.
-- Components and UI: all 55 files under `apps/web/src/components`, with focus on public rendering, admin controls, upload/search/share flows, touch-target assumptions, and client/server boundaries.
-- Core libraries: all 93 files under `apps/web/src/lib`, including data access, rate limiting, origin checks, auth/session, queue/backfill, image processing, search/CLIP, analytics, smart collections, restore/maintenance, CSP, uploads, and validation.
-- Database and migrations: `apps/web/src/db/*`, all committed `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, and `apps/web/scripts/migrate.js`.
-- Tests and guardrails: all 246 files under `apps/web/src/__tests__`, `apps/web/e2e/*`, and repository-specific lint scripts where they encode invariants.
-- Localization and config data: `apps/web/messages/*`, `apps/web/src/site-config*.json`, and route-visible JSON/config references.
+Review-relevant inventory covered:
 
-I excluded archived historical review artifacts and local plan-management files from bug hunting except where they explained an invariant already encoded in current source/tests. No source files were edited.
+- Instructions/context: `AGENTS.md`, `CLAUDE.md`, current top-level `.context/reviews/{code-reviewer,debugger,architect,test-engineer}.md`, latest `run9-cycle8` review artifacts, `run10-cycle2` plan/deferred docs, and `user-injected/pending-next-cycle.md`.
+- Package/config/deploy: root `package.json`, `apps/web/package.json`, `.nvmrc`, `.github/workflows/quality.yml`, `next.config.ts`, TS/ESLint/Vitest/Playwright configs, Dockerfile, compose, nginx, deploy scripts, root `.dockerignore`, app `.dockerignore`, env examples.
+- Runtime source inventory: all `apps/web/src` families: 73 app files, 55 component files, 93 lib files, 3 DB files, 1 i18n file, and 5 other source files.
+- Guardrail/test inventory: 247 test files under `apps/web/src/__tests__`, e2e files under `apps/web/e2e`, 27 scripts, and all 25 SQL migrations plus drizzle metadata.
+- Current behavior spot-checks: admin API wrappers, action-origin guards, public route rate limits, privacy field projections, upload/serve paths, semantic search routes, image queue/backfill paths, migration journal/runbook, raw SQL/process execution, and recent commits after prior review artifacts.
 
-## Findings
+Targeted validation run:
 
-### CR-01 — High — Semantic “similar photos” refunds the limiter after database work
+```text
+npm test --workspace=apps/web -- similar-route semantic-search-route image-types-shutter pagination nginx-config
+7 files passed, 57 tests passed
+```
 
-**Location:** `apps/web/src/app/api/search/similar/[id]/route.ts:83-154`  
-**Severity:** High  
-**Confidence:** High  
+## Confirmed Issues
+
+### CQ-01 — `.claude/` is gitignored but not dockerignored, so local agent worktrees enter the Docker build context
+
+**Severity:** Medium
+**Confidence:** High
 **Status:** Confirmed
+**Location:** `.gitignore:30`, `.dockerignore:1-22`, `apps/web/docker-compose.yml:4-6`, `apps/web/Dockerfile:67-75`
 
-The route pre-increments the per-IP semantic limiter before the semantic work starts (`route.ts:83-93`), but then refunds the request after database-backed target lookup and scan paths have already consumed the protected resource:
+The repository correctly treats `.claude/` as local, untracked agent/runtime state in `.gitignore:30`, but the root Docker ignore file does not exclude it. The production compose build uses the repository root as the Docker context (`apps/web/docker-compose.yml:4-6`), and the builder stage copies that whole context with `COPY . .` (`apps/web/Dockerfile:67-75`). In this checkout `.claude/` exists and is about 36 MiB, including a nested worktree.
 
-- `route.ts:113-123` performs the target embedding lookup.
-- `route.ts:125-127` rolls back the limiter when no embedding row exists.
-- `route.ts:131-134` rolls back when the embedding row is corrupt.
-- `route.ts:137-139` rolls back on target lookup infrastructure failure.
-- `route.ts:142-151` performs the production embedding scan.
-- `route.ts:152-154` rolls back on scan query failure.
+Concrete failure scenario: a normal `npm run deploy` / compose build sends `.claude/` to Docker and copies it into the builder layer. That makes builds slower and less reproducible, and it can expose local agent artifacts, logs, or worktree files to build cache/layer inspection even though Git intentionally excludes them. The existing `apps/web/.dockerignore` is not sufficient for this build, because Docker reads the ignore file from the root context, not from the Dockerfile directory.
 
-This conflicts with the repository’s own rate-limit contract for unauthenticated DB/CPU-expensive GET surfaces. `apps/web/src/lib/rate-limit.ts:39-52` documents the charged-post-validation pattern: once the route has consumed its own DB/CPU work, nonexistent targets and infrastructure failures stay charged because refunding them creates an unmetered probe. The semantic helper comments also say rollback is for paths before expensive work (`apps/web/src/lib/rate-limit.ts:323-340`).
+Suggested fix: add `.claude` / `.claude/` to the root `.dockerignore`. Consider adding a small source-contract test that local-agent directories ignored in `.gitignore` (`.claude/`, `.omc`, `.omx/`, `.agent/`) remain excluded from the root Docker context.
 
-The problem is currently source-locked by tests rather than caught by them: `apps/web/src/__tests__/similar-route.test.ts:195-201` expects a rollback for a missing target embedding, and `apps/web/src/__tests__/similar-route.test.ts:228-240` expects a rollback for a corrupt embedding row.
+## Refuted / Current Non-Findings
 
-**Failure scenario:** A non-browser client can forge same-origin `Origin`/`Referer` headers and repeatedly request `/api/search/similar/<valid-looking-id-without-production-embedding>`. Each request performs at least the target embedding database lookup and then refunds the semantic rate-limit token, allowing unmetered DB work and image-id/embedding-state probing. On DB failure paths, the scan/lookup work is likewise free to repeat.
+- The prior semantic similar-search limiter issue is fixed. Current `apps/web/src/app/api/search/similar/[id]/route.ts:115-153` no longer rolls back after target DB lookup or scan failures, and `similar-route` tests passed.
+- The prior shutter-speed `1/Infinity` issue is fixed by `Number.isFinite(denominator)` in `apps/web/src/lib/image-types.ts:121-127`, and `image-types-shutter` tests passed.
+- The prior admin-dashboard `parseInt('1e3')` issue is fixed through `parsePageParam()` at `apps/web/src/lib/pagination.ts:12-16`, and `pagination` tests passed.
+- The root Docker context is covered by a root `.dockerignore`; the issue is specifically the missing `.claude/` entry, not an absent root ignore file.
+- Migration journal non-monotonicity remains historical and documented; current `migrate.js` hash post-conditions and migration tests cover the known Drizzle skip behavior. I did not re-file it as a current defect.
 
-**Concrete fix:** Treat the target lookup and production scan as the guarded resource. Keep rollbacks only for syntactic validation, maintenance, and semantic-mode rejection before the route reaches target/scan DB work. Remove `rollbackSemanticAttempt(ip)` from the target-missing, corrupt-target, target-query-catch, and scan-query-catch branches. Update the route header comment at `route.ts:13-20`/`route.ts:25-27` and change `similar-route.test.ts:195-240` to assert that post-lookup failures are charged. Add a source-contract regression like the OG route tests so future edits cannot reintroduce post-DB refunds.
+## Risks / Maintainability Notes
 
-## Cross-File Notes
-
-- The sibling text semantic endpoint was reviewed separately; it refunds before the downstream embedding/scan resource and does not share this exact target-lookup oracle.
-- The OG routes already model the desired invariant. `apps/web/src/lib/rate-limit.ts:39-52` references source-locked tests that keep OG DB/CPU failures charged.
-- Public analytics actions have an in-memory per-IP guard (`apps/web/src/app/actions/public.ts:316-335`) before inserting view rows, so I did not classify analytics as an unbounded-write finding in this pass.
-- Migration journal monotonicity has a documented historical inversion, but `apps/web/scripts/migrate.js` contains the hash-based baseline/post-condition mitigation and tests encode the grandfathered block. I did not count that as a new issue.
+- Large-file risk remains real in `apps/web/src/lib/process-image.ts` (1725 lines), `apps/web/src/lib/data.ts` (1728 lines), and `apps/web/src/app/actions/images.ts` (1205 lines). This is a maintainability risk, but not a newly confirmed behavioral failure in this pass.
+- `OnThisDayWidget` and timeline month grouping still use server-local `Date` methods (`components/on-this-day-widget.tsx:15-17`, `app/[locale]/(public)/timeline/page.tsx:67-70`, `lib/data-timeline.ts:237-242`). I did not file this as confirmed because the product has not specified viewer-local versus server-local calendar semantics, and MySQL `DATETIME` values are intentionally timezone-less.
 
 ## Final Sweep
 
-Common missed classes checked:
+Final missed-issue sweep covered: public/admin route handlers, server-action guards, rate-limit rollback placement, privacy projections, raw SQL and process execution, Docker/deploy context, cache headers, migration journal state, recent commits since prior review artifacts, parse/number/date edge cases, and high-churn large modules.
 
-- Admin API/auth boundaries: `withAdminAuth(...)`, `isAdmin()`, and action-origin gates across admin route/actions.
-- Public mutating route rate limits: POST/PUT/PATCH/DELETE route handlers plus public server-action write surfaces.
-- Public GET cost controls: OG, semantic search, similar search, share pages, sitemap/feed/uploads, and metadata handlers.
-- Privacy fences: `publicSelectFields`, `publicMapSelectFields`, `_PrivacySensitiveKeys`, semantic/search enrichment fields, and tests guarding sensitive image metadata.
-- Data-flow and race paths: upload quota claim/settle, Lightroom upload tracker, restore maintenance lock, topic slug remap, image queue/backfill, view-count buffering, DB dump/restore.
-- Raw SQL/process execution/destructive operations: migration reconciliation, restore scanner, Docker/deploy scripts, and one-off maintenance scripts.
-- Edge-case validation: slugs/tags, smart collection query compiler, body/content-length caps, cursor pagination, search length/code-point handling, referrer/IP analytics sanitization.
-
-Relevant file families not fully reviewed for defects: archived review history under `.context/reviews/archive` and planning documents under `.context/plans`/`plan`. They are not runtime code or active guardrails for this cycle. I did not run lint/typecheck/build/tests because this prompt requested a read-only review artifact and allowed writing only `./.context/reviews/code-reviewer.md`; the evidence above is from static inspection of current source and tests.
-
-## Verdict
-
-One confirmed high-severity issue found. No other repository-wide findings rose above review threshold in this pass.
+Verdict: **1 confirmed Medium code-quality/deploy hygiene issue; no confirmed runtime logic regression found in current HEAD.**

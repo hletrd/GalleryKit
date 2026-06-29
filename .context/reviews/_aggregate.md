@@ -1,272 +1,360 @@
-# Review Aggregate — Cycle 1/100
+# Cycle 2 Aggregate Review
 
 Date: 2026-06-29
+HEAD: `3d1387045e0d7f1e06fb48756e412228bbdaf08d`
 
-## Agent Coverage
+Prompt 1 fan-out completed across all available required review roles. The native subagent tool exposed `worker`/`explorer`/`default` types, so required reviewer roles were run as worker lanes with role-specific prompts. UI/UX review was in scope because this is a Next.js web app. The UI lane used browser automation against a local dev server on port `3012`; public DB-backed pages were limited by local DB `ECONNREFUSED`, while `/en/admin` rendered and confirmed title evidence.
 
-- `code-reviewer`: completed, wrote `.context/reviews/code-reviewer.md`.
-- `perf-reviewer`: completed, wrote `.context/reviews/perf-reviewer.md`.
-- `security-reviewer`: completed, wrote `.context/reviews/security-reviewer.md`.
-- `critic` + `verifier`: completed as a combined lane, wrote `.context/reviews/critic-verifier.md`.
-- `test-engineer`: completed, wrote `.context/reviews/test-engineer.md`.
-- `architect` + `debugger` + `tracer`: completed as a combined lane, wrote `.context/reviews/architect-debugger-tracer.md`.
-- `document-specialist`: completed, wrote `.context/reviews/document-specialist.md`.
-- `designer`: completed, wrote `.context/reviews/designer.md`; live browser validation was limited by local DB `ECONNREFUSED`, so findings are source/test backed.
+## Agent Outputs
 
-Registered global reviewer prompts under `~/.codex/agents/product-marketer-reviewer.md` and `~/.codex/agents/ui-ux-designer-reviewer.md` were not run as additional repo reviewers because their required context and source paths are for a different SwiftUI/BurstPick project and would produce misleading GalleryKit findings.
+- `code-reviewer.md`: 1 confirmed issue, 1 risk.
+- `debugger.md`: duplicate confirmed issue, 1 risk.
+- `perf-reviewer.md`: 6 performance findings.
+- `architect.md`: 8 architecture findings.
+- `security-reviewer.md`: no confirmed security defects; 2 operational risks.
+- `critic.md`: no confirmed critic defects; 2 operational risks.
+- `verifier.md`: 1 confirmed doc mismatch, 1 verification gap.
+- `test-engineer.md`: 2 confirmed test gaps, 1 test-quality risk.
+- `tracer.md`: 1 confirmed high-severity operator-flow issue, 1 semantic-search risk.
+- `document-specialist.md`: duplicate high-severity operator-flow issue, 1 documentation risk.
+- `designer.md`: 2 UI findings.
+- `ui-ux-designer-reviewer.md`: duplicate 2 UI findings.
+- `product-marketer-reviewer.md`: duplicate admin-title finding plus 2 metadata/copy findings.
 
-## Summary
+## Merged Findings
 
-Raw reviewer findings: 28.
+### AGG-C2-01 - Gitignored `.claude/` enters Docker build context
 
-Deduped implementation findings: 27. The per-photo OG fallback redirect issue was independently reported by security-reviewer and critic/verifier, so it is listed once with cross-agent agreement.
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Cross-agent agreement: `code-reviewer`, `debugger`
 
-High severity: 4. Medium severity: 19. Low severity: 4.
+Citations: `.gitignore:30`, `.dockerignore:1-22`, `apps/web/docker-compose.yml:4-6`, `apps/web/Dockerfile:67-75`.
 
-## High Findings
+The root Docker context is the repository root and the Dockerfile performs `COPY . .`, but root `.dockerignore` excludes `.omx`, `.omc`, and `.agent` while missing `.claude/`. Local agent worktrees can therefore be sent to the builder, slowing deploys and risking local artifact leakage into layers.
 
-### AGG-C1 — Semantic similar-photo failures refund the limiter after DB work
-
-- Sources: `code-reviewer` CR-01.
-- Severity/confidence: High / High.
-- Status: Confirmed.
-- Location: `apps/web/src/app/api/search/similar/[id]/route.ts:83-154`; tests at `apps/web/src/__tests__/similar-route.test.ts:195-240`.
-- Issue: missing/corrupt target embedding and DB failure paths call `rollbackSemanticAttempt(ip)` after consuming protected DB work, creating an unmetered probe and DB-load path.
-- Fix: remove post-lookup/post-scan rollbacks; keep refunds only before protected work; update tests and comments.
+Suggested fix: add `.claude/` to root `.dockerignore`; consider a static check aligning local runtime ignores.
 
-### AGG-C2 — SQL restore scanner misses dangerous comment-separated multi-token statements
-
-- Sources: `architect-debugger-tracer` finding 1.
-- Severity/confidence: High / High.
-- Status: Confirmed.
-- Location: `apps/web/src/lib/sql-restore-scan.ts:39-137`; restore enforcement at `apps/web/src/app/[locale]/admin/db-actions.ts:408-436`.
-- Issue: stripping block comments to an empty string turns `DROP/**/TABLE` into `DROPTABLE`, bypassing patterns like `DROP\s+TABLE` while MySQL still treats comments as separators.
-- Fix: scan both comment-as-empty and comment-as-space normalized forms; add regression tests for dangerous comment-separated statements.
-
-### AGG-C3 — Documented public-route rate-limit lint gate is absent from root/CI execution
-
-- Sources: `test-engineer` TE-01.
-- Severity/confidence: High / High.
-- Status: Confirmed.
-- Location: `package.json:19-20`, `.github/workflows/quality.yml:60`, `apps/web/package.json:24`, `AGENTS.md:29-34`, `CLAUDE.md:579-590`.
-- Issue: the repo documents `lint:public-route-rate-limit` as blocking, but root scripts and CI omit it.
-- Fix: add the root forwarding script and run it in the CI security lint step.
-
-### AGG-C4 — CLIP production backfill docs omit `--force` in the pre-enable flow
-
-- Sources: `document-specialist` DOC-C1.
-- Severity/confidence: High / High.
-- Status: Confirmed mismatch.
-- Location: `CLAUDE.md:506-527`; correct app README reference at `apps/web/README.md:68-70`; script behavior at `apps/web/scripts/backfill-clip-embeddings.ts:90-95`.
-- Issue: following `CLAUDE.md` on a default install exits successfully without generating embeddings.
-- Fix: update the documented pre-enable command to `--production --force` and explain when `--force` is unnecessary.
-
-## Medium Findings
-
-### AGG-M1 — Production semantic search returns empty 200s when no production embeddings exist
-
-- Sources: `critic-verifier` finding 1.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/src/app/api/search/semantic/route.ts:249-335`; docs at `apps/web/README.md:58-60`.
-- Issue: production mode with zero real rows returns `200 { results: [] }`, contradicting the honesty gate and hiding configuration/backfill failures.
-- Fix: return 503/no-store when production scan returns zero rows; add route test.
-
-### AGG-M2 — Checked-in nginx upload root conflicts with host-side nginx topology
-
-- Sources: `critic-verifier` finding 2.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/docker-compose.yml:14-26`, `apps/web/nginx/default.conf:170-173`, `apps/web/README.md:47-49`.
-- Issue: the shipped host-side nginx config roots uploads at `/app/apps/web/public`, which is container-internal and can 404 all derivatives when installed on the host.
-- Fix: make nginx use the documented host bind-mount root or proxy uploads to Next by default, then add a config/source test.
-
-### AGG-M3 — Per-photo OG fallback redirects trust inbound request origin
-
-- Sources: `security-reviewer` SEC-01, `critic-verifier` finding 3.
-- Cross-agent agreement: High signal; two independent lanes found the same fallback trust problem.
-- Severity/confidence: Medium / High (preserving higher security-reviewer severity/confidence).
-- Status: Confirmed.
-- Location: `apps/web/src/app/api/og/photo/[id]/route.tsx:251-285`; nginx forwards host at `apps/web/nginx/default.conf:191-200`.
-- Issue: fallback redirects derive `Location` from `new URL(req.url).origin`, enabling open redirect/host-header poisoning if the edge forwards a hostile Host.
-- Fix: derive fallback origin from canonical SEO/site config and fail closed when invalid; add hostile-origin regression.
-
-### AGG-M4 — Lightroom uploads skip semantic embeddings
-
-- Sources: `architect-debugger-tracer` finding 2.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/src/app/api/admin/lr/upload/route.ts:425-465`, `apps/web/src/lib/image-queue.ts:391-413` and `:512-531`.
-- Issue: Lightroom enqueue forwards quality/image size settings but omits `semanticSearchMode`, so queue jobs default embeddings to disabled.
-- Fix: pass `semanticSearchMode: config.semanticSearchMode`; add test coverage.
-
-### AGG-M5 — Semantic search reads request body before reliable byte/rate-limit gate
-
-- Sources: `architect-debugger-tracer` finding 3.
-- Severity/confidence: Medium / Medium.
-- Status: Likely.
-- Location: `apps/web/src/app/api/search/semantic/route.ts:128-216`.
-- Issue: missing/variant transfer encoding and absent content-length paths can read large bodies before limiter charge; post-read length uses string length, not UTF-8 bytes.
-- Fix: normalize transfer encoding, add pre-body limiter or reject unknown lengths, byte-count reads; add tests.
-
-### AGG-M6 — Timeline/on-this-day queries are non-sargable on dynamic public pages
-
-- Sources: `perf-reviewer` PERF-01.
-- Severity/confidence: Medium / High.
-- Status: Confirmed likely production impact.
-- Location: `apps/web/src/lib/data-timeline.ts:95-205`.
-- Issue: `MONTH()`, `DAY()`, and `YEAR()` filters/orderings require broad scans as the archive grows.
-- Fix: rewrite year/month to sargable ranges; use generated columns or materialized/cache table for on-this-day.
-
-### AGG-M7 — Map page loads up to 10,000 unclustered markers without supporting index
-
-- Sources: `perf-reviewer` PERF-02.
-- Severity/confidence: Medium / High.
-- Status: Confirmed likely user-visible stalls.
-- Location: `apps/web/src/lib/data.ts:1624-1661`, `apps/web/src/db/schema.ts:111-117`, `apps/web/src/components/map/map-client.tsx:86-143`.
-- Issue: `/map` can scan, serialize, hydrate, and render thousands of markers without clustering or a GPS/map query index.
-- Fix: add supporting indexes and move toward viewport/bounds loading or clustering.
-
-### AGG-M8 — Production CLIP image embeddings bypass image-queue backpressure
-
-- Sources: `perf-reviewer` PERF-03.
-- Severity/confidence: Medium / High.
-- Status: Confirmed concurrency risk.
-- Location: `apps/web/src/lib/image-queue.ts:512-569`, `apps/web/src/lib/clip-model.ts:151-186`.
-- Issue: detached production embedding jobs are not bounded by the main processing queue, allowing CPU/memory spikes during batch uploads.
-- Fix: add a bounded embedding queue or await embedding in the existing queue; add metrics.
-
-### AGG-M9 — Valid single-photo share-link 200-path e2e is skipped
-
-- Sources: `test-engineer` TE-02.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/e2e/public.spec.ts:125-137`, `apps/web/scripts/seed-e2e.ts:230`.
-- Issue: valid `/s/[key]` rendering is not exercised unless an external env var is supplied.
-- Fix: seed or query a deterministic key and remove the skip.
-
-### AGG-M10 — Vitest discovery ignores future `.test.tsx` tests
-
-- Sources: `test-engineer` TE-03.
-- Severity/confidence: Medium / High.
-- Status: Risk confirmed by config.
-- Location: `apps/web/vitest.config.ts:17`.
-- Issue: `*.test.tsx` files can be typechecked but not executed.
-- Fix: include `src/__tests__/**/*.test.{ts,tsx}` or explicitly reject `.test.tsx`.
-
-### AGG-M11 — Navigation visual checks only capture screenshots
-
-- Sources: `test-engineer` TE-04.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/e2e/nav-visual-check.spec.ts:14-39`.
-- Issue: screenshots are emitted but never compared, so visual regressions pass.
-- Fix: use `toHaveScreenshot` with baselines or rename to smoke/artifact capture and add DOM/box assertions.
-
-### AGG-M12 — High-value client interactions are source-regex locked instead of behavior-tested
-
-- Sources: `test-engineer` TE-05.
-- Severity/confidence: Medium / Medium.
-- Status: Likely coverage gap.
-- Location: `apps/web/src/__tests__/search-stale-response.test.ts:8-19`, `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:15-19`, production code in `components/search.tsx` and `components/upload-dropzone.tsx`.
-- Issue: runtime asynchronous behavior can drift while brittle source-shape tests remain green.
-- Fix: add browser/component behavior tests for stale search responses and topic wiring.
-
-### AGG-M13 — `site-config.json.url` docs misstate build validation and OG behavior
-
-- Sources: `document-specialist` DOC-C2.
-- Severity/confidence: Medium / High.
-- Status: Confirmed mismatch.
-- Location: `CLAUDE.md:212`, `CLAUDE.md:628-632`, `apps/web/scripts/ensure-site-config.mjs:11-42`, `apps/web/Dockerfile:71-75`.
-- Issue: docs say there is no build-time validation and invalid OG config returns 404; code validates at build/prebuild and per-photo OG can redirect fallback.
-- Fix: rewrite docs to distinguish build guard, per-photo fetch fail-closed behavior, and topic OG behavior.
-
-### AGG-M14 — Per-photo OG inline comment says fallback to request origin
-
-- Sources: `document-specialist` DOC-C3.
-- Severity/confidence: Medium / High.
-- Status: Confirmed mismatch.
-- Location: `apps/web/src/app/api/og/photo/[id]/route.tsx:101-110`.
-- Issue: the stale comment could guide a future refactor to reintroduce request-origin fallback.
-- Fix: update comment to match the intended invariant.
-
-### AGG-M15 — `.env.local.example` documents stale `NEXT_UPLOAD_BODY_MAX_BYTES`
-
-- Sources: `document-specialist` DOC-C4.
-- Severity/confidence: Medium / High.
-- Status: Confirmed mismatch.
-- Location: `apps/web/.env.local.example:45-47`, `apps/web/src/lib/upload-limits.ts:3-21`.
-- Issue: example pins the old 206 MiB value and can break documented 250 MiB restores.
-- Fix: update to 278921216 / 266 MiB and clarify it covers photo uploads and DB restore transport overhead.
-
-### AGG-M16 — Localized error boundary has a broken skip-link target
-
-- Sources: `designer` D1.
-- Severity/confidence: Medium / High.
-- Status: Confirmed.
-- Location: `apps/web/src/app/[locale]/layout.tsx:123-128`, `apps/web/src/app/[locale]/error.tsx:16-46`, `apps/web/src/__tests__/a11y-us-p15.test.ts:29-37`.
-- Issue: the global skip link targets `#main-content`, but the localized error boundary main lacks that id.
-- Fix: add `id="main-content" tabIndex={-1}` and a source regression.
-
-### AGG-M17 — Search result links are tab-focusable while focus scanner exempts them
-
-- Sources: `designer` D2.
-- Severity/confidence: Medium / High.
-- Status: Confirmed from source.
-- Location: `apps/web/src/components/search.tsx:71-79`, `apps/web/src/__tests__/focus-visible-links-scan.test.ts:41-75`.
-- Issue: real `<Link role="option" href=...>` elements can receive Tab focus without a visible focus style, while the scanner assumes role-option results are not tab-focusable.
-- Fix: choose a consistent combobox or link-list pattern; update scanner exemption.
-
-### AGG-M18 — Error states can render with an empty document title
-
-- Sources: `designer` D3.
-- Severity/confidence: Medium / Medium.
-- Status: Confirmed runtime under DB-down dev environment.
-- Location: `apps/web/src/app/[locale]/layout.tsx:17-58`, `apps/web/src/app/[locale]/error.tsx:7-47`.
-- Issue: localized error UI can show with `document.title === ""`.
-- Fix: add regression; investigate metadata/error-boundary path; use guarded client fallback title if Next cannot preserve metadata.
-
-## Low Findings
-
-### AGG-L1 — Smart-collection cursor pages still pay a full window count
-
-- Sources: `perf-reviewer` PERF-04.
-- Severity/confidence: Low / Medium.
-- Location: `apps/web/src/lib/data.ts:1388-1430`, `apps/web/src/app/actions/public.ts:161-213`.
-- Fix: split first-page count from cursor-page lookahead.
-
-### AGG-L2 — Admin backfill candidate discovery lacks a `pipeline_version` index
-
-- Sources: `perf-reviewer` PERF-05.
-- Severity/confidence: Low / Medium.
-- Location: `apps/web/src/lib/admin-backfill-runner.ts:370-410`, `apps/web/src/db/schema.ts:111-117`.
-- Fix: add `(processed, pipeline_version, id)` index if production backfill status checks warrant schema churn, or remove eager count.
-
-### AGG-L3 — Admin e2e coverage is opt-in locally
-
-- Sources: `test-engineer` TE-06.
-- Severity/confidence: Low / High.
-- Location: `apps/web/e2e/admin.spec.ts:6-12`, `apps/web/e2e/helpers.ts:28-45`.
-- Fix: emit clear local skip summary or split public/all scripts with all failing without admin credentials.
-
-### AGG-L4 — `GalleryConfig.avifEffort` comment says 4-9 while validator/UI support 0-9
-
-- Sources: `document-specialist` DOC-C5.
-- Severity/confidence: Low / High.
-- Location: `apps/web/src/lib/gallery-config.ts:83-84`, validator/UI/messages at documented locations.
-- Fix: update comment to `0-9`.
-
-### AGG-L5 — SEO settings hints are visual only
-
-- Sources: `designer` D4.
-- Severity/confidence: Low / High.
-- Location: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:95-174`.
-- Fix: add hint ids and `aria-describedby` relationships, with a source contract test.
+### AGG-C2-02 - Timeline and on-this-day date queries are non-sargable
+
+Severity: Medium
+Confidence: High
+Status: Confirmed performance issue
+Cross-agent agreement: `perf-reviewer`
+
+Citations: `apps/web/src/lib/data-timeline.ts:95-114`, `:127-143`, `:176-205`; `apps/web/src/components/on-this-day-widget.tsx:14-23`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:14,40-60`; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:15,56-65`.
+
+Public dynamic archive pages use `YEAR()`, `MONTH()`, and `DAY()` predicates over capture dates. Large archives can turn public requests into table/index scans and DB CPU spikes.
+
+Suggested fix: use range predicates for year pages; consider generated/indexed month/day columns or a small anniversary cache for on-this-day.
+
+### AGG-C2-03 - Map page loads up to 10,000 unclustered markers without query/index support
+
+Severity: Medium
+Confidence: High
+Status: Confirmed performance issue
+Cross-agent agreement: `perf-reviewer`
+
+Citations: `apps/web/src/lib/data.ts:1624-1661`, `apps/web/src/db/schema.ts:111-117`, `apps/web/src/app/[locale]/(public)/map/page.tsx:9,30-63`, `apps/web/src/components/map/map-client.tsx:86-90,119-143`.
+
+A GPS-heavy gallery can scan many rows, serialize thousands of markers, compute bounds over every point, and mount thousands of Leaflet markers on mobile.
+
+Suggested fix: validate an index with `EXPLAIN`, then move to viewport loading or clustering before supporting large marker payloads.
+
+### AGG-C2-04 - Production CLIP image embeddings bypass image-queue backpressure
+
+Severity: Medium
+Confidence: High
+Status: Confirmed concurrency risk
+Cross-agent agreement: `perf-reviewer`
+
+Citations: `apps/web/src/lib/image-queue.ts:212`, `:414-449`, `:512-569`; `apps/web/src/lib/clip-model.ts:151-186`.
+
+Sharp work is bounded by `QUEUE_CONCURRENCY`, but production embedding work is launched in a detached async task after image processing commits. Batch uploads can stack inference work alongside new Sharp jobs in the same Node process.
+
+Suggested fix: route embeddings through a bounded queue such as `EMBEDDING_CONCURRENCY=1`, or await production embeddings inside the existing queue.
+
+### AGG-C2-05 - Semantic search brute-force scans are request-path and newest-first bounded
+
+Severity: Medium
+Confidence: High
+Status: Confirmed scaling/product-quality risk
+Cross-agent agreement: `perf-reviewer`, `architect`, `tracer`, `document-specialist`
+
+Citations: `apps/web/src/app/api/search/semantic/route.ts:240-281`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, `apps/web/src/lib/clip-embeddings.ts:18-40,160-164`, `apps/web/README.md:61`.
+
+Semantic and similar search read BLOB embeddings, score them synchronously in JS, sort candidates, and scan newest rows first up to `SEMANTIC_SCAN_LIMIT`. Larger galleries can omit older relevant images or block the event loop if the cap is raised.
+
+Suggested fix: add operational warning when embedding count exceeds the scan cap; keep a stricter production ceiling and plan a vector-index/worker boundary before raising limits.
+
+### AGG-C2-06 - Smart-collection cursor pages still pay full `COUNT(*) OVER()`
+
+Severity: Low
+Confidence: Medium
+Status: Confirmed performance issue
+Cross-agent agreement: `perf-reviewer`
+
+Citations: `apps/web/src/lib/data.ts:1388-1430`, `apps/web/src/app/actions/public.ts:161-213`, `apps/web/src/components/load-more.tsx:48-64`.
+
+Cursor load-more pages discard total-count metadata but the query still computes `COUNT(*) OVER()` over every matching smart-collection row.
+
+Suggested fix: split first-page and cursor query shapes; use `LIMIT + 1` lookahead for cursor pages.
+
+### AGG-C2-07 - Backfill stale-candidate discovery scans `pipeline_version` without an index
+
+Severity: Low
+Confidence: Medium
+Status: Likely maintenance-path inefficiency
+Cross-agent agreement: `perf-reviewer`
+
+Citations: `apps/web/src/lib/admin-backfill-runner.ts:370-379`, `:387-410`; `apps/web/src/db/schema.ts:111-117`.
+
+Color-pipeline backfill count/batch discovery can scan the image table when most rows are current.
+
+Suggested fix: add `(processed, pipeline_version, id)` if production backfills are common, or avoid eager counts.
+
+### AGG-C2-08 - Restore maintenance is process-local while restore locking is DB-wide
+
+Severity: Medium
+Confidence: High
+Status: Confirmed scale-out risk under unsupported topology
+Cross-agent agreement: `architect`, `security-reviewer`, `critic`
+
+Citations: `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/app/[locale]/admin/db-actions.ts:263-350`, `CLAUDE.md` runtime-topology section.
+
+The documented deployment is single-instance. If scaled horizontally first, only the process that starts restore sees maintenance mode, while another process can accept writes mid-restore.
+
+Suggested fix: keep single-instance as a hard invariant or move restore-maintenance state to DB/shared storage before scale-out.
+
+### AGG-C2-09 - `clip-embeddings.ts` mixes shared helpers with server-only env policy
+
+Severity: Low
+Confidence: High
+Status: Confirmed boundary smell
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/lib/clip-embeddings.ts:18-40`, `apps/web/src/components/search.tsx:1,19`, semantic/similar route imports.
+
+Client components import the same module that reads server env at module load. Future client imports of env-derived symbols can get browser fallback values while server routes enforce operator settings.
+
+Suggested fix: move env-derived limits into a `server-only` module or add a source-contract test preventing client imports of those symbols.
+
+### AGG-C2-10 - Upload quota claim settlement relies on hand-maintained rollback paths
+
+Severity: Medium
+Confidence: High
+Status: Confirmed maintainability risk; currently fenced
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/app/actions/images.ts:224-279`, `:520-564`.
+
+The upload quota pre-claim spans a long async region with manual rollback and final settlement. A future awaited throw can leave quota inflated until window expiry.
+
+Suggested fix: introduce a small claim object or `try/finally` wrapper the next time upload flow is edited.
+
+### AGG-C2-11 - Topic identity uses a mutable natural key with manual fan-out
+
+Severity: Medium
+Confidence: High
+Status: Confirmed design risk; test-fenced
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/db/schema.ts:14-17,33,234-243,288-302`, `apps/web/src/app/actions/topics.ts:320-337`.
+
+Topic slug rename manually updates FK children and JSON smart-collection predicates. New slug stores can orphan data if not registered in the fan-out.
+
+Suggested fix: long-term immutable topic IDs; short-term keep registry tests strict.
+
+### AGG-C2-12 - Public image field selections are split across manual allowlists
+
+Severity: Low-Medium
+Confidence: High
+Status: Confirmed architecture risk; no current leak found
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/lib/data.ts:364-482`, `apps/web/src/lib/data-timeline.ts:20-73`, `apps/web/src/lib/search-enrichment-fields.ts:29-46`, `apps/web/src/__tests__/privacy-fields.test.ts:74-80`.
+
+Public selectors are guarded but duplicated across read paths, leaving future public routes dependent on reviewer memory.
+
+Suggested fix: extract a canonical public image select module and derive route subsets from it.
+
+### AGG-C2-13 - Dormant storage abstraction is not wired to the product boundary
+
+Severity: Low
+Confidence: High
+Status: Confirmed dead abstraction risk
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/lib/storage/index.ts:4-143`, `apps/web/src/lib/storage/local.ts:37-139`; no live non-test importers.
+
+Future code can import `getStorage()` and accidentally build a parallel storage path outside the direct filesystem pipeline.
+
+Suggested fix: delete until scheduled or quarantine with a source-contract test preventing non-test imports.
+
+### AGG-C2-14 - `lib/api-auth.ts` depends upward on `app/actions/auth`
+
+Severity: Low-Medium
+Confidence: Medium
+Status: Confirmed layering smell
+Cross-agent agreement: `architect`
+
+Citations: `apps/web/src/lib/api-auth.ts:1`, `apps/web/src/app/actions/auth.ts:23-56`.
+
+Lower-level API auth imports an app action module, which can create circular pressure during future auth refactors.
+
+Suggested fix: move current-user/session helpers into server-only `lib/auth.ts`, re-export from action module for compatibility.
+
+### AGG-C2-15 - Direct container exposure bypasses nginx edge controls
+
+Severity: Medium
+Confidence: Medium
+Status: Operational risk, not a confirmed defect under shipped compose
+Cross-agent agreement: `security-reviewer`, `critic`
+
+Citations: `apps/web/docker-compose.yml:14-21`, `apps/web/Dockerfile:83-85`, `apps/web/nginx/default.conf:25-31,56-60,72-76,89-93,131-150`.
+
+The app image binds broadly by default and relies on compose/nginx for localhost binding, body caps, throttles, and proxy normalization. Direct exposure preserves app auth but loses edge protections.
+
+Suggested fix: add production startup/deploy guard requiring localhost binding or explicit direct-exposure opt-in.
+
+### AGG-C2-16 - `AGENTS.md` says `.context/plans/` is gitignored though it is tracked
+
+Severity: Low
+Confidence: High
+Status: Confirmed doc mismatch
+Cross-agent agreement: `verifier`
+
+Citations: `AGENTS.md:41`, `git ls-files '.context/plans/*'`.
+
+Contributors may treat committed plan history as disposable local state or place sensitive notes under a tracked directory.
+
+Suggested fix: update `AGENTS.md` to describe the actual committed/current-vs-local plan split.
+
+### AGG-C2-17 - Build gate was not run in verifier lane
+
+Severity: Low
+Confidence: High
+Status: Verification gap
+Cross-agent agreement: `verifier`
+
+Citations: `AGENTS.md` quality gates, `apps/web/package.json:11`.
+
+The verifier lane skipped `npm run build --workspace=apps/web` to avoid generated `sw.js` churn during read-only review. Prompt 3 must run the configured build gate.
+
+Suggested fix: run the build gate in implementation verification and handle/commit any generated stamp intentionally.
+
+### AGG-C2-18 - E2E nav visual checks capture screenshots without assertions
+
+Severity: Medium
+Confidence: High
+Status: Confirmed test gap
+Cross-agent agreement: `test-engineer`
+
+Citations: `apps/web/e2e/nav-visual-check.spec.ts:14,27,39`; no `toHaveScreenshot`/`toMatchSnapshot` in test tree.
+
+Visual regressions can pass because screenshots are artifacts only.
+
+Suggested fix: convert to real visual assertions or add DOM/bounding-box assertions and rename as artifact capture.
+
+### AGG-C2-19 - Browser upload enqueue settings are weakly asserted
+
+Severity: Medium
+Confidence: High
+Status: Confirmed coverage gap
+Cross-agent agreement: `test-engineer`
+
+Citations: `apps/web/src/app/actions/images.ts:467-497`, `apps/web/src/__tests__/images-actions.test.ts:375`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:326-337`, `apps/web/src/lib/image-queue.ts:414-429`.
+
+The browser upload action forwards processing/search settings, but tests only assert `id` and `topic` in the queued payload.
+
+Suggested fix: strengthen `images-actions.test.ts` to assert the full enqueue payload shape.
+
+### AGG-C2-20 - High-value client async behavior is locked by source scans
+
+Severity: Medium
+Confidence: Medium
+Status: Test-quality risk
+Cross-agent agreement: `test-engineer`
+
+Citations: `apps/web/src/__tests__/search-stale-response.test.ts:8-27`, `apps/web/src/components/search.tsx:175-225`, `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:15-21`, `apps/web/src/components/upload-dropzone.tsx:214-234`.
+
+Stale search response and mid-batch upload topic behavior are verified by brittle source-order scans instead of runtime behavior.
+
+Suggested fix: add a minimal component/harness test for these async contracts.
+
+### AGG-C2-21 - CLIP production backfill examples omit required `--force`
+
+Severity: High
+Confidence: High
+Status: Confirmed documentation/operator-flow issue
+Cross-agent agreement: `tracer`, `document-specialist`
+
+Citations: `apps/web/README.md:35-37`, `apps/web/scripts/backfill-clip-embeddings.ts:4-22`, `apps/web/scripts/backfill-clip-embeddings.ts:90-95`, `apps/web/src/app/api/search/semantic/route.ts:255-259`, correct guidance at `apps/web/README.md:68-70` and `CLAUDE.md:506-527`.
+
+The script table and script header show `--production` without `--force`, which exits `0` without processing on a default disabled install. Enabling production afterward yields no embeddings and semantic search returns 503.
+
+Suggested fix: update the README script table and script header examples to use `--production --force` for pre-enable production backfills.
+
+### AGG-C2-22 - Admin pages lack route-specific document titles
+
+Severity: Medium
+Confidence: High
+Status: Confirmed UI/UX issue
+Cross-agent agreement: `designer`, `ui-ux-designer-reviewer`, `product-marketer-reviewer`
+
+Citations: browser check `/en/admin` title `GalleryKit`; `apps/web/src/app/[locale]/layout.tsx:22-27`, `apps/web/src/app/[locale]/admin/page.tsx:6-15`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:5-17`, `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx:6-9`, `apps/web/messages/en.json:2-13`, `apps/web/messages/ko.json:2-13`.
+
+Admin login/dashboard/settings/database/SEO/tokens pages can inherit only the site title, weakening tab and screen-reader orientation.
+
+Suggested fix: add localized metadata to admin routes using existing nav labels and add metadata coverage tests.
+
+### AGG-C2-23 - Timeline/year photo cards use hard-coded English and title-only link names
+
+Severity: Medium
+Confidence: High
+Status: Confirmed accessibility/i18n issue
+Cross-agent agreement: `designer`, `ui-ux-designer-reviewer`
+
+Citations: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:192-212`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:151-168`, stronger pattern in `apps/web/src/components/home-client.tsx:291-323` and `apps/web/src/components/on-this-day-widget.tsx:49-59`.
+
+Korean timeline/year pages can expose English `Photo` fallbacks, and links use bare titles rather than localized action labels.
+
+Suggested fix: reuse the home grid localized untitled/photo fallback and `view photo` aria template.
+
+### AGG-C2-24 - Timeline/year pages miss social preview metadata
+
+Severity: Low
+Confidence: High
+Status: Confirmed product metadata gap
+Cross-agent agreement: `product-marketer-reviewer`
+
+Citations: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:26-30`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-41`, richer metadata in home/topic/smart collection routes.
+
+Timeline and year pages are shareable public surfaces but can fall back to generic social cards.
+
+Suggested fix: add localized Open Graph/Twitter metadata with a representative photo or configured fallback image.
+
+### AGG-C2-25 - Invalid year metadata returns English copy on localized routes
+
+Severity: Low
+Confidence: High
+Status: Confirmed i18n metadata issue
+Cross-agent agreement: `product-marketer-reviewer`
+
+Citations: `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:22-25`, localized not-found copy in `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
+
+Malformed localized year URLs can expose English `Not Found` in metadata.
+
+Suggested fix: resolve locale/messages before invalid-year metadata or centralize localized not-found metadata.
 
 ## Agent Failures
 
-No required reviewer failed after retry. One initial attempt to start a sixth concurrent agent hit the live agent limit; the remaining roles were run in later waves.
+None. The first UI/custom spawn failed because the active agent limit was reached; it was retried after another lane completed and returned successfully.
 
-## Final Sweep Result
+## Verification Evidence Collected During Review
 
-All current-cycle per-agent review files were read. The aggregate keeps per-agent files as provenance and dedupes only the overlapping OG fallback finding. Historical `.context/reviews/**` and archived plan artifacts were not treated as new cycle findings.
+- Verifier lane: lint, API-auth lint, action-origin lint, public-route-rate-limit lint, typecheck, and Vitest passed.
+- Security/critic lane: `npm audit` returned 0 vulnerabilities; auth/origin/rate-limit lints passed; targeted security tests passed.
+- Code/debugger lane: targeted Vitest passed, 7 files / 57 tests.
+- UI lane: dev server started on port `3012`, `/en/admin` inspected, dev server stopped, `git diff --check` passed.
