@@ -1,250 +1,158 @@
-# Cycle 9 Tracer Review
+# Cycle 10 Tracer Review
 
-HEAD reviewed: `2506c5f7`
+HEAD reviewed: `42c5b226` (`887e1dd7` source tree plus intervening review-artifact-only commits: `.context/reviews/debugger.md`, `.context/reviews/document-specialist.md`, `.context/reviews/test-engineer.md`).
 
-Mode: read-only causal tracing review. Source code and plans were not edited.
+Mode: read-only causal tracing review. Source code was not edited; this report is the only intended artifact.
 
 ## Scope And Method
 
 Read first, per workspace rule:
 - `AGENTS.md`
 - `CLAUDE.md`
+- `~/.agents/skills/code-review/SKILL.md`
 
-Required traces covered:
-- Upload -> DB -> queue -> processing -> public rendering.
-- Restore -> maintenance -> queue.
-- Search/tag filters -> data queries -> UI.
-- Semantic search -> model -> embeddings -> enrichment.
-- Sharing/analytics -> rate limit -> writes.
-- Deploy/migration artifacts.
+Inventory target: request/data lifecycles, ordering, race windows, cross-file invariants, and failure propagation across the current repository. I built the inventory from `rg --files` over app actions, API routes, library modules, scripts, DB schema, migrations, and review context; the app/source inventory contained 1,888 files under the reviewed roots, with the request/data-flow subset narrowed to the files below.
 
-I traced each lane from entry point to durable side effects and then ran a final missed-issue sweep against prior review hypotheses and high-risk keywords. This report distinguishes confirmed issues, likely issues, risks needing manual validation, and false positives/already fixed.
+## Files Reviewed / Inventory Summary
 
-## Inventory
+Upload, processing, queue, and retry lifecycle:
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/process-topic-image.ts`
+- `apps/web/src/lib/upload-paths.ts`
+- `apps/web/src/lib/upload-tracker-state.ts`
+- `apps/web/src/lib/upload-tracker.ts`
+- `apps/web/src/lib/upload-processing-contract-lock.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/admin-backfill-runner.ts`
+- `apps/web/scripts/backfill-color-pipeline.ts`
 
-Upload, DB, queue, processing, rendering:
-- Browser upload: `apps/web/src/app/actions/images.ts:113-190`, `apps/web/src/app/actions/images.ts:317-425`, `apps/web/src/app/actions/images.ts:480-512`
-- Lightroom upload: `apps/web/src/app/api/admin/lr/upload/route.ts:60-115`, `apps/web/src/app/api/admin/lr/upload/route.ts:241-305`, `apps/web/src/app/api/admin/lr/upload/route.ts:374-489`
-- Queue snapshot and worker: `apps/web/src/lib/image-queue.ts:90-175`, `apps/web/src/lib/image-queue.ts:392-465`, `apps/web/src/lib/image-queue.ts:525-683`, `apps/web/src/lib/image-queue.ts:814-884`
-- Original save/format processing: `apps/web/src/lib/process-image.ts:844-994`, `apps/web/src/lib/process-image.ts:1002-1120`
-- Public render/query: `apps/web/src/lib/data.ts:618-646`, `apps/web/src/lib/data.ts:784-811`, `apps/web/src/components/home-client.tsx:286-421`
+Restore, maintenance, and migration lifecycle:
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/lib/restore-maintenance.ts`
+- `apps/web/src/lib/db-restore.ts`
+- `apps/web/src/lib/sql-restore-scan.ts`
+- `apps/web/scripts/migrate.js`
+- `apps/web/drizzle/meta/_journal.json`
 
-Restore, maintenance, queue:
-- Restore lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts:266-386`
-- Dump scan/import: `apps/web/src/app/[locale]/admin/db-actions.ts:468-584`
-- SQL scanner: `apps/web/src/lib/sql-restore-scan.ts:39-155`
-- Queue quiesce/resume: `apps/web/src/lib/image-queue.ts:966-1019`
+Admin mutation, route-segment, sharing, and settings lifecycle:
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/actions/collections.ts`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/lr-tokens.ts`
+- `apps/web/src/lib/advisory-locks.ts`
+- `apps/web/src/lib/revalidation.ts`
+- `apps/web/src/lib/smart-collections.ts`
+- `apps/web/src/lib/sanitize.ts`
+- `apps/web/src/lib/validation.ts`
 
-Search/tag filters:
-- Public pages: `apps/web/src/app/[locale]/(public)/page.tsx:149-222`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:134-215`
-- Tag UI: `apps/web/src/components/tag-filter.tsx:10-120`, `apps/web/src/components/home-client.tsx:243-273`, `apps/web/src/components/home-client.tsx:412-421`
-- Public actions and data: `apps/web/src/app/actions/public.ts:113-310`, `apps/web/src/lib/data.ts:1481-1632`
-- Search UI: `apps/web/src/components/search.tsx:154-253`
+Public request, search, analytics, and semantic lifecycle:
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/app/api/og/route.tsx`
+- `apps/web/src/app/api/og/photo/[id]/route.tsx`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/analytics-data.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/lib/clip-model.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/app/actions/embeddings.ts`
+- `apps/web/scripts/backfill-clip-embeddings.ts`
 
-Semantic search and embeddings:
-- Semantic route: `apps/web/src/app/api/search/semantic/route.ts:156-330`
-- Similar route: `apps/web/src/app/api/search/similar/[id]/route.ts:97-215`
-- Embedding helpers/caps: `apps/web/src/lib/clip-embeddings.ts:22-44`, `apps/web/src/lib/clip-embeddings.ts:116-172`
-- Real model loader: `apps/web/src/lib/clip-model.ts:53-71`, `apps/web/src/lib/clip-model.ts:98-128`, `apps/web/src/lib/clip-model.ts:171-223`
-- Queue embedding write: `apps/web/src/lib/image-queue.ts:600-683`
-- Sidecar backfill: `apps/web/scripts/backfill-clip-embeddings.ts:1-60`, `apps/web/scripts/backfill-clip-embeddings.ts:113-196`
-- In-app embedding action: `apps/web/src/app/actions/embeddings.ts:55-180`
-
-Sharing, analytics, rate limits:
-- Share writes: `apps/web/src/app/actions/sharing.ts:22-82`, `apps/web/src/app/actions/sharing.ts:84-183`, `apps/web/src/app/actions/sharing.ts:185-304`
-- Analytics writes: `apps/web/src/app/actions/public.ts:319-414`
-- Analytics reads/index use: `apps/web/src/lib/analytics-data.ts:28-86`, `apps/web/src/lib/analytics-data.ts:93-112`, `apps/web/src/lib/analytics-data.ts:161-191`
-- Schema/indexes: `apps/web/src/db/schema.ts:220-260`, `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3`
-
-Deploy/migrations:
-- Migration reconciler/postcondition: `apps/web/scripts/migrate.js:719-779`, `apps/web/scripts/migrate.js:804-835`
-- Journal tail: `apps/web/drizzle/meta/_journal.json:145-193`
-- Runtime image/deploy: `apps/web/Dockerfile:105-145`, `apps/web/docker-compose.yml:1-27`, `apps/web/deploy.sh:10-62`
-- Semantic operations docs: `CLAUDE.md:509-538`
-
-## Confirmed Issues
+## Confirmed Findings
 
 None found in the current tree.
 
-## Likely Issues
+Evidence: the high-risk upload/settings path uses the upload-processing contract lock (`settings.ts:72-89`, `settings.ts:136-166`, `images.ts:177-184`, `lr/upload/route.ts:220-236`); processing uses per-image advisory claims and conditional DB transitions (`image-queue.ts:430-457`, `image-queue.ts:538-659`); restore obtains restore/backfill/upload locks before maintenance and queue quiescence (`db-actions.ts:266-419`); topic slug rewrites update images, aliases, topic views, and smart collection JSON in one transaction (`topics.ts:255-340`); public semantic production mode heals to disabled unless operator-gated (`gallery-config.ts:123-142`).
+
+## Likely Findings
 
 None found.
 
 ## Risks Needing Manual Validation
 
-### TRC9-RISK-01 - Semantic search recall is capped to the most recently updated embedding rows
+### TRC10-RISK-01 - Semantic search recall is capped to the most recently updated embedding rows
 
 Severity: Medium
 Confidence: High
-Status: Risk needing manual validation
+Status: Risk
 
 Code region:
 - `apps/web/src/lib/clip-embeddings.ts:22-44`
 - `apps/web/src/app/api/search/semantic/route.ts:242-283`
 - `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
-- `apps/web/src/db/schema.ts:277-292`
-- `apps/web/drizzle/0022_image_embeddings_model_version_idx.sql:1-9`
-- `CLAUDE.md:534-538`
 
-Concrete failure scenario:
-`SEMANTIC_SCAN_LIMIT` defaults to 2000 (`clip-embeddings.ts:43-44`). Both natural-language semantic search and similar-image search read only rows matching the active model version, ordered by `updated_at DESC`, then apply `.limit(SEMANTIC_SCAN_LIMIT)` before scoring (`semantic/route.ts:242-283`, `similar/[id]/route.ts:141-170`). On a gallery with more production embeddings than the cap, older rows are not candidates at all. A user searching for an older photo or asking for similar photos from an older shoot can receive no match even though that image has a valid embedding. This is intentional as a CPU/DB bound and is documented as a runtime limit (`CLAUDE.md:534-538`), but the user-facing feature reads as semantic search over the gallery.
+Failure scenario:
+`SEMANTIC_SCAN_LIMIT` defaults to 2,000 and is clamped at 25,000 (`clip-embeddings.ts:36-44`). Natural-language semantic search and similar-image search both read active-model embeddings ordered by `updated_at DESC` and then stop at that hard limit (`semantic/route.ts:242-283`, `similar/[id]/route.ts:141-170`). On a gallery with more active embeddings than the cap, older rows are never candidates, so an older photo can be absent from semantic results even when it has a valid embedding.
 
-Suggested fix:
-Add an operator/admin health surface that compares production embedding count to `SEMANTIC_SCAN_LIMIT` and labels semantic search as "recent embedding window" when count exceeds the cap. For complete-gallery semantics, replace the brute-force latest-row scan with a vector index/ANN path or a paginated bounded top-k scan that makes recall tradeoffs explicit.
+Concrete fix:
+Expose a health/admin signal when active embedding count exceeds `SEMANTIC_SCAN_LIMIT`, and label the feature as a bounded recent-embedding scan under that condition. For full-gallery semantics, move to an ANN/vector index or a paginated bounded top-k strategy with an explicit recall contract.
 
-### TRC9-RISK-02 - Unwired in-app embedding backfill reports success after only one capped candidate set
+### TRC10-RISK-02 - Dark in-app embedding backfill can report success after one capped candidate set
 
 Severity: Low
 Confidence: Medium
-Status: Risk needing manual validation
+Status: Risk
 
 Code region:
 - `apps/web/src/app/actions/embeddings.ts:79-80`
 - `apps/web/src/app/actions/embeddings.ts:103-124`
 - `apps/web/src/app/actions/embeddings.ts:129-172`
 - `apps/web/scripts/backfill-clip-embeddings.ts:113-117`
-- `apps/web/scripts/backfill-clip-embeddings.ts:192-196`
 
-Concrete failure scenario:
-The in-app action is explicitly noted as currently unwired and secondary to the sidecar (`actions/embeddings.ts:79-80`). If a future UI or admin workflow wires it directly, it selects at most `SEMANTIC_SCAN_LIMIT` pending rows once (`actions/embeddings.ts:103-124`), processes that fixed array, and returns `{ status: 'ok', processed, skipped }` (`actions/embeddings.ts:129-172`). With 3000 missing embeddings and the default cap of 2000, it can return success after 2000 rows with no `hasMore` or remaining-count signal. The sidecar at least logs that the scan limit was reached and says to rerun (`backfill-clip-embeddings.ts:113-117`).
+Failure scenario:
+The action notes that no UI currently wires it and that the sidecar remains canonical (`embeddings.ts:79-80`). If a future admin UI wires this action directly, it selects one `SEMANTIC_SCAN_LIMIT`-bounded set of missing embeddings (`embeddings.ts:103-124`), processes that fixed set, and returns `{ status: 'ok', processed, skipped }` without a `hasMore` or remaining-count signal (`embeddings.ts:129-172`). With more missing rows than the cap, the UI could present an incomplete backfill as complete. The sidecar at least warns operators when its scan limit is reached (`backfill-clip-embeddings.ts:113-117`).
 
-Suggested fix:
-Keep the action unwired, remove it, or make it keyset-paginated like the sidecar and return `hasMore`/remaining count. Add a source contract if it stays dark so a future UI cannot present the capped one-shot action as a complete backfill.
+Concrete fix:
+Keep the action unwired, remove it, or make it keyset-paginated like the sidecar and return `hasMore` plus remaining count. Add a source-level comment or test contract that prevents future UI wiring from treating the one-shot action as complete.
 
-### TRC9-RISK-03 - Process-local coordination remains valid only under the documented single web-instance topology
+### TRC10-RISK-03 - Process-local coordination depends on the documented single web-instance topology
 
 Severity: Medium
 Confidence: High
-Status: Risk needing manual validation
+Status: Risk
 
 Code region:
-- `CLAUDE.md:227`
-- `apps/web/docker-compose.yml:1-27`
+- `CLAUDE.md` runtime topology section
 - `apps/web/src/lib/restore-maintenance.ts:1-55`
 - `apps/web/src/lib/image-queue.ts:273-323`
-- `apps/web/src/app/actions/public.ts:319-338`
+- `apps/web/src/lib/upload-tracker-state.ts:70-79`
+- `apps/web/src/app/actions/public.ts:323-341`
 - `apps/web/src/app/actions/sharing.ts:22-82`
 
-Concrete failure scenario:
-The shipped compose file runs one `gallerykit-web` service with host networking and bind mounts (`docker-compose.yml:1-27`), matching the documented single-writer assumption (`CLAUDE.md:227`). Restore maintenance state, queue state, upload tracking, and several rate-limit fast paths are process-local. If production is later scaled to multiple web containers behind the same database without moving those states to shared storage, one instance can accept uploads or public write attempts while another is in restore maintenance, and per-IP limits are divided by instance count.
+Failure scenario:
+The current production topology is documented as a single web instance. Several invariants are process-local: restore maintenance state, queue/enqueued/retry maps, upload quota tracking, public analytics rate limiting, and share-write fast-path rate limiting. If the service is later scaled horizontally behind the same database without moving those states to shared storage, one instance could accept uploads while another is in restore maintenance, or per-IP budgets could be multiplied by instance count.
 
-Suggested fix:
-Before any scale-out, move restore maintenance, queue coordination, upload quota tracking, and public/share/semantic rate-limit fast paths into shared database/Redis-backed state, or hard-fail startup when more than one web instance is configured.
+Concrete fix:
+Before scale-out, move restore maintenance state, queue coordination, upload quota tracking, and public/share rate-limit fast paths into shared DB/Redis-backed state, or add a startup guard that hard-fails unsupported multi-instance deployments.
 
-## False Positives / Already Fixed
+## Competing Hypotheses Ruled Down
 
-### TRC9-FP-01 - Lightroom upload missing semantic-search mode snapshot
-
-Severity if live: Medium
-Confidence: High
-Status: Already fixed
-
-Evidence:
-- Browser upload snapshots `semanticSearchMode`: `apps/web/src/app/actions/images.ts:504-507`
-- Lightroom upload snapshots the same field: `apps/web/src/app/api/admin/lr/upload/route.ts:452-478`
-- Queue accepts and applies the field: `apps/web/src/lib/image-queue.ts:90-117`, `apps/web/src/lib/image-queue.ts:632-643`
-
-Failure scenario if unfixed:
-Lightroom uploads in production semantic mode would process derivatives but skip production embeddings until a backfill.
-
-Suggested fix:
-No source fix needed. Keep the browser/LR enqueue parity covered by tests or source contracts.
-
-### TRC9-FP-02 - Restart/bootstrap re-enqueues permanently failed rows
-
-Severity if live: Medium
-Confidence: High
-Status: Already fixed
-
-Evidence:
-- Bootstrap excludes rows with `processing_error`: `apps/web/src/lib/image-queue.ts:823-859`
-- Runtime permanent-failure set blocks repeated enqueue within a process: `apps/web/src/lib/image-queue.ts:402-407`
-
-Failure scenario if unfixed:
-Rows that had exhausted retries would be reprocessed on every restart.
-
-Suggested fix:
-No source fix needed.
-
-### TRC9-FP-03 - Restore SQL scanner misses dangerous statements split by comments
-
-Severity if live: High
-Confidence: High
-Status: Already fixed
-
-Evidence:
-- Dangerous statement patterns include privilege, DDL, handler, definer, prepared statement, and file-system primitives: `apps/web/src/lib/sql-restore-scan.ts:39-105`
-- Scanner checks both comment-deleted and comment-spaced sanitized forms: `apps/web/src/lib/sql-restore-scan.ts:113-155`
-- Restore reads the whole dump in overlapping chunks through that scanner before invoking `mysql --one-database`: `apps/web/src/app/[locale]/admin/db-actions.ts:468-520`
-
-Failure scenario if unfixed:
-A crafted dump could hide `DROP`, `CREATE USER`, or similar tokens across comments and pass the pre-import scanner.
-
-Suggested fix:
-No source fix needed.
-
-### TRC9-FP-04 - Public semantic route reads body before rate limiting
-
-Severity if live: Medium
-Confidence: High
-Status: Already fixed
-
-Evidence:
-- Content-type, transfer-encoding, content-length, and config gates run before body materialization: `apps/web/src/app/api/search/semantic/route.ts:156-173`
-- Semantic rate limit is pre-incremented before `request.text()`: `apps/web/src/app/api/search/semantic/route.ts:178-203`
-
-Failure scenario if unfixed:
-Attackers could force repeated body reads/JSON parse work without spending rate-limit budget.
-
-Suggested fix:
-No source fix needed.
-
-### TRC9-FP-05 - Analytics top-view queries lack supporting indexes
-
-Severity if live: Low
-Confidence: High
-Status: Already fixed
-
-Evidence:
-- Top queries group by entity after `bot`/window filtering: `apps/web/src/lib/analytics-data.ts:28-86`, `apps/web/src/lib/analytics-data.ts:161-180`
-- Schema includes top-view indexes: `apps/web/src/db/schema.ts:231-260`
-- Migration 0026 creates the matching indexes: `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3`
-- Journal includes migration 0026 with a monotonic tail entry: `apps/web/drizzle/meta/_journal.json:187-193`
-
-Failure scenario if unfixed:
-Admin analytics could degrade to full table scans as view rows grow.
-
-Suggested fix:
-No source fix needed.
-
-### TRC9-FP-06 - Migration journal non-monotonic entries can silently skip deploy migrations
-
-Severity if live: High
-Confidence: High
-Status: Already fixed for current flow
-
-Evidence:
-- Fresh/legacy databases are reconciled and all journal hashes are baselined: `apps/web/scripts/migrate.js:719-756`
-- After Drizzle migrate, every journal hash is asserted present: `apps/web/scripts/migrate.js:758-779`
-- The runtime image copies the migration script and runs it before `server.js`: `apps/web/Dockerfile:105-145`
-- The journal tail is monotonic for recent entries: `apps/web/drizzle/meta/_journal.json:145-193`
-
-Failure scenario if unfixed:
-Drizzle's MySQL cursor could skip committed migrations while deploy appears green.
-
-Suggested fix:
-No source fix needed. Continue following the AGENTS migration rule for future entries.
+- Topic rename race: covered by `LOCK_TOPIC_ROUTE_MUTATION` and a transaction that rewrites `topics`, `images.topic`, `topicAliases.topicSlug`, `topicViews.topic`, and exact smart-collection topic predicates (`topics.ts:62-83`, `topics.ts:255-340`).
+- Topic image cleanup after revalidation failure: current revalidation wrappers catch internally (`revalidation.ts:30-45`, `revalidation.ts:59-64`), and topic revalidation runs outside mutation cleanup catches (`topics.ts:173-179`, `topics.ts:401-405`).
+- Upload/settings configuration race: settings that change processing/privacy semantics acquire the upload-processing contract lock and reject changes while active upload claims exist (`settings.ts:72-89`, `settings.ts:136-166`); both browser and Lightroom upload flows acquire the same lock before saving/inserting/enqueuing (`images.ts:177-184`, `lr/upload/route.ts:220-236`).
+- Delete-while-processing orphan derivatives: queue success uses a conditional `processed=false` update and deletes full derivative ladders when the row vanished mid-processing (`image-queue.ts:637-659`); admin and sidecar backfills use the same claim namespace or are globally serialized (`admin-backfill-runner.ts:335-359`, `backfill-color-pipeline.ts:284-360`).
+- Semantic production activation through ordinary settings: config resolution heals stored `production` to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` is set (`gallery-config.ts:123-142`).
+- Shared-group view count flush starvation: the buffer swaps maps before draining, nulls fired timers before the in-flight guard, re-buffers failed chunks with retry/backoff caps, and shutdown can await the in-flight drain (`data.ts:12-70`, `data.ts:74-150`).
 
 ## Final Missed-Issue Sweep
 
 Final sweep covered:
-- Upload maintenance checks, upload quota claim/settle, strict config reads, DB insert cleanup, queue enqueue parity, per-image advisory claims, derivative verification, delete-during-processing cleanup, queue side effects, and bootstrap retry state.
-- Restore locks, maintenance begin/end, queue quiesce order, SQL scanner comment/literal handling, `mysql --one-database` invocation, and post-restore migration behavior.
-- Tag query canonicalization, AND semantics for multiple tags, search LIKE escaping, public search rate-limit pre-increment/rollback, UI stale-response guards, and load-more cursor continuity.
-- Semantic mode gates, production env opt-in, model-version filtering, embedding binary decode/write shape, CLIP inference concurrency, enrichment privacy select, and scan-limit behavior.
-- Share creation rate limits, atomic share-key update, group-share transaction, analytics rate limits, privacy-preserving analytics writes, and top-view query indexes.
-- Deploy bind mounts, prune-after-up guarantees, migration journal tail, migration hash postconditions, and single-instance topology assumptions.
+- Upload maintenance checks, quota claim/settle paths, disk preflight rollback, original-file cleanup, strict config reads, enqueue rejection rollback, and browser/Lightroom parity.
+- Queue bootstrap, per-image locks, retry maps, permanent-failure persistence, delete-during-processing cleanup, caption/embedding side effects, and restore/shutdown drains.
+- Restore advisory locks, maintenance begin/end, dump scanning, mysql child-process failure paths, queue quiescence order, and post-restore migration failure behavior.
+- Topic route-segment locking, alias conflicts, topic-view and smart-collection remaps, topic image lifecycle cleanup, and revalidation failure containment.
+- Share key atomic update, group-share transaction boundaries, public analytics write ordering, shared-group view count buffering, and rate-limit rollback branches.
+- Public search/load-more rate-limit ordering, semantic body-read ordering, semantic mode gates, model-version filters, embedding scan cap, and enrichment privacy fields.
+- Schema/migration journal monotonicity, migration postconditions, deploy bind-mount expectations, and the single-instance runtime assumption.
 
-No confirmed source defects were found. The actionable items from this lane are the three manual-validation/operational risks above, led by semantic-search recall when production embedding count exceeds `SEMANTIC_SCAN_LIMIT`.
+No confirmed or likely source defects were found in current HEAD. The actionable items from this tracer lane are the three operational/manual-validation risks above.
 
-Validation not run: no tests or build were executed because this was a review artifact only and no source files were changed.
+Validation not run: no source files changed. I will run markdown diff validation after writing this artifact.
