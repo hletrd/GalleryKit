@@ -1,157 +1,222 @@
-# Product Marketer Review - Cycle 17
+# Product Marketer Review - Cycle 19
 
 Date: 2026-06-30
 Reviewer lane: product-marketer-reviewer
-Scope: GalleryKit only. I read `AGENTS.md`, `CLAUDE.md`, the local product-marketer prompt, and applied only the prompt's general trust-first / claim-verification principles. I did not require any BurstPick-specific files.
+Scope: whole GalleryKit repo from product messaging, user trust, onboarding, docs/user-facing copy, SEO/social sharing, and conversion-to-use perspective.
 
 ## Executive Summary
 
-I found 6 product/copy/positioning issues: 5 confirmed and 1 likely. The most important issue is an admin trust mismatch: the settings UI says changed color/HDR encoder settings can be applied through the in-app "Re-encode existing photos" control, but the in-app runner only processes photos whose `pipeline_version` is behind the current code. A settings-only change on already-current photos can therefore no-op while the copy implies success.
+I found 6 issues: 1 High, 4 Medium, 1 Low. The biggest market-readiness problem is not positioning breadth; it is trust disclosure. GalleryKit records first-party view analytics even when Google Analytics is disabled, but the public privacy page only explains Google Analytics and photo metadata. For a self-hosted photo gallery, that gap is exactly where trust-sensitive operators and viewers will look first. The repo otherwise shows unusually strong claim discipline: semantic search, HDR delivery, Lightroom API, backups, and GPS handling are mostly qualified in code and docs.
 
-Most public claims are unusually well qualified. The README and operator docs are honest about no editor/culling/scoring features, no bundled Lightroom plugin, semantic search being operator-gated, local-only storage, SQL-only backups, PWA limits, and single-instance deployment constraints. The remaining risks are primarily hierarchy and runtime-state mismatches: honest caveats exist in docs, but the public/admin UI sometimes omits them at the decision point.
+Go-to-market readiness score: 7/10 for a technical self-hosted audience, 5/10 for broader creator adoption without a first-run trust/onboarding pass.
 
 ## Inventory Reviewed
 
-- Public/product docs: `README.md`, `apps/web/README.md`, `CLAUDE.md`
-- Defaults and identity surfaces: `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`, SEO/admin messages, footer defaults
-- Public UI and routes: home metadata, privacy page, search toggle, similar photos, color/HDR display, upload dropzone
-- Admin UI and operator copy: settings, image-processing/backfill, semantic-search mode, DB backup/restore, users, upload API tokens
-- Localization: `apps/web/messages/en.json` and matching Korean keys for search, HDR, backfill, upload API tokens, privacy, upload warnings
-- Implementation checks: semantic-search routes, CLIP scan limits, admin backfill runner, color backfill sidecar, HDR ingest/render gating, token scopes, GPS stripping, storage abstraction
+- Project guidance and context: `AGENTS.md`, `CLAUDE.md`, local `product-marketer-reviewer` prompt, code-review skill.
+- Public/product docs: `README.md`, `apps/web/README.md`, `docs/superpowers/**`.
+- Public pages and metadata: home, topic, smart collection, photo, share, map, privacy, sitemap, robots, manifest, feed, OG image routes.
+- User-facing UI/copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, nav, footer, home empty state, search, similar photos, photo viewer, upload dropzone, admin SEO/settings/tokens/analytics.
+- Trust/privacy implementation: public analytics actions, analytics schema, GPS/map data selectors, public/private field guards, SEO settings validation, same-origin OG URL validation.
+- SEO/social implementation: `generateMetadata` surfaces, JSON-LD, Atom feed, sitemap, `robots.ts`, `/api/og`, `/api/og/photo/[id]`.
 
 ## Findings
 
-### PMR17-01 - In-app re-encode copy over-promises settings backfills
+### PMR19-01 - Privacy page omits first-party view analytics
 
 Severity: High
 Confidence: High
 Status: Confirmed
 
 Evidence:
-- `apps/web/messages/en.json:757` (`settings.backfillRequiredHint`) says changing color/HDR encoder settings requires running the backfill before new encoding takes effect for existing images.
-- `apps/web/messages/en.json:759` (`settings.backfillTriggerHint`) says the in-app trigger is "Safe to run after a pipeline version bump or after changing color/HDR settings above."
-- The Korean mirror makes the same promise at `apps/web/messages/ko.json:757-759`.
-- The settings screen shows that banner and trigger when dirty color-impacting fields exist at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:253-280`.
-- The in-app runner selects only `processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < IMAGE_PIPELINE_VERSION)` at `apps/web/src/lib/admin-backfill-runner.ts:383-388` and `apps/web/src/lib/admin-backfill-runner.ts:413-418`; its own comment says already-completed rows are filtered out at `apps/web/src/lib/admin-backfill-runner.ts:45-51`.
-- The sidecar script has the missing behavior via `--force-reencode`, which bypasses the version check at `apps/web/scripts/backfill-color-pipeline.ts:331-340`.
-- `CLAUDE.md:323` correctly says flipping admin tunables requires a backfill pass, but does not distinguish the in-app runner from the force sidecar path.
+- The public privacy copy frames analytics only as Google Analytics: `apps/web/messages/en.json:786-788`; Korean mirrors that at `apps/web/messages/ko.json:786-788`.
+- The same page's metadata/body covers photo metadata, not built-in view event storage: `apps/web/messages/en.json:783-790`.
+- Public page views call fire-and-forget analytics recorders, e.g. photo pages at `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:163-165` and topic pages at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164`.
+- The recorder derives `referrer_host`, `country_code`, and `bot` from request headers/IP at `apps/web/src/app/actions/public.ts:351-360`.
+- It persists those values in `image_views`, `topic_views`, and `shared_group_views` at `apps/web/src/app/actions/public.ts:384-389`, `apps/web/src/app/actions/public.ts:415-420`, and `apps/web/src/app/actions/public.ts:450-455`.
+- The schema stores `referrer_host`, `country_code`, and `bot` for all three tables at `apps/web/src/db/schema.ts:224-258`.
 
 Failure scenario:
-An operator changes `force_srgb_derivatives`, JPEG chroma, AVIF effort, quality, or wide-gamut pixel cap after all photos are already at pipeline version 7. The UI says to re-encode and presents a live-host button. The runner finds zero candidates because no `pipeline_version` is behind current code, returns a clean no-op, and existing derivatives keep the old bytes. The operator can leave with false confidence that the new color/HDR policy was applied.
+A viewer opens `/privacy` on a site with no Google Analytics configured. The page says GA is not configured, so the viewer reasonably infers there is no visit analytics beyond normal server logs. In reality, GalleryKit records per-photo/topic/share view rows with referrer host, derived country, and bot classification. Even though full IPs are not stored, the current public disclosure is incomplete and weakens the product's self-hosted trust promise.
 
 Suggested fix:
-Either make the in-app trigger support an explicit settings-change force mode, or narrow the copy. For example: "This button only applies pipeline-version backfills. For settings-only re-encodes of current photos, run `scripts/backfill-color-pipeline.ts --force-reencode` from a sidecar." If a force mode is added in-app, make the confirmation explicit because it rewrites every processed derivative.
+Add a first-party analytics section to the privacy page in both locales. State that GalleryKit records view events for photos, topics, and shared groups; stores timestamp, referrer host, derived country code, and bot flag; does not store full IP addresses in those analytics tables; and has a retention window (`VIEW_RETENTION_DAYS`, default 395 days). Keep the Google Analytics section separate.
 
-### PMR17-02 - Demo URL can still become a self-hosted install's production identity
-
-Severity: High
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- The product is positioned as self-hosted at `README.md:8` and in the feature list at `README.md:40-44`.
-- Production docs say to set `BASE_URL` or replace `site-config.json.url` with a non-placeholder origin before build at `README.md:148` and `apps/web/README.md:42`.
-- The tracked runtime config still contains the live demo origin, not a placeholder: `apps/web/src/site-config.json:4`.
-- The example config uses the rejected placeholder `https://example.com` at `apps/web/src/site-config.example.json:4`.
-- The same tracked defaults publish generic product identity through `title`, `description`, `author`, nav title, and footer at `apps/web/src/site-config.json:2-9`.
-
-Failure scenario:
-A new operator clones the repo and builds without `BASE_URL` because a non-placeholder `src/site-config.json` already exists. Public metadata, canonical/social surfaces, feed/sitemap-style URLs, and footer/brand defaults can point at the GalleryKit demo or product brand instead of the photographer's domain. That undermines the self-hosted positioning and can create SEO/social-preview confusion after launch.
-
-Suggested fix:
-Do not ship a real demo domain in the tracked runtime config. Use a production-rejected placeholder in `src/site-config.json`, add `gallery.atik.kr` to the forbidden demo-host list unless a demo-only escape hatch is set, or move the demo config to deploy-local state. Add a first-run/admin SEO warning until the public URL and title are changed from product defaults.
-
-### PMR17-03 - Public semantic-search UI omits the bounded-scan recall caveat in production
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- README copy is precise: semantic results are a "bounded newest-first embedding scan, not a vector index" at `README.md:37`.
-- Operator docs repeat that very large galleries need tuning or a future vector index at `apps/web/README.md:58` and spell out scan scope at `apps/web/README.md:65`.
-- Public UI only labels the switch "Semantic search" via `apps/web/messages/en.json:413` / `apps/web/messages/ko.json:413`.
-- The production UI intentionally omits the disclaimer; it is shown only in stub mode at `apps/web/src/components/search.tsx:491-499`.
-- The endpoint actually scans only the most recent embeddings at `apps/web/src/app/api/search/semantic/route.ts:1-10` and `apps/web/src/app/api/search/semantic/route.ts:261-273`.
-- Similar photos uses the same newest-first cap at `apps/web/src/app/api/search/similar/[id]/route.ts:15-21` and `apps/web/src/app/api/search/similar/[id]/route.ts:143-156`.
-- The default cap is 2,000 embeddings at `apps/web/src/lib/clip-embeddings.ts:43-44`.
-
-Failure scenario:
-On a gallery larger than the scan limit, a visitor searches for an older relevant photo or opens "Similar photos" for an older image. The implementation may never inspect the best match, but the public UI presents the feature as normal semantic search. Visitors or photographers may conclude the AI search is low quality, missing Korean/English concepts, or broken, when the real limitation is recall scope.
-
-Suggested fix:
-Add a concise production-mode hint where the toggle lives, not only in README. Example: "Searches the newest embedded photos first; very large galleries may miss older matches." For admin/operator views, include the configured `SEMANTIC_SCAN_LIMIT` and link to the backfill/vector-index caveat.
-
-### PMR17-04 - Semantic setup failures are surfaced as "maintenance"
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- The semantic endpoint returns 503 with "Semantic search is not fully configured" when disabled/unconfigured at `apps/web/src/app/api/search/semantic/route.ts:180-184`.
-- Production mode with zero real embeddings also returns the same setup-oriented 503 at `apps/web/src/app/api/search/semantic/route.ts:279-283`.
-- The search client maps every 503 from the semantic endpoint to the generic `maintenance` state at `apps/web/src/components/search.tsx:193-199`.
-- The public message says "Search is temporarily unavailable during maintenance" at `apps/web/messages/en.json:410` and `apps/web/messages/ko.json:410`.
-- Admin settings correctly explain that production mode requires env opt-in, weights, and backfill at `apps/web/messages/en.json:730-736` and `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:637-685`.
-
-Failure scenario:
-An operator enables production semantic search but misses weight seeding, env opt-in, or embedding backfill. Public search reports maintenance rather than "semantic search is not configured yet." The operator investigates restore-maintenance or uptime instead of the actual activation path.
-
-Suggested fix:
-Return a machine-readable error code such as `semantic_not_configured` / `no_semantic_embeddings` and map it to setup-specific copy. Keep the generic maintenance message for restore maintenance or infrastructure failures only.
-
-### PMR17-05 - HDR compact labels can still imply HDR output
+### PMR19-02 - `robots.txt` blocks the same API paths used as OG images
 
 Severity: Medium
 Confidence: Medium
-Status: Likely
+Status: Confirmed risk
 
 Evidence:
-- The localized badge label is `HDR-capable` at `apps/web/messages/en.json:366`; Korean says `HDR 지원` at `apps/web/messages/ko.json:366`.
-- The detailed color section renders the SDR caveat beside that badge at `apps/web/src/components/color-details-section.tsx:544-558`.
-- Compact surfaces do not carry the caveat: the lightbox pip announces/renders the same badge at `apps/web/src/components/lightbox-color-pip.tsx:167-189`, and the mobile info sheet hardcodes `HDR` at `apps/web/src/components/info-bottom-sheet.tsx:272-275`.
-- The product contract says HDR ingest is admin-gated and current browser derivatives are SDR at `CLAUDE.md:288-292`; upload/settings copy also says public derivatives are SDR tone-mapped at `apps/web/messages/en.json:162` and `apps/web/messages/en.json:739-740`.
+- The home page uses `/api/og/photo/${latestImage.id}` as its Open Graph image when no custom OG image is configured: `apps/web/src/app/[locale]/(public)/page.tsx:116-122`.
+- Photo pages always use `/api/og/photo/${id}` for Open Graph/Twitter images: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:84-91` and `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:120-125`.
+- Topic pages use `/api/og?...` when no admin OG image is configured: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:79-91`.
+- `robots.ts` disallows `/api/` for all user agents at `apps/web/src/app/robots.ts:15` and emits it in the global disallow list at `apps/web/src/app/robots.ts:17-24`.
+- The robots comment explicitly names `/api/og/photo/[id]` as a target of the disallow rule at `apps/web/src/app/robots.ts:9-14`.
 
 Failure scenario:
-An admin reviewing an HDR upload sees a compact "HDR-capable" / "HDR" chip and interprets it as an output claim, especially when screenshotting or using the lightbox pip rather than opening the full details section. The longer SDR caveat exists, but it is not present on every surface where the claim appears.
+A cooperative crawler or link-preview system that checks robots before fetching `og:image` sees a public page whose metadata points to `/api/og/photo/123`, then refuses to fetch that image because `/api/` is disallowed. The page can still be indexed, but the preview loses the image, which is the main conversion surface for a photo gallery. The implementation currently optimizes origin CPU at the cost of potential social-preview reliability.
 
 Suggested fix:
-Rename the badge everywhere to "HDR source" or "HDR source - SDR delivery"; in Korean, use wording equivalent to "HDR 원본(SDR 제공)" rather than "HDR 지원." Avoid bare `HDR` in compact admin chips until the served derivatives are actually HDR.
+Do not blanket-disallow OG image endpoints. Either move generated OG images to a non-API path such as `/og/photo/[id]`, or add explicit `allow` rules for `/api/og` and `/api/og/photo/` before disallowing the rest of `/api/`. Keep the existing rate limits/cache headers on the OG routes.
 
-### PMR17-06 - Upload API token copy undersells bearer-token risk
+### PMR19-03 - Fresh installs can ship generic GalleryKit identity into public SEO
 
 Severity: Medium
 Confidence: High
 Status: Confirmed
 
 Evidence:
-- Token page copy correctly says GalleryKit exposes an API endpoint and no Lightroom Classic plugin is bundled at `apps/web/messages/en.json:810` and `apps/web/messages/ko.json:860`.
-- Token creation copy says "Upload access is granted automatically" at `apps/web/messages/en.json:818`; Korean says upload permission is granted automatically at `apps/web/messages/ko.json:868`.
-- New token dialog says it will not be shown again at `apps/web/messages/en.json:821` / `apps/web/messages/ko.json:871`, but does not say to treat it as a secret.
-- The UI creates tokens with `scopes: ['lr:upload']` at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:57-61`.
-- The token model supports scopes and expiry, but generated tokens are bearer secrets; scope names are defined at `apps/web/src/lib/admin-tokens.ts:20-25`.
-- Existing-token copy says "Never expires; revoke to disable" at `apps/web/messages/en.json:834` / `apps/web/messages/ko.json:884`.
+- The tracked runtime defaults are product-generic: title, description, author, nav title, footer text at `apps/web/src/site-config.json:2-9`.
+- The example config uses the same generic identity at `apps/web/src/site-config.example.json:2-9`.
+- `getSeoSettings()` falls back to those values whenever DB SEO fields are empty or unreadable at `apps/web/src/lib/data.ts:1721-1741`.
+- The root layout publishes the resolved title/description/Open Graph values in metadata at `apps/web/src/app/[locale]/layout.tsx:22-58`.
+- The admin SEO form starts with empty DB-backed fields at `apps/web/src/app/actions/seo.ts:37-46`, while the UI tells admins they can leave values empty for defaults at `apps/web/messages/en.json:453-464`.
+- The public footer uses the file-backed footer text directly at `apps/web/src/components/footer.tsx:35-37`.
 
 Failure scenario:
-An admin treats an upload token like a harmless integration label or plugin code and stores it in chat, docs, or a shared Lightroom preset. Anyone with the token can upload until revoked. The current copy is technically correct, but it does not carry the security weight expected for a long-lived bearer token.
+A self-hosting photographer finishes deployment, uploads photos, and shares the site before visiting SEO settings. Search results, social previews, installed PWA identity, nav/footer, and feed author can all say "GalleryKit" / "A self-hosted photo gallery" rather than the photographer or gallery brand. This makes the product look unfinished and makes shared links less trustworthy to recipients.
 
 Suggested fix:
-Change create/plaintext copy to say: "Creates a bearer token with upload-only scope. Anyone with this token can upload until it expires or is revoked; store it like a password." If expiration is not exposed in the UI, consider adding an expiry choice or explicitly saying "This token does not expire by default."
+Add a first-run/admin warning when SEO title, description, author, nav title, or footer still match product defaults. Show the resolved defaults in the SEO form instead of blank inputs alone, and make the docs call "customize public identity" a required launch step after first login. Consider using clearly invalid placeholders in `site-config.example.json` while keeping demo config out of the tracked runtime file.
 
-## Positive Claim Checks
+### PMR19-04 - Public empty gallery state exposes operator instructions to visitors
 
-- The README explicitly rejects editor/culler/scoring positioning at `README.md:42`, matching the workspace rule that photos arrive after editing.
-- Semantic search docs are strong at the operator level: disabled by default, production-gated, weights not baked, offline CLIP loading, backfill required, and newest-first scan caveats are all documented at `README.md:37`, `apps/web/README.md:58-77`, and `CLAUDE.md:487-523`.
-- Admin semantic UI truthfully offers only Disabled/Stub and warns if a raw `production` value exists without operator activation at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:637-685`.
-- Auto alt-text copy does not overclaim model captions: `apps/web/messages/en.json:725-728` says Florence-2/local inference is not implemented yet.
-- Backup/restore wording is honest that DB backups contain rows only and not original/derivative files at `apps/web/messages/en.json:19`, `README.md:157`, and `CLAUDE.md:209-210`.
-- Storage marketing is properly restrained: `CLAUDE.md:142` says local filesystem only and not to expose S3/MinIO as supported.
-- Privacy copy correctly states that standard public pages exclude GPS and the public map requires an admin-visible topic at `apps/web/messages/en.json:780-785`; upload UI warns on first upload when GPS stripping is off at `apps/web/messages/en.json:164` and `apps/web/src/components/upload-dropzone.tsx:366-369`.
-- Deployment docs do warn that the shipped Docker path is single web-instance/single-writer and should not be horizontally scaled without moving coordination state at `README.md:152`, `apps/web/README.md:50`, and `CLAUDE.md:228`.
+Severity: Medium
+Confidence: High
+Status: Confirmed
 
-## Final Missed-Copy Sweep
+Evidence:
+- The public home client renders the same empty state for all visitors when no images are present at `apps/web/src/components/home-client.tsx:424-439`.
+- The message says, "Upload photos from the admin dashboard to start the gallery" at `apps/web/messages/en.json:247-248`; Korean mirrors it at `apps/web/messages/ko.json:247-248`.
+- `HomeClient` receives gallery data, tags, topics, counts, and image sizes, but no admin/session state that would let it branch copy for admins only: `apps/web/src/components/home-client.tsx:111-124`.
 
-I re-swept claim-bearing surfaces for: `GalleryKit`, `self-hosted`, `high-performance`, `demo`, `site-config`, `BASE_URL`, `description`, `footer`, `semantic`, `CLIP`, `AI`, `similar photos`, `production`, `stub`, `maintenance`, `HDR`, `P3`, `wide-gamut`, `SDR`, `Lightroom`, `plugin`, `upload token`, `backup`, `restore`, `GPS`, `privacy`, `PWA`, `offline`, `storage`, `S3`, `MinIO`, `single-writer`, and `role`.
+Failure scenario:
+A new install is publicly reachable before the first upload, or a photographer temporarily empties the gallery. Public visitors see operational admin instructions instead of an audience-safe empty state. That reads like an unfinished deployment and unnecessarily exposes where site management happens.
 
-No additional source-backed product/copy mismatches were found beyond the six findings above. I did not implement fixes and did not modify any file other than this review artifact.
+Suggested fix:
+Use public-safe copy by default: "No photos have been published yet." If an authenticated admin is viewing the public page, optionally show a separate admin-only CTA to `/admin/dashboard`. That requires passing an `isAdmin` boolean from the server page or moving the admin CTA into a server-rendered wrapper.
+
+### PMR19-05 - Similar photos silently disappears on setup/backfill failures
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+
+Evidence:
+- The UI only renders Similar Photos when semantic mode is `production`: `apps/web/src/components/similar-photos.tsx:98-104`.
+- On any non-OK response, including 404 missing embedding, 429, or 503, it sets `results` to `'error'`, closes, and returns no UI: `apps/web/src/components/similar-photos.tsx:77-84`.
+- Network failures use the same silent-hide path at `apps/web/src/components/similar-photos.tsx:88-91`.
+- The API documents setup-sensitive failures: production-only mode gate at `apps/web/src/app/api/search/similar/[id]/route.ts:96-111`, target embedding missing at `apps/web/src/app/api/search/similar/[id]/route.ts:114-136`, and enrichment failure at `apps/web/src/app/api/search/similar/[id]/route.ts:228-233`.
+- Text semantic search already maps setup failures to explanatory UI copy at `apps/web/src/components/search.tsx:196-209`, with localized setup copy at `apps/web/messages/en.json:413`.
+
+Failure scenario:
+An operator enables production semantic search but misses a subset of backfilled embeddings. A visitor expands "Similar photos" on an unembedded photo; the control vanishes. There is no explanation for the visitor, and the operator has no visible clue that the backfill is incomplete. This makes a premium discovery feature feel flaky rather than honestly unavailable.
+
+Suggested fix:
+Keep the panel visible after a fetch failure and render a concise state: "Similar photos are unavailable for this image until embeddings finish." For 429, use the existing rate-limit language. For 503, distinguish configuration/maintenance when the route can return a code, matching the semantic-search setup pattern.
+
+### PMR19-06 - README sells technical power before showing the product experience
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+
+Evidence:
+- The README hero says only "A high-performance, self-hosted photo gallery built with Next.js" at `README.md:7-9`.
+- The feature list immediately moves into dense implementation claims, including color/HDR and semantic-search details at `README.md:31-40`.
+- The first actual setup outcome appears much later as a sentence after commands at `README.md:106`.
+- There are no screenshots, first-run checklist, privacy/SEO launch checklist, or "what a visitor sees" examples in the README section reviewed at `README.md:1-208`.
+
+Failure scenario:
+A photographer or self-hosting operator lands on GitHub and sees a strong engineering inventory, but not a quick proof of what the gallery looks like, how sharing appears, what metadata is protected, or what the first 10 minutes after install should accomplish. The repo is credible to engineers, but it under-converts creative users who evaluate with screenshots, sharing examples, and risk-reduction checklists.
+
+Suggested fix:
+Add a short product proof block near the top: one desktop/mobile screenshot, one photo/share preview screenshot, and a "first 10 minutes" checklist: configure identity/SEO, create category, upload one photo, verify privacy/GPS setting, share a photo, check `/privacy`. Keep the deep technical feature list below that proof.
+
+## Product-Market Fit Assessment
+
+GalleryKit has a clear technical wedge for self-hosted photo publishing: high-quality image derivatives, color/HDR honesty, private originals, bilingual UI, public sharing, Atom feeds, and operator-gated CLIP search. It is not trying to be a Lightroom replacement, editor, culler, or sales platform, and the README states that clearly at `README.md:42`.
+
+The first customer is best defined as a technically capable photographer or small studio that wants a self-hosted public portfolio/archive with strong image delivery and metadata control. The current product is less ready for nontechnical creators because deployment, SEO identity, privacy disclosure, and semantic-search setup still require operator judgment.
+
+Switching cost is moderate: users do not need to migrate a Lightroom catalog, but they do need to deploy infrastructure and trust the app with originals, metadata, and public URLs. That makes trust copy and first-run onboarding disproportionately important.
+
+## Positioning Audit & Recommendation
+
+Current positioning is accurate but engineering-first: "high-performance, self-hosted photo gallery." The stronger position is:
+
+> A self-hosted photo gallery for photographers who care about color accuracy, metadata privacy, and owning their publishing stack.
+
+The sentence a user should tell another user:
+
+> "GalleryKit is the self-hosted gallery that preserves my edited photos' color intent and keeps originals/private metadata under my control."
+
+Avoid positioning primarily around "AI search." The code is careful and operator-gated, but semantic search is an enhancer, not the trust wedge.
+
+## Messaging Architecture
+
+Recommended hierarchy:
+
+1. Outcome: publish a fast, self-hosted photo gallery without giving up control of originals, metadata, or color intent.
+2. Proof: AVIF/WebP/JPEG derivatives, P3/HDR source honesty, private originals, GPS controls, same-origin OG validation, no bundled cloud dependency for CLIP search.
+3. Risk reduction: disclose first-party analytics, explain GPS/map behavior, force SEO identity setup, distinguish public/private metadata fields.
+4. Expansion: semantic search, similar photos, PWA, Atom feeds, upload API tokens.
+
+Before:
+"A high-performance, self-hosted photo gallery built with Next.js."
+
+After:
+"A self-hosted photo gallery for photographers who want fast delivery, accurate color, private originals, and control over every public share."
+
+## SEO/Social Sharing Assessment
+
+Strengths:
+- Home/photo/topic metadata is localized and uses canonical/hreflang surfaces.
+- Per-photo OG cards are sized for social previews and avoid oversized base JPEGs.
+- JSON-LD uses base JPEGs for reliable Googlebot image fetches.
+- Share pages are noindex/noarchive/noimageindex, reducing accidental indexing.
+
+Main risk:
+- `robots.txt` disallows `/api/`, while several OG image URLs live under `/api/og*`. That creates a preview reliability conflict for robots-aware agents.
+
+## Trust-Building Roadmap
+
+Tier 0:
+- Disclose first-party analytics on `/privacy`.
+- Stop generic product identity from silently becoming a live gallery identity.
+
+Tier 1:
+- Fix `robots.txt` / OG endpoint conflict.
+- Split public empty-state copy from admin onboarding copy.
+- Add explicit Similar Photos failure/setup states.
+
+Tier 2:
+- Add screenshots and first-run launch checklist to README.
+- Add an admin "launch readiness" checklist for identity, privacy, categories, first upload, share preview, sitemap/feed.
+
+Tier 3:
+- Add a public-facing "About this gallery" optional page fed by SEO/settings fields.
+- Add documented export/import and backup-verification guide for nontechnical operators.
+
+## Final Missed-Issue Sweep
+
+Sweep performed:
+- Re-ran targeted `rg` over privacy, analytics, SEO, OG, robots, empty states, semantic search, similar photos, README/docs.
+- Checked public route metadata surfaces: home, photo, topic, smart collection, map, share, feed, sitemap, manifest, OG routes.
+- Checked admin trust surfaces: SEO settings, upload dropzone, settings copy, tokens, analytics disclaimers.
+- Checked implementation evidence for analytics privacy, GPS map visibility, public field guards, same-origin OG URL validation, semantic-search gating.
+
+Not filed because current code/copy is adequate:
+- Semantic search is honestly gated in docs/settings/search UI, including bounded-scan production hint in current search copy.
+- Upload API token copy clearly says GalleryKit ships the API endpoint, not a Lightroom Classic plugin.
+- GPS/map exposure is intentionally guarded by `topics.map_visible` and is disclosed on the privacy page.
+- HDR output caveats are present in upload/settings/color-detail copy.
+- SQL-only backup limitations are disclosed in admin DB copy and docs.
+
+Review boundary:
+- I did not modify source code, run the full test suite, or verify live browser rendering. This was a static code/content review with exact source references.
+
+## Final Verdict
+
+Launch or wait: wait for the High privacy disclosure fix before any broader public push. For a self-hosted gallery, trust copy is product behavior. After that, the remaining Medium issues are conversion and reliability polish, not blockers for a technical beta.

@@ -1,144 +1,174 @@
-# Cycle 18 Test-Engineer Review
+# Cycle 19 Test-Engineer Review
 
 Date: 2026-06-30 KST
-HEAD: `4ad6a394`
+HEAD: `26f1a66d`
 Scope: current HEAD of `/Users/hletrd/flash-shared/gallery`
-Lane: test-engineer, cycle 18
+Lane: test-engineer, cycle 19
 
 ## Inventory Summary
 
-Read `AGENTS.md` and `CLAUDE.md` first, then inventoried the current repo before selecting findings. This review is test-only: no application changes were made or recommended as required work inside this cycle artifact.
+Read the in-session `AGENTS.md` instructions and `CLAUDE.md`, then inventoried the repository before selecting findings.
 
-- Vitest: `apps/web/src/__tests__/**/*.test.{ts,tsx}` under `apps/web/vitest.config.ts`.
-- Playwright: 5 specs in `apps/web/e2e/`: `admin`, `public`, `origin-guard`, `nav-visual-check`, `test-fixes`.
-- API routes inspected under `apps/web/src/app/api`, including admin DB download, Lightroom upload, health/live, OG, and semantic/similar search.
-- Server actions inspected under `apps/web/src/app/actions/` plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-- Migration gate inspected across `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, and `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`.
-- PWA/public metadata surfaces inspected: `manifest.ts`, generated icon script/assets, sitemap/robots tests, dynamic topic route guards.
-- Gate surfaces inspected: lint scanners for API auth, action origin, public route rate limit, typecheck/build/test scripts, and e2e server wiring.
+- Source/test scale: 499 TS/TSX source files under `apps/web/src`; 262 Vitest files under `apps/web/src/__tests__`; 5 Playwright specs under `apps/web/e2e`.
+- Unit gate: `apps/web/vitest.config.ts` includes `src/__tests__/**/*.test.{ts,tsx}`, excludes `.next`, and uses a 15s timeout.
+- E2E gate: `apps/web/playwright.config.ts` runs Chromium single-worker; local runs start `scripts/run-e2e-server.mjs`, which runs init, e2e seed, build, then standalone server.
+- Custom gates inspected: `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, plus their fixture tests.
+- High-risk paths inspected: semantic/similar search, CLIP model queueing, bulk edit client/server flow, public timeline/on-this-day surfaces, Lightroom upload route, analytics/view-count paths, migration/reconcile tests, service worker/PWA, and Playwright smoke/visual specs.
 
-Validation performed during this review:
+Validation performed:
 
-- Read-only shell inventory/search and line-number inspection only.
-- Verified current PNG dimensions with `file` while reviewing the PWA icon gap.
-- Did not run full `lint`, `typecheck`, `build`, `test`, or Playwright. This is a review-only artifact and no implementation was requested.
+- Read-only inventory/search and line-number inspection.
+- Did not run full `lint`, `typecheck`, `build`, `npm test`, or Playwright. This is a review-only artifact; no source files were changed.
+- Unrelated worktree changes in other review files were observed during the pass. This report only edits `.context/reviews/test-engineer.md`.
 
 ## Confirmed Findings
 
-### TE18-01. Middleware CSP/header wiring is not behavior-tested
+### TE19-01. CLIP production inference queue is bounded but abort-insensitive and lacks a behavioral test
 
 Severity: Medium
 Confidence: High
 
 Evidence:
-- `apps/web/src/proxy.ts:21-34` copies a generated CSP from request headers to the response only in `applyProductionCsp`.
-- `apps/web/src/proxy.ts:36-50` generates the nonce and request-side CSP in `withProductionCspRequest`.
-- `apps/web/src/proxy.ts:76-118` must pass the CSP-mutated request into `intlMiddleware(cspRequest)` and wrap both redirect and normal responses with `applyProductionCsp`.
-- `apps/web/src/proxy.ts:128-130` also emits `x-gk-admin-render` whenever an `admin_session` cookie is present.
-- Existing CSP tests exercise only `buildContentSecurityPolicy` directly at `apps/web/src/__tests__/content-security-policy.test.ts:5-66`.
-- The service-worker contract only source-checks the admin-render marker at `apps/web/src/__tests__/sw-template-contract.test.ts:209-216`.
-- The admin e2e smoke checks unauthenticated redirect at `apps/web/e2e/admin.spec.ts:14-18`, but does not assert middleware response headers.
 
-Concrete failure not currently caught:
-A refactor can accidentally call `intlMiddleware(request)` instead of `intlMiddleware(cspRequest)`, drop `applyProductionCsp` on redirects, or stop emitting CSP headers on production HTML. The CSP builder tests would still pass because the builder output is unchanged. The admin-render marker can also drift from real middleware behavior while the source grep remains green.
+- `apps/web/src/lib/clip-model.ts:53-71` defines bounded concurrency, max pending waiters, timeout, and the waiter array.
+- `apps/web/src/lib/clip-model.ts:94-127` queues waiters with a timeout but accepts no `AbortSignal`; queued waiters are removed only by timeout or slot release.
+- `apps/web/src/lib/clip-model.ts:194-202` exposes `embedTextReal(query)` with no cancellation parameter and wraps the model call in `withInferenceSlot`.
+- `apps/web/src/app/api/search/semantic/route.ts:249-253` checks `request.signal` only before calling `embedTextReal`, then awaits the encoder.
+- `apps/web/src/app/api/search/semantic/route.ts:263-265` checks abort again only after the encoder returns, before the DB scan.
+- `apps/web/src/__tests__/clip-model-contract.test.ts:32-39` source-checks queue bound/timeout strings but does not execute the queue.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:264-279` covers only an already-aborted request before charging; it does not cover abort while waiting for or running production CLIP inference.
 
-Suggested test/fix:
-Add a focused middleware behavior test that imports the default proxy handler, forces production mode, builds `NextRequest` instances for `/en` and `/en/admin/dashboard`, and asserts `Content-Security-Policy` is present with a nonce-bearing `script-src` and no production `unsafe-inline`. Include cookie/no-cookie assertions for `x-gk-admin-render`. If direct proxy import is brittle under Next, add a Playwright production-header smoke against the standalone e2e server.
+Failure scenario:
 
-### TE18-02. Lightroom upload route is still protected mostly by source-contract tests
+Production semantic search runs with `CLIP_INFERENCE_CONCURRENCY=1`. Several clients issue searches and disconnect after their requests enter the CLIP queue. The queue is bounded, so memory cannot grow indefinitely, but disconnected waiters remain until timeout or until a slot opens. If a slot opens first, the server still runs ONNX text inference for a request whose client is gone.
 
-Severity: Medium
-Confidence: High
+Fix:
 
-Evidence:
-- The route authenticates via the PAT-aware wrapper at `apps/web/src/app/api/admin/lr/upload/route.ts:68-75`.
-- It preclaims and settles upload quota at `apps/web/src/app/api/admin/lr/upload/route.ts:114-150`, then parses multipart form data at `apps/web/src/app/api/admin/lr/upload/route.ts:153-223`.
-- It owns high-risk runtime branches: advisory lock and disk check at `apps/web/src/app/api/admin/lr/upload/route.ts:252-305`, HDR/GPS/restore cleanup at `apps/web/src/app/api/admin/lr/upload/route.ts:357-401`, DB insert at `apps/web/src/app/api/admin/lr/upload/route.ts:404-462`, enqueue payload at `apps/web/src/app/api/admin/lr/upload/route.ts:479-516`, audit logging at `apps/web/src/app/api/admin/lr/upload/route.ts:525-540`, and lock release at `apps/web/src/app/api/admin/lr/upload/route.ts:544-551`.
-- The main LR test explicitly documents that it is a source-text contract because the route is multipart/token-auth heavy at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-16`.
-- That file continues with regex/order assertions for many critical branches, e.g. upload quota/parser ordering at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:250-282` and insert containment/source contracts at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:309-360`.
-- The browser e2e upload smoke at `apps/web/e2e/admin.spec.ts:132-160` exercises the dashboard upload path, not `/api/admin/lr/upload` or the PAT flow.
+Thread `request.signal` through `embedTextReal(query, { signal })` and `withInferenceSlot`. Remove queued waiters immediately on abort, reject with an abort-specific error, and re-check the signal after acquiring a slot but before model execution. Add a focused test with fake timers or injected queue hooks proving an aborted queued waiter is removed/rejected and never invokes the model.
 
-Concrete failure not currently caught:
-The route can return the right-looking source strings while runtime behavior is broken: a mocked `formData()` failure may fail to settle the tracker, an HDR/GPS reject may skip cleanup, the insert payload may omit `uploaded_by` or color fields after a refactor, or enqueue may omit snapshot fields. Regex assertions do not prove the branches execute with real `FormData`, `File`, `NextRequest`, mocked DB, and mocked queue dependencies.
+TDD opportunity:
 
-Suggested test/fix:
-Add a focused route-level Vitest suite that invokes `POST` with a real `FormData`/`File` and mocked dependencies. Cover at least one success path and one post-save rejection path. Assert status, `settleUploadTrackerClaim`, `deleteOriginalUploadFile`, inserted values including `uploaded_by` and color/HDR fields, enqueue payload, and lock release. Keep source-contract tests for ordering, but make at least one behavioral test prove the route can actually execute.
+Write the aborting-waiter test first around a small exported/internal queue helper, then implement signal-aware slot acquisition. Keep the existing source contract as a fast guard, but make the behavior test authoritative.
 
-### TE18-03. Migration reconcile coverage is a source tripwire, not schema equivalence
+### TE19-02. Bulk edit dialog state can survive a successful close; tests cover only the server action
 
 Severity: Medium
 Confidence: High
 
 Evidence:
-- `apps/web/scripts/migrate.js:307-702` manually reconciles legacy/fresh schemas through table DDL, `ensureColumn`, `ensureColumnDefinition`, `ensureIndex`, `ensureForeignKey`, and drop helpers.
-- The coverage test says its column check is a source tripwire, not a structural validator, at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`.
-- The table/column assertions only require table creation text and comment-stripped name presence at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:86-103`.
-- The index assertions collect names from SQL and only require name presence in `migrate.js` at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:124-172`.
-- Drop removals are pinned by specific source regexes at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:190-208`.
 
-Concrete failure not currently caught:
-A new or edited migration can be mirrored with the right column/index names but wrong type, nullability, default, foreign-key action, index column order, or index uniqueness. The current test still passes because it does not compare an actual reconciled database against Drizzle/current SQL metadata. That is exactly the gate-fragility class for fresh DBs and legacy re-baselines.
+- `apps/web/src/components/bulk-edit-dialog.tsx:81-90` stores field modes, values, tag lists, and `applyAltSuggested` in component state.
+- `apps/web/src/components/bulk-edit-dialog.tsx:92-103` defines `resetState()`.
+- `apps/web/src/components/bulk-edit-dialog.tsx:105-109` calls `resetState()` only through `handleClose(false)`, i.e. when the dialog itself receives a close event.
+- `apps/web/src/components/bulk-edit-dialog.tsx:155-160` awaits `onSubmit(input)` but does not reset local state after a successful submit.
+- `apps/web/src/components/image-manager.tsx:225-232` closes the dialog externally after a successful server action via `setIsBulkEditDialogOpen(false)`.
+- `apps/web/src/components/image-manager.tsx:594-600` passes the parent open state and `handleBulkEdit` into `BulkEditDialog`.
+- Existing bulk coverage is concentrated on `bulkUpdateImages` server behavior, e.g. auth/validation and diff applier tests in `apps/web/src/__tests__/bulk-update-images.test.ts:175-360`. Repo search found no component or E2E test that opens the bulk edit dialog, submits, reopens it, and asserts the form reset.
 
-Suggested test/fix:
-Add an integration gate that runs `npm run init` against a disposable MySQL schema, then diffs `information_schema` tables/columns/indexes/foreign keys against Drizzle schema plus committed migration expectations. Keep the source tripwire for fast feedback, but make the structural diff the authoritative regression test for `reconcileLegacySchema`.
+Failure scenario:
 
-### TE18-04. PWA manifest and generated icon assets lack installability tests
+An admin bulk-edits selected photos with `titleMode = clear` or a destructive tag-removal set. The server action succeeds, the parent closes the dialog, and selection is cleared. Later the admin selects different photos and opens bulk edit again. Because the child state was not reset by the parent-driven close, the previous modes/values can still be selected and can be submitted unintentionally.
+
+Fix:
+
+Reset dialog state whenever `open` transitions to `false`, not only inside `handleClose`, or reset explicitly after `onSubmit` resolves successfully. Add a component-level regression test, or extract a pure `buildBulkUpdateInput` plus a small client test harness, covering submit-success close -> reopen -> defaults restored.
+
+TDD opportunity:
+
+Start with a failing reopen test: render the dialog with selected IDs, choose `clear` for title, submit successfully, rerender with `open=false`, rerender with `open=true`, and assert all modes are `leave` and tag lists are empty.
+
+### TE19-03. Semantic-search rate-limit posture has contradictory docs and incomplete assertions
+
+Severity: Medium
+Confidence: High
+
+Evidence:
+
+- `apps/web/src/app/api/search/semantic/route.ts:12-16` says disabled mode returns before body reads or rate-limit charging.
+- The implementation charges before the DB-backed mode lookup at `apps/web/src/app/api/search/semantic/route.ts:172-183`, then returns disabled-mode 503 at `apps/web/src/app/api/search/semantic/route.ts:185-200`.
+- `apps/web/src/lib/rate-limit.ts:24-30` says semantic text search refunds only pre-work short-query rejections.
+- `apps/web/src/lib/rate-limit.ts:374-377` says rollback is used for exits before protected work and gives disabled mode as an example.
+- The route imports only `preIncrementSemanticAttempt`, not `rollbackSemanticAttempt`, so short/long query validation at `apps/web/src/app/api/search/semantic/route.ts:237-244` stays charged.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:230-242` asserts 400 responses for short and overlong queries but does not assert whether the semantic limiter was charged or refunded.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:244-262` now asserts disabled mode is charged and not rolled back, contradicting the stale route/header prose.
+
+Failure scenario:
+
+A future maintainer follows the stale header and moves disabled-mode lookup before charging, reintroducing unmetered DB-backed config probes. Another maintainer could follow the central Pattern 2b prose and add rollbacks for short-query validation, changing current budget semantics without a test failure because those tests assert only status/body.
+
+Fix:
+
+Choose one semantic rate-limit policy and make comments plus tests match it. If current behavior is intended, update the route header and `rate-limit.ts` comments to say disabled-mode config lookup and post-read query-length validation remain charged. Add test assertions to the short-query and overlong-query cases that `preIncrementSemanticAttempt` is called once and `rollbackSemanticAttempt` is not called. If refunds are intended instead, implement the rollback and update the disabled-mode test.
+
+TDD opportunity:
+
+Add a table-driven test for each early-return branch: origin, maintenance, content-type, missing length, already-aborted, disabled mode, invalid JSON, short query, overlong query, over-limit. Assert status and exact charge/rollback calls.
+
+### TE19-04. On-this-day date behavior is source-pinned but not behavior-tested against a clock
+
+Severity: Low-Medium
+Confidence: High
+
+Evidence:
+
+- `apps/web/src/components/on-this-day-widget.tsx:14-23` computes month/day from `new Date()` inside the server component, then calls `getOnThisDayImages(month, day)`.
+- `apps/web/src/__tests__/data-timeline.test.ts:49-87` source-checks the data query predicate shape.
+- `apps/web/src/__tests__/data-timeline.test.ts:117-200` tests inline copies of grouping and MM-DD matching logic, not the exported server component or an injected clock.
+- Repo search found no test that mocks the current date and asserts `OnThisDayWidget` calls `getOnThisDayImages` with the expected month/day.
+
+Failure scenario:
+
+The server runs in UTC while the product/operator expectation is local calendar day. Around local midnight, the widget can query yesterday/tomorrow relative to the gallery's intended timezone. A future refactor can also change `new Date()` handling in the component and still pass the current source-level data query tests because they never render the widget or control the clock.
+
+Fix:
+
+Extract a tiny `getTodayMonthDay(now = new Date())` helper or inject a clock into the widget's date resolver. Add unit tests for normal dates, local-midnight boundaries, and February 29. If the product expects a specific timezone, make that explicit in config/docs and test it.
+
+TDD opportunity:
+
+Write a failing test that freezes the clock to a boundary instant and asserts the exact `(month, day)` passed into a mocked `getOnThisDayImages`. Then implement the smallest clock abstraction needed to make the behavior deterministic.
+
+### TE19-05. Nav "visual" Playwright checks save screenshots but do not compare them
 
 Severity: Low
 Confidence: High
 
 Evidence:
-- `apps/web/src/app/manifest.ts:6-52` builds the Web App Manifest dynamically, including `display_override`, categories, theme/background colors, and five icon entries.
-- The committed PNG icons are produced by `apps/web/scripts/generate-pwa-icons.ts:61-75`.
-- Existing sitemap/robots coverage at `apps/web/src/__tests__/sitemap-robots.test.ts:21-85` does not import or assert the manifest.
-- Repo search found PWA icon mentions only in the generator and one service-worker derivative exclusion check, `apps/web/src/__tests__/sw-cache.test.ts:107-108`; no test validates manifest icon entries or actual PNG dimensions.
 
-Concrete failure not currently caught:
-The manifest can drop `display_override`, lose the maskable icon purpose, point to a missing icon, or ship a regenerated icon with wrong dimensions/corruption. Browsers would degrade or reject installability while unit/build gates remain green.
+- `apps/web/e2e/nav-visual-check.spec.ts:6-38` checks visible nav targets for 44 px minimum size and pairwise overlap.
+- `apps/web/e2e/nav-visual-check.spec.ts:41-52` saves `test-results/nav-collapsed-mobile.png`.
+- `apps/web/e2e/nav-visual-check.spec.ts:54-66` saves `test-results/nav-expanded-mobile.png`.
+- `apps/web/e2e/nav-visual-check.spec.ts:68-79` saves `test-results/nav-desktop.png`.
+- None of these tests call `expect(page).toHaveScreenshot(...)` or compare against a baseline. The screenshots are diagnostic artifacts only.
 
-Suggested test/fix:
-Add `manifest.test.ts` that mocks `getSeoSettings`, calls `manifest()`, and asserts `name`, `short_name`, `display`, `display_override`, categories, colors, and required icons with exact `src`, `sizes`, `type`, and `purpose`. Add a small asset test using `sharp.metadata()` for `public/icons/icon-192.png`, `icon-512.png`, and `icon-maskable-512.png`.
+Failure scenario:
 
-### TE18-05. Reserved topic route segments are duplicated without a sync test
+A regression changes nav colors, spacing, active state, clipping, z-index, or a non-overlapping but visibly broken layout. The test still passes as long as controls remain visible, non-overlapping, and at least 44 px. The file name "visual checks" can give reviewers false confidence that screenshot regression is enforced.
 
-Severity: Low
-Confidence: Medium
+Fix:
 
-Evidence:
-- The dynamic topic route has its own file/metadata route reservation set at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:19-31`.
-- That route returns noindex metadata for reserved segments at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:33-40` and `notFound()` for the page at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:129-139`.
-- Validation has a separate `RESERVED_TOPIC_ROUTE_SEGMENTS` list at `apps/web/src/lib/validation.ts:4-25`, with a comment saying it must stay in sync with the route.
-- Current validation tests cover only a subset of static/localized segments at `apps/web/src/__tests__/validation.test.ts:122-138`; they do not cover `apple-icon`, `favicon.ico`, `icon`, `manifest`, `manifest.webmanifest`, `robots.txt`, or `sitemap.xml`, and do not compare the route-local list with validation.
+Either convert these to real visual regression tests with Playwright `toHaveScreenshot` baselines and stable masks, or rename/comment them as layout-smoke tests. If snapshot churn is too high, keep the metric assertions and add targeted checks for the specific visual invariants the repo cares about.
 
-Concrete failure not currently caught:
-A future edit can let admins create a topic slug such as `manifest` or `icon`, or can remove the dynamic-route guard for one reserved public file route while validation still passes. The result is route shadowing or inconsistent admin validation versus runtime behavior.
+TDD opportunity:
 
-Suggested test/fix:
-Centralize the reserved public-file segments in an exported constant and consume it from both validation and the topic page, then test the full list. If the route-local helper must stay private, add a source-sync test plus route behavior tests for representative reserved segments asserting `generateMetadata()` returns `robots: { index: false, follow: false }` and `TopicPage()` calls `notFound()`.
+Add one baseline-backed mobile-expanded nav screenshot first. Tune masks/timeouts until it is stable, then decide whether collapsed and desktop states should join the visual gate or remain diagnostic.
 
-### TE18-06. Admin token auth rate-limit wrapper path has no wrapper-level test
+## Coverage Notes
 
-Severity: Medium
-Confidence: High
+- The repository has strong coverage for server actions, privacy select guards, color/HDR parsing, upload processing, custom lint fixtures, and many historical regression contracts.
+- The main false-confidence pattern is source-contract testing over runtime-heavy surfaces. Source contracts are useful here, but they should not be the only gate for stateful runtime behavior such as CLIP queueing, dialog state, multipart route cleanup, or migration/schema equivalence.
+- Cycle 18 test-engineer deferred items remain tracked in `plan/plan-375-cycle18-deferred.md` (`AGG-C18-25` through `AGG-C18-30`). I did not re-count those as new Cycle 19 findings, but they remain relevant coverage debt.
 
-Evidence:
-- The PAT branch in `withAdminAuth` pre-increments the token-auth limiter and returns 429 before `verifyToken` at `apps/web/src/lib/api-auth.ts:72-81`.
-- Existing wrapper tests cover token success, header defaults, invalid token, wrong scope, and request-scoped token context at `apps/web/src/__tests__/api-auth-response-headers.test.ts:50-149`.
-- The rate-limit helper itself is tested in `apps/web/src/__tests__/semantic-search-rate-limit.test.ts:62-81`.
-- Repo search shows no test where `preIncrementAdminTokenAuthAttempt` is mocked to return `true` while invoking `withAdminAuth`; semantic route rate-limit assertions do not prove the auth wrapper gates PAT probes before token verification.
+## Final Missed-Issue Sweep
 
-Concrete failure not currently caught:
-A refactor can remove or move the wrapper-level `preIncrementAdminTokenAuthAttempt` call after `verifyToken`. Helper tests still pass, and token response-header tests still pass, but invalid PAT guessing can hit expensive token verification and avoid the intended 429/`Retry-After` branch.
+Final sweep covered:
 
-Suggested test/fix:
-Extend `api-auth-response-headers.test.ts` with a mocked `@/lib/rate-limit` branch where `preIncrementAdminTokenAuthAttempt` returns `true`. Assert the response is 429 with `Retry-After: 60`, `Cache-Control` no-store, `verifyToken` is not called, `markTokenUsed` is not called, and the wrapped handler is not called.
+- Prior Cycle 18 test-engineer report and current deferred plan, to avoid duplicating already-tracked debt as new findings.
+- Current HEAD diff and tests touched by `26f1a66d`.
+- Semantic and similar search route tests, CLIP queue source contracts, and abort handling.
+- Bulk edit client/server integration path and existing bulk server-action tests.
+- Public timeline/on-this-day tests and date handling.
+- Playwright admin/public/origin/nav specs and e2e server/seed setup.
+- Public analytics/view-count tests, migration/reconcile source tripwires, Lightroom source contracts, service worker/PWA contracts, and custom lint scanner fixtures.
 
-## Final Missed-Issues Sweep
-
-- Re-checked the cycle 17 scanner findings against current tests before writing this file. The public-route scanner now has local/inverted helper fixtures, and the action-origin scanner now has try-before-limiter catch/finally fixtures, so those are not repeated here.
-- Reviewed high-risk areas for additional blind spots: admin actions, public analytics routes, CLIP tests, service worker contracts, migration journal handling, upload processing, privacy omit guards, and e2e bootstrapping.
-- Remaining watch item not counted as a finding: real CLIP semantic/offline tests are intentionally env-gated (`CLIP_INTEGRATION=1`, `CLIP_OFFLINE_LOAD=1`) and therefore not part of default CI. That is an operational coverage risk, but the tests themselves clearly document the gate and production-weight requirement.
-
-## Count
-
-6 confirmed findings.
+No critical coverage gaps were confirmed in this pass. Confirmed findings: 5.

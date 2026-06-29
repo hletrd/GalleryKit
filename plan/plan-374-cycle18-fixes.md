@@ -1,11 +1,13 @@
 # Plan 374 - Cycle 18 Review Fixes
 
-Status: TODO
+Status: DONE
 Cycle: 18/100
 Source review aggregate: `.context/reviews/_aggregate.md`
 Created: 2026-06-30 KST
 
 Repo rules checked before planning: `CLAUDE.md`, `AGENTS.md`, `.context/**`, `docs/**`, root/app README files. Security, correctness, data-loss, and gate findings are scheduled here unless the deferred ledger quotes a repo rule or accepted boundary that permits deferral.
+
+Completion note: cycle 19 verifier confirmed every scheduled item below was implemented at current HEAD. Deferred cycle-18 findings remain active in `plan/plan-375-cycle18-deferred.md`.
 
 ## Scheduled Findings
 

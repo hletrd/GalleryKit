@@ -1,118 +1,210 @@
-# Cycle 18 Critic Review
+# Cycle 19 Critic Review
 
-Scope: whole repository at current HEAD `4ad6a394453fac80cc29aacc6f93eab3ed8c12ca` on `master`.
+Reviewer: critic
+Scope: whole-repo skeptical review at HEAD `26f1a66d`
+Mode: read-only source review plus targeted guard checks; source files were not modified.
 
-Role: critic reviewer. I did not implement product/code fixes. This artifact is the only file I changed.
+## Inventory
 
-## Inventory Inspected
+Primary instructions and prior context reviewed:
 
-Read first:
-- `AGENTS.md`
-- `CLAUDE.md`
-- `~/.agents/skills/code-review/SKILL.md`
+- `AGENTS.md` from the prompt, including repo-specific git/deploy/schema/quality gates.
+- `CLAUDE.md`, with emphasis on runtime topology, privacy fields, migrations, upload/color/HDR, semantic search, and operations.
+- Cycle context: `.context/plans/cycle-19-plan.md`, `.context/plans/cycle-19-deferred.md`, existing review history under `.context/reviews/`, and the current dirty worktree state.
 
-Repository inventory:
-- 498 review-relevant app/lib/script/test/migration files under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/src/__tests__`.
-- Current review artifacts under `.context/reviews/`, including the current perf lane and the previous top-level critic/aggregate artifacts.
-- Prior blind-spot clusters from run-9 cycle 8, run-4 cycle 18, photographer-r18, and recent deferred plans.
+Relevant repo surfaces examined:
 
-High-risk code/docs inspected:
-- Public APIs/actions: semantic search, similar search, OG routes, load/search/share actions, public route rate-limit lint, same-origin/proxy helpers.
-- Admin/API surfaces: image uploads, Lightroom upload, DB backup/download, admin auth wrapper, server-action origin lint.
-- Image and semantic pipeline: upload enqueue sites, image queue, CLIP model loading/inference, embedding backfills, embedding schema, processing snapshots.
-- Data/schema/docs: `data.ts`, `data-timeline.ts`, sitemap/feed helpers, storage quarantine, migration journal/reconciler/tests, deploy/Docker/nginx docs.
+- Product/public UI/data paths: `apps/web/src/lib/data.ts`, public pages under `apps/web/src/app/[locale]/(public)/**`, `photo-viewer.tsx`, `info-bottom-sheet.tsx`, search/similar routes, service worker template, topic/smart-collection data paths.
+- Admin and ingest paths: `actions/images.ts`, `actions/topics.ts`, `actions/tags.ts`, `actions/collections.ts`, Lightroom upload route, admin DB actions, auth/session/token wrappers.
+- Operational/safety paths: `deploy.sh`, `docker-compose.yml`, `Dockerfile`, `scripts/migrate.js`, migration SQL/journal, restore maintenance, upload tracker, rate limiting, advisory locks, image queue/backfill runners.
+- Test/guard surfaces: custom lint gates, privacy/type guards, focus-visible and touch-target scanners, migration journal tests, source-contract tests for upload/rate-limit/search.
 
-Validation stance:
-- Static review only. I did not run the full blocking gates because this was a critic-only pass and no product code was changed.
-- Existing unrelated worktree change observed: `.context/reviews/perf-reviewer.md` was already modified before this artifact write and was left untouched.
+Validation evidence:
+
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Full lint/typecheck/build/test suite was not re-run for this critic-only report.
+
+Dirty-worktree note:
+
+- Before writing this report, `git status --short` already showed modified review artifacts: `.context/reviews/code-reviewer.md`, `.context/reviews/perf-reviewer.md`, `.context/reviews/verifier.md`. I did not inspect them as source of truth for this report and did not modify them.
 
 ## Findings
 
-### C18-CRIT-01 - Disabled/non-production semantic routes still do unmetered config DB work
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- `apps/web/src/app/api/search/semantic/route.ts:168-185` calls `getGalleryConfig()` to resolve `semanticSearchMode` before the semantic rate limit is charged.
-- `apps/web/src/app/api/search/semantic/route.ts:194-205` increments the semantic rate limit only after the config gate passes.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:244-261` locks the current disabled-mode behavior: the route returns 503, does not read the body, and does not call `preIncrementSemanticAttempt`.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:85-113` pre-increments, calls `getGalleryConfig()`, then rolls the token back when mode is not `production`.
-- `apps/web/src/lib/gallery-config.ts:34-39` shows `getGalleryConfig()` reads `admin_settings` from MySQL.
-- `apps/web/src/lib/request-origin.ts:79-106` checks only request headers. That is useful against browser cross-site calls, but non-browser clients can send matching `Origin`/`Referer` headers.
-- `apps/web/src/lib/gallery-config-shared.ts:103-104` makes `semantic_search_mode='disabled'` the default fresh-install state.
-
-Issue:
-The routes avoid JSON body work and embedding scans in disabled/non-production modes, but they still admit a database configuration read before retaining a rate-limit charge. For the text route, disabled mode is completely uncharged. For the similar route, the token is rolled back after the config read. The route comments describe this as avoiding charged disabled-mode work, but the protected work here is not only body parsing or CLIP CPU; it is also the shared MySQL config read on a public endpoint.
-
-Concrete failure scenario:
-A scripted client sends many small `POST /api/search/semantic` requests with `Content-Type: application/json`, a valid `Content-Length`, and an `Origin` matching the host while semantic search is disabled. Each request returns 503 without consuming the semantic bucket, but still executes the `admin_settings` SELECT. A similar probe against `/api/search/similar/1` in disabled or stub mode also gets its token refunded after the config read. On the documented single-host deployment, this can consume DB connections/CPU while application-level telemetry shows no rate-limit pressure for the semantic bucket.
-
-Suggested fix:
-Charge the semantic bucket before the config DB read once the cheap syntactic gates pass, and do not roll back disabled/stub mode after the config read has been consumed. If product policy wants disabled-mode responses to remain effectively free, make the mode check non-DB on the hot path, for example a short-TTL in-process cached setting with bounded refresh. Add tests that assert disabled/stub semantic requests either retain a token after `getGalleryConfig()` or hit a cached no-DB mode path.
-
-### C18-CRIT-02 - CLIP inference bounds active work but leaves pending public/background callers unbounded and abort-insensitive
-
-Severity: High
-Confidence: High
-Status: Confirmed
-
-Evidence:
-- `apps/web/src/lib/clip-model.ts:53-70` limits active CLIP inference with `CLIP_INFERENCE_CONCURRENCY`, but stores pending callers in an unbounded `inferenceWaiters` array.
-- `apps/web/src/app/api/search/semantic/route.ts:248-255` checks request abort before `embedTextReal(query)`, but once a caller waits inside `withInferenceSlot()` there is no abort signal to remove it.
-- `apps/web/src/lib/clip-model.ts:138-146` routes production text search through the same inference slot.
-- `apps/web/src/lib/clip-model.ts:171-222` routes image embedding, including Sharp preprocessing, through the same slot.
-- `apps/web/src/lib/image-queue.ts:272` and `apps/web/src/lib/image-queue.ts:327-332` track embedding/caption side effects in a process-local `Set` without a pending-depth cap.
-- `apps/web/src/lib/image-queue.ts:720-746` starts the post-upload embedding side effect and drains it only by completion.
-
-Issue:
-The active CLIP work is bounded, but the admission queue is not. Public production semantic searches and background post-upload embedding side effects share the same slot. Disconnected public requests remain represented by queued promises, and background side effects can keep accumulating while waiting. That turns a CPU protection mechanism into an unbounded memory/latency queue under burst load.
-
-Concrete failure scenario:
-Production semantic mode is enabled with the default CLIP concurrency of 1. A burst of public searches arrives while uploads are finishing and scheduling production image embeddings. Many browser requests disconnect after timing out, but their waiters remain in `inferenceWaiters`; when they eventually run, they still spend ONNX CPU. Meanwhile the image queue's side-effect set grows and restore/shutdown has more abandoned work to drain. Interactive search latency, background processing, and shutdown behavior all degrade together.
-
-Suggested fix:
-Replace the manual waiter array with a bounded semaphore or queue that supports max pending count, max wait time, and `AbortSignal` removal. Return 429 or 503 on saturation. Separate public interactive search admission from background image-embedding admission, or give them distinct quotas/priorities. Expose queue depth/wait time metrics so operators can see when the CLIP subsystem is saturated.
-
-### C18-CRIT-03 - Embedding rows are one-per-image, so model cutovers are destructive and hard to roll back
+### CRIT19-01 — Embedding storage allows only one model row per image
 
 Severity: Medium
 Confidence: High
 Status: Confirmed design risk
 
 Evidence:
-- `apps/web/src/db/schema.ts:280-294` makes `image_embeddings.image_id` the primary key; `model_version` is only an indexed attribute.
-- `apps/web/scripts/backfill-clip-embeddings.ts:123-147` selects images missing an embedding row for the target model version.
-- `apps/web/scripts/backfill-clip-embeddings.ts:172-183` writes through `onDuplicateKeyUpdate`, replacing the existing row for that image with the target model version.
-- `apps/web/src/app/actions/embeddings.ts:103-124` mirrors the per-version missing-row selection.
-- `apps/web/src/app/actions/embeddings.ts:152-163` mirrors the destructive upsert.
-- `apps/web/src/app/api/search/semantic/route.ts:261-273` scans only rows matching the active model version.
 
-Issue:
-The read path is model-version aware, but the storage model cannot retain two embeddings for one image. Backfilling a new model overwrites the old vector. That makes a semantic model upgrade a destructive migration rather than a staged cutover. The code comments correctly distinguish stub and production rows, but the schema shape prevents side-by-side validation or quick rollback.
+- `apps/web/src/db/schema.ts:280-295` defines `image_embeddings.image_id` as the primary key and keeps `model_version` as a secondary indexed column.
+- `apps/web/scripts/migrate.js:643-656` reconciles the same physical table shape: `PRIMARY KEY (image_id)` plus an index on `(model_version, updated_at)`.
+- `apps/web/scripts/backfill-clip-embeddings.ts:123-183` selects rows missing the target `model_version`, then writes with `onDuplicateKeyUpdate`, which overwrites any existing row for that image.
+- `apps/web/src/app/actions/embeddings.ts:103-163` mirrors the same per-version selection followed by primary-key upsert.
 
-Concrete failure scenario:
-An operator tries a new production CLIP model version and starts a backfill. Halfway through, quality regressions or a host restart interrupt the process. Rows already rewritten no longer exist for the previous model version, and rows not yet rewritten do not exist for the new version. Search either sees a partial corpus for the new model or loses rewritten rows when rolling back to the old model. Recovering requires a full re-embed from originals.
+Failure scenario:
 
-Suggested fix:
-Model embeddings as `(image_id, model_version)` with a composite primary/unique key, and make the active semantic model a separate setting. Backfill a candidate version side by side, verify coverage and quality, then flip the active model. If storage cost rules that out, document production model upgrades as destructive maintenance windows and gate production search until coverage for the active version is complete.
+Stub and production embeddings are treated as versioned data in query code, but the table can store only one version per image. Running a production backfill over previously stubbed rows replaces the stub rows. Rolling back to stub mode, comparing model versions, running a partial canary, or keeping two production model generations hot requires a full re-backfill for whichever version was overwritten. A failed or partial model migration can therefore leave the system with neither a complete new model nor a complete previous model.
 
-## Review Blind Spots Rechecked
+Fix:
 
-- Settings-forwarding regression class from run-9 is closed at current HEAD. Browser upload forwards all processing/search snapshot fields at `apps/web/src/app/actions/images.ts:500-526`, and `apps/web/src/__tests__/images-actions.test.ts:264-276` asserts the producer payload. Lightroom upload has a source-contract lock at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-394`.
-- The old `retryFailedImage` hardcoded English error is fixed: `apps/web/src/app/actions/images.ts:1194-1224` uses translation keys for invalid ID and non-failed-state errors.
-- The historical non-monotonic migration journal remains grandfathered, but deploy safety is guarded by the migrator baselining/post-condition and migration tests. I did not refile it as a current defect.
-- The storage backend still has a public-root `original/` mapping risk inside the quarantined abstraction (`apps/web/src/lib/storage/local.ts:20`, `apps/web/src/lib/storage/local.ts:130-135`), but it is not live product code today. The quarantine is executable at `apps/web/src/__tests__/storage-quarantine.test.ts:111-143`; re-open before the first real importer.
-- Older cycle-18 feed/sitemap items are fixed at current HEAD: sitemap homepage/topic `lastModified` exists at `apps/web/src/app/sitemap.ts:57-73`, topic feed locale validation exists at `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:34-47`, and Atom enclosure/title metadata exists at `apps/web/src/lib/atom-feed.ts:119-136`.
-- The cycle-17 home-page "successful empty gallery on image query failure" appears resolved at current HEAD: `apps/web/src/app/[locale]/(public)/page.tsx:149-167` now awaits `getImagesLitePage(...)` directly instead of catching it into an empty gallery.
+Make `(image_id, model_version)` the primary or unique key, update Drizzle schema and `reconcileLegacySchema`, and change upserts to target that composite identity. Existing route lookups already filter by `model_version`, so read-path changes should be small. Add a migration/backfill test proving stub and production rows can coexist for one image.
 
-## Final Missed-Issues Sweep
+### CRIT19-02 — Topic slug is still a mutable natural key with manual fan-out
 
-I re-swept public APIs/actions, semantic/similar routes, CLIP queueing, upload enqueue paths, backup/download containment, storage quarantine, migration journal guards, route-lint scanners, feed/sitemap current fixes, privacy select fields, and prior review registers. I did not find a new current critical vulnerability, public PII leak, schema deploy blocker, or color/HDR settings-forwarding regression beyond the three findings above.
+Severity: Medium
+Confidence: High
+Status: Confirmed architectural risk
 
-Total findings: 3
-- Critical: 0
-- High: 1
-- Medium: 2
-- Low: 0
+Evidence:
+
+- `apps/web/src/db/schema.ts:4-17` makes `topics.slug` the primary key and `topic_aliases.topic_slug` an FK to it.
+- `apps/web/src/db/schema.ts:19-33` stores `images.topic` as an FK to `topics.slug`.
+- `apps/web/src/db/schema.ts:239-250` stores analytics in `topic_views.topic`, also FKed to `topics.slug` with `ON DELETE CASCADE`.
+- `apps/web/src/app/actions/topics.ts:255-339` implements rename as insert-new-topic, manually update `images`, `topicAliases`, `topicViews`, smart-collection JSON, then delete old topic.
+- The code comment at `apps/web/src/app/actions/topics.ts:294-300` documents that `topicViews` was previously missed and would have been cascade-deleted.
+
+Failure scenario:
+
+The current three FK children are handled, and smart collections are remapped, but every future table or JSON/blob reference to topic slug must be remembered manually. The next slug-dependent feature can pass basic tests and still lose history, break public pages, or orphan references when a rare admin rename occurs. This is the exact "fix one sibling, miss the next" class already visible in the `topicViews` repair comments.
+
+Fix:
+
+Prefer a stable surrogate topic id and keep slug as a unique display/routing field, or at minimum add `ON UPDATE CASCADE` where supported and keep a schema-level registry test that fails when any FK to `topics.slug` lacks cascade or rename handling. If retaining recreate-delete rename, add a central list of slug-bearing children and a test that compares it against `INFORMATION_SCHEMA` plus known JSON remappers.
+
+### CRIT19-03 — Upload quota settlement remains comment-enforced control flow
+
+Severity: Medium
+Confidence: Medium-High
+Status: Risk needing continued manual validation
+
+Evidence:
+
+- `apps/web/src/app/actions/images.ts:238-242` pre-claims `tracker.bytes` and `tracker.count`.
+- `apps/web/src/app/actions/images.ts:247-293` has hand-placed rollback settles for disk and topic validation.
+- `apps/web/src/app/actions/images.ts:278-279` states the invariant: any await between claim and final settle must roll back on throw.
+- `apps/web/src/app/actions/images.ts:536-551` has another comment explaining why one cleanup await is safe only because `deleteOriginalUploadFile` is non-throwing.
+- `apps/web/src/app/actions/images.ts:565-596` settles on all-failed or success paths.
+- `apps/web/src/__tests__/images-action-toctou-claim.test.ts:34-57` guards the current shape with regex/count assertions, not a behavioral all-throw-path harness.
+
+Failure scenario:
+
+A future edit adds an awaited validation, metadata transform, or cleanup in the post-claim window and forgets to settle on throw. The outer upload action can then leak the pre-claimed count/bytes until the in-memory one-hour window expires, causing legitimate admin uploads from the same user/IP to be blocked. The inverse under-count class is also possible around stale windows because `settleUploadTrackerClaim` mutates whichever entry exists for the key at settle time (`apps/web/src/lib/upload-tracker.ts:19-33`).
+
+Fix:
+
+Wrap the post-claim region in a single `try/finally` with a `claimSettled`/actual-success accumulator, and make `settleUploadTrackerClaim` window-identity-aware by passing the claimed `windowStart`. Replace or supplement the source-regex test with a behavioral test that forces throws at representative awaited seams and asserts quota is settled exactly once.
+
+### CRIT19-04 — Correctness state is process-local despite several correctness contracts
+
+Severity: Medium if scaled; Low under current single-process deploy
+Confidence: High
+Status: Confirmed latent operational risk
+
+Evidence:
+
+- `apps/web/docker-compose.yml:3-22` defines one `web` service/container with host networking and `TRUST_PROXY=true`.
+- `apps/web/src/lib/restore-maintenance.ts:1-56` stores restore maintenance in `globalThis`.
+- `apps/web/src/lib/upload-tracker-state.ts:7-21` stores upload quota state in a process-local `Map`.
+- `apps/web/src/lib/rate-limit.ts:112-122` uses process-local maps for fast-path public/admin-token buckets, while only some buckets have DB backing.
+- `apps/web/src/lib/data.ts:49-63` and `apps/web/src/lib/data.ts:222-249` keep shared-group view-count buffering and shutdown flush state in module globals.
+- `apps/web/src/lib/admin-backfill-runner.ts:144-250` keeps UI-visible backfill status in `globalThis`.
+
+Failure scenario:
+
+The current topology appears intentionally single-process, so this is not a present production bug. But if the app is run with multiple Node workers, multiple containers, or an autoscaled platform, restore maintenance can block uploads in one process while another accepts them, upload quota and public throttles fragment, view-count increments flush independently or are lost on one process exit, and backfill status can be invisible from a different worker. Some advisory locks protect DB mutations, but not these in-memory UI/rate/maintenance states.
+
+Fix:
+
+Before any multi-replica deployment, either add a hard startup fence that refuses multi-instance operation for the current mode, or move correctness-critical state to MySQL/Redis/durable storage. Keep purely observational process-local caches only where stale/missing state cannot affect safety or quotas.
+
+### CRIT19-05 — EXIF metadata remains visually grouped but semantically flat
+
+Severity: Medium for accessibility semantics; Low for sighted product behavior
+Confidence: High
+Status: Confirmed product/a11y issue
+
+Evidence:
+
+- Desktop photo info renders EXIF as `div > p + p` pairs in `apps/web/src/components/photo-viewer.tsx:790-825`.
+- Bottom sheet renders the same pattern in `apps/web/src/components/info-bottom-sheet.tsx:335-375`.
+
+Failure scenario:
+
+Screen reader users encounter a series of paragraphs rather than a definition list of labels and values. The visual grid communicates key/value relationships, but the DOM does not. This weakens navigation and comprehension for camera/lens/exposure metadata, especially in the bottom sheet where the content is compact and repeated.
+
+Fix:
+
+Refactor both EXIF grids to `<dl>` with each item as `<div><dt>label</dt><dd>value</dd></div>`, preserving the current grid classes. Add a source or rendered test that both components use `dt/dd` for at least representative EXIF fields.
+
+### CRIT19-06 — IPv6 clients can rotate per-address public rate-limit buckets
+
+Severity: Low
+Confidence: High for the gap, Medium for impact
+Status: Confirmed defense-in-depth risk
+
+Evidence:
+
+- `apps/web/src/lib/rate-limit.ts:123-141` normalizes an IP address exactly.
+- `apps/web/src/lib/rate-limit.ts:163-194` uses the normalized client IP as the public/admin-token rate-limit key.
+- Public expensive routes such as semantic search share these per-IP buckets after same-origin/body checks (`apps/web/src/app/api/search/semantic/route.ts:172-183`, `apps/web/src/app/api/search/similar/[id]/route.ts:84-94`).
+
+Failure scenario:
+
+An abusive IPv6 client with a delegated prefix can rotate source addresses and receive a fresh bucket for each address. Login brute-force is partly mitigated by account-scoped throttling, and semantic routes have hard body/scan caps, so this is not a high-severity confidentiality issue. It is still a resource-control gap for unauthenticated public CPU/DB surfaces.
+
+Fix:
+
+Normalize IPv6 rate-limit keys to a configured prefix, commonly `/64`, while leaving IPv4 exact. Add tests for representative IPv6 addresses within and outside the same prefix, and document any trusted-proxy/CDN interaction.
+
+### CRIT19-07 — Semantic route header comment contradicts current rate-limit behavior
+
+Severity: Low
+Confidence: High
+Status: Confirmed documentation/maintenance issue
+
+Evidence:
+
+- `apps/web/src/app/api/search/semantic/route.ts:12-16` says disabled mode returns before rate-limit charging.
+- The implementation intentionally charges before the DB-backed config lookup at `apps/web/src/app/api/search/semantic/route.ts:172-183`, then checks `semanticSearchMode` at `apps/web/src/app/api/search/semantic/route.ts:185-200`.
+
+Failure scenario:
+
+The code is the safer behavior and should remain. The stale header can mislead a future maintainer into "restoring" the comment's behavior, reopening the previous unmetered config-lookup class, or writing tests against the wrong contract.
+
+Fix:
+
+Update the route header to state that syntactic/header/body-size rejects happen before charging, but disabled/stub/production mode lookup is protected DB work and stays charged.
+
+## Scale/Performance Watchlist
+
+- `getImagesForSmartCollection` correctly skips `COUNT(*) OVER()` on cursor pages, but initial/offset pages still compute `COUNT(*) OVER()` across the compiled predicate (`apps/web/src/lib/data.ts:1394-1455`). This is acceptable at current personal-gallery scale and becomes a Medium performance issue only when public smart collections regularly match thousands of images.
+- Shared-group view-count buffering lives in `data.ts` (`apps/web/src/lib/data.ts:49-63`, `apps/web/src/lib/data.ts:222-249`). It is bounded and has tests, but the next behavioral change should consider extraction so the read data-access module stops owning timers and write buffering.
+- The dead/deferred storage abstraction risk remains documented in `.context/plans/cycle-19-deferred.md`; I did not find a live importer in this pass.
+
+## Non-Findings / Rechecked Closures
+
+- The prior CLIP queue concern is no longer current: `apps/web/src/lib/clip-model.ts:53-64` now has configurable concurrency, max pending, and queue timeout; `apps/web/src/lib/clip-model.ts:94-127` rejects full/expired waits.
+- The semantic search routes now pre-increment before the config lookup, closing the previous unmetered disabled-mode DB-work concern (`apps/web/src/app/api/search/semantic/route.ts:172-183`, `apps/web/src/app/api/search/similar/[id]/route.ts:84-112`).
+- Search enrichment now uses a shared compile-guarded public select (`apps/web/src/lib/search-enrichment-fields.ts:1-46`) in both semantic and similar routes.
+- Focus-visible coverage has a general scanner now (`apps/web/src/__tests__/focus-visible-links-scan.test.ts:1-101`) plus cycle-specific pins. I did not find the earlier "no scanner" gap still open.
+- Touch-target coverage remains broad and scans components, admin routes, public route group, and app-level locale files (`apps/web/src/__tests__/touch-target-audit.test.ts:42-83`).
+- Migration journal monotonicity and silent-skip postconditions are guarded (`apps/web/src/__tests__/migration-journal-monotonicity.test.ts:1-120`), and `migrate.js` has a loud missing-hash check (`apps/web/scripts/migrate.js:787-808`).
+- API-admin auth and mutating action origin guards passed their repo lint gates during this review.
+
+## Final Missed-Issue Sweep
+
+Sweep coverage included:
+
+- Public unauthenticated routes for body caps, same-origin, no-store, runtime pinning, and rate-limit order.
+- Admin API wrapper and PAT route posture.
+- Upload, Lightroom ingest, topic rename/delete, smart collections, sharing, map visibility, and analytics view recording.
+- Service worker HTML/image caching, admin bypass, revocable share/photo/map bypass, and admin-render header interaction.
+- Migration reconciliation against schema and journal.
+- Process-local state and deploy topology assumptions.
+- Existing cycle 19 plan/deferred items checked against current source so fixed items were not re-reported.
+
+No new Critical or High-confidence live data-loss/privacy issue was confirmed in this pass. The highest-value fixes are structural: composite embedding identity, topic slug identity/cascade design, and a single-settle upload quota control flow.

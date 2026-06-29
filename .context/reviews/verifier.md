@@ -1,156 +1,137 @@
-# Verifier Review - Cycle 18/100
+# Verifier Review - Cycle 19/100
 
 Date: 2026-06-30 KST
-HEAD reviewed: `88706b96d90e7cd3bab9006fc6797e88ef737200` (`fix(review): close cycle 17 findings`)
-Scope: evidence-check current HEAD against `AGENTS.md`, `CLAUDE.md`, cycle-17 plan/review claims, implementation, tests, lint gates, deploy assumptions, and runtime/build behavior. This review did not implement fixes.
+HEAD reviewed: `26f1a66d` (`fix(review): close cycle 18 findings`)
+Scope: evidence-based correctness review of the cycle-18 closure as the baseline for cycle 19. Checked repo policy claims in `AGENTS.md` / `CLAUDE.md`, current plans/reviews, implementation, tests, and route/tooling interactions. No source files were modified.
 
 ## Inventory
 
 Read first:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `AGENTS.md` instructions provided in-session.
+- `CLAUDE.md`.
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
 
-Inventoried and inspected:
+Repo state and cycle surface:
 
-- Cycle-17 contracts: `.context/reviews/_aggregate.md`, `.context/reviews/verifier.md`, `.context/plans/cycle-17-2026-06-30-plan.md`, `.context/plans/cycle-17-2026-06-30-deferred.md`
-- Fix diff from `5e054f80..88706b96`
-- Auth/origin/rate-limit gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`
-- Changed action/API paths: `apps/web/src/app/actions/tags.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/app/api/search/semantic/route.ts`
-- Runtime/deploy/cache paths: `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/settings-hash.ts`
-- Validation and route behavior: `apps/web/src/lib/validation.ts`, `apps/web/src/lib/locale-path.ts`, public home/timeline/year pages, touched unit tests, package scripts/config
+- `git status --short --branch`: clean `master...origin/master`.
+- `git log --oneline --max-count=40`: current HEAD is the cycle-18 closure commit.
+- `git show --stat --name-status HEAD`: inventoried all changed files in `26f1a66d`.
+- `.context/reviews/_aggregate.md`, `plan/plan-374-cycle18-fixes.md`, `plan/plan-375-cycle18-deferred.md`, `.context/plans/README.md`.
+
+Implementation/test files examined with line numbers:
+
+- Semantic/similar search and rate limiting: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/clip-model.ts`.
+- Public route scanner: `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
+- Restore/backup/serving: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/__tests__/db-restore.test.ts`, `apps/web/src/__tests__/resolved-stream-source.test.ts`.
+- Bulk edit/upload/admin UI: `apps/web/src/app/actions/images.ts`, `apps/web/src/__tests__/bulk-update-images.test.ts`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`.
+- CLIP and route tests: `apps/web/src/__tests__/clip-model-contract.test.ts`, `apps/web/src/__tests__/semantic-search-route.test.ts`, `apps/web/src/__tests__/similar-route.test.ts`.
 
 Validation evidence:
 
-- `npm run lint:api-auth --workspace=apps/web`: passed.
-- `npm run lint:action-origin --workspace=apps/web`: passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
-- Focused regression tests: `npm test --workspace=apps/web -- check-public-route-rate-limit.test.ts check-action-origin.test.ts tags-actions.test.ts strip-gps-from-original.test.ts images-action-gps-toggle-wiring.test.ts lr-upload-hdr-gate.test.ts sw-template-contract.test.ts validation.test.ts locale-path.test.ts nginx-config.test.ts`: 12 files passed, 259 tests passed.
-- `npm run lint --workspace=apps/web`: passed.
-- `npm run typecheck --workspace=apps/web`: passed.
-- `npm test --workspace=apps/web`: 260 files passed, 2 skipped; 2432 tests passed, 4 skipped.
-- `npm run build --workspace=apps/web`: passed. Warning observed: sitemap fell back to homepage-only because local MySQL at `127.0.0.1:3306` refused connection; this matches the cycle-17 plan's known local-build warning.
-- `git diff --check`: passed.
-- Probe: direct `checkPublicRouteSource()` invocation still passes a two-hop local mutator before a limiter; details below.
+- `npm test --workspace=apps/web -- --run src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/clip-model-contract.test.ts src/__tests__/db-restore.test.ts src/__tests__/resolved-stream-source.test.ts src/__tests__/bulk-update-images.test.ts`: passed, 7 files / 115 tests.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed; semantic POST reported as using a rate-limit helper, GET routes reported non-mutating.
+
+Full lint/typecheck/build/all-tests were not rerun for this verifier-only report. The review below does not claim those gates are green at cycle-19 HEAD.
 
 ## Findings
 
-### V18-01 - Public route rate-limit scanner still misses transitive local mutators
+### V19-01 - CLIP inference queue is bounded but still abort-insensitive
 
 Severity: Medium
 Confidence: High
 
 Files and regions:
 
-- `apps/web/scripts/check-public-route-rate-limit.ts:124-145`
-- `apps/web/scripts/check-public-route-rate-limit.ts:212-241`
-- `apps/web/scripts/check-public-route-rate-limit.ts:269-285`
-- `apps/web/scripts/check-public-route-rate-limit.ts:355-360`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-381`
-- `.context/plans/cycle-17-2026-06-30-plan.md:14`
+- `apps/web/src/lib/clip-model.ts:53-71`
+- `apps/web/src/lib/clip-model.ts:94-127`
+- `apps/web/src/lib/clip-model.ts:194-202`
+- `apps/web/src/app/api/search/semantic/route.ts:246-264`
+- `apps/web/src/__tests__/clip-model-contract.test.ts:32-39`
+- `apps/web/src/__tests__/semantic-search-route.test.ts:264-279`
 
 Issue:
 
-Cycle 17 scheduled `AGG-C17-03` as done: local-helper false negatives should be closed by treating local mutator helpers as mutations. The implementation now detects direct local mutators (`localMutatingFunctions`) and the tests cover an exported helper that directly calls a direct mutator. It does not compute the transitive call graph. A helper that calls another helper that performs the DB mutation is not marked mutating, so the exported route can still mutate before rate limiting while the blocking lint gate passes.
+Cycle 18 correctly added `CLIP_INFERENCE_MAX_PENDING`, `CLIP_INFERENCE_QUEUE_TIMEOUT_MS`, and full/timeout errors, so the queue is no longer unbounded. But the original finding included abort-insensitive pending callers, and that part remains open. `waitForInferenceSlot()` accepts no `AbortSignal` and stores waiters until timeout or slot release. `embedTextReal(query)` accepts only the query string, and the semantic route calls `await embedTextReal(query)` after a one-time pre-call abort check. If the request aborts while waiting or while the model call is pending, the waiter is not removed by abort and may still run ONNX inference; the route only notices the abort afterward, before the embedding scan.
 
-Concrete failure scenario:
+Failure scenario:
 
-This probe against the current scanner returned `OK: route.ts (uses rate-limit helper)`:
+Production semantic search runs with `CLIP_INFERENCE_CONCURRENCY=1`. A client sends many production-mode searches and disconnects after each request enters `embedTextReal()`. Up to `CLIP_INFERENCE_MAX_PENDING` waiters remain until timeout, and if the active inference drains before the timeout, disconnected requests still run the text encoder. The bound prevents unbounded memory growth, but it does not fully close the prior "disconnected request waiters eventually consume ONNX CPU" scenario.
 
-```ts
-import { preIncrementShareAttempt } from '@/lib/rate-limit';
+Fix:
 
-async function writeFirst() {
-  await db.insert(rows).values({ ok: true });
-}
+Thread `request.signal` into `embedTextReal(query, { signal })` / `withInferenceSlot(..., signal)`. Remove a queued waiter immediately on abort, reject with an abort-specific error, and re-check the signal after acquiring a slot but before calling the model. Add a behavior or source-contract test showing an in-queue waiter is removed/rejected on abort, not just on timeout.
 
-async function helperA() {
-  await writeFirst();
-}
+### V19-02 - Semantic rate-limit documentation contradicts code and tests
 
-export async function POST() {
-  await helperA();
-  const limit = preIncrementShareAttempt('1.2.3.4');
-  if (limit.limited) return Response.json({}, { status: 429 });
-  return Response.json({ ok: true });
-}
-```
+Severity: Medium
+Confidence: High
 
-A future public API route can hide a write behind a two-hop local helper and still pass `npm run lint:public-route-rate-limit --workspace=apps/web`. That weakens the exact security invariant this lint gate is meant to enforce.
+Files and regions:
 
-Suggested fix:
+- `apps/web/src/app/api/search/semantic/route.ts:12-16`
+- `apps/web/src/app/api/search/semantic/route.ts:172-183`
+- `apps/web/src/app/api/search/semantic/route.ts:237-244`
+- `apps/web/src/lib/rate-limit.ts:24-34`
+- `apps/web/src/__tests__/semantic-search-route.test.ts:230-262`
 
-Build local mutator detection to a fixed point: a local function is mutating if it directly calls a known mutator or calls another local function already classified as mutating. Use that transitive set in both helper-body and exported-handler scans. Add a negative fixture matching the two-hop example above, plus a variable-function variant if the scanner intends to support variable local helpers.
+Issue:
 
-### V18-02 - `serve-upload` still documents a one-day cache lifetime beside a one-hour header
+The semantic route header still says disabled mode returns before rate-limit charging. The implementation now deliberately charges before `getGalleryConfig()` so disabled mode is charged, and the disabled-mode test asserts `preIncrementSemanticAttempt` was called with no rollback. The central `rate-limit.ts` convention header also says semantic text search refunds "pre-work short-query rejections", but the route imports only `preIncrementSemanticAttempt`, not `rollbackSemanticAttempt`, and short/long query validation returns 400 after the retained charge. The short/long query tests assert only status/body, so this specific budget behavior is not locked by tests.
+
+Failure scenario:
+
+A future change follows the route header and moves disabled-mode lookup before charging, reintroducing the cycle-18 DB-config-read pressure. Or a future maintainer follows the central header and adds rollbacks for short-query validation while the current route policy is "post-read malformed/invalid bodies stay charged." Either direction makes rate-limit behavior depend on stale prose instead of the implemented security posture.
+
+Fix:
+
+Choose and document one policy. If current behavior is intended, update the route header and `rate-limit.ts` Pattern 2b to say disabled/stub config checks and post-read query-length validation remain charged. Add assertions for short and long query cases: `preIncrementSemanticAttempt` called once and `rollbackSemanticAttempt` not called. If refunds are intended instead, wire the rollback explicitly and update the disabled-mode test.
+
+### V19-03 - Cycle 18 plan status is stale after all scheduled items were checked off
 
 Severity: Low
 Confidence: High
 
 Files and regions:
 
-- `apps/web/src/lib/serve-upload.ts:247-254`
-- `apps/web/next.config.ts:63-72`
-- `apps/web/nginx/default.conf:173-176`
-- `CLAUDE.md:204`
-- `CLAUDE.md:299`
-- `.context/plans/cycle-17-2026-06-30-plan.md:18`
+- `plan/plan-374-cycle18-fixes.md:1-8`
+- `plan/plan-374-cycle18-fixes.md:12-59`
+- `.context/plans/README.md:3-6`
+- `git show --name-status HEAD`
 
 Issue:
 
-Cycle 17 scheduled cache-comment drift as done, and the docs/config consistently state derivative uploads use `Cache-Control: public, max-age=3600, must-revalidate`. One response-header comment in `serve-upload.ts` still says edge caches keep the file "fast for one day" immediately above the actual one-hour header.
+`plan/plan-374-cycle18-fixes.md` says `Status: TODO`, but every scheduled finding in that same file is marked `[x] Implemented`. `.context/plans/README.md` still lists the Cycle 18 implementation plan under Active Plans as TODO. The current HEAD commit is `fix(review): close cycle 18 findings`, and it added/modified the exact files named by the plan, so the plan index no longer matches the repo's own completion evidence.
 
-Concrete failure scenario:
+Failure scenario:
 
-A future maintainer edits route-handler cache behavior and trusts the local comment instead of the header and cross-doc contract. They can reintroduce a 24-hour route-handler cache or make operational decisions assuming derivative freshness is one day, while the rest of the repo and tests assume one hour.
+Cycle 19+ planning treats Cycle 18 implementation as still active, reopens already-implemented work, or misses the true residual items in `plan/plan-375-cycle18-deferred.md` because the completed implementation plan is mixed with active work.
 
-Suggested fix:
+Fix:
 
-Change the stale comment at `serve-upload.ts:247-253` to "one hour" and keep it aligned with `next.config.ts`, nginx, and `CLAUDE.md`. A small source-contract test can grep this specific comment if repeated drift remains a problem.
-
-### V18-03 - Backup download still claims the TOCTOU gap is closed while reopening by pathname
-
-Severity: Low
-Confidence: Medium
-
-Files and regions:
-
-- `apps/web/src/app/api/admin/db/download/route.ts:43-75`
-- `.context/plans/cycle-17-2026-06-30-deferred.md:10-16`
-
-Issue:
-
-The deferred plan correctly records this as open (`C17-D01`), but the implementation comment still says streaming from the resolved realpath closes the TOCTOU gap. The route validates `lstat(filePath)`, `realpath(filePath)`, and containment, then opens a new pathname with `createReadStream(resolvedFilePath)`. That is safer than opening the user-derived path, but it is still not descriptor-backed validation of the opened object.
-
-Concrete failure scenario:
-
-An attacker with same-host write access to the backup directory, or a compromised same-UID process, races the interval between validation and `createReadStream()`. The route can validate one file object and then stream a replacement at the same resolved pathname. This is not an unauthenticated web exploit under the current operator-boundary model, which is why the deferred plan can reasonably keep it open, but the source comment overstates the guarantee.
-
-Suggested fix:
-
-Either implement fd-based open/fstat/stream-from-fd semantics with symlink rejection where supported, or change the comment to say the route reduces but does not eliminate the race. Keep the deferral entry until descriptor-backed serving is implemented or backup storage changes.
+Change `plan/plan-374-cycle18-fixes.md` to DONE, move or list it under completed plans in `.context/plans/README.md`, and leave `plan/plan-375-cycle18-deferred.md` active/deferred.
 
 ## Verified Closures
 
-I did not find current mismatches for these cycle-17 scheduled fixes:
+These cycle-18 scheduled fixes matched code and tests in the files inspected:
 
-- Tag freshness: tag rename/delete and direct/batch tag link mutations now update affected `images.updated_at` inside transactions (`apps/web/src/app/actions/tags.ts:82-98`, `apps/web/src/app/actions/tags.ts:130-144`, `apps/web/src/app/actions/tags.ts:201-212`, `apps/web/src/app/actions/tags.ts:269-281`, `apps/web/src/app/actions/tags.ts:365-373`, `apps/web/src/app/actions/tags.ts:438-508`).
-- Action-origin try/catch: catch/finally branches are processed independently before the try block can set a later rate-limit gate (`apps/web/scripts/check-action-origin.ts:391-404`), and the current probe fails unsafe catch mutation.
-- GPS stripping: browser and Lightroom uploads now reject/clean up originals when `strip_gps_on_upload` is enabled and `stripGpsFromOriginal()` returns false (`apps/web/src/app/actions/images.ts:382-395`, `apps/web/src/app/api/admin/lr/upload/route.ts:367-385`, `apps/web/src/lib/process-image.ts:1733-1818`).
-- Home list DB failure: the home page no longer catches the image-list query as an empty success; it awaits `getImagesLitePage()` directly (`apps/web/src/app/[locale]/(public)/page.tsx:149-167`).
-- Reserved topic route segments: `c`, `privacy`, `timeline`, and `year` are now reserved (`apps/web/src/lib/validation.ts:4-24`) with tests.
-- Service worker photo pages: `/p/:id` is excluded from offline HTML cache (`apps/web/public/sw.template.js:58-64`), and generated `sw.js` was regenerated during build.
-- Proxy chain preservation: nginx now uses `$proxy_add_x_forwarded_for` on proxied locations (`apps/web/nginx/default.conf:67-70`, repeated across the file), and docs/tests describe the trusted-hop topology.
+- Public route scanner fixed-point mutator detection exists in `apps/web/scripts/check-public-route-rate-limit.ts:269-297`, and the two-hop negative fixture exists at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:383-401`.
+- Semantic and similar routes now charge before DB-backed config lookup: semantic at `apps/web/src/app/api/search/semantic/route.ts:172-195`, similar at `apps/web/src/app/api/search/similar/[id]/route.ts:84-112`.
+- Bulk tag mutations bump freshness even when scalar updates are also present: `apps/web/src/app/actions/images.ts:1152-1155`, locked by `apps/web/src/__tests__/bulk-update-images.test.ts:572-598`.
+- Backup creation serializes on `LOCK_DB_RESTORE` and validates dump header before returning a filename: `apps/web/src/app/[locale]/admin/db-actions.ts:157-170`, `apps/web/src/app/[locale]/admin/db-actions.ts:233-260`, with source contracts in `apps/web/src/__tests__/db-restore.test.ts:52-77`.
+- Resolved-path streaming comments were weakened to "not descriptor-backed" in both upload serving and backup download: `apps/web/src/lib/serve-upload.ts:263-268`, `apps/web/src/app/api/admin/db/download/route.ts:72-76`, locked by `apps/web/src/__tests__/resolved-stream-source.test.ts:8-21`.
+- Token one-time secret flow now requires acknowledgement before normal dialog dismissal and guards duplicate creates: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:46-73`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-235`.
+- Category empty state and delete pending states exist in `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:231-240`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:281-307`, and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:388-412`.
 
-## Final Missed-Issues Sweep
+## Final Missed-Issue Sweep
 
 Final sweeps covered:
 
-- The full `5e054f80..HEAD` fix diff and all files touched by the cycle-17 implementation commit.
-- Cycle-17 scheduled vs deferred findings, checking whether DONE claims match code and tests.
-- Current custom lint gates, standard ESLint, typecheck, full unit tests, production build, and `git diff --check`.
-- Docs vs code for upload cache headers, proxy trust, semantic production setup/copy, GPS stripping, route reservations, and service-worker offline exclusions.
-- Security-critical scanner behavior using both committed tests and direct probes.
+- All files changed by `26f1a66d` plus their tests and relevant docs.
+- Current implementation vs cycle-18 aggregate claims and plan statuses.
+- Stale semantic-rate-limit comments across route-local and central policy docs.
+- CLIP queue bounds, timeout behavior, and abort-signal propagation.
+- Backup/restore lock, temp-file cleanup ownership, and realpath streaming claims.
+- Public route scanner import-origin checks, star re-export fail-closed behavior, and transitive mutator fixtures.
 
-No additional confirmed critical or high-severity issues were found. Remaining risk is concentrated in security-tooling precision and low-severity doc/comment drift, plus the intentionally deferred backup TOCTOU hardening.
+No critical or high-severity correctness issues were found. The remaining confirmed risk is concentrated in one incomplete abort/cancellation behavior, one security-policy documentation drift, and one plan-status provenance drift.

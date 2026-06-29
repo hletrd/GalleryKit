@@ -1,8 +1,8 @@
-# Cycle 18 Debugger Review
+# Cycle 19 Debugger Review
 
 Review lane: `debugger`
 Date: 2026-06-30 KST
-Mode: read-only debugger review. No product code was changed. No commit or push was made.
+Mode: repository-wide latent bug/failure-mode/regression review. No source code was changed. No commit or push was made.
 
 ## Inventory
 
@@ -15,186 +15,121 @@ Read first:
 Repository inventory performed before findings:
 
 - Tracked/source inventory with `rg --files`: app source, migrations, tests, scripts, config, docs, and plans.
-- 499 TypeScript/TSX files under `apps/web/src` inventoried.
-- Relevant app routes/actions reviewed: public pages, admin pages, server actions, admin API routes, public API routes, upload serving, feed/sitemap/robots, OG routes, semantic/similar search.
-- Relevant core libraries reviewed: data access, schema, auth/session/origin, rate limits, upload tracking, restore maintenance, image queue, image processing, CLIP embeddings/model, smart collections, file serving, validation/sanitization, revalidation, storage paths.
-- Relevant operational code reviewed: `apps/web/scripts/*`, Drizzle SQL/journal/reconcile path, Docker/nginx/deploy config, service worker template/output, focused tests around the reviewed invariants.
+- App routes inventoried with a route/runtime scan under `apps/web/src/app`, including public pages, admin pages, public API routes, admin API routes, upload serving, feeds, OG routes, health/live probes, semantic search, and similar search.
+- Server actions reviewed under `apps/web/src/app/actions`, with focus on auth/origin gates, rollback paths, cache invalidation, upload quota settlement, delete cleanup, topic mutations, sharing, and public analytics actions.
+- Core libraries reviewed under `apps/web/src/lib`, including data access, schema validation, gallery config, upload paths, image processing, image queue, restore maintenance, CLIP/semantic search, rate limits, request origin, API auth, smart collections, storage, serving, audit, and retention.
+- Operational code reviewed: `apps/web/scripts/*`, Drizzle migrations/journal/reconcile path, Docker/nginx/deploy config, PWA/service worker generation, and existing tests around the reviewed invariants.
 - Existing modified review artifacts in `.context/reviews/` were observed and left untouched except this requested file.
 
 ## Findings
 
-### DBG18-01 - CLIP inference has an unbounded pending queue and ignores request aborts while waiting
+### DBG19-01 - Database backup/restore child processes can hang forever while holding restore maintenance and advisory locks
 
 Severity: High
 Confidence: High
 
 Code regions:
 
-- `apps/web/src/lib/clip-model.ts:53-70` bounds active inference with `CLIP_INFERENCE_CONCURRENCY`, but stores all pending waiters in an unbounded `inferenceWaiters` array.
-- `apps/web/src/lib/clip-model.ts:138-146` routes production text search through that slot.
-- `apps/web/src/lib/clip-model.ts:171-222` routes image embedding and Sharp preprocessing through that same slot.
-- `apps/web/src/app/api/search/semantic/route.ts:248-255` checks abort only before calling `embedTextReal()`, not while queued inside it.
-- `apps/web/src/lib/image-queue.ts:327-332` and `apps/web/src/lib/image-queue.ts:720-746` track background embedding side effects in an uncapped process-local `Set`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:157-183` acquires `LOCK_DB_RESTORE` and spawns `mysqldump`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:205-290` resolves backup only on child `close`, stream error, or spawn error; there is no timeout or abort path.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:372-438` begins restore maintenance, quiesces uploads/image processing, and releases locks only after `runRestore()` returns.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:560-642` spawns `mysql`, pipes the uploaded dump, and resolves only on `close`, stream error, stdin error, or spawn error; there is no timeout or progress watchdog.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:667-693` spawns the post-restore migration script with the same no-timeout pattern.
 
-Root-cause hypothesis:
+Failure scenario:
 
-The code protects CPU concurrency but not admission. A manual semaphore limits active work, yet every caller beyond the limit gets retained in memory until a slot opens; there is no max pending count, timeout, priority separation, or `AbortSignal` removal.
-
-Concrete failure scenario:
-
-Production semantic search is enabled with default `CLIP_INFERENCE_CONCURRENCY=1`. A burst of public searches arrives while uploads are also scheduling image embeddings. Browser requests time out or disconnect, but their waiters remain in `inferenceWaiters`; when they eventually run, they still consume ONNX CPU. Background embedding promises also accumulate in `state.sideEffects`, increasing memory pressure and shutdown drain time.
+A network partition, wedged MySQL server, stalled TLS handshake, blocked pipe, or hung migration leaves `mysqldump`, `mysql`, or `node scripts/migrate.js` alive without emitting `close` or `error`. Backup holds `LOCK_DB_RESTORE` until the promise resolves. Restore is worse: the request remains inside `runRestore()`, so restore maintenance stays active, the upload-processing contract lock remains held, image processing stays quiesced, and both DB advisory locks remain tied to the pooled connection. Operators then see stale maintenance/restore-in-progress behavior with no automatic recovery.
 
 Suggested fix:
 
-Replace the waiter array with a bounded queue/semaphore that supports max pending depth, max wait time, and abort-driven removal. Return 429 or 503 when saturated. Split public search and background image-embedding queues or reserve separate quotas/priorities so uploads cannot starve interactive search and vice versa.
+Wrap each child process in a bounded watchdog using `AbortController`/`setTimeout`, kill the process tree on timeout, destroy attached streams, clean temp files, and settle the promise exactly once. For restore, return a failure with `keepMaintenance: true` only when the DB may have been partially modified, but still release advisory/contract locks so a deliberate retry or operator recovery can proceed. Add focused tests that fake a child process which never closes and assert maintenance/locks are unwound according to the chosen policy.
 
-### DBG18-02 - Disabled/non-production semantic requests can consume DB config reads without retaining rate-limit budget
+### DBG19-02 - Topic deletion can commit the DB delete, then report failure and skip invalidation if topic-image cleanup fails
 
 Severity: Medium
 Confidence: High
 
 Code regions:
 
-- `apps/web/src/app/api/search/semantic/route.ts:168-185` calls `getGalleryConfig()` before any semantic rate-limit charge.
-- `apps/web/src/app/api/search/semantic/route.ts:194-205` charges only after the config-mode gate passes.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:85-113` pre-increments, performs `getGalleryConfig()`, then rolls back the token for non-production modes.
-- `apps/web/src/lib/gallery-config.ts` is the backing config accessor referenced by both routes; `CLAUDE.md` documents `semantic_search_mode='disabled'` as the default fresh-install state.
+- `apps/web/src/app/actions/topics.ts:429-442` deletes the topic row inside a transaction after checking that no images reference the slug.
+- `apps/web/src/app/actions/topics.ts:443-448` performs `deleteTopicImage(deletedImageFilename)` after the transaction has already committed.
+- `apps/web/src/app/actions/topics.ts:449-460` logs audit, revalidates app data, and returns success only after the file cleanup succeeds.
+- `apps/web/src/app/actions/topics.ts:461-469` catches any cleanup error and returns `failedToDeleteTopic`, even though the topic row may already be gone.
 
-Root-cause hypothesis:
+Failure scenario:
 
-The rate-limit contract optimizes around body parsing and CLIP work, but treats DB-backed config lookup as free. Public disabled/stub-mode probes therefore still hit MySQL while either never charging or refunding the limiter.
-
-Concrete failure scenario:
-
-A scripted client sends many small same-origin-looking `POST /api/search/semantic` requests while semantic search is disabled. Each request returns 503 before reading the body and before `preIncrementSemanticAttempt()`, but still runs the `admin_settings` config lookup. `/api/search/similar/1` in disabled/stub mode also performs the config lookup and then `rollbackSemanticAttempt(ip)`. On the documented single-instance, 10-connection deployment, this can create DB pressure without visible semantic rate-limit pressure.
+An admin deletes an empty topic that has a header/resource image. The DB transaction commits successfully. Then the filesystem cleanup fails due to `EACCES`, a transient disk error, a missing resource root, or a race with another cleanup. The action returns a deletion failure, skips audit logging, skips `revalidateAllAppData()`, and leaves the topic image orphaned. The UI can tell the admin the delete failed while the database state says it succeeded, and cached public/admin surfaces may stay stale until another invalidation.
 
 Suggested fix:
 
-Once cheap syntactic gates pass, retain a rate-limit charge before any DB-backed mode lookup, or make the mode check a short-TTL in-process cached value that does not issue a DB read per disabled request. Add tests that disabled/stub-mode probes either consume the semantic bucket after config work or hit a cache path that avoids per-request DB access.
+Separate the committed DB mutation result from best-effort file cleanup. After a successful row delete, always audit and revalidate. Treat image cleanup failure as a logged cleanup warning/result, or return success with a cleanup warning if the UI needs to surface it. Add a regression that stubs `deleteTopicImage()` to fail and asserts the action does not report the DB delete as failed and still invalidates.
 
-### DBG18-03 - Mixed bulk tag edits can change public tags without touching `images.updated_at`
+### DBG19-03 - Upload-serving route handlers are the only Node-file routes without an explicit Node runtime pin
 
-Severity: Medium
-Confidence: Medium
-
-Code regions:
-
-- `apps/web/src/app/actions/images.ts:1057-1068` builds and applies scalar image updates when any tri-state scalar field is not `leave`.
-- `apps/web/src/app/actions/images.ts:1123-1150` adds/removes image-tag rows.
-- `apps/web/src/app/actions/images.ts:1152-1155` explicitly touches `images.updated_at` only when tag mutations happen and the scalar `setClause` is empty.
-- `apps/web/src/db/schema.ts:97-100` relies on `updated_at` `onUpdateNow()` for ordinary image-row updates.
-- `apps/web/src/lib/data.ts:828-852` orders feeds by `images.updated_at`; sitemap freshness also derives from image update timestamps.
-
-Root-cause hypothesis:
-
-The code assumes a non-empty scalar update will always advance the image row timestamp, so it skips the explicit tag freshness touch in mixed scalar-plus-tag operations. MySQL `ON UPDATE CURRENT_TIMESTAMP` does not reliably advance when the scalar assignment is a no-op.
-
-Concrete failure scenario:
-
-An admin selects images, sets `topic` to the same topic they already have, and adds a new tag. `setClause` is non-empty, so the tag freshness branch is skipped. If the topic update is a no-op for those rows, the only real mutation is `image_tags` insertion. Public tag labels change, but `images.updated_at` can remain unchanged, so Atom feed ordering/`updated` and sitemap `lastmod` can miss or de-prioritize the changed content.
-
-Suggested fix:
-
-Whenever `tagMutationRows > 0`, explicitly update `images.updated_at = CURRENT_TIMESTAMP` for affected image IDs regardless of `setClause` size. Add a regression for a scalar no-op plus tag mutation that asserts the timestamp-touch update occurs.
-
-### DBG18-04 - Public route rate-limit scanner misses transitive local mutators
-
-Severity: Medium
+Severity: Low
 Confidence: High
 
 Code regions:
 
-- `apps/web/scripts/check-public-route-rate-limit.ts:124-127` recognizes only direct property mutation calls such as `db.insert`.
-- `apps/web/scripts/check-public-route-rate-limit.ts:256-286` marks local mutating functions only when their own body directly calls a known mutator.
-- `apps/web/scripts/check-public-route-rate-limit.ts:129-150` and `apps/web/scripts/check-public-route-rate-limit.ts:212-241` then trust that non-transitive `localMutatingFunctions` set.
-- `apps/web/scripts/check-public-route-rate-limit.ts:355-360` passes the route when every handler appears to call a limiter before the detected mutation.
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:364-381` covers only a one-hop helper that directly mutates before the limiter.
+- `apps/web/src/app/uploads/[...path]/route.ts:1-12` imports `serveUploadFile()` and handles the primary upload `GET` route without `export const runtime = 'nodejs'`.
+- `apps/web/src/app/uploads/[...path]/route.ts:15-27` handles the primary upload `HEAD` route without a runtime pin.
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:1-22` repeats the same pattern for the locale-prefixed upload route.
+- `apps/web/src/lib/serve-upload.ts:1-5` imports Node-only `fs`, `fs/promises`, `path`, and `stream`.
+- `apps/web/src/lib/serve-upload.ts:127-132` is the shared route implementation, and `apps/web/src/lib/serve-upload.ts:269-296` opens a file stream and converts it with `Readable.toWeb()`.
+- `apps/web/src/app/api/admin/db/download/route.ts:17-20` documents the local convention: routes importing Node-only modules are pinned to `runtime = 'nodejs'`.
 
-Root-cause hypothesis:
+Failure scenario:
 
-The scanner builds `localMutatingFunctions` in a single pass and never computes the local call graph to a fixed point. A helper that calls another helper that mutates is not classified as mutating.
-
-Concrete failure scenario:
-
-A future public `POST` route uses `handler() -> writeFirst() -> actuallyWrite() -> db.insert(...)`, then calls `preIncrementShareAttempt()` after `writeFirst()`. The scanner sees `writeFirst()` as a non-mutating local call because only `actuallyWrite()` directly calls `db.insert`; the file can pass `lint:public-route-rate-limit` while mutating before retaining a public rate-limit token.
+Today these routes work under the default Node runtime, but they are runtime-fragile. A future segment-level runtime change, framework default shift, or copied route pattern can compile the upload fallback under Edge, where `fs`, `fs/promises`, and Node streams are unavailable. The break would surface only at deploy/build/runtime for image delivery, not during ordinary TypeScript checks.
 
 Suggested fix:
 
-Compute local mutating functions to a fixed point: a function is mutating if it directly calls a known mutation method or calls another local function already classified as mutating. Use that transitive set for exported handlers and add a two-hop negative fixture.
+Add `export const runtime = 'nodejs';` to both upload route handler files and a lightweight guard/test or lint fixture for route handlers that transitively import Node-only serving code. This aligns the primary/locale upload routes with the admin DB download route and makes the runtime contract explicit.
 
-### DBG18-05 - `image_embeddings` stores one row per image, making model cutovers destructive
-
-Severity: Medium
-Confidence: High
-
-Code regions:
-
-- `apps/web/src/db/schema.ts:280-294` makes `image_embeddings.image_id` the primary key and keeps `model_version` as a secondary indexed attribute.
-- `apps/web/scripts/backfill-clip-embeddings.ts:123-147` selects rows missing the target `model_version`.
-- `apps/web/scripts/backfill-clip-embeddings.ts:172-183` writes with `onDuplicateKeyUpdate`, replacing any existing embedding for the image.
-- `apps/web/src/lib/image-queue.ts:356-367` uses the same one-row upsert for post-upload embeddings.
-- `apps/web/src/app/api/search/semantic/route.ts:261-284` and `apps/web/src/app/api/search/similar/[id]/route.ts:115-156` read only rows matching the active model version.
-
-Root-cause hypothesis:
-
-The schema models embeddings as mutable image state rather than versioned model artifacts. That works for the initial stub-to-production overwrite, but it makes future model upgrades, partial backfills, and rollbacks state-destructive.
-
-Concrete failure scenario:
-
-An operator backfills a new production model version. Each processed image overwrites its prior production embedding in place. During the cutover, searches filtered to the new model see only the already-upgraded subset; rolling back to the old model cannot simply flip a setting because old vectors were overwritten. A failed backfill can leave a mixed DB where no single mode has complete coverage without another full re-embed.
-
-Suggested fix:
-
-Use a composite key such as `(image_id, model_version)` and keep old model rows until the new model is fully backfilled and verified. Add an activation pointer for the serving model version and an operator cleanup path for retired versions. If storage size is a concern, keep at least one previous production version for rollback.
-
-### DBG18-06 - Backup/download and upload-serving TOCTOU comments overstate path-race protection
+### DBG19-04 - Public numeric route params accept arbitrarily large digit strings and then use unsafe `parseInt()` results
 
 Severity: Low
 Confidence: Medium
 
 Code regions:
 
-- `apps/web/src/app/api/admin/db/download/route.ts:43-75` validates `lstat()`/`realpath()` and then opens `createReadStream(resolvedFilePath)`.
-- `apps/web/src/app/api/admin/db/download/route.ts:78-84` sends `Content-Length` from the pre-open `stats`.
-- `apps/web/src/lib/serve-upload.ts:175-217` computes metadata/ETag from a pre-open `lstat()`.
-- `apps/web/src/lib/serve-upload.ts:263-267` then opens a new path with `createReadStream(resolvedPath)` while the comment says this closes the TOCTOU gap.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:73-82` validates only `/^\d+$/`, then accepts any finite positive `parseInt()` result.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:51-59` follows the same pattern for OG image IDs.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:40-52` and `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:132-140` do the same in metadata and page rendering.
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:98-103` parses optional `photoId` similarly and accepts any positive parsed number.
+- `apps/web/src/lib/validation.ts:166-191` already documents the exact precision-loss class for MySQL IDs and provides a safe-integer guard for insert IDs, but the public route-param path does not reuse that standard.
 
-Root-cause hypothesis:
+Failure scenario:
 
-The implementation validates one path object, then later opens by pathname. Realpath helps avoid opening the user-derived string and rejects symlinks at validation time, but it does not bind the streamed object to the object that was statted.
-
-Concrete failure scenario:
-
-A same-host process with write access to `data/backups` or `public/uploads` replaces a validated regular file between `realpath()`/`lstat()` and `createReadStream()`. The response can emit headers based on the old object while streaming the replacement. This is not a confirmed remote exploit under the current threat model, but the source comments can mislead future hardening work into thinking descriptor-backed validation already exists.
+A request such as `/api/search/similar/9007199254740993` passes the digit regex. `parseInt()` returns an unsafe rounded JavaScript number, and the subsequent `Number.isFinite()`, positive, and integer checks pass. Most current MySQL `int` IDs will produce no row, so the practical impact is limited, but malformed inputs can be rounded into a different numeric value before DB/cache calls. The same class affects photo pages, OG routes, and selected photo IDs in shared galleries.
 
 Suggested fix:
 
-If the threat model requires closure, open the file descriptor first, reject symlinks where supported, `fstat()` the opened descriptor, verify the opened object, and stream from `FileHandle.createReadStream()`. If local write access remains outside scope, weaken the comments/tests to say the current code reduces path risk but does not fully close the open-after-check race.
+Centralize public ID parsing in a helper that requires a bounded decimal integer, rejects values above `Number.MAX_SAFE_INTEGER`, and ideally rejects values above the schema's actual unsigned/signed integer range. Replace the route-local `parseInt()` patterns with that helper and add malformed huge-ID regression tests for similar search, OG photo, photo page metadata/rendering, and shared-gallery selected-photo routing.
 
 ## Final Missed-Issues Sweep
 
 Final sweep covered:
 
-- Server action origin/auth ordering and rollback paths.
-- Public API validation, rate-limit ordering, same-origin boundaries, and disabled-mode branches.
-- Admin API auth wrapper behavior, PAT upload path, and backup download path.
-- Upload quota claims, restore-maintenance checks, original cleanup, GPS/HDR gates, and queue enqueue semantics.
-- Image queue processing claims, delete-during-processing cleanup, bootstrap retries, shutdown drain, caption/embedding side effects.
-- Data projections, privacy-sensitive field omissions, map-specific GPS exposure, feed/sitemap freshness, tag aggregation, pagination cursors.
-- Drizzle schema, migration journal monotonicity, reconcileLegacySchema, removed feature schema drops, analytics retention indexes.
-- CLIP model loading, embedding serialization, semantic/similar search scans, production/stub version gates.
-- Smart collection parser/compiler, topic slug remap, public collection route behavior.
-- File serving path validation, upload directories, legacy original handling, service worker cache path contracts.
-- Deployment/nginx/Docker scripts and documented production constraints.
+- App-route inventory and runtime exports, with special attention to routes importing Node-only modules and public mutating handlers.
+- Server action auth/origin ordering, restore-maintenance checks, transaction boundaries, cleanup after committed mutations, audit logging, and revalidation after state changes.
+- Admin API auth wrapper behavior, PAT Lightroom upload handling, multipart/length validation, backup download path validation, and backup/restore external command failure paths.
+- Upload browser/API flows: quota preclaim/rollback/settlement, disk checks, topic checks, HDR/GPS gates, original retention paths, queue enqueueing, and delete-during-processing cleanup.
+- Image queue interactions: processing claims, stale processing recovery, retry/permanent failure transitions, bootstrap of semantic embeddings, upload-delete races, and restore quiesce/resume hooks.
+- Image processing and config: output-size validation, Sharp limits, color/HDR metadata, GPS stripping, derivative generation, and admin setting fallback behavior.
+- Public APIs/pages: semantic/similar search gates, public analytics actions, sharing, feed/OG routes, upload serving, pagination/cursor parsing, privacy-sensitive projections, sitemap/feed freshness, and map-specific GPS exposure.
+- Data/schema/migrations: Drizzle schema, journal monotonicity, reconcileLegacySchema, admin-only privacy guards, embedding/version gates, smart collection JSON parsing/remapping, and analytics/audit/view retention paths.
+- Operational code: deploy script, Docker Compose, nginx config, PWA/service-worker build scripts, model-download/manifest scripts, migration scripts, and route/action lint scripts.
 
 Validation evidence:
 
 - Static review only; I did not run the full lint/typecheck/test/build gates because this assignment requested a review artifact only and no implementation changes.
 - Exact line references above were taken from the current workspace during this review.
+- Final worktree check before writing showed existing modified review artifacts; this report is the only file intentionally edited in this lane.
 
 Final count:
 
 - High: 1
-- Medium: 4
-- Low: 1
-- Total findings: 6
+- Medium: 1
+- Low: 2
+- Total findings: 4
