@@ -1,6 +1,8 @@
 # Real CLIP Semantic Search Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+
+> **Historical record, not current instructions:** this plan is complete. The checklist below is marked done to prevent future agents from re-running old TDD/install/commit steps. Use current code, `CLAUDE.md`, and the status banner in the linked spec for live CLIP operation and activation guidance.
 
 **Goal:** Replace GalleryKit's stub CLIP encoder with a real multilingual (jina-clip-v2-class) encoder so natural-language search (Korean + English) and "similar photos" genuinely work, fully self-hosted on CPU.
 
@@ -48,12 +50,12 @@ Decide the encoder runtime BEFORE writing `clip-model.ts`. This is an investigat
 - Temp: `apps/web/scripts/_spike-clip.ts` (deleted at end of task)
 - Modify (decision record): `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md` §12
 
-- [ ] **Step 1: Install the primary candidate**
+- [x] **Step 1: Install the primary candidate**
 
 Run: `npm install --workspace=apps/web @huggingface/transformers@^3.8.1`
 Expected: added to `apps/web/package.json` dependencies, install succeeds (it pulls `onnxruntime-node`).
 
-- [ ] **Step 2: Write a throwaway proof script** at `apps/web/scripts/_spike-clip.ts`:
+- [x] **Step 2: Write a throwaway proof script** at `apps/web/scripts/_spike-clip.ts`:
 
 ```typescript
 // THROWAWAY — deleted at end of Task 1. Proves the chosen runtime can run a
@@ -79,14 +81,14 @@ async function main() {
 main();
 ```
 
-- [ ] **Step 3: Run it and record reality**
+- [x] **Step 3: Run it and record reality**
 
 Run: `cd apps/web && npx tsx scripts/_spike-clip.ts`
 Expected: prints a dim (1024 native; note it — Matryoshka truncation to 512 happens in Task 3) and **`good` cosine clearly higher than `bad`** (e.g. good > 0.25, bad < 0.15). This proves a real model, not random.
 
-- [ ] **Step 4: Decide & record.** If Step 3 works in Transformers.js → runtime = Transformers.js, record the exact model id, `dtype`, `pooling`/`normalize` flags, native dim, and per-encode CPU latency in spec §12. If the model is NOT loadable in Transformers.js (custom arch error), fall back: `npm install --workspace=apps/web onnxruntime-node` + use jina's published ONNX (`image_encoder.onnx`/`text_encoder.onnx`) with manual Sharp preprocessing + the tokenizer; record that decision and the exact ONNX URLs instead. Either way, **the `clip-model.ts` interface in Task 4 is identical.**
+- [x] **Step 4: Decide & record.** If Step 3 works in Transformers.js → runtime = Transformers.js, record the exact model id, `dtype`, `pooling`/`normalize` flags, native dim, and per-encode CPU latency in spec §12. If the model is NOT loadable in Transformers.js (custom arch error), fall back: `npm install --workspace=apps/web onnxruntime-node` + use jina's published ONNX (`image_encoder.onnx`/`text_encoder.onnx`) with manual Sharp preprocessing + the tokenizer; record that decision and the exact ONNX URLs instead. Either way, **the `clip-model.ts` interface in Task 4 is identical.**
 
-- [ ] **Step 5: Clean up & commit the decision**
+- [x] **Step 5: Clean up & commit the decision**
 
 ```bash
 rm apps/web/scripts/_spike-clip.ts
@@ -101,7 +103,7 @@ git pull --rebase && git push
 - Replace: `apps/web/scripts/download-clip-models.ts`
 - Test: `apps/web/src/__tests__/download-clip-models.test.ts`
 
-- [ ] **Step 1: Write the failing test** (`download-clip-models.test.ts`):
+- [x] **Step 1: Write the failing test** (`download-clip-models.test.ts`):
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -125,24 +127,24 @@ describe('download-clip-models', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/download-clip-models.test.ts`
-Expected: FAIL (current file contains "Running in stub mode", no `createHash`).
+Original expected result: FAIL (current file contains "Running in stub mode", no `createHash`).
 
-- [ ] **Step 3: Implement the downloader.** Replace the file with a real implementation: resolve target dir from `CLIP_MODELS_ROOT` env (default `data/models/clip`), download each artifact recorded in Task 1 (image encoder, text encoder, tokenizer files) via `fetch`, stream to disk, compute `createHash('sha256')` and compare to a hard-coded manifest, skip files already present whose checksum matches (idempotent), exit non-zero on mismatch. (If Task 1 chose Transformers.js, this script instead pre-warms the HF cache dir on the volume by setting `env.cacheDir = CLIP_MODELS_ROOT` and calling the pipelines once; keep the same checksum-verified-manifest shape for any manually downloaded file.)
+- [x] **Step 3: Implement the downloader.** Replace the file with a real implementation: resolve target dir from `CLIP_MODELS_ROOT` env (default `data/models/clip`), download each artifact recorded in Task 1 (image encoder, text encoder, tokenizer files) via `fetch`, stream to disk, compute `createHash('sha256')` and compare to a hard-coded manifest, skip files already present whose checksum matches (idempotent), exit non-zero on mismatch. (If Task 1 chose Transformers.js, this script instead pre-warms the HF cache dir on the volume by setting `env.cacheDir = CLIP_MODELS_ROOT` and calling the pipelines once; keep the same checksum-verified-manifest shape for any manually downloaded file.)
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/__tests__/download-clip-models.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Run the downloader once locally to seed the volume**
+- [x] **Step 5: Run the downloader once locally to seed the volume**
 
 Run: `cd apps/web && CLIP_MODELS_ROOT=data/models/clip npx tsx scripts/download-clip-models.ts`
 Expected: files written under `apps/web/data/models/clip/`, checksums OK. (`data/` is gitignored — do NOT commit weights.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/scripts/download-clip-models.ts apps/web/src/__tests__/download-clip-models.test.ts
@@ -160,7 +162,7 @@ git pull --rebase && git push
 - Modify: `apps/web/src/lib/clip-embeddings.ts`
 - Test: `apps/web/src/__tests__/clip-embeddings-normalize.test.ts`
 
-- [ ] **Step 1: Write the failing test**:
+- [x] **Step 1: Write the failing test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -195,12 +197,12 @@ describe('PRODUCTION_MODEL_VERSION', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/clip-embeddings-normalize.test.ts`
-Expected: FAIL ("normalizeEmbedding is not a function").
+Original expected result: FAIL ("normalizeEmbedding is not a function").
 
-- [ ] **Step 3: Add to `clip-embeddings.ts`** (after the existing constants):
+- [x] **Step 3: Add to `clip-embeddings.ts`** (after the existing constants):
 
 ```typescript
 // Real production encoder identity (set in this cycle). Stays <= 32 chars for the
@@ -210,7 +212,7 @@ export const PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8';
 // Production relevance threshold — calibrated empirically in the threshold task.
 // Placeholder-free: this is the starting value; Task 14 replaces it with the
 // calibrated number and the calibration test pins it.
-export const PRODUCTION_COSINE_THRESHOLD = 0.25;
+export const PRODUCTION_COSINE_THRESHOLD = 0.22;
 
 /** L2-normalize a vector to unit length. A zero vector is returned unchanged (no NaN). */
 export function normalizeEmbedding(v: Float32Array): Float32Array {
@@ -230,12 +232,12 @@ export function truncateAndNormalize(v: Float32Array): Float32Array {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/__tests__/clip-embeddings-normalize.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/clip-embeddings.ts apps/web/src/__tests__/clip-embeddings-normalize.test.ts
@@ -249,7 +251,7 @@ git pull --rebase && git push
 - Create: `apps/web/src/lib/clip-model.ts`
 - Test: `apps/web/src/__tests__/clip-model-contract.test.ts` (source-shape contract — no model load, so it stays fast/offline in CI)
 
-- [ ] **Step 1: Write the failing contract test**:
+- [x] **Step 1: Write the failing contract test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -277,12 +279,12 @@ describe('clip-model module contract', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/clip-model-contract.test.ts`
-Expected: FAIL (file does not exist).
+Original expected result: FAIL (file does not exist).
 
-- [ ] **Step 3: Create `clip-model.ts`** (Transformers.js variant from Task 1; if the spike chose onnxruntime-node, implement the same two exported signatures with InferenceSession + Sharp preprocessing + tokenizer — interface identical):
+- [x] **Step 3: Create `clip-model.ts`** (Transformers.js variant from Task 1; if the spike chose onnxruntime-node, implement the same two exported signatures with InferenceSession + Sharp preprocessing + tokenizer — interface identical):
 
 ```typescript
 /**
@@ -341,17 +343,17 @@ export async function embedImageReal(imagePath: string): Promise<Float32Array> {
 }
 ```
 
-- [ ] **Step 4: Run the contract test to verify it passes**
+- [x] **Step 4: Run the contract test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/__tests__/clip-model-contract.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Typecheck** (new deps + dynamic import)
+- [x] **Step 5: Typecheck** (new deps + dynamic import)
 
 Run: `npm run typecheck --workspace=apps/web`
 Expected: clean (add `@huggingface/transformers` types; if missing, the dynamic-import shape above keeps it typed locally).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/lib/clip-model.ts apps/web/src/__tests__/clip-model-contract.test.ts
@@ -369,7 +371,7 @@ git pull --rebase && git push
 - Modify: `apps/web/src/lib/gallery-config-shared.ts:171`
 - Test: `apps/web/src/__tests__/gallery-config-semantic-production.test.ts`
 
-- [ ] **Step 1: Write the failing test**:
+- [x] **Step 1: Write the failing test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -391,12 +393,12 @@ describe('semantic_search_mode validator', () => {
 
 (If the validators are exported under a different symbol, import that — confirm the export name in `gallery-config-shared.ts`.)
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/gallery-config-semantic-production.test.ts`
-Expected: FAIL (`v('production')` is `false`).
+Original expected result: FAIL (`v('production')` is `false`).
 
-- [ ] **Step 3: Update the validator** (line 171) and its comment:
+- [x] **Step 3: Update the validator** (line 171) and its comment:
 
 ```typescript
   // US-P51: real ONNX encoder shipped — 'production' is now storable.
@@ -405,12 +407,12 @@ Expected: FAIL (`v('production')` is `false`).
   semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production',
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/__tests__/gallery-config-semantic-production.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/gallery-config-shared.ts apps/web/src/__tests__/gallery-config-semantic-production.test.ts
@@ -423,16 +425,16 @@ git pull --rebase && git push
 **Files:**
 - Modify: `apps/web/src/lib/gallery-config.ts` (the resolver that returns `semanticSearchMode`)
 
-- [ ] **Step 1: Find the type** — `rg -n "semanticSearchMode" apps/web/src/lib/gallery-config.ts`. It is typed `'disabled' | 'stub'`.
+- [x] **Step 1: Find the type** — `rg -n "semanticSearchMode" apps/web/src/lib/gallery-config.ts`. It is typed `'disabled' | 'stub'`.
 
-- [ ] **Step 2: Widen it** to `'disabled' | 'stub' | 'production'` at the resolver return type and any local annotation. If the resolver clamps/falls back unknown values to `'disabled'`, keep that — just add `'production'` to the allowed set so a stored `'production'` is preserved.
+- [x] **Step 2: Widen it** to `'disabled' | 'stub' | 'production'` at the resolver return type and any local annotation. If the resolver clamps/falls back unknown values to `'disabled'`, keep that — just add `'production'` to the allowed set so a stored `'production'` is preserved.
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run typecheck --workspace=apps/web`
 Expected: this surfaces every consumer that narrowed to `'disabled' | 'stub'` (route line 223, image-queue line 433) — those are fixed in Tasks 7 & 8. It is OK for typecheck to still flag those two until then; if you prefer green-at-every-commit, do Tasks 6+7+8 before this commit. Otherwise commit the type widening with a note.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/lib/gallery-config.ts
@@ -450,7 +452,7 @@ git pull --rebase && git push
 - Modify: `apps/web/src/app/api/search/semantic/route.ts`
 - Test: `apps/web/src/__tests__/semantic-route-production.test.ts`
 
-- [ ] **Step 1: Write the failing test** (mocks the encoder + db; asserts gate + filter):
+- [x] **Step 1: Write the failing test** (mocks the encoder + db; asserts gate + filter):
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -493,12 +495,12 @@ describe('semantic route — production', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/semantic-route-production.test.ts`
-Expected: FAIL (route still only serves `'stub'` and calls `embedTextStub`).
+Original expected result: FAIL (route still only serves `'stub'` and calls `embedTextStub`).
 
-- [ ] **Step 3: Edit the route.** Make these exact changes:
+- [x] **Step 3: Edit the route.** Make these exact changes:
 
 (a) Import the real encoder + production constants (after line 55):
 ```typescript
@@ -550,17 +552,17 @@ import { CLIP_MODEL_VERSION, PRODUCTION_MODEL_VERSION, PRODUCTION_COSINE_THRESHO
   const results = topK(scored, topKParam, activeThreshold);
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd apps/web && npx vitest run src/__tests__/semantic-route-production.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Run the existing route tests (no regression)**
+- [x] **Step 5: Run the existing route tests (no regression)**
 
 Run: `cd apps/web && npx vitest run src/__tests__/semantic-search-route.test.ts`
 Expected: PASS (stub path still 503s when disabled, serves when stub).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/app/api/search/semantic/route.ts apps/web/src/__tests__/semantic-route-production.test.ts
@@ -578,7 +580,7 @@ git pull --rebase && git push
 - Modify: `apps/web/src/lib/image-queue.ts` (lines 21–22 imports, 432–461 hook)
 - Test: `apps/web/src/__tests__/image-queue-embed-wiring.test.ts` (source-shape: hook calls the real encoder + writes the production version in production mode)
 
-- [ ] **Step 1: Write the failing wiring test**:
+- [x] **Step 1: Write the failing wiring test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -596,12 +598,12 @@ describe('upload embedding hook wiring', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/image-queue-embed-wiring.test.ts`
-Expected: FAIL.
+Original expected result: FAIL.
 
-- [ ] **Step 3: Edit the hook.** Imports (lines 21–22):
+- [x] **Step 3: Edit the hook.** Imports (lines 21–22):
 ```typescript
 import { embedImageStub } from '@/lib/clip-inference';
 import { embedImageReal } from '@/lib/clip-model';
@@ -633,12 +635,12 @@ Hook body (replace lines 440–456) — `job` carries the original path; use `UP
 ```
 (Confirm the original-filename field name on the queue job via `rg -n "filename_original|originalName|filename" apps/web/src/lib/image-queue.ts`; use the real field. Add `import { join } from 'path'` if not already imported.)
 
-- [ ] **Step 4: Run the wiring test + typecheck**
+- [x] **Step 4: Run the wiring test + typecheck**
 
 Run: `cd apps/web && npx vitest run src/__tests__/image-queue-embed-wiring.test.ts && npm run typecheck --workspace=apps/web`
 Expected: PASS + clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/image-queue.ts apps/web/src/__tests__/image-queue-embed-wiring.test.ts
@@ -652,7 +654,7 @@ git pull --rebase && git push
 - Modify: `apps/web/scripts/backfill-clip-embeddings.ts`
 - Test: `apps/web/src/__tests__/backfill-clip-embeddings-reembed.test.ts` (source-shape contract)
 
-- [ ] **Step 1: Write the failing test**:
+- [x] **Step 1: Write the failing test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -674,19 +676,19 @@ describe('backfill re-embed contract', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/backfill-clip-embeddings-reembed.test.ts`
-Expected: FAIL.
+Original expected result: FAIL.
 
-- [ ] **Step 3: Edit the backfill.** Add `--production` flag → use `embedImageReal(originalPath)` + `PRODUCTION_MODEL_VERSION`; otherwise keep stub. Change the selection so a row already embedded with a DIFFERENT model_version is re-embedded: replace the `notExists(...)` clause with a LEFT JOIN / `notExists` that also matches on the target `modelVersion` — i.e. select images where there is no embedding row with `model_version = <target>`. Delete `checkSemanticEnabled()` (it reads the obsolete `semantic_search_enabled` key); gate instead on `semantic_search_mode !== 'disabled'` via `getGalleryConfig()` (or keep `--force` to bypass). Resolve the original path the same way as the upload hook. Keep keyset pagination, BATCH_SIZE/CONCURRENCY, the `--rm` sidecar usage note.
+- [x] **Step 3: Edit the backfill.** Add `--production` flag → use `embedImageReal(originalPath)` + `PRODUCTION_MODEL_VERSION`; otherwise keep stub. Change the selection so a row already embedded with a DIFFERENT model_version is re-embedded: replace the `notExists(...)` clause with a LEFT JOIN / `notExists` that also matches on the target `modelVersion` — i.e. select images where there is no embedding row with `model_version = <target>`. Delete `checkSemanticEnabled()` (it reads the obsolete `semantic_search_enabled` key); gate instead on `semantic_search_mode !== 'disabled'` via `getGalleryConfig()` (or keep `--force` to bypass). Resolve the original path the same way as the upload hook. Keep keyset pagination, BATCH_SIZE/CONCURRENCY, the `--rm` sidecar usage note.
 
-- [ ] **Step 4: Run the test + typecheck**
+- [x] **Step 4: Run the test + typecheck**
 
 Run: `cd apps/web && npx vitest run src/__tests__/backfill-clip-embeddings-reembed.test.ts && npm run typecheck --workspace=apps/web`
 Expected: PASS + clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/scripts/backfill-clip-embeddings.ts apps/web/src/__tests__/backfill-clip-embeddings-reembed.test.ts
@@ -704,21 +706,21 @@ git pull --rebase && git push
 - Create: `apps/web/src/app/api/search/similar/[id]/route.ts`
 - Test: `apps/web/src/__tests__/similar-route.test.ts`
 
-- [ ] **Step 1: Write the failing test** — asserts: 403 without same-origin; 503 unless mode is `production`; excludes self; filters to `PRODUCTION_MODEL_VERSION`; returns `{ results: [...] }`. (Mock `@/db`, `@/lib/gallery-config`, `@/lib/request-origin` like Task 7; seed two rows, assert the queried row is excluded and the other returned.)
+- [x] **Step 1: Write the failing test** — asserts: 403 without same-origin; 503 unless mode is `production`; excludes self; filters to `PRODUCTION_MODEL_VERSION`; returns `{ results: [...] }`. (Mock `@/db`, `@/lib/gallery-config`, `@/lib/request-origin` like Task 7; seed two rows, assert the queried row is excluded and the other returned.)
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/similar-route.test.ts`
-Expected: FAIL (route does not exist).
+Original expected result: FAIL (route does not exist).
 
-- [ ] **Step 3: Implement the route.** GET handler keyed by `params.id`: same-origin + maintenance + rate-limit (reuse `preIncrementSemanticAttempt`); 503 unless `getGalleryConfig().semanticSearchMode === 'production'`; load the target row's embedding (filtered to `PRODUCTION_MODEL_VERSION`) → 404 if absent; scan the other `PRODUCTION_MODEL_VERSION` rows (limit `SEMANTIC_SCAN_LIMIT`), cosine, exclude self, `topK` above `PRODUCTION_COSINE_THRESHOLD`; enrich with the same image metadata SELECT/JOIN as the semantic route; return `{ results }` with `NO_STORE_HEADERS`. Reuse `cosineSimilarity`, `bufferToEmbedding`, `topK`, `EMBEDDING_BYTES`.
+- [x] **Step 3: Implement the route.** GET handler keyed by `params.id`: same-origin + maintenance + rate-limit (reuse `preIncrementSemanticAttempt`); 503 unless `getGalleryConfig().semanticSearchMode === 'production'`; load the target row's embedding (filtered to `PRODUCTION_MODEL_VERSION`) → 404 if absent; scan the other `PRODUCTION_MODEL_VERSION` rows (limit `SEMANTIC_SCAN_LIMIT`), cosine, exclude self, `topK` above `PRODUCTION_COSINE_THRESHOLD`; enrich with the same image metadata SELECT/JOIN as the semantic route; return `{ results }` with `NO_STORE_HEADERS`. Reuse `cosineSimilarity`, `bufferToEmbedding`, `topK`, `EMBEDDING_BYTES`.
 
-- [ ] **Step 4: Run the test + the public-route rate-limit lint** (new public POST/GET must satisfy the gate)
+- [x] **Step 4: Run the test + the public-route rate-limit lint** (new public POST/GET must satisfy the gate)
 
 Run: `cd apps/web && npx vitest run src/__tests__/similar-route.test.ts && npm run lint:public-route-rate-limit --workspace=apps/web`
 Expected: PASS. (Similar route is a public GET — rate-limit lint scans mutating handlers; if it flags, add the documented `@public-no-rate-limit-required` exemption with a reason OR keep the pre-increment. Follow whichever the existing semantic route uses.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add "apps/web/src/app/api/search/similar/[id]/route.ts" apps/web/src/__tests__/similar-route.test.ts
@@ -734,7 +736,7 @@ git pull --rebase && git push
 - Modify: `apps/web/messages/en.json`, `apps/web/messages/ko.json`
 - Test: `apps/web/src/__tests__/i18n-key-parity.test.ts` (already exists — must stay green after adding keys)
 
-- [ ] **Step 1: Add i18n keys** to the `search` object in BOTH files (en first):
+- [x] **Step 1: Add i18n keys** to the `search` object in BOTH files (en first):
 
 `en.json`:
 ```json
@@ -747,21 +749,21 @@ git pull --rebase && git push
     "similarEmpty": "비슷한 사진을 찾지 못했습니다."
 ```
 
-- [ ] **Step 2: Run the parity test to verify keys match**
+- [x] **Step 2: Run the parity test to verify keys match**
 
 Run: `cd apps/web && npx vitest run src/__tests__/i18n-key-parity.test.ts`
 Expected: PASS (same key set both files).
 
-- [ ] **Step 3: Create `similar-photos.tsx`** — a client component `('use client')` taking `imageId: number`; on mount (or on a "Similar photos" button click to avoid eager fetch) `fetch('/api/search/similar/' + imageId)`; render a small grid of result thumbnails linking to `/p/{id}`; render `t('search.similarEmpty')` when empty; section heading `t('search.similarPhotos')`. Any interactive control ≥ 44px (touch-target audit). Use `next-intl` `useTranslations` like sibling components.
+- [x] **Step 3: Create `similar-photos.tsx`** — a client component `('use client')` taking `imageId: number`; on mount (or on a "Similar photos" button click to avoid eager fetch) `fetch('/api/search/similar/' + imageId)`; render a small grid of result thumbnails linking to `/p/{id}`; render `t('search.similarEmpty')` when empty; section heading `t('search.similarPhotos')`. Any interactive control ≥ 44px (touch-target audit). Use `next-intl` `useTranslations` like sibling components.
 
-- [ ] **Step 4: Mount in `photo-viewer.tsx`** — render `<SimilarPhotos imageId={image.id} />` below the existing content (e.g. near `<ColorDetailsSection>`). Confirm the prop name for the image id via `rg -n "ColorDetailsSection|image\.id" apps/web/src/components/photo-viewer.tsx`.
+- [x] **Step 4: Mount in `photo-viewer.tsx`** — render `<SimilarPhotos imageId={image.id} />` below the existing content (e.g. near `<ColorDetailsSection>`). Confirm the prop name for the image id via `rg -n "ColorDetailsSection|image\.id" apps/web/src/components/photo-viewer.tsx`.
 
-- [ ] **Step 5: Run touch-target audit + typecheck + build smoke**
+- [x] **Step 5: Run touch-target audit + typecheck + build smoke**
 
 Run: `cd apps/web && npx vitest run src/__tests__/touch-target-audit.test.ts && npm run typecheck --workspace=apps/web`
 Expected: PASS + clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/similar-photos.tsx apps/web/src/components/photo-viewer.tsx apps/web/messages/en.json apps/web/messages/ko.json
@@ -779,7 +781,7 @@ git pull --rebase && git push
 - Modify: `apps/web/src/components/search.tsx` (lines 438–444)
 - Test: `apps/web/src/__tests__/search-disclaimer.test.ts` (source-shape contract)
 
-- [ ] **Step 1: Write the failing test**:
+- [x] **Step 1: Write the failing test**:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -794,19 +796,19 @@ describe('search disclaimer', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd apps/web && npx vitest run src/__tests__/search-disclaimer.test.ts`
-Expected: FAIL (hint currently renders for any non-disabled mode).
+Original expected result: FAIL (hint currently renders for any non-disabled mode).
 
-- [ ] **Step 3: Guard the disclaimer** (lines 442–444): wrap the `<p id="semantic-search-hint">…</p>` in `{semanticSearchMode === 'stub' && ( … )}`. Keep the toggle visible for both `stub` and `production` (the outer `!== 'disabled'` guard stays). If `aria-describedby="semantic-search-hint"` on the `<Switch>` now points to a sometimes-absent node, make the `aria-describedby` conditional on stub mode too.
+- [x] **Step 3: Guard the disclaimer** (lines 442–444): wrap the `<p id="semantic-search-hint">…</p>` in `{semanticSearchMode === 'stub' && ( … )}`. Keep the toggle visible for both `stub` and `production` (the outer `!== 'disabled'` guard stays). If `aria-describedby="semantic-search-hint"` on the `<Switch>` now points to a sometimes-absent node, make the `aria-describedby` conditional on stub mode too.
 
-- [ ] **Step 4: Run the test + touch-target audit**
+- [x] **Step 4: Run the test + touch-target audit**
 
 Run: `cd apps/web && npx vitest run src/__tests__/search-disclaimer.test.ts src/__tests__/touch-target-audit.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/search.tsx apps/web/src/__tests__/search-disclaimer.test.ts
@@ -823,22 +825,22 @@ git pull --rebase && git push
 **Files:**
 - Modify: `apps/web/Dockerfile` (deps stage ~44–51, prod-deps stage ~53–57, runner mkdir ~97)
 
-- [ ] **Step 1: Add `onnxruntime-node` platform binary to the `deps` stage** install list (mirroring the Sharp `TARGETARCH` pattern at lines 44–51), and ensure it is a production dependency in `apps/web/package.json` so the `prod-deps` stage (`npm ci --omit=dev`) includes it. (If Task 1 chose Transformers.js, `onnxruntime-node` is its transitive dep — still verify the linux binary is installed in both `deps` and `prod-deps`.)
+- [x] **Step 1: Add `onnxruntime-node` platform binary to the `deps` stage** install list (mirroring the Sharp `TARGETARCH` pattern at lines 44–51), and ensure it is a production dependency in `apps/web/package.json` so the `prod-deps` stage (`npm ci --omit=dev`) includes it. (If Task 1 chose Transformers.js, `onnxruntime-node` is its transitive dep — still verify the linux binary is installed in both `deps` and `prod-deps`.)
 
-- [ ] **Step 2: Create the model dir** in the runner `mkdir -p` (line ~97):
+- [x] **Step 2: Create the model dir** in the runner `mkdir -p` (line ~97):
 ```dockerfile
 RUN mkdir -p apps/web/public/uploads /app/data/uploads/original /app/data/models/clip apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
 ```
 Add `ENV CLIP_MODELS_ROOT="/app/data/models/clip"` near the other ENVs (line ~84). Weights are NOT copied into the image — they live on the `./data` bind mount (persisted, downloaded once via Task 2's script run on the host, or pre-seeded).
 
-- [ ] **Step 3: Local build smoke**
+- [x] **Step 3: Local build smoke**
 
 Run: `docker build -f apps/web/Dockerfile -t gk-clip-test ..` (from `apps/web`, context repo root)
 Expected: build succeeds; `onnxruntime-node` native binary present. (If build is too heavy locally, defer to the deploy build but inspect logs.)
 
-- [ ] **Step 4: Document the offline pre-seed** in CLAUDE.md (Color/HDR backfill section style): how to run `download-clip-models.ts` on the host into `apps/web/data/models/clip` before flipping to production, and that `./data/models` is bind-mounted (survives the deploy.sh auto-prune — bind mounts are never pruned).
+- [x] **Step 4: Document the offline pre-seed** in CLAUDE.md (Color/HDR backfill section style): how to run `download-clip-models.ts` on the host into `apps/web/data/models/clip` before flipping to production, and that `./data/models` is bind-mounted (survives the deploy.sh auto-prune — bind mounts are never pruned).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/Dockerfile apps/web/package.json apps/web/package-lock.json CLAUDE.md
@@ -857,16 +859,16 @@ git pull --rebase && git push
 - Modify: `apps/web/src/lib/clip-embeddings.ts` (`PRODUCTION_COSINE_THRESHOLD`)
 - Create: `apps/web/scripts/_calibrate-threshold.ts` (throwaway) OR a gated test
 
-- [ ] **Step 1: Add fixtures.** Commit 3–4 tiny (<50 KB) Creative-Commons/CC0 JPEGs with obvious content.
+- [x] **Step 1: Add fixtures.** Commit 3–4 tiny (<50 KB) Creative-Commons/CC0 JPEGs with obvious content.
 
-- [ ] **Step 2: Measure.** Write a throwaway script that embeds each fixture image + a matching ko phrase + a matching en phrase + 2 unrelated phrases, prints the cosine matrix.
+- [x] **Step 2: Measure.** Write a throwaway script that embeds each fixture image + a matching ko phrase + a matching en phrase + 2 unrelated phrases, prints the cosine matrix.
 
 Run: `cd apps/web && npx tsx scripts/_calibrate-threshold.ts`
 Expected: matching pairs cluster above a clear gap from non-matching pairs.
 
-- [ ] **Step 3: Set the threshold** to the midpoint of that gap (e.g. if matches ≥ 0.28 and non-matches ≤ 0.20, set `PRODUCTION_COSINE_THRESHOLD = 0.24`). Update the constant. Delete the throwaway script.
+- [x] **Step 3: Set the threshold** to the midpoint of that gap (e.g. if matches ≥ 0.28 and non-matches ≤ 0.20, set `PRODUCTION_COSINE_THRESHOLD = 0.24`). Update the constant. Delete the throwaway script.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/lib/clip-embeddings.ts apps/web/src/__tests__/fixtures/clip/
@@ -879,7 +881,7 @@ git pull --rebase && git push
 **Files:**
 - Create: `apps/web/src/__tests__/clip-semantic-integration.test.ts`
 
-- [ ] **Step 1: Write the test** — gated behind an env flag so default CI (no weights) skips, but it runs where weights exist:
+- [x] **Step 1: Write the test** — gated behind an env flag so default CI (no weights) skips, but it runs where weights exist:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -909,14 +911,14 @@ d('CLIP integration — real semantic ranking (ko + en)', () => {
 });
 ```
 
-- [ ] **Step 2: Run it WITH weights to verify it passes**
+- [x] **Step 2: Run it WITH weights to verify it passes**
 
 Run: `cd apps/web && CLIP_INTEGRATION=1 CLIP_MODELS_ROOT=data/models/clip npx vitest run src/__tests__/clip-semantic-integration.test.ts`
 Expected: PASS (both ko + en). This is the anti-vacuity proof — it FAILS against the stub encoder (random vectors).
 
-- [ ] **Step 3: Verify it FAILS against the stub** (sanity): temporarily point the test imports at `embedImageStub`/`embedTextStub`, confirm RED, revert. (Documents the test is non-vacuous; do not commit the temporary edit.)
+- [x] **Step 3: Verify it FAILS against the stub** (sanity): temporarily point the test imports at `embedImageStub`/`embedTextStub`, confirm RED, revert. (Documents the test is non-vacuous; do not commit the temporary edit.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/src/__tests__/clip-semantic-integration.test.ts
@@ -926,7 +928,7 @@ git pull --rebase && git push
 
 ### Task 16: Full gate sweep, backfill, flip to production, deploy
 
-- [ ] **Step 1: Run every gate green**
+- [x] **Step 1: Run every gate green**
 
 Run:
 ```bash
@@ -939,20 +941,20 @@ npm run test --workspace=apps/web
 ```
 Expected: all green. Fix any failure at root cause (no suppressions) and commit.
 
-- [ ] **Step 2: Deploy** (deploy.sh now auto-prunes Docker safely): `npm run deploy`. Expected: "Deployment Complete!", site 200.
+- [x] **Step 2: Deploy** (deploy.sh now auto-prunes Docker safely): `npm run deploy`. Expected: "Deployment Complete!", site 200.
 
-- [ ] **Step 3: Seed weights on the host** (one-time): run `download-clip-models.ts` into `apps/web/data/models/clip` on the deploy host (via the `--rm` sidecar pattern in CLAUDE.md, or directly since `data/` is a bind mount).
+- [x] **Step 3: Seed weights on the host** (one-time): run `download-clip-models.ts` into `apps/web/data/models/clip` on the deploy host (via the `--rm` sidecar pattern in CLAUDE.md, or directly since `data/` is a bind mount).
 
-- [ ] **Step 4: Backfill real embeddings** via the `--rm` sidecar:
+- [x] **Step 4: Backfill real embeddings** via the `--rm` sidecar:
 ```bash
 # on the host, off the just-built image, read-only source mounts (see CLAUDE.md Backfill)
 ... npx tsx scripts/backfill-clip-embeddings.ts --production
 ```
 Expected: every processed image gets a `PRODUCTION_MODEL_VERSION` embedding row; stub rows superseded.
 
-- [ ] **Step 5: Flip the admin setting** `semantic_search_mode` → `production` in Admin → Settings. Verify: the search box no longer shows the experimental disclaimer; a Korean and an English query return relevant photos; "similar photos" works on a photo page.
+- [x] **Step 5: Flip the admin setting** `semantic_search_mode` → `production` in Admin → Settings. Verify: the search box no longer shows the experimental disclaimer; a Korean and an English query return relevant photos; "similar photos" works on a photo page.
 
-- [ ] **Step 6: Final commit if any gate fixes were needed**, then confirm `master` is in sync and deployed.
+- [x] **Step 6: Final commit if any gate fixes were needed**, then confirm `master` is in sync and deployed.
 
 ---
 

@@ -1,6 +1,8 @@
 import { test, expect, type Locator } from '@playwright/test';
 import { ensureEnglishLocale, expectNoNextError } from './helpers';
 
+const themeButtonName = /^Theme: .* Switch to .*[.]$/;
+
 async function expectVisibleNavTargetsAreStable(nav: Locator) {
   const metrics = await nav.locator('a,button').evaluateAll((elements) => elements
     .map((element) => {
@@ -71,7 +73,7 @@ test.describe('Nav visual checks', () => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
     await expect(nav).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
+    await expect(nav.getByRole('button', { name: themeButtonName })).toBeVisible();
     await expectVisibleNavTargetsAreStable(nav);
     await page.screenshot({ path: 'test-results/nav-desktop.png', fullPage: false });
   });

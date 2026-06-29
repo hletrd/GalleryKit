@@ -1396,10 +1396,9 @@ export const getSmartCollectionBySlugCached = cache(getSmartCollectionBySlug);
  * `Number(...) → NaN → 0` and re-served page 1 forever. The cursor
  * predicate is provably order-compatible: this query uses the exact
  * `capture_date DESC, created_at DESC, id DESC` triple that
- * `buildCursorCondition` was written against. The cursor path keeps the
- * `COUNT(*) OVER()` column the offset path needs (callers discard
- * `totalCount` on cursor pages) — forking the select shape for that
- * micro-win was explicitly rejected (perf/architect, run4-cycle5).
+ * `buildCursorCondition` was written against. The cursor path intentionally
+ * skips the `COUNT(*) OVER()` column because load-more callers only need rows
+ * plus `hasMore`; offset/initial pages keep the total count.
  */
 export async function getImagesForSmartCollection(
     compiledCondition: SQL,
@@ -1407,6 +1406,28 @@ export async function getImagesForSmartCollection(
     offsetOrCursor: number | ImageListCursorInput = 0,
 ) {
     const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
+
+    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
+    const cursorCondition = normalizedCursor ? buildCursorCondition(normalizedCursor) : undefined;
+
+    if (normalizedCursor) {
+        const rows = await db.select({
+            ...publicSelectFields,
+            tag_names: tagNamesAgg,
+        })
+            .from(images)
+            .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+            .leftJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(and(compiledCondition, eq(images.processed, true), cursorCondition))
+            .groupBy(images.id)
+            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
+            .limit(normalizedPageSize + 1);
+        return {
+            images: rows.slice(0, normalizedPageSize),
+            totalCount: 0,
+            hasMore: rows.length > normalizedPageSize,
+        };
+    }
 
     const baseQuery = db.select({
         ...publicSelectFields,
@@ -1419,13 +1440,10 @@ export async function getImagesForSmartCollection(
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
-    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
-    const cursorCondition = normalizedCursor ? buildCursorCondition(normalizedCursor) : undefined;
-    const query = baseQuery.where(and(compiledCondition, eq(images.processed, true), cursorCondition));
-    const limited = query.limit(normalizedPageSize + 1);
-    const rows = normalizedCursor
-        ? await limited
-        : await limited.offset(Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0));
+    const query = baseQuery.where(and(compiledCondition, eq(images.processed, true)));
+    const rows = await query
+        .limit(normalizedPageSize + 1)
+        .offset(Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0));
     const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
 
     return {

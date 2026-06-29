@@ -3,6 +3,7 @@ import { ensureEnglishLocale, expectNoNextError } from './helpers';
 
 const MOBILE = { width: 375, height: 812 };
 const DESKTOP = { width: 1280, height: 800 };
+const themeButtonName = /^Theme: .* Switch to .*[.]$/;
 
 async function openFirstPhoto(page: import('@playwright/test').Page) {
   await ensureEnglishLocale(page);
@@ -21,11 +22,11 @@ test('mobile nav keeps secondary controls hidden until expanded', async ({ page 
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav).toBeVisible();
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
-  await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeHidden();
+  await expect(nav.getByRole('button', { name: themeButtonName })).toBeHidden();
 
   await nav.getByRole('button', { name: 'Expand menu' }).click();
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
-  await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
+  await expect(nav.getByRole('button', { name: themeButtonName })).toBeVisible();
   await expect(nav.locator('button, a').filter({ hasText: 'KO' }).first()).toBeVisible();
 });
 
@@ -37,7 +38,11 @@ test('desktop nav keeps search, theme, and locale controls visible', async ({ pa
 
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
-  await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
+  const themeButton = nav.getByRole('button', { name: themeButtonName });
+  await expect(themeButton).toBeVisible();
+  const beforeName = await themeButton.getAttribute('aria-label');
+  await themeButton.click();
+  await expect(themeButton).not.toHaveAttribute('aria-label', beforeName ?? '');
   await expect(nav.locator('button, a').filter({ hasText: 'KO' }).first()).toBeVisible();
 });
 

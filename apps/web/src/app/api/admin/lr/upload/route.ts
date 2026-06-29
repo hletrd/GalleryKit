@@ -19,8 +19,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { withAdminAuth } from '@/lib/api-auth';
-import { verifyToken } from '@/lib/admin-tokens';
+import { getAdminAuthToken, withAdminAuth } from '@/lib/api-auth';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
@@ -56,28 +55,95 @@ export const runtime = 'nodejs';
 
 export const POST = withAdminAuth(
     async function POST(request: NextRequest) {
-        // Re-verify the X-GalleryKit-Token to access userId for audit
-        // logging. The withAdminAuth wrapper already verified scope and
-        // gated entry; this second verifyToken pass is type-safe (avoids
-        // augmenting the route handler's signature with a non-Next.js
-        // second parameter) and cheap (one sha256 + one indexed lookup).
-        // Cookie-authenticated requests (no header) leave tokenUserId null.
-        const tokenHeader = request.headers.get('X-GalleryKit-Token');
-        const verified = tokenHeader ? await verifyToken(tokenHeader) : null;
-        const tokenUserId = verified?.userId ?? null;
+        // The withAdminAuth wrapper already verified token scope and passes the
+        // accepted token through request-scoped context. Using that avoids re-verifying
+        // and double-touching last_used_at on successful PAT uploads.
+        const tokenUserId = getAdminAuthToken(request)?.userId ?? null;
         const ip = getClientIp(request.headers);
+
+        if (isRestoreMaintenanceActive()) {
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
+        }
+
+        const transferEncoding = request.headers.get('transfer-encoding');
+        if (transferEncoding && transferEncoding.toLowerCase().includes('chunked')) {
+            return NextResponse.json(
+                { error: 'Content-Length is required for Lightroom uploads' },
+                { status: 411, headers: NO_CACHE },
+            );
+        }
+
+        const contentLengthHeader = request.headers.get('content-length');
+        const declaredUploadBytes = contentLengthHeader ? Number(contentLengthHeader) : NaN;
+        if (!Number.isSafeInteger(declaredUploadBytes) || declaredUploadBytes <= 0) {
+            return NextResponse.json(
+                { error: 'Content-Length is required for Lightroom uploads' },
+                { status: 411, headers: NO_CACHE },
+            );
+        }
+        if (declaredUploadBytes > MAX_TOTAL_UPLOAD_BYTES) {
+            return NextResponse.json(
+                { error: 'Cumulative upload size exceeded; retry later' },
+                { status: 429, headers: NO_CACHE },
+            );
+        }
+
+        const trackerKey = `lr:${tokenUserId ?? ip}`;
+        const uploadTracker = getUploadTracker();
+        pruneUploadTracker();
+        let tracker = uploadTracker.get(trackerKey);
+        if (!tracker) {
+            tracker = { count: 0, bytes: 0, windowStart: Date.now() };
+            uploadTracker.set(trackerKey, tracker);
+        }
+        resetUploadTrackerWindowIfExpired(tracker, Date.now());
+        if (tracker.count + 1 > UPLOAD_MAX_FILES_PER_WINDOW) {
+            return NextResponse.json(
+                { error: 'Upload limit reached; retry later' },
+                { status: 429, headers: NO_CACHE },
+            );
+        }
+        if (tracker.bytes + declaredUploadBytes > MAX_TOTAL_UPLOAD_BYTES) {
+            return NextResponse.json(
+                { error: 'Cumulative upload size exceeded; retry later' },
+                { status: 429, headers: NO_CACHE },
+            );
+        }
+        tracker.count += 1;
+        tracker.bytes += declaredUploadBytes;
+        uploadTracker.set(trackerKey, tracker);
+
+        let trackerSettled = false;
+        const settleTrackerToActual = (success: boolean, actualBytes: number = 0) => {
+            if (trackerSettled) return;
+            trackerSettled = true;
+            settleUploadTrackerClaim(
+                uploadTracker,
+                trackerKey,
+                1,
+                declaredUploadBytes,
+                success ? 1 : 0,
+                success ? actualBytes : 0,
+            );
+        };
 
         let formData: FormData;
         try {
             formData = await request.formData();
         } catch {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid multipart body' }, { status: 400, headers: NO_CACHE });
         }
 
         const fileEntry = formData.get('file');
         if (!(fileEntry instanceof File)) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Missing file field' }, { status: 400, headers: NO_CACHE });
         }
+        const fileSize = fileEntry.size;
 
         // R4C1 COR-R4C1-03: mirror the browser path's user-filename guard
         // (app/actions/images.ts → getSafeUserFilename, C2L2-03/C2L2-05).
@@ -88,11 +154,13 @@ export const POST = withAdminAuth(
         // budget for the varchar(255) column.
         const safeUserFilename = getSafeUserFilename(fileEntry.name);
         if (!safeUserFilename) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid filename' }, { status: 400, headers: NO_CACHE });
         }
 
         const topicSlug = formData.get('topic')?.toString().trim() ?? '';
         if (!topicSlug || !isValidSlug(topicSlug)) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid or missing topic slug' }, { status: 400, headers: NO_CACHE });
         }
 
@@ -101,6 +169,7 @@ export const POST = withAdminAuth(
             ? sanitizeAdminString(rawTitle)
             : { value: null, rejected: false };
         if (titleRejected) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid title' }, { status: 400, headers: NO_CACHE });
         }
         const rawDesc = formData.get('description')?.toString() ?? null;
@@ -108,6 +177,7 @@ export const POST = withAdminAuth(
             ? sanitizeAdminString(rawDesc)
             : { value: null, rejected: false };
         if (descRejected) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid description' }, { status: 400, headers: NO_CACHE });
         }
 
@@ -117,9 +187,11 @@ export const POST = withAdminAuth(
         // UTF-16 `.slice()` that can bisect a surrogate pair (trailing
         // U+FFFD mojibake on the photographer's caption).
         if (title && countCodePoints(title) > 255) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Title too long (max 255 characters)' }, { status: 400, headers: NO_CACHE });
         }
         if (description && countCodePoints(description) > 5000) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Description too long (max 5000 characters)' }, { status: 400, headers: NO_CACHE });
         }
 
@@ -129,22 +201,8 @@ export const POST = withAdminAuth(
             .where(eq(topics.slug, topicSlug))
             .limit(1);
         if (!topicRow) {
+            settleTrackerToActual(false);
             return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
-        }
-
-        // Run-3 RPF cycle 4 / F1 (DEF-C4-01): mirror the browser upload path's
-        // restore-maintenance entry guard (app/actions/images.ts:122-125). While
-        // a DB restore is in progress the writer is frozen; accepting an upload
-        // here would write an on-disk original and (post-lock) an `images` row
-        // that the restore then wipes, orphaning the file. The single-writer
-        // topology (CLAUDE.md "Runtime topology") makes this a process-local
-        // flag, shared by both ingest entrypoints. 503 = service temporarily
-        // unavailable; the Lightroom plugin retries.
-        if (isRestoreMaintenanceActive()) {
-            return NextResponse.json(
-                { error: 'Restore in progress; retry shortly' },
-                { status: 503, headers: NO_CACHE },
-            );
         }
 
         // Run-3 RPF cycle 3 / F3 (CR-C3-01): acquire the upload-processing
@@ -158,6 +216,7 @@ export const POST = withAdminAuth(
         // the lock-once guarantee on the primary non-browser ingest path.
         const uploadContractLock = await acquireUploadProcessingContractLock();
         if (!uploadContractLock) {
+            settleTrackerToActual(false);
             return NextResponse.json(
                 { error: 'Upload settings are being changed; retry shortly' },
                 { status: 409, headers: NO_CACHE },
@@ -184,6 +243,7 @@ export const POST = withAdminAuth(
                 // Mirrors the browser path (images.ts).
                 const freeBytes = stats.bavail * stats.bsize;
                 if (freeBytes < 1024 * 1024 * 1024) {
+                    settleTrackerToActual(false);
                     return NextResponse.json(
                         { error: 'Insufficient disk space' },
                         { status: 507, headers: NO_CACHE },
@@ -191,69 +251,12 @@ export const POST = withAdminAuth(
                 }
             } catch (err) {
                 console.error('LR upload: failed to inspect upload disk space', err);
+                settleTrackerToActual(false);
                 return NextResponse.json(
                     { error: 'Insufficient disk space' },
                     { status: 507, headers: NO_CACHE },
                 );
             }
-
-            // Run-3 RPF cycle 4 / F3 (DEF-C4-03): mirror the browser upload
-            // path's cumulative upload-tracker window (app/actions/images.ts:
-            // 183-237, 259-265, settle at 497/519). The per-file 200 MB cap and
-            // Sharp limitInputPixels already bound abuse, but this closes the
-            // last divergence so both ingress paths share identical cumulative
-            // limits. PAT requests are single-file, so claimedCount = 1 and
-            // claimedBytes = fileEntry.size. Key on the verified token user (or
-            // IP for the cookie fallback) so a single photographer's PAT cannot
-            // exceed the window. On any pre-save reject the claim is settled back
-            // to zero; on success it is settled to the actual upload.
-            const trackerKey = `lr:${tokenUserId ?? ip}`;
-            const uploadTracker = getUploadTracker();
-            pruneUploadTracker();
-            let tracker = uploadTracker.get(trackerKey);
-            if (!tracker) {
-                tracker = { count: 0, bytes: 0, windowStart: Date.now() };
-                uploadTracker.set(trackerKey, tracker);
-            }
-            resetUploadTrackerWindowIfExpired(tracker, Date.now());
-            if (tracker.count + 1 > UPLOAD_MAX_FILES_PER_WINDOW) {
-                return NextResponse.json(
-                    { error: 'Upload limit reached; retry later' },
-                    { status: 429, headers: NO_CACHE },
-                );
-            }
-            const fileSize = fileEntry.size;
-            if (fileSize > MAX_TOTAL_UPLOAD_BYTES || tracker.bytes + fileSize > MAX_TOTAL_UPLOAD_BYTES) {
-                return NextResponse.json(
-                    { error: 'Cumulative upload size exceeded; retry later' },
-                    { status: 429, headers: NO_CACHE },
-                );
-            }
-            // Pre-claim the quota before the save so concurrent PAT requests
-            // from the same token cannot all read the same tracker state and
-            // bypass the window (TOCTOU parity with images.ts:259-265). Settled
-            // back down on every pre-success return below.
-            tracker.count += 1;
-            tracker.bytes += fileSize;
-            uploadTracker.set(trackerKey, tracker);
-            // R4C4 COR-R4C4-03: idempotent settle — the widened containment
-            // catch below may run after a reject branch already settled (e.g.
-            // a throw following the HDR-reject's own settle). A double settle
-            // of the same claim would steal quota from OTHER concurrent
-            // claims under this key, so the closure settles at most once.
-            let trackerSettled = false;
-            const settleTrackerToActual = (success: boolean) => {
-                if (trackerSettled) return;
-                trackerSettled = true;
-                settleUploadTrackerClaim(
-                    uploadTracker,
-                    trackerKey,
-                    1,
-                    fileSize,
-                    success ? 1 : 0,
-                    success ? fileSize : 0,
-                );
-            };
 
             let data: Awaited<ReturnType<typeof saveOriginalAndGetMetadata>>;
             try {
@@ -420,7 +423,7 @@ export const POST = withAdminAuth(
         // (1 file, fileSize bytes). Identity settle here, but kept explicit so
         // the claim/settle pairing is symmetric with the browser path and the
         // reject branches above.
-        settleTrackerToActual(true);
+        settleTrackerToActual(true, fileSize);
 
         enqueueImageProcessing({
             id: imageId,

@@ -117,7 +117,7 @@ COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 # Create persistence directories and cache.
 # /app/data/models/clip is created here so the path exists even before the
 # ./data bind mount is populated; the actual weights are seeded on the host.
-RUN mkdir -p apps/web/public/uploads /app/data/uploads/original /app/data/models/clip apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
+RUN mkdir -p apps/web/public/uploads apps/web/public/resources /app/data/uploads/original /app/data/models/clip apps/web/.next/cache && chown -R node:node apps/web/public/uploads apps/web/public/resources /app/data apps/web/.next
 
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh

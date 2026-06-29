@@ -44,8 +44,9 @@ describe('nginx production edge hardening', () => {
         expect(composeConfig).toContain('HOSTNAME: 127.0.0.1');
     });
 
-    it('mounts only mutable public uploads so built assets come from the image', () => {
+    it('mounts only mutable public subdirectories so built assets come from the image', () => {
         expect(composeConfig).toContain('./public/uploads:/app/apps/web/public/uploads');
+        expect(composeConfig).toContain('./public/resources:/app/apps/web/public/resources');
         expect(composeConfig).not.toContain('./public:/app/apps/web/public');
     });
 });

@@ -2,7 +2,7 @@
  * US-P53 — unit tests for admin-tokens lib.
  * Covers: generateToken format, hashToken determinism, tokenHashesEqual
  * constant-time comparison, isWellFormedToken, normalizeScopes,
- * tokenHasScope, and verifyToken (mocked DB).
+ * tokenHasScope, verifyToken, and markTokenUsed (mocked DB).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -246,6 +246,15 @@ describe('verifyToken', () => {
         expect(result?.userId).toBe(42);
         expect(result?.scopes).toContain('lr:upload');
         expect(result?.scopes).toContain('lr:read');
+        expect(mockExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it('markTokenUsed updates last_used_at explicitly', async () => {
+        mockExecute.mockResolvedValue([{}, []]);
+        const { markTokenUsed } = await import('@/lib/admin-tokens');
+        await markTokenUsed(7);
+        expect(mockExecute).toHaveBeenCalledTimes(1);
+        expect(mockExecute.mock.calls[0][0]).toBeDefined();
     });
 
     it('scope enforcement: upload route requires lr:upload', async () => {
@@ -268,5 +277,6 @@ describe('verifyToken', () => {
         const { tokenHasScope: ths } = await import('@/lib/admin-tokens');
         expect(ths(verified!.scopes, 'lr:upload')).toBe(false);
         expect(ths(verified!.scopes, 'lr:read')).toBe(true);
+        expect(mockExecute).toHaveBeenCalledTimes(1);
     });
 });

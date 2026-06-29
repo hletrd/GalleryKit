@@ -8,6 +8,9 @@ fi
 if [ "$(stat -c '%U' /app/apps/web/public/uploads 2>/dev/null || echo root)" != "node" ]; then
     chown -R node:node /app/apps/web/public/uploads
 fi
+if [ "$(stat -c '%U' /app/apps/web/public/resources 2>/dev/null || echo root)" != "node" ]; then
+    chown -R node:node /app/apps/web/public/resources
+fi
 
 # Ensure .next folder exists and has correct permissions
 # Create cache directory explicitly to avoid runtime EACCES

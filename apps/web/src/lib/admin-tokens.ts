@@ -127,7 +127,8 @@ function parseScopes(raw: string | null): AdminTokenScope[] {
 /**
  * Look up a token by its presented plaintext value and return the verified
  * record on success. Returns null on any failure (bad format, unknown hash,
- * expired). On success, asynchronously updates `last_used_at` (best-effort).
+ * expired). This function is side-effect-free; callers should mark usage only
+ * after any route-specific scope check succeeds.
  *
  * The presented plaintext is hashed locally and the lookup is done by hash;
  * the plaintext never reaches a query parameter, so no plaintext appears in
@@ -154,15 +155,19 @@ export async function verifyToken(plaintext: string): Promise<VerifiedToken | nu
     if (!tokenHashesEqual(row.token_hash, presentedHash)) return null;
     if (row.expires_at && row.expires_at.getTime() <= Date.now()) return null;
 
-    // Best-effort touch of last_used_at; never block verification on it.
-    db.execute(sql`UPDATE admin_tokens SET last_used_at = NOW() WHERE id = ${row.id}`)
-        .catch((err: unknown) => { console.debug('admin_tokens last_used_at update failed', err); });
-
     return {
         id: row.id,
         userId: row.user_id,
         scopes: parseScopes(row.scopes),
     };
+}
+
+export async function markTokenUsed(tokenId: number): Promise<void> {
+    try {
+        await db.execute(sql`UPDATE admin_tokens SET last_used_at = NOW() WHERE id = ${tokenId}`);
+    } catch (err: unknown) {
+        console.debug('admin_tokens last_used_at update failed', err);
+    }
 }
 
 /** List tokens for an admin user. Returns [] if the table is missing. */

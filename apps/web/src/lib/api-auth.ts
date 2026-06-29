@@ -2,7 +2,7 @@ import { isAdmin } from '@/app/actions/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { getTranslations } from 'next-intl/server';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
-import { verifyToken, tokenHasScope, type AdminTokenScope, type VerifiedToken } from '@/lib/admin-tokens';
+import { verifyToken, markTokenUsed, tokenHasScope, type AdminTokenScope, type VerifiedToken } from '@/lib/admin-tokens';
 
 const NO_STORE_HEADERS = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -12,6 +12,11 @@ const NO_STORE_HEADERS = {
 };
 
 const TOKEN_HEADER = 'x-gallerykit-token';
+const requestTokenContext = new WeakMap<NextRequest, VerifiedToken>();
+
+export function getAdminAuthToken(request: NextRequest): VerifiedToken | undefined {
+    return requestTokenContext.get(request);
+}
 
 export interface WithAdminAuthOptions {
     /**
@@ -65,8 +70,15 @@ export function withAdminAuth<T extends unknown[]>(
             if (presented) {
                 const verified = await verifyToken(presented);
                 if (verified && tokenHasScope(verified.scopes, options.allowTokenScope)) {
-                    const augmentedArgs = [...args, { token: verified }] as unknown as T;
-                    const response = await handler(...augmentedArgs);
+                    await markTokenUsed(verified.id);
+                    requestTokenContext.set(request, verified);
+                    const response = await (async () => {
+                        try {
+                            return await handler(...args);
+                        } finally {
+                            requestTokenContext.delete(request);
+                        }
+                    })();
                     // R4C3 SEC-R4C3-04: mirror the cookie path's C7-SEC-02
                     // defense-in-depth defaults. Token-authenticated responses
                     // are admin-grade too; the first lr:read route that

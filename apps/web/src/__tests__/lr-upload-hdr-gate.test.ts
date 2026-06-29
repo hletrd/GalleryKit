@@ -173,11 +173,17 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         );
     });
 
-    it('guards entry on isRestoreMaintenanceActive before the DB insert (DEF-C4-01)', () => {
+    it('guards entry on isRestoreMaintenanceActive before body parsing and DB work (DEF-C4-01)', () => {
         const guardIndex = LR_SRC.search(/if\s*\(\s*isRestoreMaintenanceActive\(\)\s*\)/);
+        const formDataIndex = LR_SRC.indexOf('request.formData()');
+        const topicSelectIndex = LR_SRC.indexOf('db.select({ slug: topics.slug })');
         const insertIndex = LR_SRC.indexOf('db.insert(images)');
         expect(guardIndex).toBeGreaterThan(-1);
+        expect(formDataIndex).toBeGreaterThan(-1);
+        expect(topicSelectIndex).toBeGreaterThan(-1);
         expect(insertIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeLessThan(formDataIndex);
+        expect(guardIndex).toBeLessThan(topicSelectIndex);
         expect(guardIndex).toBeLessThan(insertIndex);
     });
 
@@ -226,9 +232,17 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         );
     });
 
-    it('enforces the cumulative count and byte windows (DEF-C4-03)', () => {
+    it('enforces the cumulative count and byte windows before body parsing (DEF-C4-03)', () => {
+        expect(LR_SRC).toMatch(/request\.headers\.get\(['"]content-length['"]\)/);
+        expect(LR_SRC).toMatch(/request\.headers\.get\(['"]transfer-encoding['"]\)/);
+        expect(LR_SRC).toMatch(/declaredUploadBytes\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
         expect(LR_SRC).toMatch(/tracker\.count\s*\+\s*1\s*>\s*UPLOAD_MAX_FILES_PER_WINDOW/);
-        expect(LR_SRC).toMatch(/tracker\.bytes\s*\+\s*fileSize\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
+        expect(LR_SRC).toMatch(/tracker\.bytes\s*\+\s*declaredUploadBytes\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
+        const trackerIndex = LR_SRC.indexOf('tracker.count += 1');
+        const formDataIndex = LR_SRC.indexOf('request.formData()');
+        expect(trackerIndex).toBeGreaterThan(-1);
+        expect(formDataIndex).toBeGreaterThan(-1);
+        expect(trackerIndex).toBeLessThan(formDataIndex);
     });
 
     it('settles the tracker claim back down on a pre-success reject (DEF-C4-03)', () => {
@@ -237,7 +251,12 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         // permanently consuming the window.
         expect(LR_SRC).toMatch(/settleUploadTrackerClaim\(/);
         expect(LR_SRC).toMatch(/settleTrackerToActual\(false\)/);
-        expect(LR_SRC).toMatch(/settleTrackerToActual\(true\)/);
+        expect(LR_SRC).toMatch(/settleTrackerToActual\(true,\s*fileSize\)/);
+    });
+
+    it('uses the auth-wrapper token context instead of re-verifying the PAT', () => {
+        expect(LR_SRC).not.toMatch(/verifyToken/);
+        expect(LR_SRC).toMatch(/getAdminAuthToken\(request\)\?\.userId/);
     });
 });
 

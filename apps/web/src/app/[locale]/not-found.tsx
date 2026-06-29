@@ -10,17 +10,13 @@ import { localizePath } from '@/lib/locale-path';
 // reproduces the public layout shell so users can navigate to topics,
 // search, switch locale, etc., even from a dead-end URL.
 export default async function NotFound() {
-  const [t, common, locale] = await Promise.all([
+  const [t, locale] = await Promise.all([
     getTranslations('notFound'),
-    getTranslations('common'),
     getLocale(),
   ]);
 
   return (
     <>
-      <a href="#main-content" className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-4 focus-visible:left-4 focus-visible:z-50 focus-visible:px-4 focus-visible:py-2 focus-visible:bg-primary focus-visible:text-primary-foreground focus-visible:rounded-md">
-        {common('skipToContent')}
-      </a>
       <Nav />
       <main
         id="main-content"

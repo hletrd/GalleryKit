@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog';
 
 export function TokensClient() {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [tokens, setTokens] = useState<LrTokenListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [isPending, startTransition] = useTransition();
@@ -90,6 +90,11 @@ export function TokensClient() {
             toast.error(t('lrToken.copyFailed'));
         });
     };
+    const formatTokenDate = (value: string | Date) => new Date(value).toLocaleDateString(locale, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
 
     return (
         <div className="space-y-4">
@@ -105,8 +110,9 @@ export function TokensClient() {
             </div>
 
             {loading ? (
-                <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+                    <span className="sr-only">{t('lrToken.loading')}</span>
                 </div>
             ) : tokens.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
@@ -120,12 +126,12 @@ export function TokensClient() {
                             <div className="min-w-0">
                                 <p className="truncate font-medium text-sm">{token.label}</p>
                                 <p className="text-xs text-muted-foreground">
-                                    {t('lrToken.created')}: {new Date(token.createdAt).toLocaleDateString()}
+                                    {t('lrToken.created')}: {formatTokenDate(token.createdAt)}
                                     {token.lastUsedAt && (
-                                        <> &middot; {t('lrToken.lastUsed')}: {new Date(token.lastUsedAt).toLocaleDateString()}</>
+                                        <> &middot; {t('lrToken.lastUsed')}: {formatTokenDate(token.lastUsedAt)}</>
                                     )}
                                     {token.expiresAt && (
-                                        <> &middot; {t('lrToken.expires')}: {new Date(token.expiresAt).toLocaleDateString()}</>
+                                        <> &middot; {t('lrToken.expires')}: {formatTokenDate(token.expiresAt)}</>
                                     )}
                                 </p>
                                 <p className="text-xs text-muted-foreground">{token.scopes.join(', ')}</p>

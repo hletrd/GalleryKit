@@ -38,8 +38,10 @@ docker compose -f apps/web/docker-compose.yml up -d --build
 # DATA SAFETY — in-use data is NEVER deleted, guaranteed three ways:
 #   1. GalleryKit persistence is BIND MOUNTS, not Docker volumes:
 #        ./data  -> /app/data                  (originals + DB backups)
-#        ./public -> /app/apps/web/public       (processed derivatives)
+#        ./public/uploads -> /app/apps/web/public/uploads       (processed derivatives)
+#        ./public/resources -> /app/apps/web/public/resources   (topic covers)
 #        ./src/site-config.json                 (config, read-only)
+#      Other immutable public assets come from the freshly built image.
 #      Bind mounts are host directories; `docker volume prune` cannot touch them.
 #   2. MySQL runs on the host (network_mode: host, 127.0.0.1) — there is no DB
 #      Docker volume to prune.
@@ -57,4 +59,4 @@ df -h / || true                       # report remaining disk so a near-full hos
 
 echo "Deployment Complete!"
 echo "App is running at http://localhost:3000"
-echo "Data is persisted under apps/web/data and apps/web/public"
+echo "Data is persisted under apps/web/data, apps/web/public/uploads, and apps/web/public/resources"

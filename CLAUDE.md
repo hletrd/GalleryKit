@@ -36,6 +36,7 @@ gallerykit/
 │   │   └── i18n/             # Internationalization config
 │   ├── messages/             # Translation files (en.json, ko.json)
 │   ├── public/uploads/       # Processed public image derivatives (PERSISTENT)
+│   ├── public/resources/     # Runtime topic cover resources (PERSISTENT)
 │   ├── scripts/              # DB init, migration, seed scripts
 │   ├── drizzle/              # Database migrations
 │   ├── Dockerfile            # Multi-stage production build
@@ -457,7 +458,7 @@ The deploy host has 124 G total. Repeated deploys accumulate Docker images + bui
 
 **`apps/web/deploy.sh` now auto-prunes after every deploy** so the host stays clean without manual intervention. Immediately after `docker compose up -d --build` it runs `docker container prune -f`, `docker image prune -af`, `docker builder prune -af`, and `docker volume prune -f`, then prints `df -h /`. The prune runs AFTER the stack is back up, so the live `gallerykit-web` container + its just-built image are in-use and survive it.
 
-**In-use data is never deleted — guaranteed by the persistence model, not by luck:** GalleryKit persistence is BIND MOUNTS (`./data` → originals + DB backups, `./public` → derivatives, `./src/site-config.json`), which are host directories `docker volume prune` cannot touch; and MySQL runs on the host (`network_mode: host`, 127.0.0.1), so there is no DB Docker volume. The automatic volume prune deliberately omits `-a` (anonymous/dangling volumes only, never named volumes). When changing the deploy prune logic, preserve all three guarantees: prune-after-`up`, bind-mounted data, and no `-a` on the automatic `volume prune`.
+**In-use data is never deleted — guaranteed by the persistence model, not by luck:** GalleryKit persistence is BIND MOUNTS (`./data` → originals + DB backups, `./public/uploads` → processed derivatives, `./public/resources` → topic cover resources, `./src/site-config.json` → config), which are host directories `docker volume prune` cannot touch; immutable public assets such as `sw.js`, icons, fonts, and workers come from the freshly built image. MySQL runs on the host (`network_mode: host`, 127.0.0.1), so there is no DB Docker volume. The automatic volume prune deliberately omits `-a` (anonymous/dangling volumes only, never named volumes). When changing the deploy prune logic, preserve all three guarantees: prune-after-`up`, bind-mounted data, and no `-a` on the automatic `volume prune`.
 
 If the host is ALREADY wedged at 100 % (so a deploy can't even `git pull`), free disk manually first, then re-deploy:
 
@@ -472,7 +473,7 @@ df -h /
 
 The running `gallerykit-web` container's image survives `docker image prune -af` because `-a` only removes unused images.
 
-**Real incident (2026-06-17) — userspace starvation past the point of SSH recovery:** disk exhaustion once wedged the host so hard that userspace itself was starved — `nginx`, `sshd`, AND the Node app all stopped responding at the application layer while TCP handshakes on `:443` / `:22` still completed (kernel/network alive, userspace blocked). `ssh` hung at "banner exchange" even with a 60 s `ConnectTimeout`, so the manual `ssh … && docker prune` recovery above was UNREACHABLE. Recovery was a **block-volume resize** — the host self-healed once disk pressure lifted (no reboot needed, no data loss; bind-mounted `./data` + `./public` + host MySQL were never at risk; the filesystem now reports 124 G at ~21 % used). Lesson: if the host is starved past the point where `ssh` can return a shell, the prune recovery cannot run — use the cloud provider's **console / serial console (or resize the block volume)** to relieve disk first, then prune. The per-deploy auto-prune is the primary prevention; watch the `df -h /` line in the deploy logs for a host trending toward full.
+**Real incident (2026-06-17) — userspace starvation past the point of SSH recovery:** disk exhaustion once wedged the host so hard that userspace itself was starved — `nginx`, `sshd`, AND the Node app all stopped responding at the application layer while TCP handshakes on `:443` / `:22` still completed (kernel/network alive, userspace blocked). `ssh` hung at "banner exchange" even with a 60 s `ConnectTimeout`, so the manual `ssh … && docker prune` recovery above was UNREACHABLE. Recovery was a **block-volume resize** — the host self-healed once disk pressure lifted (no reboot needed, no data loss; bind-mounted `./data`, `./public/uploads`, `./public/resources`, and host MySQL were never at risk; the filesystem now reports 124 G at ~21 % used). Lesson: if the host is starved past the point where `ssh` can return a shell, the prune recovery cannot run — use the cloud provider's **console / serial console (or resize the block volume)** to relieve disk first, then prune. The per-deploy auto-prune is the primary prevention; watch the `df -h /` line in the deploy logs for a host trending toward full.
 
 ### Don't `npm install` inside the running production container
 
@@ -553,7 +554,7 @@ The current state of the photographer surface is documented in `photographer-r4/
 ## Important Notes
 
 - **Node.js 24+** required, **TypeScript 6.0+**
-- Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
+- Processed images are stored in `apps/web/public/uploads/`, runtime topic covers are stored in `apps/web/public/resources/`, and original uploads are stored privately under the data volume — **ensure all three mutable stores are persisted in Docker**
 - Max upload size: 200 MB per file; batch byte cap (`UPLOAD_MAX_TOTAL_BYTES`, default 2 GiB) and batch file-count cap (`UPLOAD_MAX_FILES_PER_WINDOW`, default 100) are separate limits that both apply to every upload
 - Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 MiB** by default, **64 KiB** for login, **250 MiB** for `/admin/db` restore requests, **216 MiB** for admin dashboard uploads, and **216 MiB** for the Lightroom Classic publish-plugin upload route `/api/admin/lr/upload` (a dedicated `^~ /api/admin/lr/upload` location that wins over the generic `^~ /api/admin/` 2 MiB catch-all by longest-prefix match — without it the generic 2 MiB cap 413s every real photo at the edge before the route runs; run-6 cycle-10 AGG-C10-01). The app enforces **200 MiB per file**, a default **2 GiB** cumulative upload window, and **100 files per window**.
 - Uses `output: 'standalone'` for Docker deployments

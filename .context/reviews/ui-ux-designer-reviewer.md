@@ -1,60 +1,58 @@
-# UI/UX Designer Reviewer - Review-Plan-Fix Cycle 2
+# UI/UX Designer Reviewer - Review-Plan-Fix Cycle 4
 
-Role: ui-ux-designer-reviewer. Scope: accessible page structure, localized UX, focus/keyboard behavior, responsive/product-facing UI states, and browser-observable evidence. No application code was edited.
+Role: `ui-ux-designer-reviewer`. Scope: custom professional photo-tool UI/UX pass for current HEAD `10b500bb`, distinct from the generic designer pass. No application code was edited.
 
 ## Inventory Coverage
 
-Inventory was built before review: 132 UI/product-facing files under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/i18n`, and `apps/web/messages`. I inspected package metadata/scripts, source routes/components, tests, scripts, migrations, and current `.context` review/plan docs. Covered public gallery, photo, topic, smart collection, timeline, year, map, admin, error/loading/not-found, i18n, and UI primitive surfaces.
+Inventory was rebuilt before review: 98 product-facing UI/i18n files, 18,116 lines total:
 
-Browser automation evidence:
-- Started `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3012`.
-- Inspected `/en`, `/ko`, and `/en/admin` at desktop/mobile widths with DOM/accessibility/title checks.
-- `/en` and `/ko` rendered localized error boundaries because local DB queries failed; both exposed a single `main` region and localized document titles.
-- `/en/admin` rendered sign-in controls and reported document title `GalleryKit`.
-- No screenshot-based visual verdict was possible for DB-backed gallery states; findings below use source, DOM, accessibility, and computed route evidence.
+- `apps/web/src/app/[locale]/(public)` - 13 files
+- `apps/web/src/app/[locale]/admin` - 28 files
+- `apps/web/src/components` - 55 files
+- `apps/web/messages` - 2 files
+
+Inspected applicable context first: `AGENTS.md`, `CLAUDE.md`, and `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`. The custom prompt is authored for a different SwiftUI app, so I applied its professional photo-tool standards to GalleryKit's Next.js surfaces. The prompt's `.context/project` and `.context/development` files do not exist in this repo.
+
+Source review covered public gallery, topic, smart collection, shared photo/group, photo viewer, timeline, year, map, admin login/protected pages, upload, image management, search, lightbox, bottom sheet, color/histogram surfaces, UI primitives, messages, and relevant UI tests. Prior `.context/reviews` / `.context/plans` history was checked to avoid stale duplicates.
+
+## Browser / DOM Evidence
+
+Started local dev server:
+
+- `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3014`
+
+Playwright DOM checks:
+
+- `/en/admin` rendered normally with title `Admin | GalleryKit`, one `main`, visible h1 `Admin`, password toggle `aria-label="Show password"`, and sign-in button.
+- `/en` and `/ko` rendered localized error boundaries because the local dev DB query failed in `Nav`; both still exposed one `main`, localized titles (`Error | GalleryKit`, `오류 | GalleryKit`), and localized skip/return links.
+- `/en/timeline`, `/en/year/2025`, and `/en/map` also hit the same local DB-backed nav error boundary, but route metadata was present before the boundary (`Timeline | GalleryKit`, `2025 in Review | GalleryKit`, `Map | GalleryKit`).
+- Reduced-motion emulation confirmed `matchMedia('(prefers-reduced-motion: reduce)') === true` and the loaded CSS includes the global rule that clamps transitions plus suppresses `.group-hover\:scale-105` transforms.
+
+Runtime limitation: loaded gallery grids, real search results, photo-viewer interaction, and map markers could not be browser-verified because the local DB schema/data is not currently runnable for public pages. Source and tests were used for those states.
 
 ## Findings
 
-### UX-C2-01 - Admin routes lack accessible, task-specific page titles
+No new actionable UI/UX findings.
 
-Severity: Medium
-Confidence: High
+## Rechecked Non-Findings
 
-Evidence:
-- Browser DOM/title check on `/en/admin`: title `GalleryKit`; visible h1 `Admin`; controls included `Show password` and `Sign in`.
-- `apps/web/src/app/[locale]/layout.tsx:22-27` supplies the default site title/template.
-- `apps/web/src/app/[locale]/admin/page.tsx:6-15` renders the login page without route metadata.
-- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:5-17` does not set metadata for the admin section.
-- `rg -n "generateMetadata|metadata" apps/web/src/app/[locale]/admin` found only `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx:6-9`.
+- Prior custom finding `UX-C2-01` is fixed: `apps/web/src/app/[locale]/admin/page.tsx` now exports `adminRouteMetadata('admin')`, protected admin routes use `adminRouteMetadata(...)`, and token route metadata uses `adminTokenRouteMetadata()`.
+- Prior custom finding `UX-C2-02` is fixed: timeline/year photo links now use `aria-label={tAria('viewPhoto', { title: displayTitle })}`, `tCommon('untitled')`, and `getConcisePhotoAltText(..., tCommon('photo'))`.
+- Reduced-motion hover zoom on photo cards is not re-filed: `globals.css` has an explicit `prefers-reduced-motion` rule suppressing compiled `group-hover:scale-105`; prior plans keep per-callsite `motion-reduce:` modifiers as deferred polish unless that global rule is removed.
+- Search input `h-8` remains the known deferred `DEF-C11-01`; no new exit criterion was met.
+- Analytics table `scope="col"` remains known deferred `DES-R9C3-02`; no new exit criterion was met.
+- Decorative year back-arrow `aria-hidden` remains known deferred `POL-R9C5-01`; no new exit criterion was met.
+- Touch-target coverage remains enforced by the audit test and source-level primitives; no new interactive class outside the scanner was found.
 
-Failure scenario: keyboard and assistive-technology users navigating admin tabs cannot use browser titles or screen-reader title announcements to distinguish sign-in, dashboard, analytics, database, SEO, settings, users, and password pages. This is a page-title usability failure even when each page has a visible heading.
+## Validation
 
-Suggested fix: add localized metadata to admin routes. Use existing `nav` messages and assert that admin login/protected pages expose titles such as `Admin | GalleryKit`, `Dashboard | Admin | GalleryKit`, and `Database | Admin | GalleryKit`. Add a test that enumerates admin route modules and fails when a rendered page can inherit only the root title.
+Focused UI gates passed:
 
-### UX-C2-02 - Timeline/year photo links do not match the localized accessible-name pattern
+- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/error-shell.test.ts src/__tests__/error-shell-heading.test.ts`
+  - 6 files passed, 60 tests passed.
+- `npm test --workspace=apps/web -- --run src/__tests__/i18n-key-parity.test.ts src/__tests__/info-bottom-sheet-ia.test.ts src/__tests__/lightbox-controls-contract.test.ts src/__tests__/search-disclaimer.test.ts src/__tests__/theme-resolve.test.ts`
+  - 5 files passed, 21 tests passed.
 
-Severity: Medium
-Confidence: High
+## Final Sweep
 
-Evidence:
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:192-193` hard-codes English fallback `Photo` for display title and alt text.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:209-212` sets link `aria-label={displayTitle}`.
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:151-152` uses `monthName` as display fallback but hard-codes English `Photo` as alt fallback.
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:165-168` sets link `aria-label={displayTitle}`.
-- The home grid uses localized fallbacks and an action label in `apps/web/src/components/home-client.tsx:291-323`.
-- The On This Day widget uses localized fallbacks and `viewPhotoAria` in `apps/web/src/components/on-this-day-widget.tsx:49-59`.
-
-Failure scenario: in the Korean UI, an untitled/no-tag timeline photo can produce English alt/link fallback text. In both locales, a screen-reader link list can expose title-only links instead of action-oriented "view photo" names, making the timeline/year grids less consistent than the main gallery.
-
-Suggested fix: reuse the home grid accessible-name pattern on timeline/year cards: localized untitled/photo fallback text plus a localized view-photo aria template. Add a regression test for timeline/year route source or rendered markup that rejects hard-coded English fallback strings and bare title-only photo link labels.
-
-## Non-Findings Rechecked
-
-- Error boundary skip target/title: fixed in `apps/web/src/app/[locale]/error.tsx` and covered by tests.
-- Search result `role="option"` links: no current keyboard/focus defect; source now keeps result links out of the tab order and tests cover the exception.
-- SEO form descriptions: controls now use `aria-describedby` and source tests cover expected hint wiring.
-- Touch target system: UI primitives and audit tests continue to enforce the 44 px minimum at the source/test level.
-
-## Missed-Issues Sweep
-
-Final sweep covered route metadata, focus labels, hard-coded English UI fallbacks, localized message availability, public/admin route structure, and prior review findings. No additional UI/UX defects were found within the inventory. Remaining risk is limited to visual states that require a working local DB: loaded gallery grids, empty gallery states, search results with real data, and photo-viewer interactions.
+Final sweep covered route metadata, localized fallbacks, hard-coded visible English strings, focus-visible treatment, touch-target classes, dialog/focus-trap surfaces, live regions, image alt/link names, reduced-motion coverage, public/admin responsive structures, and stale duplicate history. No skipped source files within the 98-file UI inventory. Remaining risk is confined to browser-only states blocked by the local DB-backed public render path.

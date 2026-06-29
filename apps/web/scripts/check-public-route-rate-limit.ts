@@ -122,13 +122,47 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
         ts.forEachChild(node, inspectExpression);
     };
 
+    const expressionHasTopLevelRateLimit = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (ts.isCallExpression(current) && isRateLimitHelperCall(current)) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const statementHasExecutedRateLimit = (statement: ts.Statement): boolean => {
+        if (ts.isExpressionStatement(statement)) {
+            return expressionHasTopLevelRateLimit(statement.expression);
+        }
+        if (ts.isVariableStatement(statement)) {
+            return statement.declarationList.declarations.some((decl) => (
+                decl.initializer ? expressionHasTopLevelRateLimit(decl.initializer) : false
+            ));
+        }
+        if (ts.isIfStatement(statement)) {
+            // Only the condition dominates the following statements. A helper
+            // hidden in the then/else body may be unreachable or branch-only,
+            // so it cannot satisfy the pre-mutation gate.
+            return expressionHasTopLevelRateLimit(statement.expression);
+        }
+        if (ts.isReturnStatement(statement) && statement.expression) {
+            return expressionHasTopLevelRateLimit(statement.expression);
+        }
+        return false;
+    };
+
     const inspectStatement = (statement: ts.Statement) => {
-        let statementHasRateLimit = false;
         let statementHasMutation = false;
         const visit = (node: ts.Node) => {
             if (ts.isFunctionLike(node) && node !== statement) return;
             if (ts.isCallExpression(node)) {
-                if (isRateLimitHelperCall(node)) statementHasRateLimit = true;
                 if (isKnownMutationCall(node)) statementHasMutation = true;
             }
             ts.forEachChild(node, visit);
@@ -137,7 +171,7 @@ function bodyCallsRateLimitBeforeMutation(body: ts.Node | undefined): boolean {
         if (statementHasMutation && !sawRateLimit) {
             sawMutation = true;
         }
-        if (statementHasRateLimit) {
+        if (statementHasExecutedRateLimit(statement)) {
             sawRateLimit = true;
         }
     };

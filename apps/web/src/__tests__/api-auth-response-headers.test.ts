@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  */
 
 const verifyTokenMock = vi.fn();
+const markTokenUsedMock = vi.fn();
 
 vi.mock('@/app/actions/auth', () => ({
     isAdmin: vi.fn(async () => true),
@@ -26,6 +27,7 @@ vi.mock('@/lib/request-origin', () => ({
 }));
 vi.mock('@/lib/admin-tokens', () => ({
     verifyToken: (...args: unknown[]) => verifyTokenMock(...args),
+    markTokenUsed: (...args: unknown[]) => markTokenUsedMock(...args),
     tokenHasScope: (scopes: string[], required: string) => scopes.includes(required),
 }));
 
@@ -37,16 +39,17 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
     beforeEach(() => {
         vi.resetModules();
         verifyTokenMock.mockReset();
+        markTokenUsedMock.mockReset();
     });
 
     async function importWrapper() {
-        const { withAdminAuth } = await import('@/lib/api-auth');
-        return withAdminAuth;
+        const { withAdminAuth, getAdminAuthToken } = await import('@/lib/api-auth');
+        return { withAdminAuth, getAdminAuthToken };
     }
 
     it('token branch: applies no-store/no-cache + Pragma + nosniff defaults', async () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
-        const withAdminAuth = await importWrapper();
+        const { withAdminAuth } = await importWrapper();
         const wrapped = withAdminAuth(
             async (_req: NextRequest) => NextResponse.json({ ok: true }),
             { allowTokenScope: 'lr:upload' },
@@ -54,6 +57,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
 
         const response = await wrapped(fakeRequest({ 'x-gallerykit-token': 'gk_test' }));
         expect(response.status).toBe(200);
+        expect(markTokenUsedMock).toHaveBeenCalledWith(1);
         expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
         expect(response.headers.get('Pragma')).toBe('no-cache');
         expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
@@ -61,7 +65,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
 
     it('token branch: preserves handler-set Cache-Control (has() guard)', async () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
-        const withAdminAuth = await importWrapper();
+        const { withAdminAuth } = await importWrapper();
         const wrapped = withAdminAuth(
             async (_req: NextRequest) => NextResponse.json({ ok: true }, {
                 headers: { 'Cache-Control': 'private, max-age=1' },
@@ -77,7 +81,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
     });
 
     it('cookie branch: applies the same defaults (C7-SEC-02 parity)', async () => {
-        const withAdminAuth = await importWrapper();
+        const { withAdminAuth } = await importWrapper();
         const wrapped = withAdminAuth(async (_req: NextRequest) => NextResponse.json({ ok: true }));
 
         const response = await wrapped(fakeRequest({ origin: 'https://gallery.test', host: 'gallery.test' }));
@@ -89,7 +93,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
 
     it('token branch: invalid token still yields a no-store 401', async () => {
         verifyTokenMock.mockResolvedValue(null);
-        const withAdminAuth = await importWrapper();
+        const { withAdminAuth } = await importWrapper();
         const wrapped = withAdminAuth(
             async (_req: NextRequest) => NextResponse.json({ ok: true }),
             { allowTokenScope: 'lr:upload' },
@@ -106,7 +110,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         // must be rejected — NOT fall through to the cookie path. A token bearing
         // only ['lr:read'] presented to an lr:upload route is 401, never 200.
         verifyTokenMock.mockResolvedValue({ id: 2, userId: 9, scopes: ['lr:read'] });
-        const withAdminAuth = await importWrapper();
+        const { withAdminAuth } = await importWrapper();
         let handlerCalled = false;
         const wrapped = withAdminAuth(
             async (_req: NextRequest) => {
@@ -119,6 +123,28 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         const response = await wrapped(fakeRequest({ 'x-gallerykit-token': 'gk_readonly' }));
         expect(response.status).toBe(401);
         expect(handlerCalled, 'handler must NOT run for a wrong-scope token').toBe(false);
+        expect(markTokenUsedMock).not.toHaveBeenCalled();
         expect(response.headers.get('Cache-Control')).toContain('no-store');
+    });
+
+    it('token branch: exposes verified token context only while the handler runs', async () => {
+        const verified = { id: 3, userId: 11, scopes: ['lr:upload'] };
+        verifyTokenMock.mockResolvedValue(verified);
+        const { withAdminAuth, getAdminAuthToken } = await importWrapper();
+        const request = fakeRequest({ 'x-gallerykit-token': 'gk_upload' });
+        const seenUserIds: Array<number | undefined> = [];
+        const wrapped = withAdminAuth(
+            async (req: NextRequest) => {
+                seenUserIds.push(getAdminAuthToken(req)?.userId);
+                return NextResponse.json({ ok: true });
+            },
+            { allowTokenScope: 'lr:upload' },
+        );
+
+        const response = await wrapped(request);
+
+        expect(response.status).toBe(200);
+        expect(seenUserIds).toEqual([11]);
+        expect(getAdminAuthToken(request)).toBeUndefined();
     });
 });

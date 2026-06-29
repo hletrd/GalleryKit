@@ -23,4 +23,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./public/uploads:/app/apps/web/public/uploads
+      - ./public/resources:/app/apps/web/public/resources
       - ./src/site-config.json:/app/apps/web/src/site-config.json:ro

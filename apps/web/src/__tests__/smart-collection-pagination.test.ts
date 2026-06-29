@@ -220,13 +220,16 @@ describe('getImagesForSmartCollection source contract (single lookahead + cursor
         expect(fn).toContain('buildCursorCondition(normalizedCursor)');
     });
 
-    it('keeps a SINGLE +1 lookahead (the helper owns it, callers must not add another)', () => {
+    it('keeps cursor and offset lookaheads inside the helper (callers must not add another)', () => {
         const lookaheads = fn.match(/normalizedPageSize \+ 1/g) ?? [];
-        expect(lookaheads).toHaveLength(1);
+        expect(lookaheads).toHaveLength(2);
     });
 
-    it('skips .offset() on the cursor path (keyset pagination, no offset scan)', () => {
-        expect(fn).toMatch(/normalizedCursor\s*\?\s*await limited\b/);
+    it('uses a cursor-only select without COUNT(*) OVER() on the cursor path', () => {
+        const cursorBranch = fn.slice(fn.indexOf('if (normalizedCursor)'), fn.indexOf('const baseQuery = db.select'));
+        expect(cursorBranch).toContain('hasMore: rows.length > normalizedPageSize');
+        expect(cursorBranch).not.toContain('COUNT(*) OVER()');
+        expect(cursorBranch).not.toContain('.offset(');
     });
 });
 

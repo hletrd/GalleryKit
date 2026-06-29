@@ -176,9 +176,9 @@ npm run build
 docker compose -f apps/web/docker-compose.yml up -d --build
 ```
 
-The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
+The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`, and runtime topic cover resources remain under `public/resources/`.
 
-`npm run deploy` (which runs `apps/web/deploy.sh` on the host) **auto-prunes stale Docker images, build cache, and dangling volumes after every deploy**, so a disk-constrained host stays clean without manual cleanup. The prune runs after the stack is back up, and bind-mounted data (`./data`, `./public/uploads`) plus the live container/image are never touched.
+`npm run deploy` (which runs `apps/web/deploy.sh` on the host) **auto-prunes stale Docker images, build cache, and dangling volumes after every deploy**, so a disk-constrained host stays clean without manual cleanup. The prune runs after the stack is back up, and bind-mounted data (`./data`, `./public/uploads`, `./public/resources`) plus the live container/image are never touched.
 
 Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
 The container liveness probe now uses `/api/live`. `/api/health` is liveness-only by default; set `HEALTH_CHECK_DB=true` only on private monitoring paths that intentionally need a DB readiness probe.

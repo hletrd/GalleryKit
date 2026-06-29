@@ -1,107 +1,72 @@
-# Code Reviewer — review-plan-fix cycle 3
+# Code Reviewer — review-plan-fix cycle 4
 
-**Date:** 2026-06-29
-**HEAD:** `3f24038b04f48c73f5dac079cd3276fecbd48282`
-**Role:** code-reviewer
-**Scope:** current HEAD only; repository-wide code quality, logic, SOLID/maintainability, edge cases, error handling, cross-file interaction, and regression-risk review. No application code edited.
+**Date:** 2026-06-29  
+**HEAD:** `0fa5beb107ff232ce6a004887ad7c574dd0e2963` (`0fa5beb1`)  
+**Role:** code-reviewer  
+**Scope:** current HEAD only; repository-wide code quality, logic, SOLID/maintainability, correctness, edge cases, error handling, cross-file interactions, and test gaps. No application code changes made.
 
 ## Inventory Coverage
 
-Built inventory before review from `AGENTS.md`, `CLAUDE.md`, current `.context/reviews/*`, current `.context/plans/*`, recent `run9-cycle8` review history, `git status`, `git log -20`, current HEAD diff since cycle 2 review (`3d138704..HEAD`), package/config files, source-tree enumeration, tests/scripts/migrations, and direct source reads.
+I built the review inventory from `AGENTS.md`, full `CLAUDE.md`, current cycle-3 plan/deferred files, current `.context/reviews/code-reviewer.md`, latest aggregate history, `git log -12`, `git diff 3f24038b04f48c73f5dac079cd3276fecbd48282..HEAD`, route/action inventories, and full source enumeration.
 
-Review-relevant inventory covered:
+Relevant files examined:
 
-- Instructions/context: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/_aggregate.md`, previous `.context/reviews/code-reviewer.md`, security/perf/test top-level reviews, `.context/plans/cycle-2-2026-06-29-{plan,deferred}.md`, `.context/plans/cycle-3-plan.md`, and latest `run9-cycle8` aggregate/code-reviewer artifacts to avoid stale fixed claims.
-- Current HEAD delta after cycle 2 review: `.dockerignore`, `AGENTS.md`, `apps/web/Dockerfile`, `apps/web/README.md`, `apps/web/scripts/backfill-clip-embeddings.ts`, admin metadata helpers/pages, timeline/year metadata and card labeling, nav e2e assertions, browser upload enqueue test coverage, and committed review/plan docs.
-- Runtime source inventory: 476 TypeScript/TSX files under `apps/web/src`, including app routes/actions, components, libs, DB schema, proxy, and instrumentation.
-- Guard/test inventory: 245 unit test files under `apps/web/src/__tests__`, 8 e2e/helper/fixture files under `apps/web/e2e`, 27 scripts, and 28 Drizzle SQL/meta files.
-- Focus sweeps: admin API wrappers, server-action origin gates, public route rate-limit gates, public privacy selectors, map GPS exposure, upload enqueue settings flow, semantic search and embedding paths, restore/backfill locks, raw SQL/process execution, JSON parsing, generated Docker/build context, and hidden local runtime directories.
+- Instructions and history: `AGENTS.md`, `CLAUDE.md`, `.context/plans/cycle-3-2026-06-29-plan.md`, `.context/plans/cycle-3-2026-06-29-deferred.md`, current `.context/reviews/code-reviewer.md`.
+- Current delta from the previous code-review base: 48 files, including restore-maintenance fixes, public analytics actions, route-rate-limit lint, CLIP constant split, map loader, nav aria labels, upload picker contract, docker-compose public mount, i18n strings, tests, docs, and review/plan records.
+- Full code inventory: 477 source files under `apps/web/src`, 27 scripts under `apps/web/scripts`, 8 e2e files, 28 Drizzle migration/meta files, plus package/config/deploy files.
+- Line-level reads on touched implementation regions: `apps/web/src/app/actions/images.ts:928-1127`, `apps/web/src/app/actions/lr-tokens.ts:28-140`, `apps/web/src/app/actions/public.ts:113-411`, `apps/web/scripts/check-public-route-rate-limit.ts:107-153`, `apps/web/src/components/map/map-loader.tsx:24-39`, `apps/web/src/app/[locale]/(public)/map/page.tsx:11-68`, `apps/web/src/components/nav-client.tsx:41-46` and `:161-165`, `apps/web/src/components/search.tsx:1-21`, `apps/web/src/components/upload-dropzone.tsx:175-177`, `apps/web/src/lib/clip-embedding-constants.ts:1-13`, `apps/web/src/lib/clip-embeddings.ts:9-44`, `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/app/[locale]/admin/db-actions.ts:266-360`, `apps/web/docker-compose.yml:23-26`, and `apps/web/src/lib/data-timeline.ts:88-97`.
+- Repo-wide sweeps: public/admin route handlers, server-action origin gates, restore-maintenance coverage, raw DB mutations, client imports of server-oriented CLIP helpers, privacy-sensitive selectors, map GPS exposure, Drizzle/schema comments, generated static asset behavior, and stale prior findings.
+
+Skipped as not review-relevant code: `node_modules`, `test-results`, screenshots/images under `.context`, binary fixtures/icons/fonts, and generated build output. No relevant source/config/script/test/migration file category was skipped.
 
 ## Validation Evidence
 
 - `npm run lint --workspace=apps/web` — pass.
 - `npm run lint:api-auth --workspace=apps/web` — pass; 2 admin API routes wrapped.
-- `npm run lint:action-origin --workspace=apps/web` — pass; mutating actions enforce same-origin provenance or documented exemptions.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` — pass; semantic route is rate-limited and public mutating route scan passes.
+- `npm run lint:action-origin --workspace=apps/web` — pass; mutating server actions enforce same-origin provenance or documented read-only/public exemptions.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` — pass; public mutating route inventory remains covered.
 - `npm run typecheck --workspace=apps/web` — pass.
-- `npm test --workspace=apps/web -- client-source-contracts images-actions nginx-config sw-template-contract semantic-search-route` — pass, 5 files / 55 tests.
-- `npm test --workspace=apps/web` — pass, 243 files passed / 2 skipped, 2238 tests passed / 4 skipped.
-- `npm run build --workspace=apps/web` — pass on rerun. The first attempt stopped at Next's transient "Another next build process is already running" guard after prebuild; process/lock inspection found no live build, and the immediate rerun completed successfully. Local DB was unavailable, and sitemap fell back to homepage-only as designed.
+- Targeted tests for the touched contracts: `npm test --workspace=apps/web -- bulk-update-images.test.ts lr-tokens-action.test.ts public-actions.test.ts check-public-route-rate-limit.test.ts client-source-contracts.test.ts map-thumb-wiring.test.ts nginx-config.test.ts semantic-scan-limit-source.test.ts` — pass, 8 files / 106 tests.
+- Full unit suite: `npm test --workspace=apps/web` — pass, 243 files passed / 2 skipped, 2255 tests passed / 4 skipped.
+- `npm run build --workspace=apps/web` — pass. Build logged the documented local-DB-unavailable sitemap fallback (`ECONNREFUSED 127.0.0.1:3306`) and completed successfully. The build regenerated `apps/web/public/sw.js` to the current short SHA as a local side effect; I restored that review-only side effect before writing this report.
 
 ## Confirmed Issues
 
-None found.
+None.
 
-The cycle-2 confirmed fixes are present at current HEAD:
+The cycle-3 scheduled fixes are present at current HEAD and hold under source review plus tests:
 
-- `.claude/` is now excluded from the root Docker context (`.dockerignore:8-9`), closing AGG-C2-01.
-- The standalone Docker image defaults to localhost binding (`apps/web/Dockerfile:83-85`), reducing direct-exposure footguns.
-- The CLIP pre-enable production backfill examples now use `--production --force` (`apps/web/README.md:35-37`, `apps/web/scripts/backfill-clip-embeddings.ts:6-21`).
-- Admin routes now export localized metadata helpers (`apps/web/src/app/[locale]/admin/admin-metadata.ts:16-31` plus the route exports), and typecheck/build validated the App Router signatures.
-- Timeline/year cards use localized fallback labels and action-oriented aria labels (`apps/web/src/app/[locale]/(public)/timeline/page.tsx:214-233`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:175-191`).
-- Browser upload enqueue tests now assert the full processing/settings payload (`apps/web/src/__tests__/images-actions.test.ts:222-259`), matching the runtime forwarding in `apps/web/src/app/actions/images.ts:466-502`.
+- `bulkUpdateImages` now fails fast during restore maintenance before origin/auth/DB work (`apps/web/src/app/actions/images.ts:928-936`) and is covered by `bulk-update-images.test.ts`.
+- Lightroom token create/revoke now fail fast during restore maintenance before credential writes (`apps/web/src/app/actions/lr-tokens.ts:28-40`, `apps/web/src/app/actions/lr-tokens.ts:108-116`) and are covered by `lr-tokens-action.test.ts`.
+- Public analytics recorders skip writes during restore maintenance after input validation but before headers/DB work (`apps/web/src/app/actions/public.ts:357-409`) and are covered by `public-actions.test.ts`.
+- Unsupported advertised browser-upload extensions were removed from the picker accept list (`apps/web/src/components/upload-dropzone.tsx:175-177`), matching the source contract tests.
+- The public route rate-limit scanner now ignores uncalled nested helper references and requires a top-level executed limiter before mutation (`apps/web/scripts/check-public-route-rate-limit.ts:107-153`); current public API routes pass the lint gate.
+- Search no longer imports the server-oriented embedding helper from the client; constants live in the client-safe module (`apps/web/src/components/search.tsx:19`, `apps/web/src/lib/clip-embedding-constants.ts:1-13`).
+- The compose public mount now preserves built immutable public assets while only bind-mounting mutable uploads (`apps/web/docker-compose.yml:23-26`).
 
 ## Likely Issues
 
-None at actionable confidence. Candidate regressions around route metadata signatures, timeline/year i18n, build/Docker context, upload settings forwarding, and nav e2e assertions were checked against source plus lint/type/build/tests and did not hold.
+None at actionable confidence.
 
-## Risks Needing Manual Validation
+## Known Risks Not Refiled
 
-### RISK-C3-01 — Production CLIP embeddings can overlap Sharp queue work
+The current deferred items remain real operational or architectural risks, but they are already recorded in `.context/plans/cycle-3-2026-06-29-deferred.md` and were not refiled as fresh findings:
 
-**Severity:** Medium  
-**Confidence:** High  
-**Status:** Current scaling/concurrency risk; already deferred as DEF-C2-03, not a new regression  
-**Location:** `apps/web/src/lib/image-queue.ts:490-567`, `apps/web/src/lib/clip-model.ts:151-186`
-
-Failure scenario: after `processImageFormats()` finishes, the queue commits `processed=true` and starts embedding in a detached async IIFE. A batch upload in production semantic mode can leave CLIP inference running while the next Sharp job begins, so CPU/RSS can exceed what `QUEUE_CONCURRENCY` alone suggests.
-
-Concrete fix: add a bounded embedding queue (`EMBEDDING_CONCURRENCY=1` by default) or await production embeddings inside the existing image-processing queue when immediate search availability is required. Add queue-depth/duration logging before increasing upload/semantic throughput.
-
-### RISK-C3-02 — Semantic and similar search remain bounded brute-force scans
-
-**Severity:** Medium  
-**Confidence:** High  
-**Status:** Current scaling/relevance risk; already deferred as DEF-C2-04  
-**Location:** `apps/web/src/app/api/search/semantic/route.ts:240-281`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, `apps/web/src/lib/clip-embeddings.ts:32-40`
-
-Failure scenario: both routes read the newest `SEMANTIC_SCAN_LIMIT` embedding blobs and score them synchronously in the request path. At the default 2000 rows this is bounded, but larger operator overrides can block the event loop, and newest-first scanning can omit older relevant images.
-
-Concrete fix: keep production scan limits conservative, emit an operator warning when embedding count exceeds the cap, use a heap/partial selection instead of full sorting if the cap grows, and move to a worker/vector-index boundary before raising limits materially.
-
-### RISK-C3-03 — Public map still loads up to 10,000 unclustered markers
-
-**Severity:** Medium  
-**Confidence:** High  
-**Status:** Current map scalability risk; already deferred as DEF-C2-02  
-**Location:** `apps/web/src/lib/data.ts:1628-1660`, `apps/web/src/components/map/map-client.tsx:80-143`, `apps/web/src/db/schema.ts:111-117`
-
-Failure scenario: a GPS-heavy gallery can request and hydrate thousands of markers, compute bounds over all points, and mount one Leaflet marker per photo. The query has no latitude/longitude or map-visibility-specific index in the current image index set.
-
-Concrete fix: validate the query with `EXPLAIN`, add an index or denormalized map-visibility query shape if needed, and switch the UI to viewport/bounds loading or clustering before large GPS collections approach the 10k cap.
-
-### RISK-C3-04 — Restore maintenance is process-local by design
-
-**Severity:** Medium  
-**Confidence:** High  
-**Status:** Current topology risk only under unsupported horizontal scaling; already deferred as DEF-C2-07  
-**Location:** `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/app/[locale]/admin/db-actions.ts:266-354`, `CLAUDE.md:224-227`
-
-Failure scenario: the DB restore advisory lock is DB-wide, but the maintenance flag that blocks uploads and other mutating actions is held in `globalThis`. In a multi-instance deployment, another process can miss maintenance mode and accept writes during restore.
-
-Concrete fix: keep the documented single-instance topology enforced, or move restore maintenance and other process-local coordination state into DB/shared storage before scaling horizontally.
+- Timeline/year/on-this-day indexing and date-part query scalability: `apps/web/src/lib/data-timeline.ts:95-205`, deferred as `DEF-C3-02`.
+- Semantic/similar search bounded brute-force scan and recall limits: `apps/web/src/app/api/search/semantic/route.ts:240-281`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, deferred as `DEF-C3-03`.
+- Production CLIP embedding backpressure against Sharp queue work: `apps/web/src/lib/image-queue.ts:512-567`, deferred as `DEF-C3-04`.
+- Process-local coordination state under unsupported scale-out: `apps/web/src/lib/restore-maintenance.ts:1-56`, deferred as `DEF-C3-05`.
+- Public map marker/index scalability: `apps/web/src/lib/data.ts:1624-1660`, `apps/web/src/components/map/map-client.tsx:76-143`, deferred as `DEF-C3-08`.
 
 ## Non-Findings / Stale Claims Avoided
 
-- The prior `.claude/` Docker context issue is fixed; root `.dockerignore` now includes both `.claude` and `.claude/`.
-- The prior direct-container default exposure risk was reduced; `HOSTNAME` now defaults to `127.0.0.1` in the Dockerfile.
-- The prior CLIP operator-flow doc issue is fixed; current script and README examples include `--production --force` for pre-enable backfills.
-- The prior browser-upload settings coverage gap is fixed; `images-actions.test.ts` asserts all queued settings and targeted tests pass.
-- The prior admin route title/i18n timeline/year issues are fixed in current source and validated by typecheck/build/source-contract tests.
-- The build script still rewrites `apps/web/public/sw.js` to the current commit stamp during `prebuild`. This is existing project behavior and was treated as validation side effect, not a product defect.
+- The restore-maintenance gaps from cycle 3 are fixed in source and covered by targeted tests.
+- The route-rate-limit scanner no longer accepts nested/unreachable helper calls as satisfying a mutating route.
+- The CLIP constant split does not leak `process`/`Buffer`/server imports into `Search`; server routes still correctly import scan/top-k caps from `clip-embeddings`.
+- The `sw.js` current-HEAD stamp mismatch after docs/test commits is a build-time artifact, not a production serving defect after the compose mount fix: production build regenerates `sw.js`, and `./public/uploads` no longer masks built `public/sw.js` in the container.
 
 ## Final Missed-Issues Sweep
 
-Final sweep covered: changed files since cycle 2, public/admin route handlers, server-action guards, route metadata signatures, i18n key usage, privacy projections, GPS/map exposure, raw SQL and process execution, restore/advisory-lock release paths, upload queue/settings propagation, semantic search request paths, CLIP embedding hooks, Docker/build context, hidden local runtime directories, focused tests, full unit suite, lint, typecheck, and build.
+Final sweep covered changed files since the cycle-3 review base, all public/admin API routes, all server actions, restore maintenance gates, DB mutation surfaces, public privacy selectors, map GPS exception boundaries, client/server import boundaries, generated asset serving, route metadata title templating, upload picker/runtime-format alignment, Drizzle/schema comments, lint gates, typecheck, targeted tests, full unit suite, and production build.
 
-Verdict: **0 confirmed issues, 0 likely issues, 4 current risks needing manual/operational validation.**
+Verdict: **0 confirmed issues, 0 likely issues.**

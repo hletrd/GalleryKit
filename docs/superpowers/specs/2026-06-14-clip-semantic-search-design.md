@@ -6,9 +6,9 @@
 
 ## 1. Problem & Goal
 
-Semantic search in GalleryKit is ~95% built but its encoder is a stub: `CLIP_MODEL_VERSION = 'stub-sha256-v1'`, where `embedImageStub` / `embedTextStub` produce deterministic **SHA-256-derived** 512-dim vectors. Cosine similarity between a query and an image is therefore essentially random, the admin `semantic_search_mode` can only be `disabled` or `stub`, and the search UI carries an "experimental — results may not match" disclaimer.
+**Historical pre-implementation context:** before the production activation recorded above, semantic search in GalleryKit was ~95% built but its encoder was a stub: `CLIP_MODEL_VERSION = 'stub-sha256-v1'`, where `embedImageStub` / `embedTextStub` produced deterministic **SHA-256-derived** 512-dim vectors. Cosine similarity between a query and an image was therefore essentially random, the admin `semantic_search_mode` could only be `disabled` or `stub`, and the search UI carried an "experimental — results may not match" disclaimer.
 
-**Goal:** replace the stub with a **real multilingual CLIP encoder**, open the config gate to `production`, recalibrate the relevance threshold, and ship two genuinely-working features — **natural-language search (Korean + English)** and **"similar photos"** — fully self-hosted (CPU, no per-query API cost, single Docker container).
+**Goal (completed 2026-06-15):** replace the stub with a **real multilingual CLIP encoder**, open the config gate to `production`, recalibrate the relevance threshold, and ship two genuinely-working features — **natural-language search (Korean + English)** and **"similar photos"** — fully self-hosted (CPU, no per-query API cost, single Docker container).
 
 Everything else in the pipeline already exists and is reused: the `image_embeddings` table, `/api/search/semantic`, `components/search.tsx`, `scripts/backfill-clip-embeddings.ts`, `lib/clip-embeddings.ts` (cosine / top-K / float32 ser-de), the fire-and-forget upload hook in `image-queue.ts`, and the `semantic_search_mode` admin setting.
 
@@ -60,7 +60,7 @@ Everything else in the pipeline already exists and is reused: the `image_embeddi
 
 ## 7. Config Gate + Honesty
 
-- `semantic_search_mode` validator extended to accept `'production'` (currently rejected, CRT-R5C1-01). Modes:
+- `semantic_search_mode` validator extended to accept `'production'` (shipped; originally tracked as CRT-R5C1-01). Modes:
   - `disabled` (default) → 503.
   - `stub` → experimental demo, unchanged, disclaimer retained.
   - `production` → real search. It serves results **only from rows matching the active real `model_version`**. If `production` is configured but no real-model embeddings exist yet (e.g. backfill not finished), the route returns **503** rather than serving stub or empty results under the `production` label — it never deceives.

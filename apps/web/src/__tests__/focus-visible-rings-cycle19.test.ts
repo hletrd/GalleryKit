@@ -5,6 +5,8 @@
  *  D19-07  skip links (layout.tsx, not-found.tsx) used `focus:not-sr-only`,
  *          which reveals the skip link on a MOUSE click too. Switch to
  *          `focus-visible:not-sr-only` so it only appears for keyboard focus.
+ *          Cycle 4 later removed not-found's duplicate local skip link; the
+ *          locale layout owns the single bypass link for the page.
  *  D19-01  lightbox prev/next buttons painted the ring on the full-height
  *          invisible `h-full w-16` hitbox, not the visible chevron pill. Move
  *          the ring to the inner pill via `group` + `group-focus-visible:`.
@@ -36,8 +38,8 @@ describe('D19-07 skip links use focus-visible (not bare focus)', () => {
         expect(layoutSrc).toContain('focus-visible:not-sr-only');
         expect(layoutSrc).not.toContain('focus:not-sr-only');
     });
-    it('not-found.tsx skip link reveals on focus-visible only', () => {
-        expect(notFoundSrc).toContain('focus-visible:not-sr-only');
+    it('not-found.tsx does not reintroduce a duplicate local skip link', () => {
+        expect(notFoundSrc).not.toContain('href="#main-content"');
         expect(notFoundSrc).not.toContain('focus:not-sr-only');
     });
 });
