@@ -1,15 +1,21 @@
-# Cycle 10 Performance Review
+# Cycle 11 Performance Review
 
 Date: 2026-06-29
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `4fd8bf3b docs(review): preserve cycle 10 verifier evidence`
-Role: cycle 10 `perf-reviewer`
+HEAD reviewed: `d5d79e17 fix(cycle-10): 🐛 close review findings`
+Role: cycle 11 `perf-reviewer`
 
 ## Scope And Method
 
-This was a read-only performance, concurrency, CPU, memory, and UI responsiveness review of the current repository. The only file modified by this prompt is this report.
+Read-only performance, concurrency, CPU, memory, and UI-responsiveness review. I did not edit production code. The only intended change from this prompt is this review artifact.
 
-I read `AGENTS.md` and `CLAUDE.md`, built a repository inventory, then reviewed cross-file behavior across request paths, DB access, upload/processing queues, CLIP search, image encoding, admin maintenance, client rendering, and existing tests/review context. Classifications:
+I read `AGENTS.md` and `CLAUDE.md`, built a source inventory excluding generated `.next` output, reviewed prior perf reports as hypotheses rather than conclusions, then re-inspected the current code paths after the cycle-10 fix commit. I specifically re-checked the cycle-10 findings and found these already fixed in current HEAD:
+
+- Batch upload tag resolution is now batch-level, not per-file: `apps/web/src/app/actions/images.ts:295-319` resolves tags once and `apps/web/src/app/actions/images.ts:467-479` reuses the records.
+- Semantic search client requests now abort stale in-flight fetches: `apps/web/src/components/search.tsx:145-190`, `apps/web/src/components/search.tsx:237-261`.
+- The semantic route now checks `request.signal.aborted` at several request boundaries: `apps/web/src/app/api/search/semantic/route.ts:98-104`, `apps/web/src/app/api/search/semantic/route.ts:198-200`, `apps/web/src/app/api/search/semantic/route.ts:246-249`, `apps/web/src/app/api/search/semantic/route.ts:260-263`, `apps/web/src/app/api/search/semantic/route.ts:307-309`.
+
+Classification:
 
 - Confirmed: directly present in the current code path.
 - Likely: code path is present and failure depends on realistic configuration, traffic, or data size.
@@ -17,21 +23,21 @@ I read `AGENTS.md` and `CLAUDE.md`, built a repository inventory, then reviewed 
 
 ## Review-Relevant Inventory
 
-Configuration and runtime: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/meta/_journal.json`, current migrations, `apps/web/scripts/migrate.js`, `CLAUDE.md`.
+Configuration/runtime: `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/instrumentation.ts`, `apps/web/src/proxy.ts`, `apps/web/drizzle/*`, `apps/web/scripts/*`.
 
-Public pages and API paths: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `c/[slug]/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `map/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, OG routes, feed/sitemap routes, health/live routes.
+Public pages/API: home/topic/smart-collection/timeline/year/map/photo/share pages under `apps/web/src/app/[locale]/(public)/`, public actions in `apps/web/src/app/actions/public.ts`, semantic/similar/OG/feed/sitemap/upload-serving routes under `apps/web/src/app/api` and `apps/web/src/app/uploads`.
 
-Data/query layer: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `smart-collections.ts`, `analytics-data.ts`, `view-retention.ts`, `rate-limit.ts`, `bounded-map.ts`, `gallery-config.ts`, `gallery-config-shared.ts`, `tag-records.ts`, `tag-slugs.ts`, `serve-upload.ts`, `og-photo-fetch.ts`.
+Data/query layer: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `smart-collections.ts`, `analytics-data.ts`, `analytics.ts`, `view-retention.ts`, `rate-limit.ts`, `bounded-map.ts`, `gallery-config.ts`, `gallery-config-shared.ts`, `serve-upload.ts`, `og-photo-fetch.ts`.
 
-Upload, image, queue, and CLIP surfaces: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/lib/image-queue.ts`, `admin-backfill-runner.ts`, `process-image.ts`, `upload-limits.ts`, `upload-processing-contract-lock.ts`, `upload-tracker-state.ts`, `clip-model.ts`, `clip-embeddings.ts`, `clip-captions.ts`, `clip-weights.ts`, `upload-paths.ts`, storage helpers, and related scripts under `apps/web/scripts`.
+Upload/image/queue/CLIP: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/lib/image-queue.ts`, `admin-backfill-runner.ts`, `process-image.ts`, `gps-exif-strip.ts`, `upload-limits.ts`, `upload-paths.ts`, `upload-tracker*.ts`, `clip-model.ts`, `clip-embeddings.ts`, `clip-inference.ts`, `scripts/backfill-clip-embeddings.ts`, `scripts/backfill-color-pipeline.ts`.
 
-Client/UI responsiveness: `home-client.tsx`, `load-more.tsx`, `search.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `similar-photos.tsx`, `histogram.tsx`, `public/histogram-worker.js`, map components, navigation components, upload/admin components, display-capability hooks, and service worker files.
+Client/UI responsiveness: `home-client.tsx`, `load-more.tsx`, `search.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `similar-photos.tsx`, `histogram.tsx`, `public/histogram-worker.js`, map components, upload/admin managers, navigation, service worker files.
 
-Tests and static review anchors: searched `apps/web/src/__tests__` for existing performance, queue, privacy, semantic, timeline, smart collection, upload, and lock coverage; reviewed prior `.context/reviews/perf-reviewer.md` to avoid carrying fixed findings blindly.
+Tests/static anchors: reviewed relevant tests for queue, semantic search, upload, source contracts, bounded maps, timeline, smart collections, service worker, and privacy fields under `apps/web/src/__tests__`.
 
 ## Findings
 
-### PERF-C10-01: Image queue jobs can starve the shared DB pool while holding advisory locks across Sharp work
+### PERF-C11-01: Image queue jobs can starve the shared DB pool while holding advisory locks across Sharp work
 
 Status: Likely issue
 Severity: Medium
@@ -40,48 +46,26 @@ Confidence: High
 Code regions:
 
 - `apps/web/src/lib/image-queue.ts:86-89`
-- `apps/web/src/lib/image-queue.ts:430-447`
-- `apps/web/src/lib/image-queue.ts:503-621`
-- `apps/web/src/lib/image-queue.ts:797-799`
+- `apps/web/src/lib/image-queue.ts:440-456`
+- `apps/web/src/lib/image-queue.ts:507-540`
+- `apps/web/src/lib/image-queue.ts:616-631`
+- `apps/web/src/lib/image-queue.ts:806-809`
 - `apps/web/src/db/index.ts:23-33`
 - `apps/web/src/lib/data.ts:1107-1153`
 
-`QUEUE_CONCURRENCY` is operator-configurable up to 8 (`image-queue.ts:86-89`). Each queue job acquires a pooled MySQL connection with `connection.getConnection()` and `GET_LOCK` (`image-queue.ts:430-447`), then keeps that connection until the `finally` block releases the lock (`image-queue.ts:797-799`). The same critical section includes the expensive Sharp derivative generation (`image-queue.ts:606-621`).
+`QUEUE_CONCURRENCY` is operator-configurable up to 8 (`image-queue.ts:86-89`). Each queue worker acquires a pooled MySQL connection and a connection-bound `GET_LOCK` (`image-queue.ts:440-456`), then keeps that connection until the `finally` block releases it (`image-queue.ts:806-809`). The critical section includes the expensive Sharp derivative fan-out (`image-queue.ts:616-631`).
 
-The app's shared pool is only 10 connections with `queueLimit: 20` (`db/index.ts:23-33`). Live public photo pages also fan out three DB reads in parallel for tags, previous image, and next image (`data.ts:1107-1153`). With `QUEUE_CONCURRENCY=8`, long-running encodes can pin most of the shared pool for seconds or minutes, leaving too little headroom for public pages, admin actions, semantic routes, and analytics writes.
-
-Concrete failure scenario:
-
-An operator raises `QUEUE_CONCURRENCY` to speed up backlog processing after a bulk upload. Eight queue jobs start on large originals, each holding one DB pool connection while Sharp encodes AVIF/WebP/JPEG variants. Public users open photo pages or load-more endpoints; those requests need DB connections, queue behind the two remaining pool slots, then hit pool queue pressure or timeouts. Symptoms are slow TTFB, intermittent 500s, and an apparently "CPU-bound" image queue causing DB-facing request stalls.
-
-Concrete fix:
-
-Do not hold shared request-pool connections across CPU/image work. Use a short DB row claim/status transition instead of a connection-bound advisory lock, or use a separate small lock-only pool that cannot consume public request capacity. At minimum, clamp `QUEUE_CONCURRENCY` against shared pool headroom, following the budgeted approach already present in `admin-backfill-runner`, and emit a startup warning when the configured queue concurrency would leave fewer than several request connections available.
-
-### PERF-C10-02: Batch upload resolves the same tag set once per file with serial DB round trips
-
-Status: Confirmed issue
-Severity: Medium
-Confidence: High
-
-Code regions:
-
-- `apps/web/src/app/actions/images.ts:154-164`
-- `apps/web/src/app/actions/images.ts:308-319`
-- `apps/web/src/app/actions/images.ts:436-469`
-- `apps/web/src/lib/tag-records.ts:66-69`
-
-The upload action parses one batch-level tag list (`images.ts:154-164`), then loops over every selected file (`images.ts:308-319`). Inside that per-file loop, it recomputes the unique tag list and serially calls `ensureTagRecord` for every tag (`images.ts:436-459`). `ensureTagRecord` performs an insert-ignore plus lookup work for each tag (`tag-records.ts:66-69`). Only after that does the action insert `imageTags` rows for the one image (`images.ts:462-469`).
+The app's shared pool is only 10 connections with `queueLimit: 20` (`db/index.ts:23-33`). Live photo pages fan out DB reads for tags, prev, and next in one `Promise.all` (`data.ts:1107-1153`), so they need pool headroom while image encoding is running.
 
 Concrete failure scenario:
 
-An admin uploads 100 files with 10 tags. Before returning from the server action, the code can execute roughly 1000 tag ensure operations plus 100 separate `imageTags` batch inserts, even though the tag set is identical for the whole batch. This increases admin upload latency, ties up the DB pool, and delays queue enqueueing for the actual image processing work.
+An operator raises `QUEUE_CONCURRENCY=8` after a bulk upload. Eight large-image jobs each pin one shared DB connection for the duration of AVIF/WebP/JPEG encoding. Public photo pages, admin actions, search routes, analytics writes, and queue DB updates compete for the two remaining pool slots, queue behind the pool limit, and start returning slow TTFB or intermittent DB acquisition failures even though the visible bottleneck appears to be image CPU.
 
-Concrete fix:
+Suggested fix:
 
-Resolve and validate `uniqueTagNames` once before the file loop, after the batch tag validation and topic/config checks. Reuse the resulting `tagRecords` for each inserted image. Then either insert per-image tag rows using the precomputed records, or collect all `{ imageId, tagId }` rows and insert them in bounded chunks after successful image inserts. Preserve collision warnings, but make collisions a batch-level warning instead of repeating the same work per file.
+Do not hold shared request-pool connections across CPU/image work. Prefer a short DB row claim/status transition over a connection-bound advisory lock, or move image-processing locks to a separate tiny lock-only pool that cannot consume live request capacity. At minimum, clamp `QUEUE_CONCURRENCY` with the same pool-budget pattern used by `admin-backfill-runner.ts:129-142` and log a startup warning when the configured value leaves too little live-traffic headroom.
 
-### PERF-C10-03: GPS stripping reintroduces whole-file heap pressure after the upload path streams originals to disk
+### PERF-C11-02: GPS stripping reintroduces whole-file heap pressure after the upload path streams originals to disk
 
 Status: Likely issue
 Severity: Medium
@@ -89,52 +73,24 @@ Confidence: High
 
 Code regions:
 
-- `apps/web/src/lib/upload-limits.ts:1-3`
-- `apps/web/src/lib/process-image.ts:862-879`
-- `apps/web/src/lib/process-image.ts:1673-1699`
-- `apps/web/src/app/actions/images.ts:350-356`
-- `apps/web/src/app/api/admin/lr/upload/route.ts:137-145`
-- `apps/web/src/app/api/admin/lr/upload/route.ts:344-358`
+- `apps/web/src/lib/process-image.ts:887-910`
+- `apps/web/src/lib/process-image.ts:1738-1764`
+- `apps/web/src/lib/process-image.ts:1773-1786`
+- `apps/web/src/app/actions/images.ts:381-388`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:139-145`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:346-360`
 
-The upload file cap permits 200 MiB files (`upload-limits.ts:1-3`). `saveOriginalAndGetMetadata` intentionally streams the uploaded file to disk to avoid materializing the whole file in JS heap (`process-image.ts:862-879`). If `stripGpsOnUpload` is enabled, both browser uploads and Lightroom uploads call `stripGpsFromOriginal` (`actions/images.ts:350-356`, `lr/upload/route.ts:344-358`).
-
-`stripGpsFromOriginal` reads the entire saved original into memory (`process-image.ts:1673-1678`) and then writes a scrubbed buffer before renaming it over the original (`process-image.ts:1696-1699`). The Lightroom route also obtains the multipart body through `request.formData()` (`lr/upload/route.ts:137-145`), so the GPS strip can stack with multipart buffering and Sharp metadata work.
+The normal upload path intentionally streams the original to disk to avoid materializing large files in JS heap (`process-image.ts:905-910`). When `strip_gps_on_upload` is enabled, both browser uploads and Lightroom uploads call `stripGpsFromOriginal` (`images.ts:381-388`, `lr/upload/route.ts:346-360`). That function immediately reads the entire saved original with `fs.readFile(filePath)` (`process-image.ts:1741-1743`) and, when GPS is stripped, writes a second full buffer before rename (`process-image.ts:1761-1764`). The WebP fallback path also uses the full `input` buffer to classify lossless/lossy (`process-image.ts:1773-1786`). The Lightroom route additionally enters through `request.formData()` (`lr/upload/route.ts:139-145`), which can already buffer multipart body state.
 
 Concrete failure scenario:
 
-An admin enables GPS stripping and uploads large JPEG/HEIC/TIFF exports near the 200 MiB cap. Each file can allocate the whole source buffer plus the scrubbed output buffer, while the request already carries multipart/form data and metadata extraction has run. On a disk- or memory-constrained host this can cause long GC pauses, RSS spikes, or worker termination during upload. The public gallery may remain privacy-safe because DB GPS columns are nulled, but the admin upload UX and process stability are at risk.
+An admin enables GPS stripping and uploads large JPEG/HEIC/TIFF/WebP exports near the 200 MB per-file cap. The request first streams the file safely, then GPS stripping allocates the whole source buffer and may allocate a scrubbed output buffer as well. Under concurrent uploads or a memory-constrained host, this causes RSS spikes, long GC pauses, or process termination during upload. Public DB GPS fields are nulled, but the admin upload path and process stability are at risk.
 
-Concrete fix:
+Suggested fix:
 
-Replace buffer-wide GPS stripping with streaming/container-aware rewriting for the supported formats, especially JPEG APP1/EXIF segment rewriting and ISOBMFF box traversal. If a fully streaming scrubber is not feasible immediately, add an explicit memory budget gate: serialize GPS-strip work globally, reject or defer stripping for files above a safe threshold with a clear admin-facing error, and avoid holding both original and scrubbed buffers at once.
+Replace whole-buffer GPS scrubbing with streaming/container-aware rewriting for the common formats, especially JPEG APP1/EXIF segment rewriting and ISOBMFF box traversal. If that is too large for one pass, add a memory-budget gate: serialize GPS-strip work globally, reject/defer stripping above a safe threshold with a clear admin-facing error, and avoid simultaneously retaining original and scrubbed buffers.
 
-### PERF-C10-04: Stale semantic search requests are ignored in the UI but not aborted on the server
-
-Status: Likely issue
-Severity: Medium
-Confidence: High
-
-Code regions:
-
-- `apps/web/src/components/search.tsx:143-152`
-- `apps/web/src/components/search.tsx:154-238`
-- `apps/web/src/components/search.tsx:240-253`
-- `apps/web/src/app/api/search/semantic/route.ts:232-251`
-- `apps/web/src/app/api/search/semantic/route.ts:264-283`
-
-The search component uses `requestIdRef` to ignore stale responses (`search.tsx:143-152`, `search.tsx:183-199`), and the debounce cleanup only clears pending timers (`search.tsx:240-253`). It does not keep an `AbortController` for the in-flight semantic `fetch` (`search.tsx:177-194`). That means typing a new query or closing the dialog prevents stale UI commits, but the old semantic request can still run to completion.
-
-The semantic route performs production CLIP embedding (`semantic/route.ts:232-235`), selects up to `SEMANTIC_SCAN_LIMIT` embeddings (`semantic/route.ts:242-251`), then decodes and scores the scanned rows in JS (`semantic/route.ts:264-283`). Ignoring a stale response on the client does not recover that server CPU and DB work.
-
-Concrete failure scenario:
-
-A user types several semantic queries with pauses longer than the 300 ms debounce. Each intermediate query starts a server request. The browser eventually shows only the newest result, but previous requests still consume CLIP inference, DB reads, and JS scoring. Under multiple users, this makes final-query latency worse and can fill the CLIP inference wait queue.
-
-Concrete fix:
-
-Add an `AbortController` ref in `Search`, abort the prior semantic fetch before starting a new one, and abort on dialog close/unmount/query clear. Pass `signal` to `fetch` and treat `AbortError` as a silent stale request. On the route side, check `request.signal.aborted` at cheap boundaries before embedding, before DB scan, and before result enrichment; return early where the runtime allows. Consider a longer debounce or explicit submit for production semantic search if CLIP CPU remains a bottleneck.
-
-### PERF-C10-05: CLIP inference has a concurrency cap but no global backlog cap or timeout
+### PERF-C11-03: CLIP inference has a concurrency cap but no global backlog cap or timeout
 
 Status: Risk
 Severity: Medium
@@ -143,22 +99,23 @@ Confidence: Medium-High
 Code regions:
 
 - `apps/web/src/lib/clip-model.ts:53-70`
-- `apps/web/src/app/api/search/semantic/route.ts:181-189`
-- `apps/web/src/app/api/search/semantic/route.ts:232-239`
+- `apps/web/src/lib/clip-model.ts:138-146`
+- `apps/web/src/lib/clip-model.ts:171-188`
+- `apps/web/src/app/api/search/semantic/route.ts:243-300`
 - `apps/web/src/app/actions/embeddings.ts:129-169`
-- `apps/web/src/lib/image-queue.ts:333-367`
+- `apps/web/scripts/backfill-clip-embeddings.ts:149-175`
 
-`withInferenceSlot` limits active CLIP inference to `CLIP_INFERENCE_CONCURRENCY` (max 4), but pending work is stored in an unbounded `inferenceWaiters` array (`clip-model.ts:53-70`). Public semantic search rate limiting is per IP (`semantic/route.ts:181-189`) and then can wait on `embedTextReal` (`semantic/route.ts:232-239`). Admin embedding backfill uses bounded chunks (`actions/embeddings.ts:129-169`), and queue-side image embedding enters the same CLIP path after image processing (`image-queue.ts:333-367`).
+`withInferenceSlot` caps active model calls to `CLIP_INFERENCE_CONCURRENCY` (max 4), but pending callers are stored in an unbounded `inferenceWaiters` array (`clip-model.ts:53-70`). Public semantic search enters this path through `embedTextReal` (`semantic/route.ts:243-250`) and then scans/scores up to `SEMANTIC_SCAN_LIMIT` rows (`semantic/route.ts:256-300`). Admin and sidecar embedding backfills also use the same `embedImageReal` path in bounded local chunks (`actions/embeddings.ts:129-169`, `scripts/backfill-clip-embeddings.ts:149-175`), but those chunks still wait on the same global unbounded waiter list.
 
 Concrete failure scenario:
 
-Production semantic search is enabled and a traffic burst arrives from many IPs, or stale client requests accumulate because they are not aborted. Active inference remains capped, but every excess request still keeps a promise, request/response state, and route work queued in memory. Latency grows without a clear rejection boundary, and the server can run out of memory or spend most of its time completing obsolete requests.
+Production semantic search is enabled and a burst of requests arrives from many IPs, while an operator also runs a production image-embedding backfill. Active inference stays capped, but every excess request/backfill item retains a promise and request/task state in `inferenceWaiters` with no max queue size or timeout. Latency grows without a rejection boundary, old requests can wait behind work that is no longer useful, and memory pressure grows until the process has to recover by failure rather than by graceful backpressure.
 
-Concrete fix:
+Suggested fix:
 
-Replace the hand-rolled waiter array with a queue that has `concurrency`, `timeout`, and `queueSize` limits. Return `503` or `429` with `Retry-After` once the global CLIP queue is full. Track queue depth in logs/health output so operators can tune `CLIP_INFERENCE_CONCURRENCY`, semantic route rate limits, and scan limits with evidence. Share that same queue for public text search, similar-photo work if it ever needs inference, image embedding side effects, and admin backfill.
+Replace the hand-rolled waiter array with a queue that has explicit `concurrency`, `queueSize`, and per-task timeout. Return `503` or `429` with `Retry-After` when the global CLIP queue is full. Log queue depth and time-in-queue so operators can tune `CLIP_INFERENCE_CONCURRENCY`, semantic route limits, and backfill chunk sizes with evidence. Share the same queue across public text search, queue-side image embedding, admin action backfill, and the sidecar script when it runs in-process.
 
-### PERF-C10-06: Infinite masonry keeps every loaded card mounted, so long browse sessions can create client jank
+### PERF-C11-04: Infinite masonry keeps every loaded card mounted, so long browse sessions can create client jank
 
 Status: Risk
 Severity: Low-Medium
@@ -166,23 +123,23 @@ Confidence: Medium-High
 
 Code regions:
 
-- `apps/web/src/components/home-client.tsx:127-130`
+- `apps/web/src/components/home-client.tsx:124-130`
 - `apps/web/src/components/home-client.tsx:195-210`
 - `apps/web/src/components/home-client.tsx:286-360`
 - `apps/web/src/components/load-more.tsx:41-96`
 - `apps/web/src/components/load-more.tsx:122-132`
 
-`HomeClient` stores all loaded images in one state array and appends every load-more page (`home-client.tsx:127-130`). The masonry render maps every item in that accumulated array to a card and picture (`home-client.tsx:286-360`). `LoadMore` automatically fetches more content as the sentinel enters the viewport (`load-more.tsx:122-132`) and appends returned pages (`load-more.tsx:41-96`). The page has useful mitigations such as lazy images, fixed dimensions, and intrinsic size estimates (`home-client.tsx:195-210`, `home-client.tsx:357-359`), but it does not virtualize or prune older cards.
+`HomeClient` stores all loaded images in a single state array and appends each load-more result (`home-client.tsx:124-130`). The masonry render maps the entire accumulated array to card/picture nodes (`home-client.tsx:286-360`). `LoadMore` automatically fetches more pages when the sentinel intersects (`load-more.tsx:122-132`) and appends them via `onLoadMore` (`load-more.tsx:41-96`). The code has good mitigations, including lazy decoding and intrinsic-size reservations (`home-client.tsx:195-210`, `home-client.tsx:357-359`), but it never virtualizes or prunes offscreen cards.
 
 Concrete failure scenario:
 
-A visitor scrolls through a large gallery or public smart collection for many pages. Thousands of card nodes, picture/source/img elements, hover layers, and layout boxes remain mounted. Even with lazy decoding, React updates, browser layout, accessibility tree size, and memory use grow linearly. The visible symptom is scroll jank, delayed taps, and slower search/nav interactions in long sessions.
+A visitor scrolls through a large gallery or smart collection for many pages. Thousands of `picture/source/img`, link, badge, and wrapper nodes remain mounted. Browser layout, accessibility tree size, image decode bookkeeping, and React updates grow linearly with browsing depth. The visible symptom is scroll jank, delayed taps, and slower search/nav interactions after a long session.
 
-Concrete fix:
+Suggested fix:
 
-Introduce virtualization/windowing for the masonry list, or switch automatic infinite loading to a hybrid model that requires explicit user action after a threshold. If CSS masonry makes virtualization difficult, keep recent pages mounted and replace far-off pages with stable-height placeholders that can be restored when scrolling back. Validate with a browser trace after loading 1000+ images.
+Introduce virtualization/windowing for masonry, or switch automatic infinite loading to a hybrid model that requires explicit user action after a threshold. If CSS masonry makes full virtualization impractical, keep nearby pages mounted and replace far-off pages with stable-height placeholders that can restore content when scrolling back. Validate with a browser trace after loading 1000+ images.
 
-### PERF-C10-07: Public archive and smart-collection predicates are intentionally non-sargable, but growth turns them into CPU scan paths
+### PERF-C11-05: Public archive and smart-collection predicates are intentionally non-sargable, but growth turns them into CPU scan paths
 
 Status: Risk
 Severity: Low-Medium
@@ -190,37 +147,38 @@ Confidence: High
 
 Code regions:
 
-- `apps/web/src/lib/data-timeline.ts:88-116`
+- `apps/web/src/lib/data-timeline.ts:92-116`
 - `apps/web/src/lib/data-timeline.ts:129-141`
-- `apps/web/src/lib/data-timeline.ts:172-207`
+- `apps/web/src/lib/data-timeline.ts:178-207`
 - `apps/web/src/lib/smart-collections.ts:217-220`
 - `apps/web/src/lib/smart-collections.ts:259-266`
 - `apps/web/src/lib/data.ts:1437-1451`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:62-84`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:62-90`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:103-104`
 
-The code already documents that `MONTH()`, `DAY()`, and `YEAR()` filters on `capture_date` are not sargable and are accepted at personal-gallery scale (`data-timeline.ts:88-116`, `data-timeline.ts:172-207`). The timeline year list also uses `YEAR(capture_date)` for distinct years (`data-timeline.ts:129-141`). Smart collections support `%...%` contains predicates on image fields (`smart-collections.ts:217-220`) and tag names (`smart-collections.ts:259-266`), while public first-page smart collections still use aggregation plus `COUNT(*) OVER()` (`data.ts:1437-1451`) from the public route (`c/[slug]/page.tsx:100-101`). Timeline pages are uncached dynamic pages (`timeline/page.tsx:62-84`).
+Timeline queries use `MONTH(capture_date)`, `DAY(capture_date)`, and `YEAR(capture_date)` filters (`data-timeline.ts:92-116`, `data-timeline.ts:178-207`) plus distinct/order by `YEAR(capture_date)` (`data-timeline.ts:129-141`). The comments correctly call out that these are not sargable and only acceptable at personal-gallery scale. Smart collections support `%...%` contains predicates on image columns and tag names (`smart-collections.ts:217-220`, `smart-collections.ts:259-266`). The public first-page smart-collection query also carries aggregation and `COUNT(*) OVER()` (`data.ts:1437-1451`). Public archive pages are dynamic (`timeline/page.tsx:62-90`), and smart-collection pages call this query on page render (`c/[slug]/page.tsx:103-104`).
 
 Concrete failure scenario:
 
-The gallery grows beyond personal scale, or public smart collections are promoted and crawled. Repeated `/timeline`, `/year/{year}`, and broad `/c/{slug}` requests evaluate functions or `%LIKE%` predicates over many processed rows before grouping and ordering. This creates DB CPU and temp-table pressure even though each page renders a bounded number of images.
+The gallery grows substantially, or public archive/smart-collection URLs are crawled. Repeated `/timeline`, `/year/{year}`, and broad `/c/{slug}` requests evaluate date functions or `%LIKE%` predicates across many processed rows before grouping, counting, and ordering. Each page still returns bounded rows, but the database work before the limit can become CPU/temp-table heavy and compete with live gallery traffic.
 
-Concrete fix:
+Suggested fix:
 
-For timeline, replace `YEAR(capture_date) = ?` with range predicates (`capture_date >= Y-01-01 AND capture_date < Y+1-01-01`) and add generated/indexed month/day columns if On This Day remains public. For smart collections, either restrict public collection predicates to indexable operations, materialize collection membership/counts after admin edits, or add a search index for contains-style predicates. Keep current comments, but add operational thresholds or tests that make the "personal-gallery scale" assumption explicit.
+For timeline, replace `YEAR(capture_date)=?` with range predicates and add generated/indexed month/day columns if On This Day remains public. For smart collections, either restrict public predicates to indexable operations, materialize membership/counts after admin edits, or add a real search index for contains-style predicates. Keep the existing comments, but add an operational threshold or test fixture that makes the "personal-gallery scale" assumption explicit.
 
 ## Existing Safeguards Observed
 
-- Public load-more paths use bounded page sizes and cursor pagination in `actions/public.ts` and `data.ts`.
-- `getMapImages` caps public GPS markers at 10000 and documents the future clustering requirement (`data.ts:1648-1683`).
-- Shared group view count buffering is bounded with retry caps and cleanup (`data.ts:17-34`, `data.ts:155-218`).
-- Admin color backfill computes a pool-aware concurrency budget (`admin-backfill-runner.ts:129-142`), which is the pattern the image queue should reuse.
-- Sharp global concurrency and cache behavior are explicitly controlled (`process-image.ts:36-57`), and derivative generation avoids unbounded configured output sizes through `gallery-config-shared.ts`.
-- Histogram work is offloaded to a worker and bounded by a small canvas sample.
-- Service worker and rate-limit maps were not re-flagged in this cycle; the searched code showed explicit caps/pruning on the relevant paths.
+- Source files under `apps/web/src` do not use sync filesystem APIs on request paths; sync file IO hits are confined to scripts/build helpers.
+- Public listing/load-more paths cap page sizes and now prefer cursor pagination after the first page.
+- Maps/rate-limit stores use bounded helpers or explicit caps; `BoundedMap.set()` enforces the hard cap on write.
+- `getMapImages` caps public markers at 10,000 and keeps the future clustering requirement documented.
+- `process-image.ts` controls Sharp global concurrency and disables Sharp cache to limit steady RSS.
+- Admin color backfill already has pool-aware concurrency budgeting; that pattern should be reused for the image queue.
+- Histogram work is worker-driven and small-canvas bounded.
+- Semantic search now has client aborts and server-side abort checks at several coarse boundaries.
 
 ## Final Missed-Issue Sweep
 
-After drafting findings, I re-searched for `Promise.all`, timers, `readFile`, `toBuffer`, `formData`, `COUNT(*) OVER`, `offset`, advisory locks, unbounded-map comments, and client event/listener patterns across `apps/web/src` and `apps/web/scripts`. I also re-read the current hot files with line numbers for the findings above.
+After drafting the findings, I re-searched current source for `readFile`, `toBuffer`, `arrayBuffer`, `formData`, `getConnection`, `GET_LOCK`, `inferenceWaiters`, `COUNT(*) OVER`, `YEAR(`, `MONTH(`, `offset(`, global `Map`/`Set`, `Promise.all`, dynamic/revalidate declarations, and request-path sync IO. I re-read the hot files with line numbers before citing them.
 
-I did not find a new default-path unbounded public result set: home/topic/smart listings cap rendered rows, map caps markers, shared groups cap images, timeline caps year results with a visible truncation notice, and semantic search has default scan/rate limits. The remaining concerns are the seven findings above, with the highest practical risk concentrated in shared DB pool contention, repeated upload tag work, large-file GPS scrubbing memory, and semantic search cancellation/backpressure.
+I did not find a current-code regression in the fixed cycle-10 areas: upload tags are no longer resolved once per file, semantic client fetches are abortable, and the semantic route checks abort state before the major async phases. I also did not find a new unbounded default-path public result set: home/topic/smart listing rows are capped, map markers are capped, shared groups are bounded by their membership, and timeline truncation is visible. The remaining performance concerns are the five findings above, concentrated in shared DB pool contention, large-file GPS strip memory, global CLIP backpressure, long-session masonry DOM growth, and scale-dependent non-sargable archive/search predicates.
