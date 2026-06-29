@@ -65,6 +65,9 @@ vi.mock('@/components/photo-viewer', () => ({
 import SharedPhotoPage from '@/app/[locale]/(public)/s/[key]/page';
 import SharedGroupPage from '@/app/[locale]/(public)/g/[key]/page';
 
+const VALID_PHOTO_SHARE_KEY = '23456789AB';
+const VALID_GROUP_SHARE_KEY = 'CDEFGHJKLM';
+
 describe('shared page display titles', () => {
     beforeEach(() => {
         getLocaleMock.mockReset();
@@ -110,7 +113,7 @@ describe('shared page display titles', () => {
             height: 800,
         });
 
-        const markup = renderToStaticMarkup(await SharedPhotoPage({ params: Promise.resolve({ key: 'abc' }) }));
+        const markup = renderToStaticMarkup(await SharedPhotoPage({ params: Promise.resolve({ key: VALID_PHOTO_SHARE_KEY }) }));
 
         expect(markup).toContain('#Seoul');
         expect(markup).toContain('data-fallback=\"Shared Photo\"');
@@ -131,7 +134,7 @@ describe('shared page display titles', () => {
         });
 
         const markup = renderToStaticMarkup(await SharedGroupPage({
-            params: Promise.resolve({ key: 'group', locale: 'en' }),
+            params: Promise.resolve({ key: VALID_GROUP_SHARE_KEY, locale: 'en' }),
             searchParams: Promise.resolve({ photoId: '7' }),
         }));
 
@@ -150,7 +153,7 @@ describe('shared page display titles', () => {
             height: 800,
         });
 
-        const markup = renderToStaticMarkup(await SharedPhotoPage({ params: Promise.resolve({ key: 'def' }) }));
+        const markup = renderToStaticMarkup(await SharedPhotoPage({ params: Promise.resolve({ key: VALID_PHOTO_SHARE_KEY }) }));
 
         expect(markup).toContain('Golden Hour');
         expect(markup).not.toContain('#Night</h1>');

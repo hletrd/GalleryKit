@@ -113,7 +113,7 @@ describe('Cycle 7 public UI and API contracts', () => {
 
     it('accessibility and preview fixes are present', () => {
         expect(src('components/search.tsx')).toContain('aria-hidden="true"');
-        expect(src('components/nav-client.tsx')).toContain('aria-controls="primary-nav-controls"');
+        expect(src('components/nav-client.tsx')).toContain('aria-controls="primary-nav-topics primary-nav-controls"');
         expect(src('components/upload-dropzone.tsx')).toContain('decoding="async"');
     });
 });
