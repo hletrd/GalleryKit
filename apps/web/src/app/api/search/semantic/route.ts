@@ -9,11 +9,11 @@
  *   - Scans up to SEMANTIC_SCAN_LIMIT (2000) most-recent embeddings
  *   - Returns top-K image IDs with cosine score above COSINE_THRESHOLD (0.18)
  *
- * Rate-limit posture: Pattern 2 until protected request parsing or semantic
- * work begins. The counter is consumed before reading the body so chunked or
- * missing-length requests cannot materialize arbitrary payloads for free.
- * Early config/mode failures still roll back; post-read malformed or oversized
- * bodies stay charged because the memory/CPU cost was already consumed.
+ * Rate-limit posture: disabled mode returns before body reads or rate-limit
+ * charging. Serving modes consume the counter before reading the body so
+ * chunked or missing-length requests cannot materialize arbitrary payloads for
+ * free. Post-read malformed bodies stay charged because the memory/CPU cost
+ * was already consumed.
  *
  * Serving gate: this endpoint SERVES requests in two modes:
  *   - 'stub'       — demo/experimental posture. Embeds via `embedTextStub` (sync,
@@ -34,10 +34,7 @@ import { db, imageEmbeddings, images, topics } from '@/db';
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp } from '@/lib/rate-limit';
-import {
-    preIncrementSemanticAttempt,
-    rollbackSemanticAttempt,
-} from '@/lib/rate-limit';
+import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
 import {
     cosineSimilarity,
     dotProduct,
