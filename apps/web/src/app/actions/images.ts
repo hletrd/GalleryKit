@@ -11,14 +11,19 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId, stripUnicodeFormatting } from '@/lib/validation';
 import { countCodePoints } from '@/lib/utils';
-import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
+import {
+    createProcessingSettingsSnapshot,
+    enqueueImageProcessing,
+    getProcessingQueueState,
+    serializeProcessingSettingsSnapshot,
+} from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { sanitizeAdminString, requireCleanInput } from '@/lib/sanitize';
 import { getSafeUserFilename } from '@/lib/upload-filenames';
 import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
-import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigStrict, type GalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
 import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
@@ -173,7 +178,14 @@ export async function uploadImages(formData: FormData) {
     }
 
     try {
-        const uploadConfig: GalleryConfig = await getGalleryConfig();
+        let uploadConfig: GalleryConfig;
+        try {
+            uploadConfig = await getGalleryConfigStrict();
+        } catch (err) {
+            console.error('Failed to read upload settings', err);
+            return { error: t('failedToFetchGallerySettings') };
+        }
+        const processingSettingsSnapshot = createProcessingSettingsSnapshot(uploadConfig);
         const requestHeaders = await headers();
         const uploadIp = getClientIp(requestHeaders);
         const uploadTrackerKey = `${currentUser.id}:${uploadIp}`;
@@ -403,6 +415,7 @@ export async function uploadImages(formData: FormData) {
                     // Drizzle returns a JS number. If the per-file cap is ever raised
                     // above ~9 PB, this would silently lose precision.
                     original_file_size: file.size,
+                    processing_settings_json: serializeProcessingSettingsSnapshot(processingSettingsSnapshot),
                 };
 
                 const [result] = await db.insert(images).values(insertValues);
@@ -472,12 +485,8 @@ export async function uploadImages(formData: FormData) {
                         filenameJpeg: data.filenameJpeg,
                         width: data.width,
                         topic,
-                        quality: {
-                            webp: uploadConfig.imageQualityWebp,
-                            avif: uploadConfig.imageQualityAvif,
-                            jpeg: uploadConfig.imageQualityJpeg,
-                        },
-                        imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
+                        quality: processingSettingsSnapshot.quality,
+                        imageSizes: processingSettingsSnapshot.imageSizes,
                         // CR-R9C6-01: carry the remaining 6 admin processing
                         // settings on the job (upload-time snapshot) so a fresh
                         // upload honors them. Without these, the queue handler's
@@ -485,16 +494,16 @@ export async function uploadImages(formData: FormData) {
                         // BOTH quality and imageSizes are absent, which never
                         // happens on upload), so these settings were silently
                         // ignored on every upload until a backfill re-encode.
-                        forceSrgbDerivatives: uploadConfig.forceSrgbDerivatives,
-                        wideGamutJpegChroma: uploadConfig.wideGamutJpegChroma,
-                        avifEffort: uploadConfig.avifEffort,
-                        sdrJpegChroma: uploadConfig.sdrJpegChroma,
-                        wideGamutMaxSourcePixels: uploadConfig.wideGamutMaxSourcePixels,
-                        autoAltTextEnabled: uploadConfig.autoAltTextEnabled,
+                        forceSrgbDerivatives: processingSettingsSnapshot.forceSrgbDerivatives,
+                        wideGamutJpegChroma: processingSettingsSnapshot.wideGamutJpegChroma,
+                        avifEffort: processingSettingsSnapshot.avifEffort,
+                        sdrJpegChroma: processingSettingsSnapshot.sdrJpegChroma,
+                        wideGamutMaxSourcePixels: processingSettingsSnapshot.wideGamutMaxSourcePixels,
+                        autoAltTextEnabled: processingSettingsSnapshot.autoAltTextEnabled,
                         // R17C17 PERF-17-04: snapshot the semantic-search mode so the
                         // queue worker's embedding hook reuses it instead of issuing a
                         // redundant per-image SELECT admin_settings.
-                        semanticSearchMode: uploadConfig.semanticSearchMode,
+                        semanticSearchMode: processingSettingsSnapshot.semanticSearchMode,
                         camera_model: exifDb.camera_model,
                         capture_date: exifDb.capture_date,
                         iccProfileName: data.iccProfileName,
@@ -1173,7 +1182,7 @@ export async function retryFailedImage(id: number) {
 
     // Clear the failure columns so the image is discoverable again.
     await db.update(images)
-        .set({ processing_error: null, failed_at: null })
+        .set({ processing_error: null, failed_at: null, processing_settings_json: null })
         .where(eq(images.id, id));
 
     // Remove from the in-memory permanently-failed set so the bootstrap

@@ -103,8 +103,24 @@ vi.mock('@/lib/process-image', () => ({
 }));
 
 vi.mock('@/lib/image-queue', () => ({
+    createProcessingSettingsSnapshot: vi.fn((config) => ({
+        quality: {
+            webp: config.imageQualityWebp,
+            avif: config.imageQualityAvif,
+            jpeg: config.imageQualityJpeg,
+        },
+        imageSizes: config.imageSizes,
+        forceSrgbDerivatives: config.forceSrgbDerivatives,
+        wideGamutJpegChroma: config.wideGamutJpegChroma,
+        avifEffort: config.avifEffort,
+        sdrJpegChroma: config.sdrJpegChroma,
+        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+        autoAltTextEnabled: config.autoAltTextEnabled,
+        semanticSearchMode: config.semanticSearchMode,
+    })),
     enqueueImageProcessing: enqueueImageProcessingMock,
     getProcessingQueueState: vi.fn(() => ({ enqueued: new Set<number>() })),
+    serializeProcessingSettingsSnapshot: vi.fn(() => '{"quality":{"webp":90,"avif":85,"jpeg":90}}'),
 }));
 
 vi.mock('@/lib/revalidation', () => ({
@@ -114,6 +130,7 @@ vi.mock('@/lib/revalidation', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
+    getGalleryConfigStrict: getGalleryConfigMock,
 }));
 
 vi.mock('@/lib/rate-limit', () => ({

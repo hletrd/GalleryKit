@@ -103,6 +103,9 @@ export const images = mysqlTable("images", {
     // persisted when MAX_RETRIES exceeded; cleared on successful processing.
     processing_error: varchar('processing_error', { length: 512 }),
     failed_at: datetime('failed_at', { mode: 'string' }),
+    // C7-13: upload-time processing config snapshot for pending rows. Internal
+    // admin-only state; cleared once processing succeeds.
+    processing_settings_json: text('processing_settings_json'),
     // R10-M4: tracks whether this image was encoded with 10-bit AVIF (true)
     // or 8-bit AVIF (false). Null for legacy rows pre-pipeline-version-6.
     // Set during processImageFormats based on the global high-bitdepth probe

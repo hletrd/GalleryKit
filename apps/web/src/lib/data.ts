@@ -318,6 +318,8 @@ const adminSelectFields = {
     // R10-H2: processing diagnostics — admin-only retry surface.
     processing_error: images.processing_error,
     failed_at: images.failed_at,
+    // C7-13: internal pending-row processing settings snapshot.
+    processing_settings_json: images.processing_settings_json,
     // R10-M4: delivered AVIF bit depth (10-bit vs 8-bit). Public-safe —
     // describes the encoded output, not source PII or internal pipeline state.
     avif_10bit: images.avif_10bit,
@@ -354,6 +356,7 @@ const {
     original_width: _omitOriginalWidth,
     original_height: _omitOriginalHeight,
     uploaded_by: _omitUploadedByAdminList,
+    processing_settings_json: _omitProcessingSettingsJsonAdminList,
     ...adminListSelectFieldCore
 } = adminSelectFields;
 
@@ -386,6 +389,7 @@ const {
     uploaded_by: _omitUploadedBy,
     processing_error: _omitProcessingError,
     failed_at: _omitFailedAt,
+    processing_settings_json: _omitProcessingSettingsJson,
     // R27-CP-HIGH-1: color_space is the EXIF ColorSpace tag value
     // (sRGB / Uncalibrated), and icc_profile_name is the ICC desc / mluc
     // descriptor (often a custom monitor calibration like
@@ -425,6 +429,7 @@ const {
     uploaded_by: _omitUploadedByMap,
     processing_error: _omitProcessingErrorMap,
     failed_at: _omitFailedAtMap,
+    processing_settings_json: _omitProcessingSettingsJsonMap,
     // R27-CP-HIGH-1 / R27-CP-MED-2: same admin-only contract on the
     // map-visible select path. Map markers never need EXIF ColorSpace, ICC
     // descriptor, or encoder pipeline version.
@@ -454,8 +459,8 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // union — latitude, longitude, filename_original, user_filename, processed,
 // original_format, original_file_size, color_pipeline_decision, is_hdr,
 // has_gain_map, was_downscaled, transfer_function, matrix_coefficients,
-// bit_depth, uploaded_by, processing_error, failed_at, color_space,
-// icc_profile_name, pipeline_version) is ever added to publicSelectFields,
+// bit_depth, uploaded_by, processing_error, failed_at, processing_settings_json,
+// color_space, icc_profile_name, pipeline_version) is ever added to publicSelectFields,
 // this assertion will produce a TypeScript error.
 // This prevents accidental PII leakage in public-facing API responses.
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
@@ -464,7 +469,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // R4C9 TEST-R4C9-04: exported so sibling public-select mirrors (e.g.
 // lib/data-timeline.ts) can reuse the SAME union for their own
 // compile-time guards instead of hand-copying a comment that drifts.
-export type PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
+export type PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'processing_settings_json' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
 type _PrivacySensitiveKeys = PrivacySensitiveKeys;
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;

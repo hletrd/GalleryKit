@@ -1061,6 +1061,10 @@ export async function processImageFormats(
     const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true }).metadata();
     const freshBaseWidth = (inputMeta.width && inputMeta.width > 0) ? inputMeta.width : 0;
     const baseHeight = (inputMeta.height && inputMeta.height > 0) ? inputMeta.height : 0;
+    if (freshBaseWidth <= 0 || baseHeight <= 0) {
+        throw new Error('Image dimensions could not be determined');
+    }
+    processingBaseWidth = freshBaseWidth;
     const basePixels = freshBaseWidth * baseHeight;
     if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
         const scale = Math.sqrt(WIDE_GAMUT_MAX_SOURCE_PIXELS / basePixels);
@@ -1340,12 +1344,19 @@ export async function processImageFormats(
     };
 
     try {
-        // Generate all three formats in parallel
-        await Promise.all([
+        // Generate all three formats in parallel and wait for all encoders to
+        // settle before cleanup so sibling writers cannot race cleanup.
+        const generationResults = await Promise.allSettled([
             generateForFormat('webp', UPLOAD_DIR_WEBP, filenameWebp),
             generateForFormat('avif', UPLOAD_DIR_AVIF, filenameAvif),
             generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
         ]);
+        const rejectedGeneration = generationResults.find(
+            (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
+        if (rejectedGeneration) {
+            throw rejectedGeneration.reason;
+        }
 
         // Verify all three output format base files are not empty
         const [webpStats, avifStats, jpegStats] = await Promise.all([

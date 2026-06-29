@@ -32,6 +32,8 @@ const SENSITIVE_KEYS = [
     // R10-H2: processing diagnostics — admin-only retry surface.
     'processing_error',
     'failed_at',
+    // C7-13: internal processing-settings snapshot for pending rows.
+    'processing_settings_json',
     // R27-CP-HIGH-1: color_space is the EXIF ColorSpace tag value and
     // icc_profile_name is the ICC desc/mluc descriptor (often a custom
     // monitor calibration name); CLAUDE.md flags both as admin-only.

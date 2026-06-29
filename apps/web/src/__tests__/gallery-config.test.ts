@@ -47,7 +47,7 @@ vi.mock('@/db', () => ({
     adminSettings: { key: 'admin_settings.key', value: 'admin_settings.value' },
 }));
 
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfig, getGalleryConfigStrict } from '@/lib/gallery-config';
 import { getSettingDefaults } from '@/lib/gallery-config-shared';
 
 const DEFAULTS = getSettingDefaults();
@@ -184,5 +184,15 @@ describe('getGalleryConfig resolver (TEST-R5C2-09)', () => {
 
         expect(config.semanticSearchMode).toBe(DEFAULTS.semantic_search_mode);
         expect(config.avifEffort).toBe(Number(DEFAULTS.avif_effort));
+    });
+
+    it('strict ingest config rejects settings query failures instead of falling back', async () => {
+        selectMock.mockReturnValue({
+            from: vi.fn().mockReturnValue({
+                where: vi.fn().mockRejectedValue(new Error('DB down')),
+            }),
+        });
+
+        await expect(getGalleryConfigStrict()).rejects.toThrow('DB down');
     });
 });

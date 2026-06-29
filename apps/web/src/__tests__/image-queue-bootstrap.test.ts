@@ -60,6 +60,8 @@ async function loadQueueModule({
             filename_jpeg: 'filename_jpeg',
             width: 'width',
             processed: 'processed',
+            processing_error: 'processing_error',
+            processing_settings_json: 'processing_settings_json',
         },
         sessions: { expiresAt: 'expiresAt' },
     }));
@@ -70,6 +72,7 @@ async function loadQueueModule({
         sql: vi.fn(() => 'sql'),
         asc: vi.fn(() => 'asc'),
         gt: gtMock,
+        isNull: vi.fn(() => 'isNull'),
     }));
 
     vi.doMock('@/lib/process-image', () => ({

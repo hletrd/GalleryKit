@@ -1,171 +1,144 @@
-# Cycle 6/100 Whole-Repo Critique
+# Cycle 7/100 Critic Review
 
-Role: critic, PROMPT 1
+Role: critic lane
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `e6db9241b3b4f2adbedaeeb46eb5d68275b74879`
-Mode: read-only critique of current HEAD; no fixes implemented.
+HEAD reviewed: `17124135999a3d7cb4f5262e8b2b5917503088ae`
+Mode: read-only whole-repo critique; no implementation performed.
 
-## Required First Reads
+## Required Reads
 
-- Read `AGENTS.md` first.
-- Read `CLAUDE.md` second.
-- Loaded and followed the local `code-review` skill instructions for finding-first review output.
+- Read and followed `AGENTS.md`.
+- Read and followed `CLAUDE.md`.
+- Loaded the local `code-review` skill instructions and used finding-first review output.
 
-## Review Inventory Before Findings
+## Review Inventory
 
-I built the inventory from current HEAD before promoting findings:
+I inventoried current HEAD before promoting findings. Review-relevant file families examined:
 
-- Total tracked files in HEAD: 2504.
-- Major behavior-bearing buckets inspected:
-  - Workspace and project docs: `AGENTS.md`, `CLAUDE.md`, root/package metadata, deploy notes embedded in docs.
-  - App package/config: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/tsconfig*.json`, ESLint/lint scripts, proxy/middleware.
-  - App routes and pages: public photo, topic, map, timeline, search, admin pages, share pages, OG pages, API routes.
-  - Server actions: auth, admin users, image mutations, topics, collections, tags, settings, sharing, embeddings, public analytics.
-  - Data layer and privacy surfaces: `data.ts`, timeline/search/map helpers, privacy omission guards, public/admin select fields, schema objects.
-  - Upload/image/color/HDR surfaces: browser upload, Lightroom upload, image processing, variants, resources, queue/bootstrap, service worker image caching.
-  - Security/rate-limit/origin surfaces: admin auth wrapper, same-origin helpers, public API rate-limit lint, server-action origin lint, proxy CSP, nginx config.
-  - Migrations/schema/scripts: all `apps/web/drizzle` journal entries and SQL migrations, migration reconciliation script, schema compatibility tests, backfill scripts.
-  - Tests: current Vitest/e2e/lint-rule tests relevant to privacy, auth, CSP, topics, migration coverage, upload processing, public routes, touch targets, service worker contracts.
-  - Deployment/runtime: `Dockerfile`, `docker-compose.yml`, `deploy.sh`, `nginx.conf`, worker scripts, service worker generation.
+- Project rules/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/plans/README.md`.
+- App/package/runtime config: root and app `package.json`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/src/proxy.ts`.
+- Public routes/pages: localized home/topic/photo/share/group/map/timeline/year/smart-collection/feed pages, upload serving routes, OG image routes.
+- Admin routes/actions: auth, admin users, dashboard image actions, topics, tags, smart collections, settings, SEO, sharing, DB backup/restore, Lightroom upload.
+- Data/privacy layer: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public enrichment selects, privacy-sensitive type guards, migration scripts and Drizzle journal guidance.
+- Image/color/photographer-intent surface: upload path handling, `process-image.ts`, topic image processing, queue/bootstrap, color/HDR detection, CLIP model paths, service-worker image caching.
+- Public API/trust boundaries: semantic search, similar-photo route, OG routes, same-origin helpers, rate-limit helpers, admin API wrapper.
+- UI/client surfaces: masonry grids, viewer/lightbox, search, similar photos, map, admin image manager/settings.
+- Tests and review history: relevant Vitest/e2e/lint contract tests and prior `.context/reviews` artifacts were used as clues, but current HEAD code/docs are the source of truth.
 
-Relevant file families intentionally not inspected byte-for-byte:
+Excluded from code-level review: binary assets, generated/runtime upload files, and historical archive findings that no longer match HEAD.
 
-- Historical review archives under `.context/reviews/archive/`: inventoried but not treated as current behavior, except where names helped identify areas to rescan. Current HEAD code/tests/docs were the source of truth.
-- Binary assets such as fonts/icons/images: names and placement were inventoried; binary contents were not decoded because the request is for whole-repo code/product critique and no image artifact bug was indicated by current code paths.
-- Ignored working-tree runtime uploads under `apps/web/public/uploads/`: checked and excluded from findings because they are not tracked in HEAD. This review is HEAD-only.
+## Findings
 
-## Confirmed Issues
-
-### 1. Production CSP blocks the public map tile layer
+### CRIT-C7-01 - Masonry/share grids still break when AVIF/WebP sized sources 404
 
 Severity: Medium
 Confidence: High
-Category: product correctness / cross-file interaction
+Status: Confirmed
+Perspective: product behavior / photographer presentation / cross-file UI correctness
 
 Code regions:
 
-- `apps/web/src/components/map/map-client.tsx:114-117`
-- `apps/web/src/lib/content-security-policy.ts:28-34` and `apps/web/src/lib/content-security-policy.ts:74-79`
-- `apps/web/src/proxy.ts:36-49` and `apps/web/src/proxy.ts:118-140`
-- Missing test coverage is visible in `apps/web/src/__tests__/content-security-policy.test.ts:23-45`
+- `apps/web/src/components/home-client.tsx:339-377`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:236-263`
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:194-217`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:199-233`
+- Existing correct fallback contract in `apps/web/src/components/photo-viewer.tsx:421-549`
+- Existing correct fallback contract in `apps/web/src/components/lightbox.tsx:402-519`
 
-Why this is a problem:
+Problem:
 
-The map client renders a Leaflet tile layer from OpenStreetMap:
-
-```tsx
-<TileLayer
-    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-/>
-```
-
-But the production CSP image source list is only:
-
-```ts
-const sources = ["'self'", 'data:', 'blob:'];
-if (imageBaseUrl) {
-  sources.push(imageBaseUrl.origin);
-}
-```
-
-`buildContentSecurityPolicy()` then uses that list for `img-src`, optionally adding Google Analytics image endpoints only. It never permits `https://a.tile.openstreetmap.org`, `https://b.tile.openstreetmap.org`, `https://c.tile.openstreetmap.org`, or an equivalent tile proxy origin. `proxy.ts` applies this production CSP to matched HTML routes, and the matcher includes normal public pages such as localized `/map`.
+The grid surfaces use `<source type="image/avif">` and `<source type="image/webp">` for sized derivatives, then set the `<img src>` to the base JPEG. The comments correctly say the base JPEG exists for legacy / mid-backfill rows, but that does not help modern browsers when the selected AVIF/WebP source 404s. The photo viewer and lightbox already document the actual browser behavior: a bare `img.src` fallback cannot win while matching `<source>` rows remain, so they use state to drop sources after `onError`.
 
 Concrete failure scenario:
 
-In production, an admin enables `map_visible` for topics and visitors open `/en/map`. Leaflet asks the browser for `https://a.tile.openstreetmap.org/...png` tile images. The browser blocks those images under `img-src 'self' data: blob: ...`, leaving the map background blank or partially unusable while markers/popups still appear. Server-side tests do not catch this because the current CSP tests assert GA/self image sources but do not exercise the map tile dependency.
+An `IMAGE_PIPELINE_VERSION` bump or image-size reconfigure leaves a processed legacy row with the base JPEG present while `_640.avif` / `_1536.avif` are missing during backfill. On the home, timeline, year, or shared-group grid, Chrome/Safari selects the AVIF `<source>` and receives a 404. Because those grid components never remove the `<source>` rows on error, the visitor sees a broken tile instead of the guaranteed base JPEG. This directly damages the photographer-facing browsing surface; the viewer/lightbox only recover after the user reaches the photo page.
 
 Suggested fix:
 
-Choose one policy and lock it with tests:
+Extract the viewer/lightbox fallback pattern into a reusable responsive image component for grid cards: track one error, re-render without AVIF/WebP sources, and point the `<img>` at the base JPEG. Add a regression test that a grid card renders a stateful `onError` fallback path, or a browser test with a missing AVIF/WebP derivative and present base JPEG.
 
-- Add the exact tile origins required by the chosen provider to `img-src`, for example `https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org`, or a narrowly accepted wildcard if the CSP parser/browser support target is intentional.
-- Prefer a same-origin tile proxy/self-hosted tile source if third-party tile requests are undesirable for privacy or OSM policy reasons.
-- Add a CSP unit test that fails if the configured map tile source is not allowed.
-- Add a Playwright smoke check for the production CSP path that visits the map and fails on CSP console violations for tile images.
+### CRIT-C7-02 - Parallel derivative generation can clean up before sibling encoders stop writing
 
-### 2. Concurrent topic cover updates can leak orphaned resource files
+Severity: Medium
+Confidence: Medium
+Status: Likely issue
+Perspective: reliability / operational fit / background processing
+
+Code regions:
+
+- `apps/web/src/lib/process-image.ts:1342-1348`
+- `apps/web/src/lib/process-image.ts:1374-1389`
+- Caller retry path in `apps/web/src/lib/image-queue.ts:432-460` and `apps/web/src/lib/image-queue.ts:592-603`
+- Backfill caller in `apps/web/src/lib/admin-backfill-runner.ts:498-523`
+
+Problem:
+
+`processImageFormats()` starts WebP, AVIF, and JPEG generation with `Promise.all()`. If one format rejects, `Promise.all()` rejects immediately; JavaScript does not cancel the other format promises. The catch block then deletes paths currently recorded in `writtenSizedPaths`, but sibling encoders can still be running and can write or rename additional files after cleanup has completed. The queue catch can immediately retry the same job while the prior invocation is still finishing its sibling promises.
+
+Concrete failure scenario:
+
+AVIF encoding fails quickly due to a codec/bitdepth/disk error while JPEG and WebP are still writing their ladders. The catch block deletes the paths it has seen and rethrows. The queue schedules a retry. Meanwhile the original JPEG/WebP promises continue and atomically rename more derivatives for the failed invocation. The failed job can leave partial files behind, and a retry can race with old writers over the same filenames. Because processed remains false this is not usually a public-data leak, but it creates noisy retries, stale derivative state for operators/backfills, and hard-to-reproduce mixed outputs if the retry completes while old writers are still active.
+
+Suggested fix:
+
+Run the three format promises through `Promise.allSettled()`, wait for every encoder branch to finish, then clean up all paths recorded by all branches and throw an aggregate/first error. This preserves parallelism while making the failure boundary real. Add a unit test with one format rejecting and another resolving later after adding a path, asserting cleanup waits for the late writer.
+
+### CRIT-C7-03 - Semantic/similar enrichment failures are returned as successful empty results
 
 Severity: Medium
 Confidence: High
-Category: implementation risk / latent concurrency assumption
+Status: Confirmed
+Perspective: product honesty / reliability / search UX
 
 Code regions:
 
-- `apps/web/src/app/actions/topics.ts:232-247`
-- `apps/web/src/app/actions/topics.ts:250-358`
-- `apps/web/src/app/actions/topics.ts:360-362`
-- Existing happy-path test pins the stale assumption at `apps/web/src/__tests__/topics-actions.test.ts:431-486`
-- File lifecycle helper deletes only a caller-provided filename in `apps/web/src/lib/process-topic-image.ts:59-102`
+- `apps/web/src/app/api/search/semantic/route.ts:288-335`
+- `apps/web/src/app/api/search/similar/[id]/route.ts:189-236`
+- Client success handling in `apps/web/src/components/search.tsx:191-212`
+- Similar empty-state rendering in `apps/web/src/components/similar-photos.tsx:134-156`
 
-Why this is a problem:
+Problem:
 
-`updateTopic()` reads the current topic image before acquiring the route mutation lock:
-
-```ts
-const [currentTopic] = await db.select({ image_filename: topics.image_filename })
-  .from(topics)
-  .where(eq(topics.slug, cleanCurrentSlug))
-  .limit(1);
-const previousImageFilename = currentTopic?.image_filename ?? null;
-```
-
-It then processes a new image before the lock, performs the database update or rename under `withTopicRouteMutationLock()`, and after the lock commits it deletes `previousImageFilename`:
-
-```ts
-if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
-    try { await deleteTopicImage(previousImageFilename); }
-```
-
-The rename branch correctly re-reads the authoritative topic row under the lock for data preservation, and the comments explicitly call out closing the pre-lock `image_filename` TOCTOU for the transaction. The cleanup path still uses the stale pre-lock value, so the file lifecycle is not actually protected by that invariant.
+Both search routes compute candidate IDs and scores, then run a second enrichment query for public image metadata. If that enrichment query fails, the routes log the error, set `enrichedResults = []`, and still return HTTP 200. The clients interpret HTTP 200 with an empty array as a legitimate “no matches” / “no similar photos” state.
 
 Concrete failure scenario:
 
-Two admins update the same topic cover around the same time:
-
-1. Both requests read `previousImageFilename = old.webp` before the lock.
-2. Request B acquires the lock first and updates the topic image to `b.webp`, then deletes `old.webp`.
-3. Request A later acquires the lock and updates the topic image to `a.webp`.
-4. Request A's post-commit cleanup still tries to delete only stale `old.webp`.
-5. `b.webp` is no longer referenced by `topics.image_filename`, but remains in `public/resources` permanently.
-
-The same leak can happen through the rename path because the insert carries the locked `transactionTopic.image_filename`, but cleanup after commit still deletes the pre-lock `previousImageFilename`, not the file actually replaced by this transaction.
+The CLIP scan succeeds and finds relevant matches, but the enrichment `images LEFT JOIN topics` query hits a transient MySQL connection error. The visitor sees an empty semantic result list or “no similar photos,” not a retryable error. This misrepresents infrastructure failure as photographic/search relevance failure and makes production incidents harder to detect from the client side.
 
 Suggested fix:
 
-Capture the replaced image filename inside the same locked section that performs the authoritative update:
+Return `500` or `503` when enrichment fails after matches were found, with the existing `no-store` headers. Update `Search` and `SimilarPhotos` to show the existing error/hidden state for non-OK responses. If partial results without metadata are desired, return a distinct status field such as `{ status: "partial", results: [...] }` and render it explicitly instead of collapsing to empty success.
 
-- In the same-slug branch, select `{ image_filename }` under the lock immediately before the update, store it as `replacedImageFilename`, then update.
-- In the rename branch, use `transactionTopic.image_filename` as the candidate replaced file when `imageFilename` is supplied.
-- Return that captured value from the locked action and use it for post-commit `deleteTopicImage()`.
-- Add a regression test that simulates a stale pre-lock read and a different locked row value, then asserts the locked row's replaced image is deleted.
+### CRIT-C7-04 - CLIP search silently searches only the newest capped embedding window
 
-## Likely Issues
+Severity: Low
+Confidence: High
+Status: Risk needing manual validation
+Perspective: product assumptions / operational fit
 
-No likely issue was promoted without enough current-HEAD evidence. I discarded several weaker candidates after checking the code paths:
+Code regions:
 
-- Ignored `.nfs*` and AppleDouble files exist in the local working tree under `apps/web/public/uploads`, but they are ignored and absent from HEAD, so they are not a HEAD finding.
-- The generated `apps/web/public/sw.js` contains an older stamped version string, but `apps/web/package.json` runs `scripts/build-sw.ts` in `prebuild`, so production builds regenerate it. This is at most a local-dev hygiene risk unless a deployment path skips `npm run build`.
-- Migration journal ordering has historical non-monotonic entries, but the current migrator explicitly reconciles/baselines committed hashes and the latest entries are ordered above the current max journal timestamp.
+- `apps/web/src/lib/clip-embeddings.ts:22-44`
+- `apps/web/src/app/api/search/semantic/route.ts:242-251`
+- `apps/web/src/app/api/search/similar/[id]/route.ts:141-150`
+- Operational note in `apps/web/README.md:53-62`
+- Runtime-limit note in `CLAUDE.md:534-538`
 
-## Risks Needing Manual Validation
+Problem:
 
-- The CSP/map issue should be validated in a production-mode browser run with at least one map-visible photo. The expected evidence is a blocked `tile.openstreetmap.org` image request before the fix and no CSP console violation after the fix.
-- The topic-image leak should be validated with a targeted unit test because the race is timing-sensitive in a live app. The deterministic test should mock the pre-lock row as `old.webp` and the under-lock row as `b.webp`, submit a new `a.webp`, and assert `deleteTopicImage('b.webp')`.
+The semantic and similar routes order embeddings by `updatedAt DESC` and scan only `SEMANTIC_SCAN_LIMIT` rows, defaulting to 2000. This is documented as an operational cap, and the README notes that large galleries may not surface older photos. The product UI, however, presents the feature as semantic search/similar photos without indicating that results may be incomplete due to a newest-first scan window.
+
+Concrete failure scenario:
+
+A gallery grows to 6,000 processed photos. A client searches for a specific older event or opens similar photos on an old image. If the best matches are outside the newest 2,000 embedding rows, they are invisible even though they have valid production embeddings. The photographer may conclude CLIP relevance is poor or that old work was not embedded, while the route is behaving exactly as capped.
+
+Suggested fix:
+
+At minimum, surface the bounded-search assumption in the UI or admin settings when production semantic search is active, including the effective scan limit. Better fixes are to make the cap an explicit operator setting with observed corpus count warnings, scan all rows under a concurrency/latency budget, or move to an indexed/vector-search strategy when corpus size exceeds the cap.
 
 ## Final Missed-Issues Sweep
 
-I performed an end sweep across route boundaries and previous-cycle-heavy areas:
-
-- Admin API auth wrappers and same-origin handling.
-- Public mutating API rate limits.
-- Server-action origin lint expectations.
-- Public/admin privacy field selection and symmetric privacy tests.
-- Map/timeline/search public data projections.
-- Topic rename child-table interactions and smart collection slug remapping.
-- Upload pipeline, Lightroom upload auth, image variant paths, HDR/color metadata surfaces.
-- Service worker cache exclusions for admin/share routes.
-- Drizzle migration journal, reconcile baseline behavior, and deploy migration assertions.
-- Nginx body-size/path routing and Docker runtime mounts.
-
-The two confirmed findings above are the only issues I found with enough evidence to report as real current-HEAD defects.
+- Rechecked current HEAD after noticing earlier critic findings had already been fixed: production CSP now includes OpenStreetMap tile image origins, and topic image cleanup now records the replaced filename under the route lock.
+- Re-scanned auth/session/admin API wrappers, same-origin helpers, upload path containment, Lightroom token auth, privacy field guards, backup download containment, restore scanner, and schema/migration conventions. No new higher-severity issue was confirmed there.
+- Re-scanned photographer-intent constraints: no edit/culling/scoring features were introduced; originals are private by path; GPS stripping and color/HDR delivery guardrails remain explicit.
+- No tests were run for this critic lane; this artifact is a review report only.

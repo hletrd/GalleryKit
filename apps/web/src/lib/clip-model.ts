@@ -49,6 +49,22 @@ export { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
 const CLIP_IMAGE_SIZE = 512;
 const CLIP_MEANS = [0.48145466, 0.4578275, 0.40821073] as const;
 const CLIP_STDS = [0.26862954, 0.26130258, 0.27577711] as const;
+const CLIP_INFERENCE_CONCURRENCY = Math.max(1, Number(process.env.CLIP_INFERENCE_CONCURRENCY) || 1);
+let activeInferenceCount = 0;
+const inferenceWaiters: Array<() => void> = [];
+
+async function withInferenceSlot<T>(fn: () => Promise<T>): Promise<T> {
+    if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
+        await new Promise<void>((resolve) => inferenceWaiters.push(resolve));
+    }
+    activeInferenceCount++;
+    try {
+        return await fn();
+    } finally {
+        activeInferenceCount--;
+        inferenceWaiters.shift()?.();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Volume path
@@ -120,10 +136,10 @@ export async function embedTextReal(query: string): Promise<Float32Array> {
 
     const inputs = await tokenizer(query, { padding: true, truncation: true });
 
-    const out = (await model({
+    const out = (await withInferenceSlot(() => model({
         input_ids: inputs['input_ids'],
         attention_mask: inputs['attention_mask'],
-    })) as Record<string, { data: Float32Array }>;
+    }))) as Record<string, { data: Float32Array }>;
 
     const embedding = out['l2norm_text_embeddings'];
     if (!embedding) {
@@ -181,9 +197,9 @@ export async function embedImageReal(imagePath: string): Promise<Float32Array> {
         }
     }
 
-    const out = (await model({
+    const out = (await withInferenceSlot(() => model({
         pixel_values: new Tensor('float32', pv, [1, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE]),
-    })) as Record<string, { data: Float32Array }>;
+    }))) as Record<string, { data: Float32Array }>;
 
     const embedding = out['l2norm_image_embeddings'];
     if (!embedding) {

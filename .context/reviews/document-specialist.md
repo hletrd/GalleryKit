@@ -1,47 +1,61 @@
-# Document-Specialist Review - Review-Plan-Fix Cycle 6
+# Document-Specialist Review - Review-Plan-Fix Cycle 7
 
 **Date:** 2026-06-29
-**HEAD reviewed:** `5443009e411113bf97fe2d8fcb166b2ac78625fb`
+**HEAD reviewed:** `17124135999a3d7cb4f5262e8b2b5917503088ae`
 **Role:** documentation/code consistency reviewer.
-**Boundary:** Reviewed current `HEAD` only. This artifact is the only intended write. Existing unrelated modified review files were not touched.
+**Boundary:** Reviewed current `HEAD` only. This artifact is the only intended write for this lane. Existing unrelated modified review files from other lanes were not touched.
 
 ## Inventory Coverage
 
-Read `AGENTS.md` first, then `CLAUDE.md`, before broader inspection.
+Read `AGENTS.md` and `CLAUDE.md` first, then built the review inventory from tracked docs, config, source, and contract tests.
 
-Built the review inventory from `git ls-tree -r --name-only HEAD` before findings:
-
-- Total tracked files inventoried: 2,504.
-- Governing docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`.
-- Planning/review context: `.context/plans/README.md`, active cycle/deferred plans, top-level `.context/reviews/*.md`, and targeted `.context/plans/done/*` / archive references when current docs pointed there.
-- Deploy/config surfaces: root/app `package.json`, `.env.deploy.example`, `apps/web/.env.local.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `.dockerignore`, `apps/web/.dockerignore`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`.
-- Schema/migration/runbook surfaces: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, restore/migration source-contract tests.
-- Contract-bearing implementation/tests: app routes/actions, CLIP modules/scripts/tests, upload/original-path modules, privacy/select-field guards, service worker template/generated file/tests, storage quarantine, deploy-script contract, public freshness routes, backup/restore code, lint/security scanners, and package scripts.
+- Governing docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
+- Context docs/plans/reviews: `.context/plans/README.md`, active/deferred `.context/plans/*.md`, top-level `.context/reviews/*.md`, and targeted archive/done plans only where current docs referenced their contracts.
+- Deploy/runbook/env surfaces: `.env.deploy.example`, `apps/web/.env.local.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`, package manifests, and lockfile headers.
+- Schema/migration/security contract surfaces: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, auth/origin/rate-limit scanners, privacy guards, and migration/source-contract tests.
+- Feature docs and contract-bearing comments: CLIP semantic search docs/scripts/routes, Lightroom token docs/actions/page, storage quarantine, service worker docs/template/generated file, backup/restore code, upload/original path code, site-config/SEO code, and comments containing operational `MUST`/`not wired`/`not implemented` contracts.
 
 ## Findings
 
-### DOC-C6-01 - Backup/restore docs name the wrong original-upload directory
+### DOC-C7-01 - Lightroom token docs point admins to Settings, but the live token page is separate and not discoverable in admin nav
+
+**Status:** Confirmed issue
+**Severity:** Medium
+**Confidence:** High
+**Classification:** confirmed documentation/code mismatch with admin UX impact
+
+**Mismatched regions:**
+
+- `CLAUDE.md:152` says Lightroom tokens "can be rotated or revoked from the admin Settings panel."
+- The actual token UI is a dedicated page at `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx:11-24`, rendering `TokensClient`.
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:45-83` implements create/revoke behavior there, not in Settings.
+- The admin nav currently lists dashboard/categories/tags/SEO/settings/password/users/db/analytics at `apps/web/src/components/admin-nav.tsx:15-25`; it has no `/admin/tokens` entry, and `apps/web/messages/en.json:2-14` has no `nav.tokens` label.
+
+**Why this is a problem:** The authoritative docs send operators to Settings, but the current Settings page does not own token management. The real page exists but is not linked from the admin navigation, so an admin following the docs has no obvious way to find the credential-management surface.
+
+**Concrete failure scenario:** An operator needs to revoke a compromised Lightroom Classic token. They open Admin -> Settings as documented, find only gallery/color/privacy/slideshow/semantic controls, and miss the unlinked `/admin/tokens` page. The compromised token remains usable until someone knows or guesses the direct URL.
+
+**Suggested fix:** Update `CLAUDE.md` to name the dedicated Tokens page and add a visible `/admin/tokens` entry with localized `nav.tokens` labels, or intentionally relocate token management into Settings. If the page remains separate, document "Admin -> Tokens" instead of "Settings panel."
+
+### DOC-C7-02 - Semantic-search route header still describes the old stub-only/random behavior
 
 **Status:** Confirmed issue
 **Severity:** Low
 **Confidence:** High
-**Classification:** confirmed documentation/code mismatch
-**Validation:** Source inspection and full Vitest run.
+**Classification:** confirmed source-comment/code mismatch
 
 **Mismatched regions:**
 
-- `CLAUDE.md:209` says DB backup/restore does not snapshot or roll back host files in `data/originals`, `public/uploads`, or `public/resources`.
-- The authoritative original-upload path is `data/uploads/original/`:
-  - `CLAUDE.md:176` and `CLAUDE.md:249` both describe originals as stored under `data/uploads/original/`.
-  - `apps/web/src/lib/upload-paths.ts:27-40` resolves the default private original root to `apps/web/data/uploads/original` or `data/uploads/original`.
-  - `apps/web/Dockerfile:85` sets `UPLOAD_ORIGINAL_ROOT="/app/data/uploads/original"` and `apps/web/Dockerfile:122` creates `/app/data/uploads/original`.
-  - `apps/web/scripts/migrate.js:46-50` defaults legacy-original migration to `data/uploads/original`.
+- `apps/web/src/app/api/search/semantic/route.ts:8-10` says the endpoint embeds queries via the stub CLIP text encoder and returns scores above `COSINE_THRESHOLD` (`0.18`).
+- `apps/web/src/app/api/search/semantic/route.ts:19-20` describes stub output as "random output."
+- Current implementation branches to the real CLIP encoder in production at `apps/web/src/app/api/search/semantic/route.ts:232-235` and scans only the active model version at `apps/web/src/app/api/search/semantic/route.ts:242-251`.
+- The stub implementation is deterministic, not random: `apps/web/src/lib/clip-inference.ts:6-13` and `apps/web/src/lib/clip-inference.ts:63-72` state and implement deterministic hash-based embeddings. User-facing docs agree at `apps/web/README.md:57-60` and `apps/web/messages/en.json:717-719`.
 
-**Why this is a problem:** This is an operational/runbook sentence for backup and restore scope. It tells operators which host files are outside SQL restore coverage, but names a directory that the current app does not use.
+**Why this is a problem:** The route header is a contract-style comment at the top of a public API implementation. Future maintainers can incorrectly reason that production search is not active on this route, or that stub tests are nondeterministic, despite the code and public docs saying the opposite.
 
-**Concrete failure scenario:** An operator preparing a full rollback reads this sentence, snapshots `data/originals`, `public/uploads`, and `public/resources`, then restores an SQL dump after deleting or corrupting originals under `data/uploads/original`. The DB rows come back, processed derivatives may still exist, but the private originals needed for reprocessing/backfill are missing because the documented host path was wrong.
+**Concrete failure scenario:** A maintainer debugging production search reads the header, assumes only the stub path can run, and changes threshold/model-version logic around `COSINE_THRESHOLD` instead of the production `PRODUCTION_COSINE_THRESHOLD` path. That can produce a bad fix or an incomplete test.
 
-**Suggested fix:** Change `CLAUDE.md:209` from `data/originals` to `data/uploads/original`, or phrase it as the `./data` bind mount with the current private-original subpath called out explicitly.
+**Suggested fix:** Rewrite the header summary to match the lower "Serving gate" section: stub mode uses deterministic non-semantic embeddings and `COSINE_THRESHOLD`; production mode uses `embedTextReal`, `PRODUCTION_MODEL_VERSION`, and `PRODUCTION_COSINE_THRESHOLD`.
 
 ## Likely Issues
 
@@ -53,22 +67,23 @@ None found.
 
 ## Verified Non-Findings
 
-- The prior cycle document-specialist CLIP comment findings are fixed: `semantic-search-route.test.ts` now documents stub as the default test mode while both stub and operator-gated production serve requests, and `app/actions/embeddings.ts` now describes active-model-version selection.
-- Deploy docs match implementation: remote deploy config is root `.env.deploy` by default with an external fallback, Docker deploy prunes only after `up -d`, automatic volume prune omits `-a`, immutable public assets are packaged into the image, and mutable `public/uploads` / `public/resources` are narrow bind mounts.
-- Migration/restore docs match current code except for the original-path typo above: restore now holds the DB restore lock, upload-processing contract lock, and color-pipeline backfill lock, then runs `scripts/migrate.js` after successful import before revalidation/success.
-- CLIP production docs match current code: production mode is env-gated, offline loader and downloader share `resolveClipModelsRoot`, the revision-subdir cache layout is tested, production scans only `PRODUCTION_MODEL_VERSION`, and stub rows remain segregated.
-- Service-worker docs match template/generated behavior: HTML offline fallback excludes admin-rendered pages and revocable `/s/<key>` / `/g/<key>` pages, with the 24 h TTL and 50-entry cap present in both `sw.template.js` and generated `sw.js`.
-- Privacy docs match guards: `publicSelectFields`, timeline fields, search enrichment fields, `_PrivacySensitiveKeys`, and `SENSITIVE_KEYS` agree on admin-only fields including color/HDR diagnostics and `uploaded_by`.
-- Version and test-count claims are current: package manifests/Dockerfile align with Node 24+, Next 16.2.x, React 19, TypeScript 6, and the full Vitest suite reports 2,279 passed / 4 skipped tests.
+- The prior document-specialist finding about `data/originals` is fixed: current `CLAUDE.md:209` names `data/uploads/original`, matching `apps/web/src/lib/upload-paths.ts`, `apps/web/Dockerfile`, and restore/backfill docs.
+- Deploy docs match implementation: root `.env.deploy` is supported by `scripts/deploy-remote.sh`, the external default env path remains supported, remote deploy uses `apps/web/deploy.sh`, compose bind-mounts `./data`, `./public/uploads`, `./public/resources`, and `./src/site-config.json`, and auto-prune runs only after `docker compose ... up -d --build`.
+- Migration docs match current guardrails: new migrations must advance `_journal.json` `when`, `migrate.js` baselines by committed hashes, and reconcile/post-condition tests cover the current schema.
+- Site-config and SEO docs match code: `seo_og_image_url` exists in admin actions/UI/messages and is consumed by public metadata/OG routes; static links/analytics still come from `site-config.json`.
+- Storage docs match quarantine: `@/lib/storage` remains local-only and is not wired into upload/processing/serving paths; `storage-quarantine.test.ts` pins that contract.
+- CLIP setup docs match current activation path: production mode is env-gated, weights load offline from `CLIP_MODELS_ROOT`, model rows are segregated by `model_version`, and the admin UI intentionally offers only Disabled/Stub.
+- Version claims match manifests: Node `>=24`, Next `^16.2.9`, React `^19.2.5`, and TypeScript `^6` align with README/CLAUDE badges and tech-stack text.
 
 ## Final Missed-Issues Sweep
 
-Final targeted sweeps covered stale path names (`data/originals`, original upload roots), deploy helper docs, bind mounts, Docker ignore rules, CLIP/stub/production wording, migration journal/reconcile coverage, restore maintenance, service-worker offline caching, public route freshness, storage-backend quarantine, paid-download removal, Lightroom token scopes, env/default claims, and source comments containing `MUST`/contract language.
+Final targeted sweeps covered stale route names, deploy helper defaults, Docker bind mounts, nginx body caps, CLIP/stub/production wording, Settings-vs-SEO-vs-Tokens admin surfaces, storage/S3 wording, site-config keys, backup/restore file scopes, service-worker docs, migration journal guidance, paid-download removal, and source comments containing `MUST`, `not implemented`, `not wired`, `random`, or `Settings panel`.
 
-Intentionally not inspected line-by-line: binary/image assets, generated screenshots under `.context/reviews/archive/`, the full historical `.context/reviews/archive/` corpus, and old archived implementation plans that were not referenced by current authoritative docs. They were inventoried and searched only where current docs/contracts pointed at them.
+Intentionally not inspected line-by-line: binary/image assets, generated screenshots, full historical `.context/reviews/archive/` contents, and old archived implementation plans not referenced by current authoritative docs. They were inventoried and searched where current docs/contracts pointed at them.
 
-Verification run:
+## Validation
 
-- `npm run test --workspace=apps/web -- --run --reporter=default` — passed, 248 files, 2 skipped files, 2,279 passed tests, 4 skipped tests.
+- `git diff --check -- .context/reviews/document-specialist.md` — passed.
+- No application tests were run in this lane; this was a review-only documentation/source-contract pass.
 
-**Disposition:** 1 confirmed finding, 0 likely findings, 0 manual-validation-only risks. No application-code fixes, commits, pushes, or deploys performed.
+**Disposition:** 2 confirmed findings, 0 likely findings, 0 manual-validation-only risks. No application-code fixes, commits, pushes, or deploys performed by this lane.

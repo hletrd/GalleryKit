@@ -81,7 +81,8 @@ function SearchResultItem({
             <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                 <Image
                     src={imgSrc}
-                    alt={image.title || t('common.photo')}
+                    alt=""
+                    aria-hidden="true"
                     width={48}
                     height={48}
                     className="w-full h-full object-cover"

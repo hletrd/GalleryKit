@@ -4,12 +4,12 @@ import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, images, sessions, imageEmbeddings } from '@/db';
-import { eq, and, sql, asc, gt, notInArray } from 'drizzle-orm';
+import { eq, and, sql, asc, gt, notInArray, isNull } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
@@ -81,6 +81,87 @@ const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
 const MAX_PERMANENTLY_FAILED_IDS = 1000;
+
+export type ProcessingSettingsSnapshot = {
+    quality: ImageQualitySettings;
+    imageSizes?: number[];
+    forceSrgbDerivatives: boolean;
+    wideGamutJpegChroma: JpegChromaSubsampling;
+    avifEffort: number;
+    sdrJpegChroma: JpegChromaSubsampling;
+    wideGamutMaxSourcePixels: number;
+    autoAltTextEnabled: boolean;
+    semanticSearchMode: 'disabled' | 'stub' | 'production';
+};
+
+export function createProcessingSettingsSnapshot(config: GalleryConfig): ProcessingSettingsSnapshot {
+    return {
+        quality: {
+            webp: config.imageQualityWebp,
+            avif: config.imageQualityAvif,
+            jpeg: config.imageQualityJpeg,
+        },
+        imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
+        forceSrgbDerivatives: config.forceSrgbDerivatives,
+        wideGamutJpegChroma: config.wideGamutJpegChroma,
+        avifEffort: config.avifEffort,
+        sdrJpegChroma: config.sdrJpegChroma,
+        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+        autoAltTextEnabled: config.autoAltTextEnabled,
+        semanticSearchMode: config.semanticSearchMode,
+    };
+}
+
+export function serializeProcessingSettingsSnapshot(snapshot: ProcessingSettingsSnapshot): string {
+    return JSON.stringify(snapshot);
+}
+
+function isProcessingSettingsSnapshot(value: unknown): value is ProcessingSettingsSnapshot {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<ProcessingSettingsSnapshot>;
+    return Boolean(
+        candidate.quality
+        && typeof candidate.quality.webp === 'number'
+        && typeof candidate.quality.avif === 'number'
+        && typeof candidate.quality.jpeg === 'number'
+        && (candidate.imageSizes === undefined || (
+            Array.isArray(candidate.imageSizes)
+            && candidate.imageSizes.every((size) => Number.isInteger(size) && size > 0)
+        ))
+        && typeof candidate.forceSrgbDerivatives === 'boolean'
+        && ['4:4:4', '4:2:2', '4:2:0'].includes(String(candidate.wideGamutJpegChroma))
+        && typeof candidate.avifEffort === 'number'
+        && ['4:4:4', '4:2:2', '4:2:0'].includes(String(candidate.sdrJpegChroma))
+        && typeof candidate.wideGamutMaxSourcePixels === 'number'
+        && typeof candidate.autoAltTextEnabled === 'boolean'
+        && ['disabled', 'stub', 'production'].includes(String(candidate.semanticSearchMode))
+    );
+}
+
+function parseProcessingSettingsSnapshot(raw: string | null): ProcessingSettingsSnapshot | null {
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        return isProcessingSettingsSnapshot(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function applyProcessingSettingsSnapshot(job: ImageProcessingJob, snapshot: ProcessingSettingsSnapshot): ImageProcessingJob {
+    return {
+        ...job,
+        quality: snapshot.quality,
+        imageSizes: snapshot.imageSizes,
+        forceSrgbDerivatives: snapshot.forceSrgbDerivatives,
+        wideGamutJpegChroma: snapshot.wideGamutJpegChroma,
+        avifEffort: snapshot.avifEffort,
+        sdrJpegChroma: snapshot.sdrJpegChroma,
+        wideGamutMaxSourcePixels: snapshot.wideGamutMaxSourcePixels,
+        autoAltTextEnabled: snapshot.autoAltTextEnabled,
+        semanticSearchMode: snapshot.semanticSearchMode,
+    };
+}
 
 /** Prune retry Maps to prevent unbounded growth from abandoned jobs.
  *
@@ -463,7 +544,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
             // R10-H2: clear any prior processing_error / failed_at on success.
             const [updateResult] = await db.update(images)
-                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION, was_downscaled: wasDownscaled, avif_10bit: avif10bit, processing_error: null, failed_at: null })
+                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION, was_downscaled: wasDownscaled, avif_10bit: avif10bit, processing_error: null, failed_at: null, processing_settings_json: null })
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {
@@ -731,7 +812,7 @@ export const bootstrapImageProcessingQueue = async () => {
         // monopolize every bootstrap batch and starve later pending rows.
         // C1F-DB-02: exclude permanently-failed IDs from the bootstrap query so
         // they are not re-enqueued indefinitely.
-        const baseConditions = [eq(images.processed, false)];
+        const baseConditions = [eq(images.processed, false), isNull(images.processing_error)];
         if (state.bootstrapCursorId !== null) {
             baseConditions.push(gt(images.id, state.bootstrapCursorId));
         }
@@ -757,13 +838,15 @@ export const bootstrapImageProcessingQueue = async () => {
             matrix_coefficients: images.matrix_coefficients,
             is_hdr: images.is_hdr,
             has_gain_map: images.has_gain_map,
+            processing_settings_json: images.processing_settings_json,
         })
             .from(images)
             .where(pendingWhere)
             .orderBy(asc(images.id))
             .limit(BOOTSTRAP_BATCH_SIZE);
         for (const image of pending) {
-            enqueueImageProcessing({
+            const snapshot = parseProcessingSettingsSnapshot(image.processing_settings_json);
+            const job: ImageProcessingJob = {
                 id: image.id,
                 filenameOriginal: image.filename_original,
                 filenameWebp: image.filename_webp,
@@ -781,7 +864,8 @@ export const bootstrapImageProcessingQueue = async () => {
                     isHdr: image.is_hdr,
                     hasGainMap: image.has_gain_map,
                 },
-            });
+            };
+            enqueueImageProcessing(snapshot ? applyProcessingSettingsSnapshot(job, snapshot) : job);
 
         }
         const lastPending = pending.at(-1);

@@ -9,6 +9,7 @@ import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { GridPicture } from '@/components/grid-picture';
 import type { Metadata } from 'next';
 
 export const revalidate = 0;
@@ -233,35 +234,27 @@ export default async function TimelinePage({
                                                     aria-label={tAria('viewPhoto', { title: displayTitle })}
                                                 >
                                                     <div className="relative w-full">
-                                                        <picture>
-                                                            <source
-                                                                type="image/avif"
-                                                                srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`}
-                                                                sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                                                            />
-                                                            <source
-                                                                type="image/webp"
-                                                                srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
-                                                                sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                                                            />
-                                                            {/* R19-M2: use the base JPEG filename for the
-                                                                <picture> fallback rather than the sized derivative.
-                                                                The base file always exists per the encoder
-                                                                atomic-rename contract, so legacy / mid-backfill rows
-                                                                whose `_${smallSize}.jpg` derivative is missing render
-                                                                cleanly instead of producing a broken-tile glyph.
-                                                                Modern browsers prefer the AVIF/WebP `<source>` rows
-                                                                via srcset, so this fallback adds no extra bytes. */}
-                                                            <img
-                                                                src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
-                                                                alt={altText}
-                                                                width={photo.width}
-                                                                height={photo.height}
-                                                                className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                                loading="lazy"
-                                                                decoding="async"
-                                                            />
-                                                        </picture>
+                                                        <GridPicture
+                                                            sources={[
+                                                                {
+                                                                    type: 'image/avif',
+                                                                    srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
+                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                },
+                                                                {
+                                                                    type: 'image/webp',
+                                                                    srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
+                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                },
+                                                            ]}
+                                                            src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
+                                                            alt={altText}
+                                                            width={photo.width}
+                                                            height={photo.height}
+                                                            className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
+                                                            loading="lazy"
+                                                            decoding="async"
+                                                        />
                                                         <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
                                                             <h3 className="text-white font-medium truncate">{displayTitle}</h3>
                                                         </div>

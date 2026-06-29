@@ -38,7 +38,7 @@ describe('upload embedding hook wiring', () => {
 
 describe('upload enqueue snapshots semanticSearchMode (R17C17 PERF-17-04)', () => {
   const actionSrc = readFileSync(join(process.cwd(), 'src/app/actions/images.ts'), 'utf8');
-  it('passes uploadConfig.semanticSearchMode on the upload enqueue', () => {
-    expect(actionSrc).toContain('semanticSearchMode: uploadConfig.semanticSearchMode');
+  it('passes the persisted processing snapshot semanticSearchMode on the upload enqueue', () => {
+    expect(actionSrc).toContain('semanticSearchMode: processingSettingsSnapshot.semanticSearchMode');
   });
 });

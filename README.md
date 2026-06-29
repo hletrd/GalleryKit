@@ -101,7 +101,7 @@ npm run init --workspace=apps/web
 npm run dev
 ```
 
-After the dev server starts, log in at `/en/admin`, upload one photo, and confirm the public homepage renders it.
+After the dev server starts, log in at `/en/admin`, create a category, upload one photo, and confirm the public homepage renders it.
 
 ### Remote Deploy Helper
 

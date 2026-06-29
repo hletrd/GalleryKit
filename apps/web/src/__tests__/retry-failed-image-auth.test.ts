@@ -67,8 +67,10 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('@/lib/image-queue', () => ({
+    createProcessingSettingsSnapshot: vi.fn(),
     enqueueImageProcessing: enqueueImageProcessingMock,
     getProcessingQueueState: getProcessingQueueStateMock,
+    serializeProcessingSettingsSnapshot: vi.fn(),
 }));
 
 vi.mock('@/lib/revalidation', () => ({
@@ -84,6 +86,7 @@ vi.mock('@/lib/restore-maintenance', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: vi.fn(),
+    getGalleryConfigStrict: vi.fn(),
 }));
 
 vi.mock('@/lib/upload-paths', () => ({

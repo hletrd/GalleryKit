@@ -346,7 +346,8 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
     });
 
     // CR-R9C7-01 / C1 AGG-M4 — the admin processing/search settings must be forwarded from
-    // `config` on the LR publish enqueue, exactly as the browser path does
+    // the persisted upload-time processing snapshot on the LR publish enqueue,
+    // exactly as the browser path does
     // (CR-R9C6-01). Because this path always supplies a truthy `quality`
     // object, the queue handler's `if (!quality && !imageSizes)` config-load
     // gate never enters, so an omitted setting silently falls back to the
@@ -357,13 +358,13 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
         const enqueueBlock = LR_SRC.match(/enqueueImageProcessing\(\{[\s\S]*?\}\);/);
         expect(enqueueBlock).not.toBeNull();
         const blockStr = enqueueBlock?.[0] ?? '';
-        expect(blockStr).toMatch(/forceSrgbDerivatives:\s*config\.forceSrgbDerivatives/);
-        expect(blockStr).toMatch(/wideGamutJpegChroma:\s*config\.wideGamutJpegChroma/);
-        expect(blockStr).toMatch(/avifEffort:\s*config\.avifEffort/);
-        expect(blockStr).toMatch(/sdrJpegChroma:\s*config\.sdrJpegChroma/);
-        expect(blockStr).toMatch(/wideGamutMaxSourcePixels:\s*config\.wideGamutMaxSourcePixels/);
-        expect(blockStr).toMatch(/autoAltTextEnabled:\s*config\.autoAltTextEnabled/);
-        expect(blockStr).toMatch(/semanticSearchMode:\s*config\.semanticSearchMode/);
+        expect(blockStr).toMatch(/forceSrgbDerivatives:\s*processingSettingsSnapshot\.forceSrgbDerivatives/);
+        expect(blockStr).toMatch(/wideGamutJpegChroma:\s*processingSettingsSnapshot\.wideGamutJpegChroma/);
+        expect(blockStr).toMatch(/avifEffort:\s*processingSettingsSnapshot\.avifEffort/);
+        expect(blockStr).toMatch(/sdrJpegChroma:\s*processingSettingsSnapshot\.sdrJpegChroma/);
+        expect(blockStr).toMatch(/wideGamutMaxSourcePixels:\s*processingSettingsSnapshot\.wideGamutMaxSourcePixels/);
+        expect(blockStr).toMatch(/autoAltTextEnabled:\s*processingSettingsSnapshot\.autoAltTextEnabled/);
+        expect(blockStr).toMatch(/semanticSearchMode:\s*processingSettingsSnapshot\.semanticSearchMode/);
     });
 });
 

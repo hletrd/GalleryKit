@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
+import { GridPicture } from '@/components/grid-picture';
 import { useTranslation } from "@/components/i18n-provider";
 import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
@@ -267,7 +268,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                     </p>
                 </div>
                 <Suspense fallback={null}>
-                    <TagFilter tags={tags} />
+                    <TagFilter tags={tags} currentTags={currentTags} />
                 </Suspense>
             </div>
 
@@ -324,7 +325,6 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                 onClick={saveScrollPosition}
                             >
                                 <div className="relative w-full">
-                                    <picture>
                                         {(() => {
                                             const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
                                             const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
@@ -335,54 +335,28 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                 const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
                                                 const masonrySizes = "(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw";
                                                 return (
-                                                    <>
-                                                        <source
-                                                            type="image/avif"
-                                                            srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`}
-                                                            sizes={masonrySizes}
-                                                        />
-                                                        <source
-                                                            type="image/webp"
-                                                            srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
-                                                            sizes={masonrySizes}
-                                                        />
-                                                        {/* R10-L23 / R15-L2: object-cover is intentional. The masonry
-                                                            layout uses w-full + h-auto + the natural aspect ratio
-                                                            (height inferred from image.height + width), so for masonry
-                                                            slots that match the image AR object-cover is a no-op. When
-                                                            CSS aspect-ratio rounds the slot (~1px) or when the card
-                                                            participates in a hover scale-105 transform, object-cover
-                                                            guarantees the photo fills the rendered box without letterbox
-                                                            artifacts. The 5% scale-up on hover (group-hover:scale-105)
-                                                            crops a few pixels off the photographer's framing — this is
-                                                            an explicit trade-off for the uniform-card aesthetic; do NOT
-                                                            switch to object-contain (uneven rows) or remove the hover
-                                                            scale (no affordance) without re-reviewing with the
-                                                            photographer. The full-fidelity framing is always available
-                                                            in the lightbox / photo viewer where the original aspect
-                                                            ratio is preserved. */}
-                                                        {/* R20-M1: use the base JPEG filename for the
-                                                            <picture> fallback rather than the sized derivative.
-                                                            The base file always exists per the encoder
-                                                            atomic-rename contract, so legacy / mid-backfill rows
-                                                            whose `_${smallSize}.jpg` derivative is missing render
-                                                            cleanly instead of producing a broken-tile glyph on
-                                                            the highest-traffic public surface. Modern browsers
-                                                            prefer the AVIF / WebP `<source>` rows via srcset,
-                                                            so this fallback adds no extra bytes. Mirrors the
-                                                            R19-M2 fix on timeline/year. */}
-                                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                        <img
-                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                                            alt={altText}
-                                                            width={image.width}
-                                                            height={image.height}
-                                                            className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                            loading={isAboveFold ? "eager" : "lazy"}
-                                                            decoding="async"
-                                                            fetchPriority={isAboveFold ? "high" : "auto"}
-                                                        />
-                                                    </>
+                                                    <GridPicture
+                                                        sources={[
+                                                            {
+                                                                type: 'image/avif',
+                                                                srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
+                                                                sizes: masonrySizes,
+                                                            },
+                                                            {
+                                                                type: 'image/webp',
+                                                                srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
+                                                                sizes: masonrySizes,
+                                                            },
+                                                        ]}
+                                                        src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                                        alt={altText}
+                                                        width={image.width}
+                                                        height={image.height}
+                                                        className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
+                                                        loading={isAboveFold ? "eager" : "lazy"}
+                                                        decoding="async"
+                                                        fetchPriority={isAboveFold ? "high" : "auto"}
+                                                    />
                                                 );
                                             }
 
@@ -404,7 +378,6 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                 />
                                             );
                                         })()}
-                                    </picture>
                                     {/* R10-H5: subtle gamut badge for wide-gamut photos, gated by display capability */}
                                     {isWideGamutPrimary(image.color_primaries) && (
                                         <div className="absolute top-2 right-2 z-10">

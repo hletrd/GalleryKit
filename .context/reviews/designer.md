@@ -1,6 +1,8 @@
-# Designer Review - Cycle 6 / 100
+# Designer Review - Cycle 7 / 100
 
-Role: designer / UI-UX reviewer. Scope: Next.js frontend UI/UX, information architecture, affordances, keyboard/focus navigation, WCAG 2.2 accessibility, contrast, ARIA, focus traps, responsive behavior, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL constraints, and perceived performance. No fixes were implemented. No commit, push, or deploy was performed per prompt.
+Role: designer / UI-UX reviewer. Scope: Next.js frontend UI/UX, information architecture, affordances, keyboard/focus navigation, WCAG 2.2 accessibility, contrast, ARIA, focus traps, responsive behavior, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL constraints, and perceived performance.
+
+No fixes were implemented. This lane only wrote the review artifact.
 
 ## Inventory Coverage
 
@@ -8,7 +10,7 @@ Read first:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- agent-browser skills: core navigation, query, visual capture, interaction, configuration, wait, network, and debug.
+- agent-browser skills: core navigation, config, query, visual, interact, wait, network, debug, and state.
 
 Review inventory built before findings:
 
@@ -17,123 +19,132 @@ Review inventory built before findings:
 - Shared UI components under `apps/web/src/components/`: nav, search, masonry home client, load more, photo viewer, lightbox, image zoom, bottom sheet, color details, histogram, upload dropzone, tag input/filter, admin nav/header, image manager, user manager, and shadcn/Radix primitives.
 - Styling and tokens: `apps/web/src/app/[locale]/globals.css`, UI primitive class contracts, dark/oled tokens, forced-colors and reduced-motion CSS.
 - i18n: `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
-- Test/e2e coverage relevant to UI/a11y: touch-target audit, focus-visible scanner, US-P15 a11y contracts, client source contracts, bottom-sheet IA tests, HDR contrast tests, public/admin Playwright specs.
-- Cross-file interactions checked: route locale handling, modal/focus-trap source contracts, upload in-flight state, tag input focusability, existing prior designer findings, and static fixture coverage.
+- Test/e2e coverage relevant to UI/a11y: touch-target audit, focus-visible scanner, US-P15 a11y contracts, client source contracts, bottom-sheet IA tests, HDR contrast tests, and public/admin Playwright specs.
+- Cross-file interactions checked: route locale handling, canonical tag parsing, modal/focus-trap source contracts, search result accessibility, upload in-flight state, tag input focusability, and prior designer-plan patterns.
 
-Files intentionally not inspected in detail: Drizzle migrations, image-processing internals, storage backends, deployment scripts, non-UI server action internals, and most data/security tests outside UI cross-file contracts. They are outside this Prompt 1 frontend review except where they affected browser feasibility or UI state.
+Files intentionally not inspected in detail: Drizzle migrations, image-processing internals, storage backends, deployment scripts, non-UI server action internals, and most data/security tests outside UI cross-file contracts. They are outside this designer lane except where they affected browser feasibility or UI state.
 
 ## Browser Evidence
 
-Started `npm run dev --workspace=apps/web`; Next.js served `http://localhost:3000`. Closed agent-browser and stopped the dev server before finishing.
+Local app:
 
-Runtime blocker: local MySQL was unavailable at `127.0.0.1:3306`. Server logs repeatedly showed `connect ECONNREFUSED 127.0.0.1:3306`, including failures in `src/components/nav.tsx:7` while reading topics. Therefore DB-backed public galleries, photo detail pages, search results, upload/dashboard tables, and protected admin workflows could not be fully browser-validated locally.
+- Started `npm run dev --workspace=apps/web -- --port 3017`.
+- Dev server reached `http://localhost:3017`, but DB-backed rendering failed because local MySQL was unavailable at `127.0.0.1:3306`.
+- Local `/en` rendered the app error shell. Server output showed `connect ECONNREFUSED 127.0.0.1:3306` in topic/image queries used by `Nav` and home metadata.
+- Because the local DB was unavailable, full gallery content, search results, and authenticated admin dashboards could not be fully browser-validated locally.
 
-Browser checks completed with agent-browser:
+Live public deployment used for interaction evidence:
 
-- `/en` rendered the localized error shell because the public Nav query failed. Accessibility snapshot exposed skip link, `main`, h1 `Error`, retry button, and return link.
-- `/en/admin` rendered the login page at desktop and mobile widths. Accessibility snapshot exposed h1 `Admin`, visible username/password labels, required inputs, password reveal button, submit button, and notifications region.
-- Mobile focus order on login: username input -> password input -> show-password button -> sign-in button. Computed element sizes from DOM eval: username input 308x44, password input 308x44, reveal button 44x44, submit 308x44.
-- Captured screenshots: `/tmp/gallery-home-error-desktop.png`, `/tmp/gallery-login-desktop.png`, `/tmp/gallery-login-mobile.png`, `/tmp/gallery-login-mobile-dark.png`.
-- Browser console showed expected dev/HMR logs plus DB fallback warnings/errors caused by missing local MySQL. `agent-browser errors` reported no uncaught page errors on the renderable login surface.
+- Loaded `https://gallery.atik.kr/en` at 1440x1000 and 390x844.
+- Captured accessibility snapshots for desktop home, mobile home, search dialog, admin login, Korean home, and photo detail/lightbox.
+- Captured screenshots: `/tmp/gallery-cycle7-mobile.png`, `/tmp/gallery-cycle7-admin-login.png`, `/tmp/gallery-cycle7-photo.png`, `/tmp/gallery-cycle7-dark.png`.
+- Search dialog focus stayed inside the dialog during Tab/Shift+Tab checks, and ArrowDown updated `aria-activedescendant`.
+- Admin login exposed visible labels, required username/password inputs, password reveal, and submit; empty submit used native required-field validation.
+- Korean route `/ko` set `document.documentElement.lang` to `ko` and localized the main UI labels observed in the accessibility snapshot.
+- RTL was not runtime-tested because the configured locales are English and Korean; neither is RTL.
 
 ## Confirmed Issues
 
-### DES-C6-01 - Collapsed mobile photo info sheet keeps a modal focus trap around hidden controls
+### DES-C7-01 - Tag filter active state and next URLs can diverge from the canonical server filter
 
 Severity: Medium
 Confidence: High
-Status: confirmed by source; browser runtime validation blocked by missing DB/photo data.
-Region: `InfoBottomSheet` collapsed/peek/expanded state and focus trap.
+Classification: confirmed issue; UI state / accessibility / navigation correctness
 
 Evidence:
 
-- `apps/web/src/components/info-bottom-sheet.tsx:42` defines `SheetState = 'collapsed' | 'peek' | 'expanded'`.
-- `apps/web/src/components/info-bottom-sheet.tsx:66-73` translates the collapsed sheet to `calc(100% - 28px)`, leaving only a 28 px strip visible.
-- `apps/web/src/components/info-bottom-sheet.tsx:108-113` transitions from `peek` to `collapsed` on downward swipe, so this state is reachable.
-- `apps/web/src/components/info-bottom-sheet.tsx:189-203` keeps `FocusTrap active={isOpen}` and `aria-modal="true"` for every open state, including `collapsed`.
-- `apps/web/src/components/info-bottom-sheet.tsx:211-213` sets `overflowY: hidden` outside expanded mode, so most controls are visually clipped in collapsed mode.
-- `apps/web/src/components/info-bottom-sheet.tsx:217-248` keeps both the drag handle and close button mounted; the close button sits below the handle and is clipped when only 28 px of the sheet is visible.
-- `apps/web/src/__tests__/client-source-contracts.test.ts:45-49` only pins that the sheet is modal while open; it does not distinguish collapsed hidden-control behavior.
+- `apps/web/src/app/[locale]/(public)/page.tsx:161-166` parses and filters the requested tag slugs through `parseRequestedTagSlugs()` and `filterExistingTagSlugs()`, then queries the gallery with only the canonical existing `tagSlugs`.
+- `apps/web/src/app/[locale]/(public)/page.tsx:221-223` passes that canonical `tagSlugs` array to `HomeClient` as `currentTags`.
+- `apps/web/src/components/home-client.tsx:241-250` uses `currentTags` for the visible H1 tag label display.
+- `apps/web/src/components/tag-filter.tsx:14-15` ignores the canonical server-filtered `currentTags` and re-derives active state from raw `useSearchParams().get('tags')`.
+- `apps/web/src/components/tag-filter.tsx:21-39` also builds the next pushed URL from that raw list, preserving invalid slugs when toggling real tags.
+- Live browser evidence:
+  - `https://gallery.atik.kr/en?tags=not-a-real-tag` rendered H1 `Latest` and `445 photos`, but no tag button had `aria-pressed="true"`; even `All` had `aria-pressed="false"`.
+  - `https://gallery.atik.kr/en?tags=shinyu,not-a-real-tag`, then clicking `DOHOON`, produced `https://gallery.atik.kr/en?tags=shinyu%2Cnot-a-real-tag%2Cdohoon` while the UI showed only `#SHINYU #DOHOON`.
 
 Why this is a problem:
 
-In collapsed state the user visually sees only the handle, but the component still advertises a modal dialog and traps focus inside all mounted controls. Keyboard and screen-reader users can land on controls that are not visible, and the page behind the sheet remains unavailable because the focus trap stays active. This risks WCAG 2.1.2 keyboard trap, 2.4.3 focus order, and 4.1.2 name/role/state failures.
+The server correctly treats invalid tag slugs as absent, but the client controls present and mutate a different state. Assistive tech users get a filter group where no chip is pressed even though the page is effectively unfiltered, and all users can keep carrying dead URL state forward through normal chip toggles. This is a small UI inconsistency on ordinary links, but it becomes confusing when links are shared or when QA/admins use URLs to diagnose gallery state.
 
 Failure scenario:
 
-A mobile visitor opens photo info, swipes it down to the collapsed strip, then uses an external keyboard or screen reader navigation. Focus remains trapped in a "Photo Info" modal and can move to the hidden close button or other clipped controls, even though only the handle is visible. The user has no visual correspondence for the focused target and cannot continue through the underlying photo page without discovering Escape or another close gesture.
+A visitor opens a shared link with a removed tag slug. The page displays the unfiltered gallery, but the filter controls do not mark "All" as selected. If the visitor then selects a real tag, the stale removed slug remains in the URL. The visible UI and the browser URL no longer describe the same filter set.
 
 Suggested fix:
 
-Prefer removing the `collapsed` modal state and closing the sheet when swiping down from `peek`. If collapsed must remain, make collapsed a non-modal mini-control: disable the focus trap, set `aria-modal={false}`, make all clipped controls inert/untabbable, and leave only the visible handle focusable with an accurate label such as "Expand photo info".
+Pass canonical `currentTags` into `TagFilter` and use it for `variant`, `aria-pressed`, and toggle math. When pushing a new query, start from the canonical selected slugs plus unrelated query params, not from the raw `tags` value. Optionally replace the URL on mount/render when invalid slugs are removed so shared links self-heal.
 
-### DES-C6-02 - Upload queue looks disabled during upload but remains keyboard-operable
+### DES-C7-02 - Mobile nav toggle says it controls visible topic links while collapsed
 
-Severity: Medium
+Severity: Low
 Confidence: High
-Status: confirmed by source; protected admin browser validation blocked by missing DB/auth data.
-Region: upload file grid while `uploading` is true.
+Classification: confirmed issue; ARIA semantics / information architecture
 
 Evidence:
 
-- `apps/web/src/components/upload-dropzone.tsx:198-270` starts an async sequential upload loop over the current `files` array.
-- `apps/web/src/components/upload-dropzone.tsx:448-450` dims the selected-file grid during upload with `opacity-50 pointer-events-none`.
-- `apps/web/src/components/upload-dropzone.tsx:451-453` leaves the "Clear all" button enabled inside that dimmed region.
-- `apps/web/src/components/upload-dropzone.tsx:469-475` leaves each per-file remove button enabled with its normal `onClick`.
-- `apps/web/src/components/upload-dropzone.tsx:505-518` leaves each per-file `TagInput` enabled.
-- `apps/web/src/components/tag-input.tsx:17-24` exposes no `disabled` or read-only prop, so upload-dropzone cannot disable it without changing the component contract.
+- `apps/web/src/components/nav-client.tsx:99-107` renders the mobile toggle with `aria-expanded={isExpanded}` and `aria-controls="primary-nav-topics primary-nav-controls"`.
+- `apps/web/src/components/nav-client.tsx:117-123` keeps `#primary-nav-topics` rendered as a flex row even when `isExpanded` is false; collapsed mode only changes it to horizontal overflow.
+- `apps/web/src/components/nav-client.tsx:155-159` hides `#primary-nav-controls` on collapsed mobile with `hidden md:flex`.
+- Live mobile DOM evidence at 390x844 while collapsed:
+  - Toggle HTML had `aria-label="Expand menu"`, `aria-expanded="false"`, and `aria-controls="primary-nav-topics primary-nav-controls"`.
+  - `#primary-nav-topics` computed `display:flex`; topic links `TWS` and `TOMORROW X TOGETHER` had visible 44 px-high boxes.
+  - `#primary-nav-controls` computed `display:none`.
 
 Why this is a problem:
 
-`pointer-events-none` only blocks pointer input. Keyboard users can still tab into enabled child controls and activate them while the UI visually communicates that the queue is unavailable. That creates inconsistent affordance and can mutate `filesRef`, per-file tags, or preview state while the upload loop continues processing the original closure-captured `files` array.
+The control advertises one expanded/collapsed state for two controlled regions, but one of those regions is still visible and operable while the control says collapsed. For screen-reader users, "Expand menu" implies the topic navigation is hidden until expansion, even though topic links are already present. For sighted mobile users, the chevron expands only utility controls, not the already-visible category links, so the menu model is unclear.
 
 Failure scenario:
 
-An admin starts uploading several photos, tabs into the dimmed queue, activates "Clear all", or removes a file. The visible queue changes as if the pending item was cancelled, but the upload loop still continues through the original batch. The final cleanup then reconciles against a mutated `filesRef`, producing confusing UI and potentially applying tags that no longer match what the admin sees.
+A keyboard or screen-reader visitor lands on "Expand menu, collapsed" and then encounters visible topic links that are supposedly inside the collapsed controlled region. Expanding the menu reveals search/theme/language controls, not the topic links the ARIA relationship promised.
 
 Suggested fix:
 
-Replace visual-only disabling with real disabled semantics. Options: render the selected-file list as read-only during upload; add a `disabled` prop to `TagInput`; pass `disabled` to remove/clear buttons; and add `aria-disabled` plus `inert` to the in-flight queue container if the product decision is that the queue cannot be edited mid-upload. If mid-upload edits are intended, remove the disabled visual treatment and make the latest-wins/cancel semantics explicit.
+Choose one model and align DOM semantics with it:
 
-## Likely Issues
+- If topics should remain visible in collapsed mobile nav, remove `primary-nav-topics` from `aria-controls` and rename the button to something like "Show navigation tools" / "Hide navigation tools".
+- If the button is intended to control the whole mobile nav, hide or inert the topic list while collapsed and reveal it together with the controls.
 
-None beyond the confirmed source-level issues above. Both findings need live reproduction after a DB-backed dev environment is available, but the source contracts are sufficient to classify the defects as actionable.
+### DES-C7-03 - Search result accessible names repeat generic thumbnail text
 
-## Risks Needing Manual Validation
+Severity: Low
+Confidence: High
+Classification: confirmed issue; screen-reader verbosity / accessible-name quality
 
-- Real public gallery/photo/detail surfaces could not be browser-validated because local MySQL was down. Static review covered the relevant source paths instead.
-- Protected admin upload/dashboard behavior could not be browser-validated for the same reason. `DES-C6-02` should be manually confirmed in an authenticated dev environment with one queued file.
-- The mobile bottom-sheet collapsed state should be manually confirmed on a real/touch-emulated photo page because it depends on gesture state, but the focus-trap/hidden-control source evidence is direct.
+Evidence:
 
-## Rechecked Non-Findings
+- `apps/web/src/components/search.tsx:71-80` renders each search result as a `Link` with `role="option"`.
+- `apps/web/src/components/search.tsx:82-85` gives the thumbnail image `alt={image.title || t('common.photo')}`.
+- `apps/web/src/components/search.tsx:99-103` separately renders the visible fallback title as `{image.title || image.description || `${t('common.photo')} ${image.id}`}`.
+- Live browser evidence after opening search and typing `dohoon`: the accessibility snapshot exposed options such as `Photo Photo 348 TWS ...`; the first "Photo" came from the thumbnail alt and the second from the visible fallback title.
 
-- Cycle 5 analytics locale issue is fixed: analytics links now use `localizePath(locale, ...)`, localized `opensInNewWindow`, and locale-aware `toLocaleString(locale)` in `analytics-client.tsx:117-129` and `analytics-client.tsx:225-235`.
-- Login form has visible labels, required/autocomplete fields, 44 px controls, password reveal `aria-pressed`, and alert/error plumbing.
-- Public/admin layouts provide a global skip link and `main#main-content` targets for both public and admin shells.
-- Nav, search, lightbox, photo navigation, and masonry cards carry focus-visible affordances or tests that enforce them.
-- Global CSS includes reduced-motion suppression for animations/transitions and hover scale, plus forced-colors handling for key photo-card and badge surfaces.
-- Dark/oled/light tokens are documented and login rendered in dark media without layout breakage.
-- English/Korean are LTR locales; `layout.tsx` sets `dir="ltr"`. RTL remains unsupported rather than a current shipped-locale defect.
+Why this is a problem:
 
-## Validation
+The thumbnail is redundant inside a result row that already has visible result text. When a photo lacks a title, the option's accessible name starts with a repeated generic label, making a long search list noisier and slower to scan with assistive tech.
 
-Passed:
+Failure scenario:
 
-```bash
-npm test --workspace=apps/web -- --run src/__tests__/a11y-us-p15.test.ts src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/client-source-contracts.test.ts src/__tests__/hdr-badge-contrast.test.ts
-```
+A screen-reader user searches for a tag that returns many untitled photos. Each result begins "Photo Photo N ..." before the useful metadata, so the user has to listen through repeated generic words for every option.
 
-Result: 5 test files passed, 63 tests passed.
+Suggested fix:
 
-Agent-browser evidence:
+Make the search-result thumbnail decorative with `alt=""` and `aria-hidden="true"` when the adjacent text names the same result. If retaining image alt text, derive it from the same final result label and avoid duplicating the visible fallback title.
 
-- `agent-browser install` confirmed Chromium 150.0.7871.24 installed.
-- Desktop public error shell snapshot captured from `/en`.
-- Desktop/mobile/dark login snapshots captured from `/en/admin`.
-- Login focus order and 44 px target sizes verified by DOM evaluation.
+## Risks / Manual Validation Needed
+
+- Authenticated admin dashboards were source-reviewed but not browser-tested because no admin credentials were available and local DB was down.
+- Local DB-backed route behavior was not fully testable; live production was used for public UI evidence.
+- Dark-mode media emulation through `agent-browser set media dark` did not make `matchMedia('(prefers-color-scheme: dark)')` report true in the browser session. Explicit theme cycling to `dark` did work, but a full dark/light visual contrast audit should be repeated in a clean browser session.
+- Lightbox fullscreen automation became inconclusive in Chromium after a fullscreen-control interaction, so the report does not claim a fullscreen-specific defect.
 
 ## Final Missed-Issues Sweep
 
-Final sweep covered prior designer reviews, current route/component inventory, ARIA/focus/modal markers, `pointer-events-none` and disabled-state patterns, touch-target/focus-visible scanner coverage, bottom-sheet tests, upload-dropzone tests, loading/error shells, i18n messages, dark/light/reduced-motion CSS, and browser console/server output.
+Checked the common missed categories after the main pass:
 
-No additional current-cycle actionable UI/UX findings were identified beyond `DES-C6-01` and `DES-C6-02`.
+- Touch targets: shared `Button` variants and the inspected custom controls generally preserve 44 px floors; no new sub-44 finding found.
+- Focus traps: search focus trap behaved correctly in browser; lightbox and bottom sheet use `FocusTrap` and source-managed focus restoration. No new confirmed trap issue beyond the ARIA/modal caveats noted above.
+- Reduced motion: global CSS includes a `prefers-reduced-motion: reduce` override and explicit hover-scale suppression for photo cards.
+- Forced colors: globals include forced-colors handling for photo overlays, gamut chips, HDR badge, and color pip.
+- Loading/empty/error states: local app error shell, admin login validation, search empty/loading/result states, load-more live region, admin loading spinners, and upload progress source were reviewed.
+- i18n: English/Korean snapshots and source key usage were reviewed; no key mismatch found in this lane.
+- Responsive breakpoints: desktop and mobile public nav/home/search/photo snapshots were exercised. The mobile nav ARIA mismatch above is the only confirmed responsive finding from this pass.

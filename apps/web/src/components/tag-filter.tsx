@@ -7,13 +7,18 @@ import { cn } from "@/lib/utils"
 import { useTranslation } from "@/components/i18n-provider";
 import { humanizeTagLabel } from "@/lib/photo-title";
 
-export function TagFilter({ tags }: { tags: { id: number, name: string, slug: string, count: number }[] }) {
+export function TagFilter({
+    tags,
+    currentTags = [],
+}: {
+    tags: { id: number, name: string, slug: string, count: number }[];
+    currentTags?: string[];
+}) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
-    const currentTagsParam = searchParams.get('tags');
-    const currentTags = currentTagsParam ? currentTagsParam.split(',').filter(Boolean) : [];
     const { t } = useTranslation();
+    const canonicalTags = currentTags.map(tag => tag.trim()).filter(Boolean);
 
     const handleTagClick = (slug: string | null) => {
         const params = new URLSearchParams(searchParams.toString());
@@ -21,9 +26,9 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
         if (!slug) {
             // Clear all tags
             params.delete('tags');
-        } else if (currentTags.includes(slug)) {
+        } else if (canonicalTags.includes(slug)) {
             // Remove this tag
-            const newTags = currentTags.filter(t => t !== slug);
+            const newTags = canonicalTags.filter(t => t !== slug);
             if (newTags.length === 0) {
                 params.delete('tags');
             } else {
@@ -31,7 +36,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
             }
         } else {
             // Add this tag
-            const newTags = [...currentTags, slug];
+            const newTags = [...canonicalTags, slug];
             params.set('tags', newTags.join(','));
         }
 
@@ -58,17 +63,17 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
         <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
             <Badge
                 asChild
-                variant={currentTags.length === 0 ? "default" : "outline"}
+                variant={canonicalTags.length === 0 ? "default" : "outline"}
                 // DES-R4C15-03: min-h-11 (44 px) per the blocking touch-target
                 // policy — these chips are real <button>s on the mobile-priority
                 // home surface. Matches the nav topic pills' min-h-[44px].
-                className={cn("cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1", currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                className={cn("cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1", canonicalTags.length === 0 && "bg-primary text-primary-foreground")}
             >
                 <button
                     type="button"
                     onClick={() => handleTagClick(null)}
                     onKeyDown={handleKeyDown(null)}
-                    aria-pressed={currentTags.length === 0}
+                    aria-pressed={canonicalTags.length === 0}
                 >
                     {t('home.allTags')}
                 </button>
@@ -77,19 +82,19 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                 <Badge
                     key={tag.id}
                     asChild
-                    variant={currentTags.includes(tag.slug) ? "default" : "outline"}
+                    variant={canonicalTags.includes(tag.slug) ? "default" : "outline"}
                     className={cn(
                         // DES-R4C15-03: 44 px floor (see "All" chip above).
                         "cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1",
                         "flex gap-1",
-                        currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
+                        canonicalTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                     )}
                 >
                     <button
                         type="button"
                         onClick={() => handleTagClick(tag.slug)}
                         onKeyDown={handleKeyDown(tag.slug)}
-                        aria-pressed={currentTags.includes(tag.slug)}
+                        aria-pressed={canonicalTags.includes(tag.slug)}
                     >
                         {displayName(tag.name)}
                         {/* AGG-R8-04 (run-8 c2): the count must inherit the chip
@@ -104,7 +109,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                         <span
                             className={cn(
                                 "text-xs",
-                                currentTags.includes(tag.slug)
+                                canonicalTags.includes(tag.slug)
                                     ? "text-primary-foreground/90"
                                     : "text-muted-foreground"
                             )}

@@ -100,117 +100,103 @@ function validatedNumber(map: Map<string, string>, key: GallerySettingKey): numb
     return Number(raw);
 }
 
+function buildGalleryConfig(map: Map<string, string>): GalleryConfig {
+    // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
+    const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
+
+    return {
+        imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
+        imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
+        imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
+        imageSizes,
+        stripGpsOnUpload: (() => {
+            const raw = getSetting(map, 'strip_gps_on_upload');
+            if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
+            return raw === 'true';
+        })(),
+        slideshowIntervalSeconds: parseSlideshowInterval(getSetting(map, 'slideshow_interval_seconds')),
+        autoAltTextEnabled: (() => {
+            const raw = getSetting(map, 'auto_alt_text_enabled');
+            if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
+            return raw === 'true';
+        })(),
+        semanticSearchMode: (() => {
+            const raw = getSetting(map, 'semantic_search_mode');
+            // An invalid/unknown raw value falls back to the default ('disabled').
+            if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
+            const value = raw as 'disabled' | 'stub' | 'production';
+            // AGG-C10-02 (run-6 cycle-1) / AGG-C9-05 (run-6 cycle-9): the CLIP
+            // 'production' mode is OPERATOR-GATED — it is a real, served mode (LIVE
+            // in the demo deployment) but it must NOT be activatable through the
+            // ordinary admin Settings UI (which intentionally offers only
+            // Disabled/Stub). So a stored 'production' value HEALS to 'disabled'
+            // unless an operator has set the explicit env opt-in
+            // SEMANTIC_SEARCH_ALLOW_PRODUCTION=true. This keeps the admin UI's
+            // documented invariant ("production is treated as Disabled") TRUE for
+            // every deploy that has not opted in, while preserving the deliberate,
+            // non-UI operator activation path (env flag + DB row + weights + backfill).
+            if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
+                return 'disabled';
+            }
+            return value;
+        })(),
+        forceSrgbDerivatives: (() => {
+            const raw = getSetting(map, 'force_srgb_derivatives');
+            if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';
+            return raw === 'true';
+        })(),
+        allowHdrIngest: (() => {
+            const raw = getSetting(map, 'allow_hdr_ingest');
+            if (!isValidSettingValue('allow_hdr_ingest', raw)) return DEFAULTS.allow_hdr_ingest === 'true';
+            return raw === 'true';
+        })(),
+        forceShowColorChips: (() => {
+            const raw = getSetting(map, 'force_show_color_chips');
+            if (!isValidSettingValue('force_show_color_chips', raw)) return DEFAULTS.force_show_color_chips === 'true';
+            return raw === 'true';
+        })(),
+        wideGamutJpegChroma: (() => {
+            const raw = getSetting(map, 'wide_gamut_jpeg_chroma');
+            // C3-A6: validator already enforces the union; the runtime
+            // guard re-narrows the type so consumers see
+            // JpegChromaSubsampling instead of `string`.
+            if (isJpegChromaSubsampling(raw)) return raw;
+            const fallback = DEFAULTS.wide_gamut_jpeg_chroma;
+            return isJpegChromaSubsampling(fallback) ? fallback : '4:4:4';
+        })(),
+        avifEffort: validatedNumber(map, 'avif_effort'),
+        // C2-A5: SDR JPEG chroma — defaults to 4:2:0 for backward-compat file size
+        sdrJpegChroma: (() => {
+            const raw = getSetting(map, 'sdr_jpeg_chroma');
+            if (isJpegChromaSubsampling(raw)) return raw;
+            const fallback = DEFAULTS.sdr_jpeg_chroma;
+            return isJpegChromaSubsampling(fallback) ? fallback : '4:2:0';
+        })(),
+        // C2-A6: wide-gamut max source pixels — defaults to 50 MP
+        wideGamutMaxSourcePixels: validatedNumber(map, 'wide_gamut_max_source_pixels'),
+    };
+}
+
+function getDefaultGalleryConfig(): GalleryConfig {
+    return buildGalleryConfig(new Map());
+}
+
 async function _getGalleryConfig(): Promise<GalleryConfig> {
     try {
-        const map = await getSettingsMap();
-
-        // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
-        const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
-
-        return {
-            imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
-            imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
-            imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
-            imageSizes,
-            stripGpsOnUpload: (() => {
-                const raw = getSetting(map, 'strip_gps_on_upload');
-                if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
-                return raw === 'true';
-            })(),
-            slideshowIntervalSeconds: parseSlideshowInterval(getSetting(map, 'slideshow_interval_seconds')),
-            autoAltTextEnabled: (() => {
-                const raw = getSetting(map, 'auto_alt_text_enabled');
-                if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
-                return raw === 'true';
-            })(),
-            semanticSearchMode: (() => {
-                const raw = getSetting(map, 'semantic_search_mode');
-                // An invalid/unknown raw value falls back to the default ('disabled').
-                if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
-                const value = raw as 'disabled' | 'stub' | 'production';
-                // AGG-C10-02 (run-6 cycle-1) / AGG-C9-05 (run-6 cycle-9): the CLIP
-                // 'production' mode is OPERATOR-GATED — it is a real, served mode (LIVE
-                // in the demo deployment) but it must NOT be activatable through the
-                // ordinary admin Settings UI (which intentionally offers only
-                // Disabled/Stub). So a stored 'production' value HEALS to 'disabled'
-                // unless an operator has set the explicit env opt-in
-                // SEMANTIC_SEARCH_ALLOW_PRODUCTION=true. This keeps the admin UI's
-                // documented invariant ("production is treated as Disabled") TRUE for
-                // every deploy that has not opted in, while preserving the deliberate,
-                // non-UI operator activation path (env flag + DB row + weights + backfill).
-                if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
-                    return 'disabled';
-                }
-                return value;
-            })(),
-            forceSrgbDerivatives: (() => {
-                const raw = getSetting(map, 'force_srgb_derivatives');
-                if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';
-                return raw === 'true';
-            })(),
-            allowHdrIngest: (() => {
-                const raw = getSetting(map, 'allow_hdr_ingest');
-                if (!isValidSettingValue('allow_hdr_ingest', raw)) return DEFAULTS.allow_hdr_ingest === 'true';
-                return raw === 'true';
-            })(),
-            forceShowColorChips: (() => {
-                const raw = getSetting(map, 'force_show_color_chips');
-                if (!isValidSettingValue('force_show_color_chips', raw)) return DEFAULTS.force_show_color_chips === 'true';
-                return raw === 'true';
-            })(),
-            wideGamutJpegChroma: (() => {
-                const raw = getSetting(map, 'wide_gamut_jpeg_chroma');
-                // C3-A6: validator already enforces the union; the runtime
-                // guard re-narrows the type so consumers see
-                // JpegChromaSubsampling instead of `string`.
-                if (isJpegChromaSubsampling(raw)) return raw;
-                const fallback = DEFAULTS.wide_gamut_jpeg_chroma;
-                return isJpegChromaSubsampling(fallback) ? fallback : '4:4:4';
-            })(),
-            avifEffort: validatedNumber(map, 'avif_effort'),
-            // C2-A5: SDR JPEG chroma — defaults to 4:2:0 for backward-compat file size
-            sdrJpegChroma: (() => {
-                const raw = getSetting(map, 'sdr_jpeg_chroma');
-                if (isJpegChromaSubsampling(raw)) return raw;
-                const fallback = DEFAULTS.sdr_jpeg_chroma;
-                return isJpegChromaSubsampling(fallback) ? fallback : '4:2:0';
-            })(),
-            // C2-A6: wide-gamut max source pixels — defaults to 50 MP
-            wideGamutMaxSourcePixels: validatedNumber(map, 'wide_gamut_max_source_pixels'),
-        };
+        return buildGalleryConfig(await getSettingsMap());
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[gallery-config] Falling back to defaults because admin_settings could not be read: ${message}`);
-
-        return {
-            imageQualityWebp: Number(DEFAULTS.image_quality_webp),
-            imageQualityAvif: Number(DEFAULTS.image_quality_avif),
-            imageQualityJpeg: Number(DEFAULTS.image_quality_jpeg),
-            imageSizes: parseImageSizes(DEFAULTS.image_sizes),
-            stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
-            slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
-            autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
-            semanticSearchMode: (() => {
-                const raw = DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
-                // Apply the same operator-gate check as the happy path (line 141).
-                if (raw === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
-                    return 'disabled';
-                }
-                return raw;
-            })(),
-            forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
-            allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
-            forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',
-            wideGamutJpegChroma: isJpegChromaSubsampling(DEFAULTS.wide_gamut_jpeg_chroma)
-                ? DEFAULTS.wide_gamut_jpeg_chroma
-                : '4:4:4',
-            avifEffort: Number(DEFAULTS.avif_effort),
-            sdrJpegChroma: isJpegChromaSubsampling(DEFAULTS.sdr_jpeg_chroma)
-                ? DEFAULTS.sdr_jpeg_chroma
-                : '4:2:0',
-            wideGamutMaxSourcePixels: Number(DEFAULTS.wide_gamut_max_source_pixels),
-        };
+        return getDefaultGalleryConfig();
     }
+}
+
+/**
+ * Strict gallery config for ingest/write paths. Upload privacy and processing
+ * settings must fail closed if admin_settings cannot be read.
+ */
+export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
+    return buildGalleryConfig(await getSettingsMap());
 }
 
 /** Cached gallery config — deduped within a single SSR request via React cache(). */

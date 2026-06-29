@@ -1,98 +1,149 @@
-# Architect Review - Cycle 6/100
+# Architect Review - Cycle 7/100
 
-Review target: current `HEAD` only, `5443009e411113bf97fe2d8fcb166b2ac78625fb`.
+Review target: current `HEAD` only, `17124135999a3d7cb4f5262e8b2b5917503088ae`.
 
-I read `AGENTS.md` and `CLAUDE.md` first, then exported `HEAD` to `/tmp/gallery-head-review.AEgK4R` and performed the review from that snapshot so unrelated worktree edits were not part of the inspection.
+I read `AGENTS.md`, `CLAUDE.md`, and the relevant `.context/` plan/review conventions before inspecting code. Other review lanes have modified their own files in `.context/reviews/`; this report only replaces the architect lane file.
 
 ## Inventory Built Before Findings
 
-Scope inventory from `HEAD`:
+Review-relevant inventory at current `HEAD`:
 
-- Repository/docs: `AGENTS.md`, `CLAUDE.md`, root/app package files, deployment docs embedded in config/scripts, existing `.context/reviews/architect.md`, `.context/reviews/_aggregate.md`, and relevant current/deferred plan notes.
-- App structure: `apps/web/src/app` public pages, admin pages/actions, API routes, route handlers, i18n-aware public routes, and server actions.
-- Data/schema/migrations: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, all `apps/web/drizzle/0000` through `0024` SQL files, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration monotonicity/reconcile tests.
-- Core data ownership and privacy boundaries: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `search-enrichment-fields.ts`, public/admin select fields, privacy guard tests, map/shared/photo/search read paths.
-- Runtime/deploy architecture: `apps/web/Dockerfile`, `docker-compose.yml`, `deploy.sh`, `scripts/entrypoint.sh`, `next.config.ts`, `nginx/default.conf`, `instrumentation.ts`, queue bootstrap/shutdown.
-- Cross-feature invariants: upload pipeline, Lightroom upload parity, restore maintenance, advisory locks, image queue, smart collections/topic rename, semantic search, rate limits, service worker/cache, analytics, backup/restore.
-- Tests and static gates: `src/__tests__` contracts for privacy fields, migration journal/reconcile, restore/upload locks, semantic search/similar search, LR upload, action-origin, API auth, public-route rate limits, client/server boundaries, upload limits, and relevant source-contract tests.
+- Repo and operating docs: `AGENTS.md`, `CLAUDE.md`, root/package workspace files, deploy policy, migration runbook, semantic-search docs under `docs/superpowers/**`, and current `.context/plans/**` conventions.
+- Executable app surface: 75 files under `apps/web/src/app`, including public pages, admin pages, server actions, and API route handlers.
+- Data/domain layer: 94 files under `apps/web/src/lib`, plus `apps/web/src/db/schema.ts` and `apps/web/src/db/index.ts`.
+- UI/client boundary: 55 component files under `apps/web/src/components`, with focus on state ownership where client components call server actions or consume public selectors.
+- Schema/deploy/ops: all `apps/web/drizzle/0000` through `0024` migrations, `drizzle/meta/_journal.json`, `scripts/migrate.js`, `Dockerfile`, `docker-compose.yml`, `deploy.sh`, `next.config.ts`, and config/typecheck/lint scripts.
+- Tests/contracts: relevant `src/__tests__` coverage around migration/reconcile, privacy fields, upload/restore locks, image queue failures, semantic search, Lightroom upload parity, public route rate limiting, action-origin, and client/server boundaries.
 
-The inspection was not a random sample: I used file inventories plus targeted cross-file reads around every architecture-sensitive surface above, then a final `rg` sweep for route exports, auth/origin/rate-limit calls, sensitive field references, migration/reconcile terms, advisory locks, and restore/queue interactions.
+I excluded generated `.next/` output, binary fixtures/screenshots, and historical archive plans unless they documented a current invariant. The review was cross-file, not sampled: I used the inventory plus targeted reads across upload -> queue -> DB -> backfill -> public serving, restore/maintenance boundaries, semantic-search indexing, analytics retention, and schema/index alignment. Final missed-issues sweeps used `rg` over auth/origin/rate-limit hooks, process-local state, config fallbacks, migration/reconcile terms, and embedding/processing state.
 
 ## Confirmed Issues
 
-### ARCH-C6-01 - Restore resumes traffic and queue work after post-restore migration failure
+### ARCH-C7-01 - Upload write paths use fail-open gallery config defaults for privacy and processing settings
 
 Severity: High
 Confidence: High
-Area: runtime restore lifecycle, schema/migration contract, queue ownership
+Status: Confirmed
+Area: configuration ownership, privacy boundary, ingest pipeline
 
 Evidence:
 
-- `apps/web/src/app/[locale]/admin/db-actions.ts:521-540` runs `runPostRestoreMigrations(t)` after a successful `mysql` import and resolves `{ success: false }` if migrations fail.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:362-366` wraps `runRestore(...)` in a `finally` that always calls `endRestoreMaintenance()` and `resumeImageProcessingQueueAfterRestore()`, regardless of whether `runRestore` failed because post-restore migrations failed.
-- `CLAUDE.md:209` documents the intended restore contract: database restore runs committed migration/reconcile postconditions after import. The operational invariant only holds if the app stays in maintenance and queues remain stopped when that postcondition fails.
+- `apps/web/src/lib/gallery-config.ts:103-183` wraps the whole admin-settings read in a broad `try/catch`; on any read failure it logs and returns hardcoded defaults at `apps/web/src/lib/gallery-config.ts:185-212`.
+- The default for `strip_gps_on_upload` is `false` at `apps/web/src/lib/gallery-config-shared.ts:91-97`.
+- Browser uploads read this fallback-capable config once at `apps/web/src/app/actions/images.ts:175-177`, then only strip persisted GPS when `uploadConfig.stripGpsOnUpload` is true at `apps/web/src/app/actions/images.ts:336-342`.
+- Lightroom uploads have the same shape: config is read at `apps/web/src/app/api/admin/lr/upload/route.ts:234-238`, then GPS is stripped only when `config.stripGpsOnUpload` is true at `apps/web/src/app/api/admin/lr/upload/route.ts:326-340`.
 
 Why this is a problem:
 
-The restore flow correctly added a post-import migration step, but failure handling is still coupled to the generic cleanup `finally`. A restored dump can be imported successfully, fail the current migration/reconcile/post-condition step, and then the app immediately leaves restore maintenance and resumes image-processing work. That recreates the exact schema/runtime split the migration postcondition is supposed to prevent.
+`getGalleryConfig()` is reasonable for read/render fallbacks, but it is also the authority for write-time privacy and byte-output decisions. If the `admin_settings` read fails transiently or returns through the fallback path while later upload DB operations succeed, the ingest path silently behaves as a fresh install. For a gallery where the admin explicitly enabled GPS stripping, that means the original file can be retained with GPS metadata because the fallback default is `false`.
 
 Concrete failure scenario:
 
-An admin restores an older SQL dump that lacks a current column or has stale `__drizzle_migrations` state. The `mysql` import exits `0`, then `scripts/migrate.js` fails because `reconcileLegacySchema`, journal hash validation, or admin seeding cannot complete. The restore action returns an error to the admin, but the `finally` still ends maintenance and resumes the queue. Public requests and queue workers can now execute current code against the partially restored or stale schema, causing unknown-column errors, failed image jobs, or writes made against an unverified database state.
+The operator has `strip_gps_on_upload=true`. During an upload, the settings query times out or fails on a pooled connection, so `getGalleryConfig()` returns defaults. The later topic lookup and image insert use healthy connections and succeed. The code skips `stripGpsFromOriginal(...)`, inserts `latitude`/`longitude` according to the extracted metadata unless separately nulled by the fallback, and retains the original on disk with location metadata. The admin sees a successful upload, not a privacy-setting failure.
 
 Suggested fix:
 
-Make the restore lifecycle conditional on the migration result. Keep restore maintenance active and keep the queue quiesced when post-restore migrations fail. One clean shape is for `runRestore` to return a structured status such as `{ success, migrationVerified }`; only call `endRestoreMaintenance()` and `resumeImageProcessingQueueAfterRestore()` when the import and post-restore migrations both succeeded. On failure, release advisory locks as needed but leave the process in an explicit maintenance/error state that requires a successful retry, restart, or operator intervention. Add a test that simulates `runPostRestoreMigrations` failure and asserts `endRestoreMaintenance` and queue resume are not called.
+Split config access by use case. Keep fallback behavior for non-mutating renders, but add a strict ingest/config snapshot reader for upload and processing contract settings. If settings cannot be read, fail the upload with a retryable error. At minimum, make privacy-sensitive fallback fail closed for write paths (`stripGpsOnUpload=true` when the stored setting is unreadable) and add tests for both browser and Lightroom uploads where `getSettingsMap()` throws.
 
-### ARCH-C6-02 - Public semantic search accepts multi-kilobyte queries despite the documented short-query contract
+### ARCH-C7-02 - Upload-time processing settings are not durably owned after process restart
 
 Severity: Medium
 Confidence: High
-Area: public API resource bounds, semantic-search architecture, cross-feature validation invariants
+Status: Confirmed
+Area: queue architecture, config snapshot ownership, processing determinism
 
 Evidence:
 
-- `apps/web/src/app/api/search/semantic/route.ts:93-95` says semantic queries are short strings under 200 code points and uses that assumption to justify an 8 KiB body cap.
-- `apps/web/src/app/api/search/semantic/route.ts:204-231` parses `body.query`, trims it, checks only `countCodePoints(query) < 3`, then calls `embedTextReal(query)` or `embedTextStub(query)`.
-- The ordinary public text-search action enforces the 200-code-point invariant at `apps/web/src/app/actions/public.ts:237-243`, and `apps/web/src/lib/data.ts:1476-1483` repeats the same max-length guard for SQL-backed search.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:177-187` covers oversized byte bodies and `apps/web/src/__tests__/semantic-search-route.test.ts:209-214` covers too-short queries, but there is no test for over-200-code-point semantic queries.
+- Browser upload reads a `GalleryConfig` snapshot at `apps/web/src/app/actions/images.ts:175-177` and passes processing settings into the in-memory queue job at `apps/web/src/app/actions/images.ts:467-502`.
+- Lightroom upload mirrors this in-memory enqueue at `apps/web/src/app/api/admin/lr/upload/route.ts:436-477`.
+- The queue explicitly prefers upload-time snapshots so an accepted upload cannot straddle later admin config changes at `apps/web/src/lib/image-queue.ts:385-405`.
+- Bootstrap jobs after restart are reconstructed only from image row fields at `apps/web/src/lib/image-queue.ts:744-784`; they do not include the original quality, sizes, chroma, `forceSrgbDerivatives`, `wideGamutMaxSourcePixels`, `autoAltTextEnabled`, or `semanticSearchMode` snapshot.
+- For bootstrap/legacy jobs, the queue falls back to reading current config at `apps/web/src/lib/image-queue.ts:410-428`.
 
 Why this is a problem:
 
-The semantic endpoint is the expensive search surface: in production it loads/runs the CLIP text encoder and scans up to `SEMANTIC_SCAN_LIMIT` embeddings. Its own design comments and the rest of the public search stack assume short user queries, but the route permits any query that fits in the 8 KiB JSON body. That makes the actual API contract broader than the documented/resource-budgeted contract.
+The architecture says upload-time settings are the owner of processing behavior, but that ownership exists only in process memory. A row inserted with `processed=false` survives restarts; the queue job snapshot does not. After a deploy, crash, or restart, bootstrap reconstructs a weaker job and applies current config, or defaults if config read fails.
 
 Concrete failure scenario:
 
-A same-origin client script or compromised page path sends repeated semantic-search requests with 7-8 KiB query strings. Each accepted request consumes a semantic rate-limit token only after mode/config checks, then invokes tokenizer/model work and the embedding scan. Even at 30 requests/min/IP, this is materially more CPU/memory work than the intended short-query path and may surface tokenizer/model latency or errors that normal search validation prevents.
+An admin uploads a batch while `force_srgb_derivatives=false` and custom JPEG/AVIF qualities are active. The DB insert commits, but the process restarts before the queue drains. Before bootstrap processes the pending rows, settings are changed, or `getGalleryConfig()` falls back. Those already accepted images are encoded with different settings than the upload action accepted. The row is then marked `processed=true` and `pipeline_version=7`, so the drift is not obvious from the public surface.
 
 Suggested fix:
 
-Define a shared semantic query limit constant, likely 200 code points to match `searchImagesAction` and the route comment, and enforce it immediately after trimming and before `embedTextReal` / `embedTextStub`. Return `400` for over-limit queries. Add a route test for a 201-code-point query and a client/source-contract test if the frontend has a separate semantic input guard.
+Persist processing ownership with the row or a small durable job table. Options: add an `image_processing_jobs` table with the exact settings snapshot, or store a compact `processing_settings_json` / `settings_hash` on `images` while `processed=false`. Bootstrap should rehydrate from that durable snapshot. If no snapshot exists for legacy rows, choose an explicit migration/backfill policy and log it.
+
+### ARCH-C7-03 - Permanently failed image state is split between DB and process memory, so deploys retry failed rows without admin intent
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Area: failure-state ownership, queue bootstrap, operational topology
+
+Evidence:
+
+- Permanent suppression is stored in `ProcessingQueueState.permanentlyFailedIds`, an in-memory `Set`, at `apps/web/src/lib/image-queue.ts:163-169` and initialized at `apps/web/src/lib/image-queue.ts:217-222`.
+- When max retries are exceeded, the queue adds the id to that Set at `apps/web/src/lib/image-queue.ts:605-613` and persists `processing_error` / `failed_at` to the DB at `apps/web/src/lib/image-queue.ts:626-641`.
+- Bootstrap only excludes ids currently in the in-memory Set at `apps/web/src/lib/image-queue.ts:732-740`; it does not exclude rows with persisted `processing_error IS NOT NULL`.
+- The admin retry action is built around the persisted failed state: it selects `processed=false AND processing_error IS NOT NULL` at `apps/web/src/app/actions/images.ts:1147-1168`, clears the failure columns at `apps/web/src/app/actions/images.ts:1174-1177`, then removes the id from memory at `apps/web/src/app/actions/images.ts:1179-1185`.
+
+Why this is a problem:
+
+The admin UI treats `processing_error` as the durable "failed until retry" state, but queue bootstrap treats only the process-local Set as authoritative. The Set disappears on process restart, while the DB row remains. This makes failure handling depend on whether the web process has restarted since the failure.
+
+Concrete failure scenario:
+
+A corrupt original exceeds `MAX_RETRIES`, gets `processing_error` persisted, and appears in the failed-images panel. The operator does not click retry. The next deploy restarts the container, recreating an empty `permanentlyFailedIds` Set. Bootstrap sees `processed=false`, re-enqueues the row, and runs the same expensive failing Sharp pipeline three more times. With per-cycle deploys, the same known-failed image can repeatedly consume CPU and log noise without admin intent.
+
+Suggested fix:
+
+Make the DB the source of truth for permanent failure suppression. Bootstrap should exclude `processed=false` rows with `processing_error IS NOT NULL` unless an explicit retry has cleared those columns. Keep `permanentlyFailedIds` only as a per-process fast path, or replace it with a `processing_status` enum / retry-after timestamp. Add a restart/bootstrap test that seeds a failed DB row and asserts it is not re-enqueued until `retryFailedImage()` clears the failure.
+
+### ARCH-C7-04 - View-event retention deletes do not have matching leftmost indexes on two analytics tables
+
+Severity: Medium
+Confidence: Medium
+Status: Confirmed
+Area: schema/index design, retention operations, anonymous-write bounding
+
+Evidence:
+
+- Retention deletes every analytics table with only a `viewed_at < cutoff` predicate at `apps/web/src/lib/view-retention.ts:64-81`.
+- `image_views` has indexes beginning with `bot, viewed_at` and `image_id, viewed_at` at `apps/web/src/db/schema.ts:228-232`.
+- `topic_views` only has `(topic, viewed_at)` at `apps/web/src/db/schema.ts:241-243`.
+- `shared_group_views` only has `(group_id, viewed_at)` at `apps/web/src/db/schema.ts:245-253`.
+- The retention module comment says the delete uses the composite indexes for the range scan at `apps/web/src/lib/view-retention.ts:56-59`, but the `topic_views` and `shared_group_views` indexes cannot serve a `viewed_at`-only range as a leftmost prefix.
+
+Why this is a problem:
+
+Retention is the architectural safety valve for anonymous public analytics writes. On `topic_views` and `shared_group_views`, the purge query shape does not match the existing indexes, so as those tables grow the hourly job risks table scans and chunked deletes that still walk large portions of the table. That shifts load onto the same single MySQL writer the retention sweep is supposed to protect.
+
+Concrete failure scenario:
+
+A long-running deployment accumulates hundreds of thousands or millions of topic/share view rows within the retention horizon. When old rows age out, the hourly sweep executes `DELETE ... WHERE viewed_at < cutoff LIMIT 5000` on tables whose only indexes start with `topic` or `group_id`. MySQL cannot seek by `viewed_at` alone through those indexes, so each chunk can scan broadly, contend with live analytics inserts, and stretch the maintenance job beyond its intended low-impact budget.
+
+Suggested fix:
+
+Add explicit `viewed_at`-leading indexes for retention, e.g. `idx_topic_views_viewed_at` and `idx_shared_group_views_viewed_at`, or change purge shape to iterate leftmost keys deliberately. Because this is schema work, add migrations, update `reconcileLegacySchema`, and cover the new indexes in the existing migration/reconcile tests.
 
 ## Likely Issues
 
-None filed. I found several historically risky areas, but current `HEAD` has explicit contracts or tests around them: topic slug rename fan-out, public selector privacy guards, migration journal non-monotonicity, shared-link metadata enumeration, Lightroom upload parity, and map GPS visibility.
+None beyond the confirmed issues above.
 
 ## Risks Needing Manual Validation
 
-No new manual-validation-only risks filed as findings. Existing deferred risks, especially single-instance/process-local state if the deployment topology changes, remain documented elsewhere and were not re-filed because this review focused on current `HEAD` behavior.
+- TLS edge, trusted proxy hop count, and single-instance topology remain deployment-sensitive. They are documented in `CLAUDE.md` and were also covered by the security lane as manual-validation risks, so I did not re-file them as new architect findings.
+- Semantic embedding gaps after a one-off embedding failure are partly deliberate: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:76-80` says missing embeddings are excluded and embedding hooks are fire-and-forget. I did not file that as a defect without a product requirement for automatic embedding repair.
 
 ## Missed-Issues Sweep
 
 Final sweep performed:
 
-- Re-checked all API route files under `apps/web/src/app/api/**/route.*` for auth, origin, runtime pinning, and rate-limit ownership.
-- Re-checked mutating server actions for `requireSameOriginAdmin()` and restore-maintenance boundaries.
-- Re-checked public data selectors and sensitive field references for accidental latitude/original/admin-only leakage.
-- Re-checked topic rename, smart collections, image queue, LR upload, and backfill locks for cross-feature ownership.
-- Re-checked migration journal/reconcile contracts, including the current restore migration fix that closed the older cycle-5 restore issue except for the failure-resume gap filed above.
-- Re-checked runtime/deploy files for bind-mount/data ownership, migration-before-start, Docker pruning safety, native runtime assumptions, and signal handling.
+- Re-checked public/admin selector ownership and `_PrivacySensitiveKeys` coverage.
+- Re-checked upload parity between browser and Lightroom ingestion.
+- Re-checked queue bootstrap, retry, restore quiesce/resume, side effects, and permanent failure state.
+- Re-checked migration journal monotonicity and reconcile/run-migration postconditions.
+- Re-checked analytics write and retention topology.
+- Re-checked semantic search production/stub model-version separation, backfill entry points, and route gates.
+- Re-checked deployment persistence assumptions: bind mounts, host MySQL, one web instance, and Docker prune safety.
 
-Relevant files intentionally not inspected line-by-line:
-
-- Historical `.context/reviews/**` and `.context/plans/**` archives beyond the current architect report, aggregate notes, and relevant restore/migration/deferred references. They are review history, not executable current `HEAD` behavior.
-- Binary/static assets, generated screenshots, icons, image fixtures, and test-result artifacts.
-- Generated Drizzle snapshot JSON files were not fully line-read; the authoritative migration SQL, journal, schema, and reconcile tests were inspected instead.
-- `package-lock.json` was not audited dependency-by-dependency; this was an architecture/design review rather than a dependency/security audit.
-
-No fixes were implemented.
+No fixes were implemented in this architect lane.

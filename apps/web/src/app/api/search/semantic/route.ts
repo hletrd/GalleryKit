@@ -5,9 +5,9 @@
  *   Body: { query: string, topK?: number }
  *   - Requires same-origin (no admin auth)
  *   - Rate-limit: 30 requests / min / IP (in-memory, ResetAt pattern)
- *   - Embeds query via stub CLIP text encoder
+ *   - Embeds query via the active stub or production CLIP text encoder
  *   - Scans up to SEMANTIC_SCAN_LIMIT (2000) most-recent embeddings
- *   - Returns top-K image IDs with cosine score above COSINE_THRESHOLD (0.18)
+ *   - Returns enriched top-K image results above the active cosine threshold
  *
  * Rate-limit posture: disabled mode returns before body reads or rate-limit
  * charging. Serving modes consume the counter before reading the body so
@@ -16,8 +16,8 @@
  * was already consumed.
  *
  * Serving gate: this endpoint SERVES requests in two modes:
- *   - 'stub'       — demo/experimental posture. Embeds via `embedTextStub` (sync,
- *                    random output). Scans only rows with model_version = STUB_MODEL_VERSION.
+ *   - 'stub'       — demo/experimental posture. Embeds via deterministic `embedTextStub`.
+ *                    Scans only rows with model_version = STUB_MODEL_VERSION.
  *                    The visitor-facing search toggle carries an explicit "experimental"
  *                    disclaimer (`search.semanticExperimentalHint`).
  *   - 'production' — real CLIP encoder (jina-clip-v2, async). Scans only rows with
@@ -320,12 +320,11 @@ export async function POST(request: NextRequest): Promise<Response> {
                 }))
                 .sort((a, b) => b.score - a.score);
         } catch (e) {
-            // R19C19 MINOR-1: log before falling back so a transient enrichment
-            // DB failure is diagnosable. Without this, the caller receives a 200
-            // with an empty `results` array — indistinguishable from "no matches"
-            // — after the rate-limit budget was already consumed.
             console.error('[search/semantic] result enrichment query failed', e);
-            enrichedResults = [];
+            return NextResponse.json(
+                { error: 'Search results could not be loaded' },
+                { status: 503, headers: NO_STORE_HEADERS },
+            );
         }
     }
 

@@ -24,14 +24,18 @@ import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { ensureUploadDirectories, deleteOriginalUploadFile, UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
-import { enqueueImageProcessing } from '@/lib/image-queue';
+import {
+    createProcessingSettingsSnapshot,
+    enqueueImageProcessing,
+    serializeProcessingSettingsSnapshot,
+} from '@/lib/image-queue';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
 import { countCodePoints } from '@/lib/utils';
 import { getSafeUserFilename } from '@/lib/upload-filenames';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigStrict } from '@/lib/gallery-config';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { sanitizeAdminString } from '@/lib/sanitize';
 import { revalidateAllAppData } from '@/lib/revalidation';
@@ -234,7 +238,18 @@ export const POST = withAdminAuth(
         try {
             await ensureUploadDirectories();
 
-            const config = await getGalleryConfig();
+            let config: Awaited<ReturnType<typeof getGalleryConfigStrict>>;
+            try {
+                config = await getGalleryConfigStrict();
+            } catch (err) {
+                console.error('LR upload: failed to read upload settings', err);
+                settleTrackerToActual(false);
+                return NextResponse.json(
+                    { error: 'Upload settings unavailable; retry shortly' },
+                    { status: 503, headers: NO_CACHE },
+                );
+            }
+            const processingSettingsSnapshot = createProcessingSettingsSnapshot(config);
 
             // Run-3 RPF cycle 4 / F2 (DEF-C4-02): mirror the browser upload
             // path's 1 GB disk-space pre-check (app/actions/images.ts:216-226).
@@ -406,6 +421,7 @@ export const POST = withAdminAuth(
             uploaded_by: tokenUserId,
             original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
             original_file_size: fileEntry.size,
+            processing_settings_json: serializeProcessingSettingsSnapshot(processingSettingsSnapshot),
         };
 
         // R4C1 COR-R4C1-02 / R4C4 COR-R4C4-03: the catch below contains the
@@ -441,12 +457,8 @@ export const POST = withAdminAuth(
             filenameJpeg: data.filenameJpeg,
             width: data.width,
             topic: topicSlug,
-            quality: {
-                webp: config.imageQualityWebp,
-                avif: config.imageQualityAvif,
-                jpeg: config.imageQualityJpeg,
-            },
-            imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
+            quality: processingSettingsSnapshot.quality,
+            imageSizes: processingSettingsSnapshot.imageSizes,
             // CR-R9C7-01: carry the remaining 6 admin processing settings on
             // the job (upload-time snapshot from the already-loaded `config`),
             // exactly mirroring the browser upload path (actions/images.ts).
@@ -457,13 +469,13 @@ export const POST = withAdminAuth(
             // every Lightroom publish until a backfill re-encode — the same
             // defect class CR-R9C6-01 fixed for the browser path but which the
             // c6 fix missed on this parallel enqueue site.
-            forceSrgbDerivatives: config.forceSrgbDerivatives,
-            wideGamutJpegChroma: config.wideGamutJpegChroma,
-            avifEffort: config.avifEffort,
-            sdrJpegChroma: config.sdrJpegChroma,
-            wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
-            autoAltTextEnabled: config.autoAltTextEnabled,
-            semanticSearchMode: config.semanticSearchMode,
+            forceSrgbDerivatives: processingSettingsSnapshot.forceSrgbDerivatives,
+            wideGamutJpegChroma: processingSettingsSnapshot.wideGamutJpegChroma,
+            avifEffort: processingSettingsSnapshot.avifEffort,
+            sdrJpegChroma: processingSettingsSnapshot.sdrJpegChroma,
+            wideGamutMaxSourcePixels: processingSettingsSnapshot.wideGamutMaxSourcePixels,
+            autoAltTextEnabled: processingSettingsSnapshot.autoAltTextEnabled,
+            semanticSearchMode: processingSettingsSnapshot.semanticSearchMode,
             // R4C1 COR-R4C1-05: forward EXIF caption inputs, mirroring the
             // browser path. Without these the auto alt-text stub
             // (caption-generator.ts) emits the generic "[AUTO] Photo" for

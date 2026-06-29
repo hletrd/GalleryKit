@@ -485,6 +485,8 @@ export function UploadDropzone({
                                             src={previewUrl}
                                             alt={file.name}
                                             className="h-full w-full object-contain"
+                                            loading="lazy"
+                                            decoding="async"
                                         />
                                     </div>
 

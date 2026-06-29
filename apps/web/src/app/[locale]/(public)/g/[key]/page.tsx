@@ -9,6 +9,7 @@ import { ArrowLeft } from 'lucide-react';
 import { imageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
+import { GridPicture } from '@/components/grid-picture';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
@@ -196,42 +197,28 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
                             </div>
-                            <picture>
-                                {image.filename_avif && (
-                                    <source
-                                        type="image/avif"
-                                        srcSet={`${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${smallGridSize}.avif`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${mediumGridSize}.avif`)}`)} ${mediumGridSize}w`}
-                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                    />
-                                )}
-                                {image.filename_webp && (
-                                    <source
-                                        type="image/webp"
-                                        srcSet={`${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`}
-                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                    />
-                                )}
-                                {/* R20-M1: use the base JPEG filename for the
-                                    <picture> fallback rather than the sized derivative.
-                                    The base file always exists per the encoder
-                                    atomic-rename contract, so legacy / mid-backfill rows
-                                    whose `_${smallGridSize}.jpg` derivative is missing
-                                    render cleanly instead of producing a broken-tile
-                                    glyph on the photographer-share path. Modern
-                                    browsers prefer the AVIF / WebP `<source>` rows via
-                                    srcset, so this fallback adds no extra bytes.
-                                    Mirrors the R19-M2 fix on timeline/year. */}
-                                <img
-                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                    alt={altText}
-                                    width={image.width}
-                                    height={image.height}
-                                    className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
-                                    loading={isAboveFold ? "eager" : "lazy"}
-                                    fetchPriority={isAboveFold ? "high" : "auto"}
-                                    decoding="async"
-                                />
-                            </picture>
+                            <GridPicture
+                                sources={[
+                                    ...(image.filename_avif ? [{
+                                        type: 'image/avif',
+                                        srcSet: `${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${smallGridSize}.avif`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${mediumGridSize}.avif`)}`)} ${mediumGridSize}w`,
+                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                    }] : []),
+                                    ...(image.filename_webp ? [{
+                                        type: 'image/webp',
+                                        srcSet: `${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`,
+                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                    }] : []),
+                                ]}
+                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                alt={altText}
+                                width={image.width}
+                                height={image.height}
+                                className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
+                                loading={isAboveFold ? "eager" : "lazy"}
+                                fetchPriority={isAboveFold ? "high" : "auto"}
+                                decoding="async"
+                            />
                             {/* Desktop hover overlay — matches main gallery pattern */}
                             <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
                                 <p className="text-white font-medium truncate">{altText}</p>

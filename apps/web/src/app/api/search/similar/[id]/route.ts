@@ -221,12 +221,11 @@ export async function GET(
                 }))
                 .sort((a, b) => b.score - a.score);
         } catch (e) {
-            // R19C19 MINOR-1: log before falling back so a transient enrichment
-            // DB failure is diagnosable rather than surfacing as an empty 200
-            // (indistinguishable from "no similar photos") after the rate-limit
-            // budget was already consumed.
             console.error('[search/similar] result enrichment query failed', e);
-            enrichedResults = [];
+            return NextResponse.json(
+                { error: 'Similar photos could not be loaded' },
+                { status: 503, headers: NO_STORE_HEADERS },
+            );
         }
     }
 
