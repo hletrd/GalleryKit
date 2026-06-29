@@ -73,6 +73,17 @@ describe('/api/og/photo/[id] R24-M1 fallback contract (route source)', () => {
         // The all-sizes-fail fallback branch itself remains (R24-M1).
         expect(source).toContain('if (!fetched) {');
     });
+
+    it('fallback redirects use canonical site config, not request origin', () => {
+        expect(source).toContain('function buildFallbackResponse(');
+        expect(source).toContain('canonicalBaseUrl: string');
+        expect(source).toContain('canonicalOrigin = new URL(canonicalBaseUrl).origin');
+        expect(source).toContain('url.origin === canonicalOrigin');
+        expect(source).toContain('Location: `${canonicalOrigin}/`');
+        expect(source).not.toContain('const reqOrigin = new URL(req.url).origin');
+        expect(source).not.toContain('const origin = new URL(req.url).origin');
+        expect(source).not.toContain('Location: `${origin}/`');
+    });
 });
 
 describe('lib/og-photo-fetch.ts R24-M1 contract (helper source)', () => {

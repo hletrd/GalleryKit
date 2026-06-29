@@ -50,12 +50,12 @@ export async function GET(
     // Validate id is a positive integer
     if (!/^\d+$/.test(id)) {
         rollbackOgAttempt(ip);
-        return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
     }
     const imageId = parseInt(id, 10);
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
         rollbackOgAttempt(ip);
-        return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
     }
 
     try {
@@ -75,7 +75,7 @@ export async function GET(
         // policy (og-route-source-contracts.test.ts); this route's contract
         // is locked by og-photo-fallback.test.ts.
         if (!image) {
-            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+            return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
 
         const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
@@ -106,8 +106,9 @@ export async function GET(
         // hitting `http://attacker/uploads/jpeg/<uuid>` (a weak blind-SSRF /
         // cache-poison primitive). The path component is already a validated
         // UUID derivative — pinning the host closes the only attacker lever.
-        // Fall back to the request origin only if siteConfig.url is unset /
-        // unparseable (dev without a configured URL).
+        // If siteConfig.url is unset / unparseable, do NOT fall back to the
+        // attacker-controllable request origin; return a canonical fallback
+        // response or fail closed.
         let fetchOrigin: string;
         try {
             fetchOrigin = new URL(siteConfig.url).origin;
@@ -115,7 +116,7 @@ export async function GET(
             // R5-H4: fail closed — when siteConfig.url is unset (dev), do NOT
             // fall back to the attacker-controllable request origin. Return the
             // fallback response instead of exposing a blind-SSRF primitive.
-            return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL, seo.og_image_url || undefined);
+            return buildFallbackResponse(seo.url, OG_ERROR_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const fetched = await pickFirstAvailablePhotoBuffer(
             fetchOrigin,
@@ -127,7 +128,7 @@ export async function GET(
             // to |imageSizes| internal fetch attempts (10 s timeout / 1 MB
             // cap each); refunding it let one legacy photo in a backfill
             // window become an unmetered internal-fetch amplifier.
-            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+            return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoDataUrl = `data:image/jpeg;base64,${fetched.buffer.toString('base64')}`;
 
@@ -239,7 +240,7 @@ export async function GET(
         if (e instanceof Error) {
             console.error(`[og/photo] ${e.message}`);
         }
-        return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL);
+        return buildFallbackResponse(siteConfig.url, OG_ERROR_CACHE_CONTROL);
     }
 }
 
@@ -249,22 +250,34 @@ export async function GET(
  * may become available after background processing completes).
  */
 function buildFallbackResponse(
-    req: NextRequest,
+    canonicalBaseUrl: string,
     cacheControl: string,
     ogImageUrl?: string,
 ): Response {
+    let canonicalOrigin: string;
+    try {
+        canonicalOrigin = new URL(canonicalBaseUrl).origin;
+    } catch {
+        return new Response('Not found', {
+            status: 404,
+            headers: {
+                'Cache-Control': OG_ERROR_CACHE_CONTROL,
+                'X-Content-Type-Options': 'nosniff',
+            },
+        });
+    }
+
     if (ogImageUrl) {
         // R5-H5: validate the admin-configured OG image URL is same-origin
         // before redirecting. Prevents an open-redirect primitive if the
         // admin SEO settings are ever compromised or poisoned.
         try {
-            const url = new URL(ogImageUrl);
-            const reqOrigin = new URL(req.url).origin;
-            if (url.origin === reqOrigin) {
+            const url = new URL(ogImageUrl, canonicalOrigin);
+            if (url.origin === canonicalOrigin) {
                 return new Response(null, {
                     status: 302,
                     headers: {
-                        Location: ogImageUrl,
+                        Location: url.toString(),
                         'Cache-Control': cacheControl,
                     },
                 });
@@ -275,11 +288,10 @@ function buildFallbackResponse(
     }
     // No configured fallback: redirect to the site root so crawlers get
     // the homepage's own OG metadata rather than a broken image URL.
-    const origin = new URL(req.url).origin;
     return new Response(null, {
         status: 302,
         headers: {
-            Location: `${origin}/`,
+            Location: `${canonicalOrigin}/`,
             'Cache-Control': cacheControl,
         },
     });
