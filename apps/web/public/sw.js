@@ -18,12 +18,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 48d9ad6a-p7 is replaced at build time by scripts/build-sw.ts.
+ * 252b1008-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '48d9ad6a-p7';
+const SW_VERSION = '252b1008-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -56,6 +56,10 @@ function isImageDerivative(pathname) {
 
 function isHtmlRoute(request) {
   return request.headers.get('Accept')?.includes('text/html') ?? false;
+}
+
+function isRevocableShareHtmlRoute(pathname) {
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[sg]\/[^/]+\/?$/.test(pathname);
 }
 
 function isSensitiveResponse(response) {
@@ -362,6 +366,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(staleWhileRevalidateImage(request));
     return;
   }
+
+  // Revocable share pages — always bypass to network. Offline HTML cache can
+  // otherwise outlive share revoke/delete/expiry for up to HTML_MAX_AGE_MS.
+  if (isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)) return;
 
   // HTML routes — network-first with 24 h fallback
   if (isHtmlRoute(request)) {

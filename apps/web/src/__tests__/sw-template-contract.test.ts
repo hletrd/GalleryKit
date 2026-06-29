@@ -58,6 +58,16 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
     it('offline fallback still honours the 24 h TTL on served entries', () => {
         expect(TEMPLATE).toMatch(/age > HTML_MAX_AGE_MS/);
     });
+
+    it('bypasses revocable share pages instead of offline-caching them', () => {
+        expect(TEMPLATE).toMatch(/function isRevocableShareHtmlRoute\(pathname\)/);
+        expect(TEMPLATE).toContain('[sg]\\/[^/]+');
+        const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
+        const shareBypassIdx = fetchHandler.indexOf('isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)');
+        const htmlCacheIdx = fetchHandler.indexOf('event.respondWith(networkFirstHtml(request))');
+        expect(shareBypassIdx).toBeGreaterThan(-1);
+        expect(htmlCacheIdx).toBeGreaterThan(shareBypassIdx);
+    });
 });
 
 describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11)', () => {

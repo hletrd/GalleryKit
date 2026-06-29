@@ -58,6 +58,10 @@ function isHtmlRoute(request) {
   return request.headers.get('Accept')?.includes('text/html') ?? false;
 }
 
+function isRevocableShareHtmlRoute(pathname) {
+  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[sg]\/[^/]+\/?$/.test(pathname);
+}
+
 function isSensitiveResponse(response) {
   if (!response) return true;
   if (response.status === 401 || response.status === 403) return true;
@@ -362,6 +366,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(staleWhileRevalidateImage(request));
     return;
   }
+
+  // Revocable share pages — always bypass to network. Offline HTML cache can
+  // otherwise outlive share revoke/delete/expiry for up to HTML_MAX_AGE_MS.
+  if (isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)) return;
 
   // HTML routes — network-first with 24 h fallback
   if (isHtmlRoute(request)) {
