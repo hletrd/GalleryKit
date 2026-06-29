@@ -1,163 +1,112 @@
-# Cycle 22 — Designer Review (UI/UX + WCAG 2.2 Accessibility)
+# Designer UI/UX Review — Cycle 1/100 Prompt 1
 
-**Date:** 2026-06-29  
-**Reviewer:** oh-my-claudecode:designer (Sonnet 4.6)  
-**Cycle:** 22  
-**Branch:** master (HEAD post-cycle-21 fixes, commit 0e475ba1+)
+Scope: repository-wide GalleryKit UI/UX review for public, shared, photo-viewer, admin, UI primitive, styles, i18n, and UI/a11y tests. This is source-backed; live browser validation was attempted with the local app.
 
----
+## Inventory Reviewed
 
-## Summary
+- Project docs: `AGENTS.md`, `CLAUDE.md`.
+- Public routes: `apps/web/src/app/[locale]/(public)/**`, root localized `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `global-error.tsx`.
+- Admin routes: `apps/web/src/app/[locale]/admin/**`.
+- Components: all files under `apps/web/src/components/**`, including shadcn/Radix wrappers, photo viewer, lightbox, search, map, upload, image manager, bottom sheet, color/HDR surfaces, nav/footer.
+- Styles/config: `apps/web/src/app/[locale]/globals.css`, `apps/web/tailwind.config.ts`.
+- Messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- UI/a11y tests and e2e specs: `touch-target-audit`, `a11y-us-p15`, `focus-visible-*`, `info-bottom-sheet-ia`, `search-disclaimer`, `switch-geometry-contract`, `hdr-badge-contrast`, Playwright public/admin/nav specs.
 
-Two real accessibility findings. Both are scanner blind spots — interactive `<button>` elements with no `hover:` styling (so the focus-visible scanner's heuristic skips them) that are also missing `focus-visible:ring`. No i18n parity failures. No reduced-motion regressions. No new touch-target violations. Skip link, focus traps, heading hierarchy, ARIA roles/labels, and form validation UX all remain correct.
+## Validation Evidence
 
----
+- `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3010`
+  - Server started, but logged `Could not connect to database to bootstrap queue (ECONNREFUSED)`.
+- `agent-browser` runtime checks:
+  - `/en/admin` rendered the login surface; DOM had `mainContentCount: 1`.
+  - `/en` and `/en/this-route-does-not-exist-xyz` fell into the localized error boundary because DB-backed page data was unavailable; accessibility tree exposed “Skip to content”, but DOM had `mainContentCount: 0`.
+- Targeted tests:
+  - `npm test --workspace=apps/web -- touch-target-audit a11y-us-p15 focus-visible-links-scan info-bottom-sheet-ia search-disclaimer switch-geometry-contract hdr-badge-contrast`
+  - Result: 7 files passed, 58 tests passed.
 
-## Cycle 21 Fix Verification
+## Findings
 
-All 13 cycle-21 findings (D21-01 through D21-13) confirmed fixed:
+### D1 — Localized Error Boundary Has a Broken Skip Link Target
 
-| Finding | File | Status |
-|---------|------|--------|
-| D21-01 footer GitHub/Admin links | `components/footer.tsx:47,52` | confirmed — ring-ring ring-offset-2 present |
-| D21-02 s/[key] View Gallery | `app/[locale]/(public)/s/[key]/page.tsx:105` | confirmed |
-| D21-03 year/[year] back link | `app/[locale]/(public)/year/[year]/page.tsx:109` | confirmed |
-| D21-04 analytics window selectors + table links | `analytics-client.tsx:68,117,227` | confirmed |
-| D21-05 not-found Back Home | `app/[locale]/not-found.tsx:45` | confirmed |
-| D21-06/07 error.tsx retry+home | `app/[locale]/error.tsx:34,40` | confirmed |
-| D21-08 on-this-day-widget links | `components/on-this-day-widget.tsx:42,58` | confirmed |
-| D21-09 home-client clear-filter + back-to-top | `components/home-client.tsx:459,472` | confirmed |
-| D21-10 admin error.tsx | `app/[locale]/admin/(protected)/error.tsx:37,43` | confirmed |
-| D21-11 topic-empty-state | `components/topic-empty-state.tsx:18` | confirmed |
-| D21-12 admin-header logo | `components/admin-header.tsx:16` | confirmed |
-| D21-13 nav-client logo + controls | `components/nav-client.tsx:85,96,127,157,168` | confirmed |
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Files/regions:
+  - `apps/web/src/app/[locale]/layout.tsx:123-128` renders a global skip link to `#main-content`.
+  - `apps/web/src/app/[locale]/error.tsx:16-46` renders `<main role="main">` without `id="main-content"` or `tabIndex={-1}`.
+  - `apps/web/src/__tests__/a11y-us-p15.test.ts:29-37` only asserts the public sub-layout target, not the localized error boundary.
+- Evidence:
+  - Browser DOM on `/en` error state: `mainCount: 1`, `mainContentCount: 0`.
+  - Accessibility tree exposed `link "Skip to content"` followed by a main region, but the link target did not exist.
+- Failure scenario:
+  - During DB outage or route render failure, keyboard users tab to “Skip to content”, activate it, and focus does not move into the error page’s main content. This weakens WCAG 2.4.1 bypass behavior exactly when the user needs recovery controls.
+- Concrete fix:
+  - Change `error.tsx` to `<main id="main-content" tabIndex={-1} className="... focus:outline-none">`.
+  - Add a source test beside `a11y-us-p15.test.ts` asserting `[locale]/error.tsx` carries the target because it is rendered under the global localized layout.
 
----
+### D2 — Search Results Are Tab-Focusable but the Focus Scanner Exempts Them
 
-## New Findings
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed from source; runtime search could not be loaded without DB.
+- Files/regions:
+  - `apps/web/src/components/search.tsx:71-79` renders each result as a real `<Link role="option" href=...>` with no `tabIndex={-1}` and no `focus-visible:*` style.
+  - `apps/web/src/components/search.tsx:345-376` uses input `role="combobox"` with `aria-activedescendant`.
+  - `apps/web/src/__tests__/focus-visible-links-scan.test.ts:41-42` and `:69-75` exempt `role="option"` because the test assumes result rows are “not Tab focus”.
+  - `apps/web/e2e/public.spec.ts:21-40` tests one Tab remains inside the dialog but does not create results or assert visible focus on a result row.
+- Evidence:
+  - Source contract mismatch: anchors with `href` are Tab-focusable unless removed from the tab order. The scanner’s documented premise does not match the component.
+- Failure scenario:
+  - A keyboard user opens search, types a query, presses Tab into a result row, and receives no visible focus indicator unless the row also happens to be the active descendant. This is a WCAG 2.4.7 / 2.4.11 regression hidden by the test exemption.
+- Concrete fix:
+  - Pick one pattern and make it consistent:
+    - Preferred combobox pattern: keep focus on the input, set result links `tabIndex={-1}`, navigate with arrow keys/Enter, and keep `aria-activedescendant`.
+    - Or link-list pattern: remove `role="option"`/`aria-activedescendant` coupling and add `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` plus `onFocus={() => setActiveIndex(idx)}` to result rows.
+  - Update `focus-visible-links-scan.test.ts` so `role="option"` is exempt only when the element is not Tab-focusable.
 
-### D22-01 — Histogram tooltip-trigger button missing focus ring (HIGH)
+### D3 — Error States Can Render With an Empty Document Title
 
-**File:** `apps/web/src/components/histogram.tsx:707–712`  
-**Severity:** HIGH — keyboard users (Tab navigation) reach this button but see no focus indicator  
-**WCAG:** 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA)
+- Severity: Medium
+- Confidence: Medium
+- Status: Confirmed runtime under DB-down dev environment; root cause likely spans metadata/error rendering.
+- Files/regions:
+  - `apps/web/src/app/[locale]/layout.tsx:17-58` owns localized metadata.
+  - `apps/web/src/app/[locale]/error.tsx:7-47` renders the visible error UI but cannot export static metadata as a client error boundary.
+  - `apps/web/src/lib/data.ts:1704-1725` catches SEO DB failures and falls back to `site-config`, so the empty title needs investigation at the boundary/metadata integration level rather than a simple missing fallback in `getSeoSettings`.
+- Evidence:
+  - `agent-browser eval` on `/en` after the DB-triggered error returned `"title": ""`, while the body showed the localized error UI.
+- Failure scenario:
+  - Screen-reader users and browser-tab users land on an error page with no meaningful document title, violating the intent of WCAG 2.4.2 Page Titled and making recovery tabs hard to distinguish.
+- Concrete fix:
+  - Add a regression test for DB/error-boundary rendering that asserts `document.title` is non-empty on the localized error page.
+  - Investigate why root metadata is not surviving this error path despite `getSeoSettings()` fallback; if Next cannot guarantee it, set a client-side fallback title in `error.tsx` via a guarded `useEffect` using the localized error title plus the stamped `data-gallery-title`.
 
-The histogram key-type label is a `<button>` wrapped by `<TooltipTrigger asChild>` from Radix UI. It has `cursor-help underline decoration-dotted underline-offset-2` styling but no `hover:` token and no `focus-visible:ring-*` class. Radix's `TooltipTrigger asChild` passes focus handling to the child element — the button IS keyboard-focusable (default browser focusability for `<button>`) — but when a user Tabs to it, focus is invisible.
+### D4 — SEO Settings Hints Are Visual Only
 
-```tsx
-// histogram.tsx:706-713
-<TooltipTrigger asChild>
-    <button
-        type="button"
-        className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
-        // NO hover: token, NO focus-visible: token
-    >
-        {t(`viewer.keyType${keyType}`)}
-    </button>
-</TooltipTrigger>
-```
+- Severity: Low
+- Confidence: High
+- Status: Confirmed from source.
+- Files/regions:
+  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:95-174` renders hint paragraphs for site title, nav title, description, author, locale, and OG image URL, but the related inputs/textareas do not use `aria-describedby`.
+  - Contrast: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:347-400` correctly associates many setting hints via `aria-describedby`.
+- Evidence:
+  - Source has visible hints at `seo-client.tsx:104`, `:116`, `:129`, `:141`, `:153`, `:174`; corresponding fields at `:97-103`, `:109-115`, `:121-128`, `:134-140`, `:146-152`, `:166-173` lack descriptions.
+- Failure scenario:
+  - A screen-reader admin hears the field label but not important instructions like “leave empty for default”, expected locale format, or URL purpose. That weakens WCAG 1.3.1 / 3.3.2 instruction relationships and increases avoidable validation errors.
+- Concrete fix:
+  - Give each hint an id, for example `seo-title-help`, and add matching `aria-describedby` to its input/textarea.
+  - Add a source contract test similar to the settings-client hint coverage.
 
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the className.
+## Final Sweep
 
-**Scanner note:** The focus-visible-links-scan.test.ts heuristic is `hover: present → require focus indicator`. This button has no `hover:` so the scanner never evaluates it. See Scanner Blind Spot Analysis below.
-
----
-
-### D22-02 — Map popup button missing focus ring (MEDIUM)
-
-**File:** `apps/web/src/components/map/map-client.tsx:128–133`  
-**Severity:** MEDIUM — keyboard users who open a Leaflet popup reach this button without a visible focus indicator  
-**WCAG:** 2.4.7 Focus Visible (AA)
-
-The Leaflet popup renders a `<button>` that navigates to the photo detail page. The button has touch-target sizing (`min-h-[44px] min-w-[44px]`) and an `aria-label`, but has no `hover:` styling and no `focus-visible:ring-*`.
-
-```tsx
-// map-client.tsx:128-133
-<button
-    type="button"
-    onClick={() => handleMarkerClick(marker.id)}
-    className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left"
-    aria-label={`${openPhotoLabel}: ${marker.title ?? marker.id}`}
-    // NO hover: token, NO focus-visible: token
->
-```
-
-Leaflet maps are partially keyboard-navigable; once a popup is open, its contents are reachable by Tab. The button has no visible focus ring.
-
-**Fix:** Add `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md` to the className.
-
-**Scanner note:** Same blind spot — no `hover:` token on the button, so the scanner skips it.
-
----
-
-## Scanner Blind Spot Analysis
-
-The `focus-visible-links-scan.test.ts` scanner (added in cycle 21) correctly handles:
-
-- **`role="option"` exemption:** `<Link role="option">` in `search.tsx:74` is skipped — these are managed via `aria-activedescendant` on the parent combobox (`tag-input.tsx:197–202` pattern), not via DOM focus. The `KNOWN_VIOLATIONS: {'components/search.tsx': 0}` entry is correct.
-- **Group-hover parents:** Elements with `group-hover:` get a 12-line lookahead for a child `group-focus-visible:` ring. Confirmed working for lightbox nav arrow buttons (`lightbox.tsx:623–649`).
-- **Multi-line normalization:** Template-literal classNames and multi-line JSX are joined before scanning. Confirmed working — no false negatives from multi-line histogram buttons or home-client masonry links.
-- **shadcn `<Button>` exclusion:** Capital-B Button is skipped (ring baked into shadcn variants).
-
-**Confirmed blind spot:** The heuristic is `hover: present → require focus-visible:`. An interactive element with NO `hover:` styling (but still keyboard-focusable and needing a ring) is never evaluated. Both D22-01 (histogram tooltip trigger) and D22-02 (map popup button) fall into this gap.
-
-**Recommendation for scanner improvement (D22-03):** Add a secondary scan pass that checks all native `<button>` elements lacking BOTH `hover:` and `focus-visible:` AND not wrapped by a known-exempt pattern (shadcn `<Button>`, `aria-hidden`, `disabled`, `tabIndex={-1}`). Scope the pass to the same `SCAN_ROOTS` as the existing scanner to avoid false positives from vendored code.
-
----
-
-## Passing Checks (No Action Required)
-
-### i18n Parity (en.json vs ko.json)
-
-780 keys on each side — exact parity. No missing keys in either direction. The ICU plural vs. fixed-form asymmetry (English uses `{count, plural, ...}`; Korean uses `{count}장`) is intentional per the project convention (DOC-R5C3-07).
-
-### Reduced Motion
-
-`app/[locale]/globals.css:291` catch-all: `animation-duration: 0.01ms`, `transition-duration: 0.01ms` on `*`, plus explicit suppression of `group-hover:scale-105` transforms (WCAG 2.3.3, AGG-M4). Framer-motion in `photo-viewer.tsx:704–726` gates on `prefersReducedMotion` (sets `duration: 0` / `initial: false`). No regressions.
-
-### Heading Hierarchy
-
-- Home: `h1` (photo grid title) → `h2 sr-only` (photos section) → `h3` (photo card overlay titles). Valid.
-- Timeline: `h1` → `h2` per month with `id` for `aria-labelledby` on the enclosing `<section>`. Valid.
-- Admin: one `h1` per page, `h2` subsections. Valid.
-
-### Skip Link
-
-`app/[locale]/layout.tsx:119–127` — skip link `href="#main-content"`. Both `(public)/layout.tsx:12` and `admin/layout.tsx:26` have matching `id="main-content" tabIndex={-1} className="... focus:outline-none"`. Correct.
-
-### Focus Traps
-
-Lightbox: `<FocusTrap>` (`lazy-focus-trap.tsx`) with `allowOutsideClick: true`, fallback to close button. On open: `closeButtonRef.current?.focus()`. On close: `previouslyFocusedRef.current.focus()`. WCAG 2.1 Modal Dialog pattern fulfilled.
-
-### ARIA Labels and Roles
-
-Sampled controls (all pass):
-- Lightbox: `role="dialog"`, `aria-modal="true"`, `aria-label`, per-button `aria-label`+`aria-keyshortcuts`, slideshow `aria-pressed`, position counter `role="status" aria-live="polite"`.
-- Histogram cycle button: `aria-label={t('aria.cycleHistogram')}`.
-- Map popup button: `aria-label` present (D22-02 has correct ARIA, only missing visual ring).
-- Bulk-edit: `SelectTrigger` components all have `aria-label`.
-- Tag input: full combobox ARIA (`role="combobox"`, `aria-autocomplete`, `aria-expanded`, `aria-controls`, `aria-activedescendant`, `role="listbox"`, `role="option"`, `aria-selected`).
-
-### Form Validation UX
-
-- Password form: server error → shadcn `<Alert role="alert">` proactive announce; client mismatch → `<Alert>` summary + inline `<p id="confirmPassword-error">` + `aria-invalid="true"` + `aria-describedby` on the field.
-- Login form: `<p role="alert" aria-live="assertive">` for server errors. Correct.
-- Bulk-edit dialog: `<p role="alert">` for validation errors (`DES-R4C16-05`).
-
-### Touch Targets
-
-`touch-target-audit.test.ts` passes (32/32 tests). New map popup button uses `min-h-[44px] min-w-[44px]` (D22-02 is missing a focus ring, not a touch target problem). Histogram tooltip button is a small inline text element — acceptable as an information-only tooltip trigger, not a primary navigation control.
-
-### Windows High Contrast Mode
-
-`globals.css:330+` `@media (forced-colors: active)` block correctly pins `.masonry-card h3` and `.masonry-card p` to `Canvas`/`CanvasText` system pair and suppresses the gradient overlay. No regressions observed.
-
-### Dark Mode
-
-All components use CSS custom property tokens (`hsl(var(--...))`). Lightbox-color-pip inner buttons use `ring-white ring-offset-black` which is correct for the dark overlay context.
-
----
-
-## Controls Explicitly Not Re-Reported
-
-Per task instructions — confirmed fixed in cycle 21, not re-reported here: footer GitHub/Admin links, s/[key] View Gallery, year/[year] back link, analytics window selectors + table links, not-found Back Home, error.tsx retry+home (both locales), on-this-day-widget links, home-client clear-filter + back-to-top, topic-empty-state clear-filter, admin-header logo, nav-client logo + nav controls, histogram cycle button, info-bottom-sheet + photo-viewer GPS links.
+- Information architecture: public nav, admin nav, topic/year/map/share routes have landmarks and current-page states; localized error boundary is the main IA exception because its skip target is missing.
+- Affordances and touch targets: targeted touch audit passed; shadcn button/select/switch primitives enforce 44px floors. Remaining documented admin touch exceptions are intentional desktop-priority areas in the audit map.
+- Focus and keyboard: modal/search/lightbox/bottom-sheet traps and restoration have tests; search result focus is the notable unguarded mismatch.
+- WCAG contrast: core tokens include documented light/dark/OLED contrast adjustments; targeted HDR/destructive text tests passed.
+- ARIA: major dialogs and live regions are present; SEO hints need programmatic relationships.
+- Reduced motion: global `prefers-reduced-motion` rule suppresses transitions/animations and hover scale; photo viewer/lightbox/image zoom also have source-level reduced-motion handling.
+- Responsive breakpoints: public masonry, nav, photo viewer, bottom sheet, timeline/year grids were inspected; no new source-backed breakpoint defect found.
+- Loading/empty/error states: loading components use `role="status"`; empty states exist for public/admin surfaces. Error boundary has the skip-target/title gaps above.
+- Dark/light/OLED: theme tokens and global-error theme preservation were inspected; no new source-backed issue found.
+- i18n/RTL: English/Korean messages are present and `dir="ltr"` is explicit. RTL is not currently product-relevant because supported locales are LTR, but adding RTL locales will require making `dir` locale-derived.
+- Perceived performance: source shows LCP/eager logic, intrinsic-size/aspect-ratio reservations, sized derivatives, and reduced neighbor preloads. Live performance profiling was skipped because the local DB was unavailable and the gallery routes rendered error states.
+- Skipped/irrelevant live areas: DB-backed homepage/search/photo/map/share/admin protected flows could not be fully browser-tested locally due `ECONNREFUSED`; review falls back to source/test evidence for those areas. No raw-screenshot-only findings are included.

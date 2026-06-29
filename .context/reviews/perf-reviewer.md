@@ -1,140 +1,175 @@
-# Performance Review — Cycle 22
-**Date:** 2026-06-29
-**HEAD:** 6ef2495d (post-cycle-21 fixes, R21C21 complete)
-**Findings:** 0 new; 0 regressions; cycle-21 T3/T4 fixes verified; all prior deferrals re-confirmed
+# Performance Review - review-plan-fix cycle 1/100, prompt 1
 
----
+Date: 2026-06-29
 
-## Cycle-21 Fix Verification
+Role: perf-reviewer subagent
 
-### T4 — SEMANTIC_SCAN_LIMIT / TOP_K_MAX env-wired — CONFIRMED
+Scope: repository-wide performance review of the Next.js gallery app from DB query efficiency, concurrency, CPU/memory, image processing, background jobs, cache behavior, and UI responsiveness angles. This is a report-only pass; no source files were changed.
 
-`apps/web/src/lib/clip-embeddings.ts:26–31`:
+## Inventory
 
-```ts
-function envPositiveInt(raw: string | undefined, fallback: number): number {
-    const n = Number(raw ?? '');
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
-}
-export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
-export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);
-```
+Relevant runtime surfaces inventoried before findings:
 
-`envPositiveInt` uses `Number()` (not `parseInt`) per the cycle-20 env-parse sweep. `NaN`, `Infinity`,
-and `≤0` all fall back to the documented defaults. The CLAUDE.md "Runtime limits" section documents
-both constants as env-tunable. Commit `fbd94da2`.
+- App data/query layer: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/drizzle/*.sql`.
+- Public routes and server actions: `apps/web/src/app/[locale]/(public)/**/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/**/route.ts`.
+- Image pipeline and queues: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, selected backfill scripts.
+- Upload/search/map UI: `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`, `apps/web/src/components/on-this-day-widget.tsx`, `apps/web/src/components/map/**`.
+- Project docs and constraints: `AGENTS.md`, `CLAUDE.md`.
 
-### T3 — View-buffer retry-counter eviction — CONFIRMED
+Areas intentionally treated as irrelevant to this performance prompt after inventory: tests, locale strings, pure CSS/theme files, auth-only lint rules, and docs without runtime behavior.
 
-Commit `9c3cd64d` dropped the stale retry counter when an entry is evicted from the view-count
-buffer cap. The `VIEW_COUNT_MAX_RETRIES` cap, exponential backoff, and `FLUSH_CHUNK_SIZE=5`
-batched flush are unchanged and correct. No Map leak on cap overflow.
+## Findings
 
-### instrumentation.ts — geoip-lite startup pre-warm — CONFIRMED
+### PERF-01 - Timeline and on-this-day queries are non-sargable on dynamic public pages
 
-`apps/web/src/instrumentation.ts:8–16`:
+Severity: Medium
 
-```ts
-// AGG-R11C11-L13: Pre-warm geoip-lite at startup so the first analytics
-// lookup does not pay the 50-100 ms module-load penalty on the hot path.
-try {
-    await import('geoip-lite');
-} catch { /* data files absent — graceful fallback in analytics.ts */ }
-```
+Confidence: High
 
-A 50–100 ms module-load penalty on the first real analytics request is shifted to the background
-startup path. Runs inside `register()` under the `NEXT_RUNTIME === 'nodejs'` guard (server-only,
-no client-bundle impact). Non-fatal when geoip-lite data files are absent.
+Status: Confirmed code path; likely production impact as the archive grows.
 
-### instrumentation.ts — SIGTERM/SIGINT graceful drain — CONFIRMED
+Locations:
 
-`apps/web/src/instrumentation.ts:18–88`: `Promise.all([shutdownImageProcessingQueue(), flushBufferedSharedGroupViewCounts()])` races a 15 s deadline. Both signal handlers carry a re-entrancy guard (`shutdownInProgress`) so repeated signals during drain do not double-exit. `shutdownTimer.unref?.()` prevents the sentinel from keeping the event loop alive after a clean drain. Explicit `process.exit(exitCode)` on completion — prevents the MySQL connection-pool sockets from holding the process open after drain finishes. No regression.
+- `apps/web/src/lib/data-timeline.ts:95-114` filters on `MONTH(images.capture_date)` and `DAY(images.capture_date)` for the home-page on-this-day widget.
+- `apps/web/src/lib/data-timeline.ts:127-143` computes and orders distinct `YEAR(images.capture_date)` for timeline years.
+- `apps/web/src/lib/data-timeline.ts:176-205` explicitly notes `YEAR(capture_date)` is not sargable, then uses `YEAR(...)` and optional `MONTH(...)` in the timeline image query.
+- `apps/web/src/components/on-this-day-widget.tsx:14-23` runs `getOnThisDayImages()` during the home SSR pass.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:14` disables route revalidation; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:40-60` runs `getTimelineYears()` and `getTimelineImages()`.
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:15` disables route revalidation; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:56-65` runs year-in-review data loading.
 
----
+Failure scenario:
 
-## Prior Deferred Items — Re-evaluation
+On every dynamic render of the home, timeline, or year page, MySQL must evaluate date functions against candidate rows instead of using a tight range on `capture_date`. The existing `idx_images_processed_capture_date_created_at` index still helps with `processed`, but the date-function predicates force much broader scanning, grouping, and tag aggregation than necessary. Crawlers or repeated public traffic against `/`, `/timeline`, and `/year/:year` can turn archive size directly into DB CPU and response-time cost.
 
-All nine prior deferred items re-confirmed. No exit criteria triggered.
+Concrete fix:
 
-| ID | Item | Status |
-|----|------|--------|
-| PERF-C19-01 | `getImagesForSmartCollection` COUNT(*) OVER() per cursor page | Deferred — architect decision, admin-only |
-| PERF-C19-02 | Bootstrap `NOT IN (≤1000 failed IDs)` per 30 s | Deferred — bounded, PK index |
-| PERF-C19-03 | Serial smart-collection UPDATEs in held advisory lock | Deferred — admin-only, infrequent |
-| PERF-C19-04 | Histogram 768-elem temp array per redraw | Deferred — single canvas worker, micro-cost |
-| PERF-C19-05 | `useDisplayCapability` 5 listeners × N consumers | Deferred — bounded, idempotent |
-| PERF-C20-02 | `getTopics()` N correlated subqueries per call | Deferred — < 50 topics, idx_images_topic hit |
-| PERF-C20-03 | Semantic search 2000×512-dim scoring synchronous on event loop | Deferred — hard caps + rate limit; 445 prod embeddings ≈ 228 K ops |
-| PERF-C21-01 | `similar/[id]` shares PERF-C20-03 class + 1 extra DB round-trip | Deferred — same mitigations, same exit criterion as C20-03 |
-| PERF-C21-02 | `setAllImages(prev => [...prev, ...new])` O(N) spread | Informational / no action |
+- Rewrite year/month timeline queries to sargable date ranges:
+  - year: `capture_date >= '${year}-01-01' AND capture_date < '${year + 1}-01-01'`
+  - month: range between the first day of the month and first day of the next month.
+- For on-this-day, either add stored/generated columns such as `capture_month` and `capture_day` with a composite index like `(processed, capture_month, capture_day, capture_date, created_at, id)`, or maintain a small materialized/cache table for daily anniversaries.
+- Update the stale comment at `apps/web/src/lib/data-timeline.ts:92-93`, which currently suggests `MONTH()+DAY()` stays efficient.
 
-**PERF-C19-01 detail:** `apps/web/src/lib/data.ts:1411–1414` confirmed: `COUNT(*) OVER()` still present on both offset and cursor pages. The inline comment at 1399–1403 documents the explicit architect decision to keep the unified select shape (forking was rejected at run4-cycle5). Exit criterion unmet.
+### PERF-02 - The map page loads up to 10,000 unclustered markers without a map/GPS index
 
-**PERF-C20-03 / C21-01 detail:** `clip-embeddings.ts` confirmed — `dotProduct` fast path (unit vectors, skip sqrt, AGG-C10-11c) in place at lines 63–70. Production corpus 445 embeddings at SEMANTIC_SCAN_LIMIT=2000: ≈ 228 K float ops per request. `idx_image_embeddings_model_version_updated` composite index covers the scan plan. Both the semantic text-search route and `similar/[id]` share the same 30/min/IP rate-limit bucket (`preIncrementSemanticAttempt`). Exit criterion unmet.
+Severity: Medium
 
----
+Confidence: High
 
-## Files Reviewed This Cycle — No New Findings
+Status: Confirmed code path; likely user-visible stalls for GPS-heavy archives.
 
-### `apps/web/src/lib/data.ts` (tail: lines 1190–1729)
+Locations:
 
-- **`getSharedGroup` (lines 1237–1328):** batched tag fetch via `inArray(imageTags.imageId, imageIds)` after collecting the group's image IDs — avoids N+1 on the shared-group page. The two mandatory sequential queries (group lookup → image fetch) are unavoidable. The third query (tags) is correctly parallelized in a single `inArray`. No concern.
-- **`getImagesForSmartCollection`:** COUNT(*) OVER() re-confirmed (PERF-C19-01 still deferred).
-- **`searchImages` (lines 1458–1608):** three-query pattern (`Promise.all([tagQuery, aliasQuery])`) parallelized. `remainingLimit` bounds over-fetch. Short-circuit at line 1577 (`remainingLimit <= 0`) skips both parallel queries when the main result fills the limit. No N+1. No concern.
-- **`getMapImages`:** MAP_MAX_MARKERS=10000 hard cap; INNER JOIN on `topics.map_visible=true` (selective for personal-gallery scale); `idx_images_topic` covers the join. Runtime assertion confirms the cap. No concern.
-- **`_getSeoSettings`:** single `inArray(adminSettings.key, [...SEO_SETTING_KEYS])` query. React `cache()` wrapper (`getSeoSettings`) deduplicates within the request. No concern.
-- **All ten React `cache()` exports confirmed intact:** `getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`, `getSeoSettings`. No new uncached entrypoints.
+- `apps/web/src/lib/data.ts:1624-1661` sets `MAP_MAX_MARKERS = 10000` and selects all processed rows with non-null latitude/longitude in map-visible topics.
+- `apps/web/src/db/schema.ts:111-117` defines image indexes, but none cover latitude, longitude, or the map query shape.
+- `apps/web/src/db/schema.ts:11` defines `topics.map_visible`; `apps/web/drizzle/0005_topics_map_visible.sql:6` adds it without an index.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:9` disables revalidation; `apps/web/src/app/[locale]/(public)/map/page.tsx:30-63` loads and serializes all markers for the page.
+- `apps/web/src/components/map/map-client.tsx:86-90` builds bounds arrays from every marker.
+- `apps/web/src/components/map/map-client.tsx:119-143` renders one React Leaflet `<Marker>` per marker.
 
-### `apps/web/src/lib/clip-embeddings.ts` (complete)
+Failure scenario:
 
-- `dotProduct` fast path (unit vectors, skip sqrt) confirmed at lines 63–70. `cosineSimilarity` used only for non-unit-vector comparisons.
-- `topK` at lines 151–156: filter → sort → slice. O(N log N) at N ≤ 2000 — negligible.
-- `truncateAndNormalize` uses `subarray` (zero-copy typed-array view) before re-normalizing — efficient.
-- `decodeEmbeddingColumn` (AGG-C10-01): Buffer raw 2048-byte path + legacy base64 fallback. Defensive, no perf concern.
-- No new perf concerns.
+A gallery with many geotagged images makes each `/map` request scan a broad portion of `images`, join `topics`, sort by capture date, serialize up to 10,000 markers, hydrate them in the browser, compute bounds arrays, and mount thousands of Leaflet markers. On mobile this can freeze the UI; on the server it adds DB and JSON serialization cost to a fully dynamic page.
 
-### `apps/web/src/lib/image-queue.ts` (complete)
+Concrete fix:
 
-- **GC timer:** armed once, guarded by `!state.gcInterval` at line 826 (AGG-M12 fix). `purgeExpiredSessions`, `purgeOldBuckets`, `purgeOldAuditLog`, `purgeOldViewEvents` all fire hourly. No multi-arm regression.
-- **PERF-17-04 fix confirmed:** fire-and-forget embedding IIFE at lines 512–567 uses `resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled'` — no per-image SELECT for semantic mode on regular upload jobs or bootstrap jobs.
-- **Memory bounds:** `MAX_RETRY_MAP_SIZE=10000` with FIFO eviction; `MAX_PERMANENTLY_FAILED_IDS=1000` with FIFO eviction. `pruneRetryMaps` called in every job's `finally` block — prevents unbounded Map growth between hourly GC ticks.
-- **Bootstrap:** cursor-based `BOOTSTRAP_BATCH_SIZE=500` continuation via `gt(images.id, bootstrapCursorId)`. No full-table scan per batch.
-- **Fire-and-forget IIFEs** (caption at line 474, embedding at line 512): correctly non-blocking — neither awaited in the main job path.
+- Add an index that supports the server filter/order, for example `images(processed, latitude, longitude, capture_date, created_at, id)` or a better plan after `EXPLAIN`; if `map_visible` remains in `topics`, also index `topics(map_visible, slug)` or denormalize the public map visibility onto `images`.
+- Replace the initial all-marker payload with viewport/bounds loading or server-side clustering.
+- Use marker clustering or a canvas/WebGL marker layer for large result sets.
+- Lower the initial cap until clustering or viewport paging exists.
 
-### `apps/web/src/lib/process-image.ts` (tail: lines 1092–1371)
+### PERF-03 - Production CLIP image embeddings bypass image-queue backpressure
 
-- **Parallel fan-out:** `await Promise.all([generateForFormat('webp'…), generateForFormat('avif'…), generateForFormat('jpeg'…)])` at line 1316. Three formats encode concurrently within the queue slot.
-- **Per-format-fresh Sharp instances (WI-14):** each `generateForFormat` constructs a new `sharp(processingInputPath, …)` per size iteration. No shared state between formats.
-- **Same-size dedup:** `fs.link(lastRendered.filePath, outputPath)` hard link (zero-copy on same FS) at line 1140, with `copyFile` fallback. Correct `lastRendered.resizeWidth === resizeWidth` guard.
-- **Base-filename atomic rename:** hard link + rename chain at lines 1283–1308, `safeUnlink(tmpPath)` in finally. Three-level fallback with warning on final fallback. No regression.
-- **Post-encode audit probes** (`_verifyAvifNclx`, `_verifyWebpIccChunk`): read only the file header (minimal I/O); non-blocking warnings. No perf concern.
-- **WI-15 intermediate cleanup:** `finally { if (processingInputPath !== inputPath) await safeUnlink(processingInputPath); }` at line 1364. Correct, no leak.
-- **Partial-write cleanup:** catch at line 1346 uses `Promise.all(Array.from(writtenSizedPaths.webp/avif/jpeg).map(safeUnlink))` — parallel unlinks. Correct.
+Severity: Medium
 
-### `apps/web/src/instrumentation.ts` (complete — see Fix Verification above)
+Confidence: High
 
-No new perf concerns beyond what is documented in the Fix Verification section.
+Status: Confirmed concurrency risk.
 
----
+Locations:
 
-## Overall Assessment
+- `apps/web/src/lib/image-queue.ts:212` creates the main `PQueue` with default concurrency `1`.
+- `apps/web/src/lib/image-queue.ts:414-449` awaits Sharp derivative generation and processed-state DB updates inside that queue.
+- `apps/web/src/lib/image-queue.ts:512-567` starts production CLIP image embedding in a detached async IIFE after processing succeeds.
+- `apps/web/src/lib/image-queue.ts:569` returns from the queued job while the detached embedding can still be running.
+- `apps/web/src/lib/clip-model.ts:151-186` decodes/resizes the original image with Sharp, allocates a `Float32Array(3 * 512 * 512)`, and runs model inference.
+- `apps/web/src/app/actions/images.ts:466-502` enqueues processing for uploaded images; `apps/web/src/components/upload-dropzone.tsx:263-271` uploads files sequentially on the client but still allows many images in a batch.
 
-Cycle 22 is a clean cycle with **zero new findings** and **no regressions**.
+Failure scenario:
 
-Cycle-21 targeted fixes verified at HEAD (`6ef2495d`):
-- **T4** (`fbd94da2`): `SEMANTIC_SCAN_LIMIT`/`SEMANTIC_TOP_K_MAX` env-tunable via `envPositiveInt` — CLAUDE.md documentation now matches code.
-- **T3** (`9c3cd64d`): view-buffer cap eviction no longer orphans the retry counter.
-- **AGG-R11C11-L13** (earlier cycle): geoip-lite pre-warmed at startup — first-analytics-request latency eliminated.
+`QUEUE_CONCURRENCY=1` limits Sharp derivative generation, but it does not limit the detached production embedding work. A batch upload can finish each queued image-processing task, then leave multiple CLIP embedding jobs running concurrently in the background. Those jobs perform image decode/resize, allocate per-image tensors, and run model inference while the queue continues to process later images. Under production semantic mode this can create CPU and memory spikes that contend with Sharp, MySQL, and live search requests.
 
-Foundational performance investments confirmed intact and unregressed:
-- React `cache()` SSR deduplication across 10 data-access functions
-- Cursor-based gallery pagination with no public `COUNT(*) OVER()`
-- Sharp concurrency formula tuned for 3-format fan-out (`Math.max(1, floor((cpu-1)/3))`); `sharp.cache(false)` RSS control
-- Per-format-fresh Sharp instances (WI-14); same-size zero-copy hard-link dedup
-- Semantic scan hard-capped at 2000 rows; `dotProduct` fast path (skip sqrt for unit vectors); 445-embedding corpus ≈ 228 K ops per request
-- Hourly GC armed once (not per bootstrap batch); `pruneRetryMaps` in every job `finally`
-- Fire-and-forget embedding/caption IIFEs; `resolvedSemanticMode` snapshot avoids per-image SELECT
-- `searchImages` three-query parallel pattern with short-circuit
-- `getSharedGroup` batched tag fetch (no N+1)
-- OG fetch chain bounded per-attempt at 3.5 s (PERF-C20-01, verified cycle 21)
-- geoip-lite startup pre-warm; SIGTERM/SIGINT graceful drain with 15 s deadline
+Concrete fix:
+
+- Put image embeddings behind their own bounded queue, for example `embeddingQueue = new PQueue({ concurrency: Number(process.env.EMBEDDING_CONCURRENCY) || 1 })`.
+- Alternatively, await production embedding inside the existing processing queue when semantic search must be ready immediately.
+- Add basic metrics/logging for pending embedding count and embedding duration.
+- Apply the same backpressure design to future caption generation if it becomes CPU-heavy.
+
+### PERF-04 - Smart-collection cursor pages still pay a full window count
+
+Severity: Low
+
+Confidence: Medium
+
+Status: Confirmed query shape; impact depends on collection complexity and archive size.
+
+Locations:
+
+- `apps/web/src/lib/data.ts:1388-1430` builds `getImagesForSmartCollection()` with `total_count: sql<number>\`COUNT(*) OVER()\`` in the select list for every call.
+- `apps/web/src/lib/data.ts:1400-1402` documents that cursor pages kept the count to avoid a separate select shape.
+- `apps/web/src/app/actions/public.ts:161-213` calls `getImagesForSmartCollection()` from the load-more server action for cursor pagination.
+- `apps/web/src/components/load-more.tsx:48-50` sends a cursor after the first page.
+
+Failure scenario:
+
+The initial smart-collection page needs a total count for UI metadata, but cursor-based load-more pages only need rows plus a lookahead. Because `COUNT(*) OVER()` remains in the cursor query, every load-more request can force MySQL to count the entire matching smart collection while also doing the tag join/grouping and dynamic collection predicate work. Large collections with text/tag predicates will feel slower as the user scrolls.
+
+Concrete fix:
+
+- Split the query shape:
+  - first page: include `COUNT(*) OVER()` or a separate count if the UI needs total rows.
+  - cursor pages: remove `COUNT(*) OVER()` and use only `LIMIT + 1` lookahead for `hasMore`.
+- Keep the same `mapImageWithCursor()` output by returning `totalCount: null` or the previous known count for cursor pages.
+
+### PERF-05 - Admin backfill candidate discovery scans `pipeline_version` without an index
+
+Severity: Low
+
+Confidence: Medium
+
+Status: Likely maintenance-path inefficiency.
+
+Locations:
+
+- `apps/web/src/lib/admin-backfill-runner.ts:370-379` counts stale processed images with `(pipeline_version IS NULL OR pipeline_version < current)`.
+- `apps/web/src/lib/admin-backfill-runner.ts:381-410` batches candidates with the same stale-version predicate plus `id > cursor`.
+- `apps/web/src/db/schema.ts:111-117` has no `pipeline_version` index.
+
+Failure scenario:
+
+Admin-triggered color-pipeline backfills are intentionally bounded by DB pool and worker concurrency, but candidate discovery can still scan the image table each time the admin UI starts or advances a run. With many current rows and few stale rows, the count and batch discovery cost is mostly wasted DB work.
+
+Concrete fix:
+
+- Add a supporting index such as `(processed, pipeline_version, id)` if backfill status checks are expected in production.
+- If schema churn is not worth it, remove the eager full count and report progress from keyset batches only.
+
+## Final sweep
+
+Checked issue classes with no new blocking finding:
+
+- Sharp derivative pipeline: `apps/web/src/lib/process-image.ts` already caps Sharp concurrency, disables Sharp cache, streams original uploads to disk, and cleans partial derivatives on failure.
+- Main image queue: derivative generation remains bounded by `QUEUE_CONCURRENCY`; the unbounded work identified above is specifically the detached CLIP path.
+- Semantic text/similar search APIs: both scan `SEMANTIC_SCAN_LIMIT` embeddings and enrich only the top results. The default limit is bounded, though an overly high environment value could still make requests CPU-heavy.
+- Upload UI: client upload is sequential, preventing browser-side upload fan-out.
+- Search UI: debouncing and stale-request guards are present.
+- Infinite scroll: cursor pagination and intersection guards are present for normal galleries.
+- DB pool: MySQL pool has a fixed connection limit and queue limit; backfill concurrency is clamped against that budget.
+- Cache behavior: public pages intentionally use dynamic freshness (`revalidate = 0`), so the main remaining risks are query shape and payload size rather than stale-cache correctness.
+
+Skipped as irrelevant after inventory:
+
+- Unit tests, lint rules, translation files, static docs, and CSS-only styling files.
+- Deployment scripts except where docs described production image-processing/backfill behavior.
+
+Validation evidence: line-numbered source inspection and cross-file tracing only; no tests were run because this prompt requested a read-only review artifact.

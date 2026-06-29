@@ -1,73 +1,272 @@
-# Run-22 Cycle-22 — Aggregated Review
+# Review Aggregate — Cycle 1/100
 
-**Date:** 2026-06-29
-**HEAD:** 6ef2495d (cycle-21 T1–T6 + SW stamp + gitignore chore landed)
-**Agents:** 11/11 completed (code-reviewer, security-reviewer [opus], perf-reviewer [via general-purpose], critic [opus], architect [opus], verifier, test-engineer, tracer, debugger, document-specialist, designer)
-**Agent Failures:** 0 (3 opus agents hit a transient request-throttle on the first fan-out batch and were re-spawned successfully — not a failure)
-**Baseline gates (own run + verifier-confirmed):** eslint exit 0, tsc exit 0, vitest **2195 pass / 4 skip** (241 files), lint:api-auth / lint:action-origin (42 exports) / lint:public-route-rate-limit all exit 0. `npm audit --omit=dev` 0 vulns.
+Date: 2026-06-29
 
----
+## Agent Coverage
 
-## Convergence summary
+- `code-reviewer`: completed, wrote `.context/reviews/code-reviewer.md`.
+- `perf-reviewer`: completed, wrote `.context/reviews/perf-reviewer.md`.
+- `security-reviewer`: completed, wrote `.context/reviews/security-reviewer.md`.
+- `critic` + `verifier`: completed as a combined lane, wrote `.context/reviews/critic-verifier.md`.
+- `test-engineer`: completed, wrote `.context/reviews/test-engineer.md`.
+- `architect` + `debugger` + `tracer`: completed as a combined lane, wrote `.context/reviews/architect-debugger-tracer.md`.
+- `document-specialist`: completed, wrote `.context/reviews/document-specialist.md`.
+- `designer`: completed, wrote `.context/reviews/designer.md`; live browser validation was limited by local DB `ECONNREFUSED`, so findings are source/test backed.
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| CRITICAL | 0 | Security-reviewer (opus): 0 confirmed-exploitable across the full OWASP sweep (22nd consecutive clean security cycle). |
-| HIGH | 0 | None runtime. Designer's D22-01 (histogram tooltip-trigger) is a11y-cosmetic (no `outline-none`, UA-default ring still renders) — consistency gap, not a WCAG hard-failure. |
-| MEDIUM | 3 | **(1) Focus-visible scanner blind spots — 2-agent (critic M1 + designer D22-01/D22-02 + designer's own recommendation).** The cycle-21 durable scanner missed a real sibling on its FIRST cycle: `app/global-error.tsx:78` (outside SCAN_ROOTS) and two `cursor-*`/no-`hover:` buttons (`histogram.tsx:707`, `map-client.tsx:128`) the `hover:`-only heuristic can't see. **(2) DOC22-M3** — CLAUDE.md claims `siteConfig.url` is "validated at startup … fails loud at build time" but the code only validates per-request (OG route try/catch → 404); operator-misleading. **(3) DBG22-03** — admin dashboard `parseInt(pageParam)` mis-parses `?page=1e3`→1 (the env-parse class, now on a query param). |
-| LOW (actionable) | 4 | **DBG22-02** shutter `1/Infinity` for subnormal-float EXIF (`image-types.ts:121`, one-line isFinite guard). **critic m1** `envPositiveInt('0.5')`→`Math.floor(0.5)=0` → SEMANTIC_SCAN_LIMIT=0 (scan nothing) instead of fallback. **DOC22-M1/M2** stale NEXT_UPLOAD_BODY_MAX_BYTES literal + process-image.ts line refs. **DOC22-G1** admin_tokens schema row omits the functional scope model (lr:upload/lr:read/lr:delete). |
-| INFO / LOW-latent | 4 | **SEC-22-INFO** envPositiveInt no upper clamp (operator-env-only, non-exploitable). **ARCH22-01** clip-embeddings env-read leaf module also imported by `'use client'` search.tsx (benign today; config-divergence trap for first client consumer). **TRACE22-NEW-01** images.ts auth-order comment "matches existing action pattern" is misleading (other files call isAdmin() first; functionally identical). **DBG22-01** local-time Date methods in on-this-day-widget / analytics-data (harmless in the shipped UTC deployment; the data-timeline.ts:241 sub-claim is a FALSE POSITIVE — see below). |
-| DOC | 21 MATCH / 3 MISMATCH / 1 GAP | All 4 cycle-21 doc findings (DOC21-M1/G1/G2/G3) confirmed CLOSED. New: DOC22-M3 (operator-misleading), DOC22-M1/M2 (stale literals/line-refs), DOC22-G1 (admin_tokens scope gap). |
-| STRUCTURAL / DEFER (carried) | ~10 | A1 topics.slug (3 FK children — exit UNMET, best-fenced); A3 upload single-settle (15 awaits / 6 settles, 0 new await — exit UNMET); A4 restore-maintenance scale-out fence (byte-unchanged); A5 @/lib/storage dead module (0 importers, quarantine guard intact); A6/N1/N2 data.ts cohesion + PrivacySensitiveKeys 20-key union (no new PII column); PERF-C19/20/21 carried (all scale-gated, exit UNMET); TEST21-02 IMAGE_CLEANUP_CONCURRENCY untested. |
+Registered global reviewer prompts under `~/.codex/agents/product-marketer-reviewer.md` and `~/.codex/agents/ui-ux-designer-reviewer.md` were not run as additional repo reviewers because their required context and source paths are for a different SwiftUI/BurstPick project and would produce misleading GalleryKit findings.
 
-**Verdict:** Mature, exceptionally hardened. Zero new live CRIT/HIGH; security 0-exploitable for the 22nd cycle. The headline signal: **the focus-visible scanner shipped last cycle as the durable net — and missed a real sibling on its very first cycle** (critic M1) PLUS has a heuristic blind spot for non-`hover:` interactive buttons (designer D22-01/D22-02). Two agents independently surfaced the same structural weakness. Fix the 3 controls AND close both scanner blind spots (location + signal) this cycle. Secondary: a small cluster of cheap correctness/consistency fixes (dashboard parseInt, shutter isFinite, envPositiveInt floor guard) and doc-gap closures (DOC22-M3 operator-misleading is the priority).
+## Summary
 
----
+Raw reviewer findings: 28.
 
-## Cross-agent agreement (higher signal)
+Deduped implementation findings: 27. The per-photo OG fallback redirect issue was independently reported by security-reviewer and critic/verifier, so it is listed once with cross-agent agreement.
 
-- **Focus-visible scanner blind spots — 2 agents (critic M1 + designer D22-01/D22-02), and the designer independently recommended the same heuristic extension.** The cycle-21 scanner (`__tests__/focus-visible-links-scan.test.ts`) walks only `components/` + `app/[locale]/` (misses the framework-mandated non-locale `app/global-error.tsx:78`) and fires only when a standalone `hover:` token is present (misses `<button class="cursor-help …">` at `histogram.tsx:707` and `<button onClick class="cursor-pointer …">` at `map-client.tsx:128`). Blast-radius probe: extending SCAN_ROOTS to all of `app/` surfaces exactly global-error.tsx; adding a `cursor-(pointer|help)` second signal (restricted to Link/a/button) flags exactly the two real misses — the other `cursor-*` hits are `<Label>`/`<Badge>`/`role=option` and are correctly NOT matched. **Implement: fix all 3 + extend the scanner on both axes, re-seed to 0.**
-- **env/user-input parse sweep — re-confirmed COMPLETE for env vars; one NEW user-input variant (debugger DBG22-03).** Critic retracted the two route-param `parseInt` sites (`api/og/photo/[id]:55`, `api/search/similar/[id]:78`) as false positives — both fenced by a strict `/^\d+$/` guard before parseInt. The one remaining real instance is `admin/(protected)/dashboard/page.tsx:12` `parseInt(pageParam||'1',10)` (no regex fence; clamps to [1,1000] but mis-parses scientific notation). Same class as cycle-20's env sweep + cycle-21's topics-order fix.
-- **clip-embeddings.ts envPositiveInt (cycle-21 T4) — 3 agents touched it:** critic m1 (`'0.5'`→0 floor edge, VERY LOW), security SEC-22-INFO (no upper clamp, operator-env-only), architect ARCH22-01 (server-only env-read in a leaf module also imported by a client component — config-divergence latent). The floor-guard (critic m1) is the actionable one; the upper clamp folds in for free; ARCH22-01 defers (no client consumer of those symbols today).
+High severity: 4. Medium severity: 19. Low severity: 4.
 
----
+## High Findings
 
-## Skeptical validation (findings checked and DOWNGRADED/REJECTED)
+### AGG-C1 — Semantic similar-photo failures refund the limiter after DB work
 
-- **DBG22-01 `data-timeline.ts:241` is a FALSE POSITIVE.** The debugger claimed `new Date(img.capture_date).getMonth()` can bucket a photo to the wrong month and recommended `getUTCMonth()`. But `capture_date` is `'YYYY-MM-DD HH:mm:ss'` (space-separated, non-ISO) which V8 parses as LOCAL wall-clock; reading `.getMonth()` (also local) is the identity round-trip for the month field regardless of TZ. **Switching to `getUTCMonth()` would INTRODUCE an off-by-one near month boundaries** (parse-as-local + read-as-UTC desync). Do NOT apply that fix. The on-this-day-widget / analytics-data sub-claims are real local-time reads but no-ops in the shipped UTC Docker deployment and semantically ambiguous (server-local vs UTC "today") — DEFER, don't "fix" blindly.
-- **TRACE22-NEW-01** (auth-order comment) — LOW/Informational, comment-only, zero behavioral/security impact (both orderings reject the identical request set). Whether the comment is even "wrong" is debatable (it accurately matches the images.ts file-internal convention). DEFER rather than churn.
+- Sources: `code-reviewer` CR-01.
+- Severity/confidence: High / High.
+- Status: Confirmed.
+- Location: `apps/web/src/app/api/search/similar/[id]/route.ts:83-154`; tests at `apps/web/src/__tests__/similar-route.test.ts:195-240`.
+- Issue: missing/corrupt target embedding and DB failure paths call `rollbackSemanticAttempt(ip)` after consuming protected DB work, creating an unmetered probe and DB-load path.
+- Fix: remove post-lookup/post-scan rollbacks; keep refunds only before protected work; update tests and comments.
 
----
+### AGG-C2 — SQL restore scanner misses dangerous comment-separated multi-token statements
 
-## Lead triage (implement vs defer this cycle)
+- Sources: `architect-debugger-tracer` finding 1.
+- Severity/confidence: High / High.
+- Status: Confirmed.
+- Location: `apps/web/src/lib/sql-restore-scan.ts:39-137`; restore enforcement at `apps/web/src/app/[locale]/admin/db-actions.ts:408-436`.
+- Issue: stripping block comments to an empty string turns `DROP/**/TABLE` into `DROPTABLE`, bypassing patterns like `DROP\s+TABLE` while MySQL still treats comments as separators.
+- Fix: scan both comment-as-empty and comment-as-space normalized forms; add regression tests for dangerous comment-separated statements.
 
-### IMPLEMENT (actionable now)
-1. **T1 — Focus-visible: fix 3 controls + close both scanner blind spots** (2-agent, MEDIUM). global-error.tsx:78 + histogram.tsx:707 + map-client.tsx:128 get `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` (+ `rounded`/`rounded-md`). Scanner: `SCAN_ROOTS`→`[components/, app/]` (dedupe files); add `CURSOR_TOKEN = /(?<![\w-])cursor-(pointer|help)\b/` as a second interactive signal alongside `HOVER_TOKEN`; add self-check fixtures; re-seed KNOWN_VIOLATIONS to 0.
-2. **T2 — DBG22-03**: dashboard/page.tsx:12 `parseInt(pageParam||'1',10)`→`Number(pageParam||'1')` + focused test.
-3. **T3 — DBG22-02**: image-types.ts:121 add `Number.isFinite(denominator) &&` before the `Math.abs(...)` check + test (subnormal `ExposureTime`).
-4. **T4 — critic m1 + SEC-22-INFO**: envPositiveInt — guard the FLOORED result (`Math.floor(n) >= 1`) so `'0.5'`→fallback, and add a generous upper clamp (`Math.min(floored, 1_000_000)`) for the operator-misconfig belt-and-braces + test.
-5. **T5 — TEST21-01**: export `MAX_INPUT_PIXELS` (non-TOPIC) from process-image.ts + a `vi.resetModules()` env-parse test (the topic cap is covered; the full-size cap that guards the decompression bomb is not).
-6. **T6 — Doc fixes**: DOC22-M3 (MEDIUM — correct the `siteConfig.url` "startup/build-time validation" claim to the actual per-request fail-closed pattern, both occurrences), DOC22-M1 (NEXT_UPLOAD_BODY_MAX_BYTES literal 279620608→278921216), DOC22-M2 (process-image.ts line refs), DOC22-G1 (admin_tokens functional scope model + expires_at/last_used_at).
-- Also: KEEP the 2 tests the test-engineer agent already wrote (GAP-1 updateTopic sci-notation in topics-actions.test.ts; GAP-2 similar-route SEMANTIC_SCAN_LIMIT in semantic-scan-limit-source.test.ts) — verify they pass.
+### AGG-C3 — Documented public-route rate-limit lint gate is absent from root/CI execution
 
-### DEFER (see cycle-22-deferred.md)
-DBG22-01 (timezone local-time reads — data-timeline part is a false positive; rest harmless-in-UTC + semantically ambiguous); TRACE22-NEW-01 (auth-order comment, cosmetic); ARCH22-01 (clip-embeddings server/client env split — exit: first client reference to the env consts); A1/A3/A4/A5/A6/N1 (all exit UNMET, file:line-verified by architect); all carried PERF-C19/20/21; TEST21-02 IMAGE_CLEANUP_CONCURRENCY; carried Test FINDING-3/4; SEC-19-01/02 (re-confirmed unchanged, nginx edge-throttle covers the LR-upload path).
+- Sources: `test-engineer` TE-01.
+- Severity/confidence: High / High.
+- Status: Confirmed.
+- Location: `package.json:19-20`, `.github/workflows/quality.yml:60`, `apps/web/package.json:24`, `AGENTS.md:29-34`, `CLAUDE.md:579-590`.
+- Issue: the repo documents `lint:public-route-rate-limit` as blocking, but root scripts and CI omit it.
+- Fix: add the root forwarding script and run it in the CI security lint step.
 
----
+### AGG-C4 — CLIP production backfill docs omit `--force` in the pre-enable flow
 
-## Per-agent headline (provenance: per-agent files are fresh cycle-22)
+- Sources: `document-specialist` DOC-C1.
+- Severity/confidence: High / High.
+- Status: Confirmed mismatch.
+- Location: `CLAUDE.md:506-527`; correct app README reference at `apps/web/README.md:68-70`; script behavior at `apps/web/scripts/backfill-clip-embeddings.ts:90-95`.
+- Issue: following `CLAUDE.md` on a default install exits successfully without generating embeddings.
+- Fix: update the documented pre-enable command to `--production --force` and explain when `--force` is unnecessary.
 
-- **code-reviewer** — 0 new findings. APPROVE. All cycle-21 deferred items confirmed unchanged (exit criteria unmet).
-- **security-reviewer [opus]** — 0 CRIT/HIGH/MED/LOW-new, 1 INFO (SEC-22-INFO envPositiveInt no upper clamp, operator-env-only). `npm audit` 0 vulns. SEC-19-02 re-verified BETTER-fenced than the cycle-21 note (nginx zone=admin covers the LR-upload location).
-- **perf-reviewer** — 0 new findings, 0 regressions. All 9 prior deferrals re-confirmed (no exit criterion triggered). Cycle-21 T3/T4 verified correct at HEAD.
-- **critic [opus]** — ACCEPT-WITH-RESERVATIONS. M1 (scanner missed global-error.tsx — the repo's signature "fix one sibling, miss the next" landed INSIDE the artifact built to prevent it), m1 (envPositiveInt floor edge). Retracted 2 route-param parseInt false positives. T2/T3/T5/T6 verified correct.
-- **architect [opus]** — byte-stable since cycle-21 (schema.ts / images.ts / restore-maintenance.ts / advisory-locks.ts byte-unchanged). 1 NEW: ARCH22-01 (clip-embeddings client/server env-symbol divergence, DEFER). All 6 deferred exit criteria UNMET with file:line evidence. Single-writer topology still safe.
-- **verifier** — PASS, 0 blockers. All 6 gates exit 0. All cycle-21 T1–T6 fixes present + structurally correct; both new env tests non-vacuous; 8 behavioral spot-checks MATCH.
-- **test-engineer** — HEALTHY. Wrote 2 additive tests (GAP-1 updateTopic sci-notation; GAP-2 similar-route SEMANTIC_SCAN_LIMIT). Carried: TEST21-01 (non-TOPIC MAX_INPUT_PIXELS still untested — needs export), TEST21-02 (deferred).
-- **tracer** — 6 flows traced, all CONFIRMED-CORRECT. 1 NEW LOW/Info (TRACE22-NEW-01 auth-order comment). R21C21 T3 retry-counter cleanup present + test-locked. A3 enforcement-test probe suggested (defer).
-- **debugger** — DBG21-01 confirmed FIXED (no regression). 3 new: DBG22-02 (shutter 1/Infinity, actionable), DBG22-03 (dashboard parseInt, actionable), DBG22-01 (timezone — partly false-positive, see Skeptical validation; defer).
-- **document-specialist** — 21 MATCH / 3 MISMATCH / 1 GAP. All cycle-21 doc findings closed. DOC22-M3 (MEDIUM operator-misleading), DOC22-M1/M2 (LOW stale), DOC22-G1 (admin_tokens scope gap).
-- **designer** — 2 new (D22-01 histogram tooltip-trigger HIGH-cosmetic, D22-02 map popup button MED) + confirmed the scanner blind spot (heuristic fires only on `hover:`) and recommended the second-pass extension. i18n parity (780 keys), reduced-motion, headings, skip-link, focus-trap, ARIA, touch-targets all PASS.
+## Medium Findings
 
-## AGENT FAILURES
-None. All 11 agents completed. 3 opus agents (security-reviewer, critic, architect) hit a transient "Server is temporarily limiting requests" throttle on the first parallel batch (subagent_tokens: 0) and were immediately re-spawned to completion — per the run's transient-throttle rule this is not a failure. The cycle-21 per-agent files were archived to `.context/reviews/archive/cycle-21/` before this run overwrote them.
+### AGG-M1 — Production semantic search returns empty 200s when no production embeddings exist
+
+- Sources: `critic-verifier` finding 1.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/src/app/api/search/semantic/route.ts:249-335`; docs at `apps/web/README.md:58-60`.
+- Issue: production mode with zero real rows returns `200 { results: [] }`, contradicting the honesty gate and hiding configuration/backfill failures.
+- Fix: return 503/no-store when production scan returns zero rows; add route test.
+
+### AGG-M2 — Checked-in nginx upload root conflicts with host-side nginx topology
+
+- Sources: `critic-verifier` finding 2.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/docker-compose.yml:14-26`, `apps/web/nginx/default.conf:170-173`, `apps/web/README.md:47-49`.
+- Issue: the shipped host-side nginx config roots uploads at `/app/apps/web/public`, which is container-internal and can 404 all derivatives when installed on the host.
+- Fix: make nginx use the documented host bind-mount root or proxy uploads to Next by default, then add a config/source test.
+
+### AGG-M3 — Per-photo OG fallback redirects trust inbound request origin
+
+- Sources: `security-reviewer` SEC-01, `critic-verifier` finding 3.
+- Cross-agent agreement: High signal; two independent lanes found the same fallback trust problem.
+- Severity/confidence: Medium / High (preserving higher security-reviewer severity/confidence).
+- Status: Confirmed.
+- Location: `apps/web/src/app/api/og/photo/[id]/route.tsx:251-285`; nginx forwards host at `apps/web/nginx/default.conf:191-200`.
+- Issue: fallback redirects derive `Location` from `new URL(req.url).origin`, enabling open redirect/host-header poisoning if the edge forwards a hostile Host.
+- Fix: derive fallback origin from canonical SEO/site config and fail closed when invalid; add hostile-origin regression.
+
+### AGG-M4 — Lightroom uploads skip semantic embeddings
+
+- Sources: `architect-debugger-tracer` finding 2.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/src/app/api/admin/lr/upload/route.ts:425-465`, `apps/web/src/lib/image-queue.ts:391-413` and `:512-531`.
+- Issue: Lightroom enqueue forwards quality/image size settings but omits `semanticSearchMode`, so queue jobs default embeddings to disabled.
+- Fix: pass `semanticSearchMode: config.semanticSearchMode`; add test coverage.
+
+### AGG-M5 — Semantic search reads request body before reliable byte/rate-limit gate
+
+- Sources: `architect-debugger-tracer` finding 3.
+- Severity/confidence: Medium / Medium.
+- Status: Likely.
+- Location: `apps/web/src/app/api/search/semantic/route.ts:128-216`.
+- Issue: missing/variant transfer encoding and absent content-length paths can read large bodies before limiter charge; post-read length uses string length, not UTF-8 bytes.
+- Fix: normalize transfer encoding, add pre-body limiter or reject unknown lengths, byte-count reads; add tests.
+
+### AGG-M6 — Timeline/on-this-day queries are non-sargable on dynamic public pages
+
+- Sources: `perf-reviewer` PERF-01.
+- Severity/confidence: Medium / High.
+- Status: Confirmed likely production impact.
+- Location: `apps/web/src/lib/data-timeline.ts:95-205`.
+- Issue: `MONTH()`, `DAY()`, and `YEAR()` filters/orderings require broad scans as the archive grows.
+- Fix: rewrite year/month to sargable ranges; use generated columns or materialized/cache table for on-this-day.
+
+### AGG-M7 — Map page loads up to 10,000 unclustered markers without supporting index
+
+- Sources: `perf-reviewer` PERF-02.
+- Severity/confidence: Medium / High.
+- Status: Confirmed likely user-visible stalls.
+- Location: `apps/web/src/lib/data.ts:1624-1661`, `apps/web/src/db/schema.ts:111-117`, `apps/web/src/components/map/map-client.tsx:86-143`.
+- Issue: `/map` can scan, serialize, hydrate, and render thousands of markers without clustering or a GPS/map query index.
+- Fix: add supporting indexes and move toward viewport/bounds loading or clustering.
+
+### AGG-M8 — Production CLIP image embeddings bypass image-queue backpressure
+
+- Sources: `perf-reviewer` PERF-03.
+- Severity/confidence: Medium / High.
+- Status: Confirmed concurrency risk.
+- Location: `apps/web/src/lib/image-queue.ts:512-569`, `apps/web/src/lib/clip-model.ts:151-186`.
+- Issue: detached production embedding jobs are not bounded by the main processing queue, allowing CPU/memory spikes during batch uploads.
+- Fix: add a bounded embedding queue or await embedding in the existing queue; add metrics.
+
+### AGG-M9 — Valid single-photo share-link 200-path e2e is skipped
+
+- Sources: `test-engineer` TE-02.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/e2e/public.spec.ts:125-137`, `apps/web/scripts/seed-e2e.ts:230`.
+- Issue: valid `/s/[key]` rendering is not exercised unless an external env var is supplied.
+- Fix: seed or query a deterministic key and remove the skip.
+
+### AGG-M10 — Vitest discovery ignores future `.test.tsx` tests
+
+- Sources: `test-engineer` TE-03.
+- Severity/confidence: Medium / High.
+- Status: Risk confirmed by config.
+- Location: `apps/web/vitest.config.ts:17`.
+- Issue: `*.test.tsx` files can be typechecked but not executed.
+- Fix: include `src/__tests__/**/*.test.{ts,tsx}` or explicitly reject `.test.tsx`.
+
+### AGG-M11 — Navigation visual checks only capture screenshots
+
+- Sources: `test-engineer` TE-04.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/e2e/nav-visual-check.spec.ts:14-39`.
+- Issue: screenshots are emitted but never compared, so visual regressions pass.
+- Fix: use `toHaveScreenshot` with baselines or rename to smoke/artifact capture and add DOM/box assertions.
+
+### AGG-M12 — High-value client interactions are source-regex locked instead of behavior-tested
+
+- Sources: `test-engineer` TE-05.
+- Severity/confidence: Medium / Medium.
+- Status: Likely coverage gap.
+- Location: `apps/web/src/__tests__/search-stale-response.test.ts:8-19`, `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:15-19`, production code in `components/search.tsx` and `components/upload-dropzone.tsx`.
+- Issue: runtime asynchronous behavior can drift while brittle source-shape tests remain green.
+- Fix: add browser/component behavior tests for stale search responses and topic wiring.
+
+### AGG-M13 — `site-config.json.url` docs misstate build validation and OG behavior
+
+- Sources: `document-specialist` DOC-C2.
+- Severity/confidence: Medium / High.
+- Status: Confirmed mismatch.
+- Location: `CLAUDE.md:212`, `CLAUDE.md:628-632`, `apps/web/scripts/ensure-site-config.mjs:11-42`, `apps/web/Dockerfile:71-75`.
+- Issue: docs say there is no build-time validation and invalid OG config returns 404; code validates at build/prebuild and per-photo OG can redirect fallback.
+- Fix: rewrite docs to distinguish build guard, per-photo fetch fail-closed behavior, and topic OG behavior.
+
+### AGG-M14 — Per-photo OG inline comment says fallback to request origin
+
+- Sources: `document-specialist` DOC-C3.
+- Severity/confidence: Medium / High.
+- Status: Confirmed mismatch.
+- Location: `apps/web/src/app/api/og/photo/[id]/route.tsx:101-110`.
+- Issue: the stale comment could guide a future refactor to reintroduce request-origin fallback.
+- Fix: update comment to match the intended invariant.
+
+### AGG-M15 — `.env.local.example` documents stale `NEXT_UPLOAD_BODY_MAX_BYTES`
+
+- Sources: `document-specialist` DOC-C4.
+- Severity/confidence: Medium / High.
+- Status: Confirmed mismatch.
+- Location: `apps/web/.env.local.example:45-47`, `apps/web/src/lib/upload-limits.ts:3-21`.
+- Issue: example pins the old 206 MiB value and can break documented 250 MiB restores.
+- Fix: update to 278921216 / 266 MiB and clarify it covers photo uploads and DB restore transport overhead.
+
+### AGG-M16 — Localized error boundary has a broken skip-link target
+
+- Sources: `designer` D1.
+- Severity/confidence: Medium / High.
+- Status: Confirmed.
+- Location: `apps/web/src/app/[locale]/layout.tsx:123-128`, `apps/web/src/app/[locale]/error.tsx:16-46`, `apps/web/src/__tests__/a11y-us-p15.test.ts:29-37`.
+- Issue: the global skip link targets `#main-content`, but the localized error boundary main lacks that id.
+- Fix: add `id="main-content" tabIndex={-1}` and a source regression.
+
+### AGG-M17 — Search result links are tab-focusable while focus scanner exempts them
+
+- Sources: `designer` D2.
+- Severity/confidence: Medium / High.
+- Status: Confirmed from source.
+- Location: `apps/web/src/components/search.tsx:71-79`, `apps/web/src/__tests__/focus-visible-links-scan.test.ts:41-75`.
+- Issue: real `<Link role="option" href=...>` elements can receive Tab focus without a visible focus style, while the scanner assumes role-option results are not tab-focusable.
+- Fix: choose a consistent combobox or link-list pattern; update scanner exemption.
+
+### AGG-M18 — Error states can render with an empty document title
+
+- Sources: `designer` D3.
+- Severity/confidence: Medium / Medium.
+- Status: Confirmed runtime under DB-down dev environment.
+- Location: `apps/web/src/app/[locale]/layout.tsx:17-58`, `apps/web/src/app/[locale]/error.tsx:7-47`.
+- Issue: localized error UI can show with `document.title === ""`.
+- Fix: add regression; investigate metadata/error-boundary path; use guarded client fallback title if Next cannot preserve metadata.
+
+## Low Findings
+
+### AGG-L1 — Smart-collection cursor pages still pay a full window count
+
+- Sources: `perf-reviewer` PERF-04.
+- Severity/confidence: Low / Medium.
+- Location: `apps/web/src/lib/data.ts:1388-1430`, `apps/web/src/app/actions/public.ts:161-213`.
+- Fix: split first-page count from cursor-page lookahead.
+
+### AGG-L2 — Admin backfill candidate discovery lacks a `pipeline_version` index
+
+- Sources: `perf-reviewer` PERF-05.
+- Severity/confidence: Low / Medium.
+- Location: `apps/web/src/lib/admin-backfill-runner.ts:370-410`, `apps/web/src/db/schema.ts:111-117`.
+- Fix: add `(processed, pipeline_version, id)` index if production backfill status checks warrant schema churn, or remove eager count.
+
+### AGG-L3 — Admin e2e coverage is opt-in locally
+
+- Sources: `test-engineer` TE-06.
+- Severity/confidence: Low / High.
+- Location: `apps/web/e2e/admin.spec.ts:6-12`, `apps/web/e2e/helpers.ts:28-45`.
+- Fix: emit clear local skip summary or split public/all scripts with all failing without admin credentials.
+
+### AGG-L4 — `GalleryConfig.avifEffort` comment says 4-9 while validator/UI support 0-9
+
+- Sources: `document-specialist` DOC-C5.
+- Severity/confidence: Low / High.
+- Location: `apps/web/src/lib/gallery-config.ts:83-84`, validator/UI/messages at documented locations.
+- Fix: update comment to `0-9`.
+
+### AGG-L5 — SEO settings hints are visual only
+
+- Sources: `designer` D4.
+- Severity/confidence: Low / High.
+- Location: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:95-174`.
+- Fix: add hint ids and `aria-describedby` relationships, with a source contract test.
+
+## Agent Failures
+
+No required reviewer failed after retry. One initial attempt to start a sixth concurrent agent hit the live agent limit; the remaining roles were run in later waves.
+
+## Final Sweep Result
+
+All current-cycle per-agent review files were read. The aggregate keeps per-agent files as provenance and dedupes only the overlapping OG fallback finding. Historical `.context/reviews/**` and archived plan artifacts were not treated as new cycle findings.

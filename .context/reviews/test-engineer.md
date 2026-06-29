@@ -1,85 +1,126 @@
-# Test Engineer Review — Cycle 22 (2026-06-29)
+# Test Engineer Review — review-plan-fix cycle 1 prompt 1
 
-**HEAD at investigation start:** bcd67b12 (post cycle-21)
-**Test suite baseline:** 2195 passed / 4 skipped (2199 total, 241 files)
-**Test suite after cycle-22 additions:** 2198 passed / 4 skipped (2202 total, 243 files)
-**Test Health:** HEALTHY
+## Scope And Inventory
 
----
+Review scope: repository-wide test coverage, brittle/flaky tests, missing regression tests, TDD opportunities, and whether tests lock documented behavior. This was a read-only review except for this report file.
 
-## Cycle-21 test additions — vacuousness check
+Inventory reviewed:
+- Project rules and behavior docs: `AGENTS.md`, `CLAUDE.md`, `.github/workflows/quality.yml`, root `package.json`, `apps/web/package.json`.
+- Test config and runners: `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/scripts/run-e2e-server.mjs`, `apps/web/scripts/seed-e2e.ts`.
+- Test suites: 245 Vitest test files under `apps/web/src/__tests__/`; 5 Playwright specs plus helpers/fixtures under `apps/web/e2e/`.
+- Source surface: 473 non-test TS/TSX files under `apps/web/src` (app routes/actions, components, lib, db, proxy/instrumentation/i18n), plus scripts and Drizzle migrations where they interact with tests.
+- Search/audit commands used included `rg --files`, `rg -n` for skips/TODOs/timers/snapshot assertions/routes, and line-numbered reads of every file cited below.
 
-All five tests added in cycle 21 (T1b–T5) are **non-vacuous**. Each would fail if the specific fix it guards were reverted.
+## Findings
 
-| Tag | Test file | Discriminator |
-|-----|-----------|---------------|
-| T1b | `focus-visible-links-scan.test.ts` | Would catch any of the 20 `hover:`-styled elements losing its `focus-visible:ring-2` if that element still carries `hover:` styling |
-| T2 | `topics-actions.test.ts:534` | `order='1e3'` asserts `order: 1000`; `parseInt('1e3',10) === 1` fails the `toHaveBeenCalledWith` assertion |
-| T3 | `data-view-count-flush.test.ts` | Source-contract regex requires `viewCountRetryCount.delete(oldestKey)` inside the eviction while-loop; removing the call from `data.ts:172` fails |
-| T4 | `clip-semantic-limits-env.test.ts:43` | `SEMANTIC_SCAN_LIMIT=4e3` asserts 4000; `parseInt('4e3',10) === 4` fails |
-| T5 | `process-image-max-input-pixels-env.test.ts:33` | `IMAGE_MAX_INPUT_PIXELS_TOPIC=64e6` asserts 64_000_000; `parseInt('64e6',10) === 64` fails |
+### TE-01 — Documented public route rate-limit lint gate is not run by CI/root scripts
 
----
+Severity: High  
+Confidence: High  
+Status: Confirmed
 
-## Tests written in cycle 22
+Evidence:
+- [AGENTS.md](/Users/hletrd/flash-shared/gallery/AGENTS.md:29) lists all blocking quality gates; [AGENTS.md](/Users/hletrd/flash-shared/gallery/AGENTS.md:34) explicitly includes `npm run lint:public-route-rate-limit --workspace=apps/web`.
+- [CLAUDE.md](/Users/hletrd/flash-shared/gallery/CLAUDE.md:579) says four lint scripts are blocking in CI; [CLAUDE.md](/Users/hletrd/flash-shared/gallery/CLAUDE.md:590) documents the public-route rate-limit scanner.
+- [apps/web/package.json](/Users/hletrd/flash-shared/gallery/apps/web/package.json:24) defines `lint:public-route-rate-limit`, but root [package.json](/Users/hletrd/flash-shared/gallery/package.json:19) only forwards `lint:api-auth` and [package.json](/Users/hletrd/flash-shared/gallery/package.json:20) only forwards `lint:action-origin`.
+- CI's "Security lint gates" step runs only `npm run lint:api-auth` and `npm run lint:action-origin` in [.github/workflows/quality.yml](/Users/hletrd/flash-shared/gallery/.github/workflows/quality.yml:60).
 
-### FINDING-1 (MEDIUM → FIXED): `updateTopic` scientific-notation order — no regression test
+Failure scenario: a new anonymous public mutating route can omit `preIncrement*`/`checkAndIncrement*` and still pass `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:e2e`, and CI. This directly contradicts the documented security gate and leaves DoS-sensitive public mutation endpoints dependent on reviewer memory.
 
-**File:** `apps/web/src/__tests__/topics-actions.test.ts` (line 601)
-**Test name:** `'parses a scientific-notation order with Number() in updateTopic in-place path (R21C21 T2 / DBG21-01)'`
+Concrete fix/test: add root `"lint:public-route-rate-limit": "npm run lint:public-route-rate-limit --workspace=apps/web"` and run it in `.github/workflows/quality.yml` next to the other security lint gates. Add a small CI-script/source test that asserts every documented blocking lint command in `AGENTS.md` has a root script and a CI invocation, or collapse the gates behind one `npm run lint:security` command used by both CI and docs.
 
-The T2 test (line 534) covered `createTopic` with `order='1e3'`. The inline comment said "Same fix lands in updateTopic" but no test called `updateTopic` with a scientific-notation order. If `Number(orderStr)` at `topics.ts:217` were reverted to `parseInt`, `order: 1` would be stored silently on every in-place topic update using an exponential order string; no existing test would catch it.
+### TE-02 — Valid single-photo share-link 200-path e2e is intentionally skipped
 
-The new test exercises the **in-place update path** (slug unchanged → no rename transaction, direct `db.update(topics).set({ label, order })`). It replaces `updateMock` with a spy that captures the `.set()` payload and asserts `order: 1000`. Reverting `topics.ts:217` to `parseInt` makes the assertion fail.
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
-### FINDING-2 (LOW → FIXED): `similar/[id]/route.ts` `.limit(SEMANTIC_SCAN_LIMIT)` not source-pinned
+Evidence:
+- [apps/web/e2e/public.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/public.spec.ts:125) declares a valid `/s/[key]` Playwright test, but [apps/web/e2e/public.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/public.spec.ts:131) documents that the 200-path has no e2e coverage until a share key is seeded.
+- The test skips unless `E2E_SHARE_KEY` is present at [apps/web/e2e/public.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/public.spec.ts:136) and [apps/web/e2e/public.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/public.spec.ts:137).
+- The seed script creates per-image `share_key` values at [apps/web/scripts/seed-e2e.ts](/Users/hletrd/flash-shared/gallery/apps/web/scripts/seed-e2e.ts:230), but they are random and never exported for Playwright. The same seed script does seed a deterministic shared group key at [apps/web/scripts/seed-e2e.ts](/Users/hletrd/flash-shared/gallery/apps/web/scripts/seed-e2e.ts:250).
 
-**File:** `apps/web/src/__tests__/semantic-scan-limit-source.test.ts`
-**New describe block:** `'similar/[id] route SEMANTIC_SCAN_LIMIT source contract (cycle-22 TE gap)'` (2 tests)
+Failure scenario: a regression that breaks valid `/s/[key]` rendering, navigation, metadata, or auth/privacy behavior can pass e2e as long as unknown-key 404s still work. This is exactly the kind of route-level integration gap e2e should catch because the page combines DB data, routing, localized not-found handling, and public rendering.
 
-`api/search/similar/[id]/route.ts:151` calls `.limit(SEMANTIC_SCAN_LIMIT)` to cap the brute-force embedding scan, but `semantic-scan-limit-source.test.ts` only pinned `api/search/semantic/route.ts`. The behavioral tests in `similar-route.test.ts` mock the DB and never assert the limit value. Removing `.limit(SEMANTIC_SCAN_LIMIT)` from the similar route would allow an unbounded vector scan on every image-similarity request; no prior test caught that.
+Concrete fix/test: make the seed deterministic for one photo share key, for example set the first seeded image to a fixed key and export/use `E2E_SHARE_KEY`, or have Playwright query the seeded key from the DB through `helpers.ts`. Remove the skip and assert a valid heading, image, canonical route context, and absence of Next error.
 
-Two source-contract assertions were added: import pin (import must name `SEMANTIC_SCAN_LIMIT` from `@/lib/clip-embeddings`) and call pin (`.limit(SEMANTIC_SCAN_LIMIT)` must appear in the source).
+### TE-03 — Vitest discovery silently ignores future `.test.tsx` tests
 
----
+Severity: Medium  
+Confidence: High  
+Status: Risk confirmed by config
 
-## Carried gaps (unchanged from cycle 21)
+Evidence:
+- [apps/web/vitest.config.ts](/Users/hletrd/flash-shared/gallery/apps/web/vitest.config.ts:17) includes only `src/__tests__/**/*.test.ts`.
+- There are currently zero `.test.tsx` files, while the source tree contains substantial TSX UI code under `components/` and `app/`.
+- Component behavior is often locked through source-contract tests instead of render tests; for example [apps/web/src/__tests__/search-stale-response.test.ts](/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/search-stale-response.test.ts:8) says the suite has no jsdom render harness.
 
-### TEST21-01 (MEDIUM, CARRIED): `IMAGE_MAX_INPUT_PIXELS` (non-TOPIC) not exported
+Failure scenario: a contributor doing TDD for a React component adds `foo.test.tsx`; `tsc` may typecheck it, but `npm test --workspace=apps/web` will not execute it. A red test can be committed as a false green if no reviewer notices the extension mismatch.
 
-**Location:** `apps/web/src/lib/process-image.ts:334`
+Concrete fix/test: change Vitest include to `src/__tests__/**/*.test.{ts,tsx}` and add a self-test or config assertion that fails if the include glob drops `.tsx`. If the project still wants source-only component contracts, document that policy and add a lint/check that rejects `.test.tsx` with a clear message instead of silently ignoring it.
 
-```typescript
-const envMaxInputPixels = Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '');
-const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
-    ? envMaxInputPixels
-    : 256 * 1024 * 1024;
-```
+### TE-04 — Navigation "visual checks" take screenshots but never compare them
 
-T5 in cycle 21 tests `MAX_INPUT_PIXELS_TOPIC` (an exported IIFE). The non-TOPIC `maxInputPixels` at line 334 is a module-local `const`. A `parseInt` regression here would silently cap the decompression-bomb guard at 256 pixels, rejecting every upload.
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
-**Fix when ready:** export as `MAX_INPUT_PIXELS` (same IIFE pattern as `MAX_INPUT_PIXELS_TOPIC`) and add an env-parse test in `process-image-max-input-pixels-env.test.ts` using `vi.resetModules()` + dynamic import.
+Evidence:
+- [apps/web/e2e/nav-visual-check.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/nav-visual-check.spec.ts:14), [apps/web/e2e/nav-visual-check.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/nav-visual-check.spec.ts:27), and [apps/web/e2e/nav-visual-check.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/nav-visual-check.spec.ts:39) call `page.screenshot(...)`.
+- Repository search found no `toHaveScreenshot` or `toMatchSnapshot` use in `apps/web/e2e` or `apps/web/src/__tests__`.
 
-### TEST21-02 (LOW, CARRIED): `IMAGE_CLEANUP_CONCURRENCY` env parse not tested
+Failure scenario: a nav layout regression, overlap, theme contrast issue, or responsive spacing break still passes because the test only emits PNG artifacts to `test-results/`; Playwright does not fail on visual difference without a snapshot assertion or explicit pixel/DOM assertion.
 
-Not exported; `|| 5` fallback limits blast radius. Deferred until exported.
+Concrete fix/test: convert these to `await expect(nav).toHaveScreenshot(...)` with committed baselines and stable masking, or rename them to smoke/artifact capture and add real DOM assertions for the visual contract that matters: no overlap, expected bounding boxes, control visibility, and minimum tap target dimensions at mobile/desktop widths.
 
-### FINDING-3 (LOW, CARRIED): `lr-upload-hdr-gate.test.ts` source-regex only
+### TE-05 — High-value client interaction regressions are locked by source regex, not behavior
 
-No behavioral mock for the HDR rejection path in the LR upload route. Unchanged since cycle 21.
+Severity: Medium  
+Confidence: Medium  
+Status: Likely coverage gap
 
-### FINDING-4 (LOW, CARRIED): `trackerSettled` double-settle source-regex only
+Evidence:
+- [apps/web/src/__tests__/search-stale-response.test.ts](/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/search-stale-response.test.ts:8) explicitly states client-component behavior is locked with source contracts because there is no jsdom render harness. The assertion checks string ordering around `await resp.json()` and `setResults` at [apps/web/src/__tests__/search-stale-response.test.ts](/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/search-stale-response.test.ts:19).
+- [apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts](/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:15) is also a fixture-style source scan; [apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts](/Users/hletrd/flash-shared/gallery/apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:19) says driving the full dropzone through jsdom is brittle.
+- The production code paths are actual async user interactions: search commits results in [apps/web/src/components/search.tsx](/Users/hletrd/flash-shared/gallery/apps/web/src/components/search.tsx:191) through [apps/web/src/components/search.tsx](/Users/hletrd/flash-shared/gallery/apps/web/src/components/search.tsx:210), and upload topic selection flows through [apps/web/src/components/upload-dropzone.tsx](/Users/hletrd/flash-shared/gallery/apps/web/src/components/upload-dropzone.tsx:219).
 
-Source-contract only. No mock-based behavioral test for the double-settle guard. Unchanged since cycle 21.
+Failure scenario: a refactor can preserve the regex shape while breaking runtime behavior, or improve behavior while causing a brittle source test failure. More importantly, stale-response suppression, focus, selected topic, and upload form data are user-visible asynchronous contracts that should fail from behavior, not implementation spelling.
 
----
+Concrete fix/test: add a minimal browser/component test harness for these two contracts. For search, mock semantic fetch responses so request A resolves JSON after request B and assert only B is rendered. For upload, use Playwright or a lightweight component harness with two queued files, change `#upload-topic` between sends, and assert the second request's `FormData` uses the new topic. Keep the source contracts only as secondary guardrails if they still add value.
 
-## Verification
+### TE-06 — Admin e2e coverage is opt-in locally and only enforced indirectly in CI
 
-```
-Test Files  241 passed | 2 skipped (243)
-     Tests  2198 passed | 4 skipped (2202)
-  Duration  17.83s
-```
+Severity: Low  
+Confidence: High  
+Status: Confirmed risk
 
-3 new tests added (+1 `updateTopic` order, +2 similar-route source-contract), 0 regressions.
+Evidence:
+- [apps/web/e2e/admin.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/admin.spec.ts:11) wraps admin workflows in an opt-in describe, and [apps/web/e2e/admin.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/admin.spec.ts:12) skips unless `adminE2EEnabled`.
+- `adminE2EEnabled` auto-enables only under specific local credential conditions in [apps/web/e2e/helpers.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/helpers.ts:28) through [apps/web/e2e/helpers.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/helpers.ts:45).
+- CI sets credentials in [.github/workflows/quality.yml](/Users/hletrd/flash-shared/gallery/.github/workflows/quality.yml:35) through [.github/workflows/quality.yml](/Users/hletrd/flash-shared/gallery/.github/workflows/quality.yml:37), and the guard test at [apps/web/e2e/admin.spec.ts](/Users/hletrd/flash-shared/gallery/apps/web/e2e/admin.spec.ts:6) fails CI if admin coverage is missing. This keeps CI protected but still leaves local `npm run test:e2e` as a partial e2e run when credentials are absent or hashed.
+
+Failure scenario: a developer can run `npm run test:e2e`, see green, and believe admin upload/settings/navigation paths were exercised when they were skipped. That is especially risky because admin e2e contains prior regression coverage for topic creation and upload workflow.
+
+Concrete fix/test: emit a clear Playwright annotation/summary when admin coverage is skipped locally, or split scripts into `test:e2e:public` and `test:e2e:all` where the all script fails if admin credentials are unavailable. Keep the current CI guard.
+
+## Positive Coverage Notes
+
+- The project has unusually broad unit/source coverage: 245 Vitest files against 473 non-test TS/TSX source files, with focused tests around image processing, privacy guards, migrations, auth/session, rate limits, semantic search, uploads, color/HDR, and source-level architectural invariants.
+- CI does run lint, typecheck, unit tests, e2e tests, and build in [.github/workflows/quality.yml](/Users/hletrd/flash-shared/gallery/.github/workflows/quality.yml:54) through [.github/workflows/quality.yml](/Users/hletrd/flash-shared/gallery/.github/workflows/quality.yml:79). The gap in TE-01 is specific to the missing third security lint command.
+- The e2e runner seeds a real DB and builds the standalone app before Playwright via [apps/web/scripts/run-e2e-server.mjs](/Users/hletrd/flash-shared/gallery/apps/web/scripts/run-e2e-server.mjs:75) through [apps/web/scripts/run-e2e-server.mjs](/Users/hletrd/flash-shared/gallery/apps/web/scripts/run-e2e-server.mjs:89), which is stronger than a dev-server-only smoke.
+
+## Final Sweep
+
+Common missed test issue classes checked:
+- Skipped tests: found intentional CLIP/model skips and e2e skips; actionable e2e skip is TE-02, local-admin skip risk is TE-06.
+- `.only`/`.todo`: no committed focused test was found in the reviewed test tree.
+- Timer/flaky patterns: several tests use fake timers or `vi.waitFor`; existing comments show prior cleanup from wall-clock sleeps. No new high-confidence flake beyond opt-in/skipped e2e coverage.
+- Snapshot/visual tests: no real screenshot comparisons found; TE-04 covers the misleading screenshot-only visual checks.
+- Route/auth/rate-limit gates: admin API and action-origin scanners have fixture tests and CI entries; public-route rate-limit scanner has fixture tests but is missing from root/CI execution (TE-01).
+- Docs-vs-tests drift: main drift found in blocking-gate docs versus CI/root scripts, and `/s/[key]` e2e TODO versus current seed data.
+- Type/test discovery: `tsconfig.typecheck.json` includes tests, but Vitest discovery excludes `.test.tsx` (TE-03).
+
+Skipped/irrelevant areas:
+- Did not run the full test suite; this prompt requested a review report only and source edits were prohibited.
+- Did not review binary fixture contents beyond file type/usage.
+- Did not inspect generated `.next`, `node_modules`, or gitignored runtime data.

@@ -1,154 +1,70 @@
-# Code Review — Cycle 22
+# Repository Code Review — review-plan-fix cycle 1/100
 
-**Date:** 2026-06-29
-**Reviewer:** oh-my-claudecode:code-reviewer (Sonnet 4.6)
-**Commit range:** HEAD since cycle-21 close (R21C21 T1–T6)
-**Prior aggregate:** `.context/reviews/archive/cycle-21/_aggregate.md`
-**Deferred list:** `.context/plans/cycle-21-deferred.md`
+**Date:** 2026-06-29  
+**Reviewer:** code-reviewer subagent  
+**Scope:** repository-wide static review of `/Users/hletrd/flash-shared/gallery` under `AGENTS.md` and `CLAUDE.md`.
 
----
+## Review Inventory
 
-## Summary
+I built the inventory from `rg --files`, `find apps/web/src -type f`, targeted `rg` sweeps, and line-by-line inspection of the review-relevant runtime families. I treated the following as review-relevant:
 
-Cycle 22 delivers exactly six tasks from the cycle-21 plan (T1–T6): 20 focus-visible a11y fixes + a proactive scanner test, a `parseInt`→`Number` fix for topic display-order parsing, a one-line eviction fix for the view-count retry-count map, env-wiring of two CLIP semantic-search operational constants, a regression test for `IMAGE_MAX_INPUT_PIXELS_TOPIC` env-parse, and four CLAUDE.md doc-gap closures. After full code review — spanning all changed files, all new tests, all six deferred items, every empty-catch block, and every cross-cutting invariant (auth guard, rate-limit, privacy fence, ETag, touch-target) — **no new CRITICAL or HIGH findings were identified.** All cycle-21 deferred items are unchanged and their exit criteria remain unmet. The verdict is **APPROVE**.
+- Project instructions and operations: `AGENTS.md`, `CLAUDE.md`, root package metadata, deploy scripts, Docker/nginx config, Next/Vitest/ESLint/TS configs.
+- App routes and pages: all 73 files under `apps/web/src/app`, including public photo/topic/share pages, admin protected pages, metadata handlers, `api/search/*`, `api/og*`, upload/download routes, sitemap/robots/feed, and server actions.
+- Components and UI: all 55 files under `apps/web/src/components`, with focus on public rendering, admin controls, upload/search/share flows, touch-target assumptions, and client/server boundaries.
+- Core libraries: all 93 files under `apps/web/src/lib`, including data access, rate limiting, origin checks, auth/session, queue/backfill, image processing, search/CLIP, analytics, smart collections, restore/maintenance, CSP, uploads, and validation.
+- Database and migrations: `apps/web/src/db/*`, all committed `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, and `apps/web/scripts/migrate.js`.
+- Tests and guardrails: all 246 files under `apps/web/src/__tests__`, `apps/web/e2e/*`, and repository-specific lint scripts where they encode invariants.
+- Localization and config data: `apps/web/messages/*`, `apps/web/src/site-config*.json`, and route-visible JSON/config references.
 
----
+I excluded archived historical review artifacts and local plan-management files from bug hunting except where they explained an invariant already encoded in current source/tests. No source files were edited.
 
-## Findings Table
+## Findings
 
-| ID | Sev | Conf | File:line | One-line |
-|----|-----|------|-----------|----------|
-| — | — | — | — | No new findings beyond known/deferred items |
+### CR-01 — High — Semantic “similar photos” refunds the limiter after database work
 
-No items to detail.
+**Location:** `apps/web/src/app/api/search/similar/[id]/route.ts:83-154`  
+**Severity:** High  
+**Confidence:** High  
+**Status:** Confirmed
 
----
+The route pre-increments the per-IP semantic limiter before the semantic work starts (`route.ts:83-93`), but then refunds the request after database-backed target lookup and scan paths have already consumed the protected resource:
 
-## Stage 1 — Spec Compliance
+- `route.ts:113-123` performs the target embedding lookup.
+- `route.ts:125-127` rolls back the limiter when no embedding row exists.
+- `route.ts:131-134` rolls back when the embedding row is corrupt.
+- `route.ts:137-139` rolls back on target lookup infrastructure failure.
+- `route.ts:142-151` performs the production embedding scan.
+- `route.ts:152-154` rolls back on scan query failure.
 
-All six tasks from `cycle-21-plan.md` are implemented:
+This conflicts with the repository’s own rate-limit contract for unauthenticated DB/CPU-expensive GET surfaces. `apps/web/src/lib/rate-limit.ts:39-52` documents the charged-post-validation pattern: once the route has consumed its own DB/CPU work, nonexistent targets and infrastructure failures stay charged because refunding them creates an unmetered probe. The semantic helper comments also say rollback is for paths before expensive work (`apps/web/src/lib/rate-limit.ts:323-340`).
 
-| Task | Plan intent | Implementation | Status |
-|------|-------------|----------------|--------|
-| T1a | Add `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 outline-none` to 13 named hover-styled Link/a/button siblings | 20 files changed (covers the named 13 plus 7 additional elements discovered during implementation) | PASS |
-| T1b | Add a proactive scanner test (`focus-visible-links-scan.test.ts`) so future additions don't regress | New scanner with 8 self-check tests; walks `components/` + `app/[locale]/`; correctly excludes `group-hover:`, `peer-hover:`, shadcn `<Button>`, `role="option"`, and `group`-parent / `group-focus-visible:` child pairs within 12-line window | PASS |
-| T2 | Replace `parseInt(orderStr, 10)` with `Number(orderStr)` + `!Number.isFinite` guard in `createTopic` and `updateTopic` to fix silent scientific-notation mis-parse | `topics.ts:108-112` and `214-218`; test cases added for `'1e3'`→1000 and `'abc'`→0 | PASS |
-| T3 | Add `viewCountRetryCount.delete(oldestKey)` alongside `viewCountBuffer.delete(oldestKey)` in the post-flush cap-eviction loop | `data.ts:163-176`; test pinned by regex assertion in `data-view-count-flush.test.ts:170` | PASS |
-| T4 | Wire `SEMANTIC_TOP_K_MAX` and `SEMANTIC_SCAN_LIMIT` to `process.env` via `envPositiveInt()` helper | `clip-embeddings.ts:26-31`; 5-case env test added (`clip-semantic-limits-env.test.ts`) | PASS |
-| T5 | Add regression test for `IMAGE_MAX_INPUT_PIXELS_TOPIC` env-parse | `process-image-max-input-pixels-env.test.ts`; 4 cases including scientific notation `'64e6'`→64_000_000, invalid inputs fallback | PASS |
-| T6 | Close 4 doc-code gaps in CLAUDE.md | CLAUDE.md updated (no code impact) | PASS |
+The problem is currently source-locked by tests rather than caught by them: `apps/web/src/__tests__/similar-route.test.ts:195-201` expects a rollback for a missing target embedding, and `apps/web/src/__tests__/similar-route.test.ts:228-240` expects a rollback for a corrupt embedding row.
 
----
+**Failure scenario:** A non-browser client can forge same-origin `Origin`/`Referer` headers and repeatedly request `/api/search/similar/<valid-looking-id-without-production-embedding>`. Each request performs at least the target embedding database lookup and then refunds the semantic rate-limit token, allowing unmetered DB work and image-id/embedding-state probing. On DB failure paths, the scan/lookup work is likewise free to repeat.
 
-## Stage 2 — Code Quality Review
+**Concrete fix:** Treat the target lookup and production scan as the guarded resource. Keep rollbacks only for syntactic validation, maintenance, and semantic-mode rejection before the route reaches target/scan DB work. Remove `rollbackSemanticAttempt(ip)` from the target-missing, corrupt-target, target-query-catch, and scan-query-catch branches. Update the route header comment at `route.ts:13-20`/`route.ts:25-27` and change `similar-route.test.ts:195-240` to assert that post-lookup failures are charged. Add a source-contract regression like the OG route tests so future edits cannot reintroduce post-DB refunds.
 
-### T1 — Focus-visible fixes (20 files)
+## Cross-File Notes
 
-All 20 sites add the canonical `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` triplet. Verified:
+- The sibling text semantic endpoint was reviewed separately; it refunds before the downstream embedding/scan resource and does not share this exact target-lookup oracle.
+- The OG routes already model the desired invariant. `apps/web/src/lib/rate-limit.ts:39-52` references source-locked tests that keep OG DB/CPU failures charged.
+- Public analytics actions have an in-memory per-IP guard (`apps/web/src/app/actions/public.ts:316-335`) before inserting view rows, so I did not classify analytics as an unbounded-write finding in this pass.
+- Migration journal monotonicity has a documented historical inversion, but `apps/web/scripts/migrate.js` contains the hash-based baseline/post-condition mitigation and tests encode the grandfathered block. I did not count that as a new issue.
 
-- **nav-client.tsx line 127**: The topic `<Link>` places `outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` in the BASE argument of `cn()` before the conditional `hover:text-foreground hover:bg-muted/50`. The scanner normalizes the full `cn()` call to one logical line and sees the focus-visible token before the hover token — no false negative.
-- **lightbox.tsx group pattern**: The `<button className="group ...">` parent is handled by the scanner's `GROUP_PARENT` lookahead (finds `group-focus-visible:ring-2` on the child `<span>` within 12 lines). No regression from the T1 additions.
-- **scanner `GROUP_CHILD_WINDOW = 12`**: Sufficient for all group patterns in the codebase; the deepest observed gap is 2 lines (button open → span with group-focus-visible).
-- **scanner `INTERACTIVE_OPEN` regex** (`/<(Link|a|button)\b/g`): Correctly excludes uppercase `<Button>` (shadcn), `<span>`, `<div>`, and other non-interactive tags.
-- **`normalizeInteractiveTags`**: Multi-line tag normalization is correct. `findJsxTagEnd` tracks string depth and brace depth; the `prev !== '='` guard handles bare `=>` outside braces. The `=ARROW` post-replacement is belt-and-suspenders over the `prev !== '='` guard.
-- **No `<a>` elements without `href` with `hover:` styling** exist in the scanned directories. The scanner would flag such elements, but none are present.
+## Final Sweep
 
-### T2 — topics.ts `Number()` fix
+Common missed classes checked:
 
-Edge-case analysis:
+- Admin API/auth boundaries: `withAdminAuth(...)`, `isAdmin()`, and action-origin gates across admin route/actions.
+- Public mutating route rate limits: POST/PUT/PATCH/DELETE route handlers plus public server-action write surfaces.
+- Public GET cost controls: OG, semantic search, similar search, share pages, sitemap/feed/uploads, and metadata handlers.
+- Privacy fences: `publicSelectFields`, `publicMapSelectFields`, `_PrivacySensitiveKeys`, semantic/search enrichment fields, and tests guarding sensitive image metadata.
+- Data-flow and race paths: upload quota claim/settle, Lightroom upload tracker, restore maintenance lock, topic slug remap, image queue/backfill, view-count buffering, DB dump/restore.
+- Raw SQL/process execution/destructive operations: migration reconciliation, restore scanner, Docker/deploy scripts, and one-off maintenance scripts.
+- Edge-case validation: slugs/tags, smart collection query compiler, body/content-length caps, cursor pagination, search length/code-point handling, referrer/IP analytics sanitization.
 
-| Input | Old `parseInt(x, 10)` | New `Number(x)` | MySQL INT outcome |
-|-------|----------------------|-----------------|-------------------|
-| `'1e3'` | 1 (stops at `e`) | 1000 | 1 vs 1000 — **the intended fix** |
-| `'1.5'` | 1 | 1.5 → MySQL truncates to 1 | Same result, no regression |
-| `''` | NaN → 0 | 0 (finite) → 0 | Same result |
-| `'abc'` | NaN → 0 | NaN → 0 | Same result |
-| `'1e999'` | 1 (stops at `e`) | Infinity → `!Number.isFinite` → 0 | New correct rejection |
-| `'-Infinity'` | NaN (stops at `-`) | -Infinity → `!Number.isFinite` → 0 | New correct rejection |
-
-The `Number.isFinite` guard correctly handles Infinity, -Infinity, and NaN. The `Math.max(-1000, Math.min(1000, order))` clamp remains in place for valid values. No behavioral regression on any existing valid input.
-
-### T3 — viewCountRetryCount eviction fix
-
-The fix (`data.ts:175`, `viewCountRetryCount.delete(oldestKey)`) directly addresses C21-RVW-01: without this, an evicted group that is re-inserted inherits a stale retry count, potentially exhausting `VIEW_COUNT_MAX_RETRIES` after fewer real failures than intended. The fix is a single-line addition in the correct position — inside the `if (oldestKey !== undefined)` guard, after `viewCountBuffer.delete(oldestKey)`. The `while` loop is finite: each iteration reduces `viewCountBuffer.size` by 1, and the `break` on `oldestKey === undefined` is the safe exit. Test coverage is the regex assertion in `data-view-count-flush.test.ts:170`.
-
-### T4 — clip-embeddings.ts `envPositiveInt()` and env wiring
-
-The helper:
-
-```ts
-function envPositiveInt(raw: string | undefined, fallback: number): number {
-    const n = Number(raw ?? '');
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
-}
-```
-
-Correctly handles all rejection cases:
-- `undefined` → `Number('') = 0` → `0 > 0` false → fallback
-- `'0'` → `0 > 0` false → fallback (0 is invalid topK)
-- `'-5'` → `-5 > 0` false → fallback
-- `'Infinity'` → `Number.isFinite(Infinity) = false` → fallback
-- `'abc'` → `Number.isNaN` → `Number.isFinite(NaN) = false` → fallback
-- `'2.5'` → `Math.floor(2.5) = 2` → valid
-- `'4e3'` → `Number('4e3') = 4000` → valid
-
-The module-level constants (`SEMANTIC_TOP_K_MAX`, `SEMANTIC_SCAN_LIMIT`) are computed once at import time. The test uses `vi.resetModules()` + dynamic `import()` per case to force module re-evaluation with the new `process.env` value — a correct pattern for module-level constant testing.
-
-The interaction with `clampSemanticTopK` in the semantic search route is correct: `raw=0` (JSON number zero) → `Math.max(SEMANTIC_TOP_K_DEFAULT, Math.min(SEMANTIC_TOP_K_MAX, Math.max(1, 0)))` = `Math.max(20, Math.min(50, 1))` = 20. Zero topK is treated as "use default", not passed through. Intentional behavior per AGG-12.
-
-### T5 — IMAGE_MAX_INPUT_PIXELS_TOPIC test
-
-The test mock `vi.mock('sharp', () => ({ default: Object.assign(() => ({}), { cache: () => undefined, concurrency: () => 1 }) }))` correctly prevents Sharp's native binding from loading. The test only verifies `MAX_INPUT_PIXELS_TOPIC` (a numeric constant computed from env at module load), not any Sharp API behavior. The 4-case coverage is adequate: scientific notation, plain integer, unset default, and invalid fallback.
-
-### Deferred items — cycle-21
-
-All six deferred items are confirmed unchanged and their exit criteria remain unmet:
-
-| ID | Exit criterion check |
-|----|---------------------|
-| A1 (topics.slug mutable PK) | Still exactly 3 FK children + 1 JSON referrer; no new referrer added in cycle-22 |
-| A3 (upload quota settle) | `actions/images.ts` unchanged in cycle-22; still 6 settle sites |
-| A4 (restore-maintenance process-local) | `lib/restore-maintenance.ts` unchanged; single-instance topology still the fence |
-| A5 (`@/lib/storage` dead module) | `lib/storage/local.ts` unchanged; `storage-quarantine.test.ts` tripwire still active |
-| C21-RVW-02 (proxy.ts dead equality branch) | `proxy.ts` unchanged; behavior still correct, nit only |
-| TEST21-02 (`IMAGE_CLEANUP_CONCURRENCY` untested) | `actions/images.ts:797` unchanged; `|| 5` fallback still the guard |
-
-### Security — no regressions
-
-- **Auth guard**: No new admin routes or actions added; `lint:api-auth` and `lint:action-origin` gates cover all cycle-22 action files.
-- **Privacy fence**: `publicSelectFields` / `_PrivacySensitiveKeys` unchanged; no new columns added.
-- **Rate-limit**: No public mutating routes added; `lint:public-route-rate-limit` gate unchanged.
-- **Input sanitization**: `Number(orderStr)` in T2 is not less safe than `parseInt`; the `Math.max/min` clamp is unchanged.
-
-### Empty catch blocks — no new regressions
-
-All empty catch blocks verified against the prior cycle analysis. No new empty catches were introduced in cycle-22.
-
----
-
-## Open Questions (low-confidence, not blocking)
-
-None.
-
----
-
-## Positive Observations
-
-- **T3 fix precision**: Single-line addition in exactly the right position, with an explanatory comment referencing the review finding (C21-RVW-01). Minimal diff, maximum correctness.
-- **`envPositiveInt()` helper design**: Centralized in `clip-embeddings.ts` (the only consumer), avoids a new utility module for a two-liner. `Math.floor()` instead of `parseInt` handles float inputs cleanly and consistently with the cycle-20 env-parse sweep.
-- **T1 scanner self-check tests**: The 8 inline self-check tests (`describe('self-check', ...)`) are a high-value addition — they document the scanner's intended boundary conditions and prevent the scanner itself from regressing silently.
-- **KNOWN_VIOLATIONS seeded to `{ 'components/search.tsx': 0 }`**: Explicit zero entry for the `role="option"` exemption case documents the design intent without accumulating a false violation debt.
-- **All cycle-22 tests use `vi.resetModules()`** correctly for module-level constant testing, avoiding the common pitfall of sharing a stale module singleton across env-variation cases.
-
----
+Relevant file families not fully reviewed for defects: archived review history under `.context/reviews/archive` and planning documents under `.context/plans`/`plan`. They are not runtime code or active guardrails for this cycle. I did not run lint/typecheck/build/tests because this prompt requested a read-only review artifact and allowed writing only `./.context/reviews/code-reviewer.md`; the evidence above is from static inspection of current source and tests.
 
 ## Verdict
 
-**APPROVE**
-
-- CRITICAL: 0
-- HIGH: 0
-- MEDIUM: 0 (new; 0 scheduled from prior cycles)
-- LOW: 0 (new; all cycle-21 deferred items unchanged)
-
-All six cycle-21 plan tasks are correctly implemented and tested. No new issues beyond the confirmed-deferred list. The codebase is in a consistently high-quality state at HEAD.
+One confirmed high-severity issue found. No other repository-wide findings rose above review threshold in this pass.
