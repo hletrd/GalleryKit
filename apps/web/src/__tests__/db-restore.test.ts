@@ -48,3 +48,18 @@ describe('restore temp-file cleanup ownership', () => {
         expect(DB_ACTIONS_SRC).toMatch(/finally\s*\{[\s\S]*if\s*\(!cleanupTransferredToRestoreProcess\)\s*\{[\s\S]*await cleanupTempFile\(\)/);
     });
 });
+
+describe('backup dump validation', () => {
+    it('validates the generated backup header before returning a downloadable filename', () => {
+        const dumpDatabaseSource = DB_ACTIONS_SRC.slice(
+            DB_ACTIONS_SRC.indexOf('export async function dumpDatabase()'),
+            DB_ACTIONS_SRC.indexOf('// Restore intentionally uses'),
+        );
+
+        expect(dumpDatabaseSource).toContain('hasPlausibleSqlDumpHeader(headerBytes)');
+        expect(dumpDatabaseSource.indexOf('hasPlausibleSqlDumpHeader(headerBytes)')).toBeLessThan(
+            dumpDatabaseSource.indexOf('resolve({ success: true, filename'),
+        );
+        expect(dumpDatabaseSource).toMatch(/fs\.unlink\(outputPath\)\.catch\(\(\) => \{\}\);[\s\S]*resolve\(\{ success: false, error: t\('failedToWriteBackup'\) \}\);/);
+    });
+});

@@ -250,6 +250,19 @@ function getState(): AdminBackfillState {
     return s;
 }
 
+function resetPerRunCounters(state: AdminBackfillState, queuedCount: number) {
+    state.lastQueuedCount = queuedCount;
+    state.processed = 0;
+    state.errors = 0;
+    state.lastError = null;
+    state.skippedMissingOriginal = 0;
+    state.skippedLocked = 0;
+    state.encodeFailures = 0;
+    state.detectionFailures = 0;
+    state.deletedMidReencode = 0;
+    state.lastRunHadFailures = false;
+}
+
 /**
  * AGG-R5C3-22 (TEST-R5C3-11): test-only reset of the globalThis-backed runner
  * state. Tests previously poked the `Symbol.for('gallerykit.adminBackfillState')`
@@ -629,21 +642,13 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
     const state = getState();
     try {
         state.running = true;
-        state.lastError = null;
         // AGG-R5C2-10: reset the per-run observability tallies at the start of
         // every run so the surfaced counters reflect THIS run, not a sum across
         // runs (which would be misleading for the admin status disclosure).
         // AGG-1 (run-6 c1): processed + errors are reset here too so the admin
         // sees THIS run's real successful count and fatal-error count, not a
         // stale carry-over or a snapshot-derived reconstruction.
-        state.processed = 0;
-        state.errors = 0;
-        state.skippedMissingOriginal = 0;
-        state.skippedLocked = 0;
-        state.encodeFailures = 0;
-        state.detectionFailures = 0;
-        state.deletedMidReencode = 0;
-        state.lastRunHadFailures = false;
+        resetPerRunCounters(state, state.lastQueuedCount);
         const config = await getGalleryConfig();
         const settings: RunnerSettings = {
             quality: {
@@ -836,12 +841,16 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         // The actual candidate fetch is now batched inside runBackfill.
         const candidateCount = await fetchCandidateCount();
         if (candidateCount === 0) {
-            // Nothing to do — release the lock and report zero work.
+            // Nothing to do — record a clean completed no-op so stale
+            // failure/counter state from the previous run cannot survive in
+            // the admin status banner.
+            resetPerRunCounters(state, 0);
+            state.completedRuns++;
             await releaseBackfillLock(lockConn);
             return { status: 'queued', affectedRows: 0 };
         }
         // Store the up-front count for the UI status disclosure.
-        getState().lastQueuedCount = candidateCount;
+        state.lastQueuedCount = candidateCount;
         // Hand the lock connection off to the background runner. From this
         // point the runner owns the connection's lifetime and will release
         // both the lock and the connection on completion / failure.

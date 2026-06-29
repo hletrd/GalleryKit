@@ -229,6 +229,22 @@ export async function dumpDatabase() {
                         resolve({ success: false, error: t('failedToWriteBackup') });
                         return;
                     }
+                    const headerBuf = Buffer.alloc(256);
+                    const fd = await fs.open(outputPath, 'r');
+                    let headerBytesRead = 0;
+                    try {
+                        const { bytesRead } = await fd.read(headerBuf, 0, headerBuf.length, 0);
+                        headerBytesRead = bytesRead;
+                    } finally {
+                        await fd.close();
+                    }
+                    const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
+                    if (!hasPlausibleSqlDumpHeader(headerBytes)) {
+                        console.error('Backup file does not start with a plausible SQL dump header');
+                        fs.unlink(outputPath).catch(() => {});
+                        resolve({ success: false, error: t('failedToWriteBackup') });
+                        return;
+                    }
                 } catch {
                     fs.unlink(outputPath).catch(() => {});
                     resolve({ success: false, error: t('failedToWriteBackup') });

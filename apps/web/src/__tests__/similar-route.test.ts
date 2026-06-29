@@ -12,6 +12,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
     PRODUCTION_MODEL_VERSION,
     EMBEDDING_BYTES,
@@ -66,6 +68,7 @@ vi.mock('@/db', () => {
     const chain = {
         select: () => { selectCallCount += 1; activeQuery = selectCallCount; return chain; },
         from: () => chain,
+        innerJoin: () => chain,
         leftJoin: () => chain,
         orderBy: () => chain,
         limit: () => {
@@ -328,5 +331,12 @@ describe('GET /api/search/similar/[id]', () => {
         const res = await GET(req('10') as never, params('10'));
         expect(res.status).toBe(200);
         expect(res.headers.get('cache-control')).toMatch(/no-store/);
+    });
+
+    it('source-locks target and scan queries to processed images only', () => {
+        const source = readFileSync(resolve(__dirname, '../app/api/search/similar/[id]/route.ts'), 'utf8');
+
+        expect(source.match(/\.innerJoin\(images,\s*eq\(imageEmbeddings\.imageId,\s*images\.id\)\)/g)?.length).toBeGreaterThanOrEqual(2);
+        expect(source.match(/eq\(images\.processed,\s*true\)/g)?.length).toBeGreaterThanOrEqual(3);
     });
 });

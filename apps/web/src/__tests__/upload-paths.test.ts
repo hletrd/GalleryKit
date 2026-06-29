@@ -59,25 +59,69 @@ describe('resolveOriginalUploadPath', () => {
     it('returns the PRIMARY path when the file exists there', async () => {
         await fs.writeFile(path.join(primaryDir, 'photo.jpg'), 'x');
         const resolved = await mod.resolveOriginalUploadPath('photo.jpg');
-        expect(resolved).toBe(path.join(primaryDir, 'photo.jpg'));
+        await expect(fs.realpath(resolved ?? '')).resolves.toBe(await fs.realpath(path.join(primaryDir, 'photo.jpg')));
     });
 
     it('falls back to the LEGACY path when the file exists only there', async () => {
         await fs.writeFile(path.join(legacyDir, 'old.jpg'), 'x');
         const resolved = await mod.resolveOriginalUploadPath('old.jpg');
-        expect(resolved).toBe(path.join(legacyDir, 'old.jpg'));
+        await expect(fs.realpath(resolved ?? '')).resolves.toBe(await fs.realpath(path.join(legacyDir, 'old.jpg')));
     });
 
     it('prefers PRIMARY over legacy when the file exists in both', async () => {
         await fs.writeFile(path.join(primaryDir, 'dup.jpg'), 'new');
         await fs.writeFile(path.join(legacyDir, 'dup.jpg'), 'old');
         const resolved = await mod.resolveOriginalUploadPath('dup.jpg');
-        expect(resolved).toBe(path.join(primaryDir, 'dup.jpg'));
+        await expect(fs.realpath(resolved ?? '')).resolves.toBe(await fs.realpath(path.join(primaryDir, 'dup.jpg')));
     });
 
     it('returns null when the file exists in NEITHER', async () => {
         const resolved = await mod.resolveOriginalUploadPath('missing.jpg');
         expect(resolved).toBeNull();
+    });
+
+    it('rejects traversal and absolute filenames before filesystem resolution', async () => {
+        await fs.writeFile(path.join(tmpRoot, 'secret.jpg'), 'secret');
+
+        await expect(mod.resolveOriginalUploadPath('../secret.jpg')).resolves.toBeNull();
+        await expect(mod.resolveOriginalUploadPath(path.join(primaryDir, 'photo.jpg'))).resolves.toBeNull();
+    });
+
+    it('rejects symlinked originals even when the link exists inside the upload root', async () => {
+        const outside = path.join(tmpRoot, 'outside.jpg');
+        const link = path.join(primaryDir, 'linked.jpg');
+        await fs.writeFile(outside, 'secret');
+        await fs.symlink(outside, link);
+
+        await expect(mod.resolveOriginalUploadPath('linked.jpg')).resolves.toBeNull();
+    });
+});
+
+describe('deleteOriginalUploadFileStrict', () => {
+    it('throws on unsafe filenames instead of joining them to upload roots', async () => {
+        await expect(mod.deleteOriginalUploadFileStrict('../secret.jpg')).rejects.toThrow(/unsafe original upload filename/i);
+    });
+
+    it('deletes safe primary and legacy original candidates', async () => {
+        await fs.writeFile(path.join(primaryDir, 'delete-me.jpg'), 'primary');
+        await fs.writeFile(path.join(legacyDir, 'delete-me.jpg'), 'legacy');
+
+        await expect(mod.deleteOriginalUploadFileStrict('delete-me.jpg')).resolves.toBeUndefined();
+
+        await expect(fs.access(path.join(primaryDir, 'delete-me.jpg'))).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(fs.access(path.join(legacyDir, 'delete-me.jpg'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('throws rather than unlinking a symlink candidate', async () => {
+        const outside = path.join(tmpRoot, 'outside-delete.jpg');
+        const link = path.join(primaryDir, 'linked-delete.jpg');
+        await fs.writeFile(outside, 'secret');
+        await fs.symlink(outside, link);
+
+        await expect(mod.deleteOriginalUploadFileStrict('linked-delete.jpg')).rejects.toMatchObject({
+            errors: [expect.objectContaining({ message: expect.stringMatching(/symlink/i) })],
+        });
+        await expect(fs.readFile(outside, 'utf8')).resolves.toBe('secret');
     });
 });
 

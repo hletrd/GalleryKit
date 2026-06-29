@@ -181,6 +181,8 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
 
         expect(source).toContain('sideEffects: Set<Promise<void>>');
         expect(source).toContain('trackQueueSideEffect(state');
+        expect(source).toContain('const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state).catch');
+        expect(source).toContain('trackQueueSideEffect(state, bootstrapEmbeddingRetry)');
         expect(source).toContain('await drainQueueSideEffects(state)');
         expect(source).toContain('Skipping embedding write for image');
     });

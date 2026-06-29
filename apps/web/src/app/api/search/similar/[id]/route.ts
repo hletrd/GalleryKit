@@ -118,9 +118,11 @@ export async function GET(
         const targetRows = await db
             .select({ embedding: imageEmbeddings.embedding })
             .from(imageEmbeddings)
+            .innerJoin(images, eq(imageEmbeddings.imageId, images.id))
             .where(and(
                 eq(imageEmbeddings.imageId, id),
                 eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION),
+                eq(images.processed, true),
             ))
             .limit(1);
 
@@ -145,7 +147,11 @@ export async function GET(
         rows = await db
             .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })
             .from(imageEmbeddings)
-            .where(eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION))
+            .innerJoin(images, eq(imageEmbeddings.imageId, images.id))
+            .where(and(
+                eq(imageEmbeddings.modelVersion, PRODUCTION_MODEL_VERSION),
+                eq(images.processed, true),
+            ))
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {

@@ -10,6 +10,7 @@ import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
+import { isBase56 } from '@/lib/base56';
 
 export const revalidate = 0;
 
@@ -78,6 +79,10 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 
 export default async function SharedPhotoPage({ params }: { params: Promise<{ key: string }> }) {
     const { key } = await params;
+
+    if (!isBase56(key, 10)) {
+        return notFound();
+    }
 
     // Rate-limit share-key lookups to prevent automated key enumeration
     if (await isShareLookupRateLimited()) {

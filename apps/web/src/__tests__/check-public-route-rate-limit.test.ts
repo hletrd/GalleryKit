@@ -88,6 +88,23 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
     });
 
+    it('fails a file-level exemption when another mutating handler would inherit it', () => {
+        const source = `
+            // @public-no-rate-limit-required: webhook POST is gated by signature
+            export async function POST(request) {
+                return { status: 200 };
+            }
+            export async function DELETE(request) {
+                await db.delete(images);
+                return { status: 204 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('AMBIGUOUS RATE-LIMIT EXEMPTION');
+        expect(result.failed[0]).toContain('POST, DELETE');
+    });
+
     it('fails when exempt tag is inside string literal (C1-BUG-05)', () => {
         const source = `
             const docs = "See @public-no-rate-limit-required for details";

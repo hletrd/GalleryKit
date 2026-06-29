@@ -18,6 +18,14 @@ describe('public share route lookup throttling', () => {
         expect(pageBody.indexOf('await isShareLookupRateLimited()')).toBeLessThan(pageBody.indexOf('getImageByShareKeyCached(key)'));
     });
 
+    it('validates malformed single-photo share keys before charging lookup rate-limit budget', () => {
+        const source = routeSource('s');
+        const pageBody = source.slice(source.indexOf('export default async function'));
+
+        expect(pageBody.indexOf('isBase56(key, 10)')).toBeGreaterThan(-1);
+        expect(pageBody.indexOf('isBase56(key, 10)')).toBeLessThan(pageBody.indexOf('await isShareLookupRateLimited()'));
+    });
+
     it('rate-limits group share page body before DB lookup', () => {
         const source = routeSource('g');
         const pageBody = source.slice(source.indexOf('export default async function'));
@@ -27,6 +35,14 @@ describe('public share route lookup throttling', () => {
         // calling preIncrementShareAttempt in both would double-increment.
         expect(pageBody.indexOf('await isShareLookupRateLimited()')).toBeGreaterThan(-1);
         expect(pageBody.indexOf('await isShareLookupRateLimited()')).toBeLessThan(pageBody.indexOf('getSharedGroupCached(key'));
+    });
+
+    it('validates malformed group share keys before charging lookup rate-limit budget', () => {
+        const source = routeSource('g');
+        const pageBody = source.slice(source.indexOf('export default async function'));
+
+        expect(pageBody.indexOf('isBase56(key, 10)')).toBeGreaterThan(-1);
+        expect(pageBody.indexOf('isBase56(key, 10)')).toBeLessThan(pageBody.indexOf('await isShareLookupRateLimited()'));
     });
 
     it('does NOT rate-limit in generateMetadata for single-photo share (C4-AGG-01)', () => {

@@ -21,13 +21,15 @@
  *    Use for: public read paths whose limiter is not guarding a specific
  *    expensive downstream CPU/API stage.
  *
- * 2b. **No rollback after semantic body admission** (/api/search/semantic):
- *    The route performs cheap origin/header/config checks first, then
- *    pre-increments before body materialization and keeps the charge for
- *    malformed bodies, aborts, encoder failures, DB failures, and empty
- *    production embeddings. Rationale: once request-body memory, embedding
- *    CPU, or bounded embedding scans are admitted, refunding lets a client
- *    amplify the protected cost.
+ * 2b. **No rollback after semantic body admission** (/api/search/semantic
+ *    and /api/search/similar/[id]):
+ *    The routes perform cheap origin/header/config/param checks first, then
+ *    pre-increment before admitting protected work. Semantic text search
+ *    refunds only pre-work short-query rejections; malformed bodies, aborts,
+ *    encoder failures, DB failures, empty production embeddings, and similar
+ *    target/scan lookups stay charged. Rationale: once request-body memory,
+ *    embedding CPU, or bounded embedding scans are admitted, refunding lets a
+ *    client amplify the protected cost.
  *    Use for: public read paths whose protected resource is expensive
  *    per admitted request.
  *

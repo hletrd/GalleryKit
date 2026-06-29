@@ -292,6 +292,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         .replace(/"[^"]*"/g, '')
         .replace(/'[^']*'/g, '');
     if (EXEMPT_COMMENT_RE.test(withoutStrings)) {
+        if (mutatingHandlers.length > 1) {
+            report.failed.push(
+                `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports mutating handlers ${mutatingHandlers.map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt mutating handler.`,
+            );
+            return report;
+        }
         report.passed.push(`OK: ${relative} (carries ${EXEMPT_TAG})`);
         return report;
     }

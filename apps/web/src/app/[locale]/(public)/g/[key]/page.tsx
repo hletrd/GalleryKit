@@ -15,6 +15,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
+import { isBase56 } from '@/lib/base56';
 
 export const revalidate = 0;
 
@@ -84,6 +85,10 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
+
+    if (!isBase56(key, 10)) {
+        return notFound();
+    }
 
     // Rate-limit share-key lookups to prevent automated key enumeration
     if (await isShareLookupRateLimited()) {

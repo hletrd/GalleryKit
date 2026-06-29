@@ -951,9 +951,10 @@ export const bootstrapImageProcessingQueue = async () => {
         // C9-07: processed=true is committed before embedding side effects run.
         // If the process restarts or the side effect transiently fails, retry a
         // bounded batch of processed rows missing the active model embedding.
-        bootstrapMissingActiveEmbeddings(state).catch((err) => {
+        const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state).catch((err) => {
             console.debug('bootstrapMissingActiveEmbeddings failed:', err);
         });
+        trackQueueSideEffect(state, bootstrapEmbeddingRetry);
         // R10-M14: When pending.length === 0 during a CONTINUATION scan
         // (bootstrapCursorId !== null), we cannot distinguish "no more pending
         // images" from "all pending images in this batch are permanently failed".

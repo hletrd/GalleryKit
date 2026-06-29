@@ -7,6 +7,7 @@
 
 import path from 'path';
 import * as fs from 'fs/promises';
+import { isValidFilename } from '@/lib/validation';
 
 /** Root directory for all uploaded files. Derived from UPLOAD_ROOT env var or cwd. */
 export const UPLOAD_ROOT = (() => {
@@ -55,15 +56,10 @@ export async function ensureUploadDirectories() {
 }
 
 export async function resolveOriginalUploadPath(filename: string): Promise<string | null> {
-    const candidates = [
-        path.join(UPLOAD_DIR_ORIGINAL, filename),
-        path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename),
-    ];
-
-    for (const candidate of candidates) {
+    for (const root of [UPLOAD_DIR_ORIGINAL, LEGACY_UPLOAD_DIR_ORIGINAL]) {
         try {
-            await fs.access(candidate);
-            return candidate;
+            const candidate = await resolveOriginalCandidate(root, filename);
+            if (candidate) return candidate;
         } catch {
             continue;
         }
@@ -73,10 +69,12 @@ export async function resolveOriginalUploadPath(filename: string): Promise<strin
 }
 
 export async function deleteOriginalUploadFile(filename: string) {
-    await Promise.all([
-        fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, filename)).catch(() => {}),
-        fs.unlink(path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename)).catch(() => {}),
-    ]);
+    if (!isSafeOriginalFilename(filename)) return;
+    await Promise.all([UPLOAD_DIR_ORIGINAL, LEGACY_UPLOAD_DIR_ORIGINAL].map(async (root) => {
+        const candidate = await resolveOriginalCandidate(root, filename).catch(() => null);
+        if (!candidate) return;
+        await fs.unlink(candidate).catch(() => {});
+    }));
 }
 
 async function unlinkOriginalCandidateStrict(filePath: string) {
@@ -91,12 +89,14 @@ async function unlinkOriginalCandidateStrict(filePath: string) {
 }
 
 export async function deleteOriginalUploadFileStrict(filename: string) {
+    if (!isSafeOriginalFilename(filename)) {
+        throw new Error(`Unsafe original upload filename: ${filename}`);
+    }
     const failures: unknown[] = [];
-    await Promise.all([
-        path.join(UPLOAD_DIR_ORIGINAL, filename),
-        path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename),
-    ].map(async (candidate) => {
+    await Promise.all([UPLOAD_DIR_ORIGINAL, LEGACY_UPLOAD_DIR_ORIGINAL].map(async (root) => {
         try {
+            const candidate = await resolveOriginalCandidate(root, filename, { strict: true });
+            if (!candidate) return;
             await unlinkOriginalCandidateStrict(candidate);
         } catch (err) {
             failures.push(err);
@@ -105,6 +105,59 @@ export async function deleteOriginalUploadFileStrict(filename: string) {
     if (failures.length > 0) {
         throw new AggregateError(failures, `Failed to delete ${failures.length} original upload file candidate(s) for ${filename}`);
     }
+}
+
+function isSafeOriginalFilename(filename: string): boolean {
+    return isValidFilename(filename) && !path.isAbsolute(filename) && path.basename(filename) === filename;
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+    const rel = path.relative(root, candidate);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+async function resolveOriginalCandidate(
+    root: string,
+    filename: string,
+    options: { strict?: boolean } = {},
+): Promise<string | null> {
+    if (!isSafeOriginalFilename(filename)) {
+        if (options.strict) throw new Error(`Unsafe original upload filename: ${filename}`);
+        return null;
+    }
+
+    let rootReal: string;
+    try {
+        rootReal = await fs.realpath(root);
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw err;
+    }
+
+    const candidate = path.join(rootReal, filename);
+    if (!isPathInside(rootReal, candidate)) {
+        if (options.strict) throw new Error(`Original upload path escapes root: ${filename}`);
+        return null;
+    }
+
+    let stat;
+    try {
+        stat = await fs.lstat(candidate);
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw err;
+    }
+    if (stat.isSymbolicLink()) {
+        if (options.strict) throw new Error(`Original upload path is a symlink: ${filename}`);
+        return null;
+    }
+
+    const candidateReal = await fs.realpath(candidate);
+    if (!isPathInside(rootReal, candidateReal)) {
+        if (options.strict) throw new Error(`Original upload path escapes root: ${filename}`);
+        return null;
+    }
+    return candidateReal;
 }
 
 export async function assertNoLegacyPublicOriginalUploads(options: { failInProduction?: boolean } = {}) {

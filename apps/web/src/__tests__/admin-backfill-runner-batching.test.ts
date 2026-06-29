@@ -301,6 +301,43 @@ describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-c
         );
     }
 
+    it('records a zero-candidate trigger as a clean completed no-op run', async () => {
+        const sym = Symbol.for('gallerykit.adminBackfillState');
+        (globalThis as typeof globalThis & Record<symbol, unknown>)[sym] = {
+            running: false,
+            lastQueuedCount: 9,
+            processed: 3,
+            errors: 2,
+            completedRuns: 4,
+            lastError: 'old failure',
+            skippedMissingOriginal: 1,
+            skippedLocked: 1,
+            encodeFailures: 1,
+            detectionFailures: 1,
+            deletedMidReencode: 1,
+            lastRunHadFailures: true,
+        };
+        const batches = buildExecuteMock(0);
+
+        const result = await triggerAdminBackfill();
+
+        expect(result).toEqual({ status: 'queued', affectedRows: 0 });
+        expect(batches).toHaveLength(0);
+        const state = readAdminBackfillState();
+        expect(state.running).toBe(false);
+        expect(state.lastQueuedCount).toBe(0);
+        expect(state.processed).toBe(0);
+        expect(state.errors).toBe(0);
+        expect(state.skippedMissingOriginal).toBe(0);
+        expect(state.skippedLocked).toBe(0);
+        expect(state.encodeFailures).toBe(0);
+        expect(state.detectionFailures).toBe(0);
+        expect(state.deletedMidReencode).toBe(0);
+        expect(state.lastError).toBeNull();
+        expect(state.lastRunHadFailures).toBe(false);
+        expect(state.completedRuns).toBe(5);
+    });
+
     it('(a) single-batch: 50 candidates → exactly 1 batch SELECT at cursor 0', async () => {
         const batches = buildExecuteMock(50);
 

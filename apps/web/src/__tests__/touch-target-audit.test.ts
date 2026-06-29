@@ -776,10 +776,17 @@ describe('touch-target audit (44 px floor)', () => {
         }
 
         // Detect STALE entries in KNOWN_VIOLATIONS: a file listed with
-        // count > 0 but actual count is now 0. This is informational,
-        // not a hard failure — it signals that the entry should be
-        // dropped from the map but doesn't prevent tests from passing.
-        // Hard failures stay reserved for actual regressions.
+        // count > 0 but fewer actual violations now exists. This is a hard
+        // failure because slack would let the next compact control regress
+        // without changing the aggregate count.
+        for (const [rel, allowed] of Object.entries(KNOWN_VIOLATIONS)) {
+            const actual = violationsByFile.get(rel)?.length ?? 0;
+            if (actual < allowed) {
+                failures.push(
+                    `${rel}: found ${actual} violation(s), but KNOWN_VIOLATIONS allows ${allowed}. Remove stale allowance so future regressions cannot hide in the budget.`,
+                );
+            }
+        }
 
         if (failures.length > 0) {
             throw new Error(
