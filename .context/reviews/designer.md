@@ -1,182 +1,126 @@
-# Designer Review - Cycle 10
+# Designer Review - Cycle 11
 
-Role: cycle 10 designer / UI-UX reviewer. Scope: Next.js public and admin UI, information architecture, affordances, focus and keyboard navigation, WCAG 2.2 accessibility, contrast, ARIA, focus traps, reduced motion, responsive breakpoints, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL, and perceived performance.
+Role: Cycle 11 designer / UI-UX reviewer. Scope: Next.js public and admin UI, information architecture, responsive behavior, accessibility, keyboard/focus behavior, i18n, dark/light/OLED theming, loading/empty/error states, and perceived performance. No production code was edited.
 
-This is PROMPT 1 only. No application source was edited for this report.
+## Executive Summary
+
+GalleryKit's public gallery has a mature visual system and much of the prior accessibility/touch-target work is holding, but the primary photo viewer still has two trust-breaking interaction defects: assistive technology receives generic "Photo" labels for specific photos, and the visible shortcut guide advertises a Space slideshow command on a page where Space only scrolls. Design quality score: 7/10 for the public surface, with the biggest gap in accessibility/shortcut contract accuracy rather than visual polish.
 
 ## Inventory
 
-Read before review:
+UI/UX inventory built before judging findings:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- agent-browser skills for core navigation, config, query, visual, interact, wait, network, debug, and state.
+- Public routes: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]`, `c/[slug]`, `g/[key]`, `s/[key]`, `p/[id]`, `map`, `timeline`, `year`, `privacy`, public layout, global loading/error/not-found shells.
+- Admin routes: login, protected dashboard/upload manager, categories, tags, SEO, settings, password, users, DB, tokens, analytics, admin layout/loading/error.
+- Shared UI: nav/search/footer, masonry home, tag filter/input, load more, photo viewer, photo navigation, image zoom, lightbox, info bottom sheet, color details, lightbox color pip, histogram, map client, upload dropzone, image manager, admin nav/header, and shadcn/Radix primitives.
+- Styling/i18n/docs/tests: `apps/web/src/app/[locale]/globals.css`, `apps/web/tailwind.config.ts`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `CLAUDE.md`, touch-target/focus/i18n/lightbox/info-sheet/error-shell tests.
 
-UI-relevant inventory built before judging findings:
+Runtime inspection:
 
-- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared link/group, photo detail/loading, map, timeline, year, upload route, and public layout.
-- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected layout, dashboard/upload manager, categories, tags, SEO, settings, password, users, DB, tokens, analytics, loading, and error shells.
-- Shared components under `apps/web/src/components/`: nav/search/footer, home masonry, tag filter, load more, grid picture fallback, photo viewer, image zoom, lightbox, info bottom sheet, color details, lightbox color pip, histogram, upload dropzone, tag input, image manager, bulk edit, admin nav/header, user manager, map loader/client, and shadcn/Radix UI primitives.
-- Styling/i18n/test surface: `apps/web/src/app/[locale]/globals.css`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, touch-target, focus-visible, i18n parity, error-shell, lightbox, info-bottom-sheet, and HDR contrast tests.
+- Local dev server started on `http://localhost:3011`; `/en` returned 200 but the page fell into the app error shell because the local DB query for `topics` failed. I used local only as evidence that the error path is reachable.
+- Production DOM/browser checks used `https://gallery.atik.kr/en/p/348` and mobile/desktop Chromium via Playwright. Findings below rely on DOM states, roles, labels, dimensions, URLs, and text extraction rather than screenshots.
 
-Primary source files reviewed with exact regions:
+Resolved since Cycle 10:
 
-- Layout, language, skip link: `apps/web/src/app/[locale]/layout.tsx:93-132`
-- Public home IA, masonry, empty state, back-to-top: `apps/web/src/components/home-client.tsx:255-456`
-- Mobile/desktop navigation controls: `apps/web/src/components/nav-client.tsx:83-181`
-- Search dialog/combobox shell: `apps/web/src/components/search.tsx:320-345`
-- Photo viewer/lightbox entry points: `apps/web/src/components/photo-viewer.tsx:79-230`
-- Lightbox modal focus and controls: `apps/web/src/components/lightbox.tsx:96-98`, `apps/web/src/components/lightbox.tsx:430-447`, `apps/web/src/components/lightbox.tsx:547-565`
-- Info bottom sheet modal focus and controls: `apps/web/src/components/info-bottom-sheet.tsx:185-199`, `apps/web/src/components/info-bottom-sheet.tsx:213-247`
-- Admin login form: `apps/web/src/app/[locale]/admin/login-form.tsx:47-108`
-- Admin dashboard/upload/image manager/settings: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- The previous lightbox initial-focus defect appears fixed. Source now passes `initialFocus`/`fallbackFocus` to `FocusTrap` in `apps/web/src/components/lightbox.tsx:449-450`, and runtime focus moved to the 44x44 Close button after opening the lightbox.
 
-## Browser Evidence
+## Findings
 
-Local/dev flow:
+### DES-C11-01 - Primary photo surfaces expose generic alt text instead of the photo identity
 
-- Port 3000 was already occupied, so I did not interrupt it.
-- Started `npm run dev --workspace=apps/web -- --port 3010`; Next.js 16.2.9 reported ready.
-- Local `http://localhost:3010/en` returned 200 but rendered the app error shell because the local DB/query path failed on `topics`. I used this as error-state evidence only, then used production for representative public UI behavior.
-
-Agent-browser production pass:
-
-- Mobile Korean home, `https://gallery.atik.kr/ko`, 390x844: accessibility snapshot exposed skip link, `navigation "메인 내비게이션"`, H1 `최근 사진`, tag-filter group, photo links, load-more, footer, and notifications region. DOM metrics showed `scrollWidth === 390`, `lang="ko"`, `dir="ltr"`, and sampled visible controls/photo links at 44 px or larger.
-- Expanded mobile nav: search/theme/language controls measured 44x44 and had localized accessible names.
-- Desktop English home, `https://gallery.atik.kr/en`, 1440x1000: accessibility snapshot exposed persistent search/theme/language controls, H1 `Latest`, tag-filter group, photo links, load-more, footer, and no page errors.
-- Search dialog: opening search focused `#search-input`; query `jihoon` produced 20 results. Browser evidence: input `role="combobox"`, `aria-expanded="true"`, `aria-controls="search-results"`, live text `20 results`, input 466x44, close button 44x44, result options 558x64.
-- Photo page `/en/p/348` at mobile width: toolbar/back/fullscreen/info/next/zoom controls were exposed with sampled targets at 44 px or larger and no horizontal overflow.
-- Info bottom sheet: opened as `dialog "Photo Info"`, Close was focused, drag handle was 390x44, and Close was 44x44.
-- Lightbox: opened as `dialog "Photo lightbox"` with body scroll locked and 44 px controls, but `document.activeElement` stayed on `<body>` after a 500 ms wait. Pressing Tab moved focus to Close inside the dialog.
-- Admin login `https://gallery.atik.kr/ko/admin`, 390x844: snapshot exposed H1 `관리자 로그인`, visible labels, required username/password fields, password reveal, and submit. DOM metrics: username 308x44 with `autocomplete="username"` and autofocus, password 308x44 with `autocomplete="current-password"`, reveal 44x44, submit 308x44, no horizontal overflow.
-- `agent-browser state list` showed no saved auth state, so protected admin pages were source-reviewed rather than live-DOM tested.
-
-Contrast note: token/source review and sampled screenshots were used for contrast. A computed-style contrast sweep over photo overlays was not treated as authoritative because transparent/gradient overlays sit over image pixels, which the DOM style API cannot evaluate reliably.
-
-## Confirmed Findings
-
-### DES-C10-01 - Lightbox opens with focus left on `<body>` instead of moving into the modal
-
-Severity: Medium
-
-Confidence: High
-
+Severity: High  
+Confidence: High  
 Classification: confirmed
 
 Source evidence:
 
-- `Lightbox` stores `closeButtonRef`, `previouslyFocusedRef`, and `dialogRef` at `apps/web/src/components/lightbox.tsx:96-98`.
-- The mount effect tries to focus `closeButtonRef.current` immediately after body scroll lock at `apps/web/src/components/lightbox.tsx:430-444`.
-- The `FocusTrap` wrapper at `apps/web/src/components/lightbox.tsx:447` sets `allowOutsideClick` and `fallbackFocus`, but does not provide `initialFocus`.
-- The close button is focusable and labelled at `apps/web/src/components/lightbox.tsx:547-565`.
+- `getConcisePhotoAltText()` only reads `title`, `tag_names`, and `alt_text_suggested` at `apps/web/src/lib/photo-title.ts:85-121`.
+- `PhotoViewer` passes the full `ImageDetail` object into that helper at `apps/web/src/components/photo-viewer.tsx:443` and applies the result to the primary image at `apps/web/src/components/photo-viewer.tsx:521-528`.
+- The same helper is used for the lightbox image at `apps/web/src/components/lightbox.tsx:496-505`.
+- `PhotoViewer` separately computes a specific visible/document title from `image.tags` at `apps/web/src/components/photo-viewer.tsx:136-143`, proving the specific title data exists in the viewer but does not reach the image alt path.
+- `ImageZoom` wraps the primary viewer image in a focusable `role="button"` with `aria-label={isZoomed ? t('aria.zoomOut') : t('aria.zoomIn')}` at `apps/web/src/components/image-zoom.tsx:343-362`, making the generic zoom control name the dominant keyboard affordance around the image.
 
 Browser evidence:
 
-- On `https://gallery.atik.kr/en/p/348`, clicking `Open fullscreen view` opened `dialog "Photo lightbox"`.
-- After a 500 ms wait, `document.activeElement` was still `<body class="antialiased min-h-screen bg-background font-sans flex flex-col" style="overflow: hidden;">`.
-- Pressing Tab moved focus to the Close button inside the dialog, proving focusable modal controls exist but initial focus was not placed there.
+- On `https://gallery.atik.kr/en/p/348`, `document.title` was `#JIHOON #DOHOON #Color in Music Festival — ATIK.KR Gallery`, but the primary image DOM had `alt="Photo"`.
+- The same primary image had `ancestorButton: true` because it sits inside the zoom wrapper, whose DOM was `DIV role="button" aria-label="Click to zoom in"` with a 340x638 px rectangle.
+- Opening the lightbox moved focus correctly to Close, but the lightbox image still had `alt="Photo"`.
 
 Failure scenario:
 
-A keyboard or screen-reader user opens the lightbox. The visual modal appears and body scroll locks, but assistive technology focus remains outside the dialog until the user presses Tab. The dialog may not be announced immediately, and the next key command starts from an ambiguous page-level focus position.
+A screen-reader user lands on a specific photo page or opens the lightbox. The page title and visual heading identify the work, but the actual image is announced as a generic photo, or the focused wrapper is announced as "Click to zoom in." In a gallery where many photos share the same topic, this prevents non-visual users from distinguishing the current image from the next one.
 
-Concrete fix:
+Suggested fix:
 
-Move initial focus ownership into the focus-trap activation path instead of relying on a separate mount effect. For example, pass `initialFocus: () => closeButtonRef.current ?? false` in the `FocusTrap` options at `apps/web/src/components/lightbox.tsx:447`, with a dialog-container fallback if needed. Keep the existing restore-on-unmount behavior. Add a browser or component test that opens the lightbox and asserts `document.activeElement` is the Close button or another intended in-dialog control after activation.
+Make the alt-text helper accept the same `tags` shape that `getPhotoDisplayTitle()` already supports, or pass `normalizedDisplayTitle` into the image alt path when admin-authored alt text is absent. For the zoom wrapper, avoid masking the child image semantics: either make the zoom control name include the current photo identity, or separate the focusable zoom control from the semantic image so the `img` alt remains discoverable. Add a regression test that renders an `ImageDetail` with tags but no title/tag_names and asserts the viewer and lightbox image alt text includes the tag-derived title.
 
-## Risks / Likely Issues
+### DES-C11-02 - The photo page advertises Space for slideshow, but Space scrolls the page there
 
-### DES-C10-RISK-01 - Custom modal surfaces still need manual AT validation for background virtual-cursor isolation
-
-Severity: Medium
-
-Confidence: Medium
-
-Classification: risk; not confirmed as an assistive-technology failure
+Severity: Medium  
+Confidence: High  
+Classification: confirmed
 
 Source evidence:
 
-- Search uses a custom `FocusTrap` plus manual `role="dialog"` / `aria-modal="true"` at `apps/web/src/components/search.tsx:327-340`.
-- Lightbox uses a custom `FocusTrap` plus manual modal shell at `apps/web/src/components/lightbox.tsx:447-453`.
-- Info bottom sheet uses a custom `FocusTrap` plus manual modal shell at `apps/web/src/components/info-bottom-sheet.tsx:185-199`.
+- The visible shortcut hint says `Space to toggle slideshow` in English at `apps/web/messages/en.json:344` and Korean at `apps/web/messages/ko.json:344`.
+- `PhotoViewer` renders that hint on the non-lightbox photo page at `apps/web/src/components/photo-viewer.tsx:575-576`.
+- The non-lightbox `PhotoViewer` keyboard handler implements ArrowLeft, ArrowRight, F, I, C, and H, but not Space, at `apps/web/src/components/photo-viewer.tsx:388-419`.
+- Space toggles slideshow only inside `Lightbox` at `apps/web/src/components/lightbox.tsx:307-319`, and the lightbox play/pause button advertises `aria-keyshortcuts="Space"` at `apps/web/src/components/lightbox.tsx:595-607`.
 
 Browser evidence:
 
-- Chromium accessibility snapshots for open search, info sheet, and lightbox still included page landmarks/background content alongside the dialog.
-- Keyboard Tab behavior worked or moved into modal controls in the sampled paths, so this is not a keyboard-tab failure by itself.
+- On `https://gallery.atik.kr/en/p/348`, the extracted page text included `Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram, Space to toggle slideshow.`
+- Pressing Space on the photo page changed `scrollY` from `0` to `137`; no lightbox dialog opened and the only live/status text remained `Photo navigation available`.
 
 Failure scenario:
 
-A VoiceOver, NVDA, or JAWS user opens search, the info sheet, or the lightbox and navigates with a virtual cursor/rotor rather than Tab. If background content remains reachable despite `aria-modal`, the user can move out of the active modal context and trigger unrelated page navigation.
+A keyboard user follows the visible shortcut guide and presses Space expecting slideshow playback. The viewport scrolls instead, moving the photo and toolbar out of position. The user now has to recover scroll position and infer that slideshow only works after opening the lightbox, even though the page did not say that.
 
-Concrete fix:
+Suggested fix:
 
-Validate the three custom modal shells with VoiceOver Safari and NVDA/Chrome or NVDA/Firefox. If background content remains reachable, migrate these shells to the existing Radix Dialog primitive or add an `inert`/`aria-hidden` sibling strategy while each modal is open. DES-C10-01 should be fixed separately for lightbox initial focus.
+Either implement Space in `PhotoViewer` by opening/toggling the lightbox slideshow, or change the page hint to scope Space explicitly to lightbox mode, such as `Open fullscreen, then Space toggles slideshow`. Keep `aria-keyshortcuts="Space"` only on controls/modes where the key actually works. Add a Playwright regression that presses Space on the photo page and asserts the chosen contract: either no scroll plus slideshow behavior, or no visible page-level Space claim.
 
-### DES-C10-RISK-02 - Authenticated admin workflows remain source-reviewed only in this pass
+### DES-C11-03 - Window-level swipe navigation fires while the mobile info sheet is open
 
-Severity: Low
-
-Confidence: High
-
-Classification: coverage risk
+Severity: Medium  
+Confidence: High  
+Classification: confirmed
 
 Source evidence:
 
-- Protected admin routes redirect unauthenticated users in `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`.
-- Admin login has labels, required fields, autocomplete, password reveal, and alert/server-error handling at `apps/web/src/app/[locale]/admin/login-form.tsx:47-108`.
-- Admin controls generally route through 44 px button/link primitives or explicit floors in `apps/web/src/components/admin-nav.tsx`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`, and `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`.
+- `PhotoNavigation` attaches `touchstart`, `touchmove`, and `touchend` listeners to `window` at `apps/web/src/components/photo-navigation.tsx:43-140`.
+- The swipe handler navigates when horizontal movement crosses `SWIPE_THRESHOLD` at `apps/web/src/components/photo-navigation.tsx:96-128`.
+- `PhotoViewer` disables `PhotoNavigation` only when `showLightbox` is true at `apps/web/src/components/photo-viewer.tsx:688-695`; it does not disable it when `showBottomSheet` is true.
+- The mobile info sheet is rendered independently at `apps/web/src/components/photo-viewer.tsx:1029-1039`, and its default open state is a `role="dialog"` sheet at `apps/web/src/components/info-bottom-sheet.tsx:184-210`.
 
 Browser evidence:
 
-- Production admin login was tested without credentials and passed the sampled checks.
-- `agent-browser state list` reported no saved auth state.
+- On mobile Chromium at `https://gallery.atik.kr/en/p/348`, opening the Info sheet produced `role="dialog"` with `aria-label="Photo Info"`.
+- A horizontal touch gesture inside the open sheet changed the URL from `/en/p/348` to `/en/p/347` and closed the sheet.
 
 Failure scenario:
 
-An authenticated-only admin table, dialog, upload flow, bulk-edit flow, or settings state could have focus order, overflow, error-state, or live-region defects that are not visible from the login page or source review alone.
+A mobile user opens photo info to inspect metadata, then performs a horizontal finger movement inside the sheet while reading or trying to interact with content. The page navigates to a different photo and dismisses the sheet, losing the user's current context. This is especially costly in shared galleries where recipients are comparing adjacent images and metadata.
 
-Concrete fix:
+Suggested fix:
 
-For the next cycle, provide a seeded local DB plus admin credentials, or save a reusable `agent-browser` auth state for a non-production reviewer account. Add a browser smoke pass covering upload, bulk edit, settings, SEO, tags, categories, analytics, and user management at desktop and mobile breakpoints.
+Scope swipe listeners to the photo canvas element rather than `window`, or disable `PhotoNavigation` whenever `showBottomSheet` is true. As a defensive guard, ignore swipes whose event target is inside `[role="dialog"]`, buttons, links, form controls, or other overlay roots. Add a mobile Playwright test that opens the info sheet, dispatches a horizontal swipe inside it, and asserts the URL/current photo id does not change.
 
-## Category Review Notes
+## Category Notes
 
-- Information architecture: public navigation exposes brand/home, topics, search, theme, locale, main content, photo cards, load-more, and footer in a coherent order. The mobile nav expand button controls only `primary-nav-controls` at `apps/web/src/components/nav-client.tsx:99-108`; topics remain visible and scrollable at `apps/web/src/components/nav-client.tsx:116-159`.
-- Affordances: icon-only controls have accessible labels or titles where appropriate. Search, theme, locale, fullscreen, info, lightbox, and password reveal controls were understandable in source and browser snapshots.
-- Focus and keyboard: skip link exists at `apps/web/src/app/[locale]/layout.tsx:119-128`; search keyboard navigation and focus trap worked in browser; info bottom sheet uses `initialFocus` at `apps/web/src/components/info-bottom-sheet.tsx:185-192`; lightbox initial focus is the confirmed exception.
-- WCAG 2.2 / contrast / ARIA: sampled controls satisfy the 44 px target-size policy; current components use visible labels, `aria-pressed`, `aria-current`, `aria-modal`, live regions, progress roles, and focus rings. Manual AT validation remains recommended for custom modal shells.
-- Reduced motion: global reduced-motion CSS suppresses transitions/animations and hover photo scale in `apps/web/src/app/[locale]/globals.css`; lightbox also observes `prefers-reduced-motion` at `apps/web/src/components/lightbox.tsx:92-109`.
-- Responsive behavior: desktop and 390 px mobile public pages, mobile nav expansion, mobile search, mobile photo detail, info sheet, and lightbox had no horizontal overflow in sampled DOM measurements.
-- Loading/empty/error states: home empty state and clear-filter affordance are present at `apps/web/src/components/home-client.tsx:424-438`; search loading/no-result/results live text is in `apps/web/src/components/search.tsx`; local app error shell was reachable when DB was down.
-- Form validation UX: login uses visible labels, native required validation, autocomplete, password reveal, pending submit text, and role-alert server errors at `apps/web/src/app/[locale]/admin/login-form.tsx:47-108`.
-- Dark/light mode: production home and reviewed token styles did not expose a confirmed contrast issue. OLED was source-reviewed but not separately browser-measured in this pass.
-- i18n/RTL: English and Korean public routes produced localized labels and `lang` values; `dir="ltr"` is explicit at `apps/web/src/app/[locale]/layout.tsx:94-100`. No RTL locale ships today, so RTL remains future-work rather than a current defect.
-- Perceived performance: production home loaded representative image/RSC assets without observed broken public DOM. Search results updated live after input. Local dev performance could not be judged because local DB state was unavailable.
+- Information architecture: public navigation, topic filters, photo pages, and admin nav are coherent. The photo viewer is the main IA weak spot because its mode-specific shortcut contract is not explicit enough.
+- Visual design: tokenized HSL/OKLCH themes, OLED mode, forced-colors handling, 44 px touch targets, and dark photo-viewing surfaces are generally strong. No new contrast failure was confirmed in this pass.
+- Interaction design: lightbox focus is now correct, search has an explicit focus trap/combobox structure, and info sheet initial focus is deliberate. The remaining friction is mode leakage: Space belongs to lightbox but is advertised on the page, and swipe navigation belongs to the photo canvas but listens globally.
+- Accessibility: skip link, landmarks, live regions, focus rings, and touch target work are visible in source/runtime. The alt-text regression is significant because it affects the primary object of the page.
+- Responsive states: sampled mobile photo page had no horizontal overflow. The confirmed mobile sheet swipe bug is interaction-scoping, not layout overflow.
+- Loading/empty/error states: local DB failure reached the app error shell; source includes home empty states, search no-result/loading states, admin upload progress, and table empty rows.
+- i18n: English/Korean strings are present for the reviewed surfaces. The shortcut mismatch exists in both locales.
+- Perceived performance: masonry uses responsive derivatives and content visibility; viewer/lightbox preloading and reduced-motion branches are present. No new performance defect was confirmed.
 
 ## Verification
 
-Targeted tests run:
+- Source inventory completed with `find`/`rg` over `apps/web/src/app`, `apps/web/src/components`, `apps/web/messages`, `apps/web/src/lib`, and UI-related tests.
+- Runtime evidence collected with Playwright against production photo page and lightbox; local dev server verified shell/error behavior but local gallery data was unavailable due DB query failure.
+- No production code changed. Review artifact only.
 
-```sh
-npm test --workspace=apps/web -- src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/error-shell.test.ts src/__tests__/lightbox-controls-contract.test.ts src/__tests__/info-bottom-sheet-ia.test.ts src/__tests__/hdr-badge-contrast.test.ts
-```
-
-Result: 7 test files passed, 62 tests passed.
-
-Not run: full lint, typecheck, build, or full test suite. This lane changed only a review artifact and did not edit application source.
-
-## Files Reviewed / Inventory Summary
-
-- Full route/component inventory was built with `rg --files` across `apps/web/src/app`, `apps/web/src/components`, `apps/web/messages`, `apps/web/src/lib`, and `apps/web/src/__tests__`.
-- Source-reviewed public UI: layout, navigation, home masonry, search, photo viewer, lightbox, info bottom sheet, error shell, and responsive token CSS.
-- Source-reviewed admin UI: login, protected layout/nav, dashboard/upload manager, image manager, settings, and related form/control primitives.
-- Browser-reviewed live UI: public desktop home, public mobile Korean home, expanded mobile nav, search dialog, photo detail, info bottom sheet, lightbox, and unauthenticated admin login.
-
-## Final Missed-Issue Sweep
-
-- Rechecked hidden controls: back-to-top is not keyboard reachable while hidden (`aria-hidden` and `tabIndex` track visibility at `apps/web/src/components/home-client.tsx:440-451`).
-- Rechecked modal basics: search and info bottom sheet initial focus worked in Chromium; lightbox initial focus failed and is filed as DES-C10-01.
-- Rechecked touch targets: source/test/runtime samples support the 44 px policy.
-- Rechecked public responsive samples: no horizontal overflow at desktop or mobile.
-- Rechecked admin coverage boundary: login is validated in browser; protected admin remains source-only pending auth state.
+Not run: full lint/typecheck/build/test suite, because this pass modified only `.context/reviews/designer.md`.
