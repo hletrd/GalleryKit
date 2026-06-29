@@ -254,6 +254,17 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(LR_SRC).toMatch(/settleTrackerToActual\(true,\s*fileSize\)/);
     });
 
+    it('settles the preclaim if topic lookup throws after upload quota is claimed', () => {
+        const topicLookupBlock = LR_SRC.match(
+            /try\s*\{\s*\[topicRow\]\s*=\s*await db\.select\(\{ slug: topics\.slug \}\)[\s\S]*?\}\s*catch \(err\) \{[\s\S]*?\n\s{8}\}/,
+        );
+        expect(topicLookupBlock).not.toBeNull();
+        const block = topicLookupBlock?.[0] ?? '';
+        expect(block).toContain('settleTrackerToActual(false)');
+        expect(block).toContain("console.error('LR upload: failed to verify topic', err)");
+        expect(block).toMatch(/status:\s*500/);
+    });
+
     it('uses the auth-wrapper token context instead of re-verifying the PAT', () => {
         expect(LR_SRC).not.toMatch(/verifyToken/);
         expect(LR_SRC).toMatch(/getAdminAuthToken\(request\)\?\.userId/);

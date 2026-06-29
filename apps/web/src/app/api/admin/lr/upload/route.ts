@@ -195,11 +195,19 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Description too long (max 5000 characters)' }, { status: 400, headers: NO_CACHE });
         }
 
-        // Verify topic exists
-        const [topicRow] = await db.select({ slug: topics.slug })
-            .from(topics)
-            .where(eq(topics.slug, topicSlug))
-            .limit(1);
+        // Verify topic exists. This runs after the conservative upload preclaim,
+        // so thrown DB errors must settle the claim before returning.
+        let topicRow: { slug: string } | undefined;
+        try {
+            [topicRow] = await db.select({ slug: topics.slug })
+                .from(topics)
+                .where(eq(topics.slug, topicSlug))
+                .limit(1);
+        } catch (err) {
+            settleTrackerToActual(false);
+            console.error('LR upload: failed to verify topic', err);
+            return NextResponse.json({ error: 'Upload failed' }, { status: 500, headers: NO_CACHE });
+        }
         if (!topicRow) {
             settleTrackerToActual(false);
             return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
