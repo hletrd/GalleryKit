@@ -5,6 +5,8 @@ node_modules
 .omx
 .omc
 .agent
+.claude
+.claude/
 ._*
 *.tsbuildinfo
 .github

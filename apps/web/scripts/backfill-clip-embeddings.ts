@@ -4,7 +4,7 @@
  * One-shot operator script — NOT run automatically. Invoke manually:
  *
  *   cd apps/web && npx tsx scripts/backfill-clip-embeddings.ts             # stub mode
- *   cd apps/web && npx tsx scripts/backfill-clip-embeddings.ts --production # real encoder
+ *   cd apps/web && npx tsx scripts/backfill-clip-embeddings.ts --production --force # pre-enable real encoder backfill
  *
  * In production the runtime container has prod-deps only and lacks tsx + the
  * TypeScript source files, so run this via an `--rm` sidecar off the just-built
@@ -18,7 +18,7 @@
  *     -v .../data/models/clip:/app/data/models/clip:ro \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \
- *     sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production"
+ *     sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production --force"
  *
  * What it does
  * ────────────
@@ -53,8 +53,10 @@
  *
  * --production: use the real jina-clip-v2 encoder + PRODUCTION_MODEL_VERSION
  *               instead of the stub.
- * --force:      skip the semantic_search_mode gate (useful for pre-population
- *               before flipping the setting in admin).
+ * --force:      skip the semantic_search_mode gate. Use this for pre-enable
+ *               production backfills before flipping the DB setting; plain
+ *               --production is only suitable after semantic_search_mode is
+ *               already stub/production.
  */
 
 import * as dotenv from 'dotenv';

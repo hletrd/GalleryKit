@@ -81,7 +81,7 @@ ENV NODE_ENV=production
 # Disable next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
+ENV HOSTNAME="127.0.0.1"
 ENV UPLOAD_ORIGINAL_ROOT="/app/data/uploads/original"
 # CLIP model weights root — weights are NOT baked into the image.
 # They are seeded once on the deploy host into ./data/models/clip (the ./data

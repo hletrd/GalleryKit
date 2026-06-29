@@ -38,7 +38,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 ## Plans, reviews, conventions
 
-- `.context/reviews/` is the running history of audits (committed). `.context/plans/` is gitignored — local plan-management artifacts only.
+- `.context/reviews/` and `.context/plans/` are committed review/plan history. Keep local-only scratch plans in ignored workspace paths rather than assuming `.context/plans/` is private.
 - Photographer-perspective audits: see `.context/reviews/photographer-r{3,4}/` and `cycle{1..8}-rpf-photographer/`.
 - Touch targets: 44 px minimum on every interactive element. Enforced by `__tests__/touch-target-audit.test.ts`.
 - Color/HDR convention: photos arrive AFTER editing. Deliver photographer's intent accurately. **No edit / culling / scoring features.**
