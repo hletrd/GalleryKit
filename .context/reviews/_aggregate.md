@@ -1,10 +1,10 @@
-# Cycle 7/100 Aggregate Review
+# Cycle 9/100 Aggregate Review
 
 Date: 2026-06-29
 Repo: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `17124135999a3d7cb4f5262e8b2b5917503088ae`
+Reviewed HEAD range: `adb1ae67` through reviewer artifact commits ending at `35b4ce23`
 
-## Agent Coverage
+## Reviewer Coverage
 
 Completed review artifacts:
 
@@ -20,266 +20,327 @@ Completed review artifacts:
 - `.context/reviews/document-specialist.md`
 - `.context/reviews/designer.md`
 - `.context/reviews/product-marketer-reviewer.md`
-- `.context/reviews/ui-ux-designer-reviewer.md`
 
-UI/UX browser review was in scope because this is a Next.js web app. Local DB-backed rendering was blocked by local MySQL `ECONNREFUSED`, so UI lanes used source evidence plus the live `https://gallery.atik.kr` deployment for public DOM/accessibility checks.
+UI/UX review was in scope because GalleryKit is a Next.js web app. The designer lane used `agent-browser` against the deployed public site because local DB-backed rendering returned a DB-unavailable error shell. Local/source review covered authenticated admin pages.
 
-## AGENT FAILURES
+## Agent Failures
 
-None. Every required and discovered reviewer lane returned a report.
+None. Native child-agent concurrency limited the fan-out to waves, but every required and discovered reviewer-style lane returned a report.
 
 ## Merged Findings
 
-### C7-01 - Upload write paths use fail-open gallery config defaults for privacy and processing settings
+### C9-01 - First-page public listing queries aggregate tags and count the full matched set
 
 Severity: High
 Confidence: High
 Status: Confirmed
-Sources: architect
-
-Evidence: `apps/web/src/lib/gallery-config.ts:103-212`, `apps/web/src/lib/gallery-config-shared.ts:91-109`, `apps/web/src/app/actions/images.ts:175-177`, `apps/web/src/app/actions/images.ts:309-342`, `apps/web/src/app/api/admin/lr/upload/route.ts:234-340`.
-
-`getGalleryConfig()` catches any `admin_settings` read failure and returns fresh-install defaults. That fallback is used by browser and Lightroom upload write paths. If an operator enabled `strip_gps_on_upload=true` and the settings read fails while later upload DB work succeeds, the upload can skip original-file GPS stripping and accept the image as successful. Split strict ingest config from render config or fail uploads closed when settings cannot be read.
-
-### C7-02 - Color backfill can generate undersized derivatives from stale database width
-
-Severity: High
-Confidence: High
-Status: Confirmed
-Sources: verifier, debugger
-
-Evidence: `apps/web/src/lib/process-image.ts:1050-1064`, `apps/web/src/lib/process-image.ts:1145-1148`, `apps/web/src/lib/admin-backfill-runner.ts:502-517`, `apps/web/scripts/backfill-color-pipeline.ts:206-221`.
-
-`processImageFormats()` reads fresh Sharp metadata and comments that caller `baseWidth` is ignored, but `processingBaseWidth` still initializes from the caller/DB value unless the wide-gamut downscale branch runs. Backfill callers pass `images.width`. A stale small DB width can collapse all configured derivative sizes to that stale width while still advancing `pipeline_version`. Use the fresh metadata width for normal processing and add a stale-width regression test.
-
-### C7-03 - Tag filter state and next URLs diverge from canonical server-filtered tags
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-Sources: code-reviewer, test-engineer, tracer, debugger, designer, ui-ux-designer-reviewer
-
-Evidence: `apps/web/src/app/[locale]/(public)/page.tsx:161-166`, `apps/web/src/app/[locale]/(public)/page.tsx:221-223`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:172-177`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:214`, `apps/web/src/components/home-client.tsx:259-270`, `apps/web/src/components/home-client.tsx:438-447`, `apps/web/src/components/tag-filter.tsx:13-39`, `apps/web/src/components/tag-filter.tsx:61-92`.
-
-Server pages canonicalize `tags` through existing-tag filtering and pass that canonical list to `HomeClient`, but `TagFilter` ignores it and rebuilds active state and next URLs from raw `useSearchParams()`. URLs such as `/en?tags=not-a-real-tag` render unfiltered results while no chip, including `All`, is pressed; valid toggles can preserve invalid slugs. Pass canonical `currentTags` into `TagFilter`, use it for `aria-pressed`/variants/toggle math, and add behavioral coverage.
-
-### C7-04 - Initial public listing queries aggregate tags and count across the full matched set
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
 Sources: perf-reviewer
 
-Evidence: `apps/web/src/lib/data.ts:872-900`, `apps/web/src/lib/data.ts:1403-1447`, `apps/web/src/app/[locale]/(public)/page.tsx:149-166`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-176`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`.
+Evidence: `apps/web/src/lib/data.ts:877-905`, `apps/web/src/lib/data.ts:1437-1452`, `apps/web/src/app/[locale]/(public)/page.tsx:149-166`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-176`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`.
 
-First-page home/topic/smart-collection listing queries select tag aggregation and `COUNT(*) OVER()` in the grouped listing query. MySQL must group/count the full matched set before returning the first page. Split first-page card fetch into bounded ID selection plus tag enrichment, and keep exact counts separate only where the UI truly needs them.
+The initial home/topic/smart-collection listing paths still join/aggregate tags and compute `COUNT(*) OVER()` across the full matched set before returning the first page. On a large gallery, a crawler or visitor hitting broad listings can force MySQL to group/count many rows even though the UI renders one page.
 
-### C7-05 - Analytics top tables lack bot/time/entity indexes
+Suggested fix: split initial listing into bounded ID selection plus tag enrichment for those IDs. Use `hasMore` where exact counts are not essential, or isolate exact counts to a cheaper image-only query. Validate with query-shape/source tests and, if possible, `EXPLAIN`.
 
-Severity: Medium
-Confidence: High
-Status: Likely issue confirmed by query/index mismatch
-Sources: perf-reviewer
-
-Evidence: `apps/web/src/lib/analytics-data.ts:28-46`, `apps/web/src/lib/analytics-data.ts:62-79`, `apps/web/src/lib/analytics-data.ts:161-180`, `apps/web/src/db/schema.ts:221-254`.
-
-Admin top photo/topic/shared-group queries filter `bot=false` and optional `viewed_at >= since`, then group by image/topic/group. Current indexes do not cover those access patterns for all three tables. Add matching composite indexes after `EXPLAIN` sizing, with migration/reconcile coverage.
-
-### C7-06 - View-event retention deletes lack viewed_at-leading indexes on topic/share tables
-
-Severity: Medium
-Confidence: Medium
-Status: Confirmed
-Sources: architect
-
-Evidence: `apps/web/src/lib/view-retention.ts:64-81`, `apps/web/src/db/schema.ts:228-253`.
-
-Retention purges use `WHERE viewed_at < cutoff`, but `topic_views` and `shared_group_views` indexes begin with `topic` / `group_id`. The hourly retention safety valve can degrade into broad scans as anonymous event tables grow. Add `viewed_at`-leading retention indexes or change purge shape deliberately.
-
-### C7-07 - Real CLIP inference has no process-wide concurrency governor
-
-Severity: Medium
-Confidence: Medium
-Status: Likely issue
-Sources: perf-reviewer
-
-Evidence: `apps/web/src/lib/clip-model.ts:76-108`, `apps/web/src/lib/clip-model.ts:118-140`, `apps/web/src/lib/clip-model.ts:151-199`, `apps/web/src/app/api/search/semantic/route.ts:178-240`, `apps/web/src/lib/image-queue.ts:530-589`.
-
-Model loading is deduped, but CPU-heavy `model(...)` inference calls are unbounded across public semantic search and background image embedding. Add a small process-wide limiter around text and image inference, defaulting to concurrency 1 and configurable for operators.
-
-### C7-08 - Upload preview renders every selected full-size file at once
+### C9-02 - Analytics retention deletes lack viewed_at-leading purge indexes
 
 Severity: Medium
 Confidence: High
 Status: Confirmed
-Sources: perf-reviewer
+Sources: perf-reviewer, architect
 
-Evidence: `apps/web/src/components/upload-dropzone.tsx:45-49`, `apps/web/src/components/upload-dropzone.tsx:95-123`, `apps/web/src/components/upload-dropzone.tsx:451-489`.
+Evidence: `apps/web/src/lib/view-retention.ts:56-81`, `apps/web/src/db/schema.ts:231-259`.
 
-The admin uploader permits up to 100 files / 2 GiB, creates object URLs for every selected file, and renders all previews as raw `<img>` nodes without lazy/async decode or a visible-window cap. Add immediate `loading="lazy"` and `decoding="async"` and consider capping/virtualizing preview count later.
+The hourly retention worker deletes rows with `viewed_at < cutoff`, but current indexes on `image_views`, `topic_views`, and `shared_group_views` are led by entity or `bot`, not `viewed_at`. As anonymous event tables grow, retention can degrade into broad scans and lock/IO pressure.
 
-### C7-09 - Masonry/share grids can break when AVIF/WebP sized sources 404
+Suggested fix: add dedicated `viewed_at`-leading purge indexes such as `(viewed_at, id)` on all three view tables, with Drizzle migration journal, schema, reconcile coverage, and tests.
+
+### C9-03 - Retry failed image can report success when re-enqueue is rejected
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Sources: debugger
+
+Evidence: `apps/web/src/app/actions/images.ts:1196-1239`, `apps/web/src/lib/image-queue.ts:388-400`, `apps/web/src/lib/image-queue.ts:828`, `apps/web/src/__tests__/failed-image-retry.test.ts:99-105`.
+
+`retryFailedImage()` clears `processing_error`, `failed_at`, and in-memory failure maps before calling `enqueueImageProcessing(...)`, but ignores the boolean return. If the queue rejects the job during shutdown, maintenance, invalid filenames, or permanent-failure state, the action still reports success and the image can disappear from the failed-image admin surface.
+
+Suggested fix: validate enqueue prerequisites before clearing failure state, or restore/preserve failure state when `enqueueImageProcessing` returns false. Add a behavioral test for rejected enqueue.
+
+### C9-04 - Docker native package names break on linux/amd64
 
 Severity: Medium
 Confidence: High
 Status: Confirmed
 Sources: critic
 
-Evidence: `apps/web/src/components/home-client.tsx:339-377`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:236-263`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:194-217`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:199-233`, fallback patterns in `apps/web/src/components/photo-viewer.tsx:421-549` and `apps/web/src/components/lightbox.tsx:402-519`.
+Evidence: `apps/web/Dockerfile:38-51`, `apps/web/README.md:48-49`, `CLAUDE.md:17`, `CLAUDE.md:556-559`.
 
-Grid surfaces rely on `<picture>` fallback to base JPEG, but modern browsers do not fall back to `img.src` when a matching AVIF/WebP `<source>` 404s. Viewer/lightbox already drop failed sources. Reuse that stateful source fallback for grid cards.
+The Dockerfile interpolates Docker BuildKit `TARGETARCH` directly into native npm package names. Docker uses `amd64`, while the npm packages use `x64`, so x86_64 Linux builds try to install nonexistent names such as `@next/swc-linux-amd64-gnu`.
 
-### C7-10 - Parallel derivative generation can clean up before sibling encoders stop writing
+Suggested fix: normalize `TARGETARCH` to npm arch (`amd64 -> x64`, `arm64 -> arm64`) before installing native optional packages. Add a source-contract test rejecting raw `${TARGETARCH}` in native npm package names.
 
-Severity: Medium
-Confidence: Medium
-Status: Likely issue
-Sources: critic
-
-Evidence: `apps/web/src/lib/process-image.ts:1342-1348`, `apps/web/src/lib/process-image.ts:1374-1389`, retry callers in `apps/web/src/lib/image-queue.ts` and backfill callers.
-
-`processImageFormats()` runs WebP/AVIF/JPEG branches with `Promise.all()`. If one branch rejects, cleanup starts while sibling promises may still write/rename files. Use `Promise.allSettled()` so cleanup waits for all branches and then throws the first/aggregate error.
-
-### C7-11 - Semantic/similar enrichment failures return successful empty results
+### C9-05 - Lightroom token UI grants unimplemented future scopes and obscures non-expiring default
 
 Severity: Medium
 Confidence: High
 Status: Confirmed
-Sources: critic
-
-Evidence: `apps/web/src/app/api/search/semantic/route.ts:288-335`, `apps/web/src/app/api/search/similar/[id]/route.ts:189-236`, clients in `apps/web/src/components/search.tsx` and `apps/web/src/components/similar-photos.tsx`.
-
-When CLIP scoring finds candidates but the metadata enrichment query fails, both routes log the error and return HTTP 200 with empty results. Clients render that as "no matches" rather than an infrastructure failure. Return 500/503 when enrichment fails after matches exist.
-
-### C7-12 - CLIP search silently searches only the newest capped embedding window
-
-Severity: Low
-Confidence: High
-Status: Risk needing manual validation
-Sources: critic
-
-Evidence: `apps/web/src/lib/clip-embeddings.ts:22-44`, `apps/web/src/app/api/search/semantic/route.ts:242-251`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-150`, `apps/web/README.md:53-62`, `CLAUDE.md:534-538`.
-
-Semantic/similar routes scan only the newest `SEMANTIC_SCAN_LIMIT` rows. Docs mention bounded scan, but the UI does not indicate that old photos may be invisible once the corpus exceeds the cap. Surface the limitation in UI/admin settings or move toward a vector index strategy.
-
-### C7-13 - Upload-time processing settings are not durably owned after restart
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-Sources: architect
-
-Evidence: `apps/web/src/app/actions/images.ts:467-502`, `apps/web/src/app/api/admin/lr/upload/route.ts:436-477`, `apps/web/src/lib/image-queue.ts:385-428`, `apps/web/src/lib/image-queue.ts:744-784`.
-
-Upload actions pass a processing settings snapshot to the in-memory queue, but pending DB rows survive restarts while queue snapshots do not. Bootstrap reconstructs jobs from row fields and current config, so accepted-but-unprocessed images can be encoded under later settings after deploy/crash. Persist a processing settings snapshot or job table for pending rows.
-
-### C7-14 - Permanent failed-image suppression is process-local after restart
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-Sources: architect
-
-Evidence: `apps/web/src/lib/image-queue.ts:163-169`, `apps/web/src/lib/image-queue.ts:605-641`, `apps/web/src/lib/image-queue.ts:732-740`, `apps/web/src/app/actions/images.ts:1147-1185`.
-
-Permanent suppression is stored in `permanentlyFailedIds`, while durable DB fields `processing_error` / `failed_at` power the admin retry UI. After a deploy, bootstrap can re-enqueue failed rows without admin retry intent. Exclude failed rows during bootstrap until `retryFailedImage()` clears their failure fields.
-
-### C7-15 - Lightroom token docs point to Settings while token management is an unlinked Tokens page
-
-Severity: Medium
-Confidence: High
-Status: Confirmed
-Sources: document-specialist
-
-Evidence: `CLAUDE.md:152`, `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`, `apps/web/src/components/admin-nav.tsx:15-25`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-
-Docs say Lightroom tokens can be rotated/revoked from Settings, but the UI is a dedicated `/admin/tokens` page and the admin nav does not link to it. Add a Tokens nav item with localized labels and update docs.
-
-### C7-16 - Semantic search route header describes stale stub-only/random behavior
-
-Severity: Low
-Confidence: High
-Status: Confirmed
-Sources: document-specialist
-
-Evidence: `apps/web/src/app/api/search/semantic/route.ts:8-20`, `apps/web/src/app/api/search/semantic/route.ts:232-251`, `apps/web/src/lib/clip-inference.ts:6-13`, `apps/web/src/lib/clip-inference.ts:63-72`.
-
-The route header still says queries embed via the stub encoder and describes stub output as random. Current code supports production `embedTextReal`, model-version separation, production threshold, and deterministic stub embeddings. Update the comment to match current behavior.
-
-### C7-17 - Fresh-install docs say to upload before creating the required category
-
-Severity: High
-Confidence: High
-Status: Confirmed product-onboarding defect
 Sources: product-marketer-reviewer
 
-Evidence: `README.md:91-104`, `apps/web/README.md:11-21`, `apps/web/scripts/init-db.ts`, `apps/web/scripts/migrate.js`, `apps/web/src/components/upload-dropzone.tsx:191-196`, `apps/web/src/components/upload-dropzone.tsx:347-357`, `apps/web/messages/en.json:146-148`.
+Evidence: `apps/web/messages/en.json:781-806`, `apps/web/messages/ko.json:831-856`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:57-61`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:128-181`, `apps/web/src/app/actions/lr-tokens.ts:28-93`, `apps/web/src/lib/admin-tokens.ts:24-25`, `apps/web/src/app/api/admin/lr/upload/route.ts:527`.
 
-The quick-start flow seeds admin but not topics/categories, then instructs the operator to upload a photo. The uploader is intentionally disabled until a category exists. Update both READMEs to create a category first, then upload.
+The UI creates every Lightroom token with `lr:upload`, `lr:read`, and `lr:delete`, but only upload is currently implemented. If read/delete endpoints are added later, old tokens will silently gain those powers. The UI also creates non-expiring tokens by default but does not label blank expiry as "never expires".
 
-### C7-18 - Mobile nav toggle claims it controls visible topic links while collapsed
+Suggested fix: mint only `lr:upload` until scope selection/read/delete endpoints exist, update copy, and show explicit "Never expires; revoke to disable" for non-expiring tokens. Add tests around minted scopes and expiry display.
+
+### C9-06 - Public analytics writes trust client-supplied internal IDs
+
+Severity: Medium
+Confidence: Medium
+Status: Confirmed risk in current code path
+Sources: critic
+
+Evidence: `apps/web/src/app/actions/public.ts:319-414`, `apps/web/src/db/schema.ts:220-260`, `apps/web/src/lib/analytics-data.ts:28-53`, `apps/web/src/lib/analytics-data.ts:161-185`.
+
+Public view-recording actions validate only primitive ID syntax before inserting analytics events. They do not verify route context, processed/public photo state, share key validity, or expiry. Abuse can pollute analytics and create avoidable DB writes within the single-writer topology.
+
+Suggested fix: insert analytics via context-derived identifiers or `INSERT ... SELECT` predicates that prove the target is public/processed/valid. For shared groups, record by share key or a signed per-page token and require unexpired group visibility.
+
+### C9-07 - New uploads can become permanently absent from production semantic search
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Sources: critic
+
+Evidence: `apps/web/src/lib/image-queue.ts:556-683`, `apps/web/src/lib/image-queue.ts:823-859`, `CLAUDE.md:151`, `apps/web/README.md:53-73`.
+
+The queue marks `processed=true` before CLIP embedding side effects complete. Embedding failures are caught and logged, while bootstrap only re-enqueues `processed=false` rows. A visible photo can therefore miss production semantic/similar search indefinitely until manual backfill.
+
+Suggested fix: persist embedding status/error/attempt fields or a durable embedding job table, and retry missing/failed active-model embeddings independently from image processing.
+
+### C9-08 - setTopicMapVisible lacks runtime boolean validation at the server-action boundary
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Sources: code-reviewer
+
+Evidence: `apps/web/src/app/actions/topics.ts:594-614`, `apps/web/src/db/schema.ts:4-12`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:66`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:244-245`.
+
+`setTopicMapVisible(topicSlug, mapVisible)` validates the slug but trusts TypeScript for `mapVisible`. Server actions are runtime boundaries; malformed serialized values can be coerced by Drizzle/MySQL or throw generic failures on a public GPS visibility flag.
+
+Suggested fix: reject `typeof mapVisible !== 'boolean'` before persistence and add a malformed-value regression test.
+
+### C9-09 - DB restore temp dump can survive exceptions after upload save
 
 Severity: Low
 Confidence: High
 Status: Confirmed
-Sources: designer
+Sources: code-reviewer
 
-Evidence: `apps/web/src/components/nav-client.tsx:99-107`, `apps/web/src/components/nav-client.tsx:117-123`, `apps/web/src/components/nav-client.tsx:155-159`.
+Evidence: `apps/web/src/app/[locale]/admin/db-actions.ts:434-493`, `apps/web/src/app/[locale]/admin/db-actions.ts:499-585`.
 
-The mobile toggle uses `aria-controls="primary-nav-topics primary-nav-controls"` while the topic list remains visible and operable in collapsed mobile mode. Remove `primary-nav-topics` from the controlled region and name the toggle for the tools/controls it actually reveals, or hide/inert the topic list when collapsed.
+`runRestore` writes the uploaded SQL dump to a mode-0600 temp file, but cleanup after the write is split across expected branches and child-process handlers. Exceptions during header read, stat, scan open/read, env validation, or child-process setup can bypass unlink and leave plaintext SQL in `os.tmpdir()`.
 
-### C7-19 - Search result accessible names repeat generic thumbnail text
+Suggested fix: make one idempotent cleanup owner for the entire post-write flow with a `finally` that unlinks unless already removed. Add a focused cleanup test.
+
+### C9-10 - Bulk update reports requested image count rather than existing/changed rows
+
+Severity: Low
+Confidence: Medium
+Status: Likely issue
+Sources: code-reviewer
+
+Evidence: `apps/web/src/app/actions/images.ts:940-963`, `apps/web/src/app/actions/images.ts:1024-1037`, `apps/web/src/app/actions/images.ts:1091-1134`, `apps/web/src/app/actions/tags.ts:304-343`.
+
+`bulkUpdateImages` validates requested IDs but does not canonicalize to existing IDs inside the transaction. Under concurrent deletion, it can update fewer rows than requested while logging and returning `count: ids.length`.
+
+Suggested fix: select existing IDs inside the transaction before scalar/tag mutations, use that set for writes/audit/return count, and warn or fail on missing IDs.
+
+### C9-11 - Upload preview creates and renders every selected file at once
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Sources: perf-reviewer
+
+Evidence: `apps/web/src/components/upload-dropzone.tsx:45-49`, `apps/web/src/components/upload-dropzone.tsx:95-123`, `apps/web/src/components/upload-dropzone.tsx:458-490`.
+
+The uploader permits 100 files and 2 GiB per batch, creates an object URL for every selected file, and renders every preview card. `loading="lazy"` and `decoding="async"` reduce decode pressure but not object URL creation or initial React/render work.
+
+Suggested fix: cap or virtualize previews, show a remaining-file count, and generate/release thumbnail previews incrementally.
+
+### C9-12 - Semantic scan limit hard maximum is unsafe if misconfigured
+
+Severity: Medium
+Confidence: Medium
+Status: Risk needing manual validation
+Sources: perf-reviewer, tracer
+
+Evidence: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:242-280`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`.
+
+`SEMANTIC_SCAN_LIMIT` defaults to 2000 but allows up to 1,000,000. A public request at that configured limit can materialize gigabytes of embedding data and scoring overhead in one Next.js process.
+
+Suggested fix: lower the hard maximum to a host-budgeted value until vector indexing/streamed batches exists; warn/fail on unsafe configuration.
+
+### C9-13 - AVIF bit-depth metadata can overstate the base/downloadable AVIF
+
+Severity: Low
+Confidence: Medium
+Status: Likely issue
+Sources: critic
+
+Evidence: `apps/web/src/lib/process-image.ts:1018-1024`, `apps/web/src/lib/process-image.ts:1224-1262`, `apps/web/src/lib/process-image.ts:1409`, `apps/web/src/lib/image-queue.ts:542-560`, `apps/web/src/components/color-details-section.tsx:471-497`, `apps/web/src/components/lightbox-color-pip.tsx:237-256`.
+
+`avif10bit` is an image-level boolean set after any high-bitdepth AVIF encode succeeds. If an early size succeeds at 10-bit but a later/larger base/download derivative falls back to 8-bit, the UI can label the delivered AVIF as 10-bit.
+
+Suggested fix: track base/largest AVIF bit depth explicitly or store richer per-output status. Test mixed success/fallback behavior.
+
+### C9-14 - Shared-group durable analytics and denormalized view counts can diverge
 
 Severity: Low
 Confidence: High
 Status: Confirmed
-Sources: designer
+Sources: critic
 
-Evidence: `apps/web/src/components/search.tsx:71-85`, `apps/web/src/components/search.tsx:99-103`.
+Evidence: `apps/web/src/lib/data.ts:1312-1327`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:93-119`, `apps/web/src/lib/data.ts:120-125`, `apps/web/src/lib/analytics-data.ts:140-185`.
 
-Search result rows include an image `alt` such as "Photo" plus adjacent visible fallback text such as "Photo 348", producing names like "Photo Photo 348 ...". Make thumbnails decorative in result rows or derive a single non-duplicated accessible label.
+For numeric-but-invalid `photoId` share URLs, `getSharedGroup()` can increment denormalized `view_count` while the page skips durable `shared_group_views` because `photoId` is truthy. Admin counters can diverge.
 
-### C7-20 - TLS/HSTS deployment assumptions require live validation
+Suggested fix: centralize "counts as group view" resolution and use the same boolean for the buffer and durable event, or make the route own both counters after selected-image validation.
 
-Severity if misdeployed: High
+### C9-15 - Lightroom upload can relay raw processor errors to PAT callers
+
+Severity: Low
 Confidence: Medium
-Status: Manual-validation risk
+Status: Confirmed defensive-boundary issue
 Sources: security-reviewer
 
-Evidence: `apps/web/nginx/default.conf:21-28`, `apps/web/nginx/default.conf:47-53`.
+Evidence: `apps/web/src/app/api/admin/lr/upload/route.ts:284-304`, `apps/web/src/lib/process-image.ts:844-887`.
 
-The checked-in nginx config listens on cleartext port 80 and assumes an external TLS edge while also emitting HSTS. Validate production HTTPS termination and port-80 redirect/blocking, or add deploy-time probes/edge config docs.
+The Lightroom PAT upload route returns `err.message` for non-RAW `saveOriginalAndGetMetadata()` failures. Current errors are mostly generic, but future filesystem/codec/internal errors could expose implementation details to token callers.
 
-### C7-21 - Client-IP trust depends on exact proxy-chain topology
+Suggested fix: return a fixed client message for unknown non-RAW failures and log detailed exceptions server-side. Keep explicit RAW rejection user-actionable.
 
-Severity if misconfigured: Medium
+### C9-16 - Sidecar deleted-mid-reencode cleanup can make a committed batch fail
+
+Severity: Low
 Confidence: Medium
-Status: Manual-validation risk
-Sources: security-reviewer
+Status: Likely issue
+Sources: debugger
 
-Evidence: `apps/web/docker-compose.yml:14-21`, `apps/web/nginx/default.conf`, `apps/web/src/lib/rate-limit.ts:152-180`.
+Evidence: `apps/web/scripts/backfill-color-pipeline.ts:127-132`, `apps/web/scripts/backfill-color-pipeline.ts:400-459`, `apps/web/src/lib/admin-backfill-runner.ts:430-439`.
 
-`TRUST_PROXY=true` and forwarded headers require the live proxy chain to overwrite/normalize client IP headers correctly. Validate real-IP handling and `TRUSTED_PROXY_HOPS` with representative headers.
+After a sidecar DB batch commits, deleted-mid-reencode cleanup awaits raw `Promise.all(...)`. A cleanup failure can turn post-commit best-effort orphan removal into a fatal run failure, while the in-app runner catches/logs the same cleanup class.
 
-### C7-22 - Process-local security/coordination controls would weaken under scale-out
+Suggested fix: catch cleanup failures inside the sidecar helper, log context, and optionally count cleanup warnings instead of throwing after committed DB work.
 
-Severity if scaled out: Medium
+### C9-17 - Semantic and OG rate-limit comments/tests contain stale rollback descriptions
+
+Severity: Low
 Confidence: High
-Status: Topology risk
-Sources: security-reviewer, architect
+Status: Confirmed stale artifact
+Sources: debugger
 
-Evidence: `apps/web/docker-compose.yml:11-21`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/upload-tracker-state.ts`, `apps/web/src/lib/restore-maintenance.ts`.
+Evidence: `apps/web/src/lib/rate-limit.ts:17-30`, `apps/web/src/lib/rate-limit.ts:323-340`, `apps/web/src/app/api/search/semantic/route.ts:12-16`, `apps/web/src/app/api/search/semantic/route.ts:181-230`, `apps/web/src/__tests__/semantic-search-route.test.ts:187`, `apps/web/src/__tests__/og-photo-fallback.test.ts:9-10`, `apps/web/src/app/api/og/photo/[id]/route.tsx:126-131`.
 
-The repo documents a single web-instance topology. Restore flags, upload accounting, and several limiter buckets are process-local. Keep single-instance deployment as an invariant or move coordination state to a shared store before horizontal scale-out.
+Central comments describe rollback behavior that no longer matches locked route behavior for semantic malformed bodies and OG all-sizes-fail fallback. Future maintainers could "fix" code away from the current DoS/enumeration policy.
+
+Suggested fix: update comments/test headers to match the current charged/refunded branches and prefer behavioral tests where practical.
+
+### C9-18 - Action-origin docs still say public.ts is excluded, but the scanner now includes it
+
+Severity: Medium
+Confidence: High
+Status: Confirmed documentation/source-comment mismatch
+Sources: document-specialist
+
+Evidence: `CLAUDE.md:590-602`, `apps/web/src/app/actions/public.ts:311-314`, `apps/web/scripts/check-action-origin.ts:49`, `apps/web/scripts/check-action-origin.ts:360-364`, `apps/web/scripts/check-action-origin.ts:488-490`.
+
+Docs and source comments say `public.ts` is excluded from `lint:action-origin`, but the scanner includes it and applies the narrower public-action contract. The implementation is safer than the docs, but stale docs make the security boundary harder to maintain.
+
+Suggested fix: update `CLAUDE.md` and the `public.ts` comment to document the actual scanner behavior.
+
+### C9-19 - Deploy env-file docs present two competing defaults
+
+Severity: Low
+Confidence: High
+Status: Confirmed documentation mismatch
+Sources: document-specialist, product-marketer-reviewer
+
+Evidence: `AGENTS.md:17-18`, `README.md:108-116`, `CLAUDE.md:648-657`, `.env.deploy.example:1-4`, `scripts/deploy-remote.sh:22-29`, `scripts/deploy-remote.sh:55-58`.
+
+README/AGENTS/CLAUDE present root `.env.deploy` as the normal path, while `.env.deploy.example` says to copy outside the repo by default. Both work, but the mismatch complicates deployment troubleshooting.
+
+Suggested fix: pick one canonical recommendation and make README, CLAUDE, AGENTS, example comments, and deploy helper text agree.
+
+### C9-20 - Checked-in public/sw.js has a stale generated version stamp
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+Sources: verifier, document-specialist
+
+Evidence: `CLAUDE.md:402-403`, `apps/web/scripts/build-sw.ts:28-47`, `apps/web/package.json:10`, `apps/web/public/sw.js:21-26`.
+
+`build-sw.ts` stamps the service worker with the git short SHA plus pipeline version. Review lanes observed committed `sw.js` carrying an older stamp than the reviewed HEAD. Production builds regenerate it, but dev/review paths can inspect or serve a stale cache namespace.
+
+Suggested fix: regenerate and commit `apps/web/public/sw.js` for the current HEAD, and add a test/lint assertion or adjust the versioning contract so the checked-in artifact does not drift after every commit.
+
+### C9-21 - Tracked review/plan artifacts still contain credential-assignment strings
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Sources: security-reviewer
+
+Evidence: `.context/plans/done/plan-166-cycle1-admin-upload-test-and-docs.md:22`, `.context/reviews/archive/security-reviewer-cycle1-rpf.md:167-196`, `.context/reviews/archive/security-reviewer-cycle7-rpf.md:36-38`, `.context/reviews/logs-cycle4/designer.log:2467`, `.context/reviews/run7-cycle1/security-reviewer.md:42`, `plan/plan-353-run6-cycle3-deferred.md:168`, `apps/web/src/__tests__/tracked-secrets.test.ts:5-20`.
+
+Committed historical review/plan/log artifacts contain credential-assignment patterns. Some are placeholders or historical references, but the scanner covers only a fixed allowlist rather than all committed docs/logs.
+
+Suggested fix: redact credential assignment strings to placeholders and broaden the tracked-secrets test with explicit allowlists.
+
+### C9-22 - Test coverage gaps remain around semantic malformed rows, audit metadata, visual assertions, and coverage reporting
+
+Severity: Medium
+Confidence: High
+Status: Confirmed coverage gap
+Sources: test-engineer
+
+Evidence: `.context/reviews/test-engineer.md` findings `TE9-C01` through `TE9-C04`.
+
+Test-engineer found missing regression coverage for mixed malformed semantic embedding rows and audit metadata serialization/truncation, nav "visual" screenshots that do not assert visuals, and no coverage script/report/threshold gate for critical surfaces.
+
+Suggested fix: add targeted behavioral tests for the first two code paths. Treat visual assertion/coverage-threshold work as quality-infrastructure follow-up unless scoped into this cycle.
+
+## Manual Validation / Operational Risks
+
+These were recorded by multiple lanes but are not directly implementable code defects in this cycle:
+
+- Process-local coordination remains valid only for the documented single web-instance topology. Sources: critic, security-reviewer, architect, tracer.
+- DB-only restore can drift from file storage; restore drills should include filesystem consistency. Sources: critic, architect, security-reviewer.
+- Production semantic search depends on env, DB row, model weights, and embedding rows staying aligned; live demo claims need smoke validation. Sources: architect, product-marketer-reviewer, document-specialist.
+- TLS/HSTS and `TRUST_PROXY=true` safety depend on production ingress/edge topology. Source: security-reviewer.
+- Multiple root admins and deferred 2FA fit only the current personal-gallery threat model. Source: security-reviewer.
+- Plaintext DB backups at rest depend on host disk/backup controls. Source: security-reviewer.
+- Custom modal shells need real assistive-technology validation for virtual-cursor isolation. Source: designer.
+- Authenticated admin UI needs live browser coverage with an auth state. Source: designer.
+- Sidecar runbooks pin `tsx@4.21.0` while repo dev dependency is `^4.22.4`; validate or document intentional pin. Source: document-specialist.
+- Playwright e2e is Chromium-only; WebKit/Firefox/mobile-engine risks remain manual. Source: test-engineer.
 
 ## Cross-Agent Agreement
 
-Highest-signal findings:
+Higher-signal findings:
 
-- C7-03 Tag filter canonical-state drift: independently reported by six lanes and browser-confirmed on production.
-- C7-02 Backfill stale-width derivative bug: independently reported by verifier and debugger.
-- C7-01 Upload config fail-open behavior: high-severity architecture/privacy finding with direct source evidence.
+- Analytics retention indexes: perf-reviewer + architect.
+- Stale service worker stamp: verifier + document-specialist.
+- Deploy env-file docs mismatch: document-specialist + product-marketer-reviewer.
+- Process-local single-instance boundary: critic + security-reviewer + architect + tracer.
+- DB-only restore/file drift: critic + security-reviewer + architect.
+- Semantic search runtime alignment/scan limits: perf-reviewer + tracer + architect + product-marketer-reviewer.
 
-## Deferred/Planning Notes
+## Already-Fixed / False-Positive Themes
 
-Prompt 2 must either schedule every finding above for implementation or explicitly record deferral with original severity/confidence, citation, concrete reason, and exit criterion. Security, correctness, and data-loss findings are not deferrable unless a repo rule explicitly permits deferral.
+Reviewers confirmed prior-cycle findings are closed for tag-filter canonical state, grid-card fallback hydration, top-view analytics indexes, CLIP preprocessing limiter, retry settings snapshot, public nav resilience, search modal accessibility basics, touch-target guardrails, semantic route header comments, token navigation, and migration/privacy/security scanner contracts.

@@ -1,109 +1,123 @@
-# Code Reviewer - review-plan-fix cycle 7
+# Code Reviewer - cycle 9
 
 **Date:** 2026-06-29
-**HEAD reviewed:** `17124135999a3d7cb4f5262e8b2b5917503088ae` (`17124135`)
+**HEAD reviewed:** `adb1ae67204a364a7ad6c9a9cd6398aeed39151b` (`adb1ae67 build(pwa): refresh service worker version`)
 **Role:** code-reviewer
-**Scope:** current HEAD only; code quality, logic, SOLID/maintainability, cross-file contracts, scripts, tests, migrations, config, and docs. No implementation fixes made.
+**Scope:** whole current repository inventory with deep code-quality, logic, SOLID/maintainability, state-consistency, race-condition, error-handling, and cross-file contract review. Source code and plans were not edited.
 
 ## Required Context Read
 
 - Read `AGENTS.md` first.
-- Read `CLAUDE.md` in full.
-- Loaded the `code-review` skill instructions.
-- Confirmed the current HEAD was `17124135 fix(review): harden cycle 6 review findings`.
+- Read `CLAUDE.md` for architecture, security, migration, deploy, upload, queue, restore, privacy, and review conventions.
+- Loaded the local `code-review` skill instructions before reviewing.
 
 ## Inventory Built Before Findings
 
-Review-relevant inventory at current HEAD:
+Review-relevant tracked surface, excluding `node_modules`, build outputs, coverage, screenshots/fixtures, and generated local artifacts:
 
-- Non-binary, non-lockfile repository files: 755.
-- Active app/source surface: `apps/web/src` 486 TypeScript/TSX/JS/CSS/JSON files.
-- Tests: `apps/web/src/__tests__` plus `apps/web/e2e`.
-- Runtime scripts: `apps/web/scripts`.
-- Migrations: `apps/web/drizzle` SQL files plus `apps/web/drizzle/meta/_journal.json`.
-- Config/deploy surface: root/app `package*.json`, `next.config.ts`, `eslint.config.mjs`, `vitest.config.ts`, `playwright.config.ts`, Dockerfile, compose, nginx, `.dockerignore`, env examples.
-- Docs/plans/reviews inspected for current contracts: `AGENTS.md`, `CLAUDE.md`, current `.context/reviews/_aggregate.md`, prior code-reviewer artifact, and cycle plan lineage enough to avoid re-reporting stale fixed issues.
+- 557 review-relevant files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, `docs`, and `scripts`.
+- Extension mix: 411 `ts`, 103 `tsx`, 27 `sql`, 5 `json`, 4 `mjs`, 3 `js`, 2 `sh`, 2 `md`.
+- Runtime app: Next.js app routes, API routes, server actions, shared components, admin/public surfaces, i18n provider usage, service worker/cache helpers.
+- Core data and state: `data.ts`, `data-timeline.ts`, `smart-collections.ts`, schema, migrations, migration journal, migration/reconcile scripts, analytics, privacy field contracts.
+- Mutations and trust boundaries: auth/session/admin-users, admin tokens, upload/browser/LR ingest, image delete/bulk edit/retry, tags, topics, sharing, settings, SEO, embeddings, public actions.
+- Processing and background work: upload path handling, process-image/topic-image, image queue, queue shutdown, backfill runner, restore maintenance, DB restore, advisory locks.
+- Serving and public reads: upload serving, OG/photo OG, feed/sitemap, semantic/similar search, public pages, map/timeline/topic/smart collection routes.
+- Config/docs/tests: package scripts, Next/Vitest/Playwright/ESLint config, Docker/deploy/nginx surfaces, scanner tests and lint-gate scripts, prior review aggregate/current cycle lineage enough to avoid stale duplicate findings.
 
-Files and cross-file flows examined:
-
-- App routes/actions: upload/delete/bulk/retry image actions, auth/session actions, topic actions, sharing actions, admin DB restore/export/import actions, public pages, semantic/similar search APIs, Lightroom upload API, OG/feed routes, and admin settings flows.
-- Core libraries: `data.ts`, `image-queue.ts`, `queue-shutdown.ts`, `admin-backfill-runner.ts`, `process-image.ts`, `clip-model.ts`, `gallery-config*.ts`, `settings-hash.ts`, `upload-processing-contract-lock.ts`, `advisory-locks.ts`, `restore-maintenance.ts`, `rate-limit.ts`, `serve-upload.ts`, `smart-collections.ts`, auth/session helpers, privacy/select-field contracts, pagination and tag-slug helpers.
-- UI/data interaction surface: `HomeClient`, `TagFilter`, `LoadMore`, search UI, public home/topic pages, and the server-to-client state handoff for tag filtering.
-- Scripts/config: `migrate.js`, backfill/CLIP scripts, action/auth/rate-limit scanner scripts, Dockerfile, compose, dockerignore, nginx, service worker template/generated output.
-- Tests: targeted contract tests around restore locks, upload rollback, admin backfill, image queue wiring/quiesce, migration/schema coverage, settings hash, route/action lint gates, privacy guards, touch-target audit, and public-route rate-limit scanners.
-
-Broad sweeps before finalizing:
-
-- Largest-file triage across TypeScript/TSX/JS sources.
-- Greps for lock acquisition/release, detached work, timers, raw SQL/`db.execute`, process environment use, route/action auth gates, same-origin gates, public mutating route rate limits, `eslint-disable`, `@ts-ignore`, `TODO`/`FIXME`, and pagination/filter-state handoffs.
-- Re-checked prior cycle findings against current HEAD before deciding whether they still apply.
+Broad sweeps included route/action auth gates, mutating action origin gates, public mutating route rate-limit gates, raw SQL uses, advisory locks, detached/background work, cleanup/finally paths, upload/restore temp files, privacy-sensitive select fields, JSON-LD/HTML injection surfaces, file serving path traversal, schema/journal drift, TODO/FIXME/high-risk catch sites, and prior-cycle false positives.
 
 ## Findings
 
 ### Confirmed Issues
 
-#### MEDIUM - Tag filter derives active state and next URLs from raw query params instead of canonical server state
+#### CR9-CQ-01 - `setTopicMapVisible` trusts a compile-time boolean on a runtime server-action boundary
 
-**File/region:** `apps/web/src/app/[locale]/(public)/page.tsx:161-166`, `apps/web/src/app/[locale]/(public)/page.tsx:221-222`; `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:172-177`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:214`; `apps/web/src/components/home-client.tsx:109-122`, `apps/web/src/components/home-client.tsx:259-270`, `apps/web/src/components/home-client.tsx:438-443`; `apps/web/src/components/tag-filter.tsx:10-35`, `apps/web/src/components/tag-filter.tsx:57-117`.
+**File/region:** `apps/web/src/app/actions/topics.ts:594-614`; backing column at `apps/web/src/db/schema.ts:4-12`; caller at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:66` and `:244-245`.
 
-**Issue:** The public home/topic server pages parse and validate `tags` with `filterExistingTagSlugs(parseRequestedTagSlugs(...), allTags)` before querying data and pass the canonical result into `HomeClient` as `currentTags`. `HomeClient` uses that canonical state for the heading and `LoadMore`, but it renders `<TagFilter tags={tags} />` without passing `currentTags`. `TagFilter` then re-derives its own `currentTags` directly from `useSearchParams().get('tags')`.
+**Severity:** Medium
+**Confidence:** High
+**Classification:** Confirmed issue
 
-That duplicates filter-state ownership and lets the tag chips disagree with the page's authoritative data state whenever the URL contains stale, invalid, or otherwise non-canonical tag slugs.
+**Issue:** `setTopicMapVisible(topicSlug: string, mapVisible: boolean)` validates the slug but never validates `mapVisible` before writing it to `topics.map_visible` and logging it. TypeScript only protects the normal in-repo caller; the server action remains a runtime boundary and can receive malformed serialized data. This is inconsistent with nearby action hardening such as `bulkUpdateImages`, which validates nested runtime payload shape before reading or writing values.
 
-**Concrete failure scenario:** Visit `/en?tags=deleted-tag` after a tag has been removed. The server filters `deleted-tag` out, queries the unfiltered gallery, and passes `currentTags=[]` to `HomeClient`. The heading and `LoadMore` are unfiltered, but `TagFilter` sees the raw query string, so the "All" chip is not active and no valid tag chip is active. If the user clicks a valid tag such as `wedding`, `TagFilter` builds the next URL from the stale local state and pushes `?tags=deleted-tag,wedding` instead of the canonical `?tags=wedding`. The server will keep discarding `deleted-tag`, but the client keeps carrying it forward and the UI state remains harder to reason about.
+**Concrete failure scenario:** A malformed admin client, stale bundled UI, or crafted same-origin authenticated server-action request sends `"false"`, `"1"`, `null`, or an object for `mapVisible`. The action reaches `.set({ map_visible: mapVisible })` and either lets MySQL/Drizzle coerce a non-boolean into the tinyint-backed boolean column or throws a generic failure. Because this flag is the explicit opt-in for public GPS map exposure, an invalid payload can silently flip or fail the privacy gate instead of being rejected before persistence. The exact coercion behavior should be validated against the production driver, but the missing runtime guard is source-confirmed.
 
-**Why it matters:** This is a small user-visible correctness bug and a maintainability smell. The public page already has a single canonical tag parser; the client component bypasses it, so future changes to tag normalization, aliases, or deleted-tag handling can easily split behavior between heading/data/loading and chip interactions.
+**Suggested fix:** Add a fail-closed guard immediately after auth/origin checks:
 
-**Suggested fix:** Make `TagFilter` controlled by canonical state:
+```ts
+if (typeof mapVisible !== 'boolean') return { error: t('invalidInput') };
+```
 
-- Change the component signature to accept `currentTags: string[]`.
-- Pass `currentTags={currentTags ?? []}` from `HomeClient`.
-- Use the canonical prop for chip variants, `aria-pressed`, and toggle calculations.
-- When constructing the next URL, preserve unrelated search params but set/delete `tags` from the canonical list rather than the raw query list.
-- Add a focused component/unit test or source-contract test for `?tags=unknown` proving "All" is active and clicking a valid tag emits only the valid slug.
+Then add a focused action test that passes malformed non-boolean values and asserts no update/audit call is made.
 
-**Severity:** Medium.
-**Confidence:** High.
-**Classification:** Confirmed.
+#### CR9-CQ-02 - DB restore temp dump can survive validation/read exceptions after upload is saved
+
+**File/region:** `apps/web/src/app/[locale]/admin/db-actions.ts:434-493`, `:499-585`.
+
+**Severity:** Low
+**Confidence:** High
+**Classification:** Confirmed issue
+
+**Issue:** `runRestore` writes the uploaded SQL dump to a mode-0600 temp file, but cleanup after the successful write is distributed across expected validation branches and the mysql child-process close/error handlers. There is no outer `try/finally` covering the header read, `fs.stat`, scan open/read loop, DB-env validation, and child-process setup. If one of those operations throws before reaching a branch that explicitly unlinks, the promise rejects and the temp SQL dump remains in `os.tmpdir()`.
+
+**Concrete failure scenario:** An admin uploads a restore file; `pipeline` succeeds at `db-actions.ts:437-439`. Then `fs.open(tempPath, 'r')`, `fs.stat(tempPath)`, `fs.open` for the scan, or `scanFd.read` throws due to `EMFILE`, transient disk I/O, permissions, or a host-level temp directory issue. The exception bypasses the explicit invalid-header/dangerous-SQL/missing-env unlinks and never reaches the child-process close handler. A plaintext DB dump remains on disk until manual cleanup or host temp purging. Mode `0600` limits exposure, but this is still avoidable sensitive-data retention.
+
+**Suggested fix:** Wrap the entire post-write restore flow in a single cleanup owner, for example a `let tempUnlinked = false` helper plus `finally { if (!tempUnlinked) await fs.unlink(tempPath).catch(() => {}) }`. The child-process branch can still unlink on close, but cleanup should be idempotent and guaranteed for every thrown validation/setup path.
 
 ### Likely Issues
 
-None promoted separately. Other suspicious areas were either already guarded in current HEAD or lacked enough current-source evidence to call actionable.
+#### CR9-CQ-03 - `bulkUpdateImages` reports requested IDs, not existing or changed rows
+
+**File/region:** `apps/web/src/app/actions/images.ts:940-963`, `:1024-1037`, `:1091-1103`, `:1120-1134`; contrast with stale-ID handling in `apps/web/src/app/actions/tags.ts:304-343`.
+
+**Severity:** Low
+**Confidence:** Medium
+**Classification:** Likely issue
+
+**Issue:** `bulkUpdateImages` validates that IDs are positive integers, but it does not verify that all selected images still exist before applying scalar updates, tag inserts/removals, audit logging, and success reporting. It returns `count: ids.length` regardless of how many rows were actually updated or linked. This differs from `batchAddTags`, which pre-selects existing image IDs and warns about missing images before inserting links.
+
+**Concrete failure scenario:** Admin A opens the dashboard and selects 20 images. Admin B deletes 3 of them before Admin A submits a scalar-only bulk edit, such as clearing descriptions or changing topic. The update at `images.ts:1035-1037` affects only 17 rows, but the action logs all 20 requested IDs and returns `{ success: true, count: 20 }`; the UI shows a 20-image success toast. With tag additions, stale IDs can be silently skipped by `INSERT IGNORE` FK behavior just as `tags.ts:304-307` warns, while the bulk edit path still reports the requested count.
+
+**Suggested fix:** Inside the transaction, select existing IDs with `inArray(images.id, ids)` before any mutation. Use that canonical set for scalar updates, tag insert values, tag removals, audit metadata, and the returned count. If some requested IDs are missing, return a warning/count consistent with `batchAddTags`, or fail the operation if partial success is not desired.
 
 ### Risks Needing Manual Validation
 
-- No additional manual-validation risks were promoted from this code-quality lane. The confirmed tag-filter issue is source-verifiable and can be reproduced with a stale/unknown `tags` query parameter.
+- **CR9-RISK-01:** For `CR9-CQ-01`, manually validate the exact Drizzle/mysql2/MySQL coercion for non-boolean values written through a boolean column. The source bug is the missing guard; the production failure mode determines whether this should be treated as privacy-impacting or generic invalid-input hardening.
+- **CR9-RISK-02:** For `CR9-CQ-02`, validate host temp-dir retention behavior and permissions in production. The file is created with `0600`, so the risk is primarily same-user/process/ops exposure and disk hygiene rather than cross-user world-readable leakage.
 
-## Non-Findings / Verified Current Fixes
+## False Positives / Already Fixed
 
-- Cycle 6 restore-lock acquisition cleanup is now hardened in `apps/web/src/app/[locale]/admin/db-actions.ts`; the acquisition phase has explicit held-lock tracking and cleanup tests cover setup failures.
-- Cycle 6 detached production embedding work is now behind tracked queue lifecycle helpers in `apps/web/src/lib/image-queue.ts`; restore/shutdown coordination tests cover the embedding queue.
-- Upload rollback, Lightroom topic validation rollback, public route rate-limit scanning, admin API auth wrapping, action same-origin scanning, privacy-field guards, and migration journal/hash coverage all have current-source contracts or scanner coverage.
-- `getImageCount(..., { includeUnprocessed: true })` with no filters was checked against Drizzle behavior; `and()` with no conditions returns `undefined`, so the empty-filter path is not a bug.
+- **FP-CR9-01:** The previous tag-filter state split is fixed. Current `HomeClient` passes canonical `currentTags` into `TagFilter` (`home-client.tsx:271-273`), and `TagFilter` uses that prop for active state and URL construction (`tag-filter.tsx:10-45`).
+- **FP-CR9-02:** The cycle-8 hardcoded retry error string is fixed. `retryFailedImage` now returns `t('imageNotInFailedState')` at `apps/web/src/app/actions/images.ts:1182-1184`.
+- **FP-CR9-03:** Browser upload, Lightroom upload, retry, bootstrap, and internal queue re-enqueue settings wiring were re-checked against the cycle-8 focus. The current enqueue sites forward or reload the processing snapshot as intended; no third settings-bypass consumer was found.
+- **FP-CR9-04:** Admin API exports are wrapped with `withAdminAuth`, mutating server actions call `requireSameOriginAdmin`, and public mutating API routes carry rate-limit helpers or documented exemptions. I did not find a current gate bypass.
+- **FP-CR9-05:** Public upload serving is already hardened against traversal and symlink swaps via safe segment validation, directory/extension matching, `lstat`, `realpath`, root containment, conditional ETags, and abort cleanup in `serve-upload.ts`.
+- **FP-CR9-06:** Privacy-sensitive public selects remain guarded by omit objects/type guards/tests, and the public map path joins only `topics.map_visible = true` plus a runtime GPS leak assertion.
+- **FP-CR9-07:** Upload quota preclaim/settle, restore maintenance guards, queue quiesce, and post-restore migration flow were checked. I did not find a live rollback/lock leak in those paths beyond the temp-file cleanup gap reported as `CR9-CQ-02`.
 
-## Final Missed-Issues Sweep
+## Final Missed-Issue Sweep
 
 Final sweep covered:
 
-- All tracked file inventory at HEAD and review-relevant category counts.
-- App routes/actions, public/admin API routes, server actions, core data access, upload/processing/backfill/restore flows, semantic-search flows, and public pagination/filtering.
-- Schema, migrations, migration journal, reconcile script, and migration-related tests.
-- Deployment/config surfaces: Dockerfile, compose, dockerignore, nginx, Next config, service worker, package scripts, env examples.
-- Test/lint architecture: auth route scanner, action-origin scanner, public mutating route rate-limit scanner, privacy guards, touch-target audit, migration coverage, restore lock tests, image queue embedding lifecycle tests, and upload rollback/source contracts.
-- Prior cycle aggregate/review findings checked against current HEAD so stale fixed issues were not re-reported.
+- All review-relevant file inventory and extension/category counts.
+- App routes/actions, admin/public API routes, server actions, route scanners, action-origin scanner, public mutating route scanner, auth/session/token helpers, rate limits, and same-origin/proxy handling.
+- Core data access, pagination/cursors, tag/topic/share state, public map/timeline/search/smart collection data flows, JSON-LD and OG rendering surfaces.
+- Upload/browser/LR ingest, original-file storage, derivative serving, process-image, topic-image processing, image queue, shutdown, restore, backfill, advisory locks, and temp-file cleanup paths.
+- Schema/migrations/journal/reconcile script, privacy field contracts, generated/current docs, deploy helper constraints, and prior review aggregate to avoid stale re-reports.
+- High-risk pattern greps for raw SQL, child processes, HTML injection, unguarded mutations, broad catches, TODO/FIXME, environment/config assumptions, and stale deferred issues.
 
-Files intentionally not inspected in depth:
+Files intentionally excluded from deep manual reading:
 
-- Binary assets, screenshots, fixture images, generated visual artifacts, and historical archived review screenshots.
-- Most historical `.context/reviews/archive/**` and `.context/plans/done/**` files beyond current aggregate/lineage checks, because they are not executable current behavior.
-- `node_modules` and untracked/generated local build outputs.
+- `node_modules`, `.next`, coverage/test output, binary images, screenshots, generated local artifacts, and historical archived review screenshots.
+- Historical `.context/reviews/archive/**` and completed old plan artifacts except where needed for current-lineage false-positive checks.
 
 ## Validation Evidence
 
-- This was a read-only review of current HEAD except for writing this report artifact.
-- Source evidence was gathered with tracked-file inventory, `nl -ba` line checks, `rg` sweeps, focused cross-file tracing, and current HEAD/log verification.
-- I did not run the full lint/typecheck/build/test suite because no code was changed and this lane requested review findings, not implementation.
+- Static review only; no source or plan files were edited.
+- Report artifact written to `.context/reviews/code-reviewer.md`.
+- Evidence gathered with `rg --files`, `rg` sweeps, `nl -ba` line inspections, package/config reads, current HEAD checks, and cross-file tracing.
+- I did not run full lint/typecheck/build/test because this lane requested review findings only and no executable source changed.
 
 ## Recommendation
 
-**REQUEST CHANGES** for the confirmed tag-filter state ownership bug. No high/critical code-quality findings were found in this lane at current HEAD.
+**REQUEST CHANGES** for `CR9-CQ-01` and `CR9-CQ-02`; treat `CR9-CQ-03` as a low-severity consistency fix or add an explicit product decision that bulk edits are allowed to report requested counts under concurrent deletion.

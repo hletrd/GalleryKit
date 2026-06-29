@@ -1,108 +1,113 @@
-# Verifier Review - Cycle 7/100
+# Verifier Review - Cycle 9
 
 Date: 2026-06-29
-Role: verifier
-Scope: current `HEAD` only (`17124135`, `master`). No implementation fixes made in this lane.
+Role: verifier lane
+Scope: current `HEAD` (`adb1ae67`) on `master`. Source code and plans were not edited.
 
-Note: sibling review lanes had already modified other `.context/reviews/*.md` files while this report was being written. Those files were treated as concurrent user/agent work and were not reverted.
+## Inventory
 
-## Inventory Built Before Findings
+Read first: `AGENTS.md`, `CLAUDE.md`, and the `code-review` skill instructions.
 
-Read first, per repo contract: `AGENTS.md`, `CLAUDE.md`.
+Review-relevant inventory was built across the requested contract surfaces, not by sampling:
 
-Review-relevant inventory was built with `rg --files`, `git rev-parse --short HEAD`, targeted `nl -ba` reads, and package/script inspection. The verifier lane examined all files relevant to the requested contracts:
-
-- Repo controls and gates: `AGENTS.md`, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
-- Migrations/schema: `apps/web/drizzle/meta/_journal.json`, all `apps/web/drizzle/00*.sql` entries, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/src/__tests__/migration-journal.test.ts`, `apps/web/src/__tests__/migration-journal-monotonicity.test.ts`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`.
-- Privacy/select boundaries: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/__tests__/map-privacy.test.ts`, `apps/web/src/__tests__/search-route-privacy.test.ts`.
-- Auth/origin/rate-limit contracts: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, admin API routes, public search API routes, server action files under `apps/web/src/app/**/actions.ts`.
-- Color/HDR pipeline: `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/color-detection.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, related color/settings/upload tests.
-- Service worker/PWA/cache behavior: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/proxy.ts`, `apps/web/src/__tests__/sw-template-contract.test.ts`, `apps/web/next.config.ts`.
-- Deploy/runbook/runtime: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, deploy and nginx contract tests.
+- Repo/runbook controls: `AGENTS.md`, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
+- Migration/schema surface: 27 SQL migrations, 27 journal entries, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, migration/reconcile tests.
+- Privacy/select surface: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, map/search privacy tests, all public search routes.
+- Auth/origin/rate-limit surface: 8 API route files, 13 action files plus `apps/web/src/app/[locale]/admin/db-actions.ts`, all three security lint scanners.
+- Image/color/HDR surface: process-image/color detection/ICC/gain-map/settings hash/serve-upload/backfill/queue files and related tests.
+- Queue/restore surface: image queue, admin backfill runner, sidecar backfill, DB restore, restore maintenance, upload tracker/contract lock.
+- Service worker/generated artifacts: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/__tests__/sw-template-contract.test.ts`.
+- Deploy/runbooks: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, deploy/nginx/site-config tests.
+- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`; both currently have 784 flattened keys and no parity gaps.
 
 ## Confirmed Issues
 
-### V-C7-01 - Color backfill can silently generate undersized derivatives from stale database width
+### F-001 - Committed generated service worker has a stale cache version
 
-Severity: High
+Severity: Medium
 Confidence: High
 Status: Confirmed
 
-Regions:
-- `apps/web/src/lib/process-image.ts:1050-1064`
-- `apps/web/src/lib/process-image.ts:1145-1148`
-- `apps/web/src/lib/admin-backfill-runner.ts:502-517`
-- `apps/web/scripts/backfill-color-pipeline.ts:206-221`
+Evidence:
 
-Why this is a problem:
-`processImageFormats` reads fresh Sharp metadata and explicitly comments that the upload flow's `baseWidth` is ignored (`process-image.ts:1058-1060`). The implementation does not actually assign that fresh width to `processingBaseWidth` in the normal, non-downscale path. It initializes `processingBaseWidth` from the caller-provided `baseWidth` (`process-image.ts:1050`) and only replaces it when the wide-gamut OOM downscale branch runs (`process-image.ts:1085`). The size ladder later uses `processingBaseWidth` to choose every derivative width (`process-image.ts:1145-1148`).
-
-Both color backfill callers pass the database row width into this parameter (`admin-backfill-runner.ts:502-517`, `backfill-color-pipeline.ts:206-221`). If the row width is stale, corrupt, imported from an older schema state, or mismatched with the private original, the fresh metadata read does not protect the derivative ladder.
+- `CLAUDE.md:407` states that `public/sw.template.js` is the shipped source and that `scripts/build-sw.ts` stamps `__SW_VERSION__` into `public/sw.js`; after editing the template, `sw.js` must be regenerated and committed.
+- `apps/web/scripts/build-sw.ts:28-46` builds the version from `git rev-parse --short HEAD` plus `-p${IMAGE_PIPELINE_VERSION}`.
+- Current `HEAD` is `adb1ae67`, and `npm run build --workspace=apps/web` regenerated `sw.js` as `adb1ae67-p7`.
+- The committed `apps/web/public/sw.js:21-26` still contains `1e182969-p7`.
+- `apps/web/src/__tests__/sw-template-contract.test.ts:163-167` checks generated SW logic parity for the bounded HEAD probe, but it does not check that the generated version stamp matches the current commit/pipeline version.
 
 Concrete failure scenario:
-An original file on disk is 4000 px wide, but `images.width` is 640 due to an old import, a stale row, or a previous metadata bug. A color-pipeline backfill reprocesses the image and passes `row.width = 640` to `processImageFormats`. The function reads `freshBaseWidth = 4000`, but still uses `processingBaseWidth = 640`, so configured sizes above 640 all collapse to 640 px derivatives. The row can then be advanced to the current `pipeline_version`, leaving the gallery with low-resolution WebP/AVIF/JPEG derivatives even though the original supports the intended larger sizes.
+
+A reviewer or CI run can pass `sw-template-contract` while `public/sw.js` is stamped for an older commit. Production `npm run build` regenerates the artifact, so the normal deploy path self-heals, but the repository artifact is still out of contract. Any path that serves or inspects committed `public/sw.js` without running `prebuild` can ship an older `SW_VERSION`, causing clients to keep the previous `gk-images-*`, `gk-html-*`, and `gk-meta-*` cache namespace instead of activating a cache version for the current commit.
 
 Suggested fix:
-Set `processingBaseWidth` from `freshBaseWidth` immediately after metadata validation, and reject/throw if Sharp cannot provide a positive width. Keep the downscale branch override for the temporary intermediate width. Add a regression test that invokes `processImageFormats` with a larger real source image and an intentionally stale smaller `baseWidth`, then asserts at least one configured larger derivative uses the fresh source width/configured size rather than the stale caller width.
+
+Regenerate and commit `apps/web/public/sw.js` for `adb1ae67-p7`. Add a test or lint assertion that computes the expected `${git short SHA}-p${IMAGE_PIPELINE_VERSION}` and checks `public/sw.js` contains it, so stale generated artifacts cannot pass review.
 
 ## Likely Issues
 
-None found beyond the confirmed item above.
+None found.
 
 ## Risks Needing Manual Validation
 
-- `apps/web/public/sw.js` is stamped with an older generated service-worker version than current `HEAD`, while `apps/web/scripts/build-sw.ts` regenerates it from `git rev-parse --short HEAD` during `prebuild`. I am not treating this as a finding because production builds regenerate the file and the template matched the generated file after normalizing the version token. A strict generated-artifact freshness gate would remove this ambiguity.
-- I verified migration contracts from source and tests, not by running a disposable MySQL migration/import. A live DB smoke test remains the only direct proof that advisory locks, reconcile, Drizzle journal hashes, and deploy-time migration behavior interact correctly against an actual MySQL instance.
+### R-001 - Sitemap runtime regeneration after DB-unavailable build was not proven against MySQL
 
-## Contract Checks With No Finding
+Severity: Low
+Confidence: Medium
+Status: Risk needing manual validation, not a confirmed bug
 
-Migration/journal:
-- `apps/web/drizzle/meta/_journal.json` entries `0018` through `0024` are globally monotonic after the documented historical nonmonotonic range. Current migration tests cover sequential indices, tag/file existence, known historical inversion allowances, and the silent-skip postcondition in `migrate.js`.
-- `apps/web/scripts/migrate.js` computes one hash per committed journal entry, reconciles fresh/legacy DBs before baseline insertion, and asserts every expected journal hash exists after Drizzle completes. The schema reconcile/drop tripwire tests cover current table/column/index names and historical table removal guards.
+Evidence:
 
-Privacy/select guards:
-- `apps/web/src/lib/data.ts` derives public image selects from admin selects by omitting sensitive keys and has type guards for public and map selects.
-- `apps/web/src/__tests__/privacy-fields.test.ts` symmetrically compares admin-only keys against the sensitive fixture and separately checks timeline fields.
-- Public semantic/similar search routes enrich from `apps/web/src/lib/search-enrichment-fields.ts`; route privacy tests scan for PII column use in those route sources.
-- Map image retrieval requires `topics.map_visible = true` in the join predicate and keeps runtime guard coverage in `map-privacy.test.ts`.
+- `apps/web/src/app/sitemap.ts:24-55` intentionally catches build-time DB failures, emits a minimal homepage-only sitemap, and says ISR will replace it on the first runtime hit.
+- The production build passed, but logged `ECONNREFUSED 127.0.0.1:3306` and `[sitemap] falling back to homepage-only sitemap` during static generation because no local MySQL was running.
 
-Auth/origin/rate-limit:
-- `npm run lint:api-auth --workspace=apps/web` passed during this lane.
-- `npm run lint:action-origin --workspace=apps/web` passed during this lane.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed during this lane.
-- The lints fail closed on admin API exports, mutating server actions, and mutating public route handlers respectively; current routes/actions matched the declared contracts.
+Concrete failure scenario:
 
-Color/HDR pipeline:
-- Color-impacting config hashing includes the current derivative-quality, size, chroma, force-sRGB, AVIF effort, and wide-gamut pixel-cap keys.
-- Upload serving ETags include `IMAGE_PIPELINE_VERSION` and the serving settings hash, so changed rendering policy invalidates cached derivative responses.
-- HDR/P3/NCLX detection, AVIF bit-depth probing, ICC extraction, wide-gamut max-pixel downscale, and derivative cleanup paths were inspected. The stale-width derivative bug above is the confirmed correctness issue in this surface.
+If production runtime ISR does not regenerate `/sitemap.xml` successfully after deploy, crawlers may see only the homepage/feed entries until the next successful runtime generation. The source comments describe this as intentional, but this verifier lane did not have a live MySQL instance to prove the first runtime hit replaces the fallback with topic/photo URLs.
 
-Service worker and deploy/runbook:
-- `sw.template.js` bypasses admin routes, does bounded lazy HEAD revalidation for cached upload assets, avoids caching admin-rendered HTML via the proxy marker, and uses the documented HTML fallback age limit.
-- `build-sw.ts` stamps version/pipeline tokens into `public/sw.js`; `sw-template-contract.test.ts` covers the important template/generated-file contracts.
-- `scripts/deploy-remote.sh` reads the gitignored deploy environment and delegates to the configured SSH deploy command.
-- `apps/web/deploy.sh` uses `git pull --ff-only`, rebuilds via docker compose, and prunes after `up -d`; `docker-compose.yml` keeps runtime persistence on bind mounts for `./data`, `./public/uploads`, `./public/resources`, and read-only site config.
-- `apps/web/nginx/default.conf` preserves the larger upload limits for DB download, dashboard import, and Lightroom upload before the generic low-limit admin API location.
+Suggested validation:
+
+After deploy, request `/sitemap.xml` with DB reachable and confirm topic/photo/feed URLs are present. If SEO freshness is considered critical, add a deploy smoke check or an integration test with MySQL for the sitemap route.
+
+## False Positives / Already Fixed
+
+- Migration contract: current journal has exactly one documented historical inversion at idx 7; entries from idx 18 onward exceed prior global maxima. `apps/web/scripts/migrate.js:170-183` hashes every SQL file, `apps/web/scripts/migrate.js:758-776` asserts every expected hash exists after Drizzle, and targeted migration tests passed.
+- Privacy select fields: `apps/web/src/lib/data.ts:375-405` omits sensitive fields from public selects, `apps/web/src/lib/data.ts:472-487` guards public/map select leakage, and targeted privacy/search/map tests passed.
+- Auth/origin/rate-limit lints: admin API routes are wrapped by `withAdminAuth`, mutating actions returned early on `requireSameOriginAdmin`, and mutating public POST routes used rate-limit helpers. All three architecture lints passed.
+- Image/color/HDR pipeline: targeted tests for `process-image`, `color-detection`, `gain-map-detection`, `icc-chromaticity`, `use-display-capability`, settings hash, and serve-upload passed. HDR public honesty and P3/HDR UI paths were covered by current tests.
+- Queue/restore behavior: targeted tests for image queue, admin backfill runner, sidecar backfill, restore maintenance, DB restore, upload tracker, advisory locks, deploy script, and nginx contract passed.
+- Service worker logic parity: template/generated logic for bounded HEAD revalidation and admin-rendered HTML exclusion passed. The remaining issue is only the generated version stamp.
+- i18n: message key parity is clean; English/Korean plural-shape asymmetry remains intentional per `CLAUDE.md:580`.
 
 ## Validation Evidence
 
-Commands run during this verifier lane:
+Commands run:
+
 - `npm run lint:api-auth --workspace=apps/web` -> passed.
 - `npm run lint:action-origin --workspace=apps/web` -> passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` -> passed.
-- Source-level journal monotonicity check for `apps/web/drizzle/meta/_journal.json` -> entries after the documented historical range are monotonic.
-- Template/generated service-worker normalization check -> `sw.js` matches `sw.template.js` after replacing the generated version token.
+- `npm run lint --workspace=apps/web` -> passed.
+- `npm run typecheck --workspace=apps/web` -> passed.
+- `npm test --workspace=apps/web` -> 252 test files passed, 2 skipped; 2330 tests passed, 4 skipped.
+- `npm run build --workspace=apps/web` -> passed; regenerated PWA icons and `sw.js`, then completed Next production build. The generated `sw.js` change was restored after recording F-001 so source artifacts stayed unchanged except this report.
 
-Not run in this verifier lane:
-- Full `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, and full `npm test --workspace=apps/web`; this lane was a read-only verifier report plus the three contract lints above. The cycle implementer should run the complete gate list before committing fixes.
+Targeted tests also passed before the full suite:
 
-## Final Missed-Issues Sweep
+- Migration/privacy/SW: 7 files, 105 tests.
+- Auth/rate-limit scanner coverage: 7 files, 105 tests.
+- Color/HDR/serve-upload: 23 files, 261 tests.
+- Queue/restore/deploy: 27 files, 144 tests.
+- i18n/sanitization/touch-target: 12 files, 149 tests.
+- Secrets/client-boundary/storage/upload/deploy smoke tests: 11 files, 55 tests.
+
+## Final Missed-Issue Sweep
 
 Final sweeps covered:
-- Migration journal `when` ordering, journal file/tag existence, reconcile coverage, and post-migration hash assertion.
-- Sensitive admin-only fields against public/timeline/map/search select surfaces.
-- Admin API auth wrappers, server-action origin guards, and public route rate-limit pre-increments.
-- Color/HDR source metadata freshness, settings hashing, ETag invalidation, derivative cleanup, backfill call paths, and current tests.
-- Service-worker cache strategy, generated SW stamping, admin HTML cache bypass, upload cache headers, proxy marker, deploy helper, compose mounts, nginx upload limits, and Docker prune policy.
 
-I intentionally did not inspect archived review screenshots/binary artifacts or unrelated historical `.context/reviews/archive/**` files beyond using current plan/review context. They are not part of the requested current-HEAD behavior contracts.
+- Migration journal file/tag parity, `when` ordering, reconcile coverage, dropped-table/column tripwires, and post-migration hash assertions.
+- Sensitive fields across public/timeline/map/search select surfaces.
+- Every API route export and server action export relevant to admin auth, same-origin enforcement, restore-maintenance checks, and rate limiting.
+- Color/HDR source metadata, settings hashing, cache headers, derivative cleanup, backfill update races, queue quiesce/resume, and restore locks.
+- Service worker cache strategy, generated artifact freshness, proxy admin marker, upload cache headers, deployment helper, compose mounts, nginx body-size ordering, health/live routes, i18n parity, tracked-secret scanner, and mandatory gates.
+
+No other confirmed issues were found.
