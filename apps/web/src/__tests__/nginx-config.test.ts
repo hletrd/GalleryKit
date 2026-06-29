@@ -28,4 +28,10 @@ describe('nginx production edge hardening', () => {
         const forwardedForHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) ?? [];
         expect(forwardedForHeaders.length).toBeGreaterThanOrEqual(5);
     });
+
+    it('proxies uploads instead of rooting host-side nginx at the container path', () => {
+        const uploadsLocation = nginxConfig.match(/location ~ \^\(\?:\/\[a-z\]\{2\}\)\?\/uploads\/\(jpeg\|webp\|avif\)[\s\S]*?\n    \}/)?.[0] ?? '';
+        expect(uploadsLocation).toContain('proxy_pass http://nextjs;');
+        expect(uploadsLocation).not.toContain('root /app/apps/web/public;');
+    });
 });
