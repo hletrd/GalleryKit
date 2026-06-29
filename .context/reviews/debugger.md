@@ -1,83 +1,58 @@
-# Cycle 14 Debugger Review
+# Cycle 15 Debugger Review
 
-Reviewed HEAD: `d821a9ab` (`master`)
+Reviewed HEAD: `d401dd68` (`master`) on 2026-06-30 KST.
 
-Scope: latent-bug review of current HEAD only. I read `AGENTS.md` and `CLAUDE.md` first, then built a bug-relevant inventory from `git ls-files` (2551 tracked files): app/runtime routes and actions, image processing/queue/restore code, data access, schema/migrations, deployment/config, scripts, and tests that encode behavior. I excluded historical `.context/reviews/*` and plan archives from line-by-line runtime review because they are not executable production surface, but I kept their project constraints in view through `AGENTS.md`/`CLAUDE.md` and static repository sweeps.
+Scope: latent-bug/failure-mode/regression review of current HEAD. I followed `AGENTS.md`, `CLAUDE.md`, and the code-review skill. This is a source-only review artifact; no production source code was changed.
 
-## Confirmed Issues
+## Inventory
 
-### 1. Similar-photo lookup trusts embedding rows before checking image visibility
+Relevant runtime inventory covered:
+
+- Admin actions: `apps/web/src/app/actions/{auth,images,sharing,public,settings,topics,tags,collections,admin-users,admin-backfill,embeddings,lr-tokens,seo}.ts`
+- Public/API routes: `apps/web/src/app/api/{admin/db/download,admin/lr/upload,search/semantic,search/similar/[id],og,health}/**`, plus public pages under `apps/web/src/app/[locale]/(public)/**`
+- Upload and processing pipeline: `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/lib/{process-image,image-queue,upload-processing-contract-lock,upload-tracker,serve-upload,upload-paths,upload-limits}.ts`
+- Restore/migrations: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{db-restore,restore-maintenance,sql-restore-scan}.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/**`
+- Search/share/data/frontend state: `apps/web/src/lib/{data,rate-limit,search-enrichment-fields,clip-embeddings}.ts`, `apps/web/src/components/{search,photo-viewer,home-client,similar-photos}.tsx`, share pages `/s/[key]` and `/g/[key]`
+- Tests inspected for behavioral contracts: restore/upload lock, image queue quiesce/bootstrap, semantic/similar search routes, search stale responses, upload-dropzone topic wiring, sharing/share route source contracts, migration reconcile coverage, privacy fields, public actions, image action/upload tests.
+
+## Findings
+
+### DBG-C15-01: Semantic search toggle issues duplicate searches and burns rate-limit budget
 
 - Severity: Medium
-- Confidence: Medium
-- Files/regions:
-  - `apps/web/src/app/api/search/similar/[id]/route.ts:118-125`
-  - `apps/web/src/app/api/search/similar/[id]/route.ts:145-150`
-  - `apps/web/src/app/api/search/similar/[id]/route.ts:198-205`
-  - `apps/web/src/db/schema.ts:280-295`
-  - `apps/web/drizzle/0012_image_embeddings.sql:5-12`
-
-The route loads the target vector directly from `image_embeddings` by `image_id` and `model_version`, then scans all production embeddings. It only checks `images.processed = true` later during enrichment of result rows. That means the target image itself is never required to be public/processed, and stale or inconsistent embedding rows can win `topK` before being dropped by the later enrichment query.
-
-Concrete failure scenario: after a restore, manual repair, partial backfill, or future processing retry leaves `image_embeddings` populated for an image whose `images.processed` is false, `/api/search/similar/<id>` can return a 200 for a non-public target. Separately, if many stale/unprocessed vectors rank above valid images, the route computes `topK` from stale rows and then drops them in enrichment, producing empty or underfilled results even though valid processed images exist outside the top-K cut.
-
-Concrete fix: join `image_embeddings` to `images` in the target lookup and scan, and filter `eq(images.processed, true)` before decoding/scoring. The target lookup should return 404 unless the image exists and is processed. Add a route test that asserts the target lookup `.where(...)` includes the processed predicate, not just `PRODUCTION_MODEL_VERSION`.
-
-### 2. Database backup creation claims header validation but only checks non-empty output
-
-- Severity: Low
 - Confidence: High
-- Files/regions:
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:220-236`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:456-477`
-  - `apps/web/src/lib/db-restore.ts:21-25`
+- Status: confirmed
+- Location: `apps/web/src/components/search.tsx:264-277`, `apps/web/src/components/search.tsx:472-479`
 
-`dumpDatabase()` comments say it verifies the backup is non-empty and contains the expected mysqldump header, but the implementation only calls `fs.stat()` and checks `stats.size === 0`. The restore path has a real `hasPlausibleSqlDumpHeader()` check, so the two sides disagree.
+The search effect debounces and runs `performSearch(query, useSemanticSearch)` whenever `useSemanticSearch` changes. The semantic toggle handler also calls `performSearch(query, checked)` immediately after `setUseSemanticSearch(checked)`. A user with a non-empty query who toggles semantic mode therefore sends an immediate request and a second debounced request for the same query/mode.
 
-Concrete failure scenario: if `mysqldump` exits 0 while stdout contains non-SQL diagnostic text, a wrapper output, or otherwise corrupt non-empty content, the admin UI reports a successful backup and stores it. The failure is only discovered during a later restore attempt, which is the worst time to learn that the last backup artifact was invalid.
+Failure scenario: a visitor searches for `mountain`, toggles semantic search on, and the client sends two `/api/search/semantic` POSTs. The first request is not aborted until the second semantic request starts, so both can hit `preIncrementSemanticAttempt`; the same duplication happens on the keyword server-action path when toggling off. Repeated toggling can exhaust the per-IP search budget and doubles expensive embedding scans for no user-visible benefit.
 
-Concrete fix: after the flush completes, read the first 256 bytes of `outputPath` and call `hasPlausibleSqlDumpHeader()` just like restore does. If it fails, delete the file and return `failedToWriteBackup`. Add a unit/source-contract test for backup-side header validation so this does not regress.
+Fix: make one code path responsible for mode-change searches. Prefer removing the direct `performSearch(query, checked)` call from the toggle handler and letting the existing `[query, useSemanticSearch]` effect run, or add an explicit immediate-search path that cancels/suppresses the next debounce. Add a source or component test asserting one request per semantic toggle with a non-empty query.
 
-## Likely Issues
-
-### 3. Embedding bootstrap retry can outlive restore quiescence
+### DBG-C15-02: Upload latest-wins topic/tag correction contract is unreachable during upload
 
 - Severity: Medium
-- Confidence: Medium
-- Files/regions:
-  - `apps/web/src/lib/image-queue.ts:327-367`
-  - `apps/web/src/lib/image-queue.ts:371-425`
-  - `apps/web/src/lib/image-queue.ts:951-956`
-  - `apps/web/src/lib/image-queue.ts:1035-1063`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:367-385`
-  - `apps/web/src/lib/restore-maintenance.ts:21-55`
+- Confidence: High
+- Status: confirmed
+- Location: `apps/web/src/components/upload-dropzone.tsx:76-82`, `apps/web/src/components/upload-dropzone.tsx:224-236`, `apps/web/src/components/upload-dropzone.tsx:373-399`, `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts:8-18`
 
-Normal caption/embedding side effects are tracked with `trackQueueSideEffect()` and drained during restore quiescence. The bootstrap retry root promise is launched fire-and-forget at `image-queue.ts:954`, and only the per-row tasks are tracked after the bootstrap has already read config and selected rows. `quiesceImageProcessingQueueForRestore()` drains `state.sideEffects`, but it cannot see an in-flight bootstrap root that has not registered its row tasks yet.
+The upload loop is explicitly written to support latest-wins metadata edits during a batch: comments say the topic select stays interactive during upload, `topicRef.current` is kept in sync, and each file appends the current topic/tag state at upload time. The rendered controls contradict that contract: the topic `<select>` and global `TagInput` are disabled while `uploading` is true.
 
-Concrete failure scenario: process startup schedules `bootstrapMissingActiveEmbeddings()`. Before it registers row tasks, an admin starts restore. Restore maintenance begins and the queue drains zero side effects, then starts importing SQL. The bootstrap loop can resume and attempt embedding writes during the restore window. `storeImageEmbeddingForMode()` checks `isRestoreMaintenanceActive()` before insert, but there is still a check-then-insert race between `image-queue.ts:350` and `image-queue.ts:356`.
+Failure scenario: an admin starts a long sequential batch with the wrong category or global tags. The server/client loop is built to let the admin correct metadata before later files upload, but the UI prevents the correction, so every remaining file keeps the stale click-time metadata. The existing source-contract test only checks `topicRef` wiring and does not assert that the controls remain enabled, so this regression can persist while tests pass.
 
-Concrete fix: track the bootstrap root promise itself in `state.sideEffects` before any config/query work starts, or add a dedicated `state.bootstrapEmbeddingRetryPromise` that quiesce awaits. Also re-check maintenance as close to the insert as possible, ideally under the same restore/upload contract lock used for processing writers. Add a restore-quiesce test where the bootstrap root is in progress but has not yet registered per-row tasks.
+Fix: either honor the latest-wins contract by keeping the topic select and global tag input enabled during upload, or remove the ref/latest-wins behavior and update tests/docs to state metadata is locked for the batch. Given the existing comments and test intent, the likely fix is to drop `disabled={uploading}` for the metadata controls while leaving file removal/dropzone/start buttons locked.
 
-## Risks Needing Manual Validation
+## Areas Rechecked Without Findings
 
-### 4. Timeline/year grouping tests mirror timezone-dependent parsing instead of asserting calendar semantics
-
-- Severity: Low
-- Confidence: Low
-- Files/regions:
-  - `apps/web/src/lib/data-timeline.ts:235-255`
-  - `apps/web/src/app/[locale]/(public)/timeline/page.tsx:89-99`
-  - `apps/web/src/components/on-this-day-widget.tsx:14-23`
-  - `apps/web/src/__tests__/data-timeline.test.ts:117-170`
-
-The code groups MySQL `DATETIME` strings using `new Date('YYYY-MM-DD HH:mm:ss').getMonth()`, and the tests duplicate that same parsing logic inline. On the current Node/V8 runtime this likely works as local-time parsing, but `YYYY-MM-DD HH:mm:ss` is not the same as an ISO timestamp with an explicit timezone, and the tests would pass even if the intended calendar-month semantics diverge from SQL `MONTH(capture_date)`.
-
-Concrete failure scenario to validate: run the timeline/year-review tests under a different `TZ` and with boundary values such as `2026-03-01 00:30:00` and `2026-12-31 23:30:00`. If the rendered grouping ever differs from MySQL `MONTH(capture_date)`, photos can appear in the wrong month section or the on-this-day widget can show the wrong year around timezone boundaries.
-
-Concrete fix if reproduced: parse calendar fields from the stored string (`slice(0, 4)`, `slice(5, 7)`, `slice(8, 10)`) or group in SQL with `MONTH()`/`YEAR()` and keep JS out of timezone interpretation. Replace inline test clones with tests against the exported functions/helpers and include boundary cases.
+- Admin action origin/auth/maintenance ordering: mutating admin actions consistently use `requireSameOriginAdmin()` and/or `withAdminAuth()`, with restore maintenance guards on write paths.
+- Browser and Lightroom uploads: quota claims, disk checks, topic validation rollback, contract locks, late restore cleanup, DB insert failure cleanup, and enqueue settlement paths are present.
+- Image queue and restore: queue quiesce uses pause/clear/onIdle, drains tracked side effects, resets retry/bootstrap state, and restore holds DB/upload/backfill advisory locks.
+- Search/share routes: share pages validate keys before lookup throttling and avoid metadata double-lookups; current similar route now filters both target and scanned embeddings by `images.processed = true`; semantic/similar enrichment uses shared guarded fields and logs enrichment failures.
+- Migrations/reconcile: current schema additions are mirrored in `scripts/migrate.js` and covered by reconcile/journal tests; restore SQL scanner blocks dangerous statement classes with app-table DROP masking.
 
 ## Final Missed-Issues Sweep
 
-Final sweeps covered route exports/auth/rate-limit annotations, raw SQL and file I/O, spawn/backup/restore paths, upload serving, semantic search, queue/restore interactions, migrations/schema, env parsing, JSON parsing, timers, dangerous HTML injection sites, and tests that source-lock behavior. I did not find additional confirmed runtime issues in those sweeps.
+Final sweeps covered route exports and public mutating handlers, auth/origin/rate-limit helper placement, restore lock lifecycle, queue quiescence, upload cleanup, semantic/similar search error paths, share lookup rate limits, migration journal/reconcile references, broad `catch`/cleanup regions, and frontend state effects. No additional current confirmed findings survived the sweep.
 
-Skipped relevant files: none intentionally. Non-runtime historical review/plan files under `.context/` were not line-read as production bug surface; the executable/runtime inventory was covered by direct inspection plus repository-wide static sweeps.
+Finding count: 2 confirmed.
