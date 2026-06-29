@@ -286,6 +286,7 @@ export async function restoreDatabase(formData: FormData) {
     let backfillLockHeld = false;
     let restoreLifecycleVerified = false;
     let keepRestoreMaintenance = false;
+    let imageQueueQuiesced = false;
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
@@ -361,6 +362,7 @@ export async function restoreDatabase(formData: FormData) {
             try {
                 await flushBufferedSharedGroupViewCounts();
                 await quiesceImageProcessingQueueForRestore();
+                imageQueueQuiesced = true;
             } catch (err) {
                 console.error('Failed to prepare restore maintenance window', err);
                 return { success: false, error: t('restoreFailed') };
@@ -373,7 +375,7 @@ export async function restoreDatabase(formData: FormData) {
         } finally {
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
                 endRestoreMaintenance();
-                if (restoreLifecycleVerified) {
+                if (restoreLifecycleVerified || imageQueueQuiesced) {
                     await resumeImageProcessingQueueAfterRestore().catch((err) => {
                         console.error('Failed to resume image-processing queue after restore', err);
                     });

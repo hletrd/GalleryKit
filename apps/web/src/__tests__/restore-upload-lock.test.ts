@@ -61,4 +61,22 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
         expect(source).toContain('keepMaintenance: true');
     });
+
+    it('resumes quiesced image-processing rows when restore exits maintenance after failure', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+
+        const flagIdx = source.indexOf('let imageQueueQuiesced = false');
+        const quiesceIdx = source.indexOf('await quiesceImageProcessingQueueForRestore()');
+        const setIdx = source.indexOf('imageQueueQuiesced = true');
+        const maintenanceExitIdx = source.indexOf('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
+        const resumeConditionIdx = source.indexOf('if (restoreLifecycleVerified || imageQueueQuiesced)');
+        const resumeIdx = source.indexOf('await resumeImageProcessingQueueAfterRestore()');
+
+        expect(flagIdx).toBeGreaterThan(-1);
+        expect(quiesceIdx).toBeGreaterThan(flagIdx);
+        expect(setIdx).toBeGreaterThan(quiesceIdx);
+        expect(maintenanceExitIdx).toBeGreaterThan(setIdx);
+        expect(resumeConditionIdx).toBeGreaterThan(maintenanceExitIdx);
+        expect(resumeIdx).toBeGreaterThan(resumeConditionIdx);
+    });
 });

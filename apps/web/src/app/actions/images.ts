@@ -35,6 +35,7 @@ import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { headers } from 'next/headers';
 import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 import { stripStubPrefix } from '@/lib/caption-constants';
+import { parseBoundedPositiveInteger } from '@/lib/env';
 
 type ImageCleanupFailure = {
     target: 'original' | 'webp' | 'avif' | 'jpeg';
@@ -802,8 +803,10 @@ export async function deleteImages(ids: number[]) {
     // C2-AGG-02 / plan-257. C6-AGG6R-05: env-configurable via
     // IMAGE_CLEANUP_CONCURRENCY (default 5) so NAS-backed deployments
     // with higher I/O latency can tune this without code changes.
-    // R20C20: Number(), not parseInt — 'N e' scientific-notation values truncate; Number('')===0 → falls to `|| 5`.
-    const CLEANUP_CONCURRENCY = Math.max(1, Number(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '') || 5);
+    const CLEANUP_CONCURRENCY = parseBoundedPositiveInteger(
+        process.env.IMAGE_CLEANUP_CONCURRENCY,
+        { fallback: 5, max: 32 },
+    );
     const cleanupFailures: ImageCleanupFailure[] = [];
     for (let i = 0; i < imageRecords.length; i += CLEANUP_CONCURRENCY) {
         const chunk = imageRecords.slice(i, i + CLEANUP_CONCURRENCY);
@@ -1180,9 +1183,19 @@ export async function retryFailedImage(id: number) {
         return { error: t('imageNotInFailedState') };
     }
 
-    // Clear the failure columns so the image is discoverable again.
+    let retryConfig: GalleryConfig;
+    try {
+        retryConfig = await getGalleryConfigStrict();
+    } catch (err) {
+        console.error('Failed to read retry processing settings', err);
+        return { error: t('failedToFetchGallerySettings') };
+    }
+    const processingSettingsSnapshot = createProcessingSettingsSnapshot(retryConfig);
+    const serializedSnapshot = serializeProcessingSettingsSnapshot(processingSettingsSnapshot);
+
+    // Clear the failure columns only after a fresh strict snapshot is ready.
     await db.update(images)
-        .set({ processing_error: null, failed_at: null, processing_settings_json: null })
+        .set({ processing_error: null, failed_at: null, processing_settings_json: serializedSnapshot })
         .where(eq(images.id, id));
 
     // Remove from the in-memory permanently-failed set so the bootstrap
@@ -1202,6 +1215,15 @@ export async function retryFailedImage(id: number) {
         filenameJpeg: image.filename_jpeg,
         width: image.width,
         topic: image.topic,
+        quality: processingSettingsSnapshot.quality,
+        imageSizes: processingSettingsSnapshot.imageSizes,
+        forceSrgbDerivatives: processingSettingsSnapshot.forceSrgbDerivatives,
+        wideGamutJpegChroma: processingSettingsSnapshot.wideGamutJpegChroma,
+        avifEffort: processingSettingsSnapshot.avifEffort,
+        sdrJpegChroma: processingSettingsSnapshot.sdrJpegChroma,
+        wideGamutMaxSourcePixels: processingSettingsSnapshot.wideGamutMaxSourcePixels,
+        autoAltTextEnabled: processingSettingsSnapshot.autoAltTextEnabled,
+        semanticSearchMode: processingSettingsSnapshot.semanticSearchMode,
         iccProfileName: image.icc_profile_name,
         colorSignals: {
             colorPrimaries: image.color_primaries,

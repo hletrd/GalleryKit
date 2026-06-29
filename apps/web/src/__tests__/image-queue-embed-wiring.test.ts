@@ -27,12 +27,19 @@ describe('upload embedding hook wiring', () => {
     // snapshot and only fetch when BOTH the bootstrap resolve and the snapshot
     // are absent.
     expect(src).toContain('job.semanticSearchMode');
+    expect(src).toContain('applyRuntimeSemanticGate');
     expect(src).toMatch(
-      /resolvedSemanticMode\s*\?\?\s*job\.semanticSearchMode\s*\?\?\s*'disabled'/,
+      /applyRuntimeSemanticGate\s*\(\s*[\s\S]*resolvedSemanticMode\s*\?\?\s*job\.semanticSearchMode\s*\?\?\s*'disabled'[\s\S]*\)/,
     );
     expect(src).toMatch(
       /resolvedSemanticMode === null && job\.semanticSearchMode === undefined/,
     );
+  });
+
+  it('runtime-gates production semantic snapshots behind SEMANTIC_SEARCH_ALLOW_PRODUCTION', () => {
+    expect(src).toContain('SEMANTIC_SEARCH_ALLOW_PRODUCTION');
+    expect(src).toMatch(/mode === 'production'[\s\S]*SEMANTIC_SEARCH_ALLOW_PRODUCTION/);
+    expect(src).toMatch(/return 'disabled'/);
   });
 });
 

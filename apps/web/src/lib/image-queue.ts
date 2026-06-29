@@ -23,6 +23,7 @@ import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
 import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
+import { parseBoundedPositiveInteger } from '@/lib/env';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -81,6 +82,10 @@ const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
 const MAX_PERMANENTLY_FAILED_IDS = 1000;
+const QUEUE_CONCURRENCY = parseBoundedPositiveInteger(
+    process.env.QUEUE_CONCURRENCY,
+    { fallback: 1, max: 8 },
+);
 
 export type ProcessingSettingsSnapshot = {
     quality: ImageQualitySettings;
@@ -110,6 +115,13 @@ export function createProcessingSettingsSnapshot(config: GalleryConfig): Process
         autoAltTextEnabled: config.autoAltTextEnabled,
         semanticSearchMode: config.semanticSearchMode,
     };
+}
+
+function applyRuntimeSemanticGate(mode: 'disabled' | 'stub' | 'production'): 'disabled' | 'stub' | 'production' {
+    if (mode === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
+        return 'disabled';
+    }
+    return mode;
 }
 
 export function serializeProcessingSettingsSnapshot(snapshot: ProcessingSettingsSnapshot): string {
@@ -294,7 +306,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         // R16C16 CR-16-03: `|| 1` deliberately coerces 0, NaN, and unset to 1 —
         // a 0-concurrency PQueue would never drain (every upload would hang
         // unprocessed), so there is no valid 0 value to honor here.
-        queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 }),
+        queue: new PQueue({ concurrency: QUEUE_CONCURRENCY }),
         enqueued: new Set<number>(),
         retryCounts: new Map<number, number>(),
         claimRetryCounts: new Map<number, number>(),
@@ -617,12 +629,13 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // Bootstrap/re-enqueue jobs set resolvedSemanticMode; normal upload
                 // jobs carry job.semanticSearchMode. Only a job lacking BOTH (a
                 // legacy snapshot-less upload job) falls through to the fetch.
-                let semanticMode: 'disabled' | 'stub' | 'production' =
-                    resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled';
+                let semanticMode: 'disabled' | 'stub' | 'production' = applyRuntimeSemanticGate(
+                    resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled',
+                );
                 if (resolvedSemanticMode === null && job.semanticSearchMode === undefined) {
                     try {
                         const cfg = await getGalleryConfig();
-                        semanticMode = cfg.semanticSearchMode;
+                        semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
                     } catch {
                         // DB unavailable — skip silently
                     }

@@ -30,6 +30,7 @@ import sharp from 'sharp';
 import { truncateAndNormalize, EMBEDDING_DIM } from '@/lib/clip-embeddings';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
 import { resolveClipModelsRoot } from '@/lib/clip-paths';
+import { parseBoundedPositiveInteger } from '@/lib/env';
 
 // AGG-C10-03 (run-6 cycle-1): `@huggingface/transformers` pulls native
 // onnxruntime-node (+ a WASM backend). It is imported lazily INSIDE getModelBundle()
@@ -49,7 +50,10 @@ export { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
 const CLIP_IMAGE_SIZE = 512;
 const CLIP_MEANS = [0.48145466, 0.4578275, 0.40821073] as const;
 const CLIP_STDS = [0.26862954, 0.26130258, 0.27577711] as const;
-const CLIP_INFERENCE_CONCURRENCY = Math.max(1, Number(process.env.CLIP_INFERENCE_CONCURRENCY) || 1);
+const CLIP_INFERENCE_CONCURRENCY = parseBoundedPositiveInteger(
+    process.env.CLIP_INFERENCE_CONCURRENCY,
+    { fallback: 1, max: 4 },
+);
 let activeInferenceCount = 0;
 const inferenceWaiters: Array<() => void> = [];
 
@@ -167,50 +171,53 @@ export async function embedTextReal(query: string): Promise<Float32Array> {
 export async function embedImageReal(imagePath: string): Promise<Float32Array> {
     const { model, Tensor } = await getModelBundle();
 
-    // Decode, resize to 512×512 (fill, no aspect preservation — matches CLIP convention),
-    // and return raw HWC uint8 bytes.
-    //   - autoOrient: bake EXIF Orientation pre-decode so a rotated portrait is
-    //     embedded the way it is actually displayed (matches process-image.ts).
-    //   - toColourspace('srgb'): force 3-channel sRGB so grayscale / CMYK sources
-    //     don't yield a 1- or 4-channel buffer that breaks the CHW indexing below.
-    //   - removeAlpha: drop any alpha channel so RGBA sources collapse to RGB.
-    const { data: rawData, info } = await sharp(imagePath, { autoOrient: true })
-        .resize(CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE, { fit: 'fill' })
-        .toColourspace('srgb')
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
+    return withInferenceSlot(async () => {
+        // Decode, resize to 512×512 (fill, no aspect preservation — matches CLIP convention),
+        // and return raw HWC uint8 bytes. This sits inside the slot so batches cannot
+        // run unbounded Sharp preprocessing while waiting for model inference.
+        //   - autoOrient: bake EXIF Orientation pre-decode so a rotated portrait is
+        //     embedded the way it is actually displayed (matches process-image.ts).
+        //   - toColourspace('srgb'): force 3-channel sRGB so grayscale / CMYK sources
+        //     don't yield a 1- or 4-channel buffer that breaks the CHW indexing below.
+        //   - removeAlpha: drop any alpha channel so RGBA sources collapse to RGB.
+        const { data: rawData, info } = await sharp(imagePath, { autoOrient: true })
+            .resize(CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE, { fit: 'fill' })
+            .toColourspace('srgb')
+            .removeAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
 
-    if (info.channels !== 3) {
-        throw new Error(`clip-model: expected 3-channel RGB, got ${info.channels}`);
-    }
-
-    const pixelCount = CLIP_IMAGE_SIZE * CLIP_IMAGE_SIZE;
-
-    // Convert HWC uint8 → CHW float32, normalizing with CLIP means/stds.
-    const pv = new Float32Array(3 * pixelCount);
-    for (let c = 0; c < 3; c++) {
-        const mean = CLIP_MEANS[c];
-        const std = CLIP_STDS[c];
-        for (let i = 0; i < pixelCount; i++) {
-            pv[c * pixelCount + i] = (rawData[i * 3 + c] / 255 - mean) / std;
+        if (info.channels !== 3) {
+            throw new Error(`clip-model: expected 3-channel RGB, got ${info.channels}`);
         }
-    }
 
-    const out = (await withInferenceSlot(() => model({
-        pixel_values: new Tensor('float32', pv, [1, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE]),
-    }))) as Record<string, { data: Float32Array }>;
+        const pixelCount = CLIP_IMAGE_SIZE * CLIP_IMAGE_SIZE;
 
-    const embedding = out['l2norm_image_embeddings'];
-    if (!embedding) {
-        throw new Error('clip-model: l2norm_image_embeddings missing from model output');
-    }
-    const data = embedding.data;
-    if (data.length < EMBEDDING_DIM) {
-        throw new Error(
-            `clip-model: image embedding dim ${data.length} < expected ${EMBEDDING_DIM}`
-        );
-    }
+        // Convert HWC uint8 → CHW float32, normalizing with CLIP means/stds.
+        const pv = new Float32Array(3 * pixelCount);
+        for (let c = 0; c < 3; c++) {
+            const mean = CLIP_MEANS[c];
+            const std = CLIP_STDS[c];
+            for (let i = 0; i < pixelCount; i++) {
+                pv[c * pixelCount + i] = (rawData[i * 3 + c] / 255 - mean) / std;
+            }
+        }
 
-    return truncateAndNormalize(data);
+        const out = (await model({
+            pixel_values: new Tensor('float32', pv, [1, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE]),
+        })) as Record<string, { data: Float32Array }>;
+
+        const embedding = out['l2norm_image_embeddings'];
+        if (!embedding) {
+            throw new Error('clip-model: l2norm_image_embeddings missing from model output');
+        }
+        const data = embedding.data;
+        if (data.length < EMBEDDING_DIM) {
+            throw new Error(
+                `clip-model: image embedding dim ${data.length} < expected ${EMBEDDING_DIM}`
+            );
+        }
+
+        return truncateAndNormalize(data);
+    });
 }

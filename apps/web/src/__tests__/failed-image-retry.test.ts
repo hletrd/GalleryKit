@@ -84,8 +84,11 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(actionsSource).toMatch(/isNotNull\s*\(\s*images\.processing_error\s*\)/);
         });
 
-        it('clears failure fields and the stale processing snapshot in DB before re-enqueue', () => {
-            expect(actionsSource).toMatch(/\.set\s*\(\s*\{\s*processing_error:\s*null\s*,\s*failed_at:\s*null\s*,\s*processing_settings_json:\s*null\s*\}\s*\)/);
+        it('rebuilds a fresh processing snapshot before re-enqueue', () => {
+            expect(actionsSource).toContain('getGalleryConfigStrict');
+            expect(actionsSource).toContain('createProcessingSettingsSnapshot(retryConfig)');
+            expect(actionsSource).toContain('const serializedSnapshot = serializeProcessingSettingsSnapshot(processingSettingsSnapshot)');
+            expect(actionsSource).toMatch(/processing_settings_json:\s*serializedSnapshot/);
         });
 
         it('removes ID from permanentlyFailedIds before re-enqueue', () => {

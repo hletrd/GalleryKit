@@ -56,6 +56,7 @@ describe('Cycle 7 image processing and CLIP contracts', () => {
         expect(clipModel).toContain('CLIP_INFERENCE_CONCURRENCY');
         expect(clipModel).toContain('withInferenceSlot');
         expect(clipModel.match(/withInferenceSlot/g)?.length).toBeGreaterThanOrEqual(3);
+        expect(clipModel).toMatch(/return withInferenceSlot\s*\(\s*async\s*\(\)\s*=>\s*\{[\s\S]*sharp\s*\(\s*imagePath[\s\S]*new Tensor\s*\(\s*'float32'/);
     });
 });
 
@@ -70,7 +71,7 @@ describe('Cycle 7 public UI and API contracts', () => {
         expect(homeClient).toContain('<TagFilter tags={tags} currentTags={currentTags} />');
     });
 
-    it('grid surfaces use the shared state-driven picture fallback', () => {
+    it('grid surfaces use the shared delegated picture fallback boundary', () => {
         const files = [
             src('components/home-client.tsx'),
             src('app/[locale]/(public)/timeline/page.tsx'),
@@ -78,11 +79,14 @@ describe('Cycle 7 public UI and API contracts', () => {
             src('app/[locale]/(public)/g/[key]/page.tsx'),
         ];
         const gridPicture = src('components/grid-picture.tsx');
+        const boundary = src('components/grid-picture-fallback-boundary.tsx');
 
-        expect(gridPicture).toContain('const [failedPictureKey, setFailedPictureKey] = useState<string | null>(null)');
-        expect(gridPicture).toContain('{!sourcesFailed && sources.map');
+        expect(gridPicture).toContain('data-grid-picture');
+        expect(gridPicture).not.toContain('useState');
+        expect(boundary).toContain('onErrorCapture');
         for (const source of files) {
             expect(source).toContain('GridPicture');
+            expect(source).toContain('GridPictureFallbackBoundary');
         }
     });
 
