@@ -40,6 +40,7 @@ const seedTopic = {
 };
 
 const seedTopicAliases = ['spotlight-smoke'];
+const E2E_SHARE_KEY = 'Abc234Def6';
 
 const seedImages: SeedImage[] = [
   {
@@ -227,7 +228,7 @@ async function main() {
         title: image.title,
         description: image.description,
         user_filename: `${baseName}.jpg`,
-        share_key: generateBase56(10),
+	        share_key: index === 0 ? E2E_SHARE_KEY : generateBase56(10),
         topic: seedTopic.slug,
         capture_date: image.captureDate,
         blur_data_url: null,
@@ -252,7 +253,7 @@ async function main() {
     const groupId = groupResult.insertId;
     await db.insert(sharedGroupImages).values(insertedIds.map((imageId, position) => ({ groupId, imageId, position })));
 
-    console.log(`Seeded E2E topic ${seedTopic.slug} with ${insertedIds.length} images and aliases ${seedTopicAliases.join(', ') || '(none)'}.`);
+    console.log(`Seeded E2E topic ${seedTopic.slug} with ${insertedIds.length} images, share key ${E2E_SHARE_KEY}, and aliases ${seedTopicAliases.join(', ') || '(none)'}.`);
   } finally {
     await connection.end();
   }

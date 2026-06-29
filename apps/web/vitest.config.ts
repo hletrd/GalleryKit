@@ -14,7 +14,7 @@ export default defineConfig({
         },
     },
     test: {
-        include: ['src/__tests__/**/*.test.ts'],
+        include: ['src/__tests__/**/*.test.{ts,tsx}'],
         // Run-3 cycle 1 / F1: exclude the Next.js build output from test
         // discovery. `next build` with `output: 'standalone'` copies the
         // source tree — including `src/__tests__/**` — into

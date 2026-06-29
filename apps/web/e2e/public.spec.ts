@@ -123,21 +123,8 @@ test('shared-link unknown key renders localized not-found page, not a 500 (AGG-R
 });
 
 test('shared-link valid key renders photo page (AGG-R5C2-18)', async ({ page }) => {
-  // This spec requires a seeded share link in the test environment.
-  // The e2e seed data only ships a shared-group key (/g/Abc234Def5) but no
-  // single-photo share link (/s/[key]). Skip gracefully when none is
-  // available rather than hard-coding a fragile key.
-  //
-  // TODO (TEST-R5C3-08 / plan-327 deferred entry 1): the /s/[key] 200-path has
-  // NO e2e coverage until a share key is seeded — it is exercised only at the
-  // unit/route level today. Exit criterion: the next time the e2e fixture seed
-  // script is touched, seed a deterministic share-link row, export its key as
-  // E2E_SHARE_KEY in the CI env matrix, and this spec runs automatically.
-  const shareKey = process.env.E2E_SHARE_KEY?.trim();
-  test.skip(!shareKey, 'Set E2E_SHARE_KEY to a seeded /s/[key] value to run this spec.');
-
   await ensureEnglishLocale(page);
-  await page.goto(`/en/s/${shareKey}`);
+  await page.goto('/en/s/Abc234Def6');
   await expectNoNextError(page);
 
   // A valid share key renders a photo title heading and the "View Gallery" link.
