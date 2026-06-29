@@ -1,104 +1,196 @@
-# Code Reviewer Report - Cycle 16/100
+# Code Reviewer Report - Cycle 17/100
 
-HEAD reviewed: `3da74946a7e7a198041bf6067a0192411d61a860`
-Scope: current `HEAD` only, static code quality / logic / SOLID / maintainability review.
-Outcome: 2 confirmed issues, 1 likely issue, 3 manual-validation risks. No critical or high-severity issues found in this pass.
+HEAD reviewed: `5e054f80f646cbcd16c7aae5412aa29424e05032`
+Branch: `master`
+Scope: current `HEAD`, static deep review of repository code quality, logic, SOLID/maintainability, correctness, and cross-file interactions.
+Provenance: read `AGENTS.md` and `CLAUDE.md` first; inventoried tracked/source/test/doc surfaces; compared cycle 16 base `3da74946a7e7a198041bf6067a0192411d61a860..HEAD`; inspected implementation and tests for changed and high-risk paths.
+Outcome: 4 confirmed issues, 1 likely issue, 3 manual-validation risks. No critical/high-severity runtime vulnerability confirmed in this pass.
 
 ## Confirmed Issues
 
-### C16-CR-01 - DB rate-limit rollback can subtract a request that was never persisted
+### C17-CR-01 - Tag rename/delete changes public photo content without bumping image freshness timestamps
 
 Severity: MEDIUM
 Confidence: High
 
 Code regions:
-- `apps/web/src/lib/rate-limit.ts:112-116` documents the DB as the source of truth across restarts.
-- `apps/web/src/lib/rate-limit.ts:436-451` increments persistent buckets.
-- `apps/web/src/lib/rate-limit.ts:478-507` decrements persistent buckets without a request token or prior-increment guard.
-- `apps/web/src/app/actions/public.ts:32-41`, `apps/web/src/app/actions/public.ts:92-107`, `apps/web/src/app/actions/public.ts:146-155`, `apps/web/src/app/actions/public.ts:276-303`
-- `apps/web/src/app/actions/admin-users.ts:55-59`, `apps/web/src/app/actions/admin-users.ts:130-138`, `apps/web/src/app/actions/admin-users.ts:161-178`
-- `apps/web/src/app/actions/sharing.ts:77-82`, `apps/web/src/app/actions/sharing.ts:117-127`, `apps/web/src/app/actions/sharing.ts:150-181`, `apps/web/src/app/actions/sharing.ts:231-240`, `apps/web/src/app/actions/sharing.ts:286-302`
+- `apps/web/src/app/actions/tags.ts:42-91`
+- `apps/web/src/app/actions/tags.ts:99-129`
+- `apps/web/src/lib/data.ts:523-529`
+- `apps/web/src/lib/data.ts:537-543`
+- `apps/web/src/lib/data.ts:842-853`
+- `apps/web/src/lib/data.ts:1627-1638`
+- `apps/web/src/app/sitemap.ts:57-80`
+- `apps/web/src/lib/photo-title.ts:38-52`
 
-Failure scenario:
-The affected actions intentionally continue when `incrementRateLimit(...)` throws, relying on the in-memory limiter during DB trouble. Later, if the request is over-limit, duplicates, hits a validation race, or the protected operation fails, the rollback helpers still call `decrementRateLimit(...)` for the same bucket. If the original DB increment failed but the later decrement succeeds, the code subtracts from a bucket row created by earlier legitimate requests in the same window. Repeated transient increment failures followed by rollback paths can drive the persistent bucket below the real attempt count, weakening the restart-safe / multi-process limiter that comments describe as the source of truth.
+Problem:
+Cycle 16/17 work correctly started using `images.updated_at` for sitemap `<lastmod>` and feed freshness. Direct tag add/remove paths now bump `images.updated_at`, but `updateTag` and `deleteTag` do not bump any affected image rows. That leaves a cross-file invariant broken: tag names are public photo content, but the freshness signals for those photo URLs are still tied only to the image row timestamp.
 
-This is especially visible in `public.ts`: `checkLoadMoreRateLimit` swallows an increment failure at `apps/web/src/app/actions/public.ts:92-96`, but over-limit fallback at `apps/web/src/app/actions/public.ts:100-107` and data-fetch failure at `apps/web/src/app/actions/public.ts:153-155` both call rollback with the pinned bucket. `searchImagesAction` has the same shape at `apps/web/src/app/actions/public.ts:276-303`. The same accounting pattern appears in admin user creation and share-link creation.
+Concrete failure scenario:
+An admin renames a widely used tag from `draft` to `portfolio` or deletes an accidental tag. Public photo pages, gallery cards, JSON-LD/alt/title helpers, and feeds derive visible text from `tags.name` through `tag_names`/tag joins. The page content changes immediately, but `getImageIdsForSitemap()` still returns the old `images.updated_at`, `getTopics()` still reports the old `MAX(images.updated_at)`, and `getImagesForFeed()` still orders entries as if no public content changed. Crawlers/feed readers that trust `<lastmod>` or Atom ordering may miss the content update.
 
 Suggested fix:
-Thread DB-increment success through the admission result, for example `{ bucketStart, dbIncremented }`, and only call `decrementRateLimit` when `dbIncremented === true`. Prefer a small helper that owns `increment -> check -> optional rollback` so each action cannot drift. Add regression tests that force `incrementRateLimit` to reject and then force a downstream rollback branch for search, load-more, user-create, photo share, and group share; assert `decrementRateLimit` is not called in those cases.
+In `updateTag`, select linked image ids for the tag and update `images.updated_at = CURRENT_TIMESTAMP` for those ids after the tag rename succeeds. In `deleteTag`, capture linked image ids before deleting `image_tags`, then bump those image rows in the same transaction. Add tests that `updateTag` and `deleteTag` issue the image freshness bump, and add a sitemap/feed regression that documents tag-derived content as a freshness-affecting mutation.
 
-### C16-CR-02 - `withAdminAuth` documents a token argument that the wrapper never passes
+### C17-CR-02 - Public route rate-limit scanner can bless an inverted local helper
+
+Severity: MEDIUM
+Confidence: High
+
+Code regions:
+- `apps/web/scripts/check-public-route-rate-limit.ts:129-170`
+- `apps/web/scripts/check-public-route-rate-limit.ts:193-214`
+- `apps/web/scripts/check-public-route-rate-limit.ts:271-275`
+- `apps/web/scripts/check-public-route-rate-limit.ts:345-350`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-360`
+
+Problem:
+The new local-helper support marks a helper as an approved rate-limit gate if the helper contains a syntactic pre-increment/early-return pattern and no mutation. The exported handler then treats any call to that helper inside an early-returning `if` as a valid gate. The scanner never verifies the helper's return semantics, so an inverted helper can pass while allowing over-limit requests to mutate.
+
+Concrete failure scenario:
+This route shape passes the scanner but mutates when over limit:
+
+```ts
+import { preIncrementShareAttempt } from '@/lib/rate-limit';
+
+async function enforceQuota(ip: string) {
+  const overLimit = preIncrementShareAttempt(ip);
+  if (overLimit) return false;
+  return true;
+}
+
+export async function POST() {
+  if (await enforceQuota('1.2.3.4')) return Response.json({}, { status: 429 });
+  await db.insert(rows).values({ ok: true });
+  return Response.json({ ok: true });
+}
+```
+
+The helper is added to `localRateLimitGateFunctions`, and the handler's `if (await enforceQuota(...)) return` satisfies the gate check. At runtime the boolean meaning is reversed, so the protected mutation runs exactly when the limiter says to stop.
+
+Suggested fix:
+Avoid semantic inference for arbitrary local helpers. Either require the approved `preIncrement*`/`checkAndIncrement*` result to be checked in the exported handler body, or support only a narrow helper contract that returns an object with a named field such as `{ overLimit }` and require the handler condition to check that field. Add a negative fixture for the inverted-helper example above.
+
+### C17-CR-03 - Action-origin scanner models `try/catch/finally` in an unsafe order
+
+Severity: MEDIUM
+Confidence: High
+
+Code regions:
+- `apps/web/scripts/check-action-origin.ts:302-319`
+- `apps/web/scripts/check-action-origin.ts:342-360`
+- `apps/web/scripts/check-action-origin.ts:391-405`
+- `apps/web/src/__tests__/check-action-origin.test.ts:184-203`
+- `apps/web/src/__tests__/check-action-origin.test.ts:613-626`
+
+Problem:
+For public `@action-origin-exempt` actions, the scanner processes every statement in the `try` block before it processes `catch` and `finally`. That is not control-flow accurate: an exception can jump to `catch` before a later rate-limit gate in the `try` block executes. If the later `try` statement contains a syntactic limiter, `sawRateLimitGate` becomes true before the scanner visits the catch/finally mutation, so the mutation is treated as protected.
+
+Concrete failure scenario:
+A future analytics action can pass the scanner while writing before the limiter on the exceptional path:
+
+```ts
+/** @action-origin-exempt: public analytics endpoint */
+export async function recordView(id: number) {
+  try {
+    const params = await buildViewParams(await headers()); // can throw before limiter
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
+  } catch {
+    await db.insert(errors).values({ imageId: id }); // scanner sees this after the limiter
+  }
+}
+```
+
+The current real analytics actions do not mutate inside `catch`, so this is a guardrail defect rather than an active route bug. It matters because this lint gate is security-critical and explicitly exists to prevent public writes before rate-limit admission.
+
+Suggested fix:
+Treat `catch` and `finally` as independent branches that must already be protected within that branch, or fail closed on any mutation in catch/finally unless the branch itself contains its own dominating limiter. Add fixtures where the `try` block has a statement that may throw before the limiter and the catch/finally mutates.
+
+### C17-CR-04 - `WithAdminAuthOptions` still documents a token argument the wrapper never passes
 
 Severity: LOW
 Confidence: High
 
 Code regions:
-- `apps/web/src/lib/api-auth.ts:22-35` says the verified token info is "passed as the LAST argument to the handler."
-- `apps/web/src/lib/api-auth.ts:55-89` preserves the original handler arguments and calls `handler(...args)`; token state is instead exposed through a request-scoped `WeakMap`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:67-72` shows the actual usage pattern: `getAdminAuthToken(request)?.userId`.
+- `apps/web/src/lib/api-auth.ts:22-35`
+- `apps/web/src/lib/api-auth.ts:82-90`
+- `apps/web/src/lib/api-auth.ts:18-20`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:68-75`
 
-Failure scenario:
-A future admin API route author can follow the interface comment, declare a handler expecting a final `VerifiedToken`, and get `undefined` or a Next route context object instead. That is unlikely to bypass the wrapper authentication, but it can cause wrong audit attribution, duplicate token verification, null `uploaded_by`-style metadata, or runtime failures on a token-only integration path.
+Problem:
+The implementation-level doc was corrected, but the interface comment still says the verified token info is "passed as the LAST argument to the handler." The wrapper sets a `WeakMap` context and then calls `handler(...args)` without appending the verified token.
+
+Concrete failure scenario:
+A future admin API author follows the interface comment, declares a handler expecting a final token argument, and gets the route context or `undefined` instead. Authentication still happens in the wrapper, but attribution, audit logging, per-token behavior, or scope-specific logic can silently use the wrong value. The Lightroom route demonstrates the actual supported pattern: `getAdminAuthToken(request)` plus cookie fallback via `getCurrentUser()`.
 
 Suggested fix:
-Update the `WithAdminAuthOptions` comment to state that token details are available only through `getAdminAuthToken(request)` during the wrapped handler call. If an explicit parameter API is desired, change the generic signature and implementation to append the token deliberately, then update the Lightroom route and tests together. The smaller maintainable fix is the comment correction plus a test/example asserting the context-access pattern.
+Update the `WithAdminAuthOptions` comment to match the real API: token details are available only through `getAdminAuthToken(request)` during the wrapped handler call. Add a small source-contract or unit assertion that `withAdminAuth` does not append handler arguments if that remains the intended API.
 
 ## Likely Issues
 
-### C16-CR-03 - Concurrent topic usage can turn a "topic has images" delete into a generic failure
+### C17-CR-05 - Home page image-query failures are rendered as a successful empty gallery
 
 Severity: LOW
 Confidence: Medium
 
 Code regions:
-- `apps/web/src/app/actions/topics.ts:429-466`
-- `apps/web/src/db/schema.ts:33`
+- `apps/web/src/app/[locale]/(public)/page.tsx:14-16`
+- `apps/web/src/app/[locale]/(public)/page.tsx:164-176`
+- `apps/web/src/app/[locale]/(public)/page.tsx:193-209`
+- `apps/web/src/app/[locale]/(public)/page.tsx:231-233`
 
-Failure scenario:
-`deleteTopic` comments that the transaction prevents a TOCTOU race, but the transaction first reads `images` for the topic at `apps/web/src/app/actions/topics.ts:433-437`, then deletes the topic at `apps/web/src/app/actions/topics.ts:438-441`. The schema correctly protects consistency with `images.topic` using `onDelete: 'restrict'` at `apps/web/src/db/schema.ts:33`. If another admin upload or retopic operation attaches an image after the empty check but before the delete resolves, the database should reject the delete. That keeps data safe, but the catch block only maps the local `TopicHasImagesError`; an FK rejection falls through to `failedToDeleteTopic` at `apps/web/src/app/actions/topics.ts:461-466`.
+Risk:
+The home page now catches `getImagesLitePage()` errors, logs a warning, and renders `HomeClient` with `images=[]`, `totalCount=0`, `hasMore=false`. That converts a gallery-listing failure into a normal 200 response with no visible error state and no `ImageGallery` JSON-LD. If a query-shape regression or transient DB issue affects only the listing query while settings/tags/topics still load, visitors and crawlers see an apparently empty gallery instead of an unavailable page.
 
 Suggested fix:
-Map the MySQL FK-reference error, typically `ER_ROW_IS_REFERENCED_2`, to `cannotDeleteCategoryWithImages` as well. If the code wants to preserve the stronger "transaction prevents TOCTOU" claim, lock the topic/images rows consistently or perform a single conditional delete with a `NOT EXISTS` predicate and then map affected-row / FK outcomes explicitly.
-
-## Manual-Validation Risks
-
-- Runtime gates were not executed in this review lane. Static inspection found the issues above, but `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, `npm test --workspace=apps/web`, and targeted Playwright flows remain the authoritative verification gates after fixes.
-- The topic-delete race should be validated against the deployed MySQL engine/isolation behavior before choosing a locking strategy. The user-facing error mapping fix is still useful even if the exact concurrent interleaving manifests as a wait, deadlock, or FK rejection.
-- Visual/HDR/EXIF output quality, production CLIP model behavior, and browser rendering cannot be fully proven from static source review. I checked the relevant static contracts and tests, but those surfaces still need runtime smoke coverage when changed.
+Prefer an explicit public "temporarily unavailable" state, a retry affordance, or throwing to the route error boundary for listing-query failures. If empty fallback is a product decision, distinguish it from a genuine empty gallery in the UI and consider `noindex`/`no-store` on the degraded response so crawlers do not treat outage output as canonical content.
 
 ## Inventory Summary
 
-Tracked files inventoried from `HEAD`: 2,557.
+Tracked files inventoried from current `HEAD`: 789.
 
-- `apps/web/src`: 505 files total
-- Non-test app/runtime source under `apps/web/src`: 238 files
-- Unit tests, fixtures, mocks, and test utilities under `apps/web/src`: 267 files
+- `apps/web/src`: 507 files total
+- Test files/fixtures under `apps/web/src`: 268 files
+- App route/action files under `apps/web/src/app`: 77 files
+- Shared libraries under `apps/web/src/lib`: 96 files
 - `apps/web/e2e`: 8 files
-- `apps/web/drizzle`: 31 files
 - `apps/web/scripts`: 27 files
-- `.context`: 1,755 files
-- Remaining repository/config/docs/assets: 193 files
+- `apps/web/drizzle`: 31 files
+- `.context`: 2,330 files
 
-Review-relevant surfaces included:
-- Next.js app routes, server actions, admin/public API routes, middleware/proxy, image pages, sharing routes, sitemap/feed/OG/search surfaces.
-- `src/lib`, `src/db`, migrations, migration journal, schema reconciliation scripts, deploy/backup/restore/backfill scripts, package/config/lint gates, test suites, messages, and public configuration assets.
-- Historical `.context` plans/reviews were inventoried for constraints and prior issue patterns; they were not treated as runtime code.
+Review-relevant implementation surfaces inspected:
+- Server actions: auth, public analytics/search/load-more, image CRUD/bulk edit, tags, topics, sharing, settings/SEO, admin users, collections/embeddings.
+- Public/admin API routes: OG, semantic/similar search, upload serving, health/live, DB backup download, Lightroom upload.
+- Data and schema: `data.ts`, `schema.ts`, privacy-select guards, sitemap/feed queries, smart-collection compiler, rate-limit persistence, token auth, upload/processing paths.
+- Tooling/tests: action-origin scanner, public-route rate-limit scanner, API-auth scanner, privacy-field tests, sitemap tests, tag action tests, LR upload source contracts, public action tests, smart collection tests.
+- Docs/context: `AGENTS.md`, `CLAUDE.md`, current `.context/reviews/code-reviewer.md`, current cycle diff, and recent git history.
 
 ## Cross-File Interaction Notes
 
-- Rate-limiting is the highest-coupling area: `src/lib/rate-limit.ts` defines accounting semantics while public actions, admin user creation, sharing actions, auth actions, OG routes, and semantic search each choose different rollback policies. C16-CR-01 is cross-file because the generic decrement helper cannot know whether a given request actually incremented the DB bucket.
-- Admin API auth is centralized in `src/lib/api-auth.ts`, with `lint:api-auth` enforcing wrapper usage. Token-authenticated Lightroom routes currently use `getAdminAuthToken(request)`, so the mismatch in C16-CR-02 is a maintainability contract problem rather than an immediate auth failure.
-- Topic deletion relies on both server-action prechecks and the schema-level `onDelete: 'restrict'` relationship. The database keeps referential integrity intact; the likely issue is stale user feedback under concurrency.
-- Migration safety still depends on the documented triad: SQL migration, `_journal.json`, and `reconcileLegacySchema` in `apps/web/scripts/migrate.js`. No new schema drift finding was identified in this cycle.
-- Privacy-sensitive image/admin fields remain guarded through `data.ts` omit blocks and the privacy-field tests described in `AGENTS.md`; no additional privacy leak was confirmed by this pass.
+- Freshness now depends on a broad invariant: every mutation that changes public photo-rendered content must update `images.updated_at`. Direct metadata edits, direct tag add/remove, and bulk tag add/remove mostly follow it; tag rename/delete currently do not.
+- The two security lint scanners are important architecture, not incidental tests. Both now contain enough AST sophistication that control-flow and helper-contract false negatives are real maintainability risks.
+- The cycle 16 DB rate-limit rollback issue appears fixed on the inspected search/load-more/share/user-create paths by threading `dbIncremented` into rollback decisions.
+- The cycle 16 topic-delete FK error mapping appears fixed by mapping `ER_ROW_IS_REFERENCED_2` to the user-facing "category has images" message.
+- Privacy-sensitive image/admin fields remain guarded through `publicSelectFields`, `publicMapSelectFields`, `PrivacySensitiveKeys`, `searchEnrichmentSelectFields`, and `privacy-fields.test.ts`; no new public PII leak was confirmed.
+- The migration journal still contains historical non-monotonic entries, but the current last entry (`0027_analytics_retention_indexes`) has the maximum `when` value and matches the documented post-condition/reconcile strategy. No new schema drift was confirmed in this pass.
 
-## Final Missed-Issues Sweep
+## Manual-Validation Risks
 
-Final grep/read sweeps covered:
-- Admin API wrapper usage and token context (`withAdminAuth`, `getAdminAuthToken`).
-- Mutating server-action origin checks (`requireSameOriginAdmin`) and public mutating route rate-limit patterns.
-- Persistent/in-memory rate-limit increment, check, rollback, and tests.
-- Topic/category mutation flows, FK behavior, audit logging, and image cleanup after DB changes.
-- Privacy-sensitive field omission, migration/journal conventions, upload path handling, backup/restore maintenance guards, sitemap/feed/OG/search/public share routes, and comments that encode stale contracts.
+- I did not run the full blocking gates in this read-only review lane. After fixes, validate with `npm run lint --workspace=apps/web`, `npm run lint:api-auth --workspace=apps/web`, `npm run lint:action-origin --workspace=apps/web`, `npm run lint:public-route-rate-limit --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, and `npm test --workspace=apps/web`.
+- Visual/HDR/EXIF delivery, production CLIP model behavior, and browser-specific rendering cannot be fully proven from static inspection. I checked the static contracts and relevant tests, but those surfaces still need runtime smoke coverage when changed.
+- I did not inspect every historical `.context` artifact line-by-line; I inventoried them and used current docs/reviews only for constraints and prior issue patterns. Runtime code and tests under `apps/web` received the detailed inspection.
 
-No additional confirmed critical/high issues were found after the final sweep. The actionable next step is to fix C16-CR-01 first because it crosses multiple rate-limited surfaces and has the clearest security/reliability impact.
+## Final Missed-Issue Sweep
+
+Final sweeps covered:
+- Current diff from cycle 16 base to `HEAD`.
+- Stale cycle 16 findings and whether their implementation fixes actually landed.
+- Public/admin API handler exports and `withAdminAuth` wrapping.
+- Public mutating route rate-limit scanner behavior and tests.
+- Mutating server-action same-origin/action-origin scanner behavior and tests.
+- Rate-limit increment/check/rollback semantics on search, load-more, sharing, and admin-user creation.
+- Tag/image freshness, sitemap/feed lastmod generation, public title/tag display, and test coverage.
+- Privacy-sensitive select fields and compile/test guards.
+- Migration journal shape, schema/data interactions, raw SQL surfaces, upload/processing contracts, and prominent catch/fallback paths.
+
+No additional confirmed critical/high issues were found. The most actionable fixes are C17-CR-01 for user-visible freshness correctness and C17-CR-02/C17-CR-03 for security-tooling false negatives before future route/action additions rely on those patterns.

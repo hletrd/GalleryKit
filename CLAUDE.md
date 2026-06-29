@@ -241,6 +241,9 @@ The `images` table has composite indexes optimized for query patterns:
 - `image_views(image_id, viewed_at)` — per-image view lookups (`idx_image_views_image_id_viewed_at`, migration 0010)
 - `image_views(bot, viewed_at, country_code)` — analytics country breakdown (migration 0021)
 - `image_views(bot, viewed_at, referrer_host)` — analytics referrer breakdown (migration 0021)
+- `image_views(bot, viewed_at, image_id)`, `topic_views(bot, viewed_at, topic)`, `shared_group_views(bot, viewed_at, group_id)` — top-view analytics scans (migration 0026)
+- `image_views(viewed_at, id)`, `topic_views(viewed_at, id)`, `shared_group_views(viewed_at, id)` — retention cleanup scans (migration 0027)
+- `topic_views(topic, viewed_at)` and `shared_group_views(group_id, viewed_at)` — per-topic/per-share view lookups (migration 0010)
 
 Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
@@ -650,7 +653,7 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 
 ## Remote Deploy Helper
 
-The repo-level deploy helper reads a gitignored root `.env.deploy` file and derives the SSH deploy command from it by default:
+The repo-level deploy helper reads a gitignored root `.env.deploy` file when present, otherwise falls back to `$HOME/.gallerykit-secrets/gallery-deploy.env`; set `DEPLOY_ENV_FILE` to use another path. It derives the SSH deploy command from it by default:
 
 ```bash
 cp .env.deploy.example .env.deploy

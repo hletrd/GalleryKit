@@ -2,6 +2,8 @@
 
 ## Active Plans
 
+- Cycle 17/100 Implementation Plan — implemented, gates passed (`cycle-17-2026-06-30-plan.md`)
+- Cycle 17/100 Deferred Findings — deferred (`cycle-17-2026-06-30-deferred.md`)
 - Cycle 16/100 Implementation Plan — TODO (`cycle-16-2026-06-30-plan.md`)
 - Cycle 16/100 Deferred Findings — TODO / deferred (`cycle-16-2026-06-30-deferred.md`)
 - Cycle 15/100 Deferred Findings — TODO / deferred (`cycle-15-2026-06-30-deferred.md`)

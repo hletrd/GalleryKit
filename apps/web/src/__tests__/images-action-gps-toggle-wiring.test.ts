@@ -65,4 +65,13 @@ describe('uploadImages GPS-toggle wiring (AGG-R7C2-02)', () => {
         expect(block).toMatch(/exifDb\.longitude\s*=\s*null/);
         expect(block).toMatch(/stripGpsFromOriginal\(/);
     });
+
+    it('rejects the upload if mandatory GPS stripping cannot be guaranteed', () => {
+        expect(IMAGES_SRC).toContain('const gpsStripped = await stripGpsFromOriginal');
+        expect(IMAGES_SRC).toMatch(/if\s*\(!gpsStripped\)\s*\{/);
+        expect(IMAGES_SRC).toContain('gpsStripFailureCount++');
+        expect(IMAGES_SRC).toContain("t('gpsStripFailed')");
+        expect(IMAGES_SRC).toContain('failedFiles.push(file.name)');
+        expect(IMAGES_SRC).toContain('continue;');
+    });
 });

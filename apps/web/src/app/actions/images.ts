@@ -330,6 +330,7 @@ export async function uploadImages(formData: FormData) {
         let hdrRejectedCount = 0;
         let hdrWarningCount = 0;
         let wideGamutDownscaleWarningCount = 0;
+        let gpsStripFailureCount = 0;
         // R12-H1 / R10-L4: separate RAW rejection counter so the response
         // can show a specific "RAW not supported — export to JPEG/TIFF/AVIF
         // first" message instead of a generic "all uploads failed" path.
@@ -384,7 +385,14 @@ export async function uploadImages(formData: FormData) {
                     exifDb.longitude = null;
                     // PP-BUG-3: also strip GPS EXIF from the on-disk original so
                     // the retained original doesn't leak protected locations.
-                    await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
+                    const gpsStripped = await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
+                    if (!gpsStripped) {
+                        await deleteOriginalUploadFile(savedOriginalFilename);
+                        savedOriginalFilename = null;
+                        failedFiles.push(file.name);
+                        gpsStripFailureCount++;
+                        continue;
+                    }
                 }
 
                 if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
@@ -565,6 +573,9 @@ export async function uploadImages(formData: FormData) {
             // rejections and there are no other failure categories.
             if (hdrRejectedCount > 0 && failedFiles.length === hdrRejectedCount && rawRejectedCount === 0) {
                 return { error: t('hdrNotSupported') };
+            }
+            if (gpsStripFailureCount > 0 && failedFiles.length === gpsStripFailureCount && rawRejectedCount === 0) {
+                return { error: t('gpsStripFailed') };
             }
             // R12-H1: RAW-only rejection — photographers who batch-drop a
             // folder mixing exports and RAWs need the specific remediation

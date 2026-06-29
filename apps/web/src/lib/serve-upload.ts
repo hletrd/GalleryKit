@@ -201,10 +201,12 @@ export async function serveUploadFile(
         // removed the inline 9-key list that had crept back in — see that
         // constant for the current membership).
         // A flip of any of those settings forces a 304 → 200 revalidation
-        // cycle on every cached
-        // client even when the file mtime has not changed (e.g. an admin
+        // cycle on clients that hit this route-handler fallback path even when
+        // the file mtime has not changed (e.g. an admin
         // toggles `force_srgb_derivatives=true` to clean up a colorimetric
-        // bug; previously the change shipped only to fresh browsers).
+        // bug). Existing static derivatives still need a re-encode to change
+        // bytes and mtime; the shared cache policy remains one hour plus
+        // must-revalidate.
         //
         // R8-H1: the hash reflects validated encoder values (resolved
         // GalleryConfig), not raw DB strings.

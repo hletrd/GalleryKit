@@ -1,120 +1,144 @@
-# Cycle 16 Test-Engineer Review
+# Cycle 17 Test-Engineer Review
 
 Date: 2026-06-30 KST
-HEAD: `7506661e`
+HEAD: `5e054f80`
 Scope: current HEAD of `/Users/hletrd/flash-shared/gallery`
-Lane: test-engineer, cycle 16/100
+Lane: test-engineer, cycle 17/100
 
 ## Inventory Summary
 
-Reviewed repo-wide test and gate surfaces with exhaustive file enumeration and targeted full reads of the gate/risk code paths, not a sampled subset.
+Read `AGENTS.md` and `CLAUDE.md` first, then inventoried current test/gate surfaces and inspected high-risk app/lib/components/routes/scripts/migration paths.
 
 - Vitest: 262 `apps/web/src/__tests__/**/*.test.{ts,tsx}` files.
 - Playwright: 5 specs in `apps/web/e2e/`: `admin`, `public`, `origin-guard`, `nav-visual-check`, `test-fixes`.
-- Route handlers: 12 `route.*` files, including 2 admin API routes and 6 public API routes.
+- API routes: 8 route handlers under `apps/web/src/app/api`, including 2 admin routes and 6 public routes.
 - Server actions: 13 files in `apps/web/src/app/actions/` plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- Migrations: 28 SQL migrations plus `drizzle/meta/_journal.json`.
 - Scripts: 27 files in `apps/web/scripts/` plus root `scripts/deploy-remote.sh`.
-- Blocking custom gates: `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, `check-js-scripts.mjs`, migration/reconcile source tripwires, touch-target audit, focus-visible scanner, privacy-field guards, client/server boundary scans.
-- Highest-density unit coverage areas: image processing/color/HDR, upload actions, public analytics/rate limits, auth/session/rate limits, migrations/reconcile, semantic search, admin actions, UI accessibility scanners, PWA/service worker contracts.
+- Blocking gates: ESLint, API-auth scanner, action-origin scanner, public-route rate-limit scanner, app/script typechecks, build, Vitest, optional Playwright.
 
-Validation run during this review:
+Validation performed during this review:
 
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run typecheck:scripts --workspace=apps/web` passed, including JS syntax check of 7 JavaScript scripts.
+- Direct scanner probes confirmed TE17-01 and TE17-02 false-negative shapes using `checkPublicRouteSource(...)` and `checkActionSource(...)`.
+- I did not run full lint/typecheck/build/test/e2e. This was a review-only artifact pass and no implementation fixes were requested.
 
-I did not run full `npm test`, `npm run build`, or Playwright e2e because this lane is a HEAD review/report pass and the requested output is the review artifact. The custom security gates above were run because they are central to the findings.
+## Confirmed Findings
 
-## Confirmed Issues
-
-### TE16-01. Public API rate-limit scanner misses mutations hidden behind local helpers
+### TE17-01. Public route rate-limit scanner passes an inverted local helper
 
 Severity: Medium
 Confidence: High
-Status: confirmed gate correctness issue, no current route instance found
+Status: confirmed scanner false negative
 
 Evidence:
-- `apps/web/scripts/check-public-route-rate-limit.ts:124-127` defines a mutation only as a property-access call whose method name is in `MUTATING_CALL_METHOD_NAMES`.
-- `apps/web/scripts/check-public-route-rate-limit.ts:205-231` scans handler statements for those direct property-access mutations and returns pass when a rate-limit gate was seen and no direct pre-gate mutation was seen.
-- The fixture suite checks direct `db.insert(...)` before the helper, nested helper calls, comments, unreachable branches, and ignored rate-limit results at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:196-323`, but there is no fixture for a local function that mutates before the helper.
+- `apps/web/scripts/check-public-route-rate-limit.ts:129-170` marks local helper calls as rate-limit expressions when the helper name is in `localRateLimitGateFunctions`.
+- `apps/web/scripts/check-public-route-rate-limit.ts:193-214` treats any early-returning `if` around that helper as a gate, without proving the helper returns `true` when over limit.
+- `apps/web/scripts/check-public-route-rate-limit.ts:271-275` populates `localRateLimitGateFunctions` from helpers that syntactically contain a limiter.
+- Existing fixtures cover a correct helper and an ignored-helper result at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-360`, but not an inverted boolean helper.
+- Direct probe result: an `enforceQuota()` helper that returns `false` when `preIncrementShareAttempt()` is over-limit was reported as `OK: route.ts (uses rate-limit helper)`.
 
 Failure scenario:
-A future public mutating API route can define `async function writeView() { await db.insert(views).values(...) }`, then call `await writeView(); if (preIncrementFoo(ip)) return 429;`. The scanner sees no direct `.insert(...)` before the gate, then sees the approved helper, and the route passes while the durable write is unmetered.
+A future public `POST` route defines a helper that accidentally returns the inverse boolean. The scanner passes, but over-limit requests continue into `db.insert(...)`.
 
-Suggested fix:
-TDD first: add a fixture to `check-public-route-rate-limit.test.ts` where an exported `POST` calls a local mutating helper before the rate-limit branch and assert `MISSING RATE LIMIT`. Then reuse the local-mutating-function collection pattern from `check-action-origin.ts` (`nodeContainsMutatingCall` plus identifier-call recognition), or fail closed on pre-gate calls to local functions in mutating public handlers unless their bodies are proven non-mutating.
+Suggested test/fix:
+Add a failing fixture with the inverted helper before changing the scanner. Then either disallow arbitrary local helper gates or require the exported handler to check the approved limiter result directly, with a named `overLimit` result rather than inferred helper semantics.
 
-### TE16-02. Public action origin scanner ignores `catch` and `finally` blocks when accepting exempt public mutations
+### TE17-02. Action-origin public-action scanner is not control-flow accurate for try/catch
 
 Severity: Medium
 Confidence: High
-Status: confirmed gate correctness issue, current catch blocks only log
+Status: confirmed scanner false negative
 
 Evidence:
-- `apps/web/scripts/check-action-origin.ts:295-407` implements `publicActionCallsRateLimitBeforeMutation` for exempt public actions.
-- `apps/web/scripts/check-action-origin.ts:391-393` special-cases `TryStatement` by processing only `statement.tryBlock.statements` and immediately returning. It never walks `catchClause` or `finallyBlock`.
-- Current public analytics actions wrap the rate-limited write path in `try/catch` and the catches only warn: `apps/web/src/app/actions/public.ts:365-388`, `apps/web/src/app/actions/public.ts:392-419`, `apps/web/src/app/actions/public.ts:423-455`.
-- The positive fixture explicitly blesses the `try { rate limit; insert } catch {}` shape at `apps/web/src/__tests__/check-action-origin.test.ts:591-604`, but there is no negative fixture where `catch` or `finally` performs a mutation.
+- `apps/web/scripts/check-action-origin.ts:342-360` records a rate-limit gate when it sees an early-returning `if`.
+- `apps/web/scripts/check-action-origin.ts:391-399` processes all `try` statements before `catch` and `finally`.
+- `apps/web/scripts/check-action-origin.ts:402-405` then visits mutations using the already-mutated `sawRateLimitGate` state.
+- Fixtures cover catch/finally mutations before any gate at `apps/web/src/__tests__/check-action-origin.test.ts:184-203`, and bless a try-block gate before insert at `apps/web/src/__tests__/check-action-origin.test.ts:613-626`, but do not cover an exception before the gate followed by a catch mutation.
+- Direct probe result: a public exempt action with `try { mightThrow(); if (isViewRecordRateLimited(...)) return; } catch { await db.insert(...) }` was reported as `OK (public rate-limited action)`.
 
 Failure scenario:
-A future edit to an exempt public analytics action adds fallback persistence in `catch` or cleanup persistence in `finally`, for example `catch { await db.insert(audit).values(...) }`. The scanner would process the `try` body, see the rate-limit gate before the first insert, skip the catch/finally entirely, and report `OK (public rate-limited action)` while the fallback mutation is not proven rate-limited.
+A public analytics action later adds fallback persistence in `catch`. If an earlier statement in the `try` throws before the limiter runs, the catch writes without rate-limit admission, while the scanner still passes because it traversed the later limiter first.
 
-Suggested fix:
-TDD first: add fixtures for `catch { db.insert(...) }` and `finally { db.insert(...) }` after a rate-limited `try` body and assert failure. Then make `processStatement` traverse `catchClause.block.statements` and `finallyBlock.statements` with the current `sawRateLimitGate` state reset or conservatively require any catch/finally mutation to carry its own rate-limit dominance.
+Suggested test/fix:
+Add fixtures where a `try` block has a potentially throwing statement before the limiter and `catch`/`finally` mutates. Treat catch/finally as independent branches that need their own dominating limiter, or fail closed on any catch/finally mutation in public exempt actions.
 
-### TE16-03. Touch-target audit budgets by per-file counts, so it can miss replacement violations in the same file
+### TE17-03. Touch-target audit can miss replacement violations in files with allowances
 
 Severity: Low
 Confidence: High
 Status: confirmed test design weakness
 
 Evidence:
-- `apps/web/src/__tests__/touch-target-audit.test.ts:183-199` and `apps/web/src/__tests__/touch-target-audit.test.ts:229-238` allow nonzero violation counts for several files.
-- The assertion compares only aggregate issue count per file: `issues.length > allowed` at `apps/web/src/__tests__/touch-target-audit.test.ts:764-775`, and stale budgets only fail when `actual < allowed` at `apps/web/src/__tests__/touch-target-audit.test.ts:778-788`.
+- `apps/web/src/__tests__/touch-target-audit.test.ts:183-199` and `apps/web/src/__tests__/touch-target-audit.test.ts:229-238` keep nonzero `KNOWN_VIOLATIONS` counts for several files.
+- The main assertion compares only aggregate count per file: `issues.length > allowed` at `apps/web/src/__tests__/touch-target-audit.test.ts:764-775`.
+- Stale allowances only fail when `actual < allowed` at `apps/web/src/__tests__/touch-target-audit.test.ts:778-788`.
 
 Failure scenario:
-If `components/admin-user-manager.tsx` has two allowed hits, one allowed button is fixed while a new compact button is introduced elsewhere in the same file. The actual count remains two, so neither `actual > allowed` nor `actual < allowed` fires. The report text says "NEW violation lands as a hard failure", but the predicate only proves count stability.
+One documented sub-44 target in `components/admin-user-manager.tsx` is fixed while a new sub-44 target is introduced elsewhere in the same file. Actual count remains 2, so the new violation is hidden by the removed one.
 
-Suggested fix:
-TDD first: add a small in-memory scanner fixture demonstrating "one known issue removed, one new issue added" should fail. Replace count budgets with stable issue signatures: file plus normalized snippet, line-nearby anchor, or a named exemption marker adjacent to the specific JSX node. Keep the stale-budget check, but compare sets rather than counts.
+Suggested test/fix:
+Add an in-memory scanner fixture for "one known issue removed, one new issue added" and make it fail. Replace per-file counts with stable issue signatures or adjacent exemption markers.
 
-## Likely Issues
+## Likely Findings
 
-### TE16-04. Read-only public server-action rate limits are enforced by individual tests, not by the action-origin gate
+### TE17-04. Reconcile migration tests are source tripwires, not schema equivalence tests
 
-Severity: Low
-Confidence: Medium
-Status: likely coverage/gate-policy gap
+Severity: Medium
+Confidence: High
+Status: likely coverage gap
 
 Evidence:
-- `lint:action-origin` currently skips `loadMoreImages`, `loadMoreSmartCollectionImages`, and `searchImagesAction` because they carry `@action-origin-exempt` and do not directly mutate. The run output showed those three as `SKIP (exempt comment)`.
-- The current implementation does rate-limit them: `loadMoreImages` calls `checkLoadMoreRateLimit` before `getImagesLite` at `apps/web/src/app/actions/public.ts:136-148`; `searchImagesAction` increments/checks the search bucket before `searchImages` at `apps/web/src/app/actions/public.ts:251-300`.
-- Behavioral tests exist for current functions, for example `apps/web/src/__tests__/public-actions.test.ts:228-239` and `apps/web/src/__tests__/load-more-rate-limit.test.ts:89-143`.
+- `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19` explicitly says the test introspects schema and asserts `migrate.js` mentions table/column names, but cannot verify types or defaults.
+- Column coverage is `MIGRATE_SRC_CODE.includes(c)` at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-101`.
+- Index coverage likewise checks index-name presence in source at `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:157-170`.
+- The real schema convergence logic is large and manual in `apps/web/scripts/migrate.js:307-702`.
 
 Failure scenario:
-A future expensive read-only public action can add `@action-origin-exempt: public read-only ... with its own rate limit` and omit the rate limit entirely. The generic action gate will skip it. It will only be caught if the author also writes a dedicated behavioral/source test, which is not enforced by the custom gate.
+A migration changes a column type/default/nullability, FK action, or index column order. The source tripwire can still pass because the name appears in executable code, while a fresh/reconciled DB drifts from Drizzle schema or production expectations.
 
-Suggested fix:
-TDD first: add a scanner fixture for a public exempt read-only action with a "rate limit" exemption reason but no rate-limit call. Then extend `check-action-origin.ts` to parse public-action exemption intent, or add a separate public server-action rate-limit scanner covering expensive public read actions in `actions/public.ts`.
+Suggested test/fix:
+Add an opt-in disposable MySQL schema-equivalence test that runs `scripts/migrate.js` against a throwaway DB and diffs `INFORMATION_SCHEMA` against Drizzle schema plus expected indexes/FKs. Keep the source tripwire as a fast unit gate, but do not treat it as the authoritative migration test.
+
+### TE17-05. Real CLIP production behavior is skipped in default test runs
+
+Severity: Medium
+Confidence: High
+Status: risk / environment-gated coverage gap
+
+Evidence:
+- `apps/web/src/__tests__/clip-offline-load.test.ts:15-41` skips unless `CLIP_OFFLINE_LOAD=1`, `CLIP_MODELS_ROOT` is set, and seeded model files exist.
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips unless `CLIP_INTEGRATION=1`.
+- The runtime path sets `env.cacheDir`, `env.allowRemoteModels = false`, and loads the pinned model/tokenizer in `apps/web/src/lib/clip-model.ts:98-118`.
+
+Failure scenario:
+Default CI can pass while the production model cache is missing, corrupt, or incompatible with the native runtime. Production semantic search then returns 503s only after the operator enables the live path.
+
+Suggested test/fix:
+Promote the offline-load and semantic-ranking checks to a scheduled or manually triggered CI job with a seeded model cache. At minimum, add an explicit release checklist gate for `CLIP_OFFLINE_LOAD=1` before changing CLIP model id, revision, download script, Docker/runtime dependencies, or production semantic mode.
 
 ## Manual-Validation Risks
 
-- Lightroom PAT upload path: most coverage is source-contract based because the route is multipart, token-authenticated, Sharp-backed, and queue/DB-heavy. The test itself states this at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15`, while browser upload has a real Playwright workflow at `apps/web/e2e/admin.spec.ts:132-160`. Risk: route compiles and contracts hold, but a multipart/auth/queue integration break can still escape without a token-auth e2e smoke.
-- Database backup/restore: unit/source tests cover dump header validation and restore cleanup ownership at `apps/web/src/__tests__/db-restore.test.ts:42-65`, and Playwright only navigates to the DB page/input at `apps/web/e2e/admin.spec.ts:36-42`. Risk: full restore is intentionally destructive and not covered by default e2e, so mysql CLI, advisory-lock, import, migration, and post-restore UI behavior need a disposable-DB manual/e2e lane.
-- CLIP production semantic path: default tests cover config/path/source contracts, but real offline model loading is gated by `CLIP_OFFLINE_LOAD=1` and seeded weights at `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`; semantic ranking is gated by `CLIP_INTEGRATION=1` at `apps/web/src/__tests__/clip-semantic-integration.test.ts:7-31`. Risk: normal CI can pass while the production weight volume or native runtime is broken.
-- Admin Playwright coverage is environment-dependent: `apps/web/e2e/admin.spec.ts:6-12` skips admin workflows unless admin E2E credentials are enabled, with a CI assertion. Risk is acceptable if CI always sets the required credentials; local `npm run test:e2e` can otherwise give a public-only signal.
+- Lightroom PAT upload has many source/unit contracts, but a token-authenticated multipart e2e smoke would better cover `withAdminAuth({ allowTokenScope })`, Sharp, DB insert, queueing, and cleanup together.
+- Full DB restore remains intentionally hard to cover by default because it is destructive. A disposable-DB e2e lane should exercise upload, advisory lock, restore import, migration postconditions, and UI recovery.
+- `run-e2e-server.mjs` drives `init`, `e2e:seed`, `build`, static asset copy, and standalone server launch, but has no direct unit test. Breakage usually appears only when Playwright runs.
+- Several operational scripts had no direct test references in the inventory (`backfill-alt-text.ts`, `migrate-aliases.ts`, `migrate-titles.ts`, `migration-add-column.ts`, `mysql-connection-options.js`, `prepare-next-typegen.mjs`). Some are legacy/operator tools, but changes there should get targeted smoke tests or source contracts.
 
 ## TDD Opportunities
 
-- Add scanner-regression fixtures before changing the scanner implementations: local-helper public route mutation, catch/finally public action mutation, and touch-target replacement violation.
-- Add one token-authenticated Lightroom upload Playwright/API smoke against the disposable E2E DB: create PAT with `lr:upload`, multipart upload the existing fixture, wait for processing, delete the uploaded row/files through existing cleanup paths.
-- Add an opt-in disposable restore e2e lane that dumps, restores into an isolated DB name matching the E2E safety pattern, verifies migration postconditions, then tears down.
-- Promote CLIP offline/ranking checks to a scheduled or opt-in CI job with seeded model cache, rather than relying on default skipped tests.
+- Add scanner-regression tests first for TE17-01 and TE17-02, then patch the AST logic.
+- Add touch-target exemption signatures before any further admin UI compact-control work.
+- Add a disposable MySQL schema-diff test around `reconcileLegacySchema`.
+- Add a token-authenticated Lightroom upload Playwright/API test using existing E2E fixtures.
+- Add a scheduled CLIP offline/ranking job with seeded weights.
 
-## Final Missed-Issues Sweep
+## Final Missed-Coverage Sweep
 
-- Cross-checked package scripts, Vitest config, Playwright config, TypeScript script gates, custom scanner implementations, scanner fixtures, server actions, route handlers, E2E helpers, seed/destructive guards, migration journal/reconcile tripwires, upload/LR/restore tests, public analytics/search/load-more tests, and UI accessibility scanners.
-- No current unguarded admin API route or missing same-origin action was found: the three custom lint gates passed on HEAD.
-- No current production behavior defect is asserted from TE16-01 or TE16-02; both are gate false-negative shapes that can let future changes pass incorrectly.
-- Remaining risk is concentrated in source-contract-heavy integration paths and gated tests: Lightroom PAT upload, full DB restore, and real CLIP model loading/ranking.
+Major surfaces inspected:
+
+- Package scripts, Vitest config, Playwright config, e2e helpers, e2e specs, and seed/destructive guards.
+- Custom scanner implementations and fixtures: API auth, action origin, public route rate limit, touch target, focus-visible style.
+- App routes/actions: public search/load-more/analytics, admin routes, topics/tags/images/sharing/settings, OG routes, semantic/similar search, upload/download paths.
+- Libraries: rate limiting, request origin, API auth, data selects, privacy guards, CLIP paths/model loading, image processing contracts, migration helpers.
+- Scripts/migrations: `migrate.js`, migration journal tests, reconcile coverage tests, deploy scripts, e2e server script, CLIP download/backfill scripts.
+
+No current unguarded admin API route, missing same-origin mutating action, or missing public mutating route limiter was found in current HEAD. The main residual risk is not lack of test volume; it is source-scanner false negatives and environment-gated integration coverage around production-only paths.

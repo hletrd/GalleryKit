@@ -167,6 +167,21 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('parses TSX action files with JSX syntax', () => {
+        const src = withApprovedActionGuard(`
+            export async function updateFoo(id) {
+                const label = <span>ok</span>;
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.update(foo).set({ label });
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.tsx');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: actions/fixture.tsx::updateFoo']);
+    });
+
     it('fails public exempt actions when a rate-limit result is ignored before mutation', () => {
         const src = `
             /** @action-origin-exempt: public analytics action, rate-limited before write */
@@ -194,6 +209,26 @@ describe('checkActionSource — function declarations', () => {
                 }
                 const overLimit = isViewRecordRateLimited('1.2.3.4', Date.now());
                 if (overLimit) return { error: 'rateLimited' };
+                await db.insert(views).values({ ok: true });
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails public exempt actions when try can throw before a later limiter and catch mutates', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics action, rate-limited before write */
+            export async function recordThing() {
+                try {
+                    await mightThrowBeforeLimiter();
+                    const overLimit = isViewRecordRateLimited('1.2.3.4', Date.now());
+                    if (overLimit) return { error: 'rateLimited' };
+                } catch {
+                    await db.insert(errors).values({ ok: true });
+                }
                 await db.insert(views).values({ ok: true });
                 return { success: true };
             }

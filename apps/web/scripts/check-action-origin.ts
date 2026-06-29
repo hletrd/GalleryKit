@@ -389,13 +389,17 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
         }
 
         if (ts.isTryStatement(statement)) {
-            for (const nested of statement.tryBlock.statements) processStatement(nested);
+            const sawRateLimitBeforeTry = sawRateLimitGate;
             if (statement.catchClause) {
+                sawRateLimitGate = sawRateLimitBeforeTry;
                 for (const nested of statement.catchClause.block.statements) processStatement(nested);
             }
             if (statement.finallyBlock) {
+                sawRateLimitGate = sawRateLimitBeforeTry;
                 for (const nested of statement.finallyBlock.statements) processStatement(nested);
             }
+            sawRateLimitGate = sawRateLimitBeforeTry;
+            for (const nested of statement.tryBlock.statements) processStatement(nested);
             return;
         }
 
@@ -475,7 +479,15 @@ type CheckReport = {
  */
 export function checkActionSource(content: string, relative: string = 'input.ts'): CheckReport {
     const report: CheckReport = { passed: [], failed: [], skipped: [] };
-    const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let scriptKind = ts.ScriptKind.TS;
+    if (relative.endsWith('.tsx')) {
+        scriptKind = ts.ScriptKind.TSX;
+    } else if (relative.endsWith('.jsx')) {
+        scriptKind = ts.ScriptKind.JSX;
+    } else if (relative.endsWith('.js') || relative.endsWith('.mjs') || relative.endsWith('.cjs')) {
+        scriptKind = ts.ScriptKind.JS;
+    }
+    const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const localMutatingFunctions = new Set<string>();
 

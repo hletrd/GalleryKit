@@ -129,7 +129,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | null>(null);
+    const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | 'semanticSetupRequired' | null>(null);
     const [useSemanticSearch, setUseSemanticSearch] = useState(false);
     const [isMac] = useState(() => {
         if (typeof navigator === 'undefined') return true;
@@ -194,8 +194,19 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     setResults([]);
                     setSearchStatus('rateLimited');
                 } else if (resp.status === 503) {
+                    let semanticErrorCode: string | undefined;
+                    try {
+                        semanticErrorCode = ((await resp.clone().json()) as { code?: string }).code;
+                    } catch {
+                        semanticErrorCode = undefined;
+                    }
+                    if (requestId !== requestIdRef.current) return;
                     setResults([]);
-                    setSearchStatus('maintenance');
+                    setSearchStatus(
+                        semanticErrorCode === 'semantic_not_configured' || semanticErrorCode === 'semantic_no_embeddings'
+                            ? 'semanticSetupRequired'
+                            : 'maintenance',
+                    );
                 } else if (!resp.ok) {
                     setResults([]);
                     setSearchStatus('error');
@@ -482,7 +493,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                         setResults([]);
                                         setSearchStatus(null);
                                     }}
-                                    aria-describedby={semanticSearchMode === 'stub' ? 'semantic-search-hint' : undefined}
+                                    aria-describedby={semanticSearchMode !== 'disabled' ? 'semantic-search-hint' : undefined}
                                     aria-label={t('search.semanticToggle')}
                                     // 44px touch-target floor: Switch has an implicit min-h,
                                     // wrapper div provides at least 44px tap area via padding.
@@ -495,6 +506,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             {semanticSearchMode === 'stub' && (
                                 <p id="semantic-search-hint" className="text-xs text-muted-foreground">
                                     {t('search.semanticExperimentalHint')}
+                                </p>
+                            )}
+                            {semanticSearchMode === 'production' && (
+                                <p id="semantic-search-hint" className="text-xs text-muted-foreground">
+                                    {t('search.semanticProductionHint')}
                                 </p>
                             )}
                         </div>

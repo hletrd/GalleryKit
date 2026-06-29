@@ -131,7 +131,7 @@ describe('Cycle 7 docs and admin navigation contracts', () => {
         expect(tokenClient).not.toContain("'lr:delete'");
         expect(tokenClient).toContain("t('lrToken.neverExpires')");
         expect(app('messages/en.json')).toContain('Upload access is granted automatically');
-        expect(app('messages/en.json')).toContain('Never expires; revoke to disable');
+        expect(app('messages/en.json')).toContain('Never expires by default; revoke to disable');
     });
 
     it('fresh-install docs create a category before upload', () => {

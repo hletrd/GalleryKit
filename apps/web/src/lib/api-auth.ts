@@ -26,7 +26,7 @@ export interface WithAdminAuthOptions {
      * Token-authenticated requests bypass the same-origin check (CORS-style
      * integration is the point of PATs) but MUST present a valid token whose
      * stored scope set includes `allowTokenScope`. The verified token info is
-     * passed as the LAST argument to the handler.
+     * exposed through `getAdminAuthToken(request)` while the handler runs.
      *
      * The wrapper still satisfies the `lint:api-auth` gate because the
      * exported call site is literally `withAdminAuth(...)`.

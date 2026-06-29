@@ -79,10 +79,24 @@ export async function updateTag(id: number, name: string) {
             return { error: t('tagNotFound') };
         }
 
-        const [updateResult] = await db.update(tags)
-            .set({ name: trimmedName, slug })
-            .where(eq(tags.id, id));
-        if (updateResult.affectedRows === 0) {
+        let updateRows = 0;
+        await db.transaction(async (tx) => {
+            const affectedImages = await tx.select({ id: imageTags.imageId })
+                .from(imageTags)
+                .where(eq(imageTags.tagId, id));
+            const affectedImageIds = affectedImages.map((image) => image.id);
+
+            const [updateResult] = await tx.update(tags)
+                .set({ name: trimmedName, slug })
+                .where(eq(tags.id, id));
+            updateRows = updateResult.affectedRows;
+            if (updateRows > 0 && affectedImageIds.length > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(inArray(images.id, affectedImageIds));
+            }
+        });
+        if (updateRows === 0) {
             return { error: t('tagNotFound') };
         }
         const currentUser = await getCurrentUser();
@@ -114,9 +128,19 @@ export async function deleteTag(id: number) {
         // Delete imageTags explicitly before tag (defense in depth alongside FK cascade)
         let deletedRows = 0;
         await db.transaction(async (tx) => {
+            const affectedImages = await tx.select({ id: imageTags.imageId })
+                .from(imageTags)
+                .where(eq(imageTags.tagId, id));
+            const affectedImageIds = affectedImages.map((image) => image.id);
+
             await tx.delete(imageTags).where(eq(imageTags.tagId, id));
             const [delResult] = await tx.delete(tags).where(eq(tags.id, id));
             deletedRows = delResult.affectedRows;
+            if (deletedRows > 0 && affectedImageIds.length > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(inArray(images.id, affectedImageIds));
+            }
         });
         if (deletedRows === 0) {
             return { error: t('tagNotFound') };
@@ -173,12 +197,21 @@ export async function addTagToImage(imageId: number, tagName: string) {
         if (resolvedTag.kind !== 'found') return { error: t('tagNotFound') };
 
         // Link tag to image
-        const [linkResult] = await db.insert(imageTags).ignore().values({
-            imageId,
-            tagId: resolvedTag.tag.id
+        let affectedRows = 0;
+        await db.transaction(async (tx) => {
+            const [linkResult] = await tx.insert(imageTags).ignore().values({
+                imageId,
+                tagId: resolvedTag.tag.id
+            });
+            affectedRows = linkResult.affectedRows;
+            if (affectedRows > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(eq(images.id, imageId));
+            }
         });
 
-        if (linkResult.affectedRows === 0) {
+        if (affectedRows === 0) {
             const [stillExisting] = await db.select({ id: images.id })
                 .from(images)
                 .where(eq(images.id, imageId));
@@ -190,10 +223,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
         // AGG10-01: only log the audit event when the tag was actually linked.
         // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
         // the tag was already linked — no tag_add event occurred.
-        if (linkResult.affectedRows > 0) {
-            await db.update(images)
-                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-                .where(eq(images.id, imageId));
+        if (affectedRows > 0) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: resolvedTag.tag.name }).catch(console.debug);
         }
@@ -235,13 +265,22 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         }
         if (resolvedTag.kind !== 'found') return { error: t('tagNotFound') };
 
-        const [deleteResult] = await db.delete(imageTags)
-            .where(and(
-                eq(imageTags.imageId, imageId),
-                eq(imageTags.tagId, resolvedTag.tag.id)
-            ));
+        let affectedRows = 0;
+        await db.transaction(async (tx) => {
+            const [deleteResult] = await tx.delete(imageTags)
+                .where(and(
+                    eq(imageTags.imageId, imageId),
+                    eq(imageTags.tagId, resolvedTag.tag.id)
+                ));
+            affectedRows = deleteResult.affectedRows;
+            if (affectedRows > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(eq(images.id, imageId));
+            }
+        });
 
-        if (deleteResult.affectedRows === 0) {
+        if (affectedRows === 0) {
             const [stillExisting] = await db.select({ id: images.id })
                 .from(images)
                 .where(eq(images.id, imageId));
@@ -253,10 +292,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         // AGG11-01: only log the audit event when the tag was actually removed.
         // DELETE returns affectedRows === 0 when the tag was not linked to the
         // image (no-op), meaning no tag_remove event occurred.
-        if (deleteResult.affectedRows > 0) {
-            await db.update(images)
-                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-                .where(eq(images.id, imageId));
+        if (affectedRows > 0) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
         }
@@ -325,17 +361,23 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
             tagId: resolvedTag.tag.id
         }));
 
-        const [batchInsertResult] = await db.insert(imageTags).ignore().values(values);
+        let affectedRows = 0;
+        await db.transaction(async (tx) => {
+            const [batchInsertResult] = await tx.insert(imageTags).ignore().values(values);
+            affectedRows = batchInsertResult.affectedRows;
+            if (affectedRows > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(inArray(images.id, [...existingIds]));
+            }
+        });
 
         // AGG12-01: only log the audit event when tags were actually linked.
         // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
         // no tags_batch_add event occurred.
-        if (batchInsertResult.affectedRows > 0) {
-            await db.update(images)
-                .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-                .where(inArray(images.id, [...existingIds]));
+        if (affectedRows > 0) {
             const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: batchInsertResult.affectedRows, tag: cleanName }).catch(console.debug);
+            logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: affectedRows, tag: cleanName }).catch(console.debug);
         }
 
         revalidateLocalizedPaths('/admin/dashboard', '/', '/admin/tags');
@@ -457,6 +499,12 @@ export async function batchUpdateImageTags(
                     if (deleteResult.affectedRows > 0) removed++;
                 }
             }
+
+            if (added > 0 || removed > 0) {
+                await tx.update(images)
+                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
+                    .where(eq(images.id, imageId));
+            }
         });
     } catch (err) {
         if (err instanceof Error && err.message === 'IMAGE_NOT_FOUND') {
@@ -475,9 +523,6 @@ export async function batchUpdateImageTags(
     // AGG12-01 but with lower severity because the metadata is accurate
     // (no false positive count) — the event is just unnecessary noise.
     if (added > 0 || removed > 0) {
-        await db.update(images)
-            .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-            .where(eq(images.id, imageId));
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
     }

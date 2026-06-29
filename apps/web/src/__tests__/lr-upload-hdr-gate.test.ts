@@ -102,6 +102,13 @@ describe('lr upload GPS-original strip source-contract', () => {
         // with the browser path), never unconditionally.
         expect(stripIndex).toBeGreaterThan(guardIndex);
     });
+
+    it('returns 422 if mandatory GPS stripping cannot be guaranteed', () => {
+        expect(LR_SRC).toContain('const gpsStripped = await stripGpsFromOriginal');
+        expect(LR_SRC).toMatch(/if\s*\(!gpsStripped\)\s*\{/);
+        expect(LR_SRC).toContain('GPS metadata could not be stripped from the original');
+        expect(LR_SRC).toContain('{ status: 422');
+    });
 });
 
 /**

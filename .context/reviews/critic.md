@@ -1,158 +1,264 @@
-# Cycle 16 Critic Review
+# Cycle 17 Critic Review
 
-Review target: current HEAD `3da74946a7e7a198041bf6067a0192411d61a860` in `/Users/hletrd/flash-shared/gallery`.
+Scope: whole repository and current HEAD `5e054f80` on `master`.
 
-Role: cycle 16/100 reviewer lane, critic. I reviewed current HEAD only for product correctness, maintainability, security, UX, operational risk, and project policy drift. This is a review artifact only; no production source, migrations, dependencies, runtime data, or deployment state were changed.
+Role: critic reviewer. I did not implement fixes. This artifact is the only file I changed.
 
-## Inventory Summary
+## Executive Summary
 
-Required guidance read:
-- `AGENTS.md` from the task prompt.
-- `CLAUDE.md`.
-- Code-review skill instructions.
+I found two current product/architecture issues worth fixing before another feature pass:
 
-Repository inventory at this HEAD:
-- `git ls-tree -r --name-only HEAD`: 2557 tracked paths.
-- Top-level footprint: `.context` 1755 files; `apps/web/src` 505 files; `apps/web/drizzle` 31 files; `apps/web/scripts` 27 files; `apps/web/public` 9 files; `apps/web/e2e` 8 files; plus root/app configs, deploy scripts, docs, and package metadata.
-- Extension footprint: 1806 Markdown files, 425 TypeScript files, 104 TSX files, 80 PNG files, 28 SQL migrations, 22 JSON files, 20 log files, 12 PID files, 6 JS/MJS files each, 6 JPG files, 5 ICC profiles, and supporting shell/YAML/config files.
+1. **Confirmed MEDIUM:** the public home page catches image-query failures and renders a successful empty gallery, which can hide outages and mislead crawlers/users.
+2. **Confirmed MEDIUM:** admin topic slug validation does not reserve several existing public route segments (`timeline`, `year`, `privacy`, `c`), so admins can create canonical topic URLs that Next.js will route somewhere else.
 
-Review-relevant current surfaces inspected:
-- Product/public routes: home, photo, share, group, map, search, Open Graph, service worker registration and cache policy.
-- Admin routes/actions/API: image upload/delete/retry, Lightroom upload, DB backup/restore, settings, users/tokens, protected dashboard flows.
-- Data/security boundaries: `apps/web/src/lib/data.ts`, schema/migrations, privacy omit guards, rate limiting, origin checks, API auth, CSP, upload path containment, restore SQL scanner.
-- Operational/deploy surfaces: `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `.env.deploy.example`, README/CLAUDE runbooks.
-- Test/policy surfaces: custom auth/origin/rate-limit linters, Vitest privacy/touch/security/source-contract tests, Playwright E2E inventory, historical `.context/reviews` and `.context/plans` for recurring policy drift.
+The repository has unusually strong defense-in-depth around admin APIs, server-action origin checks, public mutation rate limits, privacy field omission, share metadata lookup avoidance, semantic-search activation gates, upload serving containment, and DB restore scanning. The highest residual risks are mostly consistency gaps between route topology, operational documentation, and custom lint assumptions.
 
-Validation evidence:
+## Inventory Inspected
+
+Primary docs and policy:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `README.md`
+- `.env.deploy.example`
+- `.context/plans/` and `.context/reviews/` inventory shape
+
+Deploy and operations surfaces:
+- `package.json`
+- `scripts/deploy-remote.sh`
+- `apps/web/package.json`
+- `apps/web/deploy.sh`
+- `apps/web/docker-compose.yml`
+- `apps/web/Dockerfile`
+- `apps/web/nginx/default.conf`
+- `apps/web/scripts/migrate.js`
+- `apps/web/scripts/restore-db.sh`
+- `apps/web/scripts/check-action-origin.ts`
+- `apps/web/scripts/check-admin-api-auth.ts`
+- `apps/web/scripts/check-public-route-rate-limit.ts`
+- `apps/web/scripts/check-prod-build-origin.ts`
+- `apps/web/scripts/check-legacy-public-originals.ts`
+
+App routing surface:
+- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, photo, map, timeline, year, privacy, group share, set share, smart collection, uploads, robots, sitemap, feed, manifest, icons.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, dashboard, categories, tags, users, tokens, settings, SEO, DB, password, analytics.
+- API routes under `apps/web/src/app/api/`: `health`, `live`, `og`, `og/photo/[id]`, `search/semantic`, `search/similar/[id]`, `admin/db/download`, `admin/lr/upload`.
+- Server actions under `apps/web/src/app/actions/`: auth, images, topics, tags, sharing, settings, SEO, public analytics, collections, embeddings, admin users, admin backfill, Lightroom tokens.
+
+Components and client UX surface:
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/photo-modal.tsx`
+- `apps/web/src/components/photo-card.tsx`
+- `apps/web/src/components/share-dialog.tsx`
+- `apps/web/src/components/map-*`
+- `apps/web/src/components/admin/*`
+- `apps/web/src/components/lightroom/*`
+- `apps/web/src/components/ui/*`
+
+Core libraries:
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/data-timeline.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/image-url.ts`
+- `apps/web/src/lib/serve-upload.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/lib/session.ts`
+- `apps/web/src/lib/validation.ts`
+- `apps/web/src/lib/smart-collections.ts`
+- `apps/web/src/lib/db-restore-scan.ts`
+- `apps/web/src/lib/search-enrichment-fields.ts`
+- `apps/web/src/lib/semantic-search-*`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/process-topic-image.ts`
+- `apps/web/src/lib/upload-limits.ts`
+
+Schema, tests, migrations:
+- `apps/web/src/db/schema.ts`
+- migrations `apps/web/drizzle/0000_*.sql` through `0027_*.sql`
+- `apps/web/drizzle/meta/_journal.json`
+- Unit tests under `apps/web/src/__tests__/`, including privacy, proxy/origin, nginx config, uploads, share metadata, semantic search, similar search, restore scan, action-origin lint, public-route rate-limit lint, touch-target audit.
+- E2E tests under `apps/web/e2e/`.
+
+Validation run this cycle:
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run typecheck --workspace=apps/web` passed.
-- `npm test --workspace=apps/web` passed: 260 test files passed, 2 skipped; 2418 tests passed, 4 skipped.
+
+Not run this cycle:
+- `npm run lint --workspace=apps/web`
+- `npm run typecheck --workspace=apps/web`
+- `npm run build --workspace=apps/web`
+- `npm test --workspace=apps/web`
+- `npm run test:e2e --workspace=apps/web`
 
 ## Findings
 
-Finding count: 5 total.
-- Confirmed issues: 1
-- Likely issues: 2
-- Manual-validation risks: 2
-
-### Confirmed Issues
-
-#### CRIT16-01 - Checked-in nginx collapses real client identity when actually deployed behind the documented TLS edge/load balancer
+### C17-MED-01 - Confirmed: public home page masks image-query failures as a successful empty gallery
 
 Severity: Medium
-
 Confidence: High
+Status: Confirmed
 
-Category: Security operations / availability / rate limiting / documentation-contract drift
+Evidence:
+- `apps/web/src/app/[locale]/(public)/page.tsx:166-176` initializes `images`, `totalCount`, and `hasMore` to empty values, catches any `getImagesLitePage(...)` error, logs a warning, and continues rendering.
+- `apps/web/src/app/[locale]/(public)/page.tsx:231-233` passes those empty values to `HomeClient`, so the response is still a normal public page.
 
-Code regions:
-- `apps/web/nginx/default.conf:1-4` keys nginx connection and request zones by `$binary_remote_addr`.
-- `apps/web/nginx/default.conf:25-29` says this nginx file is intended to run behind a TLS-terminating edge/load balancer.
-- `apps/web/nginx/default.conf:67-70`, `apps/web/nginx/default.conf:83-87`, `apps/web/nginx/default.conf:100-104`, `apps/web/nginx/default.conf:116-120`, `apps/web/nginx/default.conf:140-144`, `apps/web/nginx/default.conf:157-161`, `apps/web/nginx/default.conf:179-183`, and `apps/web/nginx/default.conf:191-196` overwrite `X-Real-IP` and `X-Forwarded-For` with `$remote_addr` for all proxied traffic.
-- `apps/web/docker-compose.yml:19-21` forces `TRUST_PROXY=true` for the app.
-- `apps/web/src/lib/rate-limit.ts:163-193` trusts `X-Forwarded-For`/`X-Real-IP` only when `TRUST_PROXY=true`, then derives all app-level rate-limit identity from those headers.
-- `README.md:152-154` documents the intended host-network + nginx deployment and notes that CDN/LB topologies require trusted-header normalization first.
+Why it matters:
+- The public home page is the primary product surface. If the image query fails because of a migration bug, DB outage, bad deploy, or schema drift, visitors and crawlers see an apparently valid empty gallery instead of an error, maintenance state, or retryable failure.
+- Operators lose the strongest user-visible signal that the core gallery is broken. A warning in server logs is much weaker than a failed request or explicit degraded state.
+- SEO and social crawlers can cache or index an empty homepage while the database is transiently unavailable.
 
-Failure scenario:
-In the topology described by the nginx file itself, a TLS edge or load balancer forwards traffic to this local nginx listener. Because nginx does not configure `real_ip_header` / `set_real_ip_from` and instead writes `$remote_addr` into both trusted client-IP headers, the app sees the edge/LB address, not the browser address. The nginx zones also key on that same edge/LB address. One abusive client can therefore consume login, admin, semantic search, share, upload, and connection budgets shared by legitimate users behind the same edge. This is an availability failure for public search/share and admin login, and it weakens forensic/IP attribution. The README contains the needed caveat, but the checked-in nginx comment and default headers still make the deployable template unsafe for the stated behind-edge topology unless operators know to add real-IP normalization.
-
-Suggested fix:
-Make the template encode one unambiguous topology. If nginx is behind a trusted TLS edge/LB, add a documented `real_ip_header X-Forwarded-For` plus explicit `set_real_ip_from` entries for trusted edge networks, then pass a normalized chain (`$proxy_add_x_forwarded_for`) or normalized client (`$realip_remote_addr`) consistently and set `TRUSTED_PROXY_HOPS` to the matching value. If the checked-in file is direct-edge-only, remove the "behind TLS-terminating edge/load balancer" claim from `default.conf` and fail loudly when `TRUSTED_PROXY_HOPS` is configured for a topology the template does not implement. Add a source/config test that ties `TRUST_PROXY`, nginx `X-Forwarded-For`, and the documented topology together.
-
-### Likely Issues
-
-#### CRIT16-02 - Lightroom upload cookie fallback loses uploader and audit attribution
-
-Severity: Low
-
-Confidence: Medium-High
-
-Category: Auditability / maintainability
-
-Code regions:
-- `apps/web/src/app/api/admin/lr/upload/route.ts:67-73` accepts the request through `withAdminAuth(..., { allowTokenScope: 'lr:upload' })` and reads only `getAdminAuthToken(request)?.userId`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:433-441` stores `uploaded_by: tokenUserId`, explicitly degrading cookie-fallback requests to `NULL`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:518-525` logs the `lr_token_used` audit event with `tokenUserId`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:547` enables token scope auth but does not disable the wrapper's normal cookie fallback.
-- `apps/web/src/lib/api-auth.ts:69-83` sets request token context only for valid token-authenticated requests.
-- `apps/web/src/lib/api-auth.ts:111-131` then falls through to same-origin cookie admin auth and calls the handler without exposing the authenticated admin id.
-
-Failure scenario:
-The primary Lightroom publish path is token-authenticated and gets correct attribution. However, the route also supports same-origin cookie admin auth through the shared wrapper. A browser/manual/admin-side request to the same endpoint can successfully create an image, but `uploaded_by` and the audit-log user id are `NULL` because the route only reads token context. That makes a supported admin-authenticated upload path less attributable than the normal browser upload path, and it contradicts the multi-admin audit model described in the route comments.
+Concrete failure scenario:
+- A deploy introduces an SQL regression in `getImagesLitePage`. Topic/tag config still loads, so `GalleryHome` reaches the `try` block, catches the thrown query error, logs once, and returns `200 OK` with no images and `totalCount=0`. Monitoring that checks only `/api/live` or page status does not fail, while the public site appears wiped.
 
 Suggested fix:
-Expose authenticated admin identity from `withAdminAuth` to handlers for cookie-authenticated API requests, or call the existing current-user helper inside the LR route when `getAdminAuthToken(request)` is absent. Use the resolved actor id for `uploaded_by`, audit event `user_id`, and warning payloads. Add a route/unit test covering same-origin cookie fallback attribution separately from PAT attribution.
+- Do not silently degrade the primary gallery to empty data on unexpected query errors. Prefer one of:
+  - Let the error propagate to the Next.js error boundary.
+  - Render an explicit unavailable/maintenance state with an error status where feasible.
+  - Gate the fallback behind a narrow, typed “no images exist” condition rather than `catch (err)`.
+- Add a regression test that mocks `getImagesLitePage` throwing and asserts the home route does not render a successful empty gallery.
 
-#### CRIT16-03 - Checked-in nginx hardcodes the production hostname inside an otherwise reusable deploy template
+### C17-MED-02 - Confirmed: topic slug reservation misses existing public route segments
 
-Severity: Low
-
+Severity: Medium
 Confidence: High
+Status: Confirmed
 
-Category: Project policy drift / portability / operations
+Evidence:
+- `apps/web/src/lib/validation.ts:4-21` reserves `admin`, `g`, `map`, `p`, `s`, `uploads`, public metadata files, and locale codes for topic slugs/aliases.
+- `apps/web/src/app/actions/topics.ts:115-120` rejects reserved topic slugs through `isReservedTopicRouteSegment(slug)`.
+- `apps/web/src/app/actions/topics.ts:500-505` rejects reserved topic aliases through the same helper.
+- Existing concrete public route segments include:
+  - `timeline`: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:16-25`
+  - `year`: `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:17-20`
+  - `privacy`: `apps/web/src/app/[locale]/(public)/privacy/page.tsx:5-14`
+  - `c`: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14-18`
+- The dynamic topic route has its own smaller static-file-only reserved list at `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:19-31`, which is already divergent from `validation.ts`.
 
-Code regions:
-- `apps/web/nginx/default.conf:21-23` hardcodes `server_name gallery.atik.kr`.
-- `README.md:148-154` and `.env.deploy.example:6-14` present production URL/host/deploy values as environment- or operator-configured.
+Why it matters:
+- Admins can create a topic slug or alias such as `timeline`, `year`, `privacy`, or `c`. The database will accept it, the admin UI can link to it as a normal topic, and SEO/canonical generation can treat it as valid content. But Next.js will route `/en/timeline`, `/en/privacy`, `/en/year/...`, and `/en/c/...` to the concrete route tree rather than the topic page.
+- This creates unreachable or misleading canonical URLs. It also makes future route additions dangerous because the slug guard has to be updated by memory.
 
-Failure scenario:
-The repository otherwise treats deployment identity as config-driven, with production origins and remote deploy fields coming from environment or gitignored deploy files. The checked-in nginx template is the exception: a fresh operator, fork, or restored host can deploy the template with the wrong virtual host. Depending on the edge configuration, that can reject the intended host, serve this app for an unintended host, or cause confusing TLS/Host debugging during recovery.
+Concrete failure scenario:
+- An admin creates a “Timeline” topic with slug `timeline`. The create action passes validation because `timeline` is not in `RESERVED_TOPIC_ROUTE_SEGMENTS`. Topic navigation links point to `/en/timeline`, but that URL renders the timeline feature page, not the topic gallery. The topic looks broken even though the DB row exists.
 
 Suggested fix:
-Convert `server_name` to a neutral placeholder (`_` or `example.com`) plus explicit deployment instructions, or generate nginx config from the same configured canonical host used by the build/deploy flow. Add a small static check that the checked-in template does not contain a site-specific hostname unless this repo intentionally remains single-site/non-template.
+- Create one shared `RESERVED_PUBLIC_ROUTE_SEGMENTS` source of truth that covers all top-level concrete public segments: `admin`, `c`, `g`, `map`, `p`, `privacy`, `s`, `timeline`, `uploads`, `year`, metadata files, and locale codes.
+- Use it from both `validation.ts` and `[topic]/page.tsx`.
+- Add a test that enumerates concrete siblings of `[topic]` and fails if the reservation set is missing any slug-valid segment.
 
-### Manual-Validation Risks
-
-#### CRIT16-04 - Deploy command override is a trusted arbitrary-shell escape hatch
+### C17-LOW-03 - Confirmed: checked-in nginx template is production-host specific despite reusable deploy docs
 
 Severity: Low
-
 Confidence: Medium
+Status: Confirmed
 
-Category: Operational safety / secrets hygiene
+Evidence:
+- `apps/web/nginx/default.conf:21-29` hardcodes `server_name gallery.atik.kr`.
+- `README.md:173-184` documents Docker deployment as a generally adaptable path.
+- `.env.deploy.example:6-14` makes remote deployment host/path/user config-driven.
 
-Code regions:
-- `scripts/deploy-remote.sh:61-72` sources `.env.deploy`, accepts `DEPLOY_CMD`, and executes it through `exec bash -lc "$deploy_cmd"`.
-- `.env.deploy.example:13-14` documents `DEPLOY_CMD` as an optional complete override of the derived SSH command.
+Why it matters:
+- The deploy and README surfaces present this repository as configurable, but the checked-in nginx template still bakes one production hostname into the server block. Anyone adapting the repo can complete the documented env-driven deploy flow and still carry a stale server name.
+- In nginx, `server_name` interacts with host matching and virtual-host selection. On a shared host or future multi-domain setup, this can serve the app from the wrong default server or make a cloned deployment fail host routing.
 
-Failure scenario:
-This is not a confirmed vulnerability because `.env.deploy` is gitignored and operator-controlled. The risk is operational: if that file is created by automation, copied from chat, committed elsewhere, or made writable by an untrusted local process, `npm run deploy` becomes arbitrary local shell execution with the developer's credentials and SSH keys. The project policy says deploy credentials are config-driven, but the override broadens the trust boundary beyond typed deploy fields.
+Concrete failure scenario:
+- A second gallery instance is deployed with a different public hostname using `.env.deploy`. The app boots, but nginx still only declares `gallery.atik.kr`; depending on other server blocks, the new host may hit the default server, receive wrong headers, or bypass intended host-specific policy.
 
 Suggested fix:
-Keep the derived SSH command as the normal path and document `chmod 600 .env.deploy` plus "do not generate this file from untrusted input." Consider printing a prominent warning when `DEPLOY_CMD` is set, or replacing it with narrower fields unless a truly arbitrary local command is required.
+- Template `server_name` from deploy configuration, use `_` for an explicitly internal-only default, or document that operators must rewrite this line before deployment.
+- Add a lightweight test that either permits only the chosen generic default or verifies the deployment docs mention the required edit.
 
-#### CRIT16-05 - Admin SQL restore safety remains dependent on regex scanning and should stay covered by real-dump drills
+### C17-LOW-04 - Confirmed: upload cache comment contradicts the actual cache duration
 
 Severity: Low
+Confidence: High
+Status: Confirmed
 
-Confidence: Medium
+Evidence:
+- `apps/web/src/lib/serve-upload.ts:245-249` says edge caches keep files fast “for one day”.
+- `apps/web/src/lib/serve-upload.ts:250-252` says the policy was reduced from `86400` to `3600`, and the actual header is `Cache-Control: public, max-age=3600, must-revalidate`.
 
-Category: Operational recovery / database safety
+Why it matters:
+- This is not a runtime bug, but it is a documentation-code mismatch in a performance-sensitive path. Future operators or reviewers may reason about a 24-hour stale window when the application actually promises one hour.
+- Cache behavior is part of the color/HDR delivery contract. Incorrect comments make it easier to reintroduce stale derivative behavior during future pipeline work.
 
-Code regions:
-- `apps/web/src/app/[locale]/admin/db-actions.ts:491-519` scans uploaded SQL dump chunks before restore and rejects detected dangerous SQL.
-- `apps/web/src/lib/sql-restore-scan.ts:113-155` strips comments/literals and checks regex patterns over sanitized SQL forms.
-
-Failure scenario:
-The current scanner is materially hardened and covered by tests, so I am not promoting a specific bypass. The residual risk is that SQL restore is a destructive admin operation and the safety layer is necessarily heuristic: MySQL dump syntax, conditional comments, encodings, or future backup-format changes can create parser gaps or false positives. A false negative can execute unsafe SQL during restore; a false positive can block the emergency restore path when it is needed most.
+Concrete failure scenario:
+- A color-pipeline fix is deployed and an operator expects old derivatives to remain edge-cached for one day because of the comment, delaying investigation in the wrong direction. In reality the browser/edge TTL is one hour plus revalidation behavior.
 
 Suggested fix:
-Keep the scanner tests, but add a periodic manual restore drill with a current production-shaped dump into a disposable database, plus a small corpus of malicious/edge-case dump fragments. If restore remains a core admin feature, consider replacing regex screening with a stricter allowlist restore pipeline or parser-backed validation for the subset of SQL this app's own backup command emits.
+- Update the comment to say “within an hour” or remove the stale “one day” sentence. Keep the R8-R7 rationale next to the header.
 
-## Final Missed-Issues Sweep
+### C17-RISK-05 - Risk: custom action-origin lint advertises TSX/JSX coverage but parses every file as TypeScript
 
-Checked and not promoted:
-- Auth wrappers and origin/rate-limit policy: custom lint gates passed for admin API auth, mutating server action origin checks, and public mutating route rate limits.
-- Type/test health: typecheck passed and the full Vitest suite passed, including privacy-field guards and touch-target audit coverage.
-- Product policy drift: source and docs sweeps did not find reintroduced paid-download/Stripe flows, culling/scoring features, or photo-editing tools. Existing edit language is metadata/topic/tag/admin editing, not photographer image editing.
-- Privacy projections: public data selectors, map GPS selectors, search enrichment fields, and sensitive-key tests remain in place; no new public PII leak was promoted.
-- HTML/script sinks: `dangerouslySetInnerHTML` usage found in current source is structured JSON-LD/CSP-related, not arbitrary user HTML rendering.
-- Upload/path containment: current upload/original path helpers and LR/browser upload paths include filename sanitization, body caps, contract locking, maintenance guards, and current tests/source contracts.
-- Service worker: current cache rules exclude admin and sensitive dynamic surfaces and honor no-store/admin-render headers; no cache leak was promoted.
-- Migration/journal state: Drizzle journal and migration files are present through the current schema; no missing current migration file was promoted.
+Severity: Low
+Confidence: Medium
+Status: Risk
 
-Residual gaps:
-- I did not run production-scale browser profiling, MySQL `EXPLAIN ANALYZE`, or a live restore/deploy drill in this review lane.
-- Historical `.context/**` archives were inventoried and searched for recurring policy drift, while direct current-behavior inspection focused on HEAD source, tests, configs, docs, and operational scripts.
+Evidence:
+- `apps/web/scripts/check-action-origin.ts:47` includes `.tsx` and `.jsx` in `ACTION_FILE_EXTENSIONS`.
+- `apps/web/scripts/check-action-origin.ts:58-77` recursively discovers those files.
+- `apps/web/scripts/check-action-origin.ts:476-479` always creates the AST with `ts.ScriptKind.TS`.
+
+Why it matters:
+- The current action files are covered by the passing lint run, but the gate’s stated future coverage is wider than its parser mode. If a future server-action file uses TSX/JSX syntax, the scanner may parse it incorrectly and either fail noisily in an unexpected way or silently miss the structure it was meant to analyze.
+- Security lint gates should fail predictably. A misleading extension allowlist is a maintenance hazard because reviewers may believe `.tsx` actions are fully supported.
+
+Concrete failure scenario:
+- A future admin action is added in `app/actions/bulk-editor.tsx` with JSX used in a helper or returned fragment. Discovery includes the file, but `createSourceFile(..., ScriptKind.TS)` does not parse it as TSX. The scanner’s AST walk can produce false positives/negatives unrelated to the actual origin-guard contract.
+
+Suggested fix:
+- Select `ScriptKind.TSX` for `.tsx`, `ScriptKind.JSX` for `.jsx`, and JS/TS kinds for the other extensions.
+- Add fixture tests for guarded and unguarded `.tsx` action files so the claimed extension coverage is executable.
+
+### C17-RISK-06 - Risk: deploy escape hatch executes arbitrary shell from a gitignored env file
+
+Severity: Low
+Confidence: Medium
+Status: Risk
+
+Evidence:
+- `scripts/deploy-remote.sh:61-72` sources the selected env file, allows `DEPLOY_CMD`, and executes it with `bash -lc`.
+- `.env.deploy.example:13-14` documents `DEPLOY_CMD` as an optional override for the derived SSH command.
+
+Why it matters:
+- This is an intentional escape hatch, not a vulnerability by itself. The risk is operational: `.env.deploy` is gitignored and outside review, while `npm run deploy` is required per iteration. A compromised or accidentally edited env file can run any local shell command under the developer account.
+- Because deploy is habitual, this path deserves strong guardrails or at least loud documentation.
+
+Concrete failure scenario:
+- A local `.env.deploy` is copied from a shared note with a malformed `DEPLOY_CMD`, or is modified by unrelated tooling. The next routine `npm run deploy` executes the arbitrary command locally before any SSH boundary is reached.
+
+Suggested fix:
+- Prefer deriving the SSH command from structured fields and require an explicit `ALLOW_DEPLOY_CMD=1` for the escape hatch.
+- Print the resolved command and require an interactive confirmation only for `DEPLOY_CMD`, or restrict the override to commands beginning with `ssh`.
+- Document the local-code-execution property in `.env.deploy.example`.
+
+## Positive Contracts I Tried To Break But Did Not
+
+- Admin API authentication is currently enforced by the custom scanner; `npm run lint:api-auth --workspace=apps/web` passed.
+- Mutating server actions are currently covered by the same-origin guard scanner; `npm run lint:action-origin --workspace=apps/web` passed.
+- Public mutating API routes are currently covered by the rate-limit scanner; `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Lightroom upload attribution appears fixed in current HEAD: `apps/web/src/app/api/admin/lr/upload/route.ts:68-75` derives an authenticated token/cookie actor and `apps/web/src/app/api/admin/lr/upload/route.ts:443` persists `uploaded_by: actorUserId`.
+- Public share pages avoid token lookup in metadata and rate-limit before lookup on page render; I inspected `g/[key]` and `s/[key]` flows.
+- Semantic search and similar search have same-origin checks, activation gates, request-size checks, rate-limit pre-increment, and processed-image filtering.
+- Upload serving validates path segments, extensions, realpaths, containment, non-symlink files, ETags, and content type before streaming.
+- Privacy-sensitive fields have type/test guards around public data omission and search enrichment fields.
+
+## Final Missed-Issue Sweep
+
+I did a final sweep across:
+- Route conflicts and reserved segment validation.
+- Home/topic/photo/share/search public behavior.
+- Admin action/API guard coverage.
+- Nginx proxy trust and rate-limit IP derivation.
+- Upload serving and cache headers.
+- DB restore/backup surfaces and deploy helper behavior.
+- Schema migration journal conventions.
+- Existing test and lint gates.
+- Prior critic findings to avoid repeating issues already fixed at HEAD.
+
+Residual uncertainty:
+- I did not run the full unit suite, typecheck, build, or Playwright E2E in this critic pass.
+- I did not execute production deploy or destructive DB restore paths.
+- I sampled broad code regions rather than line-reading every component and every one of the 2000+ tests end to end.

@@ -252,7 +252,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         const response = await POST(request);
 
         expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
+        await expect(response.json()).resolves.toEqual({
+            error: 'Semantic search is not fully configured',
+            code: 'semantic_not_configured',
+        });
         expect(textMock).not.toHaveBeenCalled();
         expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
@@ -281,7 +284,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         const response = await POST(mockRequest({ query: 'mountain landscape' }));
 
         expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
+        await expect(response.json()).resolves.toEqual({
+            error: 'No production semantic embeddings are available yet',
+            code: 'semantic_no_embeddings',
+        });
         expect(embedTextRealMock).toHaveBeenCalledOnce();
         expect(embedTextStubMock).not.toHaveBeenCalled();
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();

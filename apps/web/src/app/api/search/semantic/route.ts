@@ -179,7 +179,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
     if (semanticMode !== 'stub' && semanticMode !== 'production') {
         return NextResponse.json(
-            { error: 'Semantic search is not fully configured' },
+            { error: 'Semantic search is not fully configured', code: 'semantic_not_configured' },
             { status: 503, headers: NO_STORE_HEADERS },
         );
     }
@@ -278,7 +278,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
     if (isProd && rows.length === 0) {
         return NextResponse.json(
-            { error: 'Semantic search is not fully configured' },
+            { error: 'No production semantic embeddings are available yet', code: 'semantic_no_embeddings' },
             { status: 503, headers: NO_STORE_HEADERS },
         );
     }

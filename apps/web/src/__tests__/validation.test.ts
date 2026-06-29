@@ -122,8 +122,12 @@ describe('isValidTopicAlias', () => {
 describe('isReservedTopicRouteSegment', () => {
     it('rejects static locale route segments', () => {
         expect(isReservedTopicRouteSegment('admin')).toBe(true);
+        expect(isReservedTopicRouteSegment('c')).toBe(true);
         expect(isReservedTopicRouteSegment('P')).toBe(true);
+        expect(isReservedTopicRouteSegment('privacy')).toBe(true);
+        expect(isReservedTopicRouteSegment('timeline')).toBe(true);
         expect(isReservedTopicRouteSegment('uploads')).toBe(true);
+        expect(isReservedTopicRouteSegment('year')).toBe(true);
         expect(isReservedTopicRouteSegment('en')).toBe(true);
         expect(isReservedTopicRouteSegment('KO')).toBe(true);
     });

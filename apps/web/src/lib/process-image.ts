@@ -1730,12 +1730,11 @@ export function isLosslessWebpByChunk(buf: Buffer): boolean {
  * then atomically rename over the original so concurrent readers never
  * see a partial write.
  *
- * Best-effort only: on any error the function logs and returns without
- * modifying the original. The DB columns are already nulled, so the
- * public gallery does not leak GPS; only the download-original path
- * remains at risk in that case.
+ * Returns false when GPS stripping cannot be guaranteed. Upload callers
+ * that enabled strip_gps_on_upload must reject/quarantine in that case so
+ * private originals do not silently retain protected location metadata.
  */
-export async function stripGpsFromOriginal(filePath: string): Promise<void> {
+export async function stripGpsFromOriginal(filePath: string): Promise<boolean> {
     const tmpPath = filePath + '.gps-strip.' + randomUUID() + '.tmp';
     try {
         const ext = path.extname(filePath).toLowerCase();
@@ -1755,14 +1754,14 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
             // No standardized EXIF/GPS carriage in these containers; a
             // re-encode would only degrade them (and flatten animated
             // GIFs) for zero privacy gain.
-            return;
+            return true;
         }
 
         if (scrubbed) {
-            if (!scrubbed.stripped) return; // no GPS present — leave byte-identical
+            if (!scrubbed.stripped) return true; // no GPS present — leave byte-identical
             await fs.writeFile(tmpPath, scrubbed.buffer, { mode: 0o600 });
             await fs.rename(tmpPath, filePath);
-            return;
+            return true;
         }
 
         // Tier 2 — the scrubber reported a structural anomaly (or the
@@ -1796,10 +1795,10 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
             // scrub cannot be rewritten here. Surface it loudly: the
             // original keeps its GPS data until the admin re-exports.
             console.error('stripGpsFromOriginal: cannot strip GPS from structurally anomalous HEIC (no HEVC encoder); original retains GPS', { filePath });
-            return;
+            return false;
         } else {
             console.error('stripGpsFromOriginal: no GPS-strip strategy for extension; original retains GPS', { filePath, ext });
-            return;
+            return false;
         }
         await fs.chmod(tmpPath, 0o600).catch((err) => {
             const code = err && typeof err === 'object' && 'code' in err
@@ -1810,13 +1809,11 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
             }
         });
         await fs.rename(tmpPath, filePath);
+        return true;
     } catch (e) {
         // Best-effort cleanup of temp file
         await safeUnlink(tmpPath);
-        // Non-fatal: log and continue. The DB columns are already nulled,
-        // and the derivatives (which are what the public gallery serves)
-        // already have no GPS. Only the download-original path leaks, and
-        // failing the upload entirely would be worse.
         console.error('stripGpsFromOriginal: failed to strip GPS from original', { filePath, err: e });
+        return false;
     }
 }

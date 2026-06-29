@@ -3,11 +3,15 @@ import { countCodePoints } from '@/lib/utils';
 
 const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'admin',
+    'c',
     'g',
     'map',
     'p',
+    'privacy',
     's',
+    'timeline',
     'uploads',
+    'year',
     // Public file/metadata routes handled outside the dynamic topic route.
     // Keep this list in sync with app/[locale]/(public)/[topic]/page.tsx.
     'apple-icon',

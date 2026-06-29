@@ -75,6 +75,10 @@ describe('getLocaleDirection', () => {
         expect(getLocaleDirection('en')).toBe('ltr');
         expect(getLocaleDirection('ko')).toBe('ltr');
     });
+
+    it('falls back to ltr for unsupported locale strings', () => {
+        expect(getLocaleDirection('ar')).toBe('ltr');
+    });
 });
 
 describe('buildHreflangAlternates (AGG1L-LOW-04)', () => {

@@ -71,6 +71,7 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
     it('bypasses revocable share pages instead of offline-caching them', () => {
         expect(TEMPLATE).toMatch(/function isRevocableShareHtmlRoute\(pathname\)/);
         expect(TEMPLATE).toContain('[csg]\\/[^/]+');
+        expect(TEMPLATE).toContain('p\\/\\d+');
         expect(TEMPLATE).toMatch(/map\\\/\?\$/);
         const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
         const shareBypassIdx = fetchHandler.indexOf('isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)');

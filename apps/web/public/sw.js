@@ -18,12 +18,12 @@
  *  - /admin/*, /[locale]/admin/*, and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 47a9cb1a-p7 is replaced at build time by scripts/build-sw.ts.
+ * 72f85842-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '47a9cb1a-p7';
+const SW_VERSION = '72f85842-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -58,6 +58,7 @@ function isHtmlRoute(request) {
 function isRevocableShareHtmlRoute(pathname) {
   return (
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[csg]\/[^/]+\/?$/.test(pathname) ||
+    /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?p\/\d+\/?$/.test(pathname) ||
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?map\/?$/.test(pathname)
   );
 }
@@ -385,8 +386,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Revocable share pages — always bypass to network. Offline HTML cache can
-  // otherwise outlive share revoke/delete/expiry for up to HTML_MAX_AGE_MS.
+  // Revocable/public object pages — always bypass to network. Offline HTML
+  // cache can otherwise outlive share revoke/delete/expiry or photo deletion
+  // for up to HTML_MAX_AGE_MS.
   if (isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)) return;
 
   // HTML routes — network-first with 24 h fallback

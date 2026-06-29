@@ -1,117 +1,159 @@
-# Verifier Review - Cycle 16/100
+# Verifier Review - Cycle 17/100
 
-Date: 2026-06-30
-HEAD: `3da74946a7e7a198041bf6067a0192411d61a860`
-Scope: current `HEAD` only. No diff/PR sampling. Reviewed repository-wide invariants from `AGENTS.md` and `CLAUDE.md`, with emphasis on behavior documented for auth, public routes, migrations, privacy, upload/processing, color/HDR honesty, semantic search, and deployment gates.
+Date: 2026-06-30 KST
+HEAD reviewed: `5e054f80f646cbcd16c7aae5412aa29424e05032` (`fix(cycle16): 🐛 close review-plan-fix findings`)
+Scope: evidence-based correctness review against `AGENTS.md`, `CLAUDE.md`, committed `.context` plan/review history, tests, and current HEAD implementation. This review did not implement fixes.
 
-## Inventory Summary
+## Contract Inventory And Evidence
 
-- Tracked files: 2,557 total.
-- Runtime/test code inventory:
-  - `apps/web/src/app`: 77 tracked files.
-  - Public/admin API route handlers: 8 route files.
-  - Server actions: 13 action files plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-  - Components: 57 files.
-  - Library/data/processing modules: 96 files.
-  - Unit tests: 267 tracked test/stub files; Vitest reported 262 test files discovered.
-  - E2E tests: 8 files.
-  - Drizzle migrations: 28 SQL migrations plus metadata.
-- Historical/review context:
-  - `.context`: 1,755 tracked artifacts, mostly review/plan history and screenshots.
-  - `plan`: 176 tracked plan artifacts.
-  - These were inventoried but not treated as runtime behavior unless referenced by current code/tests.
+Reviewed `AGENTS.md` and `CLAUDE.md` first, then inventoried the current contract surfaces:
 
-## Verification Evidence
+- Auth guards: `withAdminAuth(...)` route wrapper, same-origin cookie auth, token scope support, scanner `lint:api-auth`, server-action origin scanner `lint:action-origin`.
+- Upload limits: 200 MiB file cap, 2 GiB rolling app quota, 100-file batch cap, Next action/proxy 266 MiB effective cap, nginx 216M upload route cap, LR route behavior, restore-maintenance guards.
+- Color/HDR: `IMAGE_PIPELINE_VERSION = 7`, no culling/scoring, admin-only HDR delivery, color metadata persistence, derivative cache/ETag/SW freshness, backfill parity.
+- Migrations: journal monotonicity after historical inversions, hash postconditions, `reconcileLegacySchema` coverage, legacy schema cleanup.
+- Privacy: public/admin field separation, GPS/map gating, search enrichment sensitive-field guard.
+- Rate limits: public action/API pre-increment contracts, rollback only when DB increment succeeded, analytics/IP privacy.
+- Deploy/service worker/semantic search/analytics: deployment rules, generated `sw.js`, semantic production gate, analytics retention and no full IP persistence.
 
-Passed:
+Evidence commands/read-only probes:
 
-- `npm run lint:api-auth --workspace=apps/web`
-  - Confirmed every `apps/web/src/app/api/admin/**/route.*` export is wrapped with `withAdminAuth(...)`.
-- `npm run lint:action-origin --workspace=apps/web`
-  - Confirmed mutating server actions return early on `requireSameOriginAdmin()` or carry explicit read-only/public exemptions.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`
-  - Confirmed public mutating API route exports are rate-limited or non-mutating.
-- `npm run typecheck --workspace=apps/web`
-  - `next typegen`, app typecheck, script typecheck, and JS script check passed.
-- `npm run lint --workspace=apps/web`
-  - ESLint passed.
-- `npm test --workspace=apps/web`
-  - 260 passed, 2 skipped test files.
-  - 2,418 passed, 4 skipped tests.
-- `npm run build --workspace=apps/web`
-  - Production build passed.
-  - Build-time sitemap generation logged `ECONNREFUSED 127.0.0.1:3306` and intentionally fell back to homepage-only sitemap; this matches the documented fallback in `apps/web/src/app/sitemap.ts:24-55` for build/runtime DB outage tolerance.
+- Verified current HEAD and clean starting state with `git rev-parse HEAD`, `git log -1`, and `git status --short`.
+- Read key source/test regions in `apps/web/src/lib/api-auth.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, upload actions/routes, service worker template/generated file, migration runner/journal, privacy/data selectors, semantic routes, analytics/rate-limit modules, and relevant tests.
+- Confirmed generated `public/sw.js` matches `scripts/build-sw.ts` output for the current template and `IMAGE_PIPELINE_VERSION`.
+- Ran a targeted `tsx` probe against `checkPublicRouteSource()` to confirm the public route scanner false negative described below.
 
-Not run:
+## Findings
 
-- `npm run test:e2e --workspace=apps/web`.
-  - No browser-flow-specific issue was found that required Playwright confirmation in this verifier lane.
+### V17-01 - Confirmed - Tag-link freshness postcondition is not atomic
 
-## Confirmed Issues
+Severity: Medium
+Confidence: High
+Files:
 
-None found.
+- `apps/web/src/app/actions/tags.ts:176-196`
+- `apps/web/src/app/actions/tags.ts:238-259`
+- `apps/web/src/app/actions/tags.ts:328-336`
+- `apps/web/src/app/actions/tags.ts:396-480`
+- `.context/plans/cycle-16-2026-06-30-plan.md:13-17`
+- `apps/web/src/__tests__/tags-actions.test.ts:119-256`
 
-I did not identify a confirmed correctness, security, privacy, migration, or documented-behavior violation in current `HEAD` after the full inventory and invariant sweep above.
+Contract:
 
-## Likely Issues
+Cycle 16 marked the feed/sitemap freshness fix complete: tag-only changes must touch the parent image's `updated_at` when tag links are actually inserted/deleted, to prevent stale `lastModified` and false feed 304 behavior (`.context/plans/cycle-16-2026-06-30-plan.md:13-17`). `CLAUDE.md:400` also states public gallery/photo surfaces are freshness-sensitive and should show async processing/metadata updates immediately.
 
-None found.
+Implementation mismatch:
 
-## Manual-Validation Risks
+The tag-link mutation and the parent-image timestamp touch are separate writes in every tag-link path:
 
-### MVR-01 - Backup download still opens a validated path by pathname after `realpath()`
+- `addTagToImage()` inserts into `imageTags` at `tags.ts:176-179`, then updates `images.updated_at` later at `tags.ts:193-196`.
+- `removeTagFromImage()` deletes from `imageTags` at `tags.ts:238-242`, then updates `images.updated_at` later at `tags.ts:256-259`.
+- `batchAddTags()` inserts links at `tags.ts:328`, then updates `images.updated_at` at `tags.ts:333-336`.
+- `batchUpdateImageTags()` commits all add/remove work inside `db.transaction()` at `tags.ts:396-460`, then updates `images.updated_at` outside that transaction at `tags.ts:477-480`.
 
-- Severity: Low
-- Confidence: Medium
-- Files:
-  - `apps/web/src/app/api/admin/db/download/route.ts:43-76`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:138-147`
-  - `apps/web/src/__tests__/backup-download-route.test.ts:103-170`
-- Evidence:
-  - The download route validates the requested backup file with `lstat()`, rejects symlinks/non-files, resolves the path with `realpath()`, verifies it remains under `data/backups`, then calls `createReadStream(resolvedFilePath)` (`route.ts:43-76`).
-  - The backup writer creates `data/backups` with mode `0700` and backup files with mode `0600` (`db-actions.ts:138-147`, `172`), so normal app-generated backups are not attacker-writable.
-  - Existing tests cover auth/origin rejection, normal streaming, and unexpected stream failures (`backup-download-route.test.ts:103-170`), but do not simulate replacing the validated path between `realpath()` and `createReadStream()`.
-- Failure scenario:
-  - If a same-UID local process, compromised deployment user, or misconfigured host write path can modify `data/backups` concurrently, it could replace the validated backup pathname after `realpath()` returns and before `createReadStream()` opens it. Because `createReadStream()` opens by pathname and follows symlinks at open time, the comment at `route.ts:72-74` overstates the TOCTOU closure. I did not find an in-app unauthenticated or admin upload path that writes arbitrary symlinks into `data/backups`, so this is a host/runtime validation risk rather than a confirmed application exploit.
-- Suggested fix:
-  - For stronger defense-in-depth, open the file descriptor immediately after validation with no symlink following where available, then stream from the file descriptor rather than reopening the pathname. In Node, use `fs.promises.open(resolvedFilePath, constants.O_RDONLY | constants.O_NOFOLLOW)` where supported, validate `fd.stat().isFile()`, and create the stream from the `FileHandle` or descriptor. Add a regression test that mocks a symlink/path replacement after validation and asserts the stream does not follow the replaced path.
+Concrete failure scenario:
 
-## Cross-File Invariant Sweep
+An admin adds or removes a tag. The `imageTags` write succeeds, but the subsequent `db.update(images).set({ updated_at: CURRENT_TIMESTAMP })` fails because of a transient DB error, connection interruption, lock timeout, or because the row was concurrently deleted after the tag-link write. In the single/batch-add paths, the action can return an error after already changing tags; in `batchUpdateImageTags()`, the action can throw after the transaction has committed. In both cases, the feed/sitemap freshness postcondition can be false: tags changed, but `images.updated_at` did not advance, so consumers using `updated_at` can miss the change or keep a false 304.
 
-- Admin API auth:
-  - `withAdminAuth` centralizes cookie auth, same-origin checks, PAT scope handling, no-store, and `nosniff` headers in `apps/web/src/lib/api-auth.ts:55-141`.
-  - Admin route lint passed for both current admin route files.
-- Server action provenance:
-  - Mutating action exports are gated by `requireSameOriginAdmin()` in `apps/web/src/lib/action-guards.ts:37-44`; the scanner reported all mutating exports as OK.
-  - Public analytics actions are explicitly exempt and validate/rate-limit before writes in `apps/web/src/app/actions/public.ts:365-455`.
-- Public route rate limiting:
-  - OG image routes are IP-rate-limited before expensive render/fetch work in `apps/web/src/app/api/og/route.tsx:46-62` and `apps/web/src/app/api/og/photo/[id]/route.tsx:44-60`.
-  - Semantic/similar search routes use the semantic limiter per the scanner.
-  - Share-key pages rate-limit in the page body, while metadata stays generic and does not perform key lookup, in `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:35-101` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:40-115`.
-- Privacy:
-  - `publicSelectFields` omits GPS, original filenames, admin-only color/HDR fields, processing diagnostics, upload attribution, and pipeline internals in `apps/web/src/lib/data.ts:369-489`.
-  - `publicMapSelectFields` is the only public latitude/longitude select and is constrained to `topics.map_visible = true` plus runtime assertion in `apps/web/src/lib/data.ts:1651-1687`.
-  - Timeline/search mirrors carry compile-time privacy guards in `apps/web/src/lib/data-timeline.ts:20-67` and `apps/web/src/lib/data.ts:1516-1526`.
-- Migrations:
-  - The non-monotonic historical Drizzle journal region is documented and test-covered, not a new finding. `migrate.js` baselines individual hashes with original `when` values and post-checks missing hashes in `apps/web/scripts/migrate.js:710-805`.
-  - Reconcile coverage tests explicitly cover create/index mirrors and drop tripwires for removed paid-download/reactions schema.
-- Upload/processing:
-  - Browser and Lightroom upload paths both use upload tracker claims, topic validation, metadata sanitization, processing snapshots, restore-maintenance checks, and upload-processing contract locking.
-  - Delete/retry/backfill code paths are guarded by existing source-contract tests and passed the full unit suite.
-- Color/HDR honesty:
-  - Public field sets omit `is_hdr`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `icc_profile_name`, `color_space`, `has_gain_map`, `was_downscaled`, and `pipeline_version`.
-  - UI render sites gate admin-only color/HDR fields on `isAdmin`; source scans found expected gated use in `color-details-section`, `lightbox-color-pip`, `photo-viewer`, and `info-bottom-sheet`.
-- Sitemap/build behavior:
-  - Build-time DB refusal is handled by explicit homepage-only fallback in `apps/web/src/app/sitemap.ts:24-55`; production build completed successfully.
+The unit coverage currently exercises validation/collision/no-op audit behavior, but does not simulate `images.updated_at` update failure or assert rollback/postcondition behavior (`tags-actions.test.ts:119-256`). That leaves the "DONE" freshness fix under-proven.
 
-## Final Missed-Issues Sweep
+Suggested fix:
 
-I ran focused repository-wide searches for:
+Make the tag-link mutation and `images.updated_at` touch one atomic DB unit for each path. For `batchUpdateImageTags()`, move the timestamp update inside the existing transaction when `added > 0 || removed > 0`. For the single and batch-add paths, wrap the link mutation plus timestamp update in a transaction or explicitly verify/update the parent image before returning success. Add tests where the timestamp update fails and assert either the tag-link mutation rolls back or the action reports a clearly partial failure with a repair path.
 
-- Sensitive image/admin fields appearing outside data guards and admin-only UI.
-- Raw SQL / `sql` usage, `LIKE` paths, and route-level URL/fetch surfaces.
-- `dangerouslySetInnerHTML`, JSON-LD, metadata, redirect, OG, and CSP paths.
-- Destructive filesystem/database operations and migration/drop behavior.
-- Explicit TODO/FIXME/SECURITY/BUG annotations.
+### V17-02 - Confirmed false-confidence risk - Public API rate-limit scanner still passes a helper that mutates before limiting
 
-No additional confirmed or likely issue survived cross-file tracing against current tests and documented invariants. The only residual concern is MVR-01, which depends on host-level write access or a concurrent same-UID process rather than a demonstrated in-app path.
+Severity: Medium
+Confidence: High
+Files:
+
+- `apps/web/scripts/check-public-route-rate-limit.ts:124-127`
+- `apps/web/scripts/check-public-route-rate-limit.ts:129-244`
+- `apps/web/scripts/check-public-route-rate-limit.ts:271-276`
+- `apps/web/scripts/check-public-route-rate-limit.ts:345-349`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:326-361`
+
+Contract:
+
+`AGENTS.md` and `CLAUDE.md` make `npm run lint:public-route-rate-limit --workspace=apps/web` a blocking gate: every public API route exporting a mutating handler must call a rate-limit pre-increment helper before mutation, unless it carries an explicit exemption. Cycle 16 specifically scheduled the "public API scanner local-helper blind spot" as fixed (`.context/plans/cycle-16-2026-06-30-plan.md:17`).
+
+Implementation mismatch:
+
+The checker only classifies direct property-access DB calls as mutations (`isKnownMutationCall()` at `check-public-route-rate-limit.ts:124-127`). It builds `localRateLimitGateFunctions` by accepting any local function whose own body appears to contain a rate-limit gate before a known mutation (`check-public-route-rate-limit.ts:271-276`), then treats calls to those local functions as satisfying exported handlers (`check-public-route-rate-limit.ts:345-349`).
+
+Because `bodyCallsRateLimitBeforeMutation()` does not treat calls to local mutating helper functions as mutations (`check-public-route-rate-limit.ts:129-244`), this fixture incorrectly passes:
+
+```ts
+import { preIncrementShareAttempt } from '@/lib/rate-limit';
+
+async function writeFirst() {
+  await db.insert(rows).values({ ok: true });
+}
+
+async function guarded() {
+  await writeFirst();
+  const limit = preIncrementShareAttempt('1.2.3.4');
+  if (limit.limited) return Response.json({}, { status: 429 });
+  return Response.json({ ok: true });
+}
+
+export { guarded as POST };
+```
+
+I confirmed the current scanner returns:
+
+```json
+{
+  "passed": ["OK: route.ts (uses rate-limit helper)"],
+  "failed": []
+}
+```
+
+Current tests cover a good local gate helper and an ignored-rate-limit helper (`check-public-route-rate-limit.test.ts:326-361`), but not a local helper that performs the mutation before the gate.
+
+Concrete failure scenario:
+
+A future public `POST` route factors its write into `writeFirst()` and calls that helper before rate limiting inside another local function. The blocking scanner passes, CI gives false confidence, and the deployed route accepts unlimited writes until a human notices.
+
+Suggested fix:
+
+Mirror the stronger local-mutator analysis used by the action-origin scanner: collect local functions/variables whose bodies contain known mutations, treat calls to those functions as mutations while scanning both local gate helpers and exported handlers, and add a regression fixture matching the example above. Fail closed on unresolved local helper calls in mutating public route handlers if precision is uncertain.
+
+### V17-03 - Risk - Backup download still reopens by pathname after validation
+
+Severity: Low
+Confidence: Medium
+Files:
+
+- `apps/web/src/app/api/admin/db/download/route.ts:43-75`
+
+Contract:
+
+The admin DB backup download route must confine downloads to `data/backups`, reject symlinks/non-files, and avoid path traversal. The route comment claims it streams from the resolved realpath to "close the TOCTOU gap" (`route.ts:72-74`).
+
+Implementation mismatch:
+
+The route validates containment with `lstat(filePath)` and `realpath(filePath)` (`route.ts:43-64`), then calls `createReadStream(resolvedFilePath)` (`route.ts:75`). That is safer than opening the original request path, but it is still a second pathname open after validation. If an attacker with same-host filesystem write access can replace the validated backup file between `realpath()` and `createReadStream()`, Node will open whatever path now exists at `resolvedFilePath`.
+
+Concrete failure scenario:
+
+This is not an app-level unauthenticated exploit; it requires a local writer or compromised same-UID process that can race files under `data/backups`. Under that condition, an admin download request could validate one file and stream another same-path replacement. If the replacement is a symlink or hard link permitted by the filesystem context, the earlier checks no longer describe the opened object.
+
+Suggested fix:
+
+Do not claim the gap is closed unless the opened file descriptor is the same object that was validated. Prefer opening a file descriptor with flags that reject symlinks where available, `fstat()` the fd, validate the fd's metadata/containment assumptions, and stream from the fd. At minimum, update the comment to describe the residual race and add a source-level regression test around the intended open/validate order.
+
+## Final Sweep
+
+No additional confirmed mismatches found in these contracts during this pass:
+
+- Admin API auth scanner: admin routes are wrapped with `withAdminAuth(...)`, and the scanner fails closed on alias/star export patterns.
+- Server-action same-origin scanner: current scanner covers mutating exports, public-action rate-limit-before-mutation exemptions, and the cycle-16 catch/finally traversal hardening.
+- Upload limits and LR upload: current caps and nginx/Next limits match the documented proxy-vs-rolling-quota distinction; LR upload resolves cookie actor attribution and PAT scope paths.
+- Privacy selectors: public/search/map selectors exclude the sensitive fields guarded by `privacy-fields.test.ts`.
+- Migrations: current journal has the expected historical non-monotonic section and newer monotonic entries; `migrate.js` retains hash postconditions and legacy reconciliation coverage.
+- Color/HDR and service worker: generated `sw.js` matches the template/pipeline version; HEAD timeout/offline exclusions are represented in template tests.
+- Semantic search: production mode remains opt-in by `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, and public semantic routes gate same-origin, body size, query length, and rate limits.
+- Analytics: current view-event paths rate-limit without persisting full IPs, and retention purge code is present.
+
+Residual risk is concentrated in scanner precision and postcondition atomicity rather than missing top-level guards.

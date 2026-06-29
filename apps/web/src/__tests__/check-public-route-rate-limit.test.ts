@@ -323,7 +323,7 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
     });
 
-    it('passes when a local helper wraps an approved rate-limit gate before mutation', () => {
+    it('fails when a local helper wraps an approved rate-limit gate before mutation', () => {
         const source = `
             import { preIncrementShareAttempt } from '@/lib/rate-limit';
             async function enforceQuota(ip) {
@@ -338,8 +338,46 @@ describe('checkPublicRouteSource', () => {
             }
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
-        expect(result.failed).toHaveLength(0);
-        expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when a local helper inverts the rate-limit result', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            async function enforceQuota(ip) {
+                const overLimit = preIncrementShareAttempt(ip);
+                if (overLimit) return false;
+                return true;
+            }
+            export async function POST(request) {
+                if (await enforceQuota('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when a local helper mutates before an approved rate-limit gate', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            async function writeFirst() {
+                await db.insert(rows).values({ ok: true });
+            }
+            async function guarded(ip) {
+                await writeFirst();
+                const limit = preIncrementShareAttempt(ip);
+                if (limit) return { status: 429 };
+                return { status: 200 };
+            }
+            export { guarded as POST };
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
     it('fails when a local helper wraps an ignored rate-limit call before mutation', () => {

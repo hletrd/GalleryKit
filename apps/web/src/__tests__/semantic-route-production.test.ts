@@ -34,6 +34,10 @@ describe('semantic route — production', () => {
     vi.mocked(getGalleryConfig).mockResolvedValue({ semanticSearchMode: 'production' } as never);
     const res = await POST(req({ query: 'sunset over the sea' }));
     expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: 'No production semantic embeddings are available yet',
+      code: 'semantic_no_embeddings',
+    });
     expect(embedTextReal).toHaveBeenCalledOnce();
   });
 
@@ -41,5 +45,9 @@ describe('semantic route — production', () => {
     vi.mocked(getGalleryConfig).mockResolvedValue({ semanticSearchMode: 'disabled' } as never);
     const res = await POST(req({ query: 'sunset over the sea' }));
     expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Semantic search is not fully configured',
+      code: 'semantic_not_configured',
+    });
   });
 });

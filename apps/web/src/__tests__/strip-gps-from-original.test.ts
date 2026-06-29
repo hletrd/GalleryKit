@@ -165,10 +165,10 @@ describe('stripGpsFromOriginal (R4C8 COR-R4C8-01)', () => {
         expect(await gpsInFile(file)).toBeNull();
     });
 
-    it('never throws on an unreadable path (best-effort contract)', async () => {
+    it('returns false on an unreadable path (mandatory-strip contract)', async () => {
         await expect(
             stripGpsFromOriginal(path.join(tmpDir, 'does-not-exist.jpg')),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe(false);
     });
 });
 

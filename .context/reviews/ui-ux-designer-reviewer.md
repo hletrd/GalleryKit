@@ -1,148 +1,149 @@
-# UI/UX Designer Review - Cycle 15
+# UI/UX Designer Review - Cycle 17
 
 - Reviewer lane: `ui-ux-designer-reviewer`
 - Repo: `/Users/hletrd/flash-shared/gallery`
-- HEAD: `3efa0c0e`
+- HEAD: `5e054f80`
 - Date: 2026-06-30
-- Scope: GalleryKit web app current HEAD, adapted from the local reviewer prompt to this repo.
-- Write scope: review artifact only. No source code changes. No commit.
+- Scope: GalleryKit Next.js web photo gallery current HEAD.
+- Write scope: review artifact only. No source code changes.
+- Prompt note: read `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`; used only generally applicable senior UI/UX review principles and ignored Swift/BurstPick-specific requirements.
 
 ## Method
 
-1. Read `AGENTS.md`, `CLAUDE.md`, and `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`.
-2. Inventoried UI surfaces under:
-   - `apps/web/src/app/[locale]/(public)/**`
-   - `apps/web/src/app/[locale]/admin/**`
-   - `apps/web/src/components/**`
-   - `apps/web/src/app/[locale]/globals.css`
-   - `apps/web/messages/{en,ko}.json`
-3. Reviewed frontend components/pages/messages/styles for professional gallery UX, keyboard/focus, mobile, Korean i18n, accessibility, visual hierarchy, touch targets, error/loading/empty states, and perceived performance.
-4. Used `agent-browser` where feasible:
-   - `/en` on `127.0.0.1:3001` stayed in the loading shell because local data queries fail.
-   - `/en/admin` at 390 x 844 rendered the mobile login form correctly.
-   - `/ko/admin` at 390 x 844 rendered the localized mobile login form correctly.
-5. Ran targeted validation:
-   - `npm test --workspace=apps/web -- touch-target-audit.test.ts`: passed, 16 tests.
-   - `node` message-leaf count: `en 806`, `ko 806`.
-   - An initial Vitest run with `--runInBand` failed because Vitest does not support that option; reran without it successfully.
+1. Read `AGENTS.md`, `CLAUDE.md`, the code-review skill, the Playwright skill, and the local custom reviewer prompt.
+2. Inventoried public/admin routes, route states, shared components, `ui/` primitives, Tailwind/global CSS, `en`/`ko` messages, Radix/shadcn primitives, accessibility tests, and touch-target policy.
+3. Source-reviewed public photo workflows: masonry browsing, photo viewer, swipe navigation, lightbox, bottom sheet, color/HDR disclosures, search, map, topics/tags/share/year/timeline, loading/empty/error states.
+4. Source-reviewed admin workflows: login, dashboard upload, image manager, settings, SEO, categories, tags, users, tokens, DB, analytics.
+5. Ran Playwright against local dev server on `127.0.0.1:3100`:
+   - `/en` and `/en/map` returned the localized route error UI because MySQL on `127.0.0.1:3306` was unavailable.
+   - `/en/admin` rendered the English admin login page; password and submit controls measured 44 px high.
+   - `/ko/admin` rendered the Korean admin login page; password and submit controls measured 44 px high.
+6. Ran targeted validation:
+   - `npm test --workspace=apps/web -- touch-target-audit.test.ts focus-visible-rings-cycle20.test.ts info-bottom-sheet-ia.test.ts a11y-us-p15.test.ts`
+   - Result: 4 files passed, 35 tests passed.
+   - Message leaf count: `apps/web/messages/en.json` 810, `apps/web/messages/ko.json` 810.
 
 ## Inventory Summary
 
-Primary public UI:
-- Home/masonry: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/components/home-client.tsx`
-- Photo page/viewer: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/info-bottom-sheet.tsx`
-- Search/nav: `apps/web/src/components/search.tsx`, `apps/web/src/components/nav-client.tsx`
-- Topic/category/share/year/timeline/map routes under `apps/web/src/app/[locale]/(public)/**`
-- Color/HDR inspection: `apps/web/src/components/color-details-section.tsx`, `apps/web/src/components/lightbox-color-pip.tsx`, `apps/web/src/components/wide-gamut-hint.tsx`, `apps/web/src/components/histogram.tsx`
+Public routes reviewed:
+- `/`, `/p/[id]`, `/[topic]`, `/c/[slug]`, `/year/[year]`, `/timeline`, `/map`, `/privacy`, `/s/[key]`, `/g/[key]`, upload/resource/API-adjacent public surfaces under `apps/web/src/app/[locale]/(public)/**`.
 
-Primary admin UI:
-- Login/admin shell: `apps/web/src/app/[locale]/admin/**`
-- Dashboard/settings/SEO/users/tokens/db/analytics/categories/tags/upload/image manager under `apps/web/src/app/[locale]/admin/(protected)/**` and `apps/web/src/components/**`
+Admin routes reviewed:
+- `/admin`, `/admin/login`, `/admin/dashboard`, `/admin/settings`, `/admin/seo`, `/admin/categories`, `/admin/tags`, `/admin/users`, `/admin/tokens`, `/admin/db`, `/admin/analytics`, plus admin API/upload/database actions.
 
-System UI:
-- Global tokens and motion/forced-colors behavior: `apps/web/src/app/[locale]/globals.css`
-- Messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`
+Design-system surfaces reviewed:
+- Global tokens and motion/color policy: `apps/web/src/app/[locale]/globals.css`.
+- shadcn/Radix primitives: `apps/web/src/components/ui/**`, including Button/Dialog/AlertDialog/Select/Switch/Dropdown/Tooltip.
+- Public components: `home-client`, `photo-viewer`, `photo-navigation`, `lightbox`, `image-zoom`, `info-bottom-sheet`, `search`, `nav-client`, `tag-filter`, map components, color/HDR components.
+- Admin components: `upload-dropzone`, `image-manager`, `tag-input`, `bulk-edit-dialog`, admin header/nav/settings/user/database components.
 
 ## Findings
 
-### UIUX-C15-01 - Photo-page swipe navigation is attached to `window`, so mobile horizontal gestures outside the image can navigate photos
+### UIUX-C17-01 - Photo-page swipe navigation is attached to `window`, so mobile horizontal gestures outside the image can navigate photos
 
 - Severity: Medium
-- Status: Likely user-facing defect, source-confirmed
 - Confidence: High
-- Scenario: On a phone photo page, a user starts a horizontal drag in metadata/sidebar-adjacent page content, browser-edge areas, or any non-image region while the photo viewer is mounted. The global handler records the gesture and can call `preventDefault()` or navigate to the previous/next photo even though the gesture did not start on the image canvas.
+- Route/selector: `/[locale]/p/[id]`, global `window` touch handlers in the mounted `PhotoNavigation`.
 - Evidence:
-  - `apps/web/src/components/photo-navigation.tsx:43-60` records every `window` touch start/move and calls `preventDefault()` once horizontal movement exceeds 10 px.
-  - `apps/web/src/components/photo-navigation.tsx:96-133` completes navigation from the same global `window` gesture.
-  - `apps/web/src/components/photo-viewer.tsx:688-695` mounts `PhotoNavigation` inside the media box, but only disables it for lightbox or bottom sheet states; the listener itself is not scoped to that media box.
-- UX impact: Professional gallery browsing needs predictable gestures. Accidental photo changes are especially costly when users are reading metadata, inspecting color/HDR details, or trying to use browser/system gestures.
-- Recommended fix: Attach touch listeners to a media-container ref instead of `window`, or record the original target and ignore gestures that start outside the image/navigation surface, inside controls, inside scrollable metadata, or near OS/browser edge-swipe zones. Add a mobile e2e/touch regression that swipes metadata and verifies no navigation.
+  - `apps/web/src/components/photo-navigation.tsx:47-60` records every `window` touch start/move and calls `preventDefault()` once horizontal movement exceeds 10 px.
+  - `apps/web/src/components/photo-navigation.tsx:96-133` completes navigation from the same global gesture and registers the listeners on `window`.
+  - `apps/web/src/components/photo-viewer.tsx:687-694` visually mounts `PhotoNavigation` inside the media box, but the listeners are not scoped to that box.
+- User impact: Mobile photo browsing can change photos from gestures that did not begin on the photo surface. That is especially disruptive when a viewer is trying to read metadata, use browser edge gestures, or interact with page chrome.
+- Concrete failure scenario: A phone user opens a photo, starts a horizontal pan in a non-image area while repositioning the page, and the gallery moves to the next/previous photo. If the user was comparing color/HDR metadata or reading a caption, they lose context.
+- Suggested fix: Attach swipe listeners to a media-container ref, or record the touch-start target and ignore gestures that begin outside the image/navigation surface, controls, scrollable metadata, and browser-edge zones. Add a mobile e2e/touch regression that swipes metadata and verifies no navigation.
 
-### UIUX-C15-02 - Public map is visually primary but lacks an accessible named map region and gives the fallback list a generic label
+### UIUX-C17-02 - The primary photo surface is exposed as a generic zoom button instead of preserving the photo's accessible name
 
 - Severity: Medium
-- Status: Confirmed from source
 - Confidence: High
-- Scenario: A keyboard or screen-reader user opens the public map page. The large Leaflet map appears before the deterministic list, but the map is not wrapped in a named landmark/region with instructions, and the list is labelled only with the generic "open photo" text.
+- Route/selector: `/[locale]/p/[id]`, `.photo-viewer-image` inside `ImageZoom`.
 - Evidence:
-  - `apps/web/src/app/[locale]/(public)/map/page.tsx:52-66` renders the heading and then the `MapLoader`.
-  - `apps/web/src/app/[locale]/(public)/map/page.tsx:67-79` renders the fallback list after the map with `aria-label={t('openPhoto')}` rather than a list-specific label.
-  - `apps/web/src/components/map/map-client.tsx:107-144` renders `MapContainer` directly with no accessible wrapper, heading, description, or keyboard instructions around the third-party map.
-  - Marker popups do have 44 px buttons and labels at `apps/web/src/components/map/map-client.tsx:127-140`, so the issue is the page-level structure, not every map control.
-- UX impact: The map is usable visually, but assistive-tech users do not get a clear "map vs. list" mental model or a fast bypass to the reliable list. This is a professional gallery discoverability issue for geotagged work.
-- Recommended fix: Wrap the map in a `<section aria-labelledby="map-title" aria-describedby="map-help">`, add concise visible or sr-only instructions, add a "Skip map to photo list" link before the map, and label the list with a dedicated message such as `map.photoListLabel`. Consider placing the accessible list before the map in DOM order while preserving visual order if desired.
+  - `apps/web/src/components/image-zoom.tsx:343-362` wraps the image slot in a focusable `div role="button"` with `aria-label={Zoom in|Zoom out}`.
+  - The underlying photo image has meaningful alt text at `apps/web/src/components/photo-viewer.tsx:467-483` and `apps/web/src/components/photo-viewer.tsx:508-531`, but the focused interactive wrapper is named only by the zoom action.
+  - The wrapper is used around the main photo at `apps/web/src/components/photo-viewer.tsx:720-723`.
+- User impact: Screen-reader and keyboard users can reach the central object of the page and hear only "Zoom in" or "Zoom out", not the image title/alt. That makes it harder to verify which photograph is open without detouring to the hidden heading or info panel.
+- Concrete failure scenario: A client opens a shared photo link with a screen reader, tabs into the main photo, and hears "Zoom in button". They cannot confirm the subject/title from the primary surface before activating controls or searching surrounding metadata.
+- Suggested fix: Keep the image semantic name discoverable. Options: make zoom a separate adjacent button; make the photo a `figure`/`img` with a separately labeled zoom control; or include the photo title/alt in the zoom control name and use `aria-describedby` for the shortcut/action details. Avoid a generic button role replacing the main photograph's accessible identity.
 
-### UIUX-C15-03 - Several settings switch rows can squeeze long Korean/help copy against the control on mobile
+### UIUX-C17-03 - First-time desktop photo pages hide metadata, color/HDR explanation, similar photos, and download behind a non-default info panel
+
+- Severity: Medium
+- Confidence: Medium
+- Route/selector: `/[locale]/p/[id]`, desktop info sidebar toggle.
+- Evidence:
+  - `apps/web/src/components/photo-viewer.tsx:103-108` initializes `isPinned` from `sessionStorage`, defaulting to `false`.
+  - `apps/web/src/components/photo-viewer.tsx:174-175` derives `showInfo` directly from `isPinned`.
+  - `apps/web/src/components/photo-viewer.tsx:736-747` hides the desktop sidebar unless `showInfo` is true.
+  - The hidden-by-default sidebar contains color details, gamut hint, similar photos, EXIF, histogram, capture date, and download actions at `apps/web/src/components/photo-viewer.tsx:787-999`.
+  - The desktop affordance is a toolbar toggle at `apps/web/src/components/photo-viewer.tsx:642-657`.
+- User impact: The initial desktop experience is immersive, but professional gallery visitors often need confirmation details: title, caption, download, capture metadata, color-space disclosure, and related-image navigation. Those are all behind one "Info" action that first-time users may miss.
+- Concrete failure scenario: A client receives a direct `/p/[id]` link, visually inspects the image, then leaves without seeing the download button or the Display P3/sRGB honesty note because the sidebar was collapsed and there was no persistent metadata/download summary.
+- Suggested fix: Default the info sidebar open on desktop direct photo routes, or add a compact persistent metadata/download strip near the photo. If keeping the default closed, make the toolbar affordance more explicit for first-time visits and consider surfacing color/download status outside the panel.
+
+### UIUX-C17-04 - Admin image management remains a wide table inside a scroll container, so mobile/event-day management is not first-class
+
+- Severity: Medium
+- Confidence: High
+- Route/selector: `/[locale]/admin/dashboard`, recent uploads image manager.
+- Evidence:
+  - `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132` lays upload and recent uploads into a responsive grid and wraps `ImageManager` in `overflow-auto`.
+  - `apps/web/src/components/image-manager.tsx:421-445` renders a 9-column table: select, preview, title, filename, topic, tags, gamut, date, actions.
+  - `apps/web/src/components/image-manager.tsx:463-479` reserves a 128 px thumbnail column, and `apps/web/src/components/image-manager.tsx:491-524` adds a `min-w-[200px]` tag editor column.
+  - Row actions are at the far right at `apps/web/src/components/image-manager.tsx:544-579`.
+- User impact: Upload is touch-capable, but managing the just-uploaded photos on a phone or small tablet requires horizontal scrolling through a dense table. Selection state, preview, tags, and actions are spatially separated.
+- Concrete failure scenario: A photographer uploads event images from a phone, then needs to fix a title/tag or create a share group. They must pan a wide table back and forth, increasing the chance of editing the wrong row or missing the action column.
+- Suggested fix: Add a card/list layout below `lg`: thumbnail, title/filename, topic/gamut/date, tags, and edit/delete/share actions in one row stack. Keep the existing table for desktop. Move bulk actions into a sticky bottom bar on narrow screens so selected-row context stays visible.
+
+### UIUX-C17-05 - Touch-target governance still depends on documented admin exemptions rather than eliminating compact-control patterns
 
 - Severity: Low
-- Status: Confirmed source pattern, likely responsive defect
-- Confidence: Medium-High
-- Scenario: On a narrow admin settings screen in Korean, long color/HDR/privacy/auto-alt help text shares one non-wrapping horizontal row with a switch. Text can become cramped and the control can visually detach from its label.
-- Evidence:
-  - Non-wrapping switch rows use `flex items-center justify-between` at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:407-421`, `423-437`, `439-453`, `553-568`, and `614-628`.
-  - The semantic-search row already uses the safer responsive pattern `flex flex-col gap-3 sm:flex-row ...` at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:642-671`.
-  - Korean settings copy is intentionally long and explanatory, for example `apps/web/messages/ko.json:737-746` for color/HDR settings and `apps/web/messages/ko.json:754-759` for wide-gamut/backfill settings.
-- UX impact: This does not block the setting, but it makes high-risk photographer/admin controls harder to scan on mobile. The settings page already has one good responsive pattern that these rows should match.
-- Recommended fix: Use `flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between`, add `min-w-0` to the copy column, and keep the switch `shrink-0`. Preserve `aria-describedby` on each switch.
-
-### UIUX-C15-04 - Fresh-gallery empty state is descriptive but not operational
-
-- Severity: Low
-- Status: Confirmed from source
 - Confidence: High
-- Scenario: A newly deployed or fully filtered public gallery has no visible photos. The empty state explains that no photos are visible, but when there is no tag filter it does not offer an owner/operator path to upload, configure topics, or understand first-run status.
+- Route/selector: admin protected routes and `components/image-manager.tsx`.
 - Evidence:
-  - `apps/web/src/components/home-client.tsx:424-440` renders an icon, `home.noImages`, and either a filter-clearing link or `home.emptyHint`.
-  - The filtered state includes a clear-filter action at `apps/web/src/components/home-client.tsx:430-435`; the unfiltered/fresh-gallery state has no action at `apps/web/src/components/home-client.tsx:437-439`.
-- UX impact: For a self-hosted professional gallery, first-run polish matters. The public visitor copy can stay minimal, but an authenticated owner should get a path back to the admin/upload flow.
-- Recommended fix: If admin session state is available, show an owner-only link to admin upload or dashboard. Otherwise make the public empty text more explicit that photos appear after publication. Keep the public visitor version non-promotional and do not expose admin-only affordances to anonymous users.
+  - `apps/web/src/components/ui/button.tsx:23-30` currently floors all Button sizes to at least 44 px, so runtime Button hits are safe.
+  - `apps/web/src/__tests__/touch-target-audit.test.ts:151-183` still documents an `image-manager` compact-pattern budget, including one remaining `size="sm"` button without an explicit height override.
+  - `apps/web/src/__tests__/touch-target-audit.test.ts:213-238` keeps admin route-group budgets for compact patterns and states mobile admin is out of scope.
+  - The current remaining example appears at `apps/web/src/components/image-manager.tsx:335-338` as a batch-add `Button variant="secondary" size="sm"` without explicit `h-11`, relying on the primitive floor.
+- User impact: This is not a current measured sub-44 px failure. The risk is governance: future design-system changes can make admin controls regress while the source pattern still looks acceptable because historical budgets normalize compact usage.
+- Concrete failure scenario: A future Button variant or custom admin control drops the implicit size floor. The page still has compact patterns scattered across admin surfaces, and reviewers must reason from exception counts rather than a simple "all interactive admin controls declare/measure 44 px" contract.
+- Suggested fix: Retire admin compact-pattern budgets over time. Add explicit `h-11`/`min-h-11` to remaining `size="sm"` and icon usages or replace the audit with a layout-aware measured touch-target check. Keep admin desktop density, but make the mobile/touch contract unconditional.
 
-### UIUX-C15-05 - Root layout hard-codes `dir="ltr"` while the comment promises RTL future-proofing
-
-- Severity: Low
-- Status: Risk, not a current en/ko defect
-- Confidence: High
-- Scenario: GalleryKit currently ships only English and Korean, both LTR. If another locale is added later, the HTML direction will remain LTR even when locale metadata should be RTL.
-- Evidence:
-  - `apps/web/src/app/[locale]/layout.tsx:94-100` sets `lang={locale}` but hard-codes `dir="ltr"` while the comment says it future-proofs for RTL locales.
-  - Message parity is currently healthy: `en 806`, `ko 806`.
-- UX impact: No current Korean issue, but the implementation contradicts the comment and would silently break navigation, focus flow expectations, text alignment, and photo metadata layouts for RTL locales.
-- Recommended fix: Derive `dir` from locale metadata, even if the current mapping returns only `ltr`, or change the comment and add a locale-expansion test so future RTL work cannot miss this.
-
-### UIUX-C15-06 - Public-route browser validation is blocked by local data/schema failures, leaving key gallery flows unverified in this cycle
+### UIUX-C17-06 - Local browser validation of public gallery flows is blocked by an unavailable MySQL dependency
 
 - Severity: Medium as review risk
-- Status: Confirmed validation blocker
 - Confidence: High
-- Scenario: The reviewer tries to validate the public gallery in a browser. The route stays in the loading shell instead of exposing the masonry/gallery experience.
+- Route/selector: local `/en`, `/en/map`; public browsing/photo/search/map flows.
 - Evidence:
-  - `agent-browser` snapshot for `http://127.0.0.1:3001/en` showed only the skip link, `status "Loading..."`, and the notifications region after waiting.
-  - `curl http://127.0.0.1:3001/en` returned streamed error templates for failed topics/latest-image queries against local DB state.
-  - The public layout renders `Nav` before `<main>` at `apps/web/src/app/[locale]/(public)/layout.tsx:7-16`.
-  - The home page depends on multiple data queries before `HomeClient` renders at `apps/web/src/app/[locale]/(public)/page.tsx:149-166` and passes results to the masonry UI at `apps/web/src/app/[locale]/(public)/page.tsx:221-223`.
-- UX impact: This cycle could source-review the public UI and validate admin login, but could not browser-validate public masonry, photo viewer, search, map, or topic flows against local data. That increases residual risk for runtime-only focus, loading, layout, and perceived-performance issues.
-- Recommended fix: Keep a small seeded local/e2e dataset aligned with current migrations, or add a deterministic fixture mode for public UI review. Also consider isolating navigation metadata failures so the public shell can render a recoverable error instead of an indefinite loading state.
+  - Playwright on `http://127.0.0.1:3100/en` returned `Error | GalleryKit` with body text "Something went wrong loading this page. Try again Return to Gallery".
+  - Dev server logs showed `ECONNREFUSED 127.0.0.1:3306` for topics/latest-image queries.
+  - Playwright on `http://127.0.0.1:3100/en/map` hit the same route error boundary from `getMapImages`.
+  - The route error UI itself is accessible and actionable: `apps/web/src/app/[locale]/error.tsx:22-53` renders a main landmark, visible heading, 44 px retry button, and return link.
+- User impact: The review could validate admin login live and review public gallery code statically, but could not interact with real masonry browsing, photo viewer, search results, map markers, share pages, or public photo navigation in-browser. That leaves runtime-only layout/focus/perceived-performance risk.
+- Concrete failure scenario: A UI regression that only appears with real image dimensions or hydrated public data would not be caught by this cycle's local browser pass because public pages fail before the gallery surface renders.
+- Suggested fix: Maintain a small seeded local/e2e dataset aligned with current migrations, or provide a deterministic fixture mode for UI review. Keep the existing route error UI, but make the review/dev path able to render at least one public topic, one photo, one map marker, and one search result without production credentials.
 
 ## Positive Observations
 
-- Touch targets: The targeted touch audit passed (`16` tests), and inspected controls consistently use 44 px minimums in search, lightbox, map popup buttons, tag filters, and admin controls.
-- Search: `apps/web/src/components/search.tsx:359-403` now has dialog semantics, combobox state, IME-safe keyboard handling, and an `h-11` input; `apps/web/src/components/search.tsx:503` portals the dialog to `document.body`.
-- Lightbox: `apps/web/src/components/lightbox.tsx:430-457` handles focus/scroll lock and dialog semantics; controls at `apps/web/src/components/lightbox.tsx:551-656` meet touch sizing and expose keyboard shortcuts.
-- Photo viewer: Blur placeholders and reduced-motion-aware transitions are present at `apps/web/src/components/photo-viewer.tsx:703-719`; the info sidebar avoids width tweening at `apps/web/src/components/photo-viewer.tsx:737-746`.
-- Korean i18n: `/ko/admin` browser snapshot rendered localized login labels/buttons, and EN/KO message leaf counts match at 806 each.
-- Admin tables: Prior responsive overflow fixes are present in the table primitive and admin table consumers reviewed during inventory.
-- Color/HDR: The settings and viewer surfaces expose photographer-relevant color/HDR controls and warnings instead of hiding pipeline details.
+- Map accessibility has improved since the prior artifact: `apps/web/src/app/[locale]/(public)/map/page.tsx:59-78` now includes a skip link, named map section, instructions, and a labeled photo list.
+- Settings switch rows now use the safer responsive pattern: examples at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:407-456` and `647-676` stack copy/control on mobile and preserve `aria-describedby`.
+- Touch targets are broadly disciplined. `apps/web/src/components/ui/button.tsx:23-30` enforces 44 px Button variants, nav controls meet 44 px at `apps/web/src/components/nav-client.tsx:91-178`, and the targeted audit passed 35 tests.
+- Color/HDR honesty is a real strength. P3/HDR badge visibility is capability-gated in CSS at `apps/web/src/app/[locale]/globals.css:145-162`; wide-gamut explanatory copy is display-aware at `apps/web/src/components/wide-gamut-hint.tsx:150-205`; mobile photo metadata includes color details and histogram at `apps/web/src/components/info-bottom-sheet.tsx:311-330`.
+- Photo rendering is tuned for photographer intent: full photo surfaces opt into high-quality downscaling at `apps/web/src/app/[locale]/globals.css:184-202`, and reduced-motion users are protected from hover scale at `apps/web/src/app/[locale]/globals.css:253-279`.
+- Loading/error states are intentionally accessible: `apps/web/src/components/photo-viewer-loading.tsx:9-24` uses `role="status"`/`aria-live`, and the route error boundary provides clear recovery actions.
+- Search has solid interaction semantics: dialog/combobox/listbox wiring, IME-safe keyboard handling, live status, and semantic-search honesty are visible in `apps/web/src/components/search.tsx:367-504`.
+- Korean i18n parity is healthy in reviewed strings: EN/KO leaf counts match at 810, and Playwright confirmed localized `/ko/admin` login labels and buttons.
 
-## Final Missed-Issues Sweep
+## Final Missed-UX Sweep
 
-- Rechecked prior cycle defects against current HEAD: search touch size/portal, mobile nav controls, admin table overflow, dialog descriptions, SEO/settings header wrapping, semantic search select, and image edit inline validation are fixed or materially improved.
-- Searched for obvious hard-coded English in reviewed UI paths; no new actionable public/admin Korean issue found beyond third-party attribution and locale-neutral technical values.
-- Reviewed keyboard/focus hotspots: search dialog, lightbox, info bottom sheet, tag input, nav, and admin login. No additional high-confidence focus trap or lost-focus defect found in source.
-- Reviewed perceived-performance hotspots: masonry uses `content-visibility`, image priority is bounded, blur placeholders exist, and reduced motion is respected globally. No new high-confidence perf UX defect beyond the public validation blocker.
+- Rechecked prior-cycle findings: map accessibility and settings mobile wrapping are fixed in current HEAD; they are not re-reported.
+- Reviewed keyboard/focus hotspots: nav, search dialog, lightbox, info bottom sheet, tag input, admin login, image manager, and settings. No additional high-confidence focus trap or lost-focus defect found in source.
+- Reviewed loading/empty/error states: global route loading, photo loading, home empty/filter empty, search empty/error, upload no-topic state, route error, and not-found patterns. No additional high-confidence issue beyond the local public-data validation blocker.
+- Reviewed photo-specific quality: color/HDR disclosures, gamut badges, histogram placement, image alt/title derivation, blur placeholders, reduced motion, and responsive photo viewer. Findings above cover the remaining photo-gallery UX risks found in this pass.
+- Reviewed hard-coded UI text and locale parity in the surfaces inspected. No new actionable English-only public/admin UI issue found beyond third-party attribution and technical values.
 
 ## Finding Count
 
 6 findings:
-- 2 medium user-facing/product issues
-- 1 medium validation risk
-- 3 low severity issues/risks
+- 4 medium user-facing/product or workflow issues
+- 1 medium validation-risk issue
+- 1 low governance issue

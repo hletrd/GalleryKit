@@ -129,7 +129,7 @@ function isKnownMutationCall(node: ts.CallExpression): boolean {
 function bodyCallsRateLimitBeforeMutation(
     body: ts.Node | undefined,
     approvedRateLimitImports: Set<string>,
-    localRateLimitGateFunctions: Set<string> = new Set(),
+    localMutatingFunctions: Set<string> = new Set(),
 ): boolean {
     if (!body) return false;
 
@@ -139,7 +139,10 @@ function bodyCallsRateLimitBeforeMutation(
 
     const inspectExpression = (node: ts.Node) => {
         if (ts.isCallExpression(node)) {
-            if (isKnownMutationCall(node)) {
+            if (
+                isKnownMutationCall(node)
+                || (ts.isIdentifier(node.expression) && localMutatingFunctions.has(node.expression.text))
+            ) {
                 sawMutation = true;
             }
         }
@@ -152,14 +155,6 @@ function bodyCallsRateLimitBeforeMutation(
             if (found) return;
             if (ts.isFunctionLike(current)) return;
             if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
-                found = true;
-                return;
-            }
-            if (
-                ts.isCallExpression(current)
-                && ts.isIdentifier(current.expression)
-                && localRateLimitGateFunctions.has(current.expression.text)
-            ) {
                 found = true;
                 return;
             }
@@ -219,7 +214,10 @@ function bodyCallsRateLimitBeforeMutation(
         const visit = (node: ts.Node) => {
             if (ts.isFunctionLike(node) && node !== statement) return;
             if (ts.isCallExpression(node)) {
-                if (isKnownMutationCall(node)) statementHasMutation = true;
+                if (
+                    isKnownMutationCall(node)
+                    || (ts.isIdentifier(node.expression) && localMutatingFunctions.has(node.expression.text))
+                ) statementHasMutation = true;
             }
             ts.forEachChild(node, visit);
         };
@@ -268,10 +266,22 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             localBodies.set(decl.name.text, expressionBody(decl.initializer));
         }
     }
-    const localRateLimitGateFunctions = new Set<string>();
+    const localMutatingFunctions = new Set<string>();
     for (const [name, body] of localBodies) {
-        if (bodyCallsRateLimitBeforeMutation(body, approvedRateLimitImports)) {
-            localRateLimitGateFunctions.add(name);
+        if (!body) continue;
+        let containsMutation = false;
+        const visit = (node: ts.Node) => {
+            if (containsMutation) return;
+            if (ts.isFunctionLike(node) && node !== body) return;
+            if (ts.isCallExpression(node) && isKnownMutationCall(node)) {
+                containsMutation = true;
+                return;
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(body);
+        if (containsMutation) {
+            localMutatingFunctions.add(name);
         }
     }
 
@@ -342,7 +352,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localRateLimitGateFunctions))) {
+    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localMutatingFunctions))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else {
         report.failed.push(

@@ -11,12 +11,14 @@
  *   - quality: `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`
  *   - size: `image_sizes`
  *
- * The hash is folded into the ETag formula in `serve-upload.ts` so a
- * change to any of those settings forces a `must-revalidate` 304 →
- * 200 cycle on every cached client even when the file's mtime has not
- * changed. Without this, an admin who flips
+ * The hash is folded into the route-handler ETag formula in `serve-upload.ts`
+ * so a change to any of those settings forces a `must-revalidate` 304 → 200
+ * cycle on clients that hit that fallback path even when the file's mtime has
+ * not changed. Existing files normally resolve through Next's static server,
+ * so settings-only changes still need a re-encode before static derivatives
+ * change bytes. Without this fallback-path hash, an admin who flips
  * `force_srgb_derivatives=true` to clean up a colorimetric bug ships
- * the new pipeline only to fresh browsers; the existing cached
+ * the new pipeline only to fresh browsers on the route-handler path; the existing cached
  * responses keep the old bytes for `Cache-Control max-age=3600,
  * must-revalidate` (AGG-C3-05: was a stale `max-age=86400` here; R8-R7
  * reduced the served value to 3600 across serve-upload.ts, next.config.ts,

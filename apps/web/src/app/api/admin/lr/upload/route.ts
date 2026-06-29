@@ -374,10 +374,15 @@ export const POST = withAdminAuth(
             // retained original on disk, against the admin's explicit
             // strip_gps_on_upload intent. Non-browser ingest clients commonly
             // retain GPS, so this divergence is the high-likelihood leak path.
-            // Best-effort: stripGpsFromOriginal catches its own errors and never
-            // throws, so a strip failure logs and keeps the image (parity with
-            // the browser path) rather than aborting the upload.
-            await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
+            const gpsStripped = await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
+            if (!gpsStripped) {
+                await deleteOriginalUploadFile(data.filenameOriginal);
+                settleTrackerToActual(false);
+                return NextResponse.json(
+                    { error: 'GPS metadata could not be stripped from the original' },
+                    { status: 422, headers: NO_CACHE },
+                );
+            }
         }
 
         // Run-3 RPF cycle 4 / F1 (DEF-C4-01): late restore-maintenance re-check,
