@@ -18,7 +18,7 @@ const { createTokenMock, revokeTokenMock, requireSameOriginAdminMock, isAdminMoc
     revokeTokenMock: vi.fn(async () => true),
     requireSameOriginAdminMock: vi.fn(async () => null),
     isAdminMock: vi.fn(async () => true),
-    getRestoreMaintenanceMessageMock: vi.fn(() => null),
+    getRestoreMaintenanceMessageMock: vi.fn((): string | null => null),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
