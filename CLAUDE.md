@@ -108,7 +108,12 @@ git values must be treated as compromised and must not be reused.
 | `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (default 2, max 8; separate MySQL pool, not capped by the live web pool-budget formula) |
 | `UPLOAD_ORIGINAL_ROOT` | — | Override path for private original uploads (used by sidecar scripts) |
 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION` | — | Operator-only opt-in for production CLIP semantic search (requires model weights) |
-| `CLIP_MODELS_ROOT` | `/app/data/models/clip` | Bind-mount path for CLIP model weights (production) |
+| `CLIP_MODELS_ROOT` | cwd-relative `data/models/clip` in code; `/app/data/models/clip` in production env | CLIP model weights root. Absolute paths are honored verbatim; relative/unset values resolve against cwd. Production should set the absolute bind-mount path so the seed script and runtime encoder agree |
+| `CLIP_INFERENCE_CONCURRENCY` | `1` | Concurrent real CLIP inference slots, capped at 4 |
+| `CLIP_INFERENCE_MAX_PENDING` | `32` | Max queued real CLIP inference requests before returning queue-full |
+| `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` | `30000` | Max wait for a real CLIP inference slot, capped at 300000 ms |
+| `SEMANTIC_SCAN_LIMIT` | `2000` | Max recent embeddings scanned per semantic/similar query |
+| `SEMANTIC_TOP_K_MAX` | `24` | Upper bound for semantic search result count |
 | `NEXT_UPLOAD_BODY_MAX_BYTES` | `278921216` | Next.js server action body size limit (default 266 MiB = max(200 MiB upload, 250 MiB restore) + 16 MiB multipart overhead; see `upload-limits.ts`) |
 
 ## Key Files & Patterns
@@ -350,7 +355,7 @@ docker run --rm \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e BACKFILL_CONCURRENCY=2 -e UPLOAD_ORIGINAL_ROOT=/app/data/uploads/original \
   --user root -w /app/apps/web web-web:latest \
-  sh -c "npx --yes tsx@4.21.0 scripts/backfill-color-pipeline.ts"
+  sh -c "npx --yes tsx@4.22.4 scripts/backfill-color-pipeline.ts"
 ```
 
 **Critical:** never `npm install` inside the running `gallerykit-web` container. The runtime's `/app/node_modules` is the prod-deps tree from the Dockerfile build; an in-container `npm install --no-save` clobbered `argon2` / `mysql2` / `sharp` once and triggered a restart loop until the next deploy rebuilt the image. The `--rm` sidecar pattern above leaves the prod container untouched.
@@ -489,9 +494,9 @@ For one-off scripts that need source files / dev-only deps (tsx, vitest, etc.), 
 
 ### CLIP semantic search — seeding model weights on the deploy host
 
-The CLIP model weights are **NOT baked into the Docker image** (they are tens-of-hundreds of MB and live on the host volume). The image only guarantees the mount point exists (`/app/data/models/clip`, created by `mkdir -p` in the runner stage and surfaced via `CLIP_MODELS_ROOT`). The runtime encoder reads weights from that path at first inference.
+The CLIP model weights are **NOT baked into the Docker image** (they are tens-of-hundreds of MB and live on the host volume). The image only guarantees the production mount point exists (`/app/data/models/clip`, created by `mkdir -p` in the runner stage and surfaced via the production `CLIP_MODELS_ROOT`). In code, an unset or relative `CLIP_MODELS_ROOT` resolves against the current working directory as `data/models/clip`; production must set the absolute bind-mount path so the downloader seed target and runtime offline-load source agree. The runtime encoder reads weights from that path at first inference.
 
-`CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in `lib/clip-model.ts`. Raise it only after measuring CPU and RSS headroom on the deploy host because each concurrent request runs an ONNX forward pass.
+`CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in `lib/clip-model.ts`. `CLIP_INFERENCE_MAX_PENDING` and `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` bound queued visitors waiting for an inference slot; aborted requests are removed from the queue. Raise these only after measuring CPU, RSS, and tail latency on the deploy host because each concurrent request runs an ONNX forward pass. `SEMANTIC_SCAN_LIMIT` bounds scanned embeddings per search, and `SEMANTIC_TOP_K_MAX` bounds the public result count.
 
 **One-time seed procedure (run before enabling semantic search in production):**
 
@@ -509,7 +514,7 @@ docker run --rm \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
-  sh -c "npx --yes tsx@4.21.0 scripts/download-clip-models.ts"
+  sh -c "npx --yes tsx@4.22.4 scripts/download-clip-models.ts"
 ```
 
 **After seeding, run a forced `--production` backfill** to generate CLIP embeddings for all existing photos before production mode is enabled:
@@ -524,7 +529,7 @@ docker run --rm \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
-  sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production --force"
+  sh -c "npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
 ```
 
 The `--force` flag is required in the documented pre-enable flow because a fresh DB still stores `semantic_search_mode='disabled'`; without `--force`, the backfill exits successfully without processing. After the DB mode is already set to `stub` or `production`, `--force` is only needed when intentionally re-embedding existing rows.
