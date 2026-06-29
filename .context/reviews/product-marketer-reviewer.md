@@ -1,248 +1,211 @@
-# Product Marketer Review - Cycle 11
+# Product Marketer Review - Cycle 12
 
 Date: 2026-06-29
 Reviewer: product-marketer-reviewer
 Repository: GalleryKit
-Scope: Product, marketing, public docs, privacy/footer/site config, admin copy, public pages, and implementation truth for `/Users/hletrd/flash-shared/gallery`. This review is adapted to GalleryKit, not BurstPick. No production code was edited.
+Scope: Product positioning, public/user-facing copy, onboarding, trust, deployment docs, feature discoverability, SEO/marketing surfaces, market fit for photographers/self-hosters, and claim-versus-engineering reality for `/Users/hletrd/flash-shared/gallery`.
+
+## Profile Adaptation Note
+
+The local `product-marketer-reviewer` perspective is BurstPick/Swift-specific. I used only its reviewer-style lens: claim truthfulness, onboarding clarity, market fit, support-risk detection, and whether marketing promises match implemented behavior. I adapted it to this actual repo: GalleryKit, a self-hosted Next.js photo gallery for photographers/operators.
+
+No product fixes or code changes were implemented. This file is the review artifact.
+
+## Inventory Built Before Findings
+
+Primary docs and README-like surfaces reviewed:
+
+- `AGENTS.md` instructions supplied in the prompt
+- `CLAUDE.md`
+- `README.md`
+- `apps/web/README.md`
+- `.env.local.example`
+- `.env.deploy.example`
+- `LICENSE`
+- `.github/workflows/quality.yml`
+- `.github/dependabot.yml`
+- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
+- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
+- `.context/reviews/` review history as prior-context inventory; current findings below are against live docs/code
+
+User-facing copy and configuration reviewed:
+
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/src/site-config.json`
+- `apps/web/src/site-config.example.json`
+- `apps/web/src/lib/constants.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/gallery-config.ts`
+
+Public product, SEO, and trust surfaces reviewed:
+
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
+- `apps/web/src/app/sitemap.ts`
+- `apps/web/src/app/robots.ts`
+- `apps/web/src/app/manifest.ts`
+- Public feed, Open Graph, and metadata behavior reachable through the app routes inspected during the claim pass
+
+Admin/onboarding/product-control surfaces reviewed:
+
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/nav-client.tsx`
+
+Engineering reality checked for claims:
+
+- `package.json`
+- `apps/web/package.json`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/deploy.sh`
+- `scripts/deploy-remote.sh`
+- `apps/web/nginx/default.conf`
+- `apps/web/public/sw.template.js`
+- `apps/web/public/sw.js`
+- `apps/web/src/components/register-service-worker.tsx`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/lib/clip-model.ts`
+- `apps/web/src/lib/clip-embedding-constants.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/lib/admin-tokens.ts`
+
+Focused final sweeps:
+
+- Searched claim-sensitive terms: `semantic`, `AI`, `CLIP`, `Lightroom`, `plugin`, `privacy`, `GPS`, `analytics`, `HDR`, `wide-gamut`, `color-gamut`, `PWA`, `offline`, `S3`, `MinIO`, `Stripe`, `payment`, `pricing`, `culling`, `scoring`, `editing`, `deploy`, `nginx`, `server_name`, and `site-config`.
+- Checked bilingual copy where the issue can affect both English and Korean users.
+- Checked current worktree status before writing. Unrelated modified files existed at `.context/reviews/test-engineer.md` and `.context/reviews/tracer.md`; this review did not touch them.
 
 ## Executive Summary
 
-GalleryKit mostly tells the truth about its product surface: this is a self-hosted photographer gallery with serious color delivery, admin-owned infrastructure, and no payment, culling, scoring, or image-editing product surface. The main trust problem in this cycle is not overbroad positioning; it is privacy and AI wording that contradicts implementation details. The public privacy page says public pages exclude GPS coordinates, but the public `/map` route intentionally exposes opted-in latitude/longitude markers. The footer also hides the privacy page unless Google Analytics is configured, even though the page discloses metadata behavior too. Separately, the bulk editor still says "AI-suggested alt text" while the generator is explicitly an EXIF-derived stub.
+GalleryKit's overall product positioning is mostly honest and strong: the repo consistently presents a self-hosted photographer gallery, not a SaaS marketplace, editor, culler, scoring tool, or payment product. Version and stack claims align with package metadata. The privacy, backup/restore, PWA, color/HDR, single-writer deployment, and production semantic-search guardrails are generally backed by code.
 
-Finding count: 3 confirmed issues, 1 risk, 5 aligned/no-action checks.
+The remaining product-marketing risks are sharper onboarding mismatches: the root README markets semantic search without the bounded-scan limitation that the app README and code enforce; docs/comments still imply a Lightroom publish plugin even though the product only ships a server-side upload API; Firefox display copy is technically inaccurate versus the repo's own browser matrix; and the nginx self-hosting doc points users to a config that still contains the production domain without calling out the required edit.
+
+Finding count: 4 issues.
 
 | Severity | Confirmed | Likely | Risk |
 | --- | ---: | ---: | ---: |
 | Critical | 0 | 0 | 0 |
-| High | 1 | 0 | 0 |
-| Medium | 2 | 0 | 1 |
-| Low | 0 | 0 | 0 |
+| High | 0 | 0 | 0 |
+| Medium | 2 | 0 | 0 |
+| Low | 1 | 0 | 1 |
 
-## Profile Adaptation Note
+## Findings
 
-The registered local profile at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` is BurstPick-specific and asks for Swift, ML scoring, pricing, and culling surfaces that do not exist in this repository. I used the role's senior product-marketing claim-verification stance, but followed `AGENTS.md`, `CLAUDE.md`, and GalleryKit source truth. I did not invent BurstPick scope.
-
-## Inventory Summary
-
-Product/docs/marketing surfaces reviewed:
-
-- `README.md`
-- `CLAUDE.md`
-- `AGENTS.md` instructions supplied in the prompt
-- `apps/web/package.json`
-- `apps/web/src/site-config.json`
-- `apps/web/src/site-config.example.json`
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/nav-client.tsx`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
-- `apps/web/src/components/bulk-edit-dialog.tsx`
-- `apps/web/src/components/image-manager.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
-
-Implementation claim checks reviewed:
-
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/caption-generator.ts`
-- `apps/web/src/lib/bulk-edit-types.ts`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/db/schema.ts`
-- `apps/web/src/components/map/map-client.tsx`
-- `apps/web/src/components/map/map-loader.tsx`
-
-Focused searches:
-
-- `rg` for `payment`, `Stripe`, `checkout`, `pricing`, `paid`, `culling`, `scoring`, `edit`, `editing`, `S3`, `MinIO`, `semantic`, `AI`, `HDR`, `Lightroom`, `privacy`, `analytics`, `GPS`, `footer`, and `site-config`.
-- i18n key parity check with a small Node script over `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
-- Current worktree status before writing showed an unrelated modified `.context/reviews/critic.md`; this review did not touch it.
-
-## Confirmed Findings
-
-### PMR-C11-01 - Privacy page falsely says public pages exclude GPS coordinates
-
-Severity: High
-Confidence: High
-Classification: Confirmed trust/privacy copy issue
-
-Exact regions:
-
-- `apps/web/messages/en.json:773-781` defines the public Privacy page copy, including `metadataBody`: "Public pages exclude GPS coordinates."
-- `apps/web/messages/ko.json:773-781` repeats the same claim in Korean.
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx:21-28` renders that metadata claim on the public privacy page.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:38-50` builds public markers containing `latitude` and `longitude`.
-- `apps/web/src/components/map/map-client.tsx:15-22` defines the client marker shape with `latitude` and `longitude`, and `apps/web/src/components/map/map-client.tsx:120-123` renders those coordinates into Leaflet markers.
-- `apps/web/src/lib/data.ts:1658-1684` documents and implements `getMapImages()` as the public latitude/longitude path for processed images in `map_visible` topics.
-- `apps/web/src/db/schema.ts:9-11` shows `topics.map_visible` defaults to false so the GPS map is opt-in.
-- `apps/web/src/app/actions/topics.ts:593-618` exposes the admin action that toggles the public map GPS view.
-
-Why this is a problem:
-
-The implementation is intentionally privacy-aware: GPS is public only on the `/map` route and only for topics the admin opted into. The privacy copy is still false because it uses an absolute claim. A visitor reading the privacy page is told public pages exclude GPS, while another public page can publish exact map coordinates. For a client gallery, venue, home, school, wildlife location, or private event, that contradiction is a direct trust failure.
-
-Concrete failure scenario:
-
-A photographer enables "Show on Map" for a travel category, then sends the gallery to a client. The client opens the Privacy page and sees that public pages exclude GPS coordinates, then finds exact markers on `/map`. The product did the admin-requested thing, but the disclosure makes the operator look careless or deceptive.
-
-Suggested fix:
-
-Change both English and Korean privacy copy to a scoped statement. Example: "Standard gallery and photo pages exclude GPS coordinates. The public Map page can display coordinates for categories an admin explicitly marks as Show on Map. Disable map visibility or enable GPS stripping before upload if locations should stay private." Consider linking to `/map` only when marker count is non-zero, but do not make the disclosure depend on analytics.
-
-### PMR-C11-02 - Footer hides the privacy page unless Google Analytics is configured
+### PMR-C12-01 - Root README over-promises semantic search completeness for larger galleries
 
 Severity: Medium
 Confidence: High
-Classification: Confirmed trust/disclosure discoverability issue
+Classification: Confirmed claim-vs-engineering-reality issue
 
 Exact regions:
 
-- `apps/web/src/components/footer.tsx:6` computes `hasGoogleAnalytics` from `siteConfig.google_analytics_id`.
-- `apps/web/src/components/footer.tsx:44-48` renders the Privacy link only inside `{hasGoogleAnalytics && (...)}`.
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx:21-28` shows the page discloses both analytics and photo metadata behavior, not analytics alone.
-- `apps/web/messages/en.json:773-781` and `apps/web/messages/ko.json:773-781` include metadata/GPS disclosure copy that remains relevant when GA is disabled.
-- `apps/web/src/site-config.json:10` and `apps/web/src/site-config.example.json:10` default `google_analytics_id` to an empty string, so the default public footer hides Privacy.
+- `README.md:37` markets semantic search as natural-language English/Korean photo search plus similar photos, powered by local CLIP, disabled by default and live on the demo.
+- `apps/web/README.md:56-62` gives the missing caveat: the feature is fully self-hosted, but scan scope is bounded and searches newest embeddings first; large galleries may not surface relevant older photos unless re-uploaded or re-embedded after a backfill.
+- `apps/web/src/lib/clip-embeddings.ts:22-44` implements `SEMANTIC_SCAN_LIMIT`, defaulting to `2000` and clamping env overrides to `25_000`.
+- `apps/web/src/app/api/search/semantic/route.ts:257-269` scans only the most recent embeddings for the active model and limits rows by `SEMANTIC_SCAN_LIMIT`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:141-150` applies the same newest-first capped candidate set to similar-photo search.
 
-Why this is a problem:
+Failure scenario:
 
-The footer treats privacy as an analytics-only disclosure. In the actual product, privacy also covers processed derivatives, public metadata, GPS stripping, and the public map boundary. On the default self-hosted install, visitors see GitHub and Admin footer links but no Privacy link, even though the site may still publish photo metadata and opted-in GPS map markers.
-
-Concrete failure scenario:
-
-An operator leaves Google Analytics disabled, enables map visibility for a topic, and shares the site. Visitors have no footer path to the only page that explains metadata behavior. If a visitor later discovers GPS markers, the absence of an obvious privacy link compounds the trust issue from PMR-C11-01.
+A photographer self-hosts GalleryKit with 8,000-20,000 photos, sees the root README's semantic-search feature bullet, completes model setup/backfill, and expects natural-language and similar-photo search to cover the whole library. Relevant older photos outside the newest-first scan window can be absent even with valid embeddings. From the user's point of view, that looks like low-quality or broken AI search, not an operator-tunable performance guardrail.
 
 Suggested fix:
 
-Always render the Privacy link in the public footer. If the goal is to avoid a dead analytics notice on default installs, keep the existing dynamic analytics paragraph inside the page, but do not hide the entire route. A stronger fix is to rename the section to "Privacy and Metadata" in footer/UI copy if the product wants to emphasize that it is broader than GA.
+Add the bounded-scan caveat to the root README feature bullet or a nearby semantic-search subsection. State the default and hard cap plainly: newest embeddings first, default scan limit 2,000, env-tunable up to 25,000, and large libraries need deliberate backfill/re-embedding strategy or future ANN indexing for whole-catalog recall. Mention that similar-photo search has the same candidate cap.
 
-### PMR-C11-03 - Bulk editor claims AI-suggested alt text, but implementation is an EXIF stub
+### PMR-C12-02 - Lightroom wording implies an included publish plugin that GalleryKit does not ship
 
 Severity: Medium
 Confidence: High
-Classification: Confirmed AI/message honesty issue
+Classification: Confirmed onboarding/support-risk issue
 
 Exact regions:
 
-- `apps/web/messages/en.json:233-234` says "Apply suggested alt text" and "Copies AI-suggested alt text..."
-- `apps/web/messages/ko.json:233-234` says the same in Korean: "AI가 제안한..."
-- `apps/web/src/components/bulk-edit-dialog.tsx:241-257` renders the bulk apply control and hint.
-- `apps/web/src/lib/caption-generator.ts:1-18` states the caption generator is a stub and Florence-2 ONNX inference is deferred.
-- `apps/web/src/lib/caption-generator.ts:33-43` generates deterministic EXIF-derived strings such as "Photo taken with {camera_model}".
-- `apps/web/src/lib/caption-generator.ts:54-64` returns that stub when auto alt text is enabled.
-- `apps/web/messages/en.json:721-724` correctly says auto alt text creates EXIF-derived placeholders and real model-generated descriptions are future work.
-- `apps/web/messages/ko.json:721-724` correctly says the same in Korean.
-- `apps/web/src/app/actions/images.ts:1058-1107` copies `alt_text_suggested` into title or description without adding any model inference step.
+- `README.md:150` says `/api/admin/lr/upload` is capped at 216 MiB "so Lightroom publishes are not caught" by the generic admin API cap.
+- `apps/web/README.md:47` repeats that the route cap exists so "Lightroom publishes bypass" the generic cap.
+- `CLAUDE.md:152` describes `admin_tokens` as "Lightroom Classic publish-plugin PATs" and says "The plugin (`/api/admin/lr/upload`) accepts the token..."
+- `apps/web/nginx/default.conf:122-128` comments describe "Lightroom Classic publish-plugin upload" and say the generic cap would silently break "the LR publish integration."
+- `apps/web/messages/en.json:800-802` is more precise in the product UI: upload API tokens are for server-side upload integrations, and "GalleryKit does not bundle or distribute a Lightroom Classic plugin."
+- `apps/web/messages/ko.json:850-852` gives the same Korean UI clarification.
+- `apps/web/src/app/api/admin/lr/upload/route.ts:4-8` confirms the implementation accepts external upload clients, including a Lightroom Classic publish-client implementation, but exposes the server-side API only and does not bundle or distribute a plugin.
 
-Why this is a problem:
+Failure scenario:
 
-The settings page is honest, but the bulk editor is not. "AI-suggested" is a material product claim. In this repo, auto alt text is an EXIF-derived placeholder, not a vision model result. This matters because GalleryKit also has a real CLIP semantic-search implementation; loose AI wording in a separate admin flow weakens trust in the real AI claim.
-
-Concrete failure scenario:
-
-An admin enables Auto Alt-Text, bulk-applies "AI-suggested" text into titles/descriptions, and publishes generic captions like "Photo taken with Canon EOS R5" believing a model inspected the image content. The published gallery looks low-quality and the operator loses confidence in GalleryKit's AI features.
+A self-hoster or photographer reads the README/nginx/CLAUDE wording and expects GalleryKit to include a ready-to-install Lightroom Classic publish plugin. They reach the admin token page and discover only API token generation, with the UI explicitly saying no plugin is bundled. That gap creates avoidable support churn and makes the integration feel missing or hidden.
 
 Suggested fix:
 
-Change the bulk hint in both locales to "Copies EXIF-derived suggested alt text..." until real inference ships. If real Florence-2 support is added later, update the settings and bulk copy together and include a model/version disclosure.
+Standardize public docs and comments on "external upload API" or "Lightroom-compatible upload endpoint." If the project wants to claim Lightroom integration, add the precise status in the README: GalleryKit ships the authenticated server endpoint and token UI, not a bundled Lightroom plugin. Include the required header, route, upload expectations, and a curl or third-party-client example.
 
-## Risk Findings
+### PMR-C12-03 - Firefox display-detection copy contradicts the repo's own browser matrix
 
-### PMR-C11-RISK-01 - README "batch editing" wording can imply photo editing despite the product boundary
+Severity: Low
+Confidence: High
+Classification: Confirmed technical-copy issue
 
-Severity: Medium
+Exact regions:
+
+- `apps/web/messages/en.json:739-740` tells admins: "Firefox does not support the color-gamut media query..."
+- `apps/web/messages/ko.json:739-740` says the same in Korean.
+- `CLAUDE.md:303` says Firefox parses the media-query syntax since version 110, but it always returns false because wide-gamut rendering is not implemented.
+- `CLAUDE.md:356-367` repeats the browser matrix: Firefox 124+ parses `(color-gamut: p3)`, always returns false due to Mozilla bug 1626624, and suppresses P3 badges and hints for all Firefox visitors.
+- `CLAUDE.md:374` notes Firefox 110+ parses the syntax, but practical behavior is the same as older unsupported versions because it always returns false.
+
+Failure scenario:
+
+An operator debugging color/HDR visibility reads the admin settings note and concludes Firefox lacks the media query itself. The actual problem is subtler: modern Firefox parses the query but reports no P3/wide-gamut capability. The current copy weakens trust in GalleryKit's otherwise careful color-management documentation.
+
+Suggested fix:
+
+Change the English and Korean strings to explain the real behavior: Firefox 110+ parses `color-gamut`, but currently reports no wide-gamut/P3 support, so GalleryKit conservatively hides gamut/HDR badges and the educational hint unless "Force Show Color Chips" is enabled. Keep the old "no support" phrasing only for Firefox <= 109 if the UI needs that distinction.
+
+### PMR-C12-04 - Self-hosting nginx guidance points to a config with the production domain hardcoded
+
+Severity: Low
 Confidence: Medium
-Classification: Risk, not a confirmed false claim
+Classification: Risk
 
 Exact regions:
 
-- `README.md:40` markets the Admin Dashboard with "batch editing."
-- `CLAUDE.md:260` defines the product premise: photos arrive after editing and no edit, culling, or scoring features ship.
-- `apps/web/src/lib/bulk-edit-types.ts:1-19` scopes bulk editing to metadata fields: topic, title, description, tag add/remove, and suggested alt text copy.
-- `apps/web/src/app/actions/images.ts:949-1112` implements `bulkUpdateImages()` for topic/title/description/tag/alt-text metadata only.
-- `apps/web/messages/en.json:218-237` labels the UI "Bulk edit" but the description says only toggled fields, tags, and suggested alt text are changed.
+- `README.md:188` tells operators that the checked-in `apps/web/nginx/default.conf` matches the documented host-side nginx + app-container deployment and can be adapted for custom static upload serving.
+- `apps/web/README.md:49-50` similarly describes the checked-in compose/nginx topology.
+- `apps/web/nginx/default.conf:21-28` defines the server block with `server_name gallery.atik.kr;`, followed by comments about TLS edge behavior.
 
-Why this is a problem:
+Failure scenario:
 
-"Batch editing" is common photography language for editing images, presets, exposure, color, crops, or culling decisions. In GalleryKit, the feature is batch metadata management. The README does not explicitly say metadata, so a prospective operator could misread the feature list as violating GalleryKit's own no-editing boundary.
-
-Concrete failure scenario:
-
-A photographer evaluating GalleryKit sees "batch editing" and expects photo-editing workflow features. They install it, find only metadata bulk updates, and conclude the README overpromised. The product did not ship a forbidden feature, but the wording makes the boundary less clear than the implementation.
+A self-hoster copies the checked-in nginx config to a multi-vhost server for `photos.example.com`, edits upload paths and TLS separately, but misses the `server_name` value. Depending on nginx default-server order, requests may fall through to another server block or miss GalleryKit's body-size/private-originals rules. This is not a code vulnerability by itself, but it is a common deployment-onboarding footgun.
 
 Suggested fix:
 
-Change `README.md:40` from "batch editing" to "batch metadata editing" or "batch title, description, category, and tag updates." Consider adding a short README note near the feature list: "GalleryKit is a publishing/gallery tool, not an editor, culler, or scoring system."
+Make the self-hosting doc call out `server_name` replacement explicitly, or convert the checked-in config comment to an obvious placeholder instruction near `server_name`. Example: `server_name gallery.example.com; # replace with your public gallery host`. If `gallery.atik.kr` is intentionally the production deploy config, document that self-hosters must copy and edit it rather than use it verbatim.
 
-## Aligned / No Action Checks
+## Aligned / No-Action Checks
 
-### PMR-C11-OK-01 - Payment surfaces are not marketed
+- Stack/version positioning is aligned. `README.md` claims Next.js 16, React 19, TypeScript 6, Node 24+, and MySQL 8+; `apps/web/package.json` and root package scripts support those claims.
+- "Not a photo editor, culler, or scoring tool" is correctly stated in `README.md:42`; I did not find active user-facing promises for culling/scoring/payment workflows.
+- Storage claims are restrained. `CLAUDE.md` says local filesystem is the only implemented storage backend and not to document S3/MinIO as supported; current public README copy does not market S3/MinIO support.
+- Privacy/backup wording is generally better than typical self-hosted-gallery docs. The DB backup/restore copy in `apps/web/messages/en.json` and `ko.json` correctly says it backs up database rows and does not snapshot file storage.
+- Production semantic-search honesty gates are real. `gallery-config.ts` heals stored `production` mode back to `disabled` without `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, and the route returns 503 rather than serving stub vectors under the production label when real embeddings are missing.
+- PWA/offline claims are supported by the service worker implementation: admin/API/share-sensitive paths are bypassed, HTML uses network-first behavior with offline fallback, and images use cache-first/stale-while-revalidate style handling.
+- SEO basics are implemented, not just claimed: localized metadata, canonical/hreflang links, sitemap generation, robots rules, manifest generation, feed/OG surfaces, and DB-fallback behavior were present.
+- Public color/HDR claims are mostly careful: the README states HDR ingest is opt-in and gain-map detection is admin audit only; admin settings expose the corresponding controls and warnings.
 
-Evidence:
+## Final Sweep Notes
 
-- `rg` over current `README.md`, `apps/web/messages`, and `apps/web/src` found no live Stripe, checkout, pricing, billing, or paid-download product surface outside historical comments and tests.
-- `README.md:201-203` presents the repository license, not a monetized gallery feature.
-
-Assessment: No overclaim found. This respects the project ban on reintroducing payment surfaces without a product decision.
-
-### PMR-C11-OK-02 - Lightroom token page now avoids claiming a bundled plugin
-
-Evidence:
-
-- `apps/web/messages/en.json:800-805` labels the page "Upload API Tokens" and says GalleryKit does not bundle or distribute a Lightroom Classic plugin.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:5-8` similarly states the server route does not distribute a Lightroom plugin.
-- `apps/web/src/lib/admin-tokens.ts:3-24` defines token mechanics and scopes; the UI copy does not claim a full client distribution.
-
-Assessment: No current product-marketing issue found in the token page copy.
-
-### PMR-C11-OK-03 - Semantic search copy is mostly honest
-
-Evidence:
-
-- `README.md:37` says semantic search is self-hosted, operator-enabled, disabled by default, requires model download/backfill/env opt-in, and is live on the demo.
-- `apps/web/messages/en.json:725-728` explains stub mode is not meaningful and production mode is operator-gated.
-- `apps/web/messages/ko.json:725-728` mirrors the same warning.
-- `CLAUDE.md:151` says the code default is disabled and production mode requires the env gate plus production DB row.
-
-Assessment: No issue in the reviewed local copy. I did not use the live demo as implementation evidence for this artifact.
-
-### PMR-C11-OK-04 - Backup and restore copy does not overpromise full-site rollback
-
-Evidence:
-
-- `apps/web/messages/en.json:18-24` says backups are database rows only and files require host-level backups.
-- `CLAUDE.md:208-210` says DB restore does not snapshot or roll back original files, derivatives, or resources.
-
-Assessment: No actionable marketing mismatch found.
-
-### PMR-C11-OK-05 - Admin power/RBAC claims are honest
-
-Evidence:
-
-- `README.md:40` says there are multiple root-admin accounts with no role separation yet.
-- `CLAUDE.md:5` says authentication only, no role/capability separation yet.
-- `CLAUDE.md:228` says any admin can upload, edit metadata, export/restore DB backups, change settings, and manage admins.
-- `apps/web/messages/en.json:49-50` warns that new admins are full-access root admins.
-
-Assessment: No overclaim found.
-
-## Positioning Notes
-
-GalleryKit's defensible position is: self-hosted photo publishing for photographers who care about color-faithful delivery, private originals, and owning the publishing stack. The strongest marketing assets are implementation-backed: color pipeline detail, private original storage, GPS controls, SQL-only restore honesty, root-admin honesty, and operator-gated semantic search. The product should avoid vague "AI" or "editing" language because the implementation is strongest when it is precise.
-
-Recommended one-sentence positioning:
-
-> GalleryKit is a self-hosted photo gallery for photographers who want color-faithful web delivery, private originals, and control over the full publishing stack.
-
-## Verification Notes
-
-No production code was edited. This report is the only file intentionally changed. I did not run the full lint/typecheck/test suite because this was a review artifact task; verification consisted of source/docs inventory, line-level claim checks, i18n key parity check, and targeted repository searches.
+- I did not review generated dependency directories, runtime upload data, local build artifacts, or test output as product/source-of-truth surfaces.
+- I checked prior `.context/reviews/` context for review continuity, but treated current source/docs as authoritative.
+- I found no current marketing copy promising paid downloads, Stripe checkout, S3/MinIO storage, horizontal scaling, role-based permissions, or bundled AI captioning beyond the current EXIF-placeholder disclosure.
+- The strongest cycle-12 fix candidates are doc/copy changes, not code behavior changes: semantic-search scale caveat, Lightroom endpoint naming, Firefox detection wording, and nginx self-hosting instructions.
