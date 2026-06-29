@@ -1,161 +1,345 @@
-# Performance Review - Cycle 5
+# Performance Review - Cycle 6/100 - PROMPT 1
 
-Reviewer: perf-reviewer  
-Scope: current HEAD `79c698eb877e563cd46331c8cd92fc29ed970874`  
-Mode: static performance/concurrency review; application source left untouched.
+Role: perf-reviewer
+Repo: `/Users/hletrd/flash-shared/gallery`
+Reviewed HEAD: `e6db9241b3b4f2adbedaeeb46eb5d68275b74879`
+Date: 2026-06-29
 
-## Review Inventory
+## Scope And Method
 
-Read first:
-- `AGENTS.md` instructions supplied in the task
+I read `AGENTS.md` and `CLAUDE.md` first, then inspected current HEAD only. I did not implement fixes.
+
+Review perspectives covered: performance, concurrency, CPU/memory, DB/query shape, image pipeline, service worker behavior, and UI responsiveness.
+
+## Review-Relevant Inventory
+
+Inventory was built from `git ls-tree -r HEAD`, `rg --files`, targeted `rg` sweeps, and direct reads of the relevant files below. I did not sample only a narrow subset; I mapped the current app surface before writing findings.
+
+Docs and operating context inspected:
+- `AGENTS.md`
 - `CLAUDE.md`
+- `.context/plans/` and `.context/reviews/` inventory, with current review output written to `.context/reviews/perf-reviewer.md`
 
-Stale-duplicate check:
-- `.context/reviews/perf-reviewer.md` previous cycle before replacement
-- `.context/reviews/run9-cycle8/perf-reviewer.md`
-- Recent review history under `.context/reviews/`
+Build, runtime, deploy, and cache config inspected:
+- `package.json`
+- `apps/web/package.json`
+- `apps/web/next.config.ts`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/nginx/default.conf`
+- `apps/web/scripts/build-sw.ts`
+- `apps/web/public/sw.template.js`
+- `apps/web/public/sw.js`
 
-Performance/concurrency surfaces inventoried and reviewed:
-- DB/schema/pool: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/drizzle/*.sql`, Drizzle metadata
-- Data access: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/analytics-data.ts`, `apps/web/src/lib/smart-collections.ts`
-- Public pages/routes: home/topic/smart-collection/photo/shared/timeline/year/map pages, `api/search/semantic`, `api/search/similar`, OG routes, health/live routes
-- Server actions: `apps/web/src/app/actions/public.ts`, `images.ts`, `embeddings.ts`, settings/backfill/admin mutation surfaces
-- Image pipeline and queues: `apps/web/src/lib/image-queue.ts`, `process-image.ts`, `admin-backfill-runner.ts`, `process-topic-image.ts`, `gps-exif-strip.ts`
-- CLIP/search: `clip-model.ts`, `clip-embeddings.ts`, `clip-inference.ts`, semantic/similar routes, embedding backfill action/script
-- Client/UI hot paths: `home-client.tsx`, `search.tsx`, `similar-photos.tsx`, `lightbox.tsx`, `photo-viewer.tsx`, `image-manager.tsx`, `map/map-client.tsx`, upload/dropzone components
-- Cache/PWA/serving: `next.config.ts`, `serve-upload.ts`, `sw-cache.ts`, `public/sw.js`, `public/sw.template.js`, service-worker registration
-- Admin pages: dashboard, analytics, settings, DB backup/restore, tags/categories/tokens/users pages
+Schema, migrations, and DB access inspected:
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/db/index.ts`
+- `apps/web/drizzle/0000_nappy_madelyne_pryor.sql` through `apps/web/drizzle/0024_drop_reactions.sql` inventory
+- `apps/web/drizzle/meta/_journal.json` inventory
+- `apps/web/scripts/migrate.js`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/data-timeline.ts`
+- `apps/web/src/lib/analytics-data.ts`
+- `apps/web/src/lib/smart-collections.ts`
 
-## Findings
+Image, upload, queue, and backfill pipeline inspected:
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/process-topic-image.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/admin-backfill-runner.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/scripts/backfill-color-pipeline.ts`
+- `apps/web/scripts/backfill-clip-embeddings.ts`
+- `apps/web/src/lib/serve-upload.ts`
+- `apps/web/src/lib/upload-paths.ts`
+- `apps/web/src/lib/storage/local.ts`
 
-### PERF-C5-01 - Timeline and On-This-Day still use non-sargable date functions on dynamic public renders
+Search and CLIP pipeline inspected:
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/lib/clip-inference.ts`
+- `apps/web/src/lib/clip-model.ts`
+- `apps/web/src/lib/search-enrichment-fields.ts`
 
-Severity: Medium  
-Confidence: High  
-Status: confirmed
+Public pages, routes, and UI surfaces inspected:
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/histogram.tsx`
 
-Code regions:
-- `apps/web/src/lib/data-timeline.ts:97-116`
-- `apps/web/src/lib/data-timeline.ts:129-141`
-- `apps/web/src/lib/data-timeline.ts:186-207`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:14-82`
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:15-82`
-- `apps/web/src/components/on-this-day-widget.tsx:14-23`
-- `apps/web/src/db/schema.ts:111-117`
+Tests and static contracts inspected by inventory and targeted source reads:
+- `apps/web/src/__tests__/data-tag-names-sql.test.ts`
+- `apps/web/src/__tests__/smart-collection-pagination.test.ts`
+- `apps/web/src/__tests__/data-timeline.test.ts`
+- `apps/web/src/__tests__/data-timeline-truncation.test.ts`
+- `apps/web/src/__tests__/semantic-search-route.test.ts`
+- `apps/web/src/__tests__/similar-route.test.ts`
+- `apps/web/src/__tests__/search-stale-response.test.ts`
+- `apps/web/src/__tests__/sw-template-contract.test.ts`
+- `apps/web/src/__tests__/serve-upload.test.ts`
+- `apps/web/src/__tests__/process-image-*.test.ts`
+- full `apps/web/src/__tests__` filename inventory
 
-Problem:
-`getOnThisDayImages` filters with `MONTH(capture_date)` and `DAY(capture_date)`, `getTimelineYears` selects/orders `YEAR(capture_date)`, and `getTimelineImages` filters with `YEAR(capture_date)` plus optional `MONTH(capture_date)`. These expressions prevent tight range use of the existing `(processed, capture_date, created_at)` index beyond the `processed=true` prefix. The pages are `revalidate = 0`, and the home page renders `OnThisDayWidget`, so the scan cost is paid during live public requests.
+## Confirmed Issues
 
-Failure scenario:
-On a larger gallery, crawler or visitor traffic to `/timeline`, `/year/:year`, and the home page repeatedly scans the processed image set and applies date functions row-by-row before grouping, sorting, or limiting. DB CPU and buffer-pool pressure grow with total processed photos, not the visible page size.
+### 1. Initial public listing queries compute tag aggregation and `COUNT(*) OVER()` across the full matched set
 
-Concrete fix:
-Rewrite year/month filtering to sargable ranges where possible: `capture_date >= 'YYYY-01-01' AND capture_date < 'YYYY+1-01-01'`, and similarly for month ranges inside a selected year. For anniversary lookup and distinct-year navigation, add generated columns such as `capture_year`, `capture_month`, `capture_day` with matching indexes, or maintain a small derived timeline table. Update tests/comments that currently preserve the function-predicate shape.
+Severity: High
+Confidence: High
 
-### PERF-C5-02 - Public map fetches and renders up to 10,000 markers with no map/GPS-specific access path or clustering
+Code region:
+- `apps/web/src/lib/data.ts:872-900`
+- `apps/web/src/lib/data.ts:1403-1447`
+- `apps/web/src/app/[locale]/(public)/page.tsx:149-166`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-176`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`
 
-Severity: Medium  
-Confidence: High  
-Status: confirmed
+The home/topic first page path calls `getImagesLitePage(..., PAGE_SIZE, 0)`. That query selects `tag_names: tagNamesAgg`, joins `imageTags` and `tags`, groups by `images.id`, orders, and also selects `total_count: COUNT(*) OVER()` before applying `LIMIT normalizedPageSize + 1`:
 
-Code regions:
-- `apps/web/src/lib/data.ts:1642-1678`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:8-60`
-- `apps/web/src/components/map/map-client.tsx:76-143`
-- `apps/web/src/db/schema.ts:4-12`
-- `apps/web/src/db/schema.ts:111-117`
-- `apps/web/drizzle/0005_topics_map_visible.sql:2-8`
+```ts
+const baseQuery = db.select({
+    ...publicSelectFields,
+    tag_names: tagNamesAgg,
+    total_count: sql<number>`COUNT(*) OVER()`,
+})
+    .from(images)
+    .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+    .leftJoin(tags, eq(imageTags.tagId, tags.id))
+    .groupBy(images.id)
+    .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
+```
 
-Problem:
-`getMapImages` joins `images` to `topics`, filters `processed=true`, `topics.map_visible=true`, and non-null latitude/longitude, then orders by capture/created/id and returns `MAP_MAX_MARKERS = 10000`. The schema has listing/topic indexes, but no index on `topics.map_visible` and no image access path for GPS-present public map rows. The page is dynamic, serializes all returned marker data into the initial payload, then the client computes lat/lng arrays and renders one Leaflet `<Marker>` per row.
+The smart-collection initial page repeats the same shape at `data.ts:1432-1446`.
 
-Failure scenario:
-If many public photos are geotagged, each `/map` request performs a broad DB scan/sort and ships a large marker payload. On phones or older laptops, parsing thousands of markers, computing bounds, and mounting thousands of Leaflet markers can stall the main thread. The DB pays this cost on every request because the route has `revalidate = 0`.
+Why this is a problem:
+MySQL must form the grouped result set and compute the window count for all matching images before the `LIMIT` can return the first 31 rows. Because tag names are also aggregated in the same query, the first anonymous page render can pay for tag joins and grouping over the full topic/tag/smart-collection match set. These pages are dynamic public routes, so traffic can repeatedly trigger this work.
 
-Concrete fix:
-Add a map-specific DB access path and reduce client cardinality. Options include indexing `topics.map_visible`, adding a generated/denormalized `has_gps` or public-map eligibility field on `images`, and indexing `(processed, has_gps, capture_date, created_at)` or a denormalized `(map_visible, processed, capture_date, created_at)` path if topic visibility remains part of the hot predicate. On the UI side, switch to bounds/tile-based fetching or marker clustering with a hard per-viewport cap instead of initial all-marker render.
+Concrete failure scenario:
+A gallery grows to tens of thousands of processed images with several tags each. A public home page or topic page request only needs 30 cards plus a count, but the DB performs a full grouped join and window count over every matching image. Concurrent crawler or social-preview traffic can create large temp tables/filesorts, increase DB CPU, and delay the initial page render. Smart collections are worse when the compiled predicate is broad because the same full-set window count runs before the first page is served.
 
-### PERF-C5-03 - Production CLIP embedding runs outside the image queue's backpressure and shutdown accounting
+Suggested fix:
+Split the first-page query into two bounded shapes:
+- Query 1: a cheap count over the filtered `images` set, avoiding tag joins unless the filter itself requires a tag subquery.
+- Query 2: select only the first `pageSize + 1` image IDs using the listing index/order, then join/aggregate tags only for those IDs.
 
-Severity: Medium  
-Confidence: High  
-Status: confirmed
+Alternatively, remove exact `totalCount` from public first-page rendering and rely on `hasMore`, especially for smart collections. The existing cursor path for smart collections already avoids `COUNT(*) OVER()` at `data.ts:1399-1401`; the initial path should not keep the expensive shape.
 
-Code regions:
-- `apps/web/src/lib/image-queue.ts:204-212`
-- `apps/web/src/lib/image-queue.ts:470-488`
-- `apps/web/src/lib/image-queue.ts:490-567`
-- `apps/web/src/lib/clip-model.ts:151-199`
+### 2. Topic and shared-group analytics lack indexes matching their time-window queries
 
-Problem:
-The image processing queue is explicitly bounded by `PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 })`. After derivatives are written and the row is marked processed, both caption and embedding hooks are launched via detached `void (async () => ...)()` IIFEs. In production semantic mode, the embedding hook calls `embedImageReal`, which performs a Sharp decode/resize/raw buffer extraction, allocates a `Float32Array` for CHW pixels, and runs ONNX inference. Because this work is detached, a completed queue job immediately frees the queue slot while CPU/memory-heavy embedding continues unbounded relative to queue concurrency and is not drained by queue shutdown.
+Severity: Medium
+Confidence: High
 
-Failure scenario:
-During a batch upload with production semantic search enabled, the queue processes images one at a time, but each completed image can leave a real embedding task running in the background. Multiple Sharp 512x512 raw conversions and model invocations can overlap with later derivative jobs and public requests in the same Node process, causing CPU saturation, heap pressure, and slower user-facing responses. On shutdown or restore quiesce, detached embeddings can also be abandoned after image processing is considered complete.
+Code region:
+- `apps/web/src/lib/analytics-data.ts:62-79`
+- `apps/web/src/lib/analytics-data.ts:161-180`
+- `apps/web/src/db/schema.ts:221-254`
 
-Concrete fix:
-Move embeddings into a bounded execution path. A dedicated `PQueue` with explicit `EMBEDDING_CONCURRENCY`, metrics, and shutdown drain is the least invasive fix. A more durable fix is a DB-backed embedding job table processed by the sidecar/backfill worker. If embeddings must stay coupled to uploads, await them inside the existing processing queue after derivative generation so `QUEUE_CONCURRENCY` remains the true upper bound.
+The analytics queries filter by bot and optional time window, then group by topic/share key:
 
-### PERF-C5-04 - Semantic and similar search can decode/rank up to 1,000,000 vectors synchronously in public API handlers
+```ts
+const whereClause = since
+    ? and(eq(topicViews.bot, false), gte(topicViews.viewed_at, since))
+    : eq(topicViews.bot, false);
+```
 
-Severity: Medium  
-Confidence: High  
-Status: confirmed
+and:
 
-Code regions:
-- `apps/web/src/lib/clip-embeddings.ts:36-44`
-- `apps/web/src/lib/clip-embeddings.ts:104-152`
-- `apps/web/src/lib/clip-embeddings.ts:164-166`
-- `apps/web/src/__tests__/clip-semantic-limits-env.test.ts:75-85`
-- `apps/web/src/app/api/search/semantic/route.ts:240-281`
+```ts
+const whereClause = since
+    ? and(eq(sharedGroupViews.bot, false), gte(sharedGroupViews.viewed_at, since))
+    : eq(sharedGroupViews.bot, false);
+```
+
+But the schema only defines:
+
+```ts
+idxTopicViewsTopicViewedAt: index('idx_topic_views_topic_viewed_at').on(table.topic, table.viewed_at)
+idxSharedGroupViewsGroupIdViewedAt: index('idx_shared_group_views_group_id_viewed_at').on(table.groupId, table.viewed_at)
+```
+
+By contrast, `image_views` has indexes shaped for the analytics filters: `(bot, viewed_at, country_code)` and `(bot, viewed_at, referrer_host)` at `schema.ts:228-231`. `analytics-data.ts:93-111` even documents why that shape serves windowed analytics scans.
+
+Why this is a problem:
+For `WHERE bot = false AND viewed_at >= ?`, MySQL cannot efficiently use an index whose leading column is `topic` or `group_id` unless that leading column is constrained. The default analytics windows therefore degrade toward scanning retained topic/share view rows and grouping them. Retention is finite, but these are append-only public-event tables.
+
+Concrete failure scenario:
+After months of public traffic, `topic_views` and `shared_group_views` contain hundreds of thousands or millions of retained rows. Opening the admin analytics page with the default time window runs the top-topic and top-shared-group aggregations. Because the indexes are ordered by entity first, the DB scans far more rows than the selected time window, increases temp aggregation work, and makes the dashboard slow exactly when the admin needs it for operational visibility.
+
+Suggested fix:
+Add migrations and schema entries for analytics-window indexes, for example:
+- `topic_views(bot, viewed_at, topic)`
+- `shared_group_views(bot, viewed_at, group_id)`
+
+Then verify with `EXPLAIN` for the default analytics windows. Keep the existing entity-first indexes if other routes depend on entity-specific history lookups.
+
+### 3. Sized derivative re-encodes overwrite public image files non-atomically while the service worker can cache the bytes
+
+Severity: Medium
+Confidence: High
+
+Code region:
+- `apps/web/src/lib/process-image.ts:1133-1275`
+- `apps/web/src/lib/process-image.ts:1277-1292`
+- `apps/web/public/sw.template.js:176-205`
+- `apps/web/public/sw.template.js:237-254`
+
+The sized derivative loop writes each `_640`, `_1536`, etc. file directly to the public path:
+
+```ts
+const outputPath = path.join(dir, sizedFilename);
+...
+.webp({ quality: qualityWebp }).toFile(outputPath);
+...
+.avif(...).toFile(outputPath);
+...
+.jpeg(...).toFile(outputPath);
+```
+
+The duplicate-size path also writes directly when a hard link fails:
+
+```ts
+await fs.link(lastRendered.filePath, outputPath);
+...
+await fs.copyFile(lastRendered.filePath, outputPath);
+```
+
+Only the largest base filename gets the documented tmp/link/rename flow at `process-image.ts:1277-1292`. The already-public sized variants do not.
+
+The service worker caches successful derivative responses by URL:
+
+```js
+await imageCache.put(cacheKey, networkResponse.clone());
+await recordAndEvict(request.url, size);
+```
+
+and does synchronous HEAD revalidation for cached entries using `ETag` before deciding whether to return cached bytes.
+
+Why this is a problem:
+Fresh uploads are hidden until processing completes, but backfill and color-pipeline re-encodes operate on already-processed rows. During those re-encodes, a visitor can request a sized derivative while Sharp has truncated and is rewriting the same public file. Static serving or the upload fallback route can stream incomplete bytes. If the response is considered OK, the service worker may cache the partial/corrupt derivative under the stable URL.
+
+Concrete failure scenario:
+An admin starts a color-pipeline backfill. A mobile visitor loads a masonry page while `processImageFormats` is rewriting `123_640.avif` in place. The visitor receives a truncated AVIF; the service worker caches it. Subsequent visits can continue showing a broken tile until the cache revalidates to different bytes or the LRU evicts it. The stable filename and one-hour cache policy amplify a short write race into a visible UI defect.
+
+Suggested fix:
+Write every sized derivative to a unique temporary file in the same directory, then atomically `rename` to the final `outputPath`. For duplicate-size variants, hard-link or copy from the completed temp/final source into a temp destination and rename that destination. Track temp files for cleanup on failure. Longer term, versioned derivative filenames would also eliminate stale-cache ambiguity during backfills.
+
+## Likely Issues
+
+### 4. Semantic search ignores stale responses in state, but does not abort stale in-flight expensive requests
+
+Severity: Low
+Confidence: Medium
+
+Code region:
+- `apps/web/src/components/search.tsx:152-180`
+- `apps/web/src/components/search.tsx:181-197`
+- `apps/web/src/app/api/search/semantic/route.ts:228-247`
+- `apps/web/src/app/api/search/semantic/route.ts:260-279`
+
+The client increments `requestIdRef` and ignores stale semantic results after the fetch and JSON parse:
+
+```ts
+const requestId = ++requestIdRef.current;
+...
+const resp = await fetch('/api/search/semantic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: searchQuery, topK: SEMANTIC_TOP_K_DEFAULT }),
+});
+if (requestId !== requestIdRef.current) return;
+```
+
+That protects UI state, but it does not cancel the previous network request. There is no `AbortController` in `Search`, and the route does not check `request.signal.aborted` before or after its expensive operations. The route embeds the query, selects up to `SEMANTIC_SCAN_LIMIT` embeddings, decodes every row, and scores them.
+
+Why this is likely a problem:
+Semantic search is CPU/DB-heavy by design. A user typing with pauses longer than the debounce, rapidly toggling semantic mode, or closing the search overlay can leave old POSTs running even though their results will be discarded. Rate limiting bounds abuse, but it does not avoid wasted model inference and brute-force scoring for legitimate stale requests.
+
+Concrete failure scenario:
+A visitor types three semantic queries in succession on a slower connection. The first two requests are obsolete from the UI's perspective, but the server still performs embedding inference and scans/scores the embedding rows. Multiple visitors doing this at once can consume CPU that should be reserved for page renders and image serving.
+
+Suggested fix:
+Keep an `AbortController` ref in `Search`, abort the previous semantic request before starting a new one, and abort on clear/close/unmount/toggle. Pass `signal` to `fetch`. On the route, check `request.signal.aborted` before query embedding, after embedding, and before the DB scan/scoring loop where practical. This will not cancel every already-started native operation, but it gives the app a chance to stop work at the boundaries it controls.
+
+## Risks Needing Manual Validation
+
+These are not confirmed defects from code inspection alone. They are bounded or already documented, but worth validating with production-scale data or browser traces.
+
+### A. Timeline and on-this-day queries use non-sargable date functions
+
+Severity: Low
+Confidence: High that the pattern exists; Low that it is currently harmful
+
+Code region:
+- `apps/web/src/lib/data-timeline.ts:92-114`
+- `apps/web/src/lib/data-timeline.ts:178-205`
+
+The code explicitly documents that `MONTH()`, `DAY()`, and `YEAR()` predicates are non-sargable and currently acceptable at personal-gallery scale. Validate with production row counts and `EXPLAIN` if timeline or on-this-day pages become slow. I am not counting this as a confirmed issue because the implementation already caps rows and documents the tradeoff.
+
+### B. Warm service-worker image loads still put a synchronous HEAD probe on the display path
+
+Severity: Low
+Confidence: Medium
+
+Code region:
+- `apps/web/public/sw.template.js:211-254`
+
+The HEAD probe is bounded with `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` and the comments explain the color-freshness requirement. It is still one display-path validation per cached image. Validate on slow mobile networks with DevTools/WebPageTest before changing it, because removing it would regress the documented freshness behavior.
+
+### C. Semantic and similar-photo search remain brute-force scans by design
+
+Severity: Low
+Confidence: Medium
+
+Code region:
+- `apps/web/src/lib/clip-embeddings.ts:22-44`
+- `apps/web/src/db/schema.ts:282-285`
+- `apps/web/drizzle/0022_image_embeddings_model_version_idx.sql:1-9`
+- `apps/web/src/app/api/search/semantic/route.ts:238-279`
 - `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`
-- `apps/web/src/db/schema.ts:271-285`
 
-Problem:
-`SEMANTIC_SCAN_LIMIT` defaults to 2,000, but the env parser clamps it as high as `1_000_000`, and tests explicitly pin that ceiling. Both public routes select up to that many MEDIUMBLOB embeddings, decode every vector into a new `Float32Array`, score each row, then call `topK`. The helper name suggests bounded work, but it filters and sorts the full match set before slicing. The `(model_version, updated_at)` index bounds recency selection; it does not reduce request-path vector decode/scoring/ranking CPU.
+The model-version/updated-at index now bounds the DB access pattern, and `SEMANTIC_SCAN_LIMIT` is env-tunable with a default of 2000. The scoring is still O(scan limit x 512). This is acceptable at current caps, but should be profiled if operators raise `SEMANTIC_SCAN_LIMIT` or the public semantic endpoints become high traffic.
 
-Failure scenario:
-An operator increases `SEMANTIC_SCAN_LIMIT` to improve recall on a larger library. Each semantic or similar request can pull hundreds of MB to GB of vector data, allocate one `Float32Array` per decoded embedding, run up to 512 multiplications per vector, and sort all above-threshold matches in the Next.js API process. Concurrent requests can exhaust CPU and heap on the same single web instance that serves public pages.
+## Final Missed-Issues Sweep
 
-Concrete fix:
-Keep the default modest but lower the hard ceiling for the in-process route, or require an explicit unsafe override with warnings. Replace full-array sorting with a bounded min-heap top-K implementation. Add latency/scanned-row metrics and reject or degrade when a scan exceeds a budget. For larger galleries, move similarity to an ANN/vector index or a precomputed candidate table instead of brute-force scans in the public API handler.
+I ran a final static sweep for:
+- `COUNT(*) OVER`
+- `YEAR(`, `MONTH(`, `DAY(`
+- direct `toFile(outputPath)` derivative writes
+- semantic fetches and `AbortController`
+- broad `Promise.all`, `setTimeout`, `setInterval`
+- `groupBy`, `leftJoin`, and public query shapes
 
-### PERF-C5-05 - Admin dashboard loads every permanently failed image without a limit or matching index
+The sweep confirmed the issues above and also found several areas that already have explicit tests or comments explaining bounded tradeoffs, including view-count flush serialization, image-queue concurrency caps, SW HEAD timeout contracts, OG fetch timeouts, histogram abort handling, and smart-collection cursor pagination.
 
-Severity: Low  
-Confidence: High  
-Status: confirmed
+## Relevant Files Intentionally Not Inspected
 
-Code regions:
-- `apps/web/src/lib/data.ts:993-1008`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:71-100`
-- `apps/web/src/db/schema.ts:108-117`
+I intentionally did not inspect generated/build/runtime or binary-heavy paths:
+- `node_modules/`
+- `.next/`
+- `apps/web/public/uploads/`
+- `apps/web/public/resources/` binary assets
+- `apps/web/data/`
+- image/font/ICC fixture binaries except where test filenames indicated coverage
 
-Problem:
-`getFailedImages` selects all rows where `processed=false` and `processing_error IS NOT NULL`, orders by `failed_at DESC`, and applies no limit. The dashboard calls it in parallel with normal paginated image data and passes the entire array to the client, which maps every failed row. The schema has listing indexes on `processed/capture_date`, `processed/created_at`, and topic/uploader fields, but no index matching `(processed, processing_error, failed_at)` or even `(processed, failed_at)` for this admin error panel.
+I also did not read every historical review artifact under `.context/reviews/**` in full. I used that directory as historical context inventory only. Current HEAD source, config, migration inventory, and targeted tests were sufficient for this performance review.
 
-Failure scenario:
-A corrupt import, misconfigured original store, or bad batch upload leaves hundreds or thousands of failed rows. Every admin dashboard load scans/sorts the failed subset and hydrates the whole failure list into the client, making the page slow exactly when the admin needs recovery controls.
+## Summary
 
-Concrete fix:
-Paginate or cap failed rows, for example latest 50 with a "view all failures" page. Add an index such as `(processed, failed_at)` or a generated boolean `has_processing_error` with `(processed, has_processing_error, failed_at)` if this panel remains on the dashboard. Keep the retry action row-scoped.
+Confirmed issues:
+1. Public initial listing and smart-collection queries combine full-set tag aggregation with `COUNT(*) OVER()`.
+2. Topic/shared-group analytics indexes do not match their time-window filters.
+3. Sized derivative re-encodes overwrite public image files non-atomically and can interact badly with SW caching.
 
-## Missed-Issues Sweep
+Likely issue:
+1. Semantic search drops stale client results but does not abort stale expensive requests.
 
-After drafting findings, I re-swept:
-- DB indexes and migrations for map, timeline, failed-image, embedding, analytics, and backfill access paths.
-- Public dynamic pages and API routes for cache settings, unbounded result sets, and request-path CPU.
-- Image processing: Sharp concurrency is globally bounded, cache is disabled, `limitInputPixels` is passed, wide-gamut sources have a pixel cap, and queue bootstrap is batched.
-- CLIP paths: sidecar and admin embedding backfills use bounded concurrency; the live upload hook and public scan/rank routes are the remaining risks.
-- Service worker and upload serving: image cache is capped, HTML cache is capped, HEAD revalidation has a 300 ms timeout, and no new service-worker finding was found.
-- Sync filesystem I/O under `apps/web/src` excluding tests: no request-path `readFileSync`/`writeFileSync`/`statSync`/similar hits.
-- Prior stale items: smart-collection cursor load-more no longer computes `COUNT(*) OVER()` in current HEAD, so I did not refile it.
-
-## Skipped Files Statement
-
-No performance-relevant application, route, queue, image-processing, CLIP/search, service-worker, schema/migration, admin dashboard, or performance-contract test surface identified by the inventory was intentionally skipped. I did not inspect binary/image assets because they do not affect executable performance behavior in current HEAD.
-
-## Validation
-
-This was a static review. I did not run lint, typecheck, tests, build, or deploy because the task requested a HEAD review and no source-code changes. Validation evidence is direct source inspection with exact file/line regions above, plus targeted repository searches for indexes, cache settings, sync I/O, queues, Sharp usage, and vector scan limits.
+No fixes were implemented in this review pass.

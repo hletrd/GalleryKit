@@ -1,92 +1,151 @@
-# Debugger Review - Cycle 5
+# Debugger Review - Cycle 6/100
 
-Role: `debugger`
-Scope: current `HEAD` production bug and incident-path review
-HEAD: `20e0d1f3` (`docs(review): 📝 record cycle 5 critic review`)
-Timestamp: 2026-06-29 KST
-Status: review artifact only; no source edits
+Scope: deep latent bug/failure-mode review of current `HEAD` only in `/Users/hletrd/flash-shared/gallery`.
 
-## Inventory And Method
+Constraints honored:
+- Read `AGENTS.md` and `CLAUDE.md` from `HEAD` before reviewing code.
+- No fixes implemented, no commit, no push, no deploy.
+- Existing unrelated review-file worktree changes were not reverted or overwritten.
 
-Required context loaded first:
-- `AGENTS.md`
-- `CLAUDE.md`
-- `~/.agents/skills/code-review/SKILL.md`
-- Current `.context/reviews/critic.md`
+## Inventory Before Findings
 
-Repository inventory:
-- Current route/action surface under `apps/web/src/app`: public pages, admin pages, 8 API route files, and 12 server-action files.
-- Runtime/startup/shutdown paths: `apps/web/scripts/migrate.js`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`.
-- Cleanup/race paths: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`.
-- Public incident paths: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/api/search/semantic/route.ts`, semantic/share/SW tests.
-- Guard coverage checked with `rg` across startup, signal, cleanup, delete, advisory-lock, restore, service-worker, and semantic-rate-limit surfaces.
+Tracked HEAD inventory reviewed for bug-relevant surfaces:
+- Total tracked files: 2504
+- Config/docs roots: `AGENTS.md`, `CLAUDE.md`, root/workspace package files, Next/Vitest/TS/Drizzle/site config: 11 config-like files counted
+- App routes/actions: 76 files under `apps/web/src/app`
+- Components: 55 files under `apps/web/src/components`
+- Shared library/runtime code: 94 files under `apps/web/src/lib`
+- DB schema/index: 3 files under `apps/web/src/db`
+- Tests: 253 files under `apps/web/src/__tests__`
+- Scripts: 27 files under `apps/web/scripts`
+- Migrations/meta: 28 files under `apps/web/drizzle`
+- E2E: 8 files under `apps/web/e2e`
 
-Validation evidence:
-- Source-confirmed all findings against current `HEAD`.
-- Confirmed no source files were edited before writing this report.
-- Did not run full lint/typecheck/build/test because this lane is report-only and changed only a markdown review artifact.
+Review-relevant areas inspected:
+- Upload and processing: browser uploads, Lightroom upload API, disk quota checks, original-file handling, GPS strip, queue retry/permanent-failure behavior, delete-mid-processing cleanup, restore quiesce/resume.
+- Database and migrations: Drizzle schema, migration journal, `scripts/migrate.js`, legacy reconcile, restore post-condition, SQL restore scanner.
+- Public surfaces: photo/topic/share pages, upload serving, OG routes, semantic/similar search APIs, public server actions, sitemap/feed.
+- Admin surfaces: DB backup/restore, settings/SEO/collections/topics/tags/sharing/users, auth/origin/rate-limit guards.
+- Tests/linters: guard linters and targeted tests listed under validation.
 
-## Findings
+## Confirmed Issues
 
-### DBG-C5-01 - Startup migration can delete the only valid original on private-path conflict
+### DBG-C6-01 - Restore can wedge maintenance/locks if final revalidation throws
 
-- Severity: High
-- Confidence: High
-- Status: Confirmed
-- Type: startup data-loss edge case / cleanup race
-- Location/region:
-  - `apps/web/scripts/migrate.js:46-55` resolves the legacy public original root and the private original root.
-  - `apps/web/scripts/migrate.js:58-95` migrates legacy originals during startup.
-  - `apps/web/scripts/migrate.js:74-76` unlinks the legacy public source whenever the private target already exists.
-  - `apps/web/scripts/migrate.js:79-84` uses rename or `EXDEV` copy+unlink when the target does not exist.
-  - `apps/web/scripts/migrate.js:97-110` then refuses production startup only if public originals remain.
-- Failure scenario: A previous interrupted migration, manual recovery, or cross-device copy leaves `data/uploads/original/foo.jpg` present but truncated or corrupt while the original valid bytes remain at `public/uploads/original/foo.jpg`. On the next startup, the target-exists branch deletes the valid public source without comparing bytes. The follow-up production assertion passes because the public source is gone, leaving only the bad private copy.
-- Concrete fix: In the `fs.existsSync(target)` branch, compare source and target before unlinking. At minimum compare size and a SHA-256 hash. Only unlink when the bytes match. If they differ, fail startup with an actionable conflict error or quarantine the legacy source under the private data root with a unique suffix. Add tests for identical conflict, divergent conflict, and `EXDEV` copy conflict behavior.
+Severity: High
+Confidence: High
 
-### DBG-C5-02 - Service-worker HTML fallback can serve revoked share pages offline
+Code region:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:521-540`
+- `apps/web/src/lib/revalidation.ts:59-61`
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed
-- Type: stale authorization state / privacy expectation regression
-- Location/region:
-  - `apps/web/public/sw.template.js:271-293` caches any successful HTML response unless `x-gk-admin-render` is `1`.
-  - `apps/web/public/sw.template.js:294-310` serves cached HTML on network failure for up to `HTML_MAX_AGE_MS`.
-  - `apps/web/public/sw.template.js:366-369` routes all HTML GETs through `networkFirstHtml`.
-  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14-26` marks single-photo share pages dynamic/no-cache/noindex.
-  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:79-96` returns `notFound()` when a share key is invalid.
-  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:17-29` marks shared-group pages dynamic/no-cache/noindex.
-  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:82-108` returns `notFound()` when a group key is invalid.
-- Failure scenario: A visitor opens `/s/<key>` or `/g/<key>` while online, so the service worker stores the rendered HTML. The admin later revokes the single-photo share, deletes the group, or the group expires. Online requests correctly return 404, but the same browser can still see the cached shared page while offline for the 24-hour HTML fallback window. Server-side revalidation cannot evict already-installed client Cache Storage entries.
-- Concrete fix: Treat secret-bearing public share routes as permissioned for offline-cache purposes. Either bypass `networkFirstHtml` for `/s/` and `/g/` paths, including locale-prefixed forms, or emit a response header such as `x-gk-no-offline-cache: 1` from share pages and have the service worker honor it before `htmlCache.put(...)`. Add `sw-template-contract` coverage proving share HTML is not cached.
+Problem:
+`runRestore()` resolves its Promise from an async `restore.on('close', async ...)` handler. On the successful mysql-import path it awaits migrations, logs audit, calls `revalidateAllAppData()`, then resolves success:
 
-### DBG-C5-03 - Disabled semantic search still performs unmetered body parse and config work
+```ts
+const migrationResult = await runPostRestoreMigrations(t);
+...
+revalidateAllAppData();
+resolve({ success: true });
+```
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed
-- Type: public API abuse path / disabled-feature incident path
-- Location/region:
-  - `apps/web/src/app/api/search/semantic/route.ts:100-156` performs same-origin, maintenance, content-type, transfer-encoding, and optional `Content-Length` gates.
-  - `apps/web/src/app/api/search/semantic/route.ts:158-169` increments the semantic rate-limit bucket.
-  - `apps/web/src/app/api/search/semantic/route.ts:171-207` reads the request body, checks byte length, parses JSON, trims the query, and validates code-point length.
-  - `apps/web/src/app/api/search/semantic/route.ts:209-225` loads config, then rolls back the limiter and returns 503 when semantic mode is disabled.
-  - `apps/web/src/__tests__/semantic-search-route.test.ts:208-218` pins the current increment-then-rollback disabled-mode behavior.
-- Failure scenario: Semantic search is disabled by default or temporarily disabled during an operation. A same-origin-looking client can repeatedly send valid small JSON bodies. Each request still consumes body materialization, JSON parse, validation, and config lookup, then refunds the only semantic limiter token. Sustained traffic never accumulates local rate-limit pressure while still creating avoidable CPU and DB/config load.
-- Concrete fix: Check semantic mode before reading the body and before charging the semantic limiter, immediately after the cheap header gates. If the config read is considered expensive enough to protect, add a small disabled-mode limiter that is not rolled back. Update tests to assert disabled mode does not call `request.text()` or to explicitly assert disabled attempts remain charged.
+`revalidateAllAppData()` is a bare wrapper around `revalidatePath('/', 'layout')` with no local `try/catch`. Other revalidation helper code explicitly catches `revalidatePath` failures, so this is not treated as an impossible operation elsewhere.
 
-## Non-Findings / Residual Risk
+Failure scenario:
+1. Admin restore succeeds and post-restore migrations pass.
+2. `revalidatePath('/', 'layout')` throws due to a Next runtime/cache-store failure.
+3. The async event handler rejects before `resolve({ success: true })`.
+4. The Promise returned by `runRestore()` never settles.
+5. `restoreDatabase()` never reaches its inner `finally`, so `endRestoreMaintenance()`, queue resume, `LOCK_DB_RESTORE` release, backfill-lock release, and upload-contract-lock release do not run.
+6. Uploads, image processing, health checks, and future restores remain wedged until process/container restart.
 
-- Startup/shutdown signal handling in `apps/web/src/instrumentation.ts:18-88` is guarded against repeat signals, drains the image queue and buffered shared-group view counts, and exits deliberately after success or timeout. I did not find a stronger current defect than the startup migration conflict above.
-- Queue cleanup and delete-mid-processing paths have focused test coverage for permanent failures, restore quiesce, deleted-mid-reencode cleanup, and variant directory scans. I did not refile those as active findings.
-- Process-local rate limits, process-local restore flags, and best-effort shared-group view buffering remain documented single-writer assumptions in `CLAUDE.md`; I treated them as accepted topology constraints rather than new bugs.
+Suggested fix:
+Wrap final revalidation in a non-fatal error boundary before resolving restore success, or make `revalidateAllAppData()` internally match `revalidateLocalizedPaths()` by catching/logging `revalidatePath` failures. Add a restore regression test where `revalidateAllAppData` throws and assert restore still resolves and cleanup paths execute.
 
-## Final Missed-Issues Sweep
+## Likely Issues
 
-- Re-ran targeted source searches for `process.on`, `SIGTERM`, `setInterval`, `unlink`, `rm`, `DELETE`, `cleanup`, `quiesce`, `restore`, advisory locks, service-worker HTML caching, and semantic rollback paths.
-- Checked that no existing SW contract test mentions `/s/`, `/g/`, or a no-offline-cache header.
-- Checked that semantic disabled-mode tests explicitly expect limiter rollback after body/config work.
-- Checked that legacy-original migration has no byte-equality guard or tests around divergent source/target conflicts.
-- The three findings above are the concrete current-HEAD debugger issues I would schedule for fixes. No additional high-confidence startup/shutdown crash or cleanup-race finding survived the final sweep.
+### DBG-C6-02 - Semantic indexing is outside the queue retry contract
 
-Finding count: 3 total - 1 High, 2 Medium.
+Severity: Medium
+Confidence: High
+
+Code region:
+- `apps/web/src/lib/image-queue.ts:490-567`
+- `apps/web/src/app/actions/embeddings.ts:103-172`
+- `apps/web/src/app/api/search/semantic/route.ts:238-257`
+
+Problem:
+After image processing marks an image `processed=true`, semantic embedding generation/storage runs in a fire-and-forget IIFE. Failures are logged and swallowed:
+
+```ts
+void (async () => {
+  ...
+  await db.insert(imageEmbeddings)...
+})().catch-equivalent via local catch;
+```
+
+This means queue retry state, `processing_error`, `failed_at`, bootstrap retry, and permanent-failure tracking never see an embedding failure. The canonical repair path is a manual/admin backfill action or script, not an automatic retry.
+
+Failure scenario:
+1. Semantic mode is `production` or `stub`.
+2. Sharp processing succeeds; the image row is committed as processed.
+3. CLIP model loading, original-file access, or the `image_embeddings` upsert fails transiently.
+4. The queue logs `[Queue] Failed to store embedding...` but still logs job complete.
+5. Production semantic search only scans existing rows for the active `model_version`; if at least one embedding exists, the route does not surface "not fully configured" and silently omits the failed image from search results.
+
+Suggested fix:
+Move embedding work into a durable retry contract. Practical options: add a separate embedding queue/table with status + retry count, persist an embedding failure marker on the image, or have bootstrap/backfill automatically select processed images missing the active `model_version`. Keep the Sharp processing success path non-blocking if desired, but do not make missing embeddings depend on humans noticing logs.
+
+## Risks Needing Manual Validation
+
+### DBG-C6-RISK-01 - Post-commit `revalidateAllAppData()` failures can create false mutation failures
+
+Severity: Low
+Confidence: Medium
+
+Code regions:
+- `apps/web/src/app/actions/collections.ts:45-60`, `95-108`, `122-130`
+- `apps/web/src/app/actions/settings.ts:136-164`
+- `apps/web/src/app/actions/seo.ts:140-164`
+- `apps/web/src/lib/revalidation.ts:59-61`
+
+Risk:
+Several admin actions call `revalidateAllAppData()` after the database mutation/audit work but still inside the action `try` block. If `revalidatePath('/', 'layout')` throws, the mutation has already committed, but the action returns a generic failure. For create actions this can encourage a retry that hits duplicate-key behavior; for update actions it can make the UI report failure despite persisted changes.
+
+Manual validation needed:
+Confirm whether `revalidatePath('/', 'layout')` can throw in the deployed Next.js runtime outside test mocks. If it can, make app-wide revalidation best-effort like localized revalidation and add tests for "DB write succeeded, revalidation failed" behavior.
+
+## Non-Findings / Ruled Out
+
+- Admin API routes are covered by `withAdminAuth(...)`; `lint:api-auth` passed.
+- Mutating admin server actions enforce `requireSameOriginAdmin()` or carry explicit read/public exemptions; `lint:action-origin` passed.
+- Public mutating API routes are rate-limited; `lint:public-route-rate-limit` passed.
+- Public analytics recorders looked suspicious at first, but current HEAD imports them only from server-rendered public pages after the entity has already been validated (`getImage`, `getSharedGroupCached`, topic lookup). They are not re-exported through the client action barrel.
+- SQL restore scanning was checked against current schema/migration tests. Known app-table `DROP TABLE IF EXISTS` statements are intentionally allowed for own-backup restores and covered by tests.
+- Upload original serving was checked: public download links use generated JPEG/AVIF derivatives, not private originals.
+
+## Validation Evidence
+
+Commands run:
+- `npm run lint:api-auth --workspace=apps/web` - passed
+- `npm run lint:action-origin --workspace=apps/web` - passed
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed
+- `npm test --workspace=apps/web -- --run src/__tests__/restore-upload-lock.test.ts src/__tests__/revalidation.test.ts src/__tests__/semantic-search-route.test.ts` - passed, 3 files / 25 tests
+
+Static sweeps run:
+- Route exports and handler guards.
+- Server action origin exemptions.
+- Public action imports/callers.
+- `TODO` / `FIXME` / `CAVEAT` / deferred-risk comments.
+- Fire-and-forget `void` async work.
+- Restore/queue lock lifecycle and migration order.
+- Semantic embedding writers/readers/backfill tests.
+
+## Missed-Issues Sweep
+
+Final sweep result: no additional confirmed access-control, upload-cleanup, restore-lock, migration-journal, or public-route rate-limit bugs found beyond the issues above.
+
+Intentionally not inspected line-by-line:
+- Binary/static assets, screenshots, generated reports, and visual fixtures.
+- Historical archived reviews/plans except where grep surfaced relevant prior-risk context.
+- All 253 tests in full prose detail; test inventory was complete and targeted contract tests were inspected/run for the reviewed failure modes.
