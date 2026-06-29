@@ -10,6 +10,7 @@ import { imageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { GridPicture } from '@/components/grid-picture';
+import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
@@ -174,7 +175,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                 </Link>
             </div>
-            <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
+            <GridPictureFallbackBoundary className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
                 {group.images.map((image, index) => {
                     const altText = getPhotoDisplayTitle(image, t('photo'));
                     // Above-the-fold detection: in a CSS `columns` masonry layout,
@@ -226,7 +227,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                         </Link>
                     );
                 })}
-            </div>
+            </GridPictureFallbackBoundary>
             {group.images.length === 0 && (
                 <div className="text-center py-20 text-muted-foreground">
                     {t('processing')}

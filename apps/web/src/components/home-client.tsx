@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
 import { GridPicture } from '@/components/grid-picture';
+import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import { useTranslation } from "@/components/i18n-provider";
 import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
@@ -282,7 +283,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                 (1536px+) to make better use of widescreen real estate.
                 When fewer items than the breakpoint's max columns exist,
                 clamp to the item count so the grid fills its width. */}
-            <div className={masonryClasses}>
+            <GridPictureFallbackBoundary className={masonryClasses}>
                 {orderedImages.map((image, index) => {
                     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
                     // now baked into `getPhotoDisplayTitleFromTagNames` and
@@ -406,7 +407,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         </div>
                     );
                 })}
-            </div>
+            </GridPictureFallbackBoundary>
 
             {hasMore && (
                 <LoadMore

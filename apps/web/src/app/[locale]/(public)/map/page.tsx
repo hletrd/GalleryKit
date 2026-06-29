@@ -3,7 +3,8 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { Metadata } from 'next';
 import { MapLoader } from '@/components/map/map-loader';
-import { localizeUrl } from '@/lib/locale-path';
+import Link from 'next/link';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 // Public map pages must reflect GPS data immediately as topics are toggled.
 export const revalidate = 0;
@@ -54,14 +55,29 @@ export default async function MapPage() {
             {markers.length === 0 ? (
                 <p className="text-muted-foreground">{t('noPhotos')}</p>
             ) : (
-                <MapLoader
-                    markers={markers}
-                    locale={locale}
-                    noPhotosLabel={t('noPhotos')}
-                    openPhotoLabel={t('openPhoto')}
-                    loadingLabel={t('loading')}
-                    imageSizes={config.imageSizes}
-                />
+                <>
+                    <MapLoader
+                        markers={markers}
+                        locale={locale}
+                        noPhotosLabel={t('noPhotos')}
+                        openPhotoLabel={t('openPhoto')}
+                        loadingLabel={t('loading')}
+                        imageSizes={config.imageSizes}
+                    />
+                    <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label={t('openPhoto')}>
+                        {markers.map((marker) => (
+                            <li key={marker.id}>
+                                <Link
+                                    href={localizePath(locale, `/p/${marker.id}`)}
+                                    className="block min-h-11 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                >
+                                    <span className="font-medium">{marker.title ?? `${t('openPhoto')} ${marker.id}`}</span>
+                                    <span className="block text-xs text-muted-foreground">{marker.topic}</span>
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                </>
             )}
         </div>
     );

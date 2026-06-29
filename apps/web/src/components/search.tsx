@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import FocusTrap from '@/components/lazy-focus-trap';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -316,7 +317,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         );
     }
 
-    return (
+    const dialog = (
         <>
             <div
                 className="fixed inset-0 bg-black/50 z-40"
@@ -474,4 +475,6 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             </FocusTrap>
         </>
     );
+
+    return createPortal(dialog, document.body);
 }

@@ -11,6 +11,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { GridPicture } from '@/components/grid-picture';
+import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import type { Metadata } from 'next';
 
 export const revalidate = 0;
@@ -171,7 +172,7 @@ export default async function YearInReviewPage({
                                     </span>
                                 </h2>
 
-                                <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
+                                <GridPictureFallbackBoundary className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                                     {monthPhotos.map((photo) => {
                                         const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
                                         const altText = getConcisePhotoAltText(photo, tCommon('photo'));
@@ -221,7 +222,7 @@ export default async function YearInReviewPage({
                                             </div>
                                         );
                                     })}
-                                </div>
+                                </GridPictureFallbackBoundary>
                             </section>
                         );
                     })}

@@ -1,7 +1,3 @@
-'use client';
-
-import { useState } from 'react';
-
 type GridPictureSource = {
     type: string;
     srcSet: string;
@@ -31,14 +27,9 @@ export function GridPicture({
     decoding = 'async',
     fetchPriority,
 }: GridPictureProps) {
-    const sourceKey = sources.map((source) => source.srcSet).join('|');
-    const pictureKey = `${src}|${sourceKey}`;
-    const [failedPictureKey, setFailedPictureKey] = useState<string | null>(null);
-    const sourcesFailed = failedPictureKey === pictureKey;
-
     return (
-        <picture>
-            {!sourcesFailed && sources.map((source) => (
+        <picture data-grid-picture data-fallback-src={src}>
+            {sources.map((source) => (
                 <source
                     key={`${source.type}:${source.srcSet}`}
                     type={source.type}
@@ -55,7 +46,6 @@ export function GridPicture({
                 loading={loading}
                 decoding={decoding}
                 fetchPriority={fetchPriority}
-                onError={() => setFailedPictureKey(pictureKey)}
             />
         </picture>
     );

@@ -99,6 +99,7 @@ export function ImageManager({
     const [editingImage, setEditingImage] = useState<ImageType | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editDescription, setEditDescription] = useState("");
+    const [editErrors, setEditErrors] = useState<{ title?: string; description?: string }>({});
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
     const { t, locale } = useTranslation();
@@ -264,6 +265,7 @@ export function ImageManager({
         setEditingImage(image);
         setEditTitle(image.title || "");
         setEditDescription(image.description || "");
+        setEditErrors({});
     };
 
     const handleSaveEdit = async () => {
@@ -273,13 +275,18 @@ export function ImageManager({
         // native maxLength counts UTF-16 code units, which is stricter than
         // necessary for supplementary characters (emoji, rare CJK).
         if (editTitle && countCodePoints(editTitle) > 255) {
-            toast.error(t('imageManager.titleTooLong'));
+            const message = t('imageManager.titleTooLong');
+            setEditErrors({ title: message });
+            toast.error(message);
             return;
         }
         if (editDescription && countCodePoints(editDescription) > 5000) {
-            toast.error(t('imageManager.descTooLong'));
+            const message = t('imageManager.descTooLong');
+            setEditErrors({ description: message });
+            toast.error(message);
             return;
         }
+        setEditErrors({});
         setIsSavingEdit(true);
         try {
             const res = await updateImageMetadata(editingImage.id, editTitle, editDescription);
@@ -593,7 +600,12 @@ export function ImageManager({
                 onSubmit={handleBulkEdit}
             />
 
-            <Dialog open={!!editingImage} onOpenChange={(open) => !open && setEditingImage(null)}>
+            <Dialog open={!!editingImage} onOpenChange={(open) => {
+                if (!open) {
+                    setEditingImage(null);
+                    setEditErrors({});
+                }
+            }}>
                 <DialogContent closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('imageManager.editTitle')}</DialogTitle>
@@ -602,11 +614,41 @@ export function ImageManager({
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label htmlFor="title">{t('imageManager.titleField')}</Label>
-                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} />
+                            <Input
+                                id="title"
+                                value={editTitle}
+                                onChange={(e) => {
+                                    setEditTitle(e.target.value);
+                                    if (editErrors.title) setEditErrors((prev) => ({ ...prev, title: undefined }));
+                                }}
+                                placeholder={t('imageManager.titleField')}
+                                aria-invalid={editErrors.title ? true : undefined}
+                                aria-describedby={editErrors.title ? 'title-error' : undefined}
+                            />
+                            {editErrors.title && (
+                                <p id="title-error" className="text-sm text-destructive-text" role="alert">
+                                    {editErrors.title}
+                                </p>
+                            )}
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="description">{t('imageManager.descField')}</Label>
-                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} />
+                            <Textarea
+                                id="description"
+                                value={editDescription}
+                                onChange={(e) => {
+                                    setEditDescription(e.target.value);
+                                    if (editErrors.description) setEditErrors((prev) => ({ ...prev, description: undefined }));
+                                }}
+                                placeholder={t('imageManager.descField')}
+                                aria-invalid={editErrors.description ? true : undefined}
+                                aria-describedby={editErrors.description ? 'description-error' : undefined}
+                            />
+                            {editErrors.description && (
+                                <p id="description-error" className="text-sm text-destructive-text" role="alert">
+                                    {editErrors.description}
+                                </p>
+                            )}
                         </div>
                     </div>
                     <DialogFooter>
