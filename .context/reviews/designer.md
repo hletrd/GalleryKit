@@ -1,112 +1,176 @@
-# Designer Review - Cycle 13
+# Designer Review - Cycle 14
 
-Role: designer / UI-UX reviewer subagent for GalleryKit. Scope covered information architecture, affordances, keyboard/focus navigation, WCAG 2.2 accessibility, contrast/ARIA/focus traps/reduced motion, responsive breakpoints, loading/empty/error states, form validation UX, dark/light/OLED mode, i18n/RTL applicability, and perceived performance. No production code was changed.
+Role: cycle-14 designer reviewer for GalleryKit. Scope is current HEAD only: `d821a9ab`.
 
-## Inventory Reviewed
+I read `AGENTS.md` and `CLAUDE.md` first, then built a UI/UX inventory before inspecting implementation details. No production code was changed.
 
-I first read `AGENTS.md` and `CLAUDE.md`, then built a UI inventory excluding `node_modules`, `.git`, build output, uploads/resources, and runtime state. The review-relevant inventory included 507 UI-adjacent source/test/message files across:
+## Inventory
 
-- Public App Router pages/layouts: home, topic, smart collection, shared group/link, photo detail/loading, map, timeline, year archive, privacy, not-found/error/loading shells.
-- Admin pages/layouts: login, protected layout, dashboard/upload/image manager, categories, tags, SEO, settings, password, users, DB, tokens, analytics, admin error/loading shells.
-- Components/primitives: nav/footer/search, masonry/photo viewer/lightbox/info sheet, color details/histogram/wide-gamut hint, upload dropzone, tag input, image manager, admin nav/header, Radix/shadcn UI primitives.
-- Styling/config/i18n/tests: `globals.css`, `tailwind.config.ts`, `components.json`, `messages/en.json`, `messages/ko.json`, Playwright e2e specs, and UI/a11y Vitest coverage.
+Inventory command used before inspection:
 
-## Validation Evidence
+```sh
+git ls-tree -r --name-only HEAD apps/web/src/app apps/web/src/components apps/web/messages apps/web/src/i18n apps/web/e2e | rg '\.(tsx|css|json|ts)$' | sort
+```
 
-- Local dev server: `http://127.0.0.1:3200` via `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3200`.
-- Browser checks: Chromium headless at mobile viewport `390x844` for `/en`, `/en/admin`, `/en/privacy`, search dialog interaction, skip-link focus, and computed styles.
-- Runtime blocker: `/en` rendered the localized error shell because local DB-backed queries failed; `/en/admin` and `/en/privacy` rendered. I did not run DB init/seed because that would mutate the configured local database.
-- Targeted tests passed: `npm test --workspace=apps/web -- --run` for 10 UI/a11y files, 78 tests total (`a11y-us-p15`, touch-target audit, focus-visible scans, info bottom-sheet IA, search disclaimer, error shell, privacy landmark).
+The resulting inventory had 143 UI-adjacent files, covering:
+
+- Public App Router pages and shells: home, topic pages, photo detail/loading, shared links/groups/collections, map, timeline, year archive, privacy, not-found, error, loading, root layout, metadata/icon/manifest routes.
+- Admin App Router pages and client surfaces: login, protected layout, dashboard, upload/image manager, categories, tags, settings, SEO, password, users, tokens, DB, analytics, admin error/loading.
+- Shared UI: nav, footer, search, home masonry, photo viewer, lightbox, image zoom, info bottom sheet, map client, color/histogram/details, upload dropzone, tag input, admin header/nav/user manager, Radix/shadcn primitives.
+- Localization and tests: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, i18n request setup, and Playwright e2e specs.
+
+I did not intentionally skip any files from that inventory. Source review used full-inventory sweeps for ARIA, focus, sizing, motion, tables, dialogs, loading/error states, and i18n, plus targeted reads of the affected regions.
+
+## Browser Evidence
+
+I used the agent-browser workflow against a local Next dev server.
+
+- Dev server: `npm run dev --workspace=apps/web`, served on `http://localhost:3001` because `3000` was already occupied.
+- Tested URLs: `http://localhost:3001/en`, `/en/privacy`, `/en/admin`.
+- Viewports/media: desktop `1440x900`, mobile `390x844`, light mode.
+- Screenshots captured: `/tmp/gallery-home-error-desktop.png`, `/tmp/gallery-home-error-mobile.png`.
+- Accessibility snapshot on `/en`: skip link, `main`, region named `Error`, heading `Error`, paragraph `Something went wrong loading this page.`, button `Try again`, link `Return to Gallery`, and notifications region.
+- Runtime blocker: all exercised routes entered the app error boundary because the local database was unavailable. Browser and server logs showed `connect ECONNREFUSED 127.0.0.1:3306` for DB-backed queries and image queue bootstrap.
+
+Validation command:
+
+```sh
+npm test --workspace=apps/web -- touch-target-audit i18n
+```
+
+Result: 4 test files passed, 58 tests passed.
 
 ## Confirmed Issues
 
-### DES-C13-01 - OKLCH theme overrides invalidate Tailwind color utilities in modern browsers
+### DES-C14-01 - Search dialog input overrides the 44 px touch-target floor
 
-Severity: High
-Confidence: High
-Classification: confirmed
+Severity: Medium  
+Confidence: High  
+Classification: confirmed issue
 
-Source evidence:
+Evidence:
 
-- Tailwind color tokens still wrap CSS variables as HSL channel lists, e.g. `primary.DEFAULT: 'hsl(var(--primary))'`, `primary.foreground: 'hsl(var(--primary-foreground))'`, `destructive.text: 'hsl(var(--destructive-text))'` in `apps/web/tailwind.config.ts:23-58`.
-- `globals.css` overwrites those same variables with full `oklch(...)` color functions under `@supports (color: oklch(0 0 0))` at `apps/web/src/app/[locale]/globals.css:121-148`.
-
-Browser evidence:
-
-- Selector `button.bg-primary.text-primary-foreground` on `/en/admin` sign-in button computed as `background-color: rgba(0, 0, 0, 0)` and `color: rgb(9, 9, 11)` in Chromium, despite carrying the primary-button classes.
-- Selector `p[role="alert"].text-destructive-text` after a failed login computed as `color: rgb(9, 9, 11)`, not the intended red.
-- Stylesheet rules for `.bg-primary` / `.text-destructive-text` exist, but they evaluate to invalid declarations like `hsl(var(--primary))` after `--primary` becomes a full Lab/OKLCH color.
+- `apps/web/src/components/search.tsx:372-402` renders the search dialog combobox with the shared `Input` primitive, but passes `className="border-0 p-0 h-8 ..."` on line 402.
+- `apps/web/src/components/ui/input.tsx:10-14` gives the primitive `min-h-11`, but the later `h-8` class wins in Tailwind merging and makes the primary text field 32 px tall.
+- The same dialog is the primary search UI opened from mobile nav, with `role="dialog"` and `aria-modal="true"` at `apps/web/src/components/search.tsx:360-364`.
 
 Failure scenario:
 
-In modern browsers that support OKLCH/Lab, primary buttons lose their filled-background affordance, error/destructive text falls back to normal foreground color, and related accent/ring/destructive utilities can silently degrade. This affects visual hierarchy, error recognition, and focus/affordance clarity across public and admin UI.
+On mobile, the search UI is full-screen and the query input is the main control. A 32 px-tall text field is easier to miss for users with motor impairments and violates the repository's 44 px touch-target policy. It also weakens the visual affordance of the most important control in the dialog.
 
-Suggested fix:
+Concrete fix:
 
-Use one token contract consistently. Either remove the OKLCH overrides and keep `--primary`/friends as HSL channels, or change Tailwind colors to use raw variables (`var(--primary)`, `var(--primary-foreground)`, etc.) with HSL fallbacks supplied as complete color values. Add a browser/computed-style regression test for `.bg-primary`, `.text-primary-foreground`, `.text-destructive-text`, and `.ring-ring`.
+Remove the `h-8` override and keep the primitive's `min-h-11`, or set the row/input to an explicit `h-11 min-h-11` while preserving the compact borderless visual. Add this specific selector to the touch-target audit so raw class overrides on primitives are caught.
 
-### DES-C13-02 - TagInput text field misses the 44 px touch-target contract
+### DES-C14-02 - Mobile nav expander controls two regions but exposes only one
 
-Severity: Medium
-Confidence: High
-Classification: confirmed from source
+Severity: Low  
+Confidence: High  
+Classification: confirmed issue
 
-Source evidence:
+Evidence:
 
-- `TagInput` wraps selected tags and a raw `<input role="combobox">` in a bordered flex container, but the container has no click handler to focus the input: `apps/web/src/components/tag-input.tsx:184-188`.
-- The raw input class is only `flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground`, with no `min-h-11`, padding, or shared `Input` primitive: `apps/web/src/components/tag-input.tsx:203-223`.
-- This component is used in upload/admin editing paths: `apps/web/src/components/upload-dropzone.tsx:393`, `apps/web/src/components/upload-dropzone.tsx:521`, `apps/web/src/components/bulk-edit-dialog.tsx:263`, `apps/web/src/components/bulk-edit-dialog.tsx:276`, and `apps/web/src/components/image-manager.tsx:493`.
+- The mobile expand button at `apps/web/src/components/nav-client.tsx:99-107` exposes `aria-expanded={isExpanded}` and `aria-controls="primary-nav-controls"`.
+- The same state also changes the topic link region at `apps/web/src/components/nav-client.tsx:117-123`, which has `id="primary-nav-topics"`.
+- The controls region referenced by ARIA is `id="primary-nav-controls"` at `apps/web/src/components/nav-client.tsx:156-160`.
 
 Failure scenario:
 
-On mobile admin workflows, the visible tag-entry field can present as a small text-line target inside a larger decorative container. Tapping the empty padded area does not focus the combobox, and the actual text input does not meet the repo’s 44x44 px target policy from `CLAUDE.md`. This is easy to miss because the existing touch-target audit does not scan raw text inputs.
+A screen-reader user toggles the mobile nav and is told only that `primary-nav-controls` changed. The topic links also visually change from horizontal scrolling/collapsed behavior into a wrapped expanded region, but that relationship is not programmatically exposed from the button.
 
-Suggested fix:
+Concrete fix:
 
-Give the combobox input a real `min-h-11` target (and enough vertical padding), or make the wrapper an honest focus proxy with `onClick={() => inputRef.current?.focus()}` while preserving combobox semantics. Extend `touch-target-audit.test.ts` to cover raw text/search inputs or this component specifically.
+Either set `aria-controls="primary-nav-topics primary-nav-controls"` on the button, or wrap both mobile-controlled areas in one container with a single stable id and point `aria-controls` to that container.
 
-## Likely Issue / Manual Validation Needed
+## Likely Issues
 
-### DES-C13-R1 - Mobile info sheet may overstate modality in peek state
+### DES-C14-03 - Root layout hard-codes LTR despite i18n comments promising RTL readiness
 
-Severity: Medium
-Confidence: Medium
-Classification: likely; not browser-confirmed because DB-backed photo pages did not render locally
+Severity: Low  
+Confidence: High  
+Classification: likely issue, currently latent
 
-Source evidence:
+Evidence:
 
-- The backdrop renders only when `sheetState === 'expanded'`: `apps/web/src/components/info-bottom-sheet.tsx:176-182`.
-- `FocusTrap` is active for any `isOpen` state: `apps/web/src/components/info-bottom-sheet.tsx:184-193`.
-- The sheet always advertises `role="dialog"` and `aria-modal="true"`: `apps/web/src/components/info-bottom-sheet.tsx:194-199`.
-- Peek state is visually partial via transform/min height/hidden overflow: `apps/web/src/components/info-bottom-sheet.tsx:199-210`.
+- `apps/web/src/app/[locale]/layout.tsx:94-100` renders `<html lang={locale} dir="ltr">`.
+- The nearby comment at `apps/web/src/app/[locale]/layout.tsx:96-98` says the explicit direction future-proofs for RTL locales, while also noting only LTR locales are shipped today.
+- Current message files are English and Korean, so the shipped locale set is LTR.
 
-Risk scenario:
+Failure scenario:
 
-If peek is intended as a non-modal partial disclosure, keyboard and screen-reader users are trapped in a modal dialog while sighted users see no backdrop and a partially available photo view. If peek is intended as modal, the missing backdrop/inert visual treatment undersells that the rest of the page is unavailable.
+If an RTL locale such as Arabic or Hebrew is added, the page will still render and expose document direction as LTR. Reading order, punctuation flow, horizontal overflow assumptions, nav order, and directional icons can be wrong before any component-level translation work has a chance to correct them.
 
-Suggested validation/fix:
+Concrete fix:
 
-Manually test a mobile photo page with VoiceOver/TalkBack and keyboard. Then choose one contract: modal in all open states with consistent backdrop/inert treatment, or non-modal peek with trap/`aria-modal` enabled only when expanded.
+Derive `dir` from the locale, for example `rtlLocales.has(locale) ? "rtl" : "ltr"`, and add one layout/i18n test that asserts the document direction for any future RTL locale. If RTL is intentionally out of scope, update the comment so it does not imply readiness.
 
-## Verified Strengths
+### DES-C14-04 - Some admin form dialogs provide no dialog description
 
-- Skip link works in browser: first `Tab` focuses “Skip to content”; `Enter` moves focus to `#main-content`.
-- `/en/admin` login shell has one main landmark, visible labels, focused username input, password reveal button, and 44 px controls.
-- `/en/privacy` now has one main landmark and no nested `main main`; the previous cycle’s privacy landmark issue is fixed.
-- Search dialog opens from mobile nav, autofocuses `#search-input`, uses `role="dialog" aria-modal="true"`, focus trap, close button, live result status, and 44 px input/close controls.
-- Shared `Table` primitive wraps tables in `overflow-x-auto`, covering admin table overflow paths.
-- Reduced-motion and forced-colors handling exist in global CSS; photo/lightbox/image-zoom paths include reduced-motion handling.
-- English/Korean key parity and touch/focus-visible policies are backed by tests. Current locales are LTR, and `dir="ltr"` is appropriate for the shipped locale set.
+Severity: Low  
+Confidence: Medium  
+Classification: likely issue
 
-## Limitations
+Evidence:
 
-- DB-backed public gallery/photo/map and authenticated admin workflows were not fully browser-exercised because the configured local DB failed queries. I used source and existing test coverage for those paths.
-- I did not mutate local DB state or run e2e seed/init.
-- Full lint/typecheck/build/test suite was not run because this was a review-only artifact and no production code changed.
+- Create category dialog: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:189-193` has `DialogContent`, `DialogHeader`, and `DialogTitle`, then starts the form with no `DialogDescription`.
+- Edit category dialog: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:295-301` has the same title-only dialog pattern.
+- Edit tag dialog: `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:165-171` also opens a form dialog with title only.
+- Other dialog primitives in this repo support descriptions through `DialogDescription`, so this is a consistency gap rather than a missing primitive capability.
 
-## Completion Check
+Failure scenario:
 
-- Inventory built before findings.
-- Browser automation used where feasible with DOM/computed-style evidence.
-- Relevant source and cross-file interactions inspected.
-- Final sweep covered IA, affordances, focus/keyboard, WCAG/accessibility, contrast/theme, ARIA/focus traps, responsive behavior, loading/empty/error states, validation UX, i18n/RTL applicability, and perceived performance.
+Screen-reader users entering these admin modals hear the title and then field labels, but no concise task context, consequence, or expected save behavior. This matters most in edit flows where the modal changes existing taxonomy visible on the public site.
+
+Concrete fix:
+
+Add localized `DialogDescription` text to these form dialogs, or explicitly set `aria-describedby={undefined}` on `DialogContent` if the team decides the title plus field labels are sufficient. Prefer descriptions for edit/create forms that mutate site structure.
+
+## Validation Gap / Manual Follow-up
+
+### DES-C14-R1 - Data-backed UI flows could not be browser-tested locally
+
+Severity: Medium  
+Confidence: High  
+Classification: risk needing manual validation
+
+Evidence:
+
+- Browser-tested `/en`, `/en/privacy`, and `/en/admin` all reached the app error boundary instead of the intended page flows.
+- Agent-browser accessibility snapshot for `/en` exposed only the error shell controls: skip link, error heading, retry button, return link, and notifications region.
+- Browser/server logs showed failed MySQL connections: `connect ECONNREFUSED 127.0.0.1:3306`.
+- Dev server also logged image queue bootstrap retries due the same database connection refusal.
+
+Failure scenario:
+
+Runtime-only UI defects in the real gallery, search results, lightbox/photo viewer, map, and authenticated admin forms could remain undetected by this cycle because the browser could not reach the data-backed states. Source review and unit tests reduce that risk but do not replace full interaction testing.
+
+Concrete fix:
+
+Run the same browser pass with a seeded local database, then cover at least:
+
+- Public home with real masonry images at desktop and mobile.
+- Search open, type, keyboard result navigation, empty state, and error state.
+- Photo detail/lightbox next/previous, zoom, metadata sheet, and focus return.
+- Admin login and at least one create/edit/delete form flow in categories/tags/images.
+- Dark/light/OLED theme switch and reduced-motion media mode.
+- `npm run test:e2e --workspace=apps/web` once the DB/browser fixture is available.
+
+## Areas Reviewed With No New Confirmed Finding
+
+- Information architecture: public routes, admin hierarchy, nav, footer, privacy/error/not-found/loading shells, and topic/photo/shared-link surfaces were inventoried and source-reviewed.
+- Affordances and design-system consistency: shared `Button`, `Input`, `Select`, `Switch`, `Dialog`, `Sheet`, `AlertDialog`, `Table`, and admin/public component patterns were reviewed. The search input override above is the only confirmed target-size regression found in this pass.
+- Focus and keyboard navigation: skip link, mobile nav controls, search dialog, lightbox, bottom sheet, upload/tag flows, and admin forms were reviewed from source; browser could only validate the error shell because of the DB blocker.
+- WCAG 2.2 accessibility: reviewed target size, labels, landmarks, ARIA dialog/listbox/combobox patterns, focus traps, live regions, hidden text, and disabled states. Existing touch-target and i18n tests passed.
+- Contrast and theme: token usage and dark/light/OLED-related sources were inspected. No new contrast finding was confirmed in this cycle because data-backed rendered pages were unavailable for computed-style sampling.
+- Reduced motion: `apps/web/src/app/[locale]/globals.css:253-279`, `apps/web/src/components/lightbox.tsx:92-109`, `apps/web/src/components/image-zoom.tsx:45-52`, and `apps/web/src/components/photo-viewer.tsx:704-719` include reduced-motion handling.
+- Responsive breakpoints: nav, masonry cards, public shells, admin cards/tables, dialogs, sheets, and photo viewer layouts were reviewed. `apps/web/src/components/ui/table.tsx:7-18` wraps tables in horizontal overflow, and analytics adds explicit overflow wrappers.
+- Loading, empty, and error states: route loading spinners, home/topic empty states, search empty/error/loading status, upload progress, admin loading/error shells, and global/local error pages were reviewed.
+- Form validation UX: labels, required fields, max lengths, server-action status messages, alerts, password reveal, upload file removal, and tag/category/user forms were reviewed. The description gap is captured above.
+- i18n/RTL: English/Korean message files and locale-aware layouts/links were reviewed. Current locales are LTR; the latent hard-coded direction risk is captured above.
+- Perceived performance: masonry aspect-ratio reservation, `containIntrinsicSize`, eager/high-priority above-fold images, blur placeholders, skeleton/loading shells, and table overflow were reviewed. Full LCP/CLS/INP measurement was blocked by the local DB failure.
+
+## Final Missed-Issues Sweep
+
+I ran a final source sweep across the inventory for `aria-controls`, hard-coded `h-8` controls, `dir="ltr"`, dialog content, reduced-motion handling, dialog modality, and table overflow. No additional confirmed UI/UX issues were found beyond the items above.
+
+No relevant files from the built UI/UX inventory were intentionally skipped. The residual risk is runtime behavior hidden behind the unavailable local MySQL dependency.

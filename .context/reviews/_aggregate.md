@@ -1,6 +1,8 @@
-# Cycle 13 Aggregate Review
+# Cycle 14 Aggregate Review
 
-Date: 2026-06-29
+Date: 2026-06-30
+
+Reviewed HEAD range: started at `c2da917d`, then the architect review artifact was committed as `d821a9ab` during Prompt 1. Production code findings are against current code; review artifact changes do not alter production behavior.
 
 ## Review Agents
 
@@ -17,916 +19,556 @@ Completed review files:
 - `.context/reviews/debugger.md`
 - `.context/reviews/document-specialist.md`
 - `.context/reviews/designer.md`
+- `.context/reviews/ui-ux-designer-reviewer.md`
+- `.context/reviews/product-marketer-reviewer.md`
 
-Raw findings across agent files: 41.
-Deduped aggregate findings: 38.
+Raw findings across agent files: 68.
+Deduped aggregate findings: 63.
 
-Agent failures: none. The subagent service hit the live-agent cap during fan-out, so the remaining required reviewer personas were launched as earlier workers completed and were closed. No requested review perspective was dropped.
+Agent failures: none. The subagent service hit the live-agent limit during fan-out, so reviewer lanes were launched in bounded batches and closed as they completed. No requested registered reviewer perspective was dropped.
 
 ## Cross-Agent Agreement
 
-- Service-worker admin bypass was independently flagged by verifier and tracer: unlocalized `/admin` routes are not matched by the SW admin bypass predicate.
-- Restore maintenance failure was debugger-confirmed and aligns with the repo's documented restore/queue safety model: after `mysql` begins importing, failed restore exits must fail closed.
-- Several reviewers converged on single-instance/topology boundaries, but those are documented deployment constraints rather than immediate code defects when production remains one web process.
+- Similar-photo target visibility was flagged by debugger as confirmed and tracer as a manual-validation risk. The aggregate preserves the debugger severity/confidence.
+- Search input touch sizing was independently flagged by both UI reviewers. The aggregate keeps it as one confirmed touch-target/UI issue.
+- Single-instance/trusted-proxy topology was flagged by security, architect, critic, and verifier as an operational risk. The aggregate separates a concrete nginx/docs mismatch from the broader documented single-instance risk.
+- CLIP production/offline behavior gaps were flagged by verifier/test/product reviewers. The aggregate records this as a manual-validation/CI coverage risk, not a current code defect.
+- Local browser validation gaps repeatedly traced to unavailable local MySQL; this is recorded once as a review validation blocker.
 
-## Findings
+## Confirmed Findings
 
-### AGG-C13-01 - Failed mysql restore can clear maintenance after partial import
+### AGG-C14-01 - Original-upload path helpers trust DB-stored filenames
 
-Severity: High. Confidence: High. Status: Confirmed.
-Agents: debugger.
+Severity: High. Confidence: High. Agents: critic.
 
-Files: `apps/web/src/app/[locale]/admin/db-actions.ts:367-389`, `apps/web/src/app/[locale]/admin/db-actions.ts:526-604`.
+Files: `apps/web/src/lib/upload-paths.ts:57-60`, `apps/web/src/lib/upload-paths.ts:75-100`, `apps/web/src/app/actions/images.ts:1234-1237`, `apps/web/src/lib/image-queue.ts:562-623`, `apps/web/src/lib/admin-backfill-runner.ts:442-448`, `apps/web/scripts/backfill-clip-embeddings.ts:152-159`, `apps/web/scripts/backfill-cicp-recheck.ts:92-100`, `apps/web/scripts/backfill-color-pipeline.ts:197-204`.
 
-Once `mysql` starts importing a validated dump, read/stdin/spawn failures and nonzero mysql exits resolve failure without `keepMaintenance: true`. The outer `finally` then clears restore maintenance and resumes the image queue because `keepRestoreMaintenance` is false, even though the live DB may be partially mutated.
+`resolveOriginalUploadPath()` and original deletion helpers join DB-stored `filename_original` values into original-upload roots without central filename validation, absolute-path rejection, symlink rejection, or realpath containment checks. Some callers validate locally, but retry/backfill/maintenance paths can consume DB-restored or manually edited rows without that guard.
 
-Fix: after handoff to `mysql`, return `keepMaintenance: true` for nonzero import exits and non-ignorable stream/process failures. Add regression coverage that the queue is not resumed and maintenance is not cleared after a started import fails.
+Fix: move filename and containment enforcement into `upload-paths.ts`; keep caller-side validation as defense in depth. Add traversal, absolute path, symlink, missing-file, primary-hit, and legacy-hit tests.
 
-### AGG-C13-02 - `updatePassword` reads auth state before rejecting hostile origin
+### AGG-C14-02 - nginx proxy-header contract contradicts documented multi-hop deployment
 
-Severity: High. Confidence: High. Status: Confirmed coverage-backed correctness/security gap.
-Agents: test-engineer.
+Severity: Medium. Confidence: High. Agents: critic.
 
-Files: `apps/web/src/app/actions/auth.ts:283-298`, `apps/web/src/__tests__/auth-actions-behavior.test.ts:241-253`, `apps/web/scripts/check-action-origin.ts:228-232`.
+Files: `apps/web/nginx/default.conf:6-8`, `apps/web/nginx/default.conf:25-29`, `apps/web/nginx/default.conf:68-70`, `apps/web/nginx/default.conf:85-87`, `apps/web/nginx/default.conf:102-104`, `apps/web/nginx/default.conf:142-144`, `apps/web/nginx/default.conf:159-161`, `apps/web/nginx/default.conf:181-183`, `apps/web/nginx/default.conf:194-196`, `README.md:152-154`, `apps/web/src/lib/rate-limit.ts:161-183`.
 
-The generic action scanner treats session/user reads before origin validation as prohibited, but `auth.ts` is intentionally excluded. `updatePassword` currently calls `getCurrentUser()` before checking `hasTrustedSameOrigin`, and the hostile-origin behavior test only asserts no Argon2 verify/transaction.
+Docs describe an edge/CDN -> nginx -> app topology with `TRUSTED_PROXY_HOPS=2`, but nginx overwrites `X-Forwarded-For` with `$remote_addr`. Behind a CDN/LB this can collapse all visitors to the edge IP for rate limits and analytics.
 
-Fix: check trusted origin before `getCurrentUser()` and add a regression assertion that hostile-origin password-change requests do not verify sessions or perform DB user reads.
+Fix: either implement trusted upstream real-IP handling and forward a sanitized chain, or document direct-client -> nginx -> app as the only supported topology and keep `TRUSTED_PROXY_HOPS=1`.
 
-### AGG-C13-03 - Service worker admin bypass omits unlocalized `/admin` routes
+### AGG-C14-03 - Review directory allows accidental scratch artifacts
 
-Severity: Low. Confidence: High. Status: Confirmed.
-Agents: verifier, tracer.
-
-Files: `apps/web/public/sw.template.js:42-46`, `apps/web/src/lib/sw-cache.ts:54-62`, `apps/web/src/__tests__/sw-cache.test.ts:47-71`, `apps/web/src/proxy.ts:65-72`.
-
-The SW bypass predicate matches locale-prefixed admin pages and `/api/admin`, but misses `/admin` and `/admin/dashboard`, which the proxy treats as protected default-locale admin routes. Those routes can fall through to the offline HTML cache path.
-
-Fix: match `^/admin(/|$)` in the template and reference helper, regenerate `public/sw.js`, and add tests for `/admin` and `/admin/dashboard`.
-
-### AGG-C13-04 - OKLCH overrides invalidate Tailwind HSL color utilities
-
-Severity: High. Confidence: High. Status: Confirmed.
-Agents: designer.
-
-Files: `apps/web/tailwind.config.ts:23-61`, `apps/web/src/app/[locale]/globals.css:121-148`.
-
-Tailwind emits utilities like `hsl(var(--primary))`, but the OKLCH support block replaces `--primary` and related variables with full `oklch(...)` functions. In Chromium, primary and destructive utilities compute to invalid declarations/fallback colors.
-
-Fix: keep the token contract consistent. Either remove the OKLCH overrides for these HSL-channel variables or migrate Tailwind token definitions to complete `var(...)` color values with tested fallbacks. Add computed-style regression coverage.
-
-### AGG-C13-05 - TagInput combobox misses the 44 px touch-target contract
-
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: designer.
-
-Files: `apps/web/src/components/tag-input.tsx:184-223`, `apps/web/src/__tests__/touch-target-audit.test.ts`.
-
-The raw combobox input has no `min-h-11` or equivalent target sizing, and the wrapper does not proxy clicks to focus the input. Existing touch-target tests do not scan text inputs.
-
-Fix: give the input an explicit 44 px hit target or make the wrapper an honest focus proxy, and extend the touch-target audit for raw text/search inputs.
-
-### AGG-C13-06 - Fire-and-forget public analytics can still reject before internal catch
-
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: critic.
-
-Files: `apps/web/src/app/actions/public.ts:357-441`, public page call sites under `p/[id]`, `[topic]`, and `g/[key]`.
-
-The view-recording functions catch only final insert failures. `headers()`, target visibility selects, or rate-limit work can reject before the internal catch while callers discard the returned promise.
-
-Fix: wrap the full recorder body in `try/catch` after cheap input validation and add regression tests for rejected pre-insert work.
-
-### AGG-C13-07 - nginx forwarded-IP handling conflicts with documented multi-hop edge guidance
-
-Severity: Medium. Confidence: High for mismatch; production impact requires topology validation. Status: Confirmed mismatch / manual validation.
-Agents: critic.
-
-Files: `apps/web/nginx/default.conf`, `apps/web/src/lib/rate-limit.ts:161-183`, `README.md:151-154`.
-
-Docs describe a possible CDN/LB -> nginx -> app chain, but nginx overwrites `X-Forwarded-For` with `$remote_addr`, collapsing upstream client chains. With multi-hop settings, app-visible per-IP rate-limit buckets can become edge-IP buckets.
-
-Fix: either configure nginx trusted-real-IP handling for the intended upstream topology and update tests, or narrow docs to the single host-nginx hop contract.
-
-### AGG-C13-08 - Public map can render and serialize up to 10k markers
-
-Severity: High. Confidence: High. Status: Confirmed performance issue.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/data.ts:1649-1676`, `apps/web/src/app/[locale]/(public)/map/page.tsx:31-79`, `apps/web/src/components/map/map-client.tsx:76-143`.
-
-The public map fetches, serializes, server-renders a link for, and Leaflet-renders every marker up to `MAP_MAX_MARKERS = 10000`.
-
-Fix: use clustering and viewport/bounds-based or paginated marker loading, with a lower initial render cap.
-
-### AGG-C13-09 - Admin dashboard renders every permanently failed image
-
-Severity: Medium. Confidence: High. Status: Confirmed performance issue.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/data.ts:1000-1013`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:73-120`.
-
-`getFailedImages()` has no limit or failed-list index, and dashboard renders every failed row synchronously.
-
-Fix: paginate/lazy-load failed images and add an index shaped for the failed list after checking `EXPLAIN`.
-
-### AGG-C13-10 - First public listing pages perform count-window work on dynamic requests
-
-Severity: Medium. Confidence: Medium. Status: Likely performance issue.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/data.ts:878-907`, public home/topic/smart collection pages.
-
-Dynamic listing pages compute `COUNT(*) OVER()` with joins/grouping for the initial visible page.
-
-Fix: avoid exact hot-path counts or cache/precompute them; use `LIMIT + 1` for `hasMore`.
-
-### AGG-C13-11 - Image queue can pin shared DB pool connections through Sharp work
-
-Severity: Medium. Confidence: High. Status: Likely performance/concurrency issue.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/db/index.ts:23-33`, `apps/web/src/lib/image-queue.ts:446-657`.
-
-Image jobs hold advisory-lock pool connections while doing CPU/disk-heavy Sharp work, and `QUEUE_CONCURRENCY` can be raised high enough to starve live request DB capacity.
-
-Fix: use a dedicated lock pool, row leases, or clamp effective queue concurrency against reserved live pool capacity.
-
-### AGG-C13-12 - GPS stripping materializes whole originals after streaming save
-
-Severity: Medium. Confidence: High. Status: Likely memory issue.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/process-image.ts:887-910`, `apps/web/src/lib/process-image.ts:1738-1786`, `apps/web/src/app/api/admin/lr/upload/route.ts:150-153`.
-
-The upload save path streams to disk, but GPS stripping immediately reads whole originals and may allocate a second scrubbed/re-encoded buffer.
-
-Fix: add a memory-budget gate and plan streaming/container-aware scrubbers where feasible.
-
-### AGG-C13-13 - Semantic search is bounded brute force with unbounded inference waiters
-
-Severity: Medium. Confidence: Medium-High. Status: Manual validation/performance risk.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:261-305`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, `apps/web/src/lib/clip-model.ts:53-70`.
-
-Semantic/similar routes decode and score bounded newest-first embedding scans per request; CLIP inference waiters are unbounded.
-
-Fix: load-test production CLIP limits, add bounded global admission/backpressure, and plan vector indexing before raising scan caps.
-
-### AGG-C13-14 - Infinite masonry retains every loaded card and image element
-
-Severity: Medium. Confidence: High. Status: Manual validation/performance risk.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/components/home-client.tsx:124-130`, `apps/web/src/components/home-client.tsx:286-360`, `apps/web/src/components/load-more.tsx:41-96`.
-
-Long browsing sessions append and retain all loaded image cards in the DOM.
-
-Fix: add virtualization/windowing or cap mounted pages while preserving scroll restoration.
-
-### AGG-C13-15 - Non-sargable timeline/search/smart predicates are scale-sensitive
-
-Severity: Low-Medium. Confidence: High. Status: Performance risk.
-Agents: perf-reviewer.
-
-Files: `apps/web/src/lib/data-timeline.ts:97-207`, `apps/web/src/lib/data.ts:1537-1613`, `apps/web/src/lib/smart-collections.ts:218-264`.
-
-Date functions and `%LIKE%` predicates are bounded but can scan heavily at larger gallery scale.
-
-Fix: add generated/indexed date parts or search indexes if these paths become hot.
-
-### AGG-C13-16 - Service worker image freshness probe can add one HEAD RTT per warm cached tile
-
-Severity: Low. Confidence: High. Status: Performance tradeoff.
-Agents: perf-reviewer.
-
-Files: `apps/web/public/sw.template.js:226-270`, `apps/web/public/sw.js:226-270`.
-
-Warm cached image display performs a synchronous bounded HEAD probe when an ETag exists.
-
-Fix: measure before changing; consider batching/coalescing or versioned derivative URLs if visible.
-
-### AGG-C13-17 - Public route IDs accept unsafe integer ranges before DB lookup
-
-Severity: Low. Confidence: Medium. Status: Future-schema risk.
-Agents: code-reviewer.
-
-Files: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`.
-
-Routes parse digit-only IDs to `number` but do not reject values above `Number.MAX_SAFE_INTEGER` or the current MySQL int range before DB lookup.
-
-Fix: centralize route ID parsing with safe integer and schema-bound checks.
-
-### AGG-C13-18 - Database backups are plaintext at rest
-
-Severity: Low. Confidence: High. Status: Confirmed operational/security boundary.
-Agents: security-reviewer.
-
-Files: `apps/web/src/app/[locale]/admin/db-actions.ts:140-172`, `apps/web/src/app/api/admin/db/download/route.ts:78-86`, `apps/web/src/db/schema.ts:160-211`.
-
-SQL backups are written as plaintext files with restrictive modes. This matches the documented host/storage encryption boundary but remains a security exposure if copied off-host or the deploy user is compromised.
-
-Fix: encrypt backups with an operator-controlled key if the operational boundary changes; otherwise keep the plaintext-at-rest warning explicit.
-
-### AGG-C13-19 - Checked-in nginx is HTTP-only and depends on an external TLS edge
-
-Severity: High if internet-facing, otherwise informational. Confidence: Medium for deployed exposure. Status: Manual validation risk.
-Agents: security-reviewer.
-
-Files: `apps/web/nginx/default.conf:21-29`, `apps/web/docker-compose.yml:14-21`.
-
-The shipped nginx listens on port 80 only and relies on a TLS-terminating edge.
-
-Fix: validate live topology; add TLS/redirect if this nginx can be reached by external clients.
-
-### AGG-C13-20 - Public analytics actions can be intentionally forged within limits
-
-Severity: Low. Confidence: Medium. Status: Accepted analytics-integrity risk.
-Agents: security-reviewer.
-
-Files: `apps/web/src/app/actions/public.ts:314-442`.
-
-Public view-recording actions are origin-exempt and rate-limited, but a caller can inflate visible analytics within per-IP limits.
-
-Fix: if analytics integrity matters, require stronger bot/origin/page-view proof; otherwise document counts as non-audit-grade.
-
-### AGG-C13-21 - Retained originals may keep GPS if best-effort stripping cannot parse them
-
-Severity: Low. Confidence: Medium. Status: Future/operational privacy risk.
-Agents: security-reviewer.
-
-Files: `apps/web/src/app/actions/images.ts:385-387`, `apps/web/src/app/api/admin/lr/upload/route.ts:364-378`, `apps/web/src/lib/process-image.ts:1738-1820`.
-
-Public metadata/derivatives are stripped, but structurally anomalous retained originals can keep GPS if stripping fails.
-
-Fix: persist strip status or refuse future original downloads when stripping failed.
-
-### AGG-C13-22 - Failed-image retry recovery uses source-text tests for side effects
-
-Severity: Medium. Confidence: High. Status: Confirmed test gap.
-Agents: test-engineer.
-
-Files: `apps/web/src/app/actions/images.ts:1162-1275`, `apps/web/src/__tests__/failed-image-retry.test.ts:4-113`.
-
-Important retry side effects are asserted by source snippets rather than runtime state transition tests.
-
-Fix: add mocked behavior tests for success, config failure, non-failed row, invalid id, and enqueue rejection.
-
-### AGG-C13-23 - Navigation visual check records screenshots without baselines
-
-Severity: Medium. Confidence: High. Status: Confirmed test gap.
-Agents: test-engineer.
-
-Files: `apps/web/e2e/nav-visual-check.spec.ts:40-79`.
-
-The spec captures screenshots as artifacts but never asserts `toHaveScreenshot`.
-
-Fix: add visual baseline assertions or rename the spec as manual artifact generation and add a real visual regression spec.
-
-### AGG-C13-24 - Production CLIP semantic-search coverage is skipped by default CI
-
-Severity: Medium. Confidence: High. Status: Coverage/CI risk.
-Agents: test-engineer.
-
-Files: `apps/web/src/__tests__/clip-semantic-integration.test.ts`, `apps/web/src/__tests__/clip-offline-load.test.ts`, `.github/workflows/quality.yml`.
-
-Production CLIP ranking and offline model-load tests require opt-in env/cache and do not run in default CI.
-
-Fix: add a scheduled or label-triggered CI job with seeded `CLIP_MODELS_ROOT`.
-
-### AGG-C13-25 - Expensive public GET route rate limiting remains a manual-audit boundary
-
-Severity: Medium. Confidence: Medium. Status: Future gate risk.
-Agents: test-engineer.
-
-Files: `apps/web/scripts/check-public-route-rate-limit.ts`, public GET routes for similar/OG.
-
-The public route scanner only enforces mutating handlers. Expensive public GET routes rely on bespoke tests and author memory.
-
-Fix: add an expensive-GET scan mode for known costly imports/calls.
-
-### AGG-C13-26 - Sitemap and robots routes lack direct route-level regression tests
-
-Severity: Low. Confidence: Medium. Status: Likely test gap.
-Agents: test-engineer.
-
-Files: `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts`.
-
-There are no direct unit tests for localized sitemap/feed entries, fallback behavior, or robots disallow output.
-
-Fix: add route-level tests with mocked data/config.
-
-### AGG-C13-27 - No coverage-report script or threshold exists
-
-Severity: Low. Confidence: High. Status: Tooling gap.
-Agents: test-engineer.
-
-Files: root `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `.github/workflows/quality.yml`.
-
-The suite has many source-contract tests but no coverage signal or threshold.
-
-Fix: start with a non-blocking coverage report for critical directories.
-
-### AGG-C13-28 - Smart collection predicate contract is column-global
-
-Severity: Medium. Confidence: Medium. Status: Likely issue.
-Agents: architect.
-
-Files: `apps/web/src/lib/smart-collections.ts:21-392`, `apps/web/src/app/actions/collections.ts`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`.
-
-One global operator set applies to numeric, text, date, topic, and tag columns, allowing semantically invalid predicates to be saved and executed.
-
-Fix: use per-column operator/value schemas and reject invalid combinations at save time.
-
-### AGG-C13-29 - Single-instance runtime is an explicit correctness boundary
-
-Severity: High if violated. Confidence: High. Status: Accepted topology constraint / manual validation.
-Agents: architect.
-
-Files: `CLAUDE.md`, `apps/web/docker-compose.yml`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/data.ts`.
-
-Restore flags, queue state, upload tracking, public rate-limit fast paths, and view-count buffering are process-local.
-
-Fix: keep production to exactly one active web process or move these states to shared durable coordination before scaling.
-
-### AGG-C13-30 - Upload attribution comments still claim public Atom per-entry author attribution
-
-Severity: Low. Confidence: High. Status: Confirmed docs/code mismatch.
-Agents: document-specialist.
-
-Files: `apps/web/src/app/actions/images.ts:435-439`, `apps/web/src/app/api/admin/lr/upload/route.ts:434-443`, `apps/web/src/lib/data.ts:833-845`.
-
-Ingest comments suggest `uploaded_by` feeds public per-entry Atom authors, but current feed code intentionally emits feed-level authors only.
-
-Fix: update comments to describe admin/audit linkage and the separate safe-display-name requirement for future public per-entry authors.
-
-### AGG-C13-31 - `CLAUDE.md` overstates canonical URL matching requirements
-
-Severity: Low. Confidence: High. Status: Confirmed docs/code mismatch.
-Agents: document-specialist.
-
-Files: `CLAUDE.md`, `apps/web/src/lib/constants.ts`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/src/app/api/og/photo/[id]/route.tsx`.
-
-`CLAUDE.md` says `site-config.json.url` must match `BASE_URL`, while code uses effective `BASE_URL || siteConfig.url`.
-
-Fix: clarify that `BASE_URL` may override `siteConfig.url`.
-
-### AGG-C13-32 - Privacy test comment points to obsolete `data.ts` line range
-
-Severity: Low. Confidence: High. Status: Confirmed docs/test mismatch.
-Agents: document-specialist.
-
-Files: `apps/web/src/__tests__/privacy-fields.test.ts:81-84`, `apps/web/src/lib/data.ts:459-477`.
-
-The test comment cites a stale line range for `_privacyGuard`.
-
-Fix: use a symbol reference rather than line numbers.
-
-### AGG-C13-33 - Caption-generator comment says binary footprint is zero despite CLIP native inference
-
-Severity: Low. Confidence: Medium. Status: Likely docs/code mismatch.
-Agents: document-specialist.
-
-Files: `apps/web/src/lib/caption-generator.ts:4-15`, `apps/web/package.json`, `package-lock.json`, `apps/web/src/lib/clip-embeddings.ts`.
-
-The Florence caption stub comment says binary footprint is zero, which conflicts with shipped CLIP/ONNX native inference in the app.
-
-Fix: narrow the comment to no additional captioning/Florence footprint.
-
-### AGG-C13-34 - CLIP design spec still contains unresolved open-item wording
-
-Severity: Low. Confidence: Medium. Status: Documentation cleanup / manual validation.
-Agents: document-specialist.
-
-Files: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:94-132`, `apps/web/src/lib/clip-embeddings.ts:175-191`.
-
-The spec top banner says production is shipped, but later sections still label threshold calibration as an open item.
-
-Fix: rename the section to decisions/resolutions and note `PRODUCTION_COSINE_THRESHOLD = 0.22`.
-
-### AGG-C13-35 - Mobile info sheet modality in peek state needs validation
-
-Severity: Medium. Confidence: Medium. Status: Likely UI/a11y risk.
-Agents: designer.
-
-Files: `apps/web/src/components/info-bottom-sheet.tsx:176-210`.
-
-Peek state lacks a backdrop but still activates focus trap and `aria-modal="true"`.
-
-Fix: manually test mobile assistive-tech behavior and choose a consistent modal or non-modal peek contract.
-
-### AGG-C13-36 - Similar-search target visibility hardening should be validated
-
-Severity: Medium. Confidence: Medium. Status: Manual validation risk.
-Agents: tracer.
-
-Files: `apps/web/src/app/api/search/similar/[id]/route.ts`.
-
-Tracer flagged target visibility as worth validating so private/deleted/unprocessed target IDs cannot shape public similar-image behavior.
-
-Fix: audit the route target lookup and add a regression test if visibility constraints are not already explicit.
-
-### AGG-C13-37 - Upload serving realpath-before-stream TOCTOU assumption should be documented/validated
-
-Severity: Low. Confidence: Medium. Status: Manual validation risk.
-Agents: tracer.
-
-Files: `apps/web/src/lib/serve-upload.ts`.
-
-Tracer flagged the time between path validation/realpath checks and stream opening as a residual filesystem race assumption.
-
-Fix: document the accepted local-filesystem trust boundary or open files using a pattern that reduces post-check path swapping risk.
-
-### AGG-C13-38 - Review scratch files under `.context/reviews` are easy to commit accidentally
-
-Severity: Low. Confidence: High. Status: Confirmed process hygiene issue.
-Agents: critic.
+Severity: Low. Confidence: High. Agents: critic.
 
 Files: `.gitignore:19-25`.
 
-The ignore rules unignore all `.context/reviews/**` except a few log paths, so temporary inventories or hidden scratch files can become trackable.
+`.context/reviews/**` is unignored broadly, so temp inventories, JSON dumps, hidden scratch files, and command captures written under reviews can be committed with report files.
 
-Fix: ignore scratch suffixes such as `.tmp` or create a separate ignored `.context/scratch/` location for generated review intermediates.
+Fix: ignore review scratch patterns or designate an ignored `.context/scratch/` path for transient reviewer output.
 
----
+### AGG-C14-04 - Public map serializes and renders up to 10k markers and links
 
-# Cycle 12 Aggregate Review
+Severity: High. Confidence: High. Agents: perf-reviewer.
 
-Date: 2026-06-29
+Files: `apps/web/src/lib/data.ts:1649-1676`, `apps/web/src/app/[locale]/(public)/map/page.tsx:31-79`, `apps/web/src/components/map/map-loader.tsx:9-12`, `apps/web/src/components/map/map-client.tsx:76-143`, `apps/web/src/db/schema.ts:114-120`.
 
-## Review Agents
+The dynamic map page loads up to 10,000 GPS rows, serializes all markers through RSC, server-renders a link per marker, and mounts one Leaflet marker/popup per row. There is no GPS/map-oriented index.
 
-Completed review files:
+Fix: use viewport/bounds fetching and clustering or a much lower initial cap plus accessible pagination/virtualization; validate a supporting index with `EXPLAIN`.
 
-- `.context/reviews/code-reviewer.md`
-- `.context/reviews/perf-reviewer.md`
-- `.context/reviews/security-reviewer.md`
-- `.context/reviews/critic.md`
-- `.context/reviews/verifier.md`
-- `.context/reviews/test-engineer.md`
-- `.context/reviews/tracer.md`
-- `.context/reviews/architect.md`
-- `.context/reviews/debugger.md`
-- `.context/reviews/document-specialist.md`
-- `.context/reviews/designer.md`
-- `.context/reviews/product-marketer-reviewer.md`
+### AGG-C14-05 - Public map is pointer-first with weak accessible structure
 
-Raw findings across agent files: 47.
-Deduped aggregate findings: 40.
+Severity: Medium. Confidence: Medium-high. Agents: ui-ux-designer-reviewer.
 
-Agent failures: none. The subagent service initially hit its live-agent cap after five agents, so the remaining reviewer lanes were launched after completed agents were closed. No requested review perspective was dropped.
+Files: `apps/web/src/app/[locale]/(public)/map/page.tsx:59-79`, `apps/web/src/components/map/map-client.tsx:107-144`.
 
-## High Signal Agreement Clusters
+The visual map appears before the accessible fallback list and lacks a clear accessible name/instructions around the map/list relationship. Markers are primarily pointer-operated.
 
-- LR upload request body cap: critic and debugger both flagged that `apps/web/src/app/api/admin/lr/upload/route.ts` parses multipart before enforcing the 200 MiB per-file cap.
-- Migration convergence: critic and architect both flagged that schema/journal reconciliation can leave old defaults or unjournaled schema changes treated as applied.
-- Single-process topology: architect, debugger, and tracer all flagged that documented single-instance runtime assumptions lack hard guardrails.
-- Service-worker stale cache: code-reviewer and tracer independently found stale offline/cache behavior after revoke/delete or privacy visibility changes.
-- Docs/copy drift: verifier, document-specialist, and product-marketer all found stale or over-broad user/operator wording.
+Fix: wrap map/list in a named region, add a skip link or hint to the photo list before the map, and either keyboard-label markers reliably or present the list as the primary accessible control.
 
-## Findings
+### AGG-C14-06 - Admin dashboard renders every permanently failed image
 
-### AGG-C12-01 - Journal-covered databases can skip schema repair for current columns
+Severity: Medium. Confidence: High. Agents: perf-reviewer.
 
-Severity: High. Confidence: High. Status: Confirmed.
-Agents: critic, architect.
+Files: `apps/web/src/lib/data.ts:1000-1013`, `apps/web/src/db/schema.ts:101-120`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:73-120`.
 
-Files: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/db/schema.ts`.
+`getFailedImages()` has no limit or failed-list index, and the dashboard renders every failed row with retry controls. A large failed import can make the recovery UI slow or unusable.
 
-The migration runner can baseline or consider journal hashes applied while the concrete schema still depends on `reconcileLegacySchema()` repair paths. A database with partial historical migration state can keep old column defaults or miss newer schema details while future deploys report migration success.
+Fix: paginate or limit failed images, expose a separate count, lazy-load more failures, and add an index such as `(processed, failed_at)` after checking plans.
 
-Fix: add journaled migrations for current schema deltas where missing and make `reconcileLegacySchema()` converge defaults/indexes, not just column existence. Add a regression test that simulates an old/poisoned `__drizzle_migrations` state and asserts the final schema matches `schema.ts`.
+### AGG-C14-07 - Sidecar backfill scripts enqueue the full candidate set
 
-### AGG-C12-02 - Lightroom upload parses oversized multipart before enforcing the per-file cap
+Severity: Medium. Confidence: High. Agents: perf-reviewer.
 
-Severity: High. Confidence: High. Status: Confirmed risk.
-Agents: critic, debugger.
+Files: `apps/web/scripts/backfill-color-pipeline.ts:342-359`, `apps/web/scripts/backfill-color-pipeline.ts:474-511`, `apps/web/scripts/backfill-cicp-recheck.ts:57-93`, `apps/web/scripts/backfill-cicp-recheck.ts:144`, `apps/web/src/lib/admin-backfill-runner.ts:381-410`.
 
-Files: `apps/web/src/app/api/admin/lr/upload/route.ts:85`, `apps/web/src/app/api/admin/lr/upload/route.ts:139`, `apps/web/src/app/api/admin/lr/upload/route.ts:147`, `apps/web/src/lib/process-image.ts:887`.
+Sidecar backfills fetch/enqueue every candidate before waiting, so large libraries allocate one row plus one queue closure per candidate. The in-app runner already shows the bounded keyset-batch shape.
 
-The LR route validates `Content-Length` against the total upload window, then calls `request.formData()` before rejecting `fileEntry.size > MAX_UPLOAD_FILE_BYTES`. A PAT caller or bypass of nginx body caps can force Next to materialize a body that should have been rejected at the application boundary.
+Fix: rewrite these scripts to fetch keyset batches, enqueue/drain only the current batch, flush, advance the cursor, and repeat.
 
-Fix: reject declared LR upload sizes above the file cap plus multipart overhead before `formData()`, then reject `fileEntry.size > MAX_UPLOAD_FILE_BYTES` immediately after parse and before topic/settings/disk work. Add a source or route test for both guards.
+### AGG-C14-08 - GPS stripping materializes whole originals after streaming save
 
-### AGG-C12-03 - Offline HTML cache can outlive smart-collection revoke/delete
+Severity: Medium. Confidence: High. Agents: perf-reviewer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: code-reviewer.
+Files: `apps/web/src/app/actions/images.ts:381-388`, `apps/web/src/app/api/admin/lr/upload/route.ts:150-153`, `apps/web/src/app/api/admin/lr/upload/route.ts:365-377`, `apps/web/src/lib/process-image.ts:1738-1788`.
 
-Files: `apps/web/public/sw.template.js:275`, `apps/web/public/sw.template.js:370`, `apps/web/src/app/actions/collections.ts:112`, `apps/web/src/lib/data.ts:1375`.
+With GPS stripping enabled, large originals are streamed to disk and then fully read back into memory for metadata scrubbing; Lightroom uploads additionally use `request.formData()`.
 
-The service worker excludes revocable share pages from offline HTML caching, but public smart collection pages (`/c/[slug]`) are revocable by admin delete or public/private toggle and can still be served from the 24 h offline fallback.
+Fix: add a memory-budget/semaphore around buffer-based GPS stripping, document/guard the risk, and investigate streaming/range scrubbers or a streaming multipart parser for Lightroom.
 
-Fix: treat public smart-collection HTML as revocable in the SW, or add a versioned/revocation-aware cache key and invalidate on collection mutation. Regenerate `public/sw.js` after template edits.
+### AGG-C14-09 - Backfill no-op leaves stale admin status
 
-### AGG-C12-04 - Offline HTML cache can preserve GPS map markers after topic map visibility is disabled
+Severity: Low. Confidence: High. Agents: code-reviewer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: code-reviewer.
+Files: `apps/web/src/lib/admin-backfill-runner.ts:837-841`, `apps/web/src/lib/admin-backfill-runner.ts:631-646`, `apps/web/src/lib/admin-backfill-runner.ts:780-803`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:302-327`.
 
-Files: `apps/web/public/sw.template.js:275`, `apps/web/src/app/actions/topics.ts:594`, `apps/web/src/lib/data.ts:1658`, `apps/web/src/components/map/map-client.tsx`.
+When candidate count is zero, `triggerAdminBackfill()` returns without resetting prior per-run failure/status counters, so the settings UI can keep showing stale previous-run failures.
 
-The public map page can be cached as offline HTML. If an admin later disables `topic.map_visible`, a previously cached map page can still expose the old rendered marker set while offline.
+Fix: record a completed no-op status that clears per-run counters and failure state; add a regression test seeded with previous failures.
 
-Fix: bypass offline HTML caching for the map page, or add a privacy-sensitive cache invalidation/version mechanism tied to `map_visible` changes.
+### AGG-C14-10 - Touch-target audit allowlist can create stale slack
 
-### AGG-C12-05 - Service worker serves deleted image derivatives from stale cache
+Severity: Medium. Confidence: High. Agents: test-engineer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: tracer.
+Files: `apps/web/src/__tests__/touch-target-audit.test.ts:112-189`, `apps/web/src/__tests__/touch-target-audit.test.ts:764-782`.
 
-Files: `apps/web/public/sw.template.js:176`, `apps/web/public/sw.template.js:237`, `apps/web/public/sw.template.js:245`, `apps/web/public/sw.template.js:262`, `apps/web/src/app/actions/images.ts:673`.
+Positive `KNOWN_VIOLATIONS` budgets are treated as an upper bound. If old known violations are removed, new unrelated violations in the same file can pass within the stale allowance.
 
-After an image is deleted, cached derivative URLs under `/uploads/{avif,webp,jpeg}/...` are not evicted when HEAD/GET revalidation returns 404/410. The handler falls through to return stale cached bytes.
+Fix: require exact counts or fingerprint known exceptions; add a fixture proving stale slack fails.
 
-Fix: evict the cache entry and metadata when HEAD or background GET returns 404/410 for a derivative, and lock it with SW template/reference tests.
+### AGG-C14-11 - Public route rate-limit exemption is file-level
 
-### AGG-C12-06 - Admin dashboard loads every permanently failed image in one query/render
+Severity: Medium. Confidence: High. Agents: test-engineer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: perf-reviewer.
+Files: `apps/web/scripts/check-public-route-rate-limit.ts:287-296`, `apps/web/scripts/check-public-route-rate-limit.ts:238-280`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:79-89`.
 
-Files: `apps/web/src/lib/data.ts:1000`, admin dashboard failed-image surfaces under `apps/web/src/app/[locale]/admin/`.
+One `@public-no-rate-limit-required` comment exempts every mutating handler in a route file, so a mixed route could contain one justified exempt handler and one unmetered unrelated mutating handler.
 
-`getFailedImages()` returns the entire failed-image set. A production incident with many failures can turn the admin dashboard into a large query/render path.
+Fix: attach exemptions to the specific handler/export or reject file-level exemptions when a file has more than one mutating handler. Add a mixed POST/DELETE regression fixture.
 
-Fix: paginate failed images or cap the default dashboard query with a clear "view more" flow.
+### AGG-C14-12 - Similar-photo lookup trusts embeddings before target visibility
 
-### AGG-C12-07 - Per-photo OG generation lacks conditional validation before Satori/Sharp work
+Severity: Medium. Confidence: Medium. Agents: debugger, tracer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: perf-reviewer.
+Files: `apps/web/src/app/api/search/similar/[id]/route.ts:118-125`, `apps/web/src/app/api/search/similar/[id]/route.ts:145-150`, `apps/web/src/app/api/search/similar/[id]/route.ts:198-205`, `apps/web/src/db/schema.ts:280-295`, `apps/web/drizzle/0012_image_embeddings.sql:5-12`.
 
-Files: `apps/web/src/app/api/og/photo/[id]/route.tsx:38`, `apps/web/src/app/api/og/photo/[id]/route.tsx:227`.
+The route loads the target vector by image id/model version without joining to `images` or requiring `images.processed = true`. Result enrichment later filters processed rows, but the target and candidate scoring set can include stale/unprocessed embeddings.
 
-The per-photo OG route performs image/Satori/Sharp work even when a crawler/client already has a fresh cached card.
+Fix: join target and scan queries to `images` and filter processed images before decoding/scoring. Add a route test for an unprocessed target with an embedding returning 404.
 
-Fix: support conditional request handling where practical before expensive generation, or document why dynamic cards cannot validate cheaply.
+### AGG-C14-13 - Backup creation comment promises header validation that is not implemented
 
-### AGG-C12-08 - Image queue can starve the shared MySQL pool while Sharp work holds advisory-lock connections
+Severity: Low. Confidence: High. Agents: debugger.
 
-Severity: Medium. Confidence: High. Status: Likely.
-Agents: perf-reviewer.
+Files: `apps/web/src/app/[locale]/admin/db-actions.ts:220-236`, `apps/web/src/app/[locale]/admin/db-actions.ts:456-477`, `apps/web/src/lib/db-restore.ts:21-25`.
 
-Files: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/db/index.ts`.
+`dumpDatabase()` comments say it verifies a mysqldump header, but it only checks non-empty size. Restore has the actual header validator.
 
-Queue processing combines long Sharp work with DB/advisory-lock coordination in the same process and pool budget. Higher concurrency can crowd live reads/writes.
+Fix: read the first bytes after dump completion and call `hasPlausibleSqlDumpHeader()`. Delete/return failure on invalid output and add coverage.
 
-Fix: bound queue concurrency against DB pool reserve, shorten lock-held sections where possible, and add a concurrency budget test or runtime guard.
+### AGG-C14-14 - `db:push` is documented like a normal DB command
 
-### AGG-C12-09 - GPS stripping still materializes whole originals in memory after upload streaming
+Severity: Medium. Confidence: High. Agents: document-specialist.
 
-Severity: Medium. Confidence: High. Status: Likely.
-Agents: perf-reviewer.
+Files: `CLAUDE.md:58-61`, `apps/web/README.md:23-32`, `apps/web/package.json:17`, `AGENTS.md:22-27`, `CLAUDE.md:415-435`.
 
-Files: `apps/web/src/lib/gps-exif-strip.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`.
+Docs list `npm run db:push` without a development-only warning, even though repo policy requires journaled SQL migrations plus `_journal.json` and reconcile updates.
 
-Large uploads are streamed to disk first, but GPS stripping can still read full originals into memory for supported formats.
+Fix: remove it from operator-facing docs or explicitly mark it local throwaway prototyping only; point schema changes to the migration checklist.
 
-Fix: evaluate streaming or bounded-buffer strip paths, or document and test the memory ceiling for max-size originals.
+### AGG-C14-15 - CLIP backfill concurrency guidance is stale/incomplete
 
-### AGG-C12-10 - CLIP inference admits an unbounded waiter queue with no timeout or abort propagation
+Severity: Low. Confidence: High. Agents: document-specialist.
 
-Severity: Medium. Confidence: Medium-High. Status: Risk.
-Agents: perf-reviewer.
+Files: `apps/web/scripts/backfill-clip-embeddings.ts:44-45`, `apps/web/scripts/backfill-clip-embeddings.ts:72-73`, `apps/web/src/lib/clip-model.ts:53-56`, `CLAUDE.md:510-523`, `apps/web/.env.local.example:68-72`.
 
-Files: `apps/web/src/lib/clip-model.ts`, `apps/web/src/app/api/search/semantic/route.ts`.
+The script says operators can raise concurrency after real ONNX inference ships, but the script batch concurrency is hardcoded and the actual inference limiter is `CLIP_INFERENCE_CONCURRENCY`, which is not documented in the runbook/env example.
 
-Concurrent semantic requests can wait behind model inference without a bounded queue, timeout, or request abort propagation.
+Fix: update script comments, CLIP runbook, and env example to distinguish batch concurrency from model inference concurrency and document defaults/caps/caveats.
 
-Fix: add inference queue limits/backpressure and connect request aborts to waiting work.
+### AGG-C14-16 - Search dialog input overrides the 44 px floor
 
-### AGG-C12-11 - Infinite gallery accumulates every loaded card and image element
+Severity: Medium. Confidence: High. Agents: designer, ui-ux-designer-reviewer.
 
-Severity: Medium. Confidence: High. Status: Risk.
-Agents: perf-reviewer.
+Files: `apps/web/src/components/search.tsx:372-403`, `apps/web/src/components/ui/input.tsx:10-14`.
 
-Files: `apps/web/src/components/masonry-gallery.tsx`, public gallery pages.
+The search combobox input passes `h-8`, overriding the shared input `min-h-11` and making the primary mobile search field visually 32 px tall.
 
-Long browsing sessions keep all loaded cards/images mounted, increasing DOM, memory, and layout cost.
+Fix: remove the `h-8` override or set `h-11 min-h-11`; add touch-target audit coverage for raw input height overrides.
 
-Fix: add virtualization/windowing or bounded page retention for large galleries.
+### AGG-C14-17 - Mobile nav expander exposes only one controlled region
 
-### AGG-C12-12 - Semantic/similar search remains a bounded brute-force scan
+Severity: Low. Confidence: High. Agents: designer.
 
-Severity: Low-Medium. Confidence: High. Status: Risk.
-Agents: perf-reviewer, product-marketer-reviewer.
+Files: `apps/web/src/components/nav-client.tsx:99-107`, `apps/web/src/components/nav-client.tsx:117-123`, `apps/web/src/components/nav-client.tsx:156-160`.
 
-Files: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `README.md`.
+The mobile expand button sets `aria-controls="primary-nav-controls"` but also changes `primary-nav-topics`.
 
-The code caps semantic scans, but user-facing wording can imply complete semantic search for larger galleries. At scale, recent-row bounded brute force can miss older matches.
+Fix: point `aria-controls` at both regions or wrap both controlled areas in one container with a stable id.
 
-Fix: clarify scale limits in README/admin copy or add an ANN/indexed search plan before making broad completeness claims.
+### AGG-C14-18 - Admin form dialogs omit descriptions
 
-### AGG-C12-13 - Timeline and smart/search predicates retain non-sargable scan paths
+Severity: Low. Confidence: Medium. Agents: designer.
 
-Severity: Low-Medium. Confidence: High. Status: Risk.
-Agents: perf-reviewer.
+Files: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:189-193`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:295-301`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:165-171`.
 
-Files: `apps/web/src/lib/smart-collections.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/public.ts`.
+Create/edit category and edit tag dialogs have titles but no `DialogDescription`, leaving less context for screen-reader users.
 
-Some smart/search predicates remain hard for MySQL to satisfy through indexes, which can degrade with larger libraries.
+Fix: add localized descriptions or explicitly opt out with `aria-describedby={undefined}` if the title/fields are sufficient.
 
-Fix: profile representative predicates and add generated columns/indexes or query rewrites for hot filters.
+### AGG-C14-19 - Admin tables lack narrow-screen overflow/fallback
 
-### AGG-C12-14 - Backup/restore CLI TLS encrypts but does not verify server identity
+Severity: Medium. Confidence: High. Agents: ui-ux-designer-reviewer.
 
-Severity: Medium. Confidence: High. Status: Confirmed.
-Agents: security-reviewer.
+Files: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:216-261`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:95-126`, `apps/web/src/components/admin-user-manager.tsx:137-177`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`, `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:95-96`.
 
-Files: `apps/web/src/lib/mysql-cli-ssl.ts:11`, `apps/web/src/app/[locale]/admin/db-actions.ts:149`, `apps/web/src/app/[locale]/admin/db-actions.ts:511`, `apps/web/scripts/mysql-connection-options.js:11`.
+Several admin tables are not wrapped in local overflow/card fallbacks, unlike dashboard and analytics tables. Mobile/Korean layouts can clip actions or force page-level horizontal scrolling.
 
-The app DB client uses certificate verification for remote DB TLS, but `mysqldump`/`mysql` receive `--ssl-mode=REQUIRED`, which encrypts without verifying identity.
+Fix: wrap tables in `overflow-x-auto` with stable min widths or provide small-screen card rows.
 
-Fix: add CA/env support and use a verifying CLI mode (`VERIFY_IDENTITY` or MariaDB equivalent), failing closed for remote DB hosts when verification cannot be configured.
+### AGG-C14-20 - Settings/SEO admin layouts are brittle with Korean copy on mobile
 
-### AGG-C12-15 - Shipped nginx config is HTTP-only if copied as a public edge
+Severity: Medium. Confidence: Medium-high. Agents: ui-ux-designer-reviewer.
 
-Severity: High risk. Confidence: Medium. Status: Risk.
-Agents: security-reviewer.
+Files: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:226-240`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:407-443`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:553-671`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:658-665`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:72-87`, `apps/web/messages/ko.json`.
 
-Files: `apps/web/nginx/default.conf`, `CLAUDE.md`.
+Single-line headers/rows and fixed-width controls can collide with long Korean copy on narrow screens.
 
-The shipped nginx config is appropriate behind a trusted TLS terminator but can be copied as a public edge without TLS, weakening cookies/admin traffic.
+Fix: add responsive wrapping, `min-w-0`, `shrink-0`, and mobile two-row setting layouts; replace fixed select width with `w-full sm:w-[200px]`.
 
-Fix: split internal versus public-edge nginx examples or make the shipped public-edge path redirect HTTP and require TLS.
+### AGG-C14-21 - Public home empty state is not actionable for a fresh gallery
 
-### AGG-C12-16 - Database backups are plaintext at rest
+Severity: Low. Confidence: High. Agents: ui-ux-designer-reviewer.
 
-Severity: Low. Confidence: High. Status: Confirmed operational risk.
-Agents: security-reviewer.
+Files: `apps/web/src/components/home-client.tsx:424-438`, `apps/web/src/components/upload-dropzone.tsx:344-363`.
 
-Files: `apps/web/src/app/[locale]/admin/db-actions.ts`, backup storage under `apps/web/data/backups`.
+An empty unfiltered public home only says no images, with no setup/publishing explanation or admin path.
 
-Admin DB backups are stored as plaintext SQL under the app data directory.
+Fix: improve neutral empty copy and optionally show an authenticated-admin upload/dashboard link.
 
-Fix: document the boundary beside the backup UI/runbook or add optional operator-managed encryption at creation time.
+### AGG-C14-22 - README terminology says "Topics & Albums" while UI says "Categories"
 
-### AGG-C12-17 - Atom attribution comments/test wording still describe stale per-entry behavior
+Severity: Low. Confidence: High. Agents: product-marketer-reviewer.
 
-Severity: Low. Confidence: High. Status: Confirmed.
-Agents: verifier, document-specialist.
+Files: `README.md:34`, `apps/web/messages/en.json:3-5`, `apps/web/messages/en.json:76-108`.
 
-Files: `apps/web/src/lib/data.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `CLAUDE.md:171`.
+Public docs use "Topics & Albums" while the UI consistently presents "Categories".
 
-Comments/tests still imply public Atom per-entry attribution behavior around `uploaded_by`, while the current privacy contract uses feed-level author only.
+Fix: align README wording with UI terminology and note internal topic naming only where useful.
 
-Fix: update comments/test descriptions to match the current privacy behavior.
+### AGG-C14-23 - README overstates search as "full metadata search"
 
-### AGG-C12-18 - Resolved-path stream tests overstate TOCTOU protection
+Severity: Medium. Confidence: High. Agents: product-marketer-reviewer.
 
-Severity: Low. Confidence: Medium. Status: Risk.
-Agents: verifier.
+Files: `README.md:36`, `apps/web/src/lib/data.ts:1542-1612`.
 
-Files: tests/comments around resolved-path stream helpers.
+Search covers titles, descriptions, camera/lens, topic slug/label/aliases, and tags, but not full EXIF/date/GPS/color metadata.
 
-The tests document stronger time-of-check/time-of-use protection than the stream contract actually provides.
+Fix: narrow README copy or implement/document broader metadata search.
 
-Fix: narrow the comments to the guaranteed containment/symlink checks or add stronger open-by-handle protections if needed.
+### AGG-C14-24 - Fresh example config can produce blank Atom feed author/rights
 
-### AGG-C12-19 - Auth server actions rely on source-contract tests instead of behavior locks
+Severity: Medium. Confidence: High. Agents: product-marketer-reviewer.
 
-Severity: High. Confidence: High. Status: Confirmed test gap.
-Agents: test-engineer.
+Files: `apps/web/src/site-config.example.json:6`, `apps/web/src/lib/data.ts:1733-1740`, `apps/web/src/app/feed.xml/route.ts:103-120`, `apps/web/src/lib/atom-feed.ts:92-104`.
 
-Files: `apps/web/src/app/actions/auth.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, auth action tests.
+The example config sets `author` to an empty string, and feed generation emits author/right fields from that value.
 
-Auth actions are outside the action-origin scanner and are mostly protected by source-contract tests rather than behavior tests for hostile origins and HTTPS cookie semantics.
+Fix: make example author non-empty and add code fallback to site title or suppress rights when author/copyright are empty.
 
-Fix: add behavior-level tests for login/logout/password update origin and cookie contracts, or extend the scanner with explicit auth exemptions plus behavioral fixtures.
+## Likely Issues
 
-### AGG-C12-20 - Failed image retry recovery is mostly source-text tested
+### AGG-C14-25 - Invalid share keys consume real share lookup budget
 
-Severity: Medium. Confidence: High. Status: Likely test gap.
-Agents: test-engineer.
+Severity: Medium. Confidence: Medium. Agents: critic.
 
-Files: `apps/web/src/app/actions/images.ts:1163`, `apps/web/src/__tests__/failed-image-retry.test.ts`.
+Files: `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:79-90`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:84-102`, `apps/web/src/lib/data.ts:1177-1181`, `apps/web/src/lib/data.ts:1243-1250`, `apps/web/src/lib/rate-limit.ts:88-96`.
 
-Retry recovery behavior is asserted primarily via source text, which can pass while runtime behavior drifts.
+Malformed share paths are charged against the per-IP share lookup bucket before cheap Base56 validation.
 
-Fix: add behavior tests around retrying failed images, queue enqueue state, and persisted fields.
+Fix: validate key syntax before rate-limit charging, while preserving rate limiting before valid-looking DB lookups.
 
-### AGG-C12-21 - Navigation visual check records screenshots but does not assert them
+### AGG-C14-26 - Image queue can pin most shared DB pool connections
 
-Severity: Medium. Confidence: High. Status: Confirmed test gap.
-Agents: test-engineer.
+Severity: Medium. Confidence: High. Agents: perf-reviewer.
 
-Files: visual/navigation test artifacts under `apps/web/e2e` or related screenshot scripts.
+Files: `apps/web/src/db/index.ts:23-33`, `apps/web/src/lib/image-queue.ts:87-90`, `apps/web/src/lib/image-queue.ts:446-462`, `apps/web/src/lib/image-queue.ts:519-540`, `apps/web/src/lib/image-queue.ts:622-657`, `apps/web/src/lib/image-queue.ts:812-815`.
 
-Screenshots are collected but not compared or asserted, so the gate can pass with visible regressions.
+If `QUEUE_CONCURRENCY` is raised, jobs can hold advisory-lock connections through Sharp work, leaving little pool capacity for live traffic.
 
-Fix: add screenshot comparison thresholds, DOM/accessibility assertions, or retire the non-asserting capture from the gate.
+Fix: avoid holding shared-pool connections across Sharp processing, use a dedicated lock pool/lease model, or clamp concurrency with reserved pool capacity.
 
-### AGG-C12-22 - Production CLIP semantic-search coverage is skipped in default CI
+### AGG-C14-27 - Dynamic first listing pages perform count-window work on hot requests
 
-Severity: Medium. Confidence: High. Status: Risk.
-Agents: test-engineer.
+Severity: Medium. Confidence: Medium. Agents: perf-reviewer.
 
-Files: `apps/web/src/__tests__/clip-semantic-integration.test.ts`, `apps/web/src/__tests__/clip-offline-load.test.ts`, CI workflow files if present.
+Files: `apps/web/src/lib/data.ts:878-907`, `apps/web/src/lib/data.ts:1438-1453`, `apps/web/src/app/[locale]/(public)/page.tsx:14-16`, `apps/web/src/app/[locale]/(public)/page.tsx:164-167`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:174-176`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`.
 
-Production CLIP/offline model tests are gated out of default CI, so dependency/model-path regressions can escape.
+Dynamic SSR first pages use `COUNT(*) OVER()` with grouped joins and exact counts on broad result sets.
 
-Fix: add a lightweight CI smoke with cached/minimal model fixtures or document and schedule periodic production-mode verification.
+Fix: avoid exact hot-path counts, cache/precompute counts, or load counts asynchronously after `LIMIT + 1`.
 
-### AGG-C12-23 - Public route rate-limit scanner ignores expensive GET handlers
+### AGG-C14-28 - Feed ordering lacks matching indexes
 
-Severity: Medium. Confidence: High. Status: Risk.
-Agents: test-engineer.
+Severity: Medium. Confidence: Medium. Agents: perf-reviewer.
 
-Files: `apps/web/scripts/check-public-route-rate-limit.mjs`, `apps/web/src/app/api/og/**`, other public GET API routes.
+Files: `apps/web/src/app/feed.xml/route.ts:29-40`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:49-63`, `apps/web/src/lib/data.ts:828-853`, `apps/web/src/db/schema.ts:94-120`.
 
-The scanner only covers mutating public API handlers. Expensive public GET routes depend on manual review for rate limiting.
+Feeds order by `updated_at DESC, created_at DESC, id DESC`, but indexes are capture-date/created-at oriented.
 
-Fix: extend the scanner to a documented expensive-GET allowlist/requirement or add explicit exemptions for reviewed routes.
+Fix: add feed-shaped indexes or split feed ID selection into an indexed subquery before tag aggregation.
 
-### AGG-C12-24 - Sitemap and robots metadata routes lack route-level regression tests
+### AGG-C14-29 - Pipeline-version backfill scans lack supporting index
 
-Severity: Low. Confidence: Medium. Status: Likely test gap.
-Agents: test-engineer.
+Severity: Medium. Confidence: Medium. Agents: perf-reviewer.
 
-Files: `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts`.
+Files: `apps/web/src/lib/admin-backfill-runner.ts:370-408`, `apps/web/scripts/backfill-color-pipeline.ts:337-348`, `apps/web/src/db/schema.ts:76-120`.
 
-SEO metadata routes have important fallback and URL construction behavior but little route-level coverage.
+Stale-pipeline candidate discovery filters by `processed` and `pipeline_version` without a matching composite index.
 
-Fix: add tests for DB-failure fallback, localized URLs, feed entries, and canonical base handling.
+Fix: add and validate `(processed, pipeline_version, id)` or split predicates if MySQL does not use the index.
 
-### AGG-C12-25 - No coverage report or threshold gate exists for the mixed test suite
+### AGG-C14-30 - Semantic rate-limit helper comment contradicts charged short-query behavior
 
-Severity: Low. Confidence: High. Status: Confirmed.
-Agents: test-engineer.
+Severity: Low. Confidence: Medium. Agents: code-reviewer.
 
-Files: `apps/web/package.json`, Vitest config/test scripts.
+Files: `apps/web/src/lib/rate-limit.ts:372-375`, `apps/web/src/app/api/search/semantic/route.ts:194-243`, `apps/web/src/__tests__/semantic-search-route.test.ts:230-235`.
 
-The suite has many tests but no coverage threshold or report to reveal untested critical surfaces.
+The helper comment says short queries are an example rollback case, but the route intentionally charges after body admission and does not roll back short queries.
 
-Fix: add coverage reporting and initially conservative thresholds, then ratchet for critical modules.
+Fix: update the comment or explicitly move short-query validation before charging and test that contract.
 
-### AGG-C12-26 - Public shared-group view recording can be forged by numeric group id
+### AGG-C14-31 - Sitemap/robots metadata routes lack direct behavioral coverage
 
-Severity: Low. Confidence: High. Status: Confirmed.
-Agents: tracer.
+Severity: Low. Confidence: Medium. Agents: test-engineer.
 
-Files: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127`, `apps/web/src/app/actions/public.ts:413`, `apps/web/src/lib/data.ts:1323`.
+Files: `apps/web/src/app/sitemap.ts:24-119`, `apps/web/src/app/robots.ts:17-25`.
 
-The durable analytics action records shared-group views by numeric id only. A client can forge events for guessed valid group ids without knowing the share key, polluting analytics but not exposing images.
+No direct tests invoke sitemap/robots behavior despite non-trivial URL budget, locale expansion, feed entries, and crawl policy.
 
-Fix: pass and verify the share key, or issue a signed one-use analytics token from the key-gated page.
+Fix: add direct unit tests with mocked data helpers.
 
-### AGG-C12-27 - Sidecar color backfill warning is stale about admin retry overlap
+### AGG-C14-32 - Quarantined storage abstraction models resources in wrong keyspace
 
-Severity: Low. Confidence: High. Status: Confirmed docs/comment drift.
-Agents: tracer.
+Severity: Medium. Confidence: High. Agents: architect.
 
-Files: `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `CLAUDE.md`.
+Files: `apps/web/src/lib/storage/index.ts:4-12`, `apps/web/src/__tests__/storage-quarantine.test.ts:1-132`, `apps/web/src/lib/storage/local.ts:15-20`, `apps/web/src/lib/storage/local.ts:130-137`, `apps/web/src/lib/process-topic-image.ts:11-102`, `apps/web/docker-compose.yml:23-27`, `apps/web/next.config.ts:29-34`, `apps/web/src/lib/serve-upload.ts:15-140`.
 
-The sidecar warning still suggests admin retry overlap behavior that no longer matches the shared advisory-lock implementation.
+If the quarantined storage abstraction is wired in, topic resources would be stored/served under upload keyspace instead of `public/resources`.
 
-Fix: update the warning/comment to the current shared-lock behavior.
+Fix: keep quarantine or split explicit upload/original/resource keyspaces before integration.
 
-### AGG-C12-28 - Restore and queue safety depend on documented single web-process topology
+### AGG-C14-33 - LocalStorageBackend write paths are less hardened than live pipeline
 
-Severity: Medium. Confidence: Medium-High. Status: Risk.
-Agents: tracer, architect, debugger.
+Severity: Medium. Confidence: Medium. Agents: architect.
 
-Files: `apps/web/docker-compose.yml`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/restore-maintenance.ts`, `CLAUDE.md:227`.
+Files: `apps/web/src/__tests__/storage-quarantine.test.ts:11-16`, `apps/web/src/lib/storage/local.ts:40-98`, `apps/web/src/lib/storage/local.ts:118-127`, `apps/web/src/lib/upload-paths.ts:11-46`.
 
-Several correctness controls are process-local and documented as single-instance only, but deployment guardrails do not enforce that topology.
+If quarantine is breached, writes/copies follow final-path symlinks and lack production-grade temp/atomic/no-follow checks.
 
-Fix: add runtime/deploy assertions for single web replica or move the relevant coordination state to shared storage before scale-out.
+Fix: keep quarantine or harden writes before integration with temp files, `lstat`/realpath checks, and symlink tests.
 
-### AGG-C12-29 - Public privacy guards are alias-key based, not column-origin based
+### AGG-C14-34 - Embedding bootstrap retry can outlive restore quiescence
 
-Severity: Medium. Confidence: Medium. Status: Risk.
-Agents: architect.
+Severity: Medium. Confidence: Medium. Agents: debugger.
 
-Files: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, privacy tests.
+Files: `apps/web/src/lib/image-queue.ts:327-425`, `apps/web/src/lib/image-queue.ts:951-956`, `apps/web/src/lib/image-queue.ts:1035-1063`, `apps/web/src/app/[locale]/admin/db-actions.ts:367-385`, `apps/web/src/lib/restore-maintenance.ts:21-55`.
 
-The compile-time privacy guard protects selected object keys, but a future raw SQL alias or computed field can obscure sensitive column origin.
+The bootstrap retry root promise is fire-and-forget until per-row tasks are registered, so restore quiescence may miss it before it begins writes.
 
-Fix: add source/AST tests for sensitive column references in public selectors or centralize public field construction around safe schema helpers.
+Fix: track the bootstrap root promise in queue side effects or a dedicated state slot that restore quiescence awaits; re-check maintenance close to insert.
 
-### AGG-C12-30 - Browser and Lightroom upload paths duplicate ingest transaction boundaries
+### AGG-C14-35 - CLIP spec uses broad `./data/models/` path in some shipped sections
 
-Severity: Medium. Confidence: High. Status: Confirmed architectural risk.
-Agents: architect.
+Severity: Low. Confidence: Medium. Agents: document-specialist.
 
-Files: `apps/web/src/app/actions/images.ts:114`, `apps/web/src/app/api/admin/lr/upload/route.ts:62`.
+Files: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:24`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:34`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:41`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:72`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:137`, `apps/web/src/lib/clip-paths.ts:48-65`.
 
-Browser and LR uploads duplicate topic validation, locks, disk checks, HDR/GPS handling, DB insert, queue snapshots, audit, and revalidation.
+The shipped CLIP design spec inconsistently says `./data/models/` while implementation/runbooks use `data/models/clip`.
 
-Fix: extract a shared ingest service with route/action adapters so parity is enforced in one implementation.
+Fix: update shipped-status sections to consistently say `data/models/clip`.
 
-### AGG-C12-31 - Quarantined local storage backend still maps `original/` under public upload root
+### AGG-C14-36 - Root layout hard-codes LTR despite future-RTL comment
 
-Severity: Medium. Confidence: High. Status: Risk, not live path.
-Agents: architect.
+Severity: Low. Confidence: High. Agents: designer.
 
-Files: `apps/web/src/lib/storage/local.ts:130`, `apps/web/src/lib/upload-paths.ts:25`, `CLAUDE.md`.
+Files: `apps/web/src/app/[locale]/layout.tsx:94-100`.
 
-The quarantined storage abstraction refuses public URLs for `original/*`, but if wired later it would still write those bytes under the public upload tree.
+The document direction is hard-coded `ltr` while the nearby comment implies future RTL readiness.
 
-Fix: keep storage quarantined or change original storage to a private root before integration; add tests that `original/*` cannot resolve under public uploads.
+Fix: derive direction from locale or update the comment to state RTL is out of scope.
 
-### AGG-C12-32 - Semantic search can materialize an oversized body without `Content-Length`
+### AGG-C14-37 - Photo-page swipe listeners may intercept gestures outside media
 
-Severity: Medium. Confidence: Medium. Status: Likely.
-Agents: debugger.
+Severity: Low-medium. Confidence: Medium. Agents: ui-ux-designer-reviewer.
 
-Files: `apps/web/src/app/api/search/semantic/route.ts:147`, `apps/web/src/app/api/search/semantic/route.ts:212`.
+Files: `apps/web/src/components/photo-navigation.tsx:47-60`, `apps/web/src/components/photo-navigation.tsx:131-133`.
 
-The semantic route caps declared `Content-Length`, but when the header is absent and transfer is not chunked, the route can read a too-large body before the JSON-size guard catches it.
+Global `window` touch listeners can call `preventDefault()` after detecting horizontal movement, even if the gesture starts over controls/panels.
 
-Fix: read with a bounded stream/parser or reject missing length for this public JSON endpoint unless transfer semantics are explicitly safe.
+Fix: scope swipe handling to the photo media region or ignore gestures starting in controls/dialogs/sheets/scrollable metadata.
 
-### AGG-C12-33 - Florence caption-generator comments say `onnxruntime-node` still needs to be added
+### AGG-C14-38 - README PWA offline fallback claim is too broad
 
-Severity: Low. Confidence: High. Status: Confirmed docs/comment drift.
-Agents: document-specialist.
+Severity: Low. Confidence: Medium-high. Agents: product-marketer-reviewer.
 
-Files: `apps/web/src/lib/caption-generator.ts`, `CLAUDE.md:540`, `apps/web/package.json`.
+Files: `README.md:38`, `apps/web/public/sw.template.js:7-18`, `apps/web/public/sw.template.js:62-66`, `apps/web/public/sw.template.js:297-398`.
 
-Comments say `onnxruntime-node` needs adding, while the CLIP dependency path already installs it.
+README says offline HTML fallback, but implementation is a 24-hour fallback for previously visited eligible public HTML, with admin/share/smart/group/map bypasses.
 
-Fix: update the comments to distinguish future caption work from already-present CLIP runtime dependencies.
+Fix: qualify the README claim.
 
-### AGG-C12-34 - CLAUDE base-URL prose overstates `siteConfig.url` / `BASE_URL` matching
+### AGG-C14-39 - Firefox color/HDR copy blames the wrong capability layer
 
-Severity: Low. Confidence: High. Status: Confirmed docs drift.
-Agents: document-specialist.
+Severity: Low. Confidence: Medium. Agents: product-marketer-reviewer.
 
-Files: `CLAUDE.md:93`, `CLAUDE.md:636`, `apps/web/src/lib/constants.ts:24`, `apps/web/scripts/ensure-site-config.mjs`.
+Files: `apps/web/messages/en.json:739-740`, `apps/web/messages/ko.json:739-740`, `CLAUDE.md:368-375`.
 
-Docs imply `BASE_URL` must match `siteConfig.url`, but runtime/build behavior uses a fallback/override contract.
+UI copy says Firefox does not support the `color-gamut` media query, while docs say Firefox parses it but reports false because wide-gamut rendering is not implemented.
 
-Fix: rewrite the prose to the actual effective-base-url behavior and any production constraints.
+Fix: reword both locales to a more precise detection/support statement.
 
-### AGG-C12-35 - Privacy test comment points at an obsolete `data.ts` line range
+## Risks Needing Manual Validation Or Explicit Deferral
 
-Severity: Low. Confidence: High. Status: Confirmed docs/test drift.
-Agents: document-specialist.
+### AGG-C14-R01 - Listing/search SQL needs production-scale evidence
 
-Files: `apps/web/src/__tests__/privacy-fields.test.ts`.
+Severity: Medium at large scale. Confidence: Medium. Agents: critic, perf-reviewer.
 
-The comment references a stale `data.ts` line range.
+Files: `apps/web/src/lib/data.ts:878-907`, `apps/web/src/lib/data.ts:1438-1453`, `apps/web/src/lib/data.ts:1482-1555`, `apps/web/src/db/schema.ts:115-117`.
 
-Fix: remove brittle line references or update them to semantic references.
+Validate with `EXPLAIN ANALYZE` on production-sized data for home/topic/tag/smart collection/search paths before deciding on count/index/search-index changes.
 
-### AGG-C12-36 - Nginx `X-Forwarded-Host` docs/config drift
+### AGG-C14-R02 - Admin/origin/browser E2E coverage is environment-gated
 
-Severity: Low. Confidence: Medium. Status: Risk.
-Agents: document-specialist.
+Severity: Medium if CI lacks seeded lanes. Confidence: High for gating. Agents: critic, verifier, designer, ui-ux-designer-reviewer.
 
-Files: `apps/web/nginx/default.conf`, `CLAUDE.md`.
+Files: `apps/web/e2e/admin.spec.ts:7-12`, `apps/web/e2e/origin-guard.spec.ts:29-77`.
 
-Docs require proxies to overwrite forwarded host headers, but the shipped catch-all config does not set `X-Forwarded-Host`.
+Local review hit `ECONNREFUSED 127.0.0.1:3306`; data-backed public pages and protected admin browser flows need seeded DB/credentials validation.
 
-Fix: align the nginx config and docs, or document that an upstream edge is responsible for that header.
+### AGG-C14-R03 - Trusted-proxy/single-instance topology must be validated
 
-### AGG-C12-37 - Privacy page nests a second `main` landmark
+Severity: High if violated. Confidence: High for repo assumption. Agents: security-reviewer, architect, critic.
 
-Severity: Low. Confidence: High. Status: Confirmed.
-Agents: designer.
+Files: `CLAUDE.md:227-230`, `apps/web/docker-compose.yml:3-27`, `apps/web/src/lib/restore-maintenance.ts:1-55`, `apps/web/src/lib/image-queue.ts:76-325`, `apps/web/src/lib/rate-limit.ts:75-119`, `apps/web/src/lib/data.ts:75-150`.
 
-Files: `apps/web/src/app/[locale]/(public)/layout.tsx`, `apps/web/src/app/[locale]/(public)/privacy/page.tsx`.
+The app remains correct only under one active web process with trusted proxy headers. Validate deployment and document/guard against scale-out until process-local state moves to shared storage.
 
-Browser evidence on `/en/privacy` showed a nested `<main>` landmark inside the public layout's main landmark, creating redundant landmarks for assistive technology.
+### AGG-C14-R04 - SQL backups are intentionally plaintext and DB-only
 
-Fix: change the privacy page wrapper to `section`/`article` or make the layout/page landmark ownership singular.
+Severity: Low-Medium depending on host controls. Confidence: High. Agents: security-reviewer.
 
-### AGG-C12-38 - Mobile info sheet likely overstates modality in peek state
+Files: `CLAUDE.md:209-210`, `apps/web/src/app/[locale]/admin/db-actions.ts:140-178`, `apps/web/src/app/api/admin/db/download/route.ts:21-101`.
 
-Severity: Medium. Confidence: Medium. Status: Likely.
-Agents: designer.
+Validate host/offsite encryption and pair DB dumps with filesystem snapshots for full recovery.
 
-Files: `apps/web/src/components/photo-viewer.tsx`, mobile info sheet/dialog components.
+### AGG-C14-R05 - Admin authorization is all-root by design
 
-The mobile photo info bottom sheet appears to expose modal/dialog semantics while in a peek/non-modal state, risking focus-trap and screen-reader mismatch.
+Severity: Medium if admins are not equally trusted. Confidence: High. Agents: security-reviewer.
 
-Fix: split peek versus expanded modal semantics, with correct `aria-modal`, focus handling, and escape/back behavior.
+Files: `README.md:40`, `CLAUDE.md:229`, `apps/web/src/app/actions/admin-users.ts:75-82`, `apps/web/src/app/[locale]/admin/db-actions.ts:121-133`.
 
-### AGG-C12-39 - Lightroom wording implies an included publish plugin
+Validate that every admin account is fully trusted; otherwise plan roles/capabilities.
 
-Severity: Medium. Confidence: High. Status: Confirmed product-copy drift.
-Agents: product-marketer-reviewer.
+### AGG-C14-R06 - Historical secrets need operator rotation validation
 
-Files: `README.md`, `CLAUDE.md:152`, LR token/admin upload docs.
+Severity: Medium if historical examples were reused. Confidence: Unknown for production. Agents: security-reviewer.
 
-User-facing wording can imply GalleryKit ships a Lightroom Classic publish plugin, while the repo exposes a PAT upload endpoint and token management rather than a bundled plugin.
+Files: `apps/web/.env.local.example:19-30`, `CLAUDE.md:80-85`.
 
-Fix: clarify "Lightroom-compatible upload API/token support" unless and until a plugin is shipped.
+Confirm production secrets were rotated away from historical examples.
 
-### AGG-C12-40 - Firefox display-detection and self-hosting nginx copy can mislead operators/users
+### AGG-C14-R07 - Real CLIP production/offline suites are skipped by default
 
-Severity: Low. Confidence: Medium-High. Status: Confirmed/risk docs drift.
-Agents: product-marketer-reviewer.
+Severity: Medium. Confidence: High. Agents: test-engineer, verifier, product-marketer-reviewer.
 
-Files: `README.md`, `CLAUDE.md`, `apps/web/nginx/default.conf`.
+Files: `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`, `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`, `.github/workflows/quality.yml:66-80`, `apps/web/src/app/api/search/semantic/route.ts:248-283`.
 
-Firefox display-copy should match the documented browser matrix, and self-hosting nginx guidance points at a config with production-domain assumptions.
+Add a seeded scheduled/manual CI lane for real CLIP offline load/ranking, and manually validate live demo semantic/similar after deploy/config changes.
 
-Fix: align Firefox limitations with the browser matrix and make nginx self-hosting instructions explicit about domain/TLS/proxy assumptions.
+### AGG-C14-R08 - Semantic/similar brute force and inference waiter limits need load evidence
 
-## Prompt 1 Completion
+Severity: Medium. Confidence: Medium. Agents: perf-reviewer.
 
-Every requested reviewer perspective completed and wrote a per-agent review file. This aggregate dedupes their findings while preserving the per-agent files as provenance.
+Files: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:261-305`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-170`, `apps/web/src/lib/clip-model.ts:53-70`.
+
+Load-test scan limits and add bounded CLIP admission/backpressure before raising limits.
+
+### AGG-C14-R09 - Infinite masonry retains every loaded card
+
+Severity: Medium. Confidence: High. Agents: perf-reviewer.
+
+Files: `apps/web/src/components/home-client.tsx:124-130`, `apps/web/src/components/load-more.tsx:41-96`, `apps/web/src/components/home-client.tsx:286-360`.
+
+Consider virtualization/windowing after a threshold for very long browsing sessions.
+
+### AGG-C14-R10 - Non-sargable timeline/search/smart predicates are scale-sensitive
+
+Severity: Low-Medium. Confidence: High. Agents: perf-reviewer, debugger.
+
+Files: `apps/web/src/lib/data-timeline.ts:97-207`, `apps/web/src/lib/data.ts:1537-1613`, `apps/web/src/lib/smart-collections.ts:218-264`.
+
+Validate under different `TZ` and production-sized data; use sargable date ranges/generated columns or proper search indexes if confirmed.
+
+### AGG-C14-R11 - Service-worker image freshness adds one HEAD RTT per warm cached image
+
+Severity: Low. Confidence: High. Agents: perf-reviewer.
+
+Files: `apps/web/public/sw.template.js:31-38`, `apps/web/public/sw.template.js:227-260`, `apps/web/src/lib/serve-upload.ts:20-80`.
+
+Measure warm-cache waterfalls before changing; consider coalescing/versioned URLs if it becomes visible.
+
+### AGG-C14-R12 - Topic slug is mutable natural key with manual rename fan-out
+
+Severity: Medium. Confidence: High. Agents: architect.
+
+Files: `apps/web/src/db/schema.ts:4-33`, `apps/web/src/db/schema.ts:239-249`, `apps/web/src/app/actions/topics.ts:255-339`, `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1-23`.
+
+Plan a structural migration to immutable topic IDs or `ON UPDATE CASCADE`; keep registry tests until then.
+
+### AGG-C14-R13 - Migration runner cannot detect live schema drift after hashes are recorded
+
+Severity: Medium. Confidence: Medium. Agents: architect.
+
+Files: `apps/web/drizzle/meta/_journal.json:47-64`, `apps/web/scripts/migrate.js:748-808`, `CLAUDE.md:421-427`.
+
+Add read-only schema-shape postconditions if operator drift has been observed.
+
+### AGG-C14-R14 - Historical archived docs may contain stale recommendations
+
+Severity: Low. Confidence: Medium. Agents: document-specialist.
+
+Files: `.context/**`, `plan/**`.
+
+Treat archived plans/reviews as historical unless linked from active docs.
+
+### AGG-C14-R15 - Some advanced env knobs are intentionally undocumented
+
+Severity: Low. Confidence: Medium. Agents: document-specialist.
+
+Files: `apps/web/.env.local.example`, related scripts/libs.
+
+Revisit only if advanced/test-only knobs become supported operator controls.
+
+### AGG-C14-R16 - OG/social cards need deployed validator coverage
+
+Severity: Low. Confidence: Medium. Agents: product-marketer-reviewer.
+
+Files: `apps/web/src/app/[locale]/(public)/page.tsx:61-123`, `apps/web/src/app/api/og/route.tsx:33-224`, `apps/web/src/app/api/og/photo/[id]/route.tsx:38-299`.
+
+Validate home/topic/photo OG URLs with social-card validators after deploy.
+
+### AGG-C14-R17 - PWA install/offline behavior needs browser smoke coverage
+
+Severity: Low. Confidence: Medium. Agents: product-marketer-reviewer.
+
+Files: `apps/web/src/app/manifest.ts:6-52`, `apps/web/public/sw.template.js:370-403`.
+
+Run production-build installability/offline smoke for eligible and bypassed routes.
+
+## Verified No-Finding Summaries
+
+- Security-reviewer found no confirmed or likely vulnerabilities and passed lint/typecheck/security gate subsets, `npm audit`, and targeted security tests.
+- Verifier found no confirmed correctness findings, with the local E2E/MySQL blocker recorded above.
+- Tracer found no confirmed/likely defects beyond the similar-photo visibility risk promoted by debugger.

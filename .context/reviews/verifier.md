@@ -1,94 +1,98 @@
-# Verifier Review - Cycle 13
+# Verifier Review - Cycle 14
 
-Date: 2026-06-29
-Role: verifier subagent, evidence-based correctness check against docs, tests, and code contracts
-Scope: `/Users/hletrd/flash-shared/gallery` on `master` at `b269a36b`
+Date: 2026-06-30
+Role: cycle-14 verifier, evidence-based correctness check
+Scope: `/Users/hletrd/flash-shared/gallery` current `HEAD` only
+HEAD: `c2da917d0fe9620bcbef3897570591080445592c`
 Constraint: review artifact only. No production code edited.
 
-## Inventory
+## Inventory Built Before Inspection
 
-Reviewed the repo surfaces that carry explicit behavior claims:
+I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the current tracked repo before inspecting behavior.
 
-- Governing docs/contracts: `AGENTS.md` from the prompt, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
-- Runtime/deploy/config: `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`.
-- Routes/actions: committed `apps/web/src/app/**/route.{ts,tsx}` files, public pages under `app/[locale]/(public)`, server actions under `apps/web/src/app/actions/`, and `apps/web/src/app/[locale]/admin/db-actions.ts`.
-- Data/privacy/search: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `search-enrichment-fields.ts`, `smart-collections.ts`, feed helpers, sitemap/robots helpers, and public semantic/similar search routes.
-- Image/color/upload pipeline: `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, `gallery-config*.ts`, `settings-hash.ts`, color/ICC/gain-map/GPS helpers, upload serving, and backfill scripts.
-- Auth/security/rate-limit: `proxy.ts`, `session.ts`, `api-auth.ts`, `request-origin.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, admin token helpers, CSP helpers, and scanner scripts.
-- Schema/migrations/scripts: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`, build/service-worker scripts, backup/restore scripts.
-- Tests/contracts sampled: auth/origin/rate-limit scanners, privacy guards, migration journal/reconcile tests, nginx/Next config tests, service-worker cache/template contracts, semantic/similar search, OG route contracts, and image/upload source contracts.
+Tracked inventory:
 
-Excluded as non-source review inputs: `node_modules/`, `.git/`, `.claude/worktrees/`, `.next/`, generated build/test output, runtime upload/data/resource directories, local `.env*`, screenshots/binary fixtures, and transient review inventories.
+- Total tracked files: 2551.
+- Current implementation and invariant surfaces inventoried: 77 `apps/web/src/app` files, 96 `apps/web/src/lib` files, 57 component files, 27 scripts, 31 migration files, 9 public assets/templates, 27 config/deploy files, 265 unit/source-contract tests, and 8 e2e files.
+- Review focus set from stated invariants: auth/session/origin gates, public API rate limits, server-action scanners, schema/migration/reconcile, public/admin privacy field separation, upload/original-file privacy, image/color/HDR pipeline, CLIP semantic search, service worker caching, deploy/runtime persistence, Docker prune guarantees, and build/test gates.
+- Historical `.context/` and `plan/` files were inventoried and used only as hints/regression context; implementation claims were validated against current code, tests, and command output.
+
+Relevant current-source files skipped: none intentionally. Excluded from behavior inspection: binary fixtures, screenshots, generated build output, `.git`, `node_modules`, local env/secrets, runtime upload/data directories, and historical review artifacts that do not encode current runtime behavior.
 
 ## Findings
 
-### LOW / Confirmed / High Confidence - Service worker admin bypass omits unlocalized `/admin` routes
+No confirmed correctness findings were identified in this pass.
 
-**Evidence**
-
-- `CLAUDE.md` defines the service-worker contract: `public/sw.template.js` is the shipped source and `lib/sw-cache.ts` is the unit-tested reference (`CLAUDE.md:408-409`). The HTML offline fallback must exclude admin routes and admin-rendered pages (`CLAUDE.md:411`).
-- The shipped template repeats the narrower claim that `/admin/*` and `/api/admin/*` always bypass to network (`apps/web/public/sw.template.js:18`), and the fetch handler relies entirely on `isAdminRoute(pathname)` for that bypass (`apps/web/public/sw.template.js:382-383`).
-- The actual template predicate only matches locale-prefixed admin paths and admin API paths: `^/[a-z]{2}(-[A-Z]{2})?/admin` or `^/api/admin` (`apps/web/public/sw.template.js:42-46`). It does not match `/admin` or `/admin/dashboard`.
-- The unit-tested reference implementation has the same omission: its comment says it matches `/[locale]/admin/* and /api/admin/*`, and the regexes match only those two shapes (`apps/web/src/lib/sw-cache.ts:54-62`).
-- If the predicate misses an HTML admin route, the request falls through to `networkFirstHtml` (`apps/web/public/sw.template.js:395-397`). That path caches any `networkResponse.ok` response unless `x-gk-admin-render` is set (`apps/web/public/sw.template.js:296-315`).
-- Existing tests pass but do not cover the missing route shape. `sw-cache.test.ts` asserts `/en/admin/`, `/ko/admin/settings`, and `/api/admin/db`, but has no `/admin` or `/admin/dashboard` case (`apps/web/src/__tests__/sw-cache.test.ts:47-71`). `sw-template-contract.test.ts` checks the marker gate and revocable-share bypasses, but does not assert the unlocalized admin bypass (`apps/web/src/__tests__/sw-template-contract.test.ts:28-80`).
-- Other source contracts acknowledge unlocalized admin paths. `proxy.ts` treats `/admin/...` as protected default-locale admin subroutes (`apps/web/src/proxy.ts:65-72`), and `robots.ts` disallows `/admin` and `/admin/` alongside localized admin paths (`apps/web/src/app/robots.ts:4-8`).
-
-**Failure scenario**
-
-An unauthenticated browser with the service worker installed requests `/admin/dashboard` or `/admin` while online. Because the service worker does not classify that URL as admin, the request can enter the HTML offline fallback path. If the server returns an OK login/redirect target without `x-gk-admin-render`, the service worker can cache that HTML under the admin URL for up to 24 hours. Later offline visits receive cached admin/login HTML instead of the documented "always bypass to network" behavior. Authenticated admin page bodies are still protected by the proxy-set `x-gk-admin-render` marker (`apps/web/src/proxy.ts:120-129`), so this is a contract/freshness bug rather than a confirmed sensitive-data leak.
-
-**Suggested fix**
-
-Add an explicit `^/admin(/|$)` match to both `apps/web/public/sw.template.js` and `apps/web/src/lib/sw-cache.ts`, then regenerate and commit `apps/web/public/sw.js` as required by `CLAUDE.md:408`. Add tests for `/admin` and `/admin/dashboard` in `sw-cache.test.ts`, and add a template contract that pins the shipped service worker admin predicate against the same unlocalized paths.
-
-## Likely Issues
-
-No additional likely correctness issues were found with enough evidence to report as actionable in this pass.
+No likely implementation issues had enough evidence to report as actionable.
 
 ## Risks Needing Manual Validation
 
-- After fixing the service-worker predicate, validate in a real browser/PWA session that `/admin`, `/admin/`, and `/admin/dashboard` bypass the service worker while public gallery/photo pages still populate and serve the intended offline-only HTML fallback. The current unit/source tests do not exercise browser redirect caching behavior end to end.
+### Risk 1 - Browser e2e flow was not freshly proven locally
+
+- Severity: Medium
+- Confidence: High
+- Status: Risk needing manual validation
+- Evidence:
+  - `apps/web/playwright.config.ts:78-85` starts a local web server for `npm run test:e2e`.
+  - `apps/web/scripts/run-e2e-server.mjs:75-78` runs `npm run init`, then seeds e2e data before building/serving.
+  - The local e2e run failed before tests started because `scripts/migrate.js` could not connect to MySQL at `127.0.0.1:3306`.
+- Concrete failure scenario:
+  - A regression in browser-only behavior, hydration, navigation, or admin flows could remain undetected by this verifier run because Playwright did not reach the app.
+- Concrete fix:
+  - Run `npm run test:e2e --workspace=apps/web` in an environment with the expected MySQL test database available, or provide an `E2E_ENV_FILE`/`E2E_BASE_URL` target that satisfies the guarded remote-e2e config.
 
 ## Confirmed Correct Invariants
 
-- Admin authentication is layered: middleware only performs the coarse admin cookie/path guard, while protected layouts/actions/API wrappers still verify sessions or admin tokens (`CLAUDE.md:192-195`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`).
-- Public privacy selectors omit GPS, original filenames, user filenames, color/HDR internals, blur placeholders, and processing/admin-only fields; the symmetric privacy guard and fixture cover the omission list (`apps/web/src/lib/data.ts:368-507`, `apps/web/src/__tests__/privacy-fields.test.ts:7-132`).
-- Public search and semantic enrichment use the public select/enrichment fields rather than admin selects, and semantic routes apply same-origin/content-type/body/rate-limit gates before expensive work (`apps/web/src/app/api/search/semantic/route.ts:106-246`, `apps/web/src/app/api/search/similar/[id]/route.ts:60-170`).
-- Upload serving rejects original files, validates derivative directories/extensions, rejects symlinks, checks realpath containment, versions ETags with `IMAGE_PIPELINE_VERSION`, and supports conditional/HEAD handling (`apps/web/src/lib/serve-upload.ts:15-17`, `142-184`, `191-259`).
-- Deploy/disk hygiene matches the documented single-host posture: bind-mounted data/uploads/resources are preserved, Docker prune runs after `up -d`, and `volume prune` is used without `-a` (`apps/web/docker-compose.yml:1-27`, `apps/web/deploy.sh:31-58`).
-- Migration journal/reconcile tests and scanner gates cover the current schema and auth/origin/rate-limit contracts sampled in this pass.
+- Security scanners passed:
+  - `npm run lint:api-auth --workspace=apps/web` passed; both admin API routes are wrapped by `withAdminAuth`.
+  - `npm run lint:action-origin --workspace=apps/web` passed; mutating server actions return early on `requireSameOriginAdmin()` or carry explicit read-only/public-rate-limit exemptions.
+  - `npm run lint:public-route-rate-limit --workspace=apps/web` passed; public mutating API routes are rate-limited or exempted.
+- Type/lint/build/unit gates passed:
+  - `npm run typecheck --workspace=apps/web` passed.
+  - `npm run lint --workspace=apps/web` passed.
+  - `npm test --workspace=apps/web` passed: 258 files passed, 2 skipped; 2386 tests passed, 4 skipped.
+  - `npm run build --workspace=apps/web` passed. Build logged the documented sitemap homepage-only fallback when local DB was unavailable; `apps/web/src/app/sitemap.ts:24-55` intentionally catches DB failure for prerender/build.
+- Service-worker cycle-13 finding is fixed:
+  - `apps/web/src/lib/sw-cache.ts:54-63` and `apps/web/public/sw.template.js:42-47` both match `/admin`, localized admin paths, and `/api/admin`.
+  - `apps/web/src/__tests__/sw-cache.test.ts:47-78` now covers `/admin` and `/admin/dashboard`.
+  - `npm test --workspace=apps/web -- sw-cache.test.ts sw-template-contract.test.ts` passed: 41 tests.
+- Migration journal risk is known and guarded, not a new finding:
+  - The historical non-monotonic journal block is documented in tests.
+  - `apps/web/src/__tests__/migration-journal.test.ts:76-104` enforces monotonicity for new/global entries.
+  - `apps/web/scripts/migrate.js:710-744` baselines per journal hash, and `apps/web/scripts/migrate.js:787-806` throws if Drizzle silently skips a journal hash.
+- Privacy field separation remains enforced:
+  - `apps/web/src/lib/data.ts:368-507` derives public/map select fields from admin fields and applies TypeScript guards for sensitive keys.
+  - `apps/web/src/__tests__/privacy-fields.test.ts:7-132` symmetrically asserts admin-only key differences and search enrichment omissions.
+  - `apps/web/src/lib/search-enrichment-fields.ts:29-47` has its own compile-time sensitive-key guard for semantic/similar search enrichment.
+- Recent cycle-14/15 hinted regressions are already fixed in current HEAD:
+  - GPS NaN/Infinity coordinates return null and are covered by `apps/web/src/__tests__/process-image-metadata.test.ts:167-211`.
+  - BoundedMap copy-on-read rate-limit users write back via `.set()` in `sharing.ts:40-57`, `admin-users.ts:31-44`, and `embeddings.ts:36-49`.
+  - Admin-only color fields are gated in `color-details-section.tsx:194-215` and `color-details-section.tsx:453-459`, with source-contract coverage in `color-details-section-delivered.test.ts:33-46`.
+  - LR upload disk-space check uses `stats.bavail * stats.bsize` at `apps/web/src/app/api/admin/lr/upload/route.ts:280-288`.
 
 ## Validation Evidence
 
 Commands run:
 
-- `npm run lint:api-auth --workspace=apps/web` -> passed; 2 admin API route exports OK.
-- `npm run lint:action-origin --workspace=apps/web` -> passed; mutating server actions enforce same-origin provenance or explicit exemptions.
+- `git status --short && git rev-parse HEAD` -> clean before review; HEAD `c2da917d0fe9620bcbef3897570591080445592c`.
+- `npm run lint:api-auth --workspace=apps/web` -> passed.
+- `npm run lint:action-origin --workspace=apps/web` -> passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` -> passed.
-- `npm test --workspace=apps/web -- privacy-fields.test.ts migration-journal.test.ts migration-journal-monotonicity.test.ts migrate-reconcile-coverage.test.ts nginx-config.test.ts next-config-uploads-headers.test.ts` -> 6 files passed, 93 tests passed.
-- `npm test --workspace=apps/web -- sw-cache.test.ts sw-template-contract.test.ts` -> 2 files passed, 38 tests passed. This is evidence that the current suite misses the unlocalized `/admin` bypass case.
+- `npm run typecheck --workspace=apps/web` -> passed.
+- `npm run lint --workspace=apps/web` -> passed.
+- `npm test --workspace=apps/web` -> passed: 2386 passed, 4 skipped.
+- `npm run build --workspace=apps/web` -> passed; local DB unavailable warning was the documented sitemap fallback.
+- `npm test --workspace=apps/web -- sw-cache.test.ts sw-template-contract.test.ts` -> passed: 41 tests.
+- `npm run test:e2e --workspace=apps/web` -> not completed; webServer init failed due `connect ECONNREFUSED 127.0.0.1:3306`.
 
-Not run: full `npm run lint`, full `npm run typecheck`, full `npm run build`, full `npm test`, and Playwright e2e. This was a verifier review pass with targeted gates and source-contract checks, not a complete release validation run.
+## Final Missed-Issues Sweep
 
-## Files And Regions Reviewed
+Final sweep actions:
 
-- Docs/contracts: `AGENTS.md`, `CLAUDE.md:186-228`, `CLAUDE.md:326-348`, `CLAUDE.md:406-414`, `CLAUDE.md:520-541`, `CLAUDE.md:588-597`.
-- Auth/admin/token routes: `apps/web/src/proxy.ts:52-132`, `apps/web/src/lib/session.ts:26-151`, `apps/web/src/lib/api-auth.ts:55-140`, `apps/web/src/app/actions/auth.ts:93-280`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/api/admin/db/download/route.ts`.
-- Public API/serving: `apps/web/src/app/api/search/semantic/route.ts:1-355`, `apps/web/src/app/api/search/similar/[id]/route.ts:1-235`, `apps/web/src/app/api/og/route.tsx:33-224`, `apps/web/src/app/api/og/photo/[id]/route.tsx:38-299`, `apps/web/src/app/uploads/[...path]/route.ts`, `apps/web/src/app/[locale]/uploads/[...path]/route.ts`, `apps/web/src/lib/serve-upload.ts:15-309`.
-- Public pages/actions/feeds: share pages under `s/[key]` and `g/[key]`, root/topic feed routes, `apps/web/src/app/actions/public.ts:31-439`, `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts:1-26`, `apps/web/src/lib/atom-feed.ts:21-165`.
-- Data/privacy/schema: `apps/web/src/lib/data.ts:13-507`, `apps/web/src/lib/data.ts:1462-1744`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/db/schema.ts:1-311`.
-- Image/config/deploy: `apps/web/src/lib/gallery-config-shared.ts:21-287`, `apps/web/src/lib/gallery-config.ts:34-200`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/build-sw.ts`, `apps/web/public/sw.template.js:1-402`, `apps/web/src/lib/sw-cache.ts:1-95`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`.
-- Tests/contracts: `apps/web/src/__tests__/privacy-fields.test.ts:1-132`, `apps/web/src/__tests__/sw-cache.test.ts:1-95`, `apps/web/src/__tests__/sw-template-contract.test.ts:1-180`, migration/config/scanner tests listed in validation evidence.
+- Rechecked prior verifier finding against current `sw-cache.ts`, `sw.template.js`, generated `sw.js`, and service-worker tests.
+- Rechecked current source against known risk clusters from recent plans: GPS parsing, BoundedMap rate-limit writeback, admin-only color metadata gates, LR disk-space checks, migration baselining, and public search enrichment privacy.
+- Re-ran the full unit suite, lint, typecheck, build, and custom security scanners.
+- Attempted Playwright e2e and recorded the DB-environment blocker.
+- Checked `git status --short` after validation; only this review file is modified.
 
-## Final Sweep
-
-Commonly missed checks completed:
-
-- Compared source-contract tests to the implementation they claim to lock, not just their pass/fail status.
-- Checked both the shipped service-worker template and the separate unit-tested reference copy for drift and shared omissions.
-- Re-read public GET routes even though the public-route rate-limit scanner only blocks mutating handlers.
-- Cross-checked docs against privacy/data selectors, route guards, upload serving, image pipeline versioning, deploy mounts, and migration assertions.
-- Checked locale and non-locale route variants for admin, feed, uploads, sitemap/robots, and public search surfaces.
-
-No critical, high, or medium confirmed correctness findings were identified in this pass.
+Relevant files skipped: none, aside from non-source/generated/binary/local-secret/runtime artifacts listed in the inventory.

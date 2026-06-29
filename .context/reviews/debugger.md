@@ -1,87 +1,83 @@
-# Debugger Review - Cycle 13
+# Cycle 14 Debugger Review
 
-Scope: latent runtime bugs, race regressions, edge cases, stale state, flaky browser behavior, failed deployments, queue failures, data corruption, and recovery paths in `/Users/hletrd/flash-shared/gallery`.
+Reviewed HEAD: `d821a9ab` (`master`)
 
-Constraints honored:
-- Read `AGENTS.md` and `CLAUDE.md` before reviewing code.
-- Loaded the local `code-review` skill before finalizing this artifact because the task is a comprehensive review.
-- Review-only lane: no production code edits, no deletes, and no reverts.
-- Excluded `node_modules`, `.git`, build output, runtime upload/data directories, generated traces/screenshots, and historical worktree copies from behavioral claims.
-- Existing modified review artifacts in `.context/reviews/` were left untouched.
-
-## Inventory
-
-Bug-prone flow inventory built and inspected:
-- Restore/deploy/schema: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/scripts/migrate.js`, `apps/web/scripts/entrypoint.sh`, `apps/web/deploy.sh`, Drizzle migrations/journal.
-- Upload/processing/queue: browser upload action, Lightroom upload API, upload tracker/contract lock, original/derivative path helpers, image processor, foreground image queue, queue shutdown, admin backfill runner.
-- Public APIs/data state: text search/load more, semantic/similar search APIs, public share pages/actions, analytics view writes, shared-group view buffering, data-layer selectors/privacy omissions.
-- Runtime/browser surfaces: service worker template, upload serving route and shared file server, client search/load-more/home state machines, startup instrumentation and graceful shutdown.
-- Operational config: root/web package manifests, Docker/compose/nginx config, Next config, scripts used by deploy/test/migration.
-
-Review method:
-- Source-first review with line-numbered citations from current files.
-- Cross-file validation of locks, maintenance state, queue quiescing/resume, body-size guards, cleanup/finally paths, cache/state lifetimes, and deployment failure behavior.
-- Final sweep focused on commonly missed paths: nonzero child-process exits, partially completed imports, direct-to-Node bypasses of nginx assumptions, process-local state, client aborts, symlink/path traversal, migration postconditions, and shutdown drains.
+Scope: latent-bug review of current HEAD only. I read `AGENTS.md` and `CLAUDE.md` first, then built a bug-relevant inventory from `git ls-files` (2551 tracked files): app/runtime routes and actions, image processing/queue/restore code, data access, schema/migrations, deployment/config, scripts, and tests that encode behavior. I excluded historical `.context/reviews/*` and plan archives from line-by-line runtime review because they are not executable production surface, but I kept their project constraints in view through `AGENTS.md`/`CLAUDE.md` and static repository sweeps.
 
 ## Confirmed Issues
 
-### DBG13-01 - Failed mysql restore can clear maintenance after a partial database import
+### 1. Similar-photo lookup trusts embedding rows before checking image visibility
 
-Severity: High  
-Confidence: High  
-Status: Confirmed issue
+- Severity: Medium
+- Confidence: Medium
+- Files/regions:
+  - `apps/web/src/app/api/search/similar/[id]/route.ts:118-125`
+  - `apps/web/src/app/api/search/similar/[id]/route.ts:145-150`
+  - `apps/web/src/app/api/search/similar/[id]/route.ts:198-205`
+  - `apps/web/src/db/schema.ts:280-295`
+  - `apps/web/drizzle/0012_image_embeddings.sql:5-12`
 
-Code regions:
-- `apps/web/src/app/[locale]/admin/db-actions.ts:367-380` flushes shared view counts, quiesces the image queue, runs `runRestore(...)`, then records `restoreLifecycleVerified` and `keepRestoreMaintenance` only from the returned result.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:381-389` ends restore maintenance and resumes the image queue whenever the restore succeeded OR `keepRestoreMaintenance` is false.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:526-539` starts the `mysql` CLI and streams the validated dump into it.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:544-552` handles read/stdin/spawn failures after the import process has been created by resolving `{ success: false, error }` without `keepMaintenance: true`.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:572-600` treats `mysql` exit code `0` specially and keeps maintenance only when post-restore migrations fail; a nonzero mysql exit resolves `{ success: false, error: ... }` without `keepMaintenance: true`.
+The route loads the target vector directly from `image_embeddings` by `image_id` and `model_version`, then scans all production embeddings. It only checks `images.processed = true` later during enrichment of result rows. That means the target image itself is never required to be public/processed, and stale or inconsistent embedding rows can win `topK` before being dropped by the later enrichment query.
 
-Concrete failure scenario:
-1. An admin uploads a plausible SQL dump that passes header and dangerous-SQL scanning.
-2. The dump starts importing through `mysql`; early statements may already drop, recreate, truncate, or insert rows in application tables.
-3. The mysql process exits nonzero because the dump is truncated, has a late incompatible statement, hits disk/connection failure, or otherwise fails after partial execution.
-4. `runRestore` returns failure without `keepMaintenance: true`.
-5. The outer `finally` sees `!keepRestoreMaintenance`, calls `endRestoreMaintenance()`, and because the queue was quiesced, calls `resumeImageProcessingQueueAfterRestore()`.
+Concrete failure scenario: after a restore, manual repair, partial backfill, or future processing retry leaves `image_embeddings` populated for an image whose `images.processed` is false, `/api/search/similar/<id>` can return a 200 for a non-public target. Separately, if many stale/unprocessed vectors rank above valid images, the route computes `topK` from stale rows and then drops them in enrichment, producing empty or underfilled results even though valid processed images exist outside the top-K cut.
 
-User-visible impact:
-The application can resume live traffic and background image work against a partially restored database. That can expose missing rows/settings, stale queue snapshots, broken shared links, inconsistent image/file references, or follow-on processing that writes into a damaged schema/data state. The post-restore migration failure path is already treated as unsafe enough to keep maintenance; the nonzero import-exit path has the same or worse data-integrity risk.
+Concrete fix: join `image_embeddings` to `images` in the target lookup and scan, and filter `eq(images.processed, true)` before decoding/scoring. The target lookup should return 404 unless the image exists and is processed. Add a route test that asserts the target lookup `.where(...)` includes the processed predicate, not just `PRODUCTION_MODEL_VERSION`.
 
-Suggested fix:
-After the mysql import process has started, fail closed. Return `keepMaintenance: true` for any nonzero mysql exit, restore stream read error, non-ignorable stdin error, or spawn/process error after the dump has been handed to mysql. Only clear maintenance after a verified full import plus successful post-restore migrations/schema health checks. Longer term, restore into a temporary database and swap only after validation, or take a verified pre-restore backup/recovery checkpoint before mutating the live database.
+### 2. Database backup creation claims header validation but only checks non-empty output
 
-Suggested regression test:
-Add a restore action/unit test around `runRestore` or the outer `restoreDatabase` flow that simulates a validated dump, a quiesced queue, and a mysql child `close` event with nonzero code. Assert the returned result has `keepMaintenance: true` and that the outer cleanup does not call `endRestoreMaintenance()` or resume the queue.
+- Severity: Low
+- Confidence: High
+- Files/regions:
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:220-236`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:456-477`
+  - `apps/web/src/lib/db-restore.ts:21-25`
+
+`dumpDatabase()` comments say it verifies the backup is non-empty and contains the expected mysqldump header, but the implementation only calls `fs.stat()` and checks `stats.size === 0`. The restore path has a real `hasPlausibleSqlDumpHeader()` check, so the two sides disagree.
+
+Concrete failure scenario: if `mysqldump` exits 0 while stdout contains non-SQL diagnostic text, a wrapper output, or otherwise corrupt non-empty content, the admin UI reports a successful backup and stores it. The failure is only discovered during a later restore attempt, which is the worst time to learn that the last backup artifact was invalid.
+
+Concrete fix: after the flush completes, read the first 256 bytes of `outputPath` and call `hasPlausibleSqlDumpHeader()` just like restore does. If it fails, delete the file and return `failedToWriteBackup`. Add a unit/source-contract test for backup-side header validation so this does not regress.
 
 ## Likely Issues
 
-No additional likely issue was promoted in this cycle. The other reviewed surfaces had explicit guards or documented tradeoffs that matched the current single-instance deployment contract.
+### 3. Embedding bootstrap retry can outlive restore quiescence
+
+- Severity: Medium
+- Confidence: Medium
+- Files/regions:
+  - `apps/web/src/lib/image-queue.ts:327-367`
+  - `apps/web/src/lib/image-queue.ts:371-425`
+  - `apps/web/src/lib/image-queue.ts:951-956`
+  - `apps/web/src/lib/image-queue.ts:1035-1063`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:367-385`
+  - `apps/web/src/lib/restore-maintenance.ts:21-55`
+
+Normal caption/embedding side effects are tracked with `trackQueueSideEffect()` and drained during restore quiescence. The bootstrap retry root promise is launched fire-and-forget at `image-queue.ts:954`, and only the per-row tasks are tracked after the bootstrap has already read config and selected rows. `quiesceImageProcessingQueueForRestore()` drains `state.sideEffects`, but it cannot see an in-flight bootstrap root that has not registered its row tasks yet.
+
+Concrete failure scenario: process startup schedules `bootstrapMissingActiveEmbeddings()`. Before it registers row tasks, an admin starts restore. Restore maintenance begins and the queue drains zero side effects, then starts importing SQL. The bootstrap loop can resume and attempt embedding writes during the restore window. `storeImageEmbeddingForMode()` checks `isRestoreMaintenanceActive()` before insert, but there is still a check-then-insert race between `image-queue.ts:350` and `image-queue.ts:356`.
+
+Concrete fix: track the bootstrap root promise itself in `state.sideEffects` before any config/query work starts, or add a dedicated `state.bootstrapEmbeddingRetryPromise` that quiesce awaits. Also re-check maintenance as close to the insert as possible, ideally under the same restore/upload contract lock used for processing writers. Add a restore-quiesce test where the bootstrap root is in progress but has not yet registered per-row tasks.
 
 ## Risks Needing Manual Validation
 
-### RISK13-01 - Restore partial-import behavior should be rehearsed on a disposable database
+### 4. Timeline/year grouping tests mirror timezone-dependent parsing instead of asserting calendar semantics
 
-Severity: High if reproduced  
-Confidence: Medium  
-Status: Needs manual validation
+- Severity: Low
+- Confidence: Low
+- Files/regions:
+  - `apps/web/src/lib/data-timeline.ts:235-255`
+  - `apps/web/src/app/[locale]/(public)/timeline/page.tsx:89-99`
+  - `apps/web/src/components/on-this-day-widget.tsx:14-23`
+  - `apps/web/src/__tests__/data-timeline.test.ts:117-170`
 
-Relevant code regions:
-- Same restore regions as `DBG13-01`.
-- `apps/web/scripts/migrate.js:787-807` has a strong postcondition for skipped Drizzle migrations, but that only runs after a mysql exit code `0`; it does not protect a failed import that already changed data.
+The code groups MySQL `DATETIME` strings using `new Date('YYYY-MM-DD HH:mm:ss').getMonth()`, and the tests duplicate that same parsing logic inline. On the current Node/V8 runtime this likely works as local-time parsing, but `YYYY-MM-DD HH:mm:ss` is not the same as an ISO timestamp with an explicit timezone, and the tests would pass even if the intended calendar-month semantics diverge from SQL `MONTH(capture_date)`.
 
-Validation scenario:
-On a disposable database, run the admin restore flow with a dump that begins with valid app-table mutations and then contains a late syntax error or truncated INSERT. Confirm whether mysql leaves partial changes visible, whether the app exits maintenance, and whether queue processing resumes. This validates the operational blast radius, not the code defect itself.
+Concrete failure scenario to validate: run the timeline/year-review tests under a different `TZ` and with boundary values such as `2026-03-01 00:30:00` and `2026-12-31 23:30:00`. If the rendered grouping ever differs from MySQL `MONTH(capture_date)`, photos can appear in the wrong month section or the on-this-day widget can show the wrong year around timezone boundaries.
 
-## Coverage Evidence
+Concrete fix if reproduced: parse calendar fields from the stored string (`slice(0, 4)`, `slice(5, 7)`, `slice(8, 10)`) or group in SQL with `MONTH()`/`YEAR()` and keep JS out of timezone interpretation. Replace inline test clones with tests against the exported functions/helpers and include boundary cases.
 
-Findings intentionally not reported:
-- Deploy script disk cleanup was inspected and still runs prune after `up -d`, with bind-mounted data and `docker volume prune` without `-a`.
-- Migration bootstrap/postcondition logic was inspected; current code fails deploy when committed journal hashes are missing after Drizzle migration.
-- Upload serving route validates allowed directories/extensions/segments, rejects symlink escapes with `lstat` + `realpath`, short-circuits `HEAD`, and destroys streams on client abort.
-- Image queue and backfill paths were inspected for per-image advisory locks, deleted-mid-processing cleanup, permanent failure state, retry counters, restore quiesce/resume, and bootstrap recovery. No additional concrete queue corruption issue was confirmed.
-- Browser search/load-more/home state machines were checked for stale response guards, abort cleanup, mounted checks, and query-version isolation. No additional concrete flaky-browser issue was confirmed.
+## Final Missed-Issues Sweep
 
-Verification performed:
-- Static/code review only; no production code was modified and no test suite was run.
-- Fresh line-numbered source inspection was collected for restore, migration, deploy, startup, DB pool, upload serving, service worker, queue/backfill, upload, search, and public data paths.
+Final sweeps covered route exports/auth/rate-limit annotations, raw SQL and file I/O, spawn/backup/restore paths, upload serving, semantic search, queue/restore interactions, migrations/schema, env parsing, JSON parsing, timers, dangerous HTML injection sites, and tests that source-lock behavior. I did not find additional confirmed runtime issues in those sweeps.
+
+Skipped relevant files: none intentionally. Non-runtime historical review/plan files under `.context/` were not line-read as production bug surface; the executable/runtime inventory was covered by direct inspection plus repository-wide static sweeps.

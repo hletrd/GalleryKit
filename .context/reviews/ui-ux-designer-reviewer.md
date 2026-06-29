@@ -1,53 +1,72 @@
-# UI/UX Designer Reviewer - Cycle 11
+# UI/UX Designer Reviewer - Cycle 14
 
 Role: `ui-ux-designer-reviewer` registered at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`.
 
-Profile note: the registered local profile is BurstPick/SwiftUI-specific. This repository is GalleryKit, a Next.js photographer gallery and admin tool, so I adapted the professional creative-tool UI/UX, accessibility, interaction, and perceived-performance lens to this web gallery surface.
+Profile note: the registered local prompt is written for another app. I used only its reviewer-style intent: deep professional UI/UX critique, accessibility review, interaction-quality review, and source-backed findings. I did not apply BurstPick-specific product requirements to GalleryKit.
 
-Scope: PROMPT 1 / Cycle 11 deep review. Review artifact only. No production code edits. No deploy.
-
-Current HEAD reviewed: `36694ea1` (`docs(review): record cycle 11 debugger review`).
+Scope: independent review artifact only. No production code edits. Current HEAD reviewed: `d821a9ab`.
 
 ## Executive Summary
 
-GalleryKit remains strong for a self-hosted photographer gallery: the primary home grid, shared-group grid, photo viewer, search overlay, lightbox, mobile nav, touch-target policy, focus rings, and EN/KO message surfaces are substantially hardened. Design quality score: 8/10 for public viewing and 7/10 for admin tooling. The biggest remaining UI/UX weakness I found in this pass is that the archive surfaces (`/timeline` and `/year/[year]`) lag behind the main gallery/shared-grid interaction contracts: they lazy-load every visible photo and still build card geometry from raw dimensions without the defensive guards already added elsewhere. That creates avoidable perceived-performance and layout-reservation risk on photo-dense archive pages.
+GalleryKit has a strong baseline for a photographer-first gallery: the main masonry grid, photo viewer, lightbox, search dialog, touch-target scanning, focus-visible scanning, dark/light/OLED tokens, and EN/KO key parity are already mature. The clearest remaining UI/UX problems are concentrated in secondary or admin surfaces: the public map is visually useful but weakly exposed to keyboard/screen-reader users, several admin data tables are not wrapped for narrow screens, and settings-style admin forms are brittle under Korean copy and mobile widths.
 
-## Inventory Reviewed
+Browser validation was only partially feasible locally. The existing local dev server loaded the admin login page, but public routes rendered the app error boundary because the local database/schema state failed a topics query. I recorded that as a validation blocker, not as a confirmed product UI bug.
 
-Primary UI inventory built before findings:
+## Inventory Built Before Inspection
 
-- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared group, shared photo, photo detail, timeline, year-in-review, map, privacy, loading, and layout surfaces.
-- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected layout/loading/error, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, and analytics.
-- Shared UI under `apps/web/src/components/`: nav, search, masonry cards, tag filter/input, load-more, photo viewer, image zoom, lightbox, info bottom sheet, color details, histogram, upload, image manager, bulk edit, admin header/nav/user manager, map, footer, and shadcn/Radix primitives.
-- Design/CSS/i18n: `apps/web/src/app/[locale]/globals.css`, `apps/web/tailwind.config.ts`, `apps/web/messages/en.json`, and `apps/web/messages/ko.json`.
-- Tests/evidence: `apps/web/src/__tests__` and `apps/web/e2e`, focused on touch targets, focus rings, source contracts, map wiring, timeline/year cards, i18n, public navigation, and visual/perceived-performance coverage.
+Primary UI/UX inventory:
 
-Previous Cycle 10 UI findings were rechecked and appear fixed in current source:
+- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, smart collection, shared group, shared photo, photo detail/loading, timeline, year, map, privacy, uploads route, feed route, and locale layout.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, admin layout, dashboard, categories, tags, settings, SEO, DB, password, users, tokens, analytics, protected loading/error, and route metadata.
+- Shared UI under `apps/web/src/components/`: home grid, photo viewer, lightbox, search, map, nav, admin nav/header, image manager, upload dropzone, tag filter/input, load-more, color details, histogram, bottom sheet, EXIF/color panels, footer, and UI primitives used by these surfaces.
+- i18n and styling: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/src/app/[locale]/globals.css`, and Tailwind/Radix/shadcn component usage.
+- Regression coverage checked: `touch-target-audit.test.ts`, `focus-visible-links-scan.test.ts`, i18n key parity tests, public source-contract tests, and related UI unit/e2e files.
 
-- Shared-group links now use `aria-label={tAria('viewPhoto', { title: altText })}` at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:189-194`.
-- Shared-group dimensions now guard width/height before aspect ratio and intrinsic size at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:179-197`.
-- Image, tag, and category row actions now include target names at `apps/web/src/components/image-manager.tsx:546-552`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:109-112`, and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:251-254`.
+Approximate source surface inventoried: 99 public/admin/component files. I deeply inspected the primary public gallery/photo/share/search/map paths and the main admin login/dashboard/settings/forms/table paths. I did not line-review non-rendering API/feed/upload route handler bodies beyond inventory because they do not render UI. Protected admin browser flows were not exercised because no credentials were used.
 
 ## Browser Evidence
 
-Browser evidence used deployed `https://gallery.atik.kr` because it has representative production data. Source citations below are from current local HEAD.
+Local server status:
 
-- Mobile home `/en` at 390 x 844: no horizontal overflow; tab order starts with skip link, title, expand button, topic links, then tag chips; hidden mobile controls are not in the keyboard path while collapsed.
-- Mobile search overlay: opening search from expanded nav focuses `#search-input`; computed input and close button boxes were both 44 px high; dialog has `role="dialog"` and combobox/listbox source semantics.
-- Mobile timeline `/en/timeline`: first visible archive images were text-extractably present with `loading="lazy"` and no `fetchpriority`; first image rect was inside the first viewport at `y=400`, `w=358`, `h=238`.
-- Map `/en/map`: current production data has the no-geotagged-photos empty state, so marker/popup behavior was assessed from source. The empty state has no horizontal overflow and normal tab order.
+- An existing Next dev server was already running at `http://localhost:3001`.
+- `curl -I http://localhost:3001/en` returned HTTP 200, but the browser rendered the application error boundary.
+- Browser title at `/en`: `Error | GalleryKit`.
+- Visible error UI at `/en`: `Error / Something went wrong loading this page. / Try again / Return to Gallery`.
+- Console/server evidence: the page failed while querying `topics` with `select slug, label, order, image_filename, map_visible, (SELECT MAX(updated_at) FROM images WHERE topic=slug AND processed=true) ...`.
+- Screenshot evidence captured locally: `/tmp/gallerykit-home-error.png`.
 
-Focused source/test evidence:
+Admin login browser check:
 
-- `apps/web/src/__tests__/client-source-contracts.test.ts:130-143` locks timeline/year accessible labels, but not above-the-fold loading priority or dimension guards.
-- `apps/web/src/__tests__/grid-picture-fallback-boundary.test.ts:25-35` only asserts the delegated image fallback wrapper is present on timeline/year.
-- `apps/web/src/__tests__/map-thumb-wiring.test.ts:61-66` locks the map dynamic fallback as an ARIA status, but does not require visible loading text.
+- URL: `http://localhost:3001/en/admin`.
+- Mobile viewport: 390 x 844.
+- Visible UI: `Admin / Sign in to manage your gallery / Username / Password / Sign in`.
+- Basic keyboard path reached the submit button after username/password fields; labels and password toggle were visible in source at `apps/web/src/app/[locale]/admin/login-form.tsx:35-108`.
+- Screenshot evidence captured locally: `/tmp/gallerykit-admin-login-mobile.png`.
 
-## Findings
+## Confirmed Issues
 
-### UIUX-C11-01 - Timeline and year grids lazy-load their first visible photos
+### UIUX-C14-01 - Public map is pointer-first and has weak accessible structure
 
-Classification: Confirmed
+Severity: Medium
+
+Confidence: Medium-high
+
+Evidence:
+
+- The map page renders the map before the accessible fallback list at `apps/web/src/app/[locale]/(public)/map/page.tsx:59-79`.
+- The accessible fallback list is present, but it is after the map: links are rendered at `apps/web/src/app/[locale]/(public)/map/page.tsx:67-78`.
+- The Leaflet `MapContainer` is rendered as a visual block with inline height/width styling and no surrounding accessible name or visible keyboard instructions at `apps/web/src/components/map/map-client.tsx:107-144`.
+- Markers are wired primarily through pointer click handlers at `apps/web/src/components/map/map-client.tsx:119-126`, with photo navigation exposed inside the popup at `apps/web/src/components/map/map-client.tsx:127-141`.
+
+Failure scenario:
+
+A keyboard or screen-reader user opens `/map`. They encounter a large interactive map region before the useful list, but the map itself does not announce a clear name, purpose, keyboard model, or marker list. The fallback links are helpful, but their placement after the map makes the accessible path less discoverable. Sighted keyboard users can also get stuck understanding how to operate a third-party map before reaching the list.
+
+Concrete fix:
+
+Treat the map and list as a single accessible region. Add a visible heading or `aria-labelledby` around the map/list, add short keyboard-use text or a skip link to the photo list before the map, and either make markers reliably keyboard-labelled or explicitly present the map as visual exploration with the list as the primary accessible control. Consider disabling scroll-wheel zoom by default and adding an explicit zoom/use hint so the map does not unexpectedly capture page navigation.
+
+### UIUX-C14-02 - Several admin tables lack a narrow-screen overflow or card fallback
 
 Severity: Medium
 
@@ -55,47 +74,42 @@ Confidence: High
 
 Evidence:
 
-- Timeline cards render every `GridPicture` with `loading="lazy"` at `apps/web/src/app/[locale]/(public)/timeline/page.tsx:238-258`; there is no `fetchPriority` prop.
-- Year-in-review cards do the same at `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:196-215`.
-- The main gallery already treats above-the-fold cards as first-class LCP candidates: `apps/web/src/components/home-client.tsx:296` computes `isAboveFold`, then passes `loading={isAboveFold ? "eager" : "lazy"}` and `fetchPriority={isAboveFold ? "high" : "auto"}` at `apps/web/src/components/home-client.tsx:357-359`.
-- The shared-group grid follows the same pattern at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:182-186` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:221-222`.
-- Playwright text-extractable runtime check on production `/en/timeline` found the first eight `main img` elements all had `loading="lazy"` and no `fetchpriority`, including the first image inside the initial mobile viewport.
+- Category management renders a multi-column table directly inside a bordered wrapper without `overflow-x-auto` at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:216-261`.
+- Tag management renders its table without an overflow wrapper at `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:95-126`.
+- Admin user management renders its table inside `className="border rounded-md"` with no horizontal overflow handling at `apps/web/src/components/admin-user-manager.tsx:137-177`.
+- Dashboard image management shows the established safer pattern: the image manager is wrapped in `max-w-full ... overflow-auto` at `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`.
+- Analytics tables also use `overflow-x-auto`, for example `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:95-96`, `141-142`, `172-173`, `206-207`, and `247-248`.
 
 Failure scenario:
 
-A visitor opens `/timeline` or a year-in-review page from the nav. The first visible photo is the core content, but the browser is told it is lazy and not high priority. On mobile or a slower connection, the archive page can paint heading/chrome first and defer the photo that visually defines the page, while the home and shared-gallery surfaces do the right thing for comparable masonry grids.
+On a 320-390 px admin viewport, category rows include order, label, slug, aliases, map visibility, and actions. Without a local horizontal scroller or stacked small-screen layout, the right-side action controls can clip off-screen or force page-level horizontal scrolling. That makes edit/delete actions hard to discover and easy to miss, especially in Korean where labels and dates are longer.
 
 Concrete fix:
 
-Port the home/shared-grid above-the-fold priority logic into the archive pages. Compute the first visible count from the grid column count or use a conservative server-safe first-N heuristic (`index < 1` mobile, first 4 or 5 desktop if client measurement is unavailable). Pass `loading={isAboveFold ? "eager" : "lazy"}` and `fetchPriority={isAboveFold ? "high" : "auto"}` to `GridPicture`. Add a source-contract test beside the existing timeline/year label test so archive grids cannot regress to all-lazy loading.
+Wrap each admin table in the same local overflow pattern already used by analytics and dashboard (`rounded-md border overflow-x-auto`) and give the table a stable `min-w-*` where needed. For the category table, consider a small-screen stacked card layout because it mixes editable text, aliases, visibility, and destructive actions. Keep row action buttons visible without requiring a whole-page horizontal pan.
 
-### UIUX-C11-02 - Timeline and year card geometry lacks the dimension guard used by home/shared grids
+### UIUX-C14-03 - Settings and SEO admin headers/rows are brittle with Korean copy on mobile
 
-Classification: Risk
+Severity: Medium
 
-Severity: Low
-
-Confidence: Medium
+Confidence: Medium-high
 
 Evidence:
 
-- Timeline cards build `aspectRatio: \`${photo.width} / ${photo.height}\`` directly at `apps/web/src/app/[locale]/(public)/timeline/page.tsx:225-231`.
-- Year cards build the same raw aspect ratio at `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:183-189`.
-- The main gallery has the defensive contract at `apps/web/src/components/home-client.tsx:298-309`: `hasValidDims`, `1 / 1` fallback, and a square intrinsic reservation when either dimension is non-positive.
-- The shared-group page now has a lighter version of the same guard at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:179-197`.
-- Existing archive source contracts cover label localization at `apps/web/src/__tests__/client-source-contracts.test.ts:130-143` and delegated fallback wrapping at `apps/web/src/__tests__/grid-picture-fallback-boundary.test.ts:25-35`, but do not cover non-positive dimension handling.
+- Settings uses a single-line `flex items-center justify-between` header with a `text-3xl` title and a right-aligned save button at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:226-240`.
+- Settings has multiple long-label rows using side-by-side `flex items-center justify-between`, including metadata/display switches at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:407-443`, color/HDR settings at `553-671`, and semantic-search controls with a fixed-width `SelectTrigger className="w-[200px]"` at `658-665`.
+- SEO uses the same non-wrapping header pattern at `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:72-87`.
+- Korean messages include long explanatory settings strings, including color profile, Firefox display limitation, AVIF effort, semantic search, backfill, and analytics disclaimers in `apps/web/messages/ko.json`.
 
 Failure scenario:
 
-If a legacy, partially repaired, or hand-imported archive row ever carries width or height `0`, the timeline/year card emits invalid CSS such as `0 / 0` or a divide-by-zero-derived reservation. Browsers silently drop or misinterpret that layout hint, causing a masonry jump or collapsed reservation on archive pages. The same bad row is already protected on the main gallery and shared-group grid, so this is inconsistent resilience across equivalent photo grids.
+In Korean on a narrow phone or split-screen tablet, the title/help text and fixed-width controls compete in the same row. The save button or select can squeeze, wrap awkwardly, or push text into a hard-to-scan column. This is most likely in settings because it combines long localized explanations with switches, selects, and fixed-width controls.
 
 Concrete fix:
 
-Reuse the `hasValidDims` pattern from `HomeClient` in both archive pages: derive `cardAspectRatio = hasValidDims ? \`${photo.width} / ${photo.height}\` : '1 / 1'` and, ideally, add `containIntrinsicSize` with a square fallback. Add source coverage that timeline/year pages include `hasValidDims` or equivalent guard before constructing `aspectRatio`.
+Make settings/SEO headers responsive: `flex-wrap`, `gap-3`, `items-start`, `min-w-0` on text blocks, and `shrink-0` on the save button. For setting rows, prefer a two-row mobile layout: label/help text full width, control beneath or right-aligned on `sm:` and above. Replace fixed `w-[200px]` selects with `w-full sm:w-[200px]` inside a wrapping row.
 
-### UIUX-C11-03 - Map dynamic-loading fallback is visually blank
-
-Classification: Confirmed
+### UIUX-C14-04 - Public home empty state is not actionable for a fresh gallery
 
 Severity: Low
 
@@ -103,59 +117,126 @@ Confidence: High
 
 Evidence:
 
-- `MapLoadingFallback` receives a localized loading label, but renders only an empty bordered muted box at `apps/web/src/components/map/map-loader.tsx:24-31`.
-- The fallback has `role="status"`, `aria-live="polite"`, and `aria-label={label}` at `apps/web/src/components/map/map-loader.tsx:26-31`, so assistive tech gets the label, but sighted users see no visible "Loading map" text or spinner.
-- The map page passes the localized label at `apps/web/src/app/[locale]/(public)/map/page.tsx:59-65`.
-- The current test only asserts `role="status"` and `aria-label={label}` at `apps/web/src/__tests__/map-thumb-wiring.test.ts:61-66`; it does not assert visible loading copy.
+- The home grid empty state renders only a generic title/body when there are no images at `apps/web/src/components/home-client.tsx:424-438`.
+- The only action in that state is a clear-filter link, and it appears only when `currentTags.length > 0` at `apps/web/src/components/home-client.tsx:430-435`.
+- The admin upload area has a more useful setup-oriented empty state for missing categories at `apps/web/src/components/upload-dropzone.tsx:344-363`, but the public home page has no comparable path or explanation.
 
 Failure scenario:
 
-On a slow connection, cold browser cache, or delayed Leaflet chunk, a visitor opens the map page and sees a large 520 px blank muted rectangle. Because the fallback has no visible text, a sighted user cannot distinguish "the map is loading" from "the map failed but left an empty panel" until the dynamic import resolves or never does.
+A newly installed or private gallery with no processed public photos shows a dead-end public page: visitors see "No images" but do not know whether the gallery is empty, loading, private, still processing uploads, or filtered. A signed-in owner viewing the public page also gets no route back to upload/setup from the empty state.
 
 Concrete fix:
 
-Render the label visibly inside the fallback, for example a centered `Loader2` plus `{label}` text, while keeping `role="status"` and `aria-live`. Add a source test that `MapLoadingFallback` includes visible `{label}` or a visible text node, not just an ARIA label.
+Keep the public copy neutral, but make it more informative: "Photos will appear here once published" or similar. If the viewer is an authenticated admin, optionally include a localized link to the dashboard/upload flow. Preserve the existing clear-filter action for filtered empty states.
 
-## Information Architecture
+## Likely Issues
 
-The public IA is coherent: nav, topic pills, tag filters, masonry grid, load-more, timeline/year archives, detail viewer, lightbox, and info sheet all lead to the same photo-viewing task. The archive pages are structurally sound, but they should inherit the same grid-performance and geometry-resilience contracts as the home/shared grids because they are alternate entry points into the same photo corpus.
+### UIUX-C14-05 - Photo-page swipe handling may intercept gestures outside the photo canvas
 
-Admin IA remains dense and appropriate for a self-hosted operational tool. Cycle 10's repeated-row-action labeling issue appears closed.
+Severity: Low-medium
 
-## Visual Design
+Confidence: Medium
 
-No new confirmed theme/token contrast failure found. The UI remains photo-first, with dark/oled modes, focus-visible rings, 44 px controls, and reduced-motion overrides. The map fallback is the main visual-state weakness in this pass: it reserves the correct space but communicates loading only to assistive tech.
+Evidence:
 
-## Interaction Design
+- `PhotoNavigation` installs global `window` touch listeners at `apps/web/src/components/photo-navigation.tsx:47-60`.
+- Once horizontal movement is detected, it calls `e.preventDefault()` from the global `touchmove` handler at `apps/web/src/components/photo-navigation.tsx:131-133`.
+- The listener is attached while the photo viewer is active, not scoped to only the photo image/canvas area.
 
-Search, nav, photo viewer, lightbox, and image zoom have strong interaction contracts in current source. Browser checks confirmed the mobile nav tab order and search focus behavior. The archive-grid issue is more about perceived performance than direct manipulation: users see slower first-photo readiness on timeline/year surfaces than on the main gallery.
+Failure scenario:
 
-## Accessibility
+On mobile photo pages, a horizontal gesture over side panels, bottom sheets, controls, or browser-edge navigation may be interpreted as photo navigation instead of local scrolling or browser navigation. This is hard to prove without a populated local photo page, but the source shape is broad enough to warrant manual validation.
 
-Positive evidence:
+Concrete fix:
 
-- Search dialog uses dialog + combobox/listbox semantics and focuses the input on open.
-- Mobile nav hidden controls are not in the tab path while collapsed.
-- Timeline/year photo links use action-oriented localized labels.
-- Admin row actions now include target names.
-- Map fallback has an ARIA live status.
+Scope swipe listeners to the photo media region rather than `window`, or ignore gestures that start inside controls, panels, dialogs, bottom sheets, or scrollable metadata regions. Add a mobile browser regression check that swipes over the image navigate photos while swipes over controls/metadata do not.
 
-Remaining issue:
+### UIUX-C14-06 - Search input has a 32 px visual field inside a touch-first dialog
 
-- Map loading state needs visible feedback parity with its accessible status label.
+Severity: Low
 
-## Responsive Behavior
+Confidence: Medium
 
-Mobile home, timeline, photo, and map checks showed no horizontal overflow. Archive pages use responsive masonry columns, but their first visible image priority does not adapt to the viewport the way `HomeClient` does.
+Evidence:
 
-## i18n
+- The search dialog input uses `className="h-8 ..."` at `apps/web/src/components/search.tsx:372-403`.
+- The dialog itself, close button, semantic toggle, and result rows have stronger touch/focus treatment at `apps/web/src/components/search.tsx:351-364`, `429-496`.
+- The touch-target audit focuses primarily on interactive controls and known button/link patterns, not every text input visual height.
 
-No EN/KO key-parity problem found in this pass. The proposed map fallback fix can reuse the existing `map.loading` key already passed through `MapLoader`.
+Failure scenario:
 
-## Photographer Intent
+On mobile, the primary search field is visually smaller than GalleryKit's 44 px touch-target policy. Even if the surrounding dialog padding makes it usable, the field reads as denser and less touch-first than the rest of the interface.
 
-GalleryKit continues to respect the documented product boundary: it presents finished photos accurately and does not add culling/scoring/editing workflows. The archive findings are in service of the same photographer intent: first visible photos should appear promptly and layout should stay stable even around unusual legacy metadata.
+Concrete fix:
 
-## Final Verdict
+Use `h-11` or `min-h-11` for the mobile search combobox input, with a compact desktop override if necessary. Confirm the text baseline remains visually balanced in both English and Korean.
 
-GalleryKit helps the photographer/viewer today. The core viewing surface is polished, and the prior assistive-tech naming issues are fixed. For Cycle 11, I would prioritize bringing timeline/year grids up to the same loading-priority and geometry-resilience standard as the home/shared grids, then make the map loading state visibly self-explanatory.
+## Risks Needing Manual Validation
+
+### UIUX-C14-R1 - Public gallery/photo/share/search/map pages could not be browser-validated against local data
+
+Severity: Medium as a review blocker
+
+Confidence: High
+
+Evidence:
+
+- Local `/en` rendered the error boundary instead of the home gallery.
+- The app error text was visible in browser: `Something went wrong loading this page`.
+- The failing query involved topic loading before `HomeClient` could render. The home page depends on topic/config/image data at `apps/web/src/app/[locale]/(public)/page.tsx:149-166`.
+
+Failure scenario:
+
+This review could not validate real runtime layout, image loading, share pages, photo navigation, map markers, or search result behavior locally with representative data. Source review found issues, but browser-only problems such as visual overlap, animation jank, route-specific hydration errors, and mobile map marker behavior may remain.
+
+Concrete fix:
+
+Before the next UI/UX review cycle, provide a migrated local database or a seed fixture that lets `/en`, `/en/p/[id]`, `/en/g/[key]`, `/en/s/[key]`, `/en/search`, `/en/timeline`, `/en/year/[year]`, and `/en/map` load with representative photos, topics, tags, shares, EXIF/color data, and geotags.
+
+### UIUX-C14-R2 - Protected admin workflows need credential-backed browser validation
+
+Severity: Medium as a review gap
+
+Confidence: High
+
+Evidence:
+
+- `/en/admin` login loaded and was inspected.
+- Protected pages such as dashboard/settings/forms could only be source-reviewed because no credentials were used.
+- The protected admin layout constrains the app into `h-screen overflow-hidden` with a scrolling main region at `apps/web/src/app/[locale]/admin/layout.tsx:17-29`; this pattern needs real mobile browser validation with wrapped nav, tables, dialogs, toasts, and forms.
+
+Failure scenario:
+
+Source review can identify table and wrapping risks, but cannot prove how the protected admin shell behaves with real data, virtual keyboards, form validation errors, sticky headers, wrapped navigation, and dialogs on iOS/Android widths.
+
+Concrete fix:
+
+Run an authenticated browser pass at 390 x 844, 768 x 1024, and desktop widths covering dashboard image manager, upload, categories, tags, settings, SEO, password, users, tokens, and analytics. Include Korean locale and at least one validation-error state per form.
+
+## Positive Evidence
+
+- Reduced-motion handling is broad. Global CSS clamps animations/transitions under `prefers-reduced-motion: reduce` and suppresses hover scale at `apps/web/src/app/[locale]/globals.css:253-279`; the lightbox also uses a `matchMedia` state for slideshow/image motion at `apps/web/src/components/lightbox.tsx:81-109` and `529-537`.
+- Touch targets are actively policed. The audit scans app/component roots at `apps/web/src/__tests__/touch-target-audit.test.ts:79-83` and records known exceptions rather than silently ignoring them.
+- Focus-visible behavior is actively policed by `apps/web/src/__tests__/focus-visible-links-scan.test.ts`, and primary controls in search/photo/lightbox/admin forms include explicit focus-ring classes.
+- Search has a solid keyboard model: Cmd/Ctrl+K open/close and Escape handling at `apps/web/src/components/search.tsx:283-300`, dialog semantics at `351-364`, combobox/listbox attributes at `372-444`, and live status text at `417-427`.
+- The photo viewer exposes keyboard shortcuts and avoids editable-target conflicts at `apps/web/src/components/photo-viewer.tsx:388-419`.
+- Lightbox keyboard behavior is comprehensive, including slideshow, color pip, histogram, fullscreen, arrows, and Escape handling at `apps/web/src/components/lightbox.tsx:306-357`.
+- EN/KO message key parity was checked with a flat key comparison: both files currently expose 802 keys.
+
+## Missed-Issues Sweep
+
+Final sweep checked for:
+
+- Primary UI routes and components across public gallery, photo, share, search, map, timeline/year, admin login, dashboard, categories/tags/users, settings/SEO, tokens/password/analytics.
+- Known touch-target and focus-visible enforcement tests.
+- Reduced-motion, forced-colors, dark/light/OLED CSS support.
+- Korean/English key parity and long-copy pressure.
+- Loading/error/empty states in home, map, tokens, admin login, upload, and analytics-style tables.
+
+Skipped or not fully validated:
+
+- Browser-backed public page validation was blocked by the local database/schema error described above.
+- Browser-backed protected admin validation was blocked by authentication scope; source review covered the pages instead.
+- Non-rendering route handlers, feed/upload internals, and backend data utilities were inventoried but not line-reviewed as UI surfaces.
+
+No production code was modified for this review. Only this review artifact was written.

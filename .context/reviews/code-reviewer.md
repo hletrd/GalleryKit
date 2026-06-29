@@ -1,68 +1,82 @@
-# Code Reviewer - Cycle 13
+# Code Reviewer - Cycle 14
 
-**Date:** 2026-06-29  
-**HEAD reviewed:** `b269a36bde0fa6e22ebe6c025a41af3f4e050cc6` (`b269a36 test(auth): ✅ lock auth and ops guardrails`)  
-**Role:** code-reviewer subagent  
-**Scope:** whole current repository from code quality, logic, SOLID, maintainability, cross-file contracts, state consistency, race/shared-state hazards, error handling, and documentation/code mismatches. Review-only: no production code was changed.
+**Date:** 2026-06-30
+**HEAD reviewed:** `c2da917d0fe9620bcbef3897570591080445592c`
+**Role:** cycle-14 code-reviewer
+**Scope:** current `HEAD` only; review-only artifact. No production code was modified.
 
 ## Required Context Read
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- Local review workflow: `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-## Inventory Coverage
+## Inventory Built Before Inspection
 
-I built the review inventory before evaluating findings.
+- Tracked repository inventory at `HEAD`: **2,551 files**.
+- Primary runtime/review surface:
+  - `apps/web/src`: **503 tracked files**
+  - `apps/web/scripts`: **27 tracked files**
+  - `apps/web/drizzle`: **31 tracked files**
+  - `apps/web/e2e`: **8 tracked files**
+  - root/app configs: `package.json`, `apps/web/package.json`, `next.config.ts`, TypeScript/Vitest/Playwright/ESLint/Tailwind configs, Docker/deploy files, env examples.
+- Historical `.context/reviews/` and `plan/` files were inventoried as context/history, not treated as executable production behavior.
 
-- Tracked repository inventory after required exclusions: **2,546 files** via `git ls-files`, excluding `node_modules`, `.git`, build output, runtime upload/data/resource directories, `test-results`, and `apps/web/tsconfig.tsbuildinfo`.
-- App/script/migration executable surface: **556 files** under `apps/web/src`, `apps/web/scripts`, and `apps/web/drizzle` (`*.ts`, `*.tsx`, `*.js`, `*.mjs`, `*.sql`, `*.json`) after the same runtime/build exclusions.
-- Total executable-surface line count: **83,953 lines**. Largest hotspots directly reviewed included `process-image.ts`, `data.ts`, `actions/images.ts`, `image-queue.ts`, `photo-viewer.tsx`, `migrate.js`, `admin-backfill-runner.ts`, `settings-client.tsx`, `image-manager.tsx`, `admin/db-actions.ts`, `gps-exif-strip.ts`, `actions/topics.ts`, `upload-dropzone.tsx`, `api/admin/lr/upload/route.ts`, `rate-limit.ts`, `search.tsx`, `actions/tags.ts`, `smart-collections.ts`, `actions/auth.ts`, and `actions/public.ts`.
-- Binary fixtures and historical docs/review artifacts were inventoried but not treated as behavioral code. The pre-existing untracked `.context/reviews/.critic-inventory.tmp` was left untouched.
+## Files And Regions Reviewed
 
-Coverage method:
+Direct reads covered the high-risk executable paths and their cross-file contracts:
 
-- Direct source reads of the core data layer, schema, migrations/reconcile logic, upload and Lightroom ingest paths, image processing queue, restore/backfill operations, admin authentication/session/token/rate-limit paths, public/search/similar/OG routes, sharing, topics/tags/collections, smart-collection parser/compiler, privacy projections, service worker, and high-risk client components.
-- Repository-wide sweeps for raw SQL, route/action auth wrappers, same-origin gates, public mutating rate limits, JSON-LD injection, path/file handling, numeric coercion, async fire-and-forget, advisory locks, rollbacks, environment parsing, cache/service-worker behavior, and privacy-sensitive fields.
-- Cross-file checks against schema/migration/reconcile mirrors and source-locked tests for privacy, service-worker cache routing, migration journal monotonicity, upload/processing contracts, map visibility, and action-origin/API-auth lint rules.
+- Data/schema/migrations: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/src/lib/data.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`.
+- Upload/processing/storage: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/storage/local.ts`, upload quota/restore-maintenance helpers.
+- Admin/ops/security flow: `apps/web/src/app/actions/auth.ts`, `admin-users.ts`, `settings.ts`, `seo.ts`, `sharing.ts`, `lr-tokens.ts`, `admin-backfill.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/api-auth.ts`, `rate-limit.ts`, `request-origin.ts`, `proxy.ts`, CSP helpers.
+- Public/search/share flow: public pages under `apps/web/src/app/[locale]/(public)`, `/api/search/semantic`, `/api/search/similar/[id]`, `/api/og`, `/api/og/photo/[id]`, public actions, map/share/group pages.
+- Domain/admin mutation flow: topics, tags, collections, smart collections, SEO/gallery config, privacy-sensitive projections, semantic-search enrichment fields and tests.
+- Representative UI/state clients: settings backfill status, image manager, photo viewer/lightbox, public grid/share pages.
+- Final sweeps: repository-wide searches for unsafe casts, raw SQL, TODO/FIXME/HACK markers, `dangerouslySetInnerHTML`, auth/origin/rate-limit wrappers, global state, timers, catch blocks, env parsing, and migration/schema drift.
 
-## Confirmed Issues
+No runtime-relevant source files were intentionally skipped. I did not line-review every historical review artifact in `.context/reviews/` or every plan document because they are not production runtime/test code.
 
-No confirmed code-quality, logic, maintainability, state-consistency, or cross-file behavior defects were found at this review threshold.
+## Confirmed Findings
+
+### C14-01 - Zero-candidate backfill leaves stale "last run" state in the admin UI
+
+**Severity:** Low
+**Confidence:** High
+**File/region:** `apps/web/src/lib/admin-backfill-runner.ts:837-841`, `apps/web/src/lib/admin-backfill-runner.ts:631-646`, `apps/web/src/lib/admin-backfill-runner.ts:780-803`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:302-327`
+
+**Problem:** `triggerAdminBackfill()` handles `candidateCount === 0` by releasing the advisory lock and returning `{ status: 'queued', affectedRows: 0 }` immediately. That path never enters `runBackfill()`, so it does not reset `processed`, `errors`, `encodeFailures`, `detectionFailures`, `lastRunHadFailures`, `lastError`, or increment/replace the completed-run summary. The normal runner path resets state at start and flushes final counters on completion, but the no-op path bypasses both.
+
+**Failure scenario:** An admin runs a backfill that records failures. Later, after the stale candidates are fixed or no longer exist, the admin clicks "Re-encode existing photos" again and receives a successful queued/0-work result. The settings UI renders the last-run panel whenever `completedRuns > 0` and reads the stale counters directly, so it can continue showing the previous failure banner or old processed count even though the latest trigger found no work.
+
+**Concrete fix:** Treat `candidateCount === 0` as a completed no-op run in the shared state before returning: set `lastQueuedCount = 0`, reset all per-run counters to 0, set `lastRunHadFailures = false`, clear `lastError`, and either increment `completedRuns` or add an explicit `lastNoopAt`/`lastRunStatus` field that the UI can render. Add a focused test that seeds a failed previous state, mocks `fetchCandidateCount()` to 0, calls `triggerAdminBackfill()`, and asserts the status state no longer reports stale failures.
 
 ## Likely Issues
 
-No likely issues were identified with enough evidence to classify above risk/watchlist level.
+### C14-02 - Semantic rate-limit helper documentation contradicts the route's charged short-query behavior
+
+**Severity:** Low
+**Confidence:** Medium
+**File/region:** `apps/web/src/lib/rate-limit.ts:372-375`, `apps/web/src/app/api/search/semantic/route.ts:194-243`, `apps/web/src/__tests__/semantic-search-route.test.ts:230-235`
+
+**Problem:** `rollbackSemanticAttempt()` says it is used for requests that exit before guarded work is consumed, "for example disabled mode or too-short query." The semantic route now intentionally checks disabled mode before charging, but charges at `route.ts:194-205` before body parsing and does not roll back for malformed JSON, oversized post-read bodies, or short queries at `route.ts:239-243`. The route-level comments and tests align with charged body admission; the helper comment is the stale part.
+
+**Failure scenario:** A future maintainer following the helper comment can reintroduce a rollback for `< 3` character queries after body admission, weakening the current "charged after body read" posture and making cheap invalid bodies a free request stream again.
+
+**Concrete fix:** Update the helper comment to match the route contract: rollback is for callers that exit before body/embedding/vector-scan admission, not for too-short semantic-route queries after the route has charged. If fairness for short queries is desired instead, move short-query validation before the rate-limit charge and add tests for that explicit contract.
 
 ## Risks Needing Manual Validation
 
-### C13-RISK-01 - Public route IDs accept unsafe integer ranges before DB lookup
+- Image-processing color fidelity, HDR/gain-map detection, AVIF/WebP/JPEG byte output, and rollback behavior were reviewed statically and through existing tests/comments, but not manually validated with real photo fixtures during this review.
+- DB restore/backfill/queue interactions were reviewed from code and invariants; no live restore, long-running backfill, or multi-process race test was executed.
+- Full `npm run build`, `npm test --workspace=apps/web`, and Playwright e2e were not run because this was a review-only artifact and no production code changed.
+- Current worktree had unrelated modifications in other `.context/reviews/*.md` files; they were not part of this review and were left untouched.
 
-**Severity:** Low  
-**Confidence:** Medium  
-**Classification:** Maintainability / future-schema risk, not a confirmed current production bug.
+## Final Missed-Issues Sweep
 
-**File/region:**
-
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:40-58` and `:129-145`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:74-82`
-- `apps/web/src/app/api/og/photo/[id]/route.tsx:51-64`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:93-99`
-- Current schema bound: `apps/web/src/db/schema.ts:19-20` (`images.id` is MySQL `int` autoincrement)
-
-**Risk:** These route params first require `/^\d+$/`, then use `parseInt(...)`, and only reject `NaN`, non-positive, or non-integer values. Values above `Number.MAX_SAFE_INTEGER`, and values above the current MySQL signed-int range, still pass local validation and are sent into the data lookup as JavaScript numbers. With the current `images.id int` schema, practical impact is low because valid IDs cannot reach those ranges. The inconsistency is still worth cleaning up because the repository already treats unsafe integer coercion as a known risk class for insert IDs in `apps/web/src/lib/validation.ts:162-187`.
-
-**Concrete failure scenario:** If a future migration widens `images.id` or shared-photo selection to `bigint`, `/p/9007199254740993` would pass the regex, round during JavaScript numeric coercion, and could query the wrong numeric ID. Even today, impossible values such as `/api/search/similar/999999999999999999999` consume validation/database work instead of being rejected at the route boundary.
-
-**Suggested fix:** Centralize route-ID parsing, for example `parseImageRouteId(raw): number | null`, and require `Number.isSafeInteger(id)`, `id > 0`, and the current schema maximum (`id <= 2147483647`) before any DB/cache lookup. Reuse it across photo pages, similar search, OG photo, and shared-group `photoId`.
-
-## Final Sweep Notes
-
-- The previous cycle's service-worker stale HTML findings are fixed in the current tree: `apps/web/public/sw.template.js:61-65` and generated `apps/web/public/sw.js:61-65` now match `/c/*`, `/s/*`, `/g/*`, and `/map`, and the fetch handler bypasses those HTML routes at `apps/web/public/sw.template.js:391-397`. `apps/web/src/__tests__/sw-template-contract.test.ts:71-80` now source-locks that broader predicate.
-- JSON-LD injection sites all route through `safeJsonLd(...)` or generated script literals with controlled config values.
-- Raw SQL in request paths is parameterized through Drizzle/sql templates or dedicated connection queries with fixed SQL and bound parameters. Migration helper dynamic identifiers are guard-railed by helper functions and static migration inputs.
-- Schema/migration/reconcile checks found current columns such as `processing_settings_json`, `avif_10bit`, and `topics.map_visible` mirrored between `schema.ts`, committed migrations, `migrate.js`, and tests.
-- Privacy-sensitive DB projections, smart-collection query compilation, semantic/similar response shaping, upload quota/rollback accounting, derivative cleanup, queue claims/retries, restore-maintenance locks, and admin mutation guards did not yield a confirmed non-duplicate finding.
+- Auth/origin/rate-limit sweeps found the admin API routes wrapped by `withAdminAuth`, mutating server actions covered by `requireSameOriginAdmin()`, and public mutating API routes covered by pre-increment rate-limit helpers.
+- Schema/migration/reconcile sweep found the current late migrations mirrored in `migrate.js`, including `processing_settings_json`, AVIF bit-depth, analytics indexes, and removed feature schema drops. The journal still contains the known historic non-monotonic timestamp, but current migration code baselines per hash and verifies all journal hashes after migration.
+- Privacy projection sweep found public image/search/map/share select fields constrained by shared omit/type-guard fixtures.
+- No relevant runtime source files were intentionally skipped; skipped material was historical review/plan content and non-runtime artifacts.
 
 ## Validation Evidence
 
@@ -71,7 +85,3 @@ Commands run:
 - `npm run lint:api-auth --workspace=apps/web` - passed.
 - `npm run lint:action-origin --workspace=apps/web` - passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-- `npm run typecheck --workspace=apps/web` - passed.
-- `npm run lint --workspace=apps/web` - passed.
-
-I did not run full `npm run build`, `npm test --workspace=apps/web`, or Playwright e2e because this was a review-only artifact and no executable source was changed. The targeted gates above were used to validate the review's control-surface claims.

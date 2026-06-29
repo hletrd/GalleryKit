@@ -1,152 +1,110 @@
-# Cycle 13 Document-Specialist Review
+# Cycle 14 Document-Specialist Review
 
-Date: 2026-06-29
-Scope: whole repository documentation/code contract review for `/Users/hletrd/flash-shared/gallery`.
-Reviewer lane: document-specialist.
+Date: 2026-06-30  
+Reviewed HEAD: `c2da917d`  
+Scope: documentation/code mismatch review for `/Users/hletrd/flash-shared/gallery`.
 
-## Process and Inventory
+## Methodology and Inventory
 
-Required first reads were completed: `AGENTS.md` and `CLAUDE.md`.
+Read first, as required: `AGENTS.md`, then `CLAUDE.md`.
 
-Excluded from inventory/review sweeps: `node_modules/`, `.git/`, Next/build outputs, test output, runtime data/upload/resource directories such as `apps/web/data/`, `apps/web/public/uploads/`, and `apps/web/public/resources/`.
+Inventory built before inspection:
 
-Authoritative documentation and contract files reviewed:
+- Canonical docs and app docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
+- Env/config examples: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`.
+- Deploy/runbook surfaces: root `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`.
+- Migration/schema contracts: `apps/web/drizzle/**/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
+- Tests-as-contract and lint gates: auth/action/rate-limit scanners, privacy fixtures, upload-limit tests, nginx config tests, semantic-search tests, service-worker contract tests, touch-target audit.
+- Source comments carrying operational or safety contracts: upload paths, image processing, CLIP model/download/backfill, storage abstraction, DB restore, rate limiting, CSP, public routes, and admin actions.
+- Historical/current planning and review docs under `docs/`, `plan/`, and `.context/` were inventoried and searched. Archived plans/reviews were treated as historical evidence unless they were linked from current authoritative docs.
 
-- Root docs and operations: `README.md`, `AGENTS.md`, `CLAUDE.md`, `.env.deploy.example`.
-- App docs/examples: `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`.
-- Historical/current planning docs: `.context/plans/*.md`, `.context/reviews/*.md`, `docs/superpowers/**/*.md`.
-- Runtime/deploy contracts: root `package.json`, `apps/web/package.json`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`.
-- Schema/migration contracts: `apps/web/drizzle/**/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
-- Implementation contracts behind docs: auth/rate-limit lint scripts, upload limits, semantic search, CLIP model loading, Atom feed generation, SEO/base URL handling, image processing/color/HDR pipeline, storage abstraction, DB backup/restore, health/live routes, privacy selectors/tests, and relevant Vitest/Playwright tests.
-
-Coverage evidence:
-
-- Deploy docs were checked against root `package.json` deploy script, `scripts/deploy-remote.sh`, `.env.deploy.example`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, and Docker/nginx behavior.
-- Environment docs were checked against `.env.local.example`, `constants.ts`, `ensure-site-config.mjs`, `next.config.ts`, upload-limit helpers, DB TLS helpers, and tests.
-- Public/privacy docs were checked against `data.ts`, public Atom routes, `atom-feed.ts`, schema comments, and privacy tests.
-- Semantic-search docs were checked against `clip-embeddings.ts`, `clip-model.ts`, search routes, CLIP docs, package metadata, package lock, Dockerfile, and tests.
-- Migration/runbook docs were checked against migration SQL, journal metadata, migrator assertions, and migration journal tests.
-- Final sweep included previous-cycle findings, stale line-number references, examples that can be copied into production, comments that state source-of-truth contracts, and docs that could cause deploy/operator mistakes.
+Excluded from content review: `node_modules`, `.git`, build outputs, runtime data, uploads/resources, generated test output, and binary screenshots/media. Existing unrelated modified review files in `.context/reviews/` were ignored; this pass reviewed current HEAD behavior and wrote only this report.
 
 ## Confirmed Issues
 
-### DOC13-01 - Stale upload attribution comments still claim public Atom per-entry author attribution
+### DOC14-01 - `db:push` is advertised as a normal database command even though the repo requires journaled migrations
 
-Severity: Low
-Confidence: High
-
-Evidence:
-
-- Browser upload still documents `uploaded_by` as feeding per-entry Atom attribution and says public feed renders a JOIN-derived display name: `apps/web/src/app/actions/images.ts:435-439`.
-- Lightroom upload still says LR-published images without `uploaded_by` make public Atom per-entry author attribution "dead" even though the PAT identifies the photographer: `apps/web/src/app/api/admin/lr/upload/route.ts:434-443`.
-- Current public feed routes explicitly prevent admin username exposure and fall back to the feed-level author: `apps/web/src/app/feed.xml/route.ts:76-82`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:87-93`.
-- `getImagesForFeed` deliberately emits `author_name: NULL` and documents that per-uploader attribution must wait for a safe public display-name column: `apps/web/src/lib/data.ts:833-845`.
-- The schema and Atom helper now agree with the current privacy contract: `apps/web/src/db/schema.ts:87-92`, `apps/web/src/lib/atom-feed.ts:53-58`.
-
-Failure scenario:
-
-A future maintainer reads the ingest-path comments as authoritative and reintroduces an admin-user join or a raw username display to "fix" missing per-entry Atom authors. That would contradict the current privacy invariant and could expose admin login identifiers through unauthenticated feed endpoints.
-
-Suggested fix:
-
-Update both ingest comments to say `uploaded_by` is an admin/audit linkage only. State that public Atom currently uses the feed-level author and that per-entry attribution requires a separate safe public display-name field.
-
-### DOC13-02 - `CLAUDE.md` overstates canonical URL matching requirements
-
-Severity: Low
-Confidence: High
+Severity: Medium  
+Confidence: High  
+Category: unsafe operational guidance
 
 Evidence:
 
-- `CLAUDE.md` says per-photo OG internal derivative fetches are pinned to trusted `siteConfig.url`: `CLAUDE.md:215`.
-- The setup section says `site-config.json.url` "must match `BASE_URL` env var": `CLAUDE.md:637`.
-- Runtime code defines the canonical base URL as `process.env.BASE_URL || siteConfig.url`: `apps/web/src/lib/constants.ts:21-24`.
-- The production validator checks the effective URL from `BASE_URL || siteConfig.url` and explicitly tells operators to "Set BASE_URL or customize src/site-config.json": `apps/web/scripts/ensure-site-config.mjs:11-40`.
-- The validator test confirms that a real `BASE_URL` may override an example `site-config.url`: `apps/web/src/__tests__/ensure-site-config.test.ts:69-76`.
-- The per-photo OG route pins to the trusted effective canonical origin (`BASE_URL || siteConfig.url`), not specifically `siteConfig.url`: `apps/web/src/app/api/og/photo/[id]/route.tsx:101-120`.
-- Root and app READMEs use the more accurate "set `BASE_URL` or replace site-config URL" wording: `README.md:148-149`, `apps/web/README.md:42`.
-- SEO defaults also expose `url: process.env.BASE_URL || siteConfig.url`: `apps/web/src/lib/data.ts:1733-1740`.
+- `CLAUDE.md:58-61` lists `npm run db:push` under "Database" with the description "Push schema to MySQL (drizzle-kit)" and no development-only warning.
+- `apps/web/README.md:23-32` also lists `npm run db:push` as "Push schema to MySQL".
+- The script exists and runs `drizzle-kit push`: `apps/web/package.json:17`.
+- The authoritative schema policy says migrations must live in `apps/web/drizzle/NNNN_*.sql`, must be added to `_journal.json`, and must mirror `reconcileLegacySchema`: `AGENTS.md:22-27`, `CLAUDE.md:429-435`.
+- The migration runbook explains why journal hashes and `__drizzle_migrations` postconditions are safety-critical after prior production drift: `CLAUDE.md:415-427`.
 
-Failure scenario:
+Concrete failure scenario:
 
-An operator may think `BASE_URL` and `site-config.json.url` must be duplicated exactly and spend time changing gitignored or bind-mounted config unnecessarily. A future agent could also "fix" the code/tests to enforce equality, breaking the documented and tested override path.
+An agent or operator follows the common-command table against a real `.env.local` and runs `npm run db:push` to apply a schema change. The database changes outside the committed SQL/journal/reconcile path. A later deploy or fresh restore cannot prove the schema via journal hashes, and the next migration author has no committed baseline for the out-of-band change.
 
-Suggested fix:
+Concrete fix:
 
-Change `CLAUDE.md` to consistently describe the source of truth as the effective canonical origin: `BASE_URL || siteConfig.url`. Replace "must match `BASE_URL`" with "used when `BASE_URL` is unset" or "may be overridden by `BASE_URL`".
+Either remove `db:push` from operator-facing docs or mark it explicitly as local throwaway prototyping only, never production or committed schema work. Point schema changes to the migration checklist and `npm run init`/deploy migrator path instead.
 
-### DOC13-03 - Privacy test comment points to an obsolete `data.ts` line range
+### DOC14-02 - CLIP backfill concurrency docs imply a now-available operator tuning path that is not documented or wired at that layer
 
-Severity: Low
-Confidence: High
+Severity: Low  
+Confidence: High  
+Category: stale source comment / missing operational docs
 
 Evidence:
 
-- The privacy test still says the existing `_privacyGuard` lives at `data.ts:198-200`: `apps/web/src/__tests__/privacy-fields.test.ts:81-84`.
-- The actual guard is now at `apps/web/src/lib/data.ts:459-477`.
+- `apps/web/scripts/backfill-clip-embeddings.ts:44-45` says concurrency is capped at `BATCH_CONCURRENCY=2` and "Operators can raise this once the real ONNX inference ships."
+- Real ONNX/Transformers inference is already shipped and documented as production-active: `CLAUDE.md:527-539`.
+- The script-level batch concurrency is still a hardcoded constant: `apps/web/scripts/backfill-clip-embeddings.ts:72-73`.
+- The actual runtime inference limiter is a different env knob, `CLIP_INFERENCE_CONCURRENCY`, default `1`, max `4`: `apps/web/src/lib/clip-model.ts:53-56`.
+- The CLIP runbook commands document `CLIP_MODELS_ROOT` but not `CLIP_INFERENCE_CONCURRENCY`: `CLAUDE.md:510-523`; `.env.local.example:68-72` also omits it.
 
-Failure scenario:
+Concrete failure scenario:
 
-During a privacy-sensitive schema change, a reviewer follows the test comment to the wrong region and misses the current `PrivacySensitiveKeys` contract. This is especially risky because `AGENTS.md` requires new admin-only columns to be added to the omit block, type guard, and fixture together.
+An operator sees slow production CLIP backfill after real ONNX inference is live. The script comment says concurrency can be raised, but the sidecar command and env example do not name the real knob. They may edit `BATCH_CONCURRENCY`, run multiple sidecars, or assume the backfill is already parallel, while actual model inference remains serialized by `CLIP_INFERENCE_CONCURRENCY=1`.
 
-Suggested fix:
+Concrete fix:
 
-Replace the hard-coded line range with a symbol reference such as "`_privacyGuard` in `apps/web/src/lib/data.ts`" or update the line range whenever this file moves.
+Update the script comment and CLIP runbook to distinguish script batch concurrency from model inference concurrency. Document `CLIP_INFERENCE_CONCURRENCY` with default `1`, max `4`, CPU/RAM caveats, and an example sidecar `-e CLIP_INFERENCE_CONCURRENCY=2` only when appropriate.
 
 ## Likely Issues
 
-### DOC13-04 - Caption-generator comment says binary footprint is zero despite shipped CLIP native inference
+### DOC14-03 - Shipped CLIP design spec still uses the broad `./data/models/` path where implementation/runbooks use `data/models/clip`
 
-Severity: Low
-Confidence: Medium
+Severity: Low  
+Confidence: Medium  
+Category: stale design doc / operator ambiguity
 
 Evidence:
 
-- The caption generator correctly says Florence-2 captioning is stubbed, but then says the stub keeps "the binary footprint zero": `apps/web/src/lib/caption-generator.ts:4-15`.
-- The app now depends on `@huggingface/transformers`: `apps/web/package.json:28-30`.
-- The lockfile shows `@huggingface/transformers` pulls `onnxruntime-node` and includes the native package: `package-lock.json:1045`, `package-lock.json:8638-8643`.
-- CLIP docs and code describe the production encoder and calibrated threshold as shipped: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:4`, `apps/web/src/lib/clip-embeddings.ts:172-191`.
+- The shipped/activated CLIP spec says weights are downloaded to `./data/models/`: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:24`, `:34`, `:41`, `:72`.
+- The current implementation default is `data/models/clip`: `apps/web/src/lib/clip-paths.ts:48-65`.
+- The downloader comment and production runbooks use the exact `clip` child path: `apps/web/scripts/download-clip-models.ts:5-30`, `CLAUDE.md:489-522`, `apps/web/README.md:62-72`.
+- The same spec later mentions `./data/models/clip`, so the file is internally inconsistent: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:137`.
 
-Failure scenario:
+Concrete failure scenario:
 
-A maintainer or operator reads "binary footprint zero" as a global runtime/deploy statement and assumes the container has no native ONNX inference payload. That conflicts with the production CLIP path and can lead to wrong image-size, cold-start, or dependency triage assumptions.
+A future operator or agent follows the shipped spec instead of the newer runbook and seeds/checks the parent `data/models` directory. The runtime loader points at `data/models/clip`, so offline model load can still fail even though "models" appears populated.
 
-Suggested fix:
+Concrete fix:
 
-Reword the comment to "no additional Florence-2 model or captioning-runner footprint" or "no additional captioning binary/model footprint" so it remains true without contradicting the CLIP runtime.
+Update the spec's shipped-status sections to consistently say `data/models/clip` for the CLIP cache root, while noting that it sits under the persisted `data/` bind mount.
 
 ## Risks Needing Manual Validation
 
-### DOC13-05 - Shipped CLIP spec still contains unresolved "open item" wording
+- Historical `.context/` and `plan/` files contain intentionally stale recommendations and old review findings. I inventoried and searched them, but did not treat every archived recommendation as live operational guidance. Manual validation is needed only if a future process starts linking a historical archive as authoritative current runbook material.
+- Env docs still omit some low-level/test-only or advanced knobs (`UPLOAD_ROOT`, `TOPIC_RESOURCES_ROOT`, `IMAGE_CLEANUP_CONCURRENCY`, E2E-only variables). I did not file these as findings because current docs either frame them as sidecar/test overrides or do not present them as normal operator controls. Revisit if these become supported deployment knobs.
 
-Severity: Low
-Confidence: Medium
+## Verified Non-Findings
 
-Evidence:
+- Deploy helper, `.env.deploy.example`, Docker bind mounts, host-network topology, and post-deploy Docker prune guidance match `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `docker-compose.yml`, and `Dockerfile`.
+- Nginx body caps match docs and tests: 2 MiB default/admin API, 64 KiB login, 250 MiB DB restore, 216 MiB dashboard upload, 216 MiB Lightroom upload.
+- Health docs match implementation: Docker probes `/api/live`; `/api/health` is liveness-only unless `HEALTH_CHECK_DB=true`.
+- Privacy/admin-only field docs are aligned with `publicSelectFields`, `PrivacySensitiveKeys`, and `privacy-fields.test.ts`; prior stale privacy line-number comments are fixed.
+- Prior stale Atom `uploaded_by` comments are fixed; browser and Lightroom upload comments now describe admin/audit linkage and feed-level public author fallback.
+- CLIP production mode, model version, threshold, same-origin/rate-limit gates, and runtime limits match current search routes and constants, aside from the concurrency/path documentation issues above.
 
-- The CLIP design spec now begins with a shipped/activated production status and records production threshold `0.22`: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:3-11`.
-- Later in the same spec, section 12 is still titled "Open Items to Resolve During Planning" and lists threshold value as an open item: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:94-101`.
-- The spike result resolves items 1, 2, and 4 but still says threshold item 3 is deferred to Task 14: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:103-132`.
-- The implementation and plan show Task 14 completed and the threshold set to `0.22`: `apps/web/src/lib/clip-embeddings.ts:175-191`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md:855-875`.
+## Final Missed-Issues Sweep
 
-Failure scenario:
+Final sweep rechecked canonical docs, app README, env examples, deploy/runbook files, migration journal/runbook, security lint scripts, tests-as-contract, CLIP docs, storage docs, and high-risk source comments for `MUST`, `never`, `production`, `operator`, `rate-limit`, `migration`, `backfill`, `restore`, `prune`, `body cap`, `semantic`, `privacy`, and related terms.
 
-A future agent treating the spec as an authoritative current design could re-open threshold calibration or runtime-selection work that is already completed. This is lower risk because the spec's top banner is current and the linked plan is historical, but the local section heading still reads like pending work.
-
-Suggested fix:
-
-Rename section 12 to "Planning Decisions and Resolutions" or append a short note after line 132 saying Task 14 resolved item 3 with `PRODUCTION_COSINE_THRESHOLD = 0.22`; keep the historical measurements if they are useful.
-
-## No Findings in These Areas
-
-- Deploy/runbook behavior: root deploy script, `.env.deploy.example`, remote SSH command derivation, Docker Compose build args, bind mounts, and post-deploy Docker pruning matched the documented operational model.
-- DB TLS backup/restore: docs matched the fail-closed non-local `DB_SSL_CA` behavior and MySQL CLI flag generation.
-- Upload limits: README/nginx/app helper values matched the documented 2 MiB generic API cap, 216 MiB admin upload/LR caps, 250 MiB restore cap, 200 MiB per-file cap, 2 GiB total window, and 100-file window.
-- Health/live routes: Docker healthcheck uses `/api/live`; `/api/health` only checks DB when `HEALTH_CHECK_DB=true`, matching docs.
-- Storage abstraction: docs correctly state local filesystem is the only integrated production backend and cloud backends are abstractions, not wired runtime behavior.
-- Migration journal/runbook: journal monotonicity and migrator postconditions were represented in docs and tests.
-- Semantic search runtime: production mode, same-origin enforcement, rate limiting, active model-version filtering, threshold use, and no-store behavior matched the current docs aside from the historical open-item wording above.
-
-## Verification Notes
-
-This was a read-only documentation/code mismatch review plus this artifact write. I did not run lint, typecheck, build, or tests because the request was for review findings and no production code was changed.
+No additional confirmed mismatch survived the evidence threshold. No relevant active documentation/code contract files were skipped; only non-authoritative generated/binary/runtime artifacts and historical archive material not used as current guidance were excluded as noted above.

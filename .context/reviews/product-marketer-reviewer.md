@@ -1,211 +1,173 @@
-# Product Marketer Review - Cycle 12
+# Product Marketer Review - Cycle 14
 
-Date: 2026-06-29
-Reviewer: product-marketer-reviewer
-Repository: GalleryKit
-Scope: Product positioning, public/user-facing copy, onboarding, trust, deployment docs, feature discoverability, SEO/marketing surfaces, market fit for photographers/self-hosters, and claim-versus-engineering reality for `/Users/hletrd/flash-shared/gallery`.
-
-## Profile Adaptation Note
-
-The local `product-marketer-reviewer` perspective is BurstPick/Swift-specific. I used only its reviewer-style lens: claim truthfulness, onboarding clarity, market fit, support-risk detection, and whether marketing promises match implemented behavior. I adapted it to this actual repo: GalleryKit, a self-hosted Next.js photo gallery for photographers/operators.
-
-No product fixes or code changes were implemented. This file is the review artifact.
-
-## Inventory Built Before Findings
-
-Primary docs and README-like surfaces reviewed:
-
-- `AGENTS.md` instructions supplied in the prompt
-- `CLAUDE.md`
-- `README.md`
-- `apps/web/README.md`
-- `.env.local.example`
-- `.env.deploy.example`
-- `LICENSE`
-- `.github/workflows/quality.yml`
-- `.github/dependabot.yml`
-- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-- `.context/reviews/` review history as prior-context inventory; current findings below are against live docs/code
-
-User-facing copy and configuration reviewed:
-
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-- `apps/web/src/site-config.json`
-- `apps/web/src/site-config.example.json`
-- `apps/web/src/lib/constants.ts`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/gallery-config.ts`
-
-Public product, SEO, and trust surfaces reviewed:
-
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/app/sitemap.ts`
-- `apps/web/src/app/robots.ts`
-- `apps/web/src/app/manifest.ts`
-- Public feed, Open Graph, and metadata behavior reachable through the app routes inspected during the claim pass
-
-Admin/onboarding/product-control surfaces reviewed:
-
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/nav-client.tsx`
-
-Engineering reality checked for claims:
-
-- `package.json`
-- `apps/web/package.json`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/deploy.sh`
-- `scripts/deploy-remote.sh`
-- `apps/web/nginx/default.conf`
-- `apps/web/public/sw.template.js`
-- `apps/web/public/sw.js`
-- `apps/web/src/components/register-service-worker.tsx`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/lib/clip-embeddings.ts`
-- `apps/web/src/lib/clip-model.ts`
-- `apps/web/src/lib/clip-embedding-constants.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-
-Focused final sweeps:
-
-- Searched claim-sensitive terms: `semantic`, `AI`, `CLIP`, `Lightroom`, `plugin`, `privacy`, `GPS`, `analytics`, `HDR`, `wide-gamut`, `color-gamut`, `PWA`, `offline`, `S3`, `MinIO`, `Stripe`, `payment`, `pricing`, `culling`, `scoring`, `editing`, `deploy`, `nginx`, `server_name`, and `site-config`.
-- Checked bilingual copy where the issue can affect both English and Korean users.
-- Checked current worktree status before writing. Unrelated modified files existed at `.context/reviews/test-engineer.md` and `.context/reviews/tracer.md`; this review did not touch them.
+Date: 2026-06-30
+Scope: current HEAD only. Review style adapted from the local product-marketer prompt for positioning, claims-vs-implementation, docs/UI trust, SEO/feed metadata, and user-facing copy. BurstPick-specific market assumptions were not applied to GalleryKit.
 
 ## Executive Summary
 
-GalleryKit's overall product positioning is mostly honest and strong: the repo consistently presents a self-hosted photographer gallery, not a SaaS marketplace, editor, culler, scoring tool, or payment product. Version and stack claims align with package metadata. The privacy, backup/restore, PWA, color/HDR, single-writer deployment, and production semantic-search guardrails are generally backed by code.
+I found three confirmed issues, two likely issues, and three risks that need manual/live validation. The strongest trust problems are overbroad README wording around metadata search, inconsistent "Topics & Albums" vs "Categories" vocabulary, and a feed metadata default that can emit a blank author/copyright on fresh self-hosted installs that follow the example config.
 
-The remaining product-marketing risks are sharper onboarding mismatches: the root README markets semantic search without the bounded-scan limitation that the app README and code enforce; docs/comments still imply a Lightroom publish plugin even though the product only ships a server-side upload API; Firefox display copy is technically inaccurate versus the repo's own browser matrix; and the nginx self-hosting doc points users to a config that still contains the production domain without calling out the required edit.
+No production code was modified. This report is the only file changed.
 
-Finding count: 4 issues.
+## Inventory Reviewed
 
-| Severity | Confirmed | Likely | Risk |
-| --- | ---: | ---: | ---: |
-| Critical | 0 | 0 | 0 |
-| High | 0 | 0 | 0 |
-| Medium | 2 | 0 | 0 |
-| Low | 1 | 0 | 1 |
+- Core project instructions and context: `AGENTS.md`, `CLAUDE.md`
+- Public product docs: `README.md`, `apps/web/README.md`
+- Config and deploy examples: `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json`, `.env.local.example`, `.env.deploy.example`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`
+- User-facing copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`
+- SEO, OG, feeds, manifest, robots, sitemap: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/feed.xml/route.ts`, `apps/web/src/lib/atom-feed.ts`, `apps/web/src/app/manifest.ts`, `apps/web/src/app/robots.ts`, `apps/web/src/app/sitemap.ts`, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`
+- Public/admin UI surfaces and claims: navigation, footer, search, photo viewer, info sheet, admin settings, token management
+- Feature-claim implementation checks: metadata search, semantic search/similar photos, service worker PWA behavior, site/SEO settings, Lightroom token API, color/HDR messaging, package versions
 
-## Findings
+## Confirmed Issues
 
-### PMR-C12-01 - Root README over-promises semantic search completeness for larger galleries
-
-Severity: Medium
-Confidence: High
-Classification: Confirmed claim-vs-engineering-reality issue
-
-Exact regions:
-
-- `README.md:37` markets semantic search as natural-language English/Korean photo search plus similar photos, powered by local CLIP, disabled by default and live on the demo.
-- `apps/web/README.md:56-62` gives the missing caveat: the feature is fully self-hosted, but scan scope is bounded and searches newest embeddings first; large galleries may not surface relevant older photos unless re-uploaded or re-embedded after a backfill.
-- `apps/web/src/lib/clip-embeddings.ts:22-44` implements `SEMANTIC_SCAN_LIMIT`, defaulting to `2000` and clamping env overrides to `25_000`.
-- `apps/web/src/app/api/search/semantic/route.ts:257-269` scans only the most recent embeddings for the active model and limits rows by `SEMANTIC_SCAN_LIMIT`.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:141-150` applies the same newest-first capped candidate set to similar-photo search.
-
-Failure scenario:
-
-A photographer self-hosts GalleryKit with 8,000-20,000 photos, sees the root README's semantic-search feature bullet, completes model setup/backfill, and expects natural-language and similar-photo search to cover the whole library. Relevant older photos outside the newest-first scan window can be absent even with valid embeddings. From the user's point of view, that looks like low-quality or broken AI search, not an operator-tunable performance guardrail.
-
-Suggested fix:
-
-Add the bounded-scan caveat to the root README feature bullet or a nearby semantic-search subsection. State the default and hard cap plainly: newest embeddings first, default scan limit 2,000, env-tunable up to 25,000, and large libraries need deliberate backfill/re-embedding strategy or future ANN indexing for whole-catalog recall. Mention that similar-photo search has the same candidate cap.
-
-### PMR-C12-02 - Lightroom wording implies an included publish plugin that GalleryKit does not ship
-
-Severity: Medium
-Confidence: High
-Classification: Confirmed onboarding/support-risk issue
-
-Exact regions:
-
-- `README.md:150` says `/api/admin/lr/upload` is capped at 216 MiB "so Lightroom publishes are not caught" by the generic admin API cap.
-- `apps/web/README.md:47` repeats that the route cap exists so "Lightroom publishes bypass" the generic cap.
-- `CLAUDE.md:152` describes `admin_tokens` as "Lightroom Classic publish-plugin PATs" and says "The plugin (`/api/admin/lr/upload`) accepts the token..."
-- `apps/web/nginx/default.conf:122-128` comments describe "Lightroom Classic publish-plugin upload" and say the generic cap would silently break "the LR publish integration."
-- `apps/web/messages/en.json:800-802` is more precise in the product UI: upload API tokens are for server-side upload integrations, and "GalleryKit does not bundle or distribute a Lightroom Classic plugin."
-- `apps/web/messages/ko.json:850-852` gives the same Korean UI clarification.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:4-8` confirms the implementation accepts external upload clients, including a Lightroom Classic publish-client implementation, but exposes the server-side API only and does not bundle or distribute a plugin.
-
-Failure scenario:
-
-A self-hoster or photographer reads the README/nginx/CLAUDE wording and expects GalleryKit to include a ready-to-install Lightroom Classic publish plugin. They reach the admin token page and discover only API token generation, with the UI explicitly saying no plugin is bundled. That gap creates avoidable support churn and makes the integration feel missing or hidden.
-
-Suggested fix:
-
-Standardize public docs and comments on "external upload API" or "Lightroom-compatible upload endpoint." If the project wants to claim Lightroom integration, add the precise status in the README: GalleryKit ships the authenticated server endpoint and token UI, not a bundled Lightroom plugin. Include the required header, route, upload expectations, and a curl or third-party-client example.
-
-### PMR-C12-03 - Firefox display-detection copy contradicts the repo's own browser matrix
+### 1. README Uses "Topics & Albums" While the Product UI Uses "Categories"
 
 Severity: Low
 Confidence: High
-Classification: Confirmed technical-copy issue
 
-Exact regions:
-
-- `apps/web/messages/en.json:739-740` tells admins: "Firefox does not support the color-gamut media query..."
-- `apps/web/messages/ko.json:739-740` says the same in Korean.
-- `CLAUDE.md:303` says Firefox parses the media-query syntax since version 110, but it always returns false because wide-gamut rendering is not implemented.
-- `CLAUDE.md:356-367` repeats the browser matrix: Firefox 124+ parses `(color-gamut: p3)`, always returns false due to Mozilla bug 1626624, and suppresses P3 badges and hints for all Firefox visitors.
-- `CLAUDE.md:374` notes Firefox 110+ parses the syntax, but practical behavior is the same as older unsupported versions because it always returns false.
+Evidence:
+- `README.md:34` advertises "Topics & Albums".
+- `apps/web/messages/en.json:3-5` exposes the primary nav as `Home`, `Categories`, and `Search`.
+- `apps/web/messages/en.json:76-108` names the public taxonomy surface "Categories" throughout the UI.
 
 Failure scenario:
+A new operator reads the README, then opens the app/admin UI and looks for "topics" or "albums". The UI consistently says "Categories", so the product feels less polished and harder to map from docs to implementation. This is especially risky because "Albums" implies a user-facing collection model that the visible UI copy does not present as the primary concept.
 
-An operator debugging color/HDR visibility reads the admin settings note and concludes Firefox lacks the media query itself. The actual problem is subtler: modern Firefox parses the query but reports no P3/wide-gamut capability. The current copy weakens trust in GalleryKit's otherwise careful color-management documentation.
+Concrete fix:
+Use one user-facing noun in public docs. The lowest-risk fix is to rewrite `README.md:34` to "Categories - Organize photos into categories with slug aliases..." and, if needed, add a small implementation note elsewhere that categories are called topics internally in code/database naming.
 
-Suggested fix:
+### 2. README Overstates Keyword Search as "Full Metadata Search"
 
-Change the English and Korean strings to explain the real behavior: Firefox 110+ parses `color-gamut`, but currently reports no wide-gamut/P3 support, so GalleryKit conservatively hides gamut/HDR badges and the educational hint unless "Force Show Color Chips" is enabled. Keep the old "no support" phrasing only for Firefox <= 109 if the UI needs that distinction.
+Severity: Medium
+Confidence: High
 
-### PMR-C12-04 - Self-hosting nginx guidance points to a config with the production domain hardcoded
+Evidence:
+- `README.md:36` claims "Tagging & Search - full metadata search across titles, descriptions, cameras, and tags".
+- `apps/web/src/lib/data.ts:1542-1548` searches title, description, camera model, lens model, topic slug, and topic label.
+- `apps/web/src/lib/data.ts:1596-1604` searches tag names.
+- `apps/web/src/lib/data.ts:1605-1612` searches topic aliases.
+- No matching branch in `searchImages` searches EXIF fields such as ISO, aperture, shutter speed, focal length, capture date, GPS, ICC profile, or color/HDR metadata.
+
+Failure scenario:
+A photographer or self-hosting operator expects queries like `ISO 3200`, `f/1.8`, `35mm`, a date, GPS location, or color profile to work because "full metadata search" sounds comprehensive. When those searches fail, the README looks inflated even though the implemented search is useful within its actual field set.
+
+Concrete fix:
+Either narrow the claim or extend the implementation. The trust-preserving copy fix is: "Search titles, descriptions, camera and lens models, categories, category aliases, and tags." If GalleryKit wants to keep "full metadata search", add explicit query support for the major EXIF/searchable metadata fields and document privacy-sensitive exclusions.
+
+### 3. Fresh Example Config Can Produce Blank Atom Feed Author/Rights
+
+Severity: Medium
+Confidence: High
+
+Evidence:
+- `apps/web/src/site-config.example.json:6` sets `"author": ""`.
+- `apps/web/src/lib/data.ts:1733-1740` resolves `seo.author` from `seo_author` or `siteConfig.author`.
+- `apps/web/src/app/feed.xml/route.ts:103-108` falls back to `© ${new Date().getFullYear()} ${seo.author}` when `siteConfig.copyright` is absent.
+- `apps/web/src/app/feed.xml/route.ts:116-120` always passes `feedAuthor.name: seo.author`.
+- `apps/web/src/lib/atom-feed.ts:92-104` always emits `<author><name>...</name></author>` from that value.
+
+Failure scenario:
+A self-hosted deploy copied from `site-config.example.json` and without an admin SEO author override can expose an Atom feed with an empty `<author><name></name></author>` and a weak rights string like `© 2026 `. Feed readers, validators, and subscribers may display blank ownership metadata, reducing trust in a public photography site.
+
+Concrete fix:
+Make the example author non-empty, for example `"author": "Your Name"`, and document it as required/recommended for feeds and SEO. In code, also consider falling back feed author to the site title and suppressing `<rights>` unless either `siteConfig.copyright` or a non-empty author is present. Document the optional `copyright` key if operators are expected to use it.
+
+## Likely Issues
+
+### 4. PWA "Offline HTML Fallback" Claim Is Broader Than the Implemented Behavior
+
+Severity: Low
+Confidence: Medium-High
+
+Evidence:
+- `README.md:38` claims "PWA - Service worker with stale-while-revalidate image cache and offline HTML fallback".
+- `apps/web/public/sw.template.js:7-18` describes a narrower behavior: image SWR, HTML network-first cache, 24-hour offline-only fallback, and admin bypass.
+- `apps/web/public/sw.template.js:62-66` classifies revocable share, smart collection, group, and map routes as bypassed from offline HTML caching.
+- `apps/web/public/sw.template.js:297-338` serves cached HTML only after a successful prior network response and only while the entry is within `HTML_MAX_AGE_MS`.
+- `apps/web/public/sw.template.js:392-398` bypasses revocable share HTML routes before applying the HTML fallback.
+
+Failure scenario:
+An operator may market GalleryKit as broadly offline-capable. In reality, unvisited pages do not work offline, cached public HTML expires after 24 hours, and admin/share/smart collection/group/map pages intentionally require network. A client testing a shared collection or map offline could perceive the PWA claim as broken.
+
+Concrete fix:
+Qualify the README claim: "PWA - image stale-while-revalidate cache plus 24-hour offline fallback for previously visited public gallery/photo HTML pages; admin, map, and revocable share routes stay network-only." This keeps the security-sensitive bypasses visible as a product strength rather than a surprise.
+
+### 5. Firefox Color/HDR Copy Blames the Wrong Capability Layer
 
 Severity: Low
 Confidence: Medium
-Classification: Risk
 
-Exact regions:
-
-- `README.md:188` tells operators that the checked-in `apps/web/nginx/default.conf` matches the documented host-side nginx + app-container deployment and can be adapted for custom static upload serving.
-- `apps/web/README.md:49-50` similarly describes the checked-in compose/nginx topology.
-- `apps/web/nginx/default.conf:21-28` defines the server block with `server_name gallery.atik.kr;`, followed by comments about TLS edge behavior.
+Evidence:
+- `apps/web/messages/en.json:739-740` says Firefox "does not support the color-gamut media query or dynamic-range detection".
+- `apps/web/messages/ko.json:739-740` carries the same claim in Korean.
+- `CLAUDE.md:368-375` says Firefox parses `(color-gamut: p3)` since v110 but still returns false for wide gamut because Firefox has not implemented wide-gamut rendering; dynamic-range remains unsupported.
 
 Failure scenario:
+Technically sophisticated photographers or browser engineers can notice that the UI copy is imprecise. The product's color-management positioning is otherwise careful, so this wording creates avoidable doubt in a high-trust area.
 
-A self-hoster copies the checked-in nginx config to a multi-vhost server for `photos.example.com`, edits upload paths and TLS separately, but misses the `server_name` value. Depending on nginx default-server order, requests may fall through to another server block or miss GalleryKit's body-size/private-originals rules. This is not a code vulnerability by itself, but it is a common deployment-onboarding footgun.
+Concrete fix:
+Reword both locales to avoid the incorrect API-level claim. Suggested English direction: "Firefox currently reports no usable P3/HDR capability through the detection APIs GalleryKit can trust, so GalleryKit keeps previews in sRGB there." Mirror the nuance in Korean.
 
-Suggested fix:
+## Risks Needing Manual Validation
 
-Make the self-hosting doc call out `server_name` replacement explicitly, or convert the checked-in config comment to an obvious placeholder instruction near `server_name`. Example: `server_name gallery.example.com; # replace with your public gallery host`. If `gallery.atik.kr` is intentionally the production deploy config, document that self-hosters must copy and edit it rather than use it verbatim.
+### 1. Semantic Search Live Demo Claim
 
-## Aligned / No-Action Checks
+Severity: Medium
+Confidence: Medium
 
-- Stack/version positioning is aligned. `README.md` claims Next.js 16, React 19, TypeScript 6, Node 24+, and MySQL 8+; `apps/web/package.json` and root package scripts support those claims.
-- "Not a photo editor, culler, or scoring tool" is correctly stated in `README.md:42`; I did not find active user-facing promises for culling/scoring/payment workflows.
-- Storage claims are restrained. `CLAUDE.md` says local filesystem is the only implemented storage backend and not to document S3/MinIO as supported; current public README copy does not market S3/MinIO support.
-- Privacy/backup wording is generally better than typical self-hosted-gallery docs. The DB backup/restore copy in `apps/web/messages/en.json` and `ko.json` correctly says it backs up database rows and does not snapshot file storage.
-- Production semantic-search honesty gates are real. `gallery-config.ts` heals stored `production` mode back to `disabled` without `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, and the route returns 503 rather than serving stub vectors under the production label when real embeddings are missing.
-- PWA/offline claims are supported by the service worker implementation: admin/API/share-sensitive paths are bypassed, HTML uses network-first behavior with offline fallback, and images use cache-first/stale-while-revalidate style handling.
-- SEO basics are implemented, not just claimed: localized metadata, canonical/hreflang links, sitemap generation, robots rules, manifest generation, feed/OG surfaces, and DB-fallback behavior were present.
-- Public color/HDR claims are mostly careful: the README states HDR ingest is opt-in and gain-map detection is admin audit only; admin settings expose the corresponding controls and warnings.
+Evidence:
+- `README.md:37` says semantic search is "live on the demo with CLIP weight seeding".
+- `apps/web/README.md:56-76` documents disabled/stub/production modes and the production activation requirements.
+- `apps/web/src/app/api/search/semantic/route.ts:168-185` rejects disabled/stub modes differently from production.
+- `apps/web/src/app/api/search/semantic/route.ts:279-283` returns 503 when production mode has no real embeddings.
 
-## Final Sweep Notes
+Failure scenario:
+The code supports the claim, but a production/demo configuration drift could make the README's "live on the demo" statement stale. Users trying English/Korean semantic search on the demo would lose confidence if they receive disabled/stub/no-embedding behavior.
 
-- I did not review generated dependency directories, runtime upload data, local build artifacts, or test output as product/source-of-truth surfaces.
-- I checked prior `.context/reviews/` context for review continuity, but treated current source/docs as authoritative.
-- I found no current marketing copy promising paid downloads, Stripe checkout, S3/MinIO storage, horizontal scaling, role-based permissions, or bundled AI captioning beyond the current EXIF-placeholder disclosure.
-- The strongest cycle-12 fix candidates are doc/copy changes, not code behavior changes: semantic-search scale caveat, Lightroom endpoint naming, Firefox detection wording, and nginx self-hosting instructions.
+Concrete fix:
+Manually validate the live demo after deploy/config changes: run one English semantic query, one Korean semantic query, and one similar-photos action. If the demo is not guaranteed to stay enabled, change README wording from "live on the demo" to a versioned/current-status note.
+
+### 2. OG/Social Card Rendering Was Code-Inspected, Not Externally Validated
+
+Severity: Low
+Confidence: Medium
+
+Evidence:
+- `apps/web/src/app/[locale]/(public)/page.tsx:61-123` builds alternate feed metadata and Open Graph image metadata from configured or latest-photo sources.
+- `apps/web/src/app/api/og/route.tsx:33-224` renders the generic/topic OG card.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:38-299` renders photo-specific OG cards and includes fallback redirect behavior.
+
+Failure scenario:
+Generated OG cards can be syntactically valid in code but still render poorly, fail in social validators, or expose unexpected fallback images once deployed behind the configured base URL/proxy.
+
+Concrete fix:
+Validate at least the home OG image, one topic OG image, and one photo OG image with deployed URLs and social-card validators. Capture failures as product trust bugs, not just visual bugs.
+
+### 3. PWA Install/Offline Behavior Was Not Browser-Tested
+
+Severity: Low
+Confidence: Medium
+
+Evidence:
+- `apps/web/src/app/manifest.ts:6-52` defines a manifest suitable for app install surfaces.
+- `apps/web/public/sw.template.js:370-403` handles the fetch strategy for images, HTML, revocable shares, admin, and pass-through requests.
+
+Failure scenario:
+The product claim may still fail in a real browser because of scope, registration, HTTPS/proxy behavior, cache headers, or installability criteria even though the source implementation is coherent.
+
+Concrete fix:
+Run a production-build browser smoke: load public gallery, verify service worker registration, installability, offline reload of a previously visited public photo route, and network-only behavior for admin/share/map routes.
+
+## Final Missed-Issues Sweep
+
+I re-swept the claim-bearing surfaces with repository search for product-facing terms including `GalleryKit`, `semantic`, `offline`, `PWA`, `Lightroom`, `HDR`, `P3`, `search`, `metadata`, `author`, `copyright`, `Open Graph`, `feed`, `S3`, `MinIO`, `AI`, `production`, `demo`, `category`, `topic`, and `album`.
+
+Relevant files intentionally not deeply reviewed:
+- Historical `.context/reviews/` and `.context/plans/` files, because this review targets current HEAD product claims rather than prior-cycle findings.
+- Full unit/e2e test suites, except where needed to understand product-claim contracts.
+- Every admin implementation page in full detail. The review searched user-facing messages and inspected the main claim-heavy admin settings/token surfaces, but did not line-audit every CRUD table and analytics view.
+- Live production/demo URLs, social-card validators, and browser PWA install/offline flows. Those are listed above as manual validation risks.
+
+No relevant README, CLAUDE/docs, config example, message bundle, SEO/feed/OG/manifest/sitemap route, search/semantic implementation, service worker, or deployment document identified in the inventory was skipped.
+

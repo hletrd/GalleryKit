@@ -1,8 +1,8 @@
-# Cycle 13 Critic Review
+# Cycle 14 Critic Review
 
-Review target: repository state inspected on 2026-06-29 from `/Users/hletrd/flash-shared/gallery`.
+Review target: current HEAD `c2da917d0fe9620bcbef3897570591080445592c` in `/Users/hletrd/flash-shared/gallery`.
 
-Role: critic subagent. I did not modify production code, revert changes, run deploys, or change runtime data. This report is the intended output.
+Role: cycle-14 critic. I reviewed current HEAD only. I did not modify production code, runtime data, migrations, dependencies, or deployment config. This file is the review artifact requested by the task.
 
 ## Coverage
 
@@ -12,141 +12,190 @@ Required guidance read first:
 - Code-review skill instructions
 
 Inventory built before findings:
-- 6471 review-relevant files after excluding `.git`, `node_modules`, build output, test reports, runtime data, and upload/resource payload directories.
-- Active source focus: `apps/web/src/**`, `apps/web/scripts/**`, `apps/web/drizzle/**`, `apps/web/e2e/**`, root/app package/config files, nginx/docker/deploy files, `.github/**`, `README.md`, `AGENTS.md`, `CLAUDE.md`, and committed `.context/**` review/plan history.
+- `git ls-files` HEAD inventory: 2551 tracked paths.
+- Review-relevant tracked categories: 8 API route files, 13 server-action files, 96 `src/lib` files, 57 component files, 273 test/e2e files, 31 Drizzle migration/meta files, 27 scripts, 17 root/app config and canonical docs, and 1751 committed `.context` review/plan/artifact paths.
 
-High-risk surfaces read directly:
-- Public pages and analytics actions.
-- Admin/public API route guard patterns.
-- Rate-limit/proxy IP handling.
-- Data privacy projections and privacy tests.
-- Migrations, migration runner, schema tests, and journal tests.
-- Service worker template/generated contract tests.
-- Smart collections, search, share links, uploads, deploy, nginx, and docs.
+High-risk surfaces inspected directly or by whole-category static sweep:
+- Public share/photo/topic pages, public actions, search, semantic/similar routes, OG routes, service worker contracts.
+- Admin actions, admin API auth wrappers, same-origin/origin guards, auth/session/token code, rate-limit/proxy IP handling.
+- Upload/original-file path helpers, queue/backfill/scripts using originals, derivative serving, image processing cleanup.
+- Data privacy projections, `_PrivacySensitiveKeys` guards, search/group/listing SQL shapes, schema indexes.
+- Restore/dump SQL scanner, migration journal/reconcile contracts, deploy/nginx/Docker docs and tests.
+- E2E skip gates, source-contract tests, TODO/FIXME/unsafe-sink/secret/path/SQL pattern sweeps.
+
+Validation commands run:
+- `npm run lint:api-auth --workspace=apps/web` — passed.
+- `npm run lint:action-origin --workspace=apps/web` — passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` — passed for scanned mutating public routes.
+- Static sweeps for `test.skip`, `describe.skip`, `TODO/FIXME`, `dangerouslySetInnerHTML`, rate-limit exemptions, action-origin exemptions, original upload path consumers, and tracked secret-like filenames.
 
 ## Findings Summary
 
 Confirmed issues: 3
 
-Likely issues: 0
+Likely issues: 1
 
-Risks needing manual validation: 1
+Risks needing manual validation: 2
 
-No Critical or High findings were promoted from this pass.
+No finding below claims a test/build failure; this was a static critique pass plus focused lint gates, not a full release gate run.
 
 ## Confirmed Issues
 
-### C13-CRIT-01 - Fire-and-forget analytics can still reject before the internal catch
+### C14-CRIT-01 - Original-upload helpers trust stored filenames as path components
 
-Severity: Medium
+Severity: High
 
 Confidence: High
 
-Category: Correctness / operations / testing
+Category: Security / data-loss / operational recovery
 
 Status: Confirmed
 
 Code regions:
-- `apps/web/src/app/actions/public.ts:357-361` documents photo view recording as fire-and-forget, non-blocking, and internally swallowed.
-- `apps/web/src/app/actions/public.ts:365-384` catches only the final `db.insert(...).values(...).catch(...)`; `headers()`, `buildViewParams(...)`, rate limiting, and the visibility `db.select(...)` can still reject before that catch is attached.
-- `apps/web/src/app/actions/public.ts:388-410` has the same pattern for topic views.
-- `apps/web/src/app/actions/public.ts:415-441` has the same pattern for shared-group views.
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:163-165` discards the returned promise with `void recordPhotoView(image.id)` and says errors are swallowed internally.
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164` discards `recordTopicView(...)`.
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127-131` discards `recordSharedGroupView(...)`.
-- `apps/web/src/__tests__/public-actions.test.ts:241-250` covers successful non-blocking inserts.
-- `apps/web/src/__tests__/public-actions.test.ts:253-267`, `apps/web/src/__tests__/public-actions.test.ts:295-304`, and `apps/web/src/__tests__/public-actions.test.ts:307-317` cover public-target miss, maintenance skip, and rate-limit skip, but not a rejected pre-insert select/header path.
+- `apps/web/src/lib/upload-paths.ts:57-60` builds original-file candidates with `path.join(UPLOAD_DIR_ORIGINAL, filename)` and `path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename)` without validating `filename` or proving realpath containment.
+- `apps/web/src/lib/upload-paths.ts:75-79` and `apps/web/src/lib/upload-paths.ts:93-100` use the same raw filename join for best-effort and strict original deletion.
+- `apps/web/src/app/actions/images.ts:646-654` and `apps/web/src/app/actions/images.ts:751-760` validate filenames before admin delete, but that protection is local to delete actions.
+- `apps/web/src/app/actions/images.ts:1234-1237` re-enqueues a failed DB row using `filename_original` without re-validating it.
+- `apps/web/src/lib/image-queue.ts:562-623` resolves `job.filenameOriginal` and passes the resulting path to Sharp.
+- `apps/web/src/lib/admin-backfill-runner.ts:442-448`, `apps/web/scripts/backfill-clip-embeddings.ts:152-159`, `apps/web/scripts/backfill-cicp-recheck.ts:92-100`, and `apps/web/scripts/backfill-color-pipeline.ts:197-204` resolve DB-stored original filenames for maintenance work.
+- `apps/web/src/__tests__/upload-paths.test.ts:58-81` covers primary/legacy/missing resolution only; it does not cover traversal, absolute paths, symlinks, or containment failure.
 
 Failure scenario:
-During a transient DB outage, the visibility lookup in `recordPhotoView`, `recordTopicView`, or `recordSharedGroupView` rejects before the final insert promise exists. The page call site has already discarded the returned promise, so the rejection is unhandled from the render path. Depending on runtime settings, this can produce unhandled-rejection noise, trigger process restarts, or at minimum violate the explicit product invariant that analytics must never break public UX.
+A crafted or corrupted SQL restore, direct DB repair, or legacy import inserts an unprocessed/failed image row with `filename_original = '../../some-readable-file'` or an absolute-path payload. The queue retry/backfill paths do not repeat the delete action's `isValidFilename` guard; they call `resolveOriginalUploadPath`, which can return a path outside the intended originals directory if that joined candidate exists. The app then reads/processes the outside file through Sharp or embedding code. For deletion paths, a future caller of `deleteOriginalUploadFileStrict` that omits the local action guard can unlink outside the originals directory. This violates the documented assumption that upload path traversal is centrally contained.
 
-Suggested fix:
-Wrap the full recorder body after cheap input validation in a top-level `try/catch`, then log at most a concise analytics warning and return. Alternatively attach `.catch(...)` at every `void record*View(...)` call site, but the invariant is easier to preserve inside the recorder. Add regression tests where `headers()` or the public-target `db.select(...)` rejects and each recorder resolves without throwing or producing an unhandled promise.
+Concrete fix:
+Move the boundary into `upload-paths.ts` so every original-file consumer gets the same guarantee. Reject filenames unless they pass the existing safe filename policy, reject absolute paths, resolve both base directories and candidate paths with `realpath`, require the candidate to stay under the resolved base, and reject symlink candidates with `lstat` before returning. Add tests to `upload-paths.test.ts` for `../`, absolute paths, symlink escape, missing file, primary hit, and legacy hit. Keep the delete action's local validation as defense in depth, not as the primary invariant.
 
-### C13-CRIT-02 - nginx collapses forwarded client IPs while docs describe a multi-hop edge topology
+### C14-CRIT-02 - nginx proxy header contract contradicts the documented multi-hop deployment
 
 Severity: Medium
 
-Confidence: High for the mismatch; production impact depends on the actual edge topology.
+Confidence: High for the repository mismatch; production impact depends on live topology.
 
-Category: Operations / security / docs / cross-module contract
+Category: Operations / security / availability
 
 Status: Confirmed
 
 Code regions:
-- `apps/web/nginx/default.conf:6-8` says this nginx can be the internal HTTP hop behind a TLS-terminating load balancer.
-- `apps/web/nginx/default.conf:25-29` repeats that the file is intended behind a TLS-terminating edge/load balancer.
-- `apps/web/nginx/default.conf:68-70`, `apps/web/nginx/default.conf:85-87`, `apps/web/nginx/default.conf:102-104`, `apps/web/nginx/default.conf:118-120`, `apps/web/nginx/default.conf:142-144`, `apps/web/nginx/default.conf:159-161`, `apps/web/nginx/default.conf:181-183`, and `apps/web/nginx/default.conf:194-196` set `X-Real-IP` and `X-Forwarded-For` to `$remote_addr` in every proxied location.
-- `apps/web/src/lib/rate-limit.ts:161-183` trusts `X-Forwarded-For` only when `TRUST_PROXY=true`, then selects the client immediately before the trusted proxy suffix and falls back to `X-Real-IP`.
-- `apps/web/src/lib/rate-limit.ts:168-173` explicitly models a chain like `client, cdn, nginx` with `TRUSTED_PROXY_HOPS=2`.
-- `README.md:151-154` documents shipped nginx as an internal hop, says compose forces `TRUST_PROXY=true`, and tells operators to set `TRUSTED_PROXY_HOPS=2` for `CDN/LB -> nginx -> app`.
-- `apps/web/src/__tests__/nginx-config.test.ts:30-33` currently locks the opposite behavior by asserting nginx does not use `$proxy_add_x_forwarded_for` and does overwrite inbound `X-Forwarded-For` with `$remote_addr`.
+- `apps/web/nginx/default.conf:6-8` and `apps/web/nginx/default.conf:25-29` describe nginx as an internal HTTP hop behind a TLS-terminating load balancer or edge.
+- `apps/web/nginx/default.conf:68-70`, `apps/web/nginx/default.conf:85-87`, `apps/web/nginx/default.conf:102-104`, `apps/web/nginx/default.conf:142-144`, `apps/web/nginx/default.conf:159-161`, `apps/web/nginx/default.conf:181-183`, and `apps/web/nginx/default.conf:194-196` overwrite `X-Real-IP` and `X-Forwarded-For` with only `$remote_addr`.
+- `README.md:152-154` says shipped compose forces `TRUST_PROXY=true`, calls nginx an internal hop behind a TLS-terminating edge, and tells operators to set `TRUSTED_PROXY_HOPS=2` for `CDN/LB -> nginx -> app`.
+- `apps/web/src/lib/rate-limit.ts:88-96` gives share routes a per-IP in-memory budget, and `apps/web/src/lib/rate-limit.ts:161-183` selects client IP from trusted forwarded chains when `TRUST_PROXY=true`.
+- `apps/web/src/__tests__/nginx-config.test.ts:30-34` locks the overwrite behavior by asserting `$proxy_add_x_forwarded_for` is absent and `$remote_addr` is used.
 
 Failure scenario:
-If production has Cloudflare or another TLS/LB hop in front of host nginx, the upstream edge may send a verified `X-Forwarded-For: client, edge` chain. Host nginx then replaces it with only `$remote_addr`, which is the edge or load-balancer address. The app sees a one-element chain; with `TRUSTED_PROXY_HOPS=2` it cannot select a client slot, and its fallback `X-Real-IP` is the same edge address. Login, search, share, analytics, and other per-IP buckets then collapse many real users behind the edge into one bucket, while abuse from one client can throttle unrelated users.
+If production traffic reaches this nginx from Cloudflare or another TLS/LB hop, the original client chain is collapsed to the upstream edge address before the app sees it. With `TRUSTED_PROXY_HOPS=2`, the app cannot select the real client from a one-element chain and falls back to the same edge IP. Login, public search, share lookups, OG generation, and analytics buckets can all collapse unrelated visitors behind the CDN/LB into one rate-limit identity, allowing one abusive client to throttle legitimate users sharing that edge.
 
-Suggested fix:
-Choose and encode one topology. If upstream CDN/LB support is intended, configure nginx to verify the trusted upstream first, for example with `set_real_ip_from`, `real_ip_header X-Forwarded-For`, and `real_ip_recursive on`, then forward the sanitized client identity consistently and update the nginx source test. If a single host-nginx hop is the only supported topology, remove the multi-hop/CDN guidance from `README.md` and nginx comments, keep `TRUSTED_PROXY_HOPS=1`, and keep the anti-spoofing overwrite test as the documented contract.
+Concrete fix:
+Choose one supported topology and make code/docs/tests agree. If multi-hop edge support is intended, configure nginx with a trusted upstream allowlist, `real_ip_header X-Forwarded-For`, `real_ip_recursive on`, and forward the sanitized chain/client consistently; update `nginx-config.test.ts` around that contract. If the only supported production topology is direct client -> host nginx -> app, remove the CDN/LB and `TRUSTED_PROXY_HOPS=2` guidance from README/nginx comments and document `TRUSTED_PROXY_HOPS=1` as the invariant.
 
-### C13-CRIT-03 - Review scratch files under `.context/reviews` are easy to commit accidentally
+### C14-CRIT-03 - `.context/reviews/**` unignores reviewer scratch by default
 
 Severity: Low
 
 Confidence: High
 
-Category: Maintainability / repository hygiene / docs
+Category: Repository hygiene / process reliability
 
 Status: Confirmed
 
 Code regions:
-- `.gitignore:19-21` ignores `.context/*` and then unignores `.context/reviews/**`.
-- `.gitignore:22-25` re-ignores only review logs and `gate-logs`, leaving temporary inventory or scratch artifacts under `.context/reviews` trackable.
+- `.gitignore:19-21` ignores `.context/*` and then unignores the entire `.context/reviews/**` subtree.
+- `.gitignore:22-25` re-ignores only `*.log` and `gate-logs`, leaving temporary inventories, JSON dumps, hidden scratch files, and raw command captures trackable under the review tree.
 
 Failure scenario:
-A reviewer or automation process writes an intermediate inventory, JSON dump, raw grep output, or hidden scratch file under `.context/reviews` while producing a committed review artifact. Because the negation unignores the entire subtree, that scratch file appears in `git status` and can be committed with the report. I hit this exact footgun during this review with a temporary `.context/reviews/.critic-inventory.tmp` inventory file.
+A critic/verifier writes an intermediate file under `.context/reviews` while producing a committed report. The file appears in `git status` and can be committed with the final review, leaking noisy inventories or local diagnostic output into review history. The project explicitly stores committed reviews there, so this is an easy path for accidental artifact churn.
 
-Suggested fix:
-Add explicit ignore rules for `.context/reviews/**/*.tmp`, `.context/reviews/**/.tmp-*`, or hidden scratch files such as `.context/reviews/.*.tmp`. Better yet, document or create a separate ignored `.context/scratch/` location for reviewer inventories and generated diagnostics.
+Concrete fix:
+Add explicit ignore rules for reviewer scratch patterns such as `.context/reviews/**/*.tmp`, `.context/reviews/**/.tmp-*`, `.context/reviews/**/*.scratch.*`, and hidden temp files. Alternatively document and use an ignored `.context/scratch/` directory for transient inventories, keeping `.context/reviews/` for intentional report artifacts only.
 
 ## Likely Issues
 
-None promoted. The remaining suspicious areas either already have source-contract tests or depend on deployment state that I could not validate from the repository alone.
+### C14-CRIT-04 - Invalid share-route keys consume the real share lookup budget
 
-## Risks Needing Manual Validation
-
-### C13-CRIT-R1 - Current production proxy topology determines whether C13-CRIT-02 is live
-
-Severity: Medium if production has a CDN/LB in front of host nginx; Low if host nginx is the only trusted hop.
+Severity: Medium
 
 Confidence: Medium
 
-Manual validation needed:
-- Confirm whether live traffic reaches `apps/web/nginx/default.conf` directly from clients or through Cloudflare / a TLS load balancer / another reverse proxy.
-- Confirm the live values of `TRUST_PROXY` and `TRUSTED_PROXY_HOPS`.
-- Check rate-limit logs or analytics distribution for edge-IP bucket collapse.
+Category: Availability / UX / rate-limit design
 
-Suggested validation:
-From a controlled client, send a request through the live edge and inspect the app-visible `x-forwarded-for` / `x-real-ip` chain via a temporary authenticated diagnostic path or logs that do not expose public data. Do not trust raw client-injected forwarded headers; validate from the trusted edge side.
+Status: Likely issue
 
-## Final Sweep
+Code regions:
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:79-90` calls `isShareLookupRateLimited()` before `getImageByShareKeyCached(key)`.
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:84-102` calls the same limiter before `getSharedGroupCached(key, ...)`.
+- `apps/web/src/lib/data.ts:1177-1181` and `apps/web/src/lib/data.ts:1243-1250` already reject syntactically invalid Base56 keys without querying share rows.
+- `apps/web/src/lib/rate-limit.ts:88-96` sets the share lookup budget to 60 requests/minute per IP.
+- `apps/web/src/__tests__/shared-route-rate-limit-source.test.ts:10-30` source-locks "rate limit before DB lookup" but does not distinguish cheap syntactic rejection from valid-looking DB lookup.
+- `apps/web/src/__tests__/rate-limit.test.ts:258-275` tests the raw budget only, not route behavior for invalid key shapes.
 
-Commonly missed issue classes checked:
-- Public/admin route auth wrappers and mutating-action same-origin guards.
-- Public mutating API rate-limit pre-increment conventions and explicit exemptions.
-- Privacy-sensitive admin fields in public data projections and the symmetric type/test guard.
-- JSON-LD sinks and CSP nonce/safe-string helper usage.
-- Upload path traversal controls, original-file serving restrictions, and edge/body-size contracts.
-- Semantic-search, smart-collection, shared-link, and public analytics expensive-resource paths.
-- Migration journal monotonicity, reconcile coverage, and schema/runtime write contracts.
-- Service worker template/generated file drift and bounded cache-warming tests.
-- Deployment docs, nginx, Docker, and host-network assumptions.
-- Touch-target/a11y test surfaces and Korean/i18n message surfaces.
+Failure scenario:
+A crawler or attacker on the same NAT sends 61 requests to malformed share paths such as `/s/foo` or `/g/not-a-base56-key`. These requests do not need a DB lookup because the data layer would reject them syntactically, but the page body charges the shared per-IP lookup bucket before validation. A legitimate recipient behind the same IP can then get `notFound()` for a valid share link until the minute window resets.
 
-No additional high-confidence correctness, data-loss, privacy, or security findings were promoted from that sweep.
+Concrete fix:
+Perform a cheap `isBase56(key.trim(), 10)` check in both page bodies before `isShareLookupRateLimited()`, returning `notFound()` without charging for malformed keys. Preserve the existing limiter before valid-looking key DB lookups so enumeration remains throttled. Update the source-contract test to assert: syntactic validation happens before `isShareLookupRateLimited`, and `isShareLookupRateLimited` still happens before `getImageByShareKeyCached` / `getSharedGroupCached`.
 
-Verification performed for this review:
-- Read required guidance before analysis.
-- Built a non-excluded repository inventory before findings.
-- Ran repo-wide static searches for unsafe sinks, guard coverage, uploads, proxy headers, migrations, env/config, and source-contract patterns.
-- Read high-risk files directly and checked cited line anchors.
-- Did not run lint/typecheck/test suites because this was a review-only artifact and no production code was modified.
+## Risks Needing Manual Validation
+
+### C14-CRIT-R1 - Listing/search SQL may be fine at personal scale but has no production-scale evidence in repo
+
+Severity: Medium if the gallery grows into tens of thousands of images/tags; Low at the documented personal-gallery scale.
+
+Confidence: Medium
+
+Category: Performance / UX
+
+Status: Risk needing manual validation
+
+Code regions:
+- `apps/web/src/lib/data.ts:878-907` runs the initial public listing query with `LEFT JOIN imageTags/tags`, `GROUP BY images.id`, `COUNT(*) OVER()`, sort by `capture_date, created_at, id`, and offset pagination.
+- `apps/web/src/lib/data.ts:1438-1453` uses the same initial-page shape for public smart collections.
+- `apps/web/src/db/schema.ts:115-117` indexes `processed,capture_date,created_at` and `topic,processed,capture_date,created_at`, but the sort tie-breaker includes `id`.
+- `apps/web/src/lib/data.ts:1482-1555` public text search uses `%LIKE%` predicates across title/description/camera/lens/topic/topic label before running tag/alias fallbacks.
+
+Failure scenario:
+On a larger gallery or high-cardinality tag set, initial page loads and public search can degrade into expensive grouped scans/filesorts, especially because `COUNT(*) OVER()` forces total-count work on the grouped result. The code has keyset pagination for load-more paths, but first-page/topic/smart-collection/search latency still needs measurement against production data.
+
+Concrete validation/fix:
+Capture `EXPLAIN ANALYZE` and slow-query samples on a production-sized copy for home, topic, tag-filtered home, smart collection, and common search terms. If confirmed, consider separate count caching, avoiding `COUNT(*) OVER()` on first-page SSR, adding indexes that include the `id` sort tie-breaker where MySQL uses them, or introducing a proper full-text/search index for public keyword search.
+
+### C14-CRIT-R2 - Admin/origin E2E coverage is intentionally environment-gated
+
+Severity: Medium when CI does not set the required E2E credentials; Low when the gated lane runs on seeded CI.
+
+Confidence: High for the gating, Medium for actual CI impact.
+
+Category: Testing / release confidence
+
+Status: Risk needing manual validation
+
+Code regions:
+- `apps/web/e2e/admin.spec.ts:7-12` skips admin E2E unless CI and `E2E_ADMIN_ENABLED=true` are present.
+- `apps/web/e2e/origin-guard.spec.ts:29-35`, `apps/web/e2e/origin-guard.spec.ts:56-58`, and `apps/web/e2e/origin-guard.spec.ts:77` skip credentialed or baseURL-dependent origin-guard paths when local/CI environment is not configured.
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts:31` and `apps/web/src/__tests__/clip-offline-load.test.ts:41` skip CLIP-weighted integration suites when model weights are absent; that is expected, but it means production semantic mode still depends on a separate seeded lane.
+
+Failure scenario:
+The lightweight lint/source-contract/unit tests pass while the browser-level admin login, admin mutations, same-origin rejection, and CLIP model-loading paths are not exercised in the actual CI run. A regression in cookie/session wiring, browser form behavior, reverse-proxy origin headers, or production semantic weights can ship despite strong unit coverage.
+
+Concrete validation/fix:
+Check the CI configuration and recent run logs to confirm these gated suites run in at least one required lane with seeded credentials, `baseURL`, and any CLIP model artifacts expected for production semantic mode. If not, add a protected CI job that runs the admin/origin E2E tests against seeded data, and keep CLIP integration as a separate explicit model-weight job rather than a silent default skip.
+
+## Final Missed-Issues Sweep
+
+Common missed issue classes checked:
+- Admin API wrappers and mutating server-action same-origin guards: lint gates passed and spot checks matched the guard model.
+- Public route/action throttling: mutating public API lint passed; share-route GET throttling and OG/search routes were manually inspected because GET routes are outside that lint gate.
+- XSS/HTML sinks: `dangerouslySetInnerHTML` hits are JSON-LD patterns already routed through the safe helper in current source; no new arbitrary HTML sink was promoted.
+- Privacy leakage: public selectors, search result fields, share selectors, and privacy guard tests were inspected; no new public exposure was promoted.
+- Upload/path traversal: public derivative serving has containment checks; original private helper is the confirmed exception above.
+- SQL/restore boundaries: SQL restore scanner and dangerous SQL blocklist were inspected; no additional restore finding was promoted.
+- Tests/skips: no `.only` found; skips are admin/origin environment gates and CLIP weight gates.
+- Docs/comments/playbooks: current docs generally match code except the proxy topology mismatch and review scratch hygiene above.
+
+Relevant files skipped:
+- No tracked source, config, script, migration, canonical doc, or test category was intentionally skipped from inventory or static sweeps.
+- I did not line-read every historical `.context/reviews/**` artifact or every binary/image artifact one by one. They were inventoried as tracked HEAD files and included in text/pattern sweeps where applicable, but the direct inspection focus was current product/code/docs/tests/playbooks.
+
+Residual verification gaps:
+- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and Playwright E2E were not run because the task was a review artifact with no production code changes.
+- Production proxy topology, CI gated-suite execution, and production-scale query plans require environment evidence outside the repository.
