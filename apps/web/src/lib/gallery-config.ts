@@ -80,7 +80,7 @@ export interface GalleryConfig {
     // P3-20: JPEG chroma subsampling for wide-gamut sources
     wideGamutJpegChroma: JpegChromaSubsampling;
 
-    // P3-21: AVIF encoding effort (4-9)
+    // P3-21: AVIF encoding effort (0-9)
     avifEffort: number;
 
     // C2-A5 / C2-COL-MED-2: JPEG chroma subsampling for sRGB / non-wide-gamut sources

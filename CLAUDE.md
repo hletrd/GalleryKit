@@ -209,7 +209,7 @@ git values must be treated as compromised and must not be reused.
 - CSV export escapes formula injection characters (`=`, `+`, `-`, `@`) with leading-whitespace tolerance (C7R-RPL-01), strips C0/C1 control characters, strips Unicode bidi override and isolate chars (U+202A-202E, U+2066-2069) against Trojan-Source-style visual reordering (C7R-RPL-11), and strips zero-width / invisible formatting chars (U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM, U+2060 WJ, U+FEFF BOM, U+180E MVS, U+FFF9-FFFB interlinear anchors) against invisible-character formula-injection bypasses (C8R-RPL-01). See `apps/web/src/lib/csv-escape.ts`
 - Admin-controlled persistent string fields (`topic.alias`, `tag.name`, `topic.label`, `image.title`, `image.description`, `seo_title`, `seo_description`, `seo_nav_title`, `seo_author`) reject Unicode bidi overrides (U+202A-202E LRE/RLE/PDF/LRO/RLO, U+2066-2069 LRI/RLI/FSI/PDI) and zero-width / invisible formatting characters (U+200B-200F, U+2060, U+FEFF, U+180E, U+FFF9-FFFB) at the validation layer (`UNICODE_FORMAT_CHARS` / `containsUnicodeFormatting` in `apps/web/src/lib/validation.ts`). Closes Trojan-Source-style spoofing on every admin string surface that is rendered back to admins or end users (admin tables, public navigation, photo viewer, lightbox, OG images, SEO `<title>` / `<meta description>` / `<meta og:*>`). Lineage: C7R-RPL-11 / C8R-RPL-01 (CSV) → C3L-SEC-01 (topic alias) → C4L-SEC-01 (tag name) → C5L-SEC-01 (topic.label / image.title / image.description) → C6L-SEC-01 (SEO settings)
 - Defense-in-depth runtime strip for the Satori-rendered OpenGraph cards: `sanitizeForOg` in `apps/web/src/lib/og-sanitize.ts` strips Unicode bidi/zero-width formatting (the global-flag `stripUnicodeFormatting`) **and** C0 control chars before any admin-controlled string (site title, topic label, tags, JSON-LD camera/lens/exposure) reaches the image render. ONE shared sanitizer is imported by all three consumers — both OG image routes (`api/og/route.tsx`, `api/og/photo/[id]/route.tsx`) and the JSON-LD photo page (`p/[id]/page.tsx`) — so a future loosened SEO/topic/tag validator cannot let bidi/C0 chars reach ONE card while the others strip them. Non-exploitable today (admin-controlled + validator-rejected inputs, Satori renders text into an image), pure symmetry/defense-in-depth. Lineage: AGG-R8-13 (extract shared lib + wire both OG routes) → AGG-R8c3-02 (migrate the JSON-LD page's third copy + add C0 parity). Pinned by `__tests__/sanitize-for-og-global.test.ts` (all three consumers import the shared helper) + `__tests__/og-sanitize.test.ts`
-- **OG route SSRF hardening:** both OG image routes (`api/og/route.tsx` and `api/og/photo/[id]/route.tsx`) construct the `new URL()` for the card's background image using a fail-closed pattern: the route wraps `new URL(siteConfig.url)` in a try/catch **at request time** and returns a 404 (rather than falling back to a relative/request-derived origin that could be manipulated into an unintended fetch target) whenever `siteConfig.url` is missing or unparseable. NOTE (DOC22-M3): this validation is **per-request, not at startup/build time** — there is no module-load assertion on `siteConfig.url`, so an operator who mistypes the `url` field gets a cleanly-starting container that then silently returns 404 on OG image requests, not a loud build failure. The per-photo route additionally validates the photo ID exists before rendering, so a non-existent ID returns 404 instead of a card with a broken image reference.
+- **OG route SSRF hardening:** production builds validate the effective canonical base URL (`BASE_URL || siteConfig.url`) through `apps/web/scripts/ensure-site-config.mjs` before `next build` runs. The per-photo OG route still treats the inbound request origin as attacker-controllable at request time: internal derivative fetches are pinned to trusted `siteConfig.url`, and fallback redirects are derived from the canonical SEO/site URL, never from `new URL(req.url).origin`. If the canonical URL cannot be parsed, the fallback fails closed instead of redirecting to a request-derived host. The topic OG route does not perform the per-photo internal derivative fetch.
 - `MYSQL_PWD` env var used for mysqldump/restore (not `-p` flag)
 
 ### Privacy
@@ -503,7 +503,7 @@ docker run --rm \
   sh -c "npx --yes tsx@4.21.0 scripts/download-clip-models.ts"
 ```
 
-**After seeding, run a `--production` backfill** to generate CLIP embeddings for all existing photos:
+**After seeding, run a forced `--production` backfill** to generate CLIP embeddings for all existing photos before production mode is enabled:
 
 ```bash
 docker run --rm \
@@ -515,14 +515,16 @@ docker run --rm \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
-  sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production"
+  sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production --force"
 ```
+
+The `--force` flag is required in the documented pre-enable flow because a fresh DB still stores `semantic_search_mode='disabled'`; without `--force`, the backfill exits successfully without processing. After the DB mode is already set to `stub` or `production`, `--force` is only needed when intentionally re-embedding existing rows.
 
 **Activating production (operator-only, deliberate):** the resolver heals a stored
 `semantic_search_mode='production'` to `'disabled'` UNLESS the app environment sets
 `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (AGG-C10-02). The admin Settings UI intentionally
 offers only Disabled/Stub — there is no one-click production toggle. To go live: seed the
-weights (above), run the `--production` backfill (above), set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`
+weights (above), run the `--production --force` backfill (above), set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`
 in `.env.local`, and set the DB row `admin_settings.semantic_search_mode='production'`. Without
 the env flag the routes 503 regardless of the DB value.
 
@@ -628,7 +630,7 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 3. Copy `apps/web/src/site-config.example.json` to `apps/web/src/site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing. The file is a flat JSON object with **snake_case** keys (read directly via `import siteConfig from '@/site-config.json'` — there is NO camelCase mapping layer, so the key names below are exactly what you must write):
    - `title` — displayed in nav, footer, and OG title
    - `description` — OG description fallback
-   - `url` — canonical base URL (must match `BASE_URL` env var). NOTE (DOC22-M3): there is no startup/build-time validation of this field; the OG routes validate it per-request (fail-closed 404 on an unparseable value), so a typo here surfaces as silent OG-card 404s, not a build failure
+   - `url` — canonical base URL (must match `BASE_URL` env var). Production deploy/build paths validate the effective base URL (`BASE_URL || siteConfig.url`) before build; OG runtime paths still fail closed rather than falling back to request-derived hosts
    - `locale` — OG/HTML locale (e.g. `en_US`)
    - `author` — Atom feed attribution
    - `nav_title` — nav-bar brand text
