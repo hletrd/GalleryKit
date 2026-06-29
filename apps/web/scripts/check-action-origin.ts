@@ -47,6 +47,7 @@ const REPO_SRC = path.resolve(__dirname, '../src');
 const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']);
 
 const EXCLUDED_ACTION_BASENAMES = new Set(['auth']);
+const APPROVED_ACTION_GUARD_MODULE = '@/lib/action-guards';
 
 /**
  * Recursively walk a directory collecting action source files, excluding
@@ -112,16 +113,38 @@ function hasExemptComment(node: ts.Node, source: string): boolean {
     return /@action-origin-exempt/.test(leadingText);
 }
 
-function isRequireSameOriginAdminExpression(node: ts.Node): boolean {
+function collectApprovedRequireSameOriginImports(sourceFile: ts.SourceFile): Set<string> {
+    const approved = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || statement.moduleSpecifier.text !== APPROVED_ACTION_GUARD_MODULE
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === 'requireSameOriginAdmin') {
+                approved.add(element.name.text);
+            }
+        }
+    }
+    return approved;
+}
+
+function isRequireSameOriginAdminExpression(node: ts.Node, approvedImports: Set<string>): boolean {
     const expression = ts.isAwaitExpression(node) ? node.expression : node;
     return (
         ts.isCallExpression(expression)
         && ts.isIdentifier(expression.expression)
-        && expression.expression.text === 'requireSameOriginAdmin'
+        && approvedImports.has(expression.expression.text)
     );
 }
 
-function sameOriginGuardVariableName(statement: ts.Statement): string | null {
+function sameOriginGuardVariableName(statement: ts.Statement, approvedImports: Set<string>): string | null {
     if (!ts.isVariableStatement(statement)) {
         return null;
     }
@@ -130,7 +153,7 @@ function sameOriginGuardVariableName(statement: ts.Statement): string | null {
         if (
             ts.isIdentifier(declaration.name)
             && declaration.initializer
-            && isRequireSameOriginAdminExpression(declaration.initializer)
+            && isRequireSameOriginAdminExpression(declaration.initializer, approvedImports)
         ) {
             return declaration.name.text;
         }
@@ -264,7 +287,7 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     return sawRateLimit;
 }
 
-function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
+function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set<string>): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
     // calling it is not sufficient because callers must return early on that
@@ -276,7 +299,7 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
     }
 
     for (let index = 0; index < body.statements.length; index++) {
-        const guardName = sameOriginGuardVariableName(body.statements[index]);
+        const guardName = sameOriginGuardVariableName(body.statements[index], approvedImports);
         if (!guardName) continue;
 
         if (body.statements.slice(0, index).some(statementContainsPreGuardMutation)) {
@@ -321,6 +344,7 @@ type CheckReport = {
 export function checkActionSource(content: string, relative: string = 'input.ts'): CheckReport {
     const report: CheckReport = { passed: [], failed: [], skipped: [] };
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
 
     const lineOf = (node: ts.Node) =>
         sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
@@ -352,7 +376,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             return;
         }
 
-        if (!functionCallsRequireSameOriginAdmin(body)) {
+        if (!functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports)) {
             report.failed.push(
                 `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
             );

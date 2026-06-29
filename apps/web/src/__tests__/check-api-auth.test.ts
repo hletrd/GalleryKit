@@ -76,6 +76,38 @@ describe('checkRouteSource — .ts route files', () => {
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('must export GET directly');
     });
+
+    it('fails when a local function spoofs withAdminAuth', () => {
+        const src = `
+            function withAdminAuth(handler) { return handler; }
+            export const GET = withAdminAuth(async (req) => new Response('ok'));
+        `;
+        const report = checkRouteSource(src, 'api/admin/foo/route.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING AUTH');
+    });
+
+    it('fails when withAdminAuth is imported from an unapproved module', () => {
+        const src = `
+            import { withAdminAuth } from './fake-api-auth';
+            export const GET = withAdminAuth(async (req) => new Response('ok'));
+        `;
+        const report = checkRouteSource(src, 'api/admin/foo/route.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING AUTH');
+    });
+
+    it('passes when approved withAdminAuth is imported under an alias', () => {
+        const src = `
+            import { withAdminAuth as adminGuard } from '@/lib/api-auth';
+            export const GET = adminGuard(async (req) => new Response('ok'));
+        `;
+        const report = checkRouteSource(src, 'api/admin/foo/route.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: api/admin/foo/route.ts']);
+    });
 });
 
 describe('checkRouteSource — extension variants (C5R-RPL-02 / AGG5R-02)', () => {

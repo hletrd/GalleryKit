@@ -43,6 +43,7 @@ function findRouteFiles(dir: string): string[] {
 }
 
 const HTTP_METHOD_EXPORTS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+const APPROVED_AUTH_MODULE = '@/lib/api-auth';
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
     let current = expression;
@@ -61,7 +62,29 @@ function getLineNumber(sourceFile: ts.SourceFile, node: ts.Node) {
     return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 }
 
-function variableUsesWithAdminAuth(initializer: ts.Expression | undefined): boolean {
+function collectApprovedWithAdminAuthImports(sourceFile: ts.SourceFile): Set<string> {
+    const approved = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || statement.moduleSpecifier.text !== APPROVED_AUTH_MODULE
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === 'withAdminAuth') {
+                approved.add(element.name.text);
+            }
+        }
+    }
+    return approved;
+}
+
+function variableUsesWithAdminAuth(initializer: ts.Expression | undefined, approvedImports: Set<string>): boolean {
     if (!initializer) return false;
     const unwrapped = unwrapExpression(initializer);
     if (!ts.isCallExpression(unwrapped)) {
@@ -69,7 +92,7 @@ function variableUsesWithAdminAuth(initializer: ts.Expression | undefined): bool
     }
 
     const callee = unwrapExpression(unwrapped.expression);
-    return ts.isIdentifier(callee) && callee.text === 'withAdminAuth';
+    return ts.isIdentifier(callee) && approvedImports.has(callee.text);
 }
 
 type RouteCheckReport = {
@@ -93,6 +116,7 @@ export function checkRouteSource(content: string, relative: string = 'route.ts')
         scriptKind = ts.ScriptKind.JS;
     }
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
+    const approvedWithAdminAuthImports = collectApprovedWithAdminAuthImports(sourceFile);
     let sawHandlerExport = false;
     let fileHadFailure = false;
 
@@ -120,7 +144,7 @@ export function checkRouteSource(content: string, relative: string = 'route.ts')
                 }
 
                 sawHandlerExport = true;
-                if (!variableUsesWithAdminAuth(declaration.initializer)) {
+                if (!variableUsesWithAdminAuth(declaration.initializer, approvedWithAdminAuthImports)) {
                     report.failed.push(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, declaration)} must export ${declaration.name.text} = withAdminAuth(...)`);
                     fileHadFailure = true;
                 }

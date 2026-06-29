@@ -42,6 +42,7 @@ const RATE_LIMIT_NAME_PREFIXES = ['preIncrement', 'checkAndIncrement'];
 const APPROVED_RATE_LIMIT_MODULES = new Set(['@/lib/rate-limit', '@/lib/auth-rate-limit']);
 
 const EXEMPT_TAG = '@public-no-rate-limit-required';
+const EXEMPT_COMMENT_RE = /(?:^|[\s/*])@public-no-rate-limit-required:[^\S\r\n]*\S/;
 
 const MUTATING_CALL_METHOD_NAMES = new Set([
     'insert',
@@ -283,14 +284,14 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    // Check for explicit exempt comment anywhere in the file.
+    // Check for explicit reasoned exempt comment.
     // C1-BUG-05: strip string literals before matching so the tag inside
     // a string literal does not falsely exempt the file.
     const withoutStrings = content
         .replace(/`[^`]*`/g, '')
         .replace(/"[^"]*"/g, '')
         .replace(/'[^']*'/g, '');
-    if (withoutStrings.includes(EXEMPT_TAG)) {
+    if (EXEMPT_COMMENT_RE.test(withoutStrings)) {
         report.passed.push(`OK: ${relative} (carries ${EXEMPT_TAG})`);
         return report;
     }

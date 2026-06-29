@@ -599,7 +599,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
-**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
+**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` is intentionally excluded by name because it owns its own same-origin handling. `public.ts` is scanned with the narrower public-rate-limit contract for intentionally unauthenticated analytics writes.
 
 ## Touch-Target Audit
 

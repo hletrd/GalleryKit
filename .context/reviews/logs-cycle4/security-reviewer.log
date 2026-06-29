@@ -153,10 +153,10 @@ Create `apps/web/.env.local` from `apps/web/.env.local.example`:
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=[REDACTED]
 DB_NAME=gallery
-ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
-SESSION_SECRET=<random-64-char-hex>
+ADMIN_PASSWORD=[REDACTED]
+SESSION_SECRET=[REDACTED]
 ```
 
 ## Key Files & Patterns
@@ -19483,8 +19483,8 @@ exec
  succeeded in 0ms:
 README.md:37:- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multi-user auth (Argon2)
 README.md:72:│   ├── public/uploads/       # Processed public image derivatives (persistent volume)
-README.md:121:ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
-README.md:122:SESSION_SECRET=<openssl rand -hex 32>
+README.md:121:ADMIN_PASSWORD=[REDACTED]
+README.md:122:SESSION_SECRET=[REDACTED] rand -hex 32>
 README.md:124:# Optional: serve uploaded assets from a CDN or reverse proxy prefix
 README.md:160:The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
 README.md:162:Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
@@ -19492,14 +19492,14 @@ apps/web/drizzle.config.ts:11:        url: `mysql://${encodeURIComponent(process
 apps/web/playwright.config.ts:11:const port = Number(process.env.E2E_PORT || 3100);
 apps/web/playwright.config.ts:16:const requestedBaseUrl = process.env.E2E_BASE_URL?.trim() || localBaseUrl;
 apps/web/playwright.config.ts:27:if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E2E_ALLOW_REMOTE_ADMIN !== 'true') {
-apps/web/.env.local:8:ADMIN_PASSWORD=fh97rnr3
-apps/web/.env.local:9:SESSION_SECRET=5f4d6343e6df65c64b629cb9adaf7b57298ac99fb30eafcb1f0677f2e7299e87
+apps/web/.env.local:8:ADMIN_PASSWORD=[REDACTED]
+apps/web/.env.local:9:SESSION_SECRET=[REDACTED]
 apps/web/.env.local.example:11:# Optional absolute CDN origin/prefix for uploaded assets, for example:
 apps/web/.env.local.example:19:# or a precomputed Argon2 hash that starts with $argon2.
-apps/web/.env.local.example:20:ADMIN_PASSWORD=<generate-a-strong-admin-secret-or-argon2-hash>
+apps/web/.env.local.example:20:ADMIN_PASSWORD=[REDACTED]
 apps/web/.env.local.example:21:# Optional plaintext password for Playwright admin flows when ADMIN_PASSWORD is hashed.
 apps/web/.env.local.example:22:# E2E_ADMIN_PASSWORD=<plaintext-password-for-playwright-only>
-apps/web/.env.local.example:25:SESSION_SECRET=<generate-with: openssl rand -hex 32>
+apps/web/.env.local.example:25:SESSION_SECRET=[REDACTED] openssl rand -hex 32>
 apps/web/.env.local.example:31:# Optional: cap total batch upload size (default: 2147483648 = 2 GiB)
 apps/web/deploy.sh:17:    echo "Please create apps/web/.env.local with DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SESSION_SECRET, and ADMIN_PASSWORD."
 apps/web/next.config.ts:3:import { NEXT_UPLOAD_BODY_SIZE_LIMIT } from './src/lib/upload-limits';
@@ -26254,7 +26254,7 @@ DEPLOY_CMD=ssh -i ~/.ssh/atik.pem ubuntu@gallery.atik.kr "cd /home/ubuntu/galler
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=[REDACTED]
 DB_NAME=gallery
 # DB_SSL=false  # TLS is auto-enabled for non-localhost DB_HOST; set to "false" to disable
 
@@ -26269,12 +26269,12 @@ BASE_URL=http://localhost:3000
 # Admin Configuration
 # Use either a strong plaintext bootstrap secret (16+ chars, not a common default)
 # or a precomputed Argon2 hash that starts with $argon2.
-ADMIN_PASSWORD=<generate-a-strong-admin-secret-or-argon2-hash>
+ADMIN_PASSWORD=[REDACTED]
 # Optional plaintext password for Playwright admin flows when ADMIN_PASSWORD is hashed.
 # E2E_ADMIN_PASSWORD=<plaintext-password-for-playwright-only>
 # Remote admin E2E stays disabled unless you opt in explicitly.
 # E2E_ALLOW_REMOTE_ADMIN=true
-SESSION_SECRET=<generate-with: openssl rand -hex 32>
+SESSION_SECRET=[REDACTED] openssl rand -hex 32>
 
 # Image Processing
 # SHARP_CONCURRENCY=10  # Override Sharp thread pool size (default: CPU count - 2)
@@ -26295,11 +26295,11 @@ SESSION_SECRET=<generate-with: openssl rand -hex 32>
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=7-2gtD3IeP2HoTlV
+DB_PASSWORD=[REDACTED]
 DB_NAME=gallery
 DB_FILE_NAME=sqlite.db
-ADMIN_PASSWORD=fh97rnr3
-SESSION_SECRET=5f4d6343e6df65c64b629cb9adaf7b57298ac99fb30eafcb1f0677f2e7299e87
+ADMIN_PASSWORD=[REDACTED]
+SESSION_SECRET=[REDACTED]
 
 hook: PostToolUse
 hook: PostToolUse Completed

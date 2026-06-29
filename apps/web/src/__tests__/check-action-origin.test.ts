@@ -14,6 +14,11 @@ import { checkActionSource, walkForActionFiles } from '../../scripts/check-actio
  * defense-in-depth Origin/Referer check on mutating server actions.
  */
 
+const withApprovedActionGuard = (body: string) => `
+    import { requireSameOriginAdmin } from '@/lib/action-guards';
+    ${body}
+`;
+
 describe('checkActionSource — function declarations', () => {
     it('fails when a mutating function declaration omits requireSameOriginAdmin', () => {
         const src = `
@@ -30,76 +35,76 @@ describe('checkActionSource — function declarations', () => {
     });
 
     it('passes when a mutating function declaration calls requireSameOriginAdmin', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 
     it('fails when requireSameOriginAdmin is hidden in an uncalled nested helper', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 async function guard() {
                     return requireSameOriginAdmin();
                 }
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('fails when requireSameOriginAdmin appears only in a dead branch', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 if (false) {
                     await requireSameOriginAdmin();
                 }
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('fails when a DB mutation happens before the same-origin guard', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 await db.delete(foo).where(eq(foo.id, id));
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('fails when a DB mutation happens between the same-origin guard and early return', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 const originError = await requireSameOriginAdmin();
                 await db.delete(foo).where(eq(foo.id, id));
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('allows non-mutating localization/auth work before the same-origin guard', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
                 const t = await getTranslations('serverActions');
                 if (!(await isAdmin())) return { error: t('unauthorized') };
@@ -108,21 +113,21 @@ describe('checkActionSource — function declarations', () => {
                 await db.delete(foo).where(eq(foo.id, id));
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 
     it('fails when revalidation happens before the same-origin guard', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function updateFoo(id) {
                 revalidateLocalizedPaths('/admin');
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
@@ -132,28 +137,28 @@ describe('checkActionSource — function declarations', () => {
     // revalidate* wrappers) must count as mutations so an action calling them
     // before the same-origin guard is flagged.
     it('fails when raw revalidatePath happens before the same-origin guard', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function updateFoo(id) {
                 revalidatePath('/admin');
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
     it('fails when raw revalidateTag happens before the same-origin guard', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function updateFoo(id) {
                 revalidateTag('images');
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
@@ -230,7 +235,7 @@ describe('checkActionSource — function declarations', () => {
     });
 
     it('passes a guard-carrying mutating action WITHOUT an exempt comment (createLrToken shape)', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export async function createToken(opts) {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
@@ -238,7 +243,7 @@ describe('checkActionSource — function declarations', () => {
                 await logAuditEvent(1, 'created', 'token', '1');
                 return { success: true };
             }
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toContain('OK: actions/fixture.ts::createToken');
@@ -260,25 +265,25 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
     });
 
     it('passes when a mutating arrow-function export returns on the requireSameOriginAdmin result', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export const deleteFoo = async (id) => {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             };
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 
     it('fails when a mutating arrow-function export ignores the requireSameOriginAdmin result', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export const deleteFoo = async (id) => {
                 const originError = await requireSameOriginAdmin();
                 return { success: true };
             };
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.passed).toEqual([]);
         expect(report.failed).toHaveLength(1);
@@ -332,13 +337,13 @@ describe('checkActionSource — function-expression exports', () => {
     });
 
     it('passes when a mutating function-expression calls requireSameOriginAdmin', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             export const deleteFoo = async function (id) {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             };
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
@@ -380,7 +385,7 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
         expect(found).toEqual(['keep-js.js', 'keep.ts']);
     });
 
-    it('excludes auth.* and public.* at any depth', () => {
+    it('excludes auth.* but keeps public.* covered by public-action checks', () => {
         fs.writeFileSync(path.join(tempRoot, 'auth.ts'), '// top auth');
         fs.writeFileSync(path.join(tempRoot, 'public.tsx'), '// top public');
         fs.mkdirSync(path.join(tempRoot, 'sub'));
@@ -396,7 +401,7 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
 
 describe('checkActionSource — mixed file', () => {
     it('reports each export independently', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             /** @action-origin-exempt: read-only fixture */
             export async function getFoo() { return []; }
             export async function updateFoo(id) {
@@ -412,7 +417,7 @@ describe('checkActionSource — mixed file', () => {
                 if (originError) return { error: originError };
                 return { success: true };
             };
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::getFoo');
         expect(report.passed).toContain('OK: actions/fixture.ts::updateFoo');
@@ -424,14 +429,14 @@ describe('checkActionSource — mixed file', () => {
 
 describe('checkActionSource — aliased exports', () => {
     it('fails closed for aliased mutating exports that the scanner cannot inspect', () => {
-        const src = `
+        const src = withApprovedActionGuard(`
             const deleteFoo = async (id) => {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
             };
             export { deleteFoo };
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('UNSUPPORTED aliased export');
@@ -445,6 +450,53 @@ describe('checkActionSource — aliased exports', () => {
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('STAR RE-EXPORT');
+    });
+});
+
+describe('checkActionSource — approved guard import source', () => {
+    it('fails when a local function spoofs requireSameOriginAdmin', () => {
+        const src = `
+            function requireSameOriginAdmin() { return null; }
+            export async function deleteFoo(id) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('fails when requireSameOriginAdmin is imported from an unapproved module', () => {
+        const src = `
+            import { requireSameOriginAdmin } from './fake-action-guards';
+            export async function deleteFoo(id) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('passes when the approved guard is imported under an alias', () => {
+        const src = `
+            import { requireSameOriginAdmin as checkActionOrigin } from '@/lib/action-guards';
+            export async function deleteFoo(id) {
+                const originError = await checkActionOrigin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 });
 

@@ -100,6 +100,30 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when exempt tag has no reason', () => {
+        const source = `
+            // @public-no-rate-limit-required
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when exempt tag reason is blank', () => {
+        const source = `
+            // @public-no-rate-limit-required:
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('fails when rate-limit helper is only in a line comment (C12-LOW-01)', () => {
         const source = `
             // preIncrementSemanticAttempt(ip, now);
