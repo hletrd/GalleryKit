@@ -1,3 +1,100 @@
+# Critic Review - Cycle 5
+
+Role: `critic`
+Scope: whole repository and current HEAD
+HEAD: `8819d68a`
+Timestamp: 2026-06-29 KST
+Status: review artifact written for review-plan-fix cycle 5
+
+## Inventory And Method
+
+Required context read first:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `~/.agents/skills/code-review/SKILL.md`
+- prior `.context/reviews/critic.md`
+- current `.context/reviews/code-review.md`
+- current `.context/reviews/security-review.md`
+
+Repository and surface inventory:
+- Current route/action surface inventoried under `apps/web/src/app`, including public routes `/`, `/p/[id]`, `/g/[key]`, `/s/[key]`, `/c/[slug]`, `/map`, `/timeline`, admin pages, 8 API route files, and 12 server-action files.
+- Runtime/deploy/storage files inspected: `apps/web/scripts/migrate.js`, `apps/web/src/instrumentation.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`.
+- Sharing/public-cache surface inspected: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/lib/data.ts`.
+- Semantic/search surface inspected: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`.
+- Schema/privacy/test surface inspected: `apps/web/drizzle/meta/_journal.json`, migration journal tests, `apps/web/src/db/schema.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/__tests__/upload-paths.test.ts`, `apps/web/src/__tests__/semantic-search-route.test.ts`, `apps/web/src/__tests__/sw-template-contract.test.ts`.
+
+Validation evidence gathered:
+- PASS `npm run lint:api-auth --workspace=apps/web`.
+- PASS `npm run lint:action-origin --workspace=apps/web`.
+- PASS `npm run lint:public-route-rate-limit --workspace=apps/web`.
+- PASS `npm test --workspace=apps/web -- --run src/__tests__/sw-template-contract.test.ts src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/privacy-fields.test.ts` (4 files, 33 tests).
+
+## Findings
+
+### CRIT-C5-01 - Legacy-original migration can delete the only good original on filename conflict
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed
+- Perspectives: operational risk, product correctness, docs/implementation mismatch, maintainability
+- Location/region:
+  - `apps/web/scripts/migrate.js:46-55` defines the legacy public original root and the private original root.
+  - `apps/web/scripts/migrate.js:58-95` migrates legacy originals at startup.
+  - `apps/web/scripts/migrate.js:74-76` deletes the legacy public source whenever the private target path already exists, without verifying equality.
+  - `apps/web/scripts/migrate.js:80-84` otherwise moves or copies the source into the private root and unlinks the source.
+  - `apps/web/scripts/migrate.js:97-110` refuses production startup if legacy public originals remain.
+  - `CLAUDE.md:557-558` documents original uploads as private, persisted data-volume state.
+  - `apps/web/src/__tests__/upload-paths.test.ts:58-76` covers runtime path preference when both roots contain a file, but not the destructive migration conflict branch.
+- Failure scenario: A previous partial deploy, manual recovery, or interrupted cross-device copy leaves `data/uploads/original/foo.jpg` present but truncated/corrupt while the valid legacy `public/uploads/original/foo.jpg` still exists. On the next startup, `migrateLegacyOriginalUploads()` sees the target and unlinks the valid public source. The production assertion then passes because the public source is gone, but the only recoverable original has been destroyed.
+- Concrete fix: In the `fs.existsSync(target)` branch, compare source and target before unlinking. Only delete the source when size and a cryptographic hash match. If they differ, fail startup with an actionable error or quarantine the source into a conflict directory under the private data root with a unique suffix. Add focused tests for identical conflict, divergent conflict, and `EXDEV` copy conflict behavior.
+
+### CRIT-C5-02 - Service-worker offline HTML cache can outlive share revoke, delete, or expiry
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Perspectives: product correctness, privacy expectation, cache/docs interaction, operational surprise
+- Location/region:
+  - `apps/web/public/sw.template.js:271-293` caches any successful HTML response that is not marked `x-gk-admin-render: 1`.
+  - `apps/web/public/sw.template.js:294-310` serves cached HTML while offline for up to `HTML_MAX_AGE_MS` (24 hours).
+  - `apps/web/public/sw.template.js:366-369` applies this network-first HTML handler to every HTML route.
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14-26` marks single-photo share pages dynamic/no-cache/noindex, but the SW deliberately ignores normal no-cache behavior.
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:79-96` resolves a share key and returns `notFound()` when the key is no longer valid.
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:17-29` does the same robots/no-cache signaling for shared groups.
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:82-108` resolves the group key and returns `notFound()` when invalid.
+  - `apps/web/src/app/actions/sharing.ts:306-343` revokes a single-photo share link and revalidates `/s/${oldShareKey}`.
+  - `apps/web/src/app/actions/sharing.ts:346-386` deletes a group share link and revalidates `/g/${group.key}`.
+  - `CLAUDE.md:404-409` documents the deliberate HTML offline fallback and its current exclusion only for admin-rendered pages/admin routes.
+- Failure scenario: A visitor opens `/s/<key>` or `/g/<key>` once, installing a cached HTML copy. The admin later revokes the photo share, deletes the group share, or a group expires. Server-side requests correctly return 404, but if that same device is offline within 24 hours, the service worker still serves the stale shared page HTML from Cache Storage. Server revalidation cannot purge already-installed client service-worker caches.
+- Concrete fix: Treat secret-bearing share routes as permissioned even though they are public. Exclude `/s/` and `/g/` from `networkFirstHtml`, or better, set a response header such as `x-gk-no-offline-cache: 1` on share pages and teach the SW to honor it. Add `sw-template-contract` coverage proving share HTML is not cached and update `CLAUDE.md` to document the permissioned-route exclusion.
+
+### CRIT-C5-03 - Disabled semantic search still has an unmetered parse/config work path
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Perspectives: hidden assumption, operational risk, test/implementation interaction, abuse resistance
+- Location/region:
+  - `apps/web/src/app/api/search/semantic/route.ts:100-156` performs same-origin, maintenance, content-type, transfer-encoding, and optional `Content-Length` gates before charging the limiter.
+  - `apps/web/src/app/api/search/semantic/route.ts:158-169` pre-increments the process-local semantic limiter before body materialization.
+  - `apps/web/src/app/api/search/semantic/route.ts:171-207` reads and parses the body and validates the query.
+  - `apps/web/src/app/api/search/semantic/route.ts:209-225` loads gallery config, then rolls back the limiter and returns 503 when mode is disabled.
+  - `apps/web/src/__tests__/semantic-search-route.test.ts:208-218` explicitly locks this behavior: disabled mode increments and then rolls back the limiter.
+  - `apps/web/src/lib/rate-limit.ts:312-352` implements the semantic limiter as a bounded in-process map, so rollback removes the only local accounting for this request path.
+- Failure scenario: Semantic search is disabled by default or temporarily disabled during operations. A non-browser client can send same-origin-looking JSON requests with valid small bodies. Each request still pays the server cost of body read, JSON parse, query validation, and config lookup, then refunds the limiter token because the mode is disabled. Sustained traffic can create avoidable CPU/DB/config load while never accumulating semantic rate-limit pressure.
+- Concrete fix: Move the semantic-mode check ahead of body materialization and limiter charging, immediately after the cheap header gates, so disabled mode fails without reading/parsing the body. If the config lookup is considered non-trivial, add a small disabled-mode limiter that is not rolled back. Update the test to assert disabled mode does not call `request.text()` and does not consume/rollback a semantic attempt, or explicitly charge disabled-mode attempts if rollback is retained.
+
+## Final Missed-Issues Sweep
+
+- Re-ran the review against current HEAD `8819d68a`; the worktree was clean before writing this artifact.
+- Rechecked prior recurring topics and did not refile them as new findings: process-local single-writer assumptions, historical migration-journal non-monotonicity, stale `sw.js` stamp behavior for docs-only commits, semantic newest-model scan tradeoffs, admin API/action-origin scanner coverage, and privacy-field omission guards.
+- Looked specifically for docs/tests/implementation disagreements. The three findings above are the remaining concrete mismatches with exact source evidence: private-original migration has destructive conflict behavior not covered by tests, share pages carry no-cache/secret semantics but are still eligible for offline HTML caching, and semantic disabled-mode tests encode a rollback that removes accounting after real work.
+- Full `lint`, `typecheck`, `build`, and full Vitest were not run in this critic lane; targeted gates relevant to the reviewed risks passed as listed above.
+
+Finding count: 3 total - 1 High, 2 Medium.
+
+---
+
 # Critic Review - Cycle 4
 
 Role: `critic`
