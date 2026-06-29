@@ -59,7 +59,10 @@ function isHtmlRoute(request) {
 }
 
 function isRevocableShareHtmlRoute(pathname) {
-  return /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[sg]\/[^/]+\/?$/.test(pathname);
+  return (
+    /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[csg]\/[^/]+\/?$/.test(pathname) ||
+    /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?map\/?$/.test(pathname)
+  );
 }
 
 function isSensitiveResponse(response) {
@@ -173,6 +176,13 @@ async function touchMeta(url, knownSize) {
   await setMeta(entries);
 }
 
+async function deleteMeta(url) {
+  const entries = await getMeta();
+  if (entries.delete(url)) {
+    await setMeta(entries);
+  }
+}
+
 async function staleWhileRevalidateImage(request) {
   const imageCache = await caches.open(IMAGE_CACHE);
   // C18-MED-01: use request.url (string) as the cache key so it matches
@@ -194,6 +204,11 @@ async function staleWhileRevalidateImage(request) {
     if (!revalidatePromise) {
       revalidatePromise = fetch(request.clone())
         .then(async (networkResponse) => {
+          if (networkResponse.status === 404 || networkResponse.status === 410) {
+            await imageCache.delete(cacheKey);
+            await deleteMeta(request.url);
+            return networkResponse;
+          }
           if (isSensitiveResponse(networkResponse)) return networkResponse;
           if (!networkResponse.ok) return networkResponse;
           const clone = networkResponse.clone();
@@ -247,6 +262,12 @@ async function staleWhileRevalidateImage(request) {
           const cachedSize = Number(cached.headers.get('Content-Length')) || 0;
           touchMeta(request.url, cachedSize).catch(() => {});
           return cached;
+        }
+        if (head.status === 404 || head.status === 410) {
+          await imageCache.delete(cacheKey);
+          await deleteMeta(request.url);
+          const fresh = await startRevalidate();
+          return fresh ?? new Response('Not found', { status: head.status });
         }
         if (head.ok) {
           const networkEtag = head.headers.get('ETag');

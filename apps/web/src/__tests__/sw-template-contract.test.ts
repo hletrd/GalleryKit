@@ -70,7 +70,8 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
 
     it('bypasses revocable share pages instead of offline-caching them', () => {
         expect(TEMPLATE).toMatch(/function isRevocableShareHtmlRoute\(pathname\)/);
-        expect(TEMPLATE).toContain('[sg]\\/[^/]+');
+        expect(TEMPLATE).toContain('[csg]\\/[^/]+');
+        expect(TEMPLATE).toMatch(/map\\\/\?\$/);
         const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
         const shareBypassIdx = fetchHandler.indexOf('isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)');
         const htmlCacheIdx = fetchHandler.indexOf('event.respondWith(networkFirstHtml(request))');
@@ -173,6 +174,14 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
         expect(generated).toMatch(/signal:\s*AbortSignal\.timeout\(HEAD_REVALIDATE_TIMEOUT_MS\)/);
         expect(generated).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
+    });
+
+    it('evicts stale derivative cache entries when the server returns 404 or 410', () => {
+        const fn = imageFn();
+        expect(TEMPLATE).toMatch(/async function deleteMeta\(url\)/);
+        expect(fn).toMatch(/networkResponse\.status === 404 \|\| networkResponse\.status === 410/);
+        expect(fn).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*await deleteMeta\(request\.url\);/);
+        expect(fn).toMatch(/head\.status === 404 \|\| head\.status === 410/);
     });
 });
 
