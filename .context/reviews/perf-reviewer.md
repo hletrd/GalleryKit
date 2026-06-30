@@ -1,33 +1,34 @@
-# Cycle 34 Performance Reviewer Report
+# Cycle 35 Performance Reviewer Report
 
-Review target: current HEAD `e1f124a265998ea51297d6716df6c03a2056a96c`.
+Review target: current HEAD `96160854ebadca1606e9f99b2e6f5bc4689e366c`.
 Review role: `performance-reviewer`.
-Mode: review-only. Product source, tests, plans, git state, and commits were not changed.
+Mode: read-only review. Product source, tests, plans, git history, and deploy state were not changed; this file is the only artifact written.
 
 ## Inventory
 
-- Required context read first: `AGENTS.md`; `CLAUDE.md` sections covering environment/deploy limits, image upload flow, runtime topology, database indexes, image processing pipeline, Color/HDR pipeline, performance optimizations, service worker/PWA behavior, operational deploy/disk hygiene, and CLIP semantic-search runtime limits.
-- Prior-cycle filter read: `.context/reviews/_aggregate.md`, `.context/plans/cycle-33-2026-06-30-plan.md`, `.context/plans/cycle-33-2026-06-30-deferred.md`, and the stale `.context/reviews/perf-reviewer.md` Cycle 33 artifact. I did not re-raise Cycle 33 deferred scale items without new evidence: grouped first-page counts, timeline/date-part non-sargability, GPS full-file stripping, grid JPEG fallback, semantic scan-window recall/cost, process-local limits, feed/Docker CI/deploy scale boundaries.
-- Upload and image pipeline inspected: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, relevant LR/upload tests.
-- Image delivery and cache inspected: `apps/web/src/lib/serve-upload.ts`, upload route handlers, `apps/web/next.config.ts`, service-worker cache docs/tests, `GridPicture`/masonry image call sites.
-- Feed/sitemap/public SSR inspected: `apps/web/src/app/feed.xml/route.ts`, localized topic feed route, `apps/web/src/app/sitemap.ts`, public home/topic/smart collection/photo/timeline/map/share pages, `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`.
-- Search and queue surfaces inspected: public keyword search/load-more actions, semantic and similar search routes, `clip-model.ts`, `clip-embeddings.ts`, queue bootstrap/claim/retry/side-effect tracking.
-- UI responsiveness inspected: `home-client.tsx`, `load-more.tsx`, `search.tsx`, `similar-photos.tsx`, `grid-picture.tsx`, and surrounding public page render paths.
+- Required context: `AGENTS.md` and `CLAUDE.md`, with focus on single-instance topology, DB pool limits, image upload/processing, CLIP semantic-search limits, service-worker caching, remote deploy helper, Docker disk hygiene, and prior performance notes.
+- Prior-cycle filter: `.context/plans/cycle-33-2026-06-30-deferred.md`, `.context/plans/archive/80-deferred-cycle33.md`, `.context/reviews/performance-reviewer.md`, and the stale cycle-34 `.context/reviews/perf-reviewer.md`. I did not re-raise the cycle-33 deferred grouped count, timeline non-sargability, GPS stripping, grid JPEG fallback, semantic scan-window, Docker CI, process-local limiter, stale derivative byte, or invalid analytics-limiter items without new evidence.
+- Data/query coverage: `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, analytics data helpers, sitemap/feed accessors, public home/topic/smart-collection/photo/timeline/map/share page paths.
+- Pagination/search coverage: public load-more and search actions, `LoadMore`, `Search`, keyset cursor flow, exact-count first-page paths, public route rate limits, semantic and similar search routes.
+- Image/queue coverage: `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, color and CLIP backfill scripts, upload tracker and Lightroom/PAT upload route, upload-serving route twins, derivative cache headers.
+- Client/cache coverage: `home-client.tsx`, `grid-picture.tsx`, `load-more.tsx`, `search.tsx`, service-worker template/generated behavior, masonry responsiveness, image priorities, abort/stale response guards.
+- Deploy/resource coverage: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, production bind mounts, health check, stop grace period, and post-deploy Docker prune policy.
 
 ## Findings
 
-### C34-PERF-01 - LR multipart parse slot leaks on quota rejection
+### C35-PERF-01 - Upload HEAD/304 responses leak file descriptors
 
-- Location: `apps/web/src/app/api/admin/lr/upload/route.ts:60-74`, `apps/web/src/app/api/admin/lr/upload/route.ts:130-185`.
 - Severity: Medium.
 - Confidence: High.
-- Scenario: The Cycle 33 fix added a single in-process multipart parse slot before `request.formData()` so concurrent 200 MiB Lightroom/PAT uploads cannot all materialize request bodies at once. After acquiring the slot at lines 130-136, the route checks upload tracker quotas at lines 147-158. Both quota-rejection branches return 429 before entering the `try/finally` that releases the slot at lines 177-185. Once a legitimate PAT client exceeds file-count or cumulative-byte quota, `lrMultipartParseInFlight` remains at `1` for the life of the process. Every subsequent LR upload then receives "Another Lightroom upload is being parsed" even though no parse is active.
-- Fix: Move the tracker quota checks before `tryAcquireLrMultipartParseSlot()`, or wrap everything after slot acquisition in a `try/finally` that always calls `releaseMultipartParseSlot()`. Add behavior/source coverage specifically for the two early 429 quota branches, not only for the happy `request.formData()` branch.
+- Citations: `apps/web/src/lib/serve-upload.ts:166-184`, `apps/web/src/lib/serve-upload.ts:231-242`, `apps/web/src/lib/serve-upload.ts:245-267`, `apps/web/src/lib/serve-upload.ts:269-314`, `apps/web/src/app/uploads/[...path]/route.ts:17-29`, `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:17-24`, `apps/web/public/sw.template.js:250-263`.
+- Failure scenario: The service worker does a synchronous HEAD ETag probe for every cached derivative tile before serving the cached response. Both upload route twins pass `method='HEAD'` into `serveUploadFile`. `serveUploadFile` opens a `FileHandle` for the resolved derivative and stats it, but the successful non-body branches return before ownership is transferred to `createReadStream({ autoClose: true })`: matching `If-None-Match` returns 304, wildcard returns 304, and all HEAD requests return headers only. The only close-on-success path is the non-file guard; otherwise `fileHandle.close()` runs only in the `catch` block. A warm masonry visit with many cached images can therefore leak one descriptor per HEAD probe, and repeated visits/scrolls can push the Node process toward `EMFILE`, breaking image serving and any other fd-opening work until process restart or GC finalization happens.
+- Fix: Close the opened `FileHandle` before every successful non-stream return, or wrap the function with a `finally` that closes `fileHandle` unless it has been nulled after `createReadStream({ autoClose: true })` takes ownership. Add focused coverage that spies/mocks `fs/promises.open().close` for `serveUploadFile(..., etag)`, `serveUploadFile(..., '*')`, and `serveUploadFile(..., null, 'HEAD')`, plus a route/source contract so the HEAD fast path stays non-streaming and closed.
 
-## Final sweep
+## Verification Notes
 
-- The browser upload path settles quota claims and releases the upload-processing contract lock in `finally`; I did not find the same slot-leak pattern there.
-- Image queue processing remains bounded by PQueue concurrency, DB-pool-aware caps, advisory locks, retry map caps, permanent-failure caps, and tracked side effects for caption/embedding shutdown drains.
-- Semantic/similar search retains same-origin gates, body caps, rate limits, CLIP inference queue bounds, scan caps, and enrichment caps. Remaining brute-force scan limits are already recorded as Cycle 33 deferred scale work.
-- Feed/sitemap and public SSR paths remain intentionally dynamic or ISR-bounded per `CLAUDE.md`; no new narrow performance regression met the reporting bar beyond the LR parse-slot leak.
-- No tests were run; this lane was a static read-only performance review.
+- The cycle-34 LR multipart parse-slot finding is fixed at current HEAD: quota checks now occur before `tryAcquireLrMultipartParseSlot()`, and the parse slot is released in a `finally` around `request.formData()` (`apps/web/src/app/api/admin/lr/upload/route.ts:130-185`); the source contract checks that ordering (`apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:267-288`).
+- DB pool behavior remains bounded by a 10-connection pool, `queueLimit=20`, and timeout-cleared connection init waits (`apps/web/src/db/index.ts:23-38`, `apps/web/src/db/index.ts:70-134`).
+- Image processing remains constrained by queue concurrency resolved against the DB pool and Sharp global concurrency/cache settings (`apps/web/src/lib/image-queue.ts:87-108`, `apps/web/src/lib/process-image.ts:36-57`).
+- Semantic search remains rate-limited, body-capped, CLIP-inference-queue-bounded, and scan-window-bounded; the recall/ANN boundary is already cycle-33 deferred (`apps/web/src/app/api/search/semantic/route.ts:94-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:98-201`, `apps/web/src/lib/clip-model.ts:53-172`, `apps/web/src/lib/clip-embeddings.ts:36-44`).
+- In-app color backfill is now O(batch) memory via keyset batches drained through PQueue (`apps/web/src/lib/admin-backfill-runner.ts:633-760`). The sidecar script still materializes/enqueues the full candidate set, but that is already recorded as older deferred sidecar/operator work (`apps/web/scripts/backfill-color-pipeline.ts:343-360`, `apps/web/scripts/backfill-color-pipeline.ts:475-512`).
+- No test suite was run; this lane was a static read-only review.

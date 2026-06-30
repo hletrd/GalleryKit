@@ -165,6 +165,12 @@ export async function serveUploadFile(
 
     let fileHandle: FileHandle | null = null;
     let fileStream: ReturnType<FileHandle['createReadStream']> | null = null;
+    const closeFileHandle = async () => {
+        if (!fileHandle) return;
+        const handle = fileHandle;
+        fileHandle = null;
+        await handle.close();
+    };
     try {
         const resolvedRoot = await realpath(UPLOAD_ROOT).catch((err: unknown) => {
             if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -184,13 +190,13 @@ export async function serveUploadFile(
         const stats = await fileHandle.stat();
 
         if (!stats.isFile()) {
-            await fileHandle.close();
-            fileHandle = null;
+            await closeFileHandle();
             return new NextResponse('Access denied', { status: 403 });
         }
 
         // Content type already resolved from extension above (no SVG)
         if (!contentType) {
+            await closeFileHandle();
             return new NextResponse('Unsupported file type', { status: 404 });
         }
 
@@ -231,6 +237,7 @@ export async function serveUploadFile(
         if (ifNoneMatch) {
             const tags = ifNoneMatch.split(',').map((t) => t.trim());
             if (tags.includes('*') || tags.includes(etag)) {
+                await closeFileHandle();
                 return new NextResponse(null, {
                     status: 304,
                     headers: {
@@ -263,6 +270,7 @@ export async function serveUploadFile(
         } as const;
 
         if (method === 'HEAD') {
+            await closeFileHandle();
             return new NextResponse(null, { headers: responseHeaders });
         }
 

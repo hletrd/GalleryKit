@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 import { requestHistogramFromWorker, estimateKeyType, resolveHistogramSourceLabel, resolveIsClipped } from '@/components/histogram';
 
@@ -23,6 +25,43 @@ class FakeWorker {
             listener({ data } as MessageEvent);
         }
     }
+}
+
+function runShippedHistogramWorker(message: {
+    requestId: number;
+    imageData: ArrayBuffer;
+    width: number;
+    height: number;
+    colorSpace?: 'srgb' | 'display-p3';
+}) {
+    const source = readFileSync(new URL('../../public/histogram-worker.js', import.meta.url), 'utf8');
+    const posted: unknown[] = [];
+    const scope: {
+        self?: unknown;
+        onmessage?: (event: { data: typeof message }) => void;
+        postMessage: (data: unknown) => void;
+        Uint8ClampedArray: typeof Uint8ClampedArray;
+        Array: ArrayConstructor;
+        Math: Math;
+    } = {
+        postMessage: (data: unknown) => posted.push(data),
+        Uint8ClampedArray,
+        Array,
+        Math,
+    };
+    scope.self = scope;
+
+    vm.runInContext(source, vm.createContext(scope), {
+        filename: 'public/histogram-worker.js',
+    });
+
+    expect(scope.onmessage).toBeTypeOf('function');
+    scope.onmessage?.({ data: message });
+    expect(posted).toHaveLength(1);
+    return posted[0] as {
+        requestId: number;
+        histogram: { r: number[]; g: number[]; b: number[]; l: number[] };
+    };
 }
 
 describe('requestHistogramFromWorker', () => {
@@ -60,81 +99,40 @@ describe('requestHistogramFromWorker', () => {
 });
 
 describe('histogram-worker luminance coefficients', () => {
-    it('produces different luminance bins for sRGB vs display-p3 colorSpace', async () => {
-        const worker = new FakeWorker();
-
+    it('executes the shipped worker and produces different luminance bins for sRGB vs display-p3 colorSpace', () => {
         // A single pixel with pure red (255, 0, 0).
         // sRGB BT.709:  0.2126 * 255 = 54.213 → 54
         // P3:           0.22897 * 255 = 58.387 → 58
         const pixel = new Uint8ClampedArray([255, 0, 0, 255]);
 
-        const srgbPromise = requestHistogramFromWorker(worker, {
+        const srgbResult = runShippedHistogramWorker({
+            requestId: 1,
             imageData: pixel.buffer,
             width: 1,
             height: 1,
             colorSpace: 'srgb',
         });
-        const p3Promise = requestHistogramFromWorker(worker, {
+        const p3Result = runShippedHistogramWorker({
+            requestId: 2,
             imageData: pixel.buffer,
             width: 1,
             height: 1,
             colorSpace: 'display-p3',
         });
 
-        const [srgbMsg, p3Msg] = worker.messages;
-
-        // Simulate the worker logic with the correct coefficients per colorSpace.
-        function computeHistogram(
-            imageData: ArrayBuffer,
-            width: number,
-            height: number,
-            colorSpace: 'srgb' | 'display-p3',
-        ) {
-            const data = new Uint8ClampedArray(imageData);
-            const r = new Array(256).fill(0);
-            const g = new Array(256).fill(0);
-            const b = new Array(256).fill(0);
-            const l = new Array(256).fill(0);
-            const isP3 = colorSpace === 'display-p3';
-            const lr = isP3 ? 0.22897 : 0.2126;
-            const lg = isP3 ? 0.69174 : 0.7152;
-            const lb = isP3 ? 0.07929 : 0.0722;
-            const len = width * height * 4;
-            for (let i = 0; i < len; i += 4) {
-                const rv = data[i];
-                const gv = data[i + 1];
-                const bv = data[i + 2];
-                r[rv]++;
-                g[gv]++;
-                b[bv]++;
-                const lum = Math.round(lr * rv + lg * gv + lb * bv);
-                l[lum]++;
-            }
-            return { r, g, b, l };
-        }
-
-        worker.emit({
-            requestId: srgbMsg.requestId,
-            histogram: computeHistogram(srgbMsg.imageData, srgbMsg.width, srgbMsg.height, 'srgb'),
-        });
-        worker.emit({
-            requestId: p3Msg.requestId,
-            histogram: computeHistogram(p3Msg.imageData, p3Msg.width, p3Msg.height, 'display-p3'),
-        });
-
-        const srgbResult = await srgbPromise;
-        const p3Result = await p3Promise;
+        expect(srgbResult.requestId).toBe(1);
+        expect(p3Result.requestId).toBe(2);
 
         // RGB bins should be identical (same raw pixel values).
-        expect(srgbResult.r).toEqual(p3Result.r);
-        expect(srgbResult.g).toEqual(p3Result.g);
-        expect(srgbResult.b).toEqual(p3Result.b);
+        expect(srgbResult.histogram.r).toEqual(p3Result.histogram.r);
+        expect(srgbResult.histogram.g).toEqual(p3Result.histogram.g);
+        expect(srgbResult.histogram.b).toEqual(p3Result.histogram.b);
 
         // Luminance bins should differ: sRGB=54, P3=58.
-        expect(srgbResult.l[54]).toBe(1);
-        expect(srgbResult.l[58]).toBe(0);
-        expect(p3Result.l[58]).toBe(1);
-        expect(p3Result.l[54]).toBe(0);
+        expect(srgbResult.histogram.l[54]).toBe(1);
+        expect(srgbResult.histogram.l[58]).toBe(0);
+        expect(p3Result.histogram.l[58]).toBe(1);
+        expect(p3Result.histogram.l[54]).toBe(0);
     });
 });
 

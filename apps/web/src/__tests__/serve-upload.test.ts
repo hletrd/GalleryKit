@@ -34,6 +34,7 @@ describe('serveUploadFile', () => {
     afterEach(async () => {
         delete process.env.UPLOAD_ROOT;
         await fsp.rm(uploadRoot, { recursive: true, force: true });
+        vi.doUnmock('fs/promises');
         vi.resetModules();
     });
 
@@ -102,6 +103,43 @@ describe('serveUploadFile', () => {
         // Wildcard If-None-Match also triggers 304 per RFC 7232.
         const wildcard = await serveUploadFile(['jpeg', 'inm.jpg'], '*');
         expect(wildcard.status).toBe(304);
+    });
+
+    it('closes the file handle before returning non-stream 304 and HEAD responses (C35-PERF-01)', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'close.jpg');
+        await fsp.writeFile(jpegPath, 'close-data');
+
+        const closeSpies: Array<ReturnType<typeof vi.spyOn>> = [];
+        vi.doMock('fs/promises', async () => {
+            const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+            return {
+                ...actual,
+                open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
+                    const handle = await actual.open(...args);
+                    closeSpies.push(vi.spyOn(handle, 'close'));
+                    return handle;
+                }),
+            };
+        });
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        const first = await serveUploadFile(['jpeg', 'close.jpg']);
+        const etag = first.headers.get('ETag') ?? '';
+        expect(etag).not.toBe('');
+        await first.text();
+
+        const matching = await serveUploadFile(['jpeg', 'close.jpg'], etag);
+        expect(matching.status).toBe(304);
+        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
+
+        const wildcard = await serveUploadFile(['jpeg', 'close.jpg'], '*');
+        expect(wildcard.status).toBe(304);
+        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
+
+        const head = await serveUploadFile(['jpeg', 'close.jpg'], null, 'HEAD');
+        expect(head.status).toBe(200);
+        expect(await head.text()).toBe('');
+        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
     });
 
     // AGG-H5 (run-6 cycle-2): client-abort fd-release behavior.

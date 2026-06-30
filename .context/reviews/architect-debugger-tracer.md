@@ -1,45 +1,52 @@
-# Cycle 34 Architect / Debugger / Tracer Review
+# Cycle 35 Architect / Debugger / Tracer Review
 
-Reviewer: architect-debugger-tracer
-Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `e1f124a265998ea51297d6716df6c03a2056a96c`
-Date: 2026-06-30 KST
-Scope: read-only cross-file trace for failure modes, concurrency/race hazards, schema/migration/reconcile drift, deploy/docs drift, and latent regressions. No source, tests, plans, git state, or commits were edited.
+- Reviewed HEAD: `96160854ebadca1606e9f99b2e6f5bc4689e366c`
+- Branch: `master` tracking `origin/master`
+- Review date: 2026-06-30 KST
+- Lane: architecture, latent-bug, and causal-flow review
+- Write scope: this artifact only
 
-## Inventory
+## Inventory Built
 
-- Required governance/context read: `AGENTS.md`; `CLAUDE.md` project overview, security architecture, runtime topology, race-condition protections, migration/schema-drift runbook, operational playbook, deployment checklist, and remote deploy helper sections.
-- Cycle 33 baseline read to avoid duplicate deferred architecture items: `.context/plans/cycle-33-2026-06-30-plan.md`, `.context/plans/cycle-33-2026-06-30-deferred.md`, and `.context/reviews/_aggregate.md`.
-- Current HEAD confirmed with `git rev-parse HEAD`; worktree was clean at review start.
-- Stale candidates in the pre-existing `architect-debugger-tracer.md` were rechecked and found closed at this HEAD: SQL comment-split restore scanning has dual normalized passes and tests; Lightroom enqueue forwards `semanticSearchMode`; semantic search rejects missing `Content-Length` before reading the body and uses byte length after read.
-- Source surfaces traced: restore scanner/action, durable restore maintenance, upload-processing contract lock, browser upload action, Lightroom/PAT upload route, image queue, background DB writes, semantic search routes, Drizzle schema, migration journal, `reconcileLegacySchema`, Dockerfile, compose file, deploy scripts, and the LR upload source-contract tests.
-- Validation run: `npm test --workspace=apps/web -- --run src/__tests__/lr-upload-hdr-gate.test.ts` passed, 39 tests, showing the current LR source-contract suite does not catch the finding below.
+- Governance: `AGENTS.md`, `CLAUDE.md`, Lore commit/deploy rules, migration rules, privacy/touch-target conventions.
+- Prior review baseline: previous `.context/reviews/architect-debugger-tracer.md`, `.context/reviews/_aggregate.md`, cycle-34 plan/review artifacts, stale archived cycle-35 artifacts.
+- Upload paths: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, upload tracker, image settings, contract-lock tests.
+- Deletes and cleanup: browser delete actions, strict original/variant cleanup helpers, queue-state cleanup, share-path revalidation.
+- Processing/backfill: `apps/web/src/lib/image-queue.ts`, active embedding bootstrap, color/semantic backfill lock usage, queue tests.
+- Public flows: topic/listing actions, search actions, share pages/actions, photo page, public view counters, public API rate-limit lint coverage.
+- Admin flows: settings, users, Lightroom tokens, backup/restore, action-origin and auth lint scripts.
+- Deploy/migrations/docs: root deploy helper, `apps/web/deploy.sh`, Docker files, `apps/web/scripts/migrate.js`, Drizzle journal and schema reconciliation, plan/review indexes.
+
+## Coverage Notes
+
+- The cycle-34 LR multipart semaphore finding was rechecked against current HEAD. The LR route now validates content length and tracker quota before acquiring the parse slot, releases the slot in a `finally` around `request.formData()`, and has a focused source-contract test guarding that ordering.
+- Upload traces covered both browser and LR/PAT ingress through upload contract locking, settings snapshotting, HDR/GPS handling, DB insert, image processing enqueue, and quota settlement.
+- Delete traces covered single and bulk deletion through DB transaction ordering, queue-state cleanup, original/variant cleanup, audit logging, and public/share revalidation.
+- Processing traces covered enqueue idempotence, advisory lock usage, conditional processed-row updates, failed-output cleanup, active embedding bootstrap, and shutdown/restore behavior.
+- Public traces covered list/search/share/photo view validation, rate limiting, visibility checks, background view writes, and metadata/JSON-LD privacy constraints.
+- Admin traces covered restore maintenance mode, backup/restore locks, settings immutability around uploads/images, admin-user deletion locks, PAT token lifecycle, and custom lint gate coverage.
+- Deploy/migration traces covered config-driven remote deploy, healthcheck-before-prune behavior, no `volume prune -a`, Drizzle journal ordering, legacy reconciliation, and migration postcondition checks.
 
 ## Findings
 
-### C34-ADT-01 - HIGH - Lightroom multipart parse semaphore leaks on quota early returns and can wedge the upload route
+### C35-ADT-01 - Cycle-34 plan state still marks push/deploy steps incomplete
 
-- **Location:** `apps/web/src/app/api/admin/lr/upload/route.ts:60-73`, `apps/web/src/app/api/admin/lr/upload/route.ts:130-185`; test gap at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:267-278`.
-- **Severity:** High.
-- **Confidence:** High.
+- Severity: Low
+- Confidence: Medium
+- Area: deploy/docs drift, workflow coordination
+- Citations:
+  - `.context/plans/README.md:5` starts the active current-cycle plan section.
+  - `.context/plans/README.md:7` lists the cycle-34 implementation plan as "in progress".
+  - `.context/plans/cycle-34-2026-06-30-plan.md:68` begins the "Progress" checklist.
+  - `.context/plans/cycle-34-2026-06-30-plan.md:75` leaves "Signed commit pushed" unchecked.
+  - `.context/plans/cycle-34-2026-06-30-plan.md:76` leaves "Per-cycle deploy completed" unchecked.
+  - Current reviewed `HEAD` is `96160854ebadca1606e9f99b2e6f5bc4689e366c`, the cycle-34 fix commit on `master`/`origin/master`; the cycle-35 task context identifies it as the current deployed master HEAD.
+- Failure scenario: A later review-plan-fix lane reads the committed plan index and interprets cycle 34 as still active or not pushed/deployed, then either duplicates coordination work, reports a false incomplete predecessor state, or misses that cycle-35 should be the only active cycle.
+- Fix: After each per-cycle push/deploy, update the committed plan progress/index to reflect the completed terminal state, or move finished plan entries out of the active section in the same cycle closure commit/reporting step. If deploy evidence is intentionally kept outside git, add a short committed note that the terminal deploy evidence lives in the final cycle report.
 
-The route added a process-global pre-parse semaphore for large Lightroom/PAT multipart parsing:
+## Non-Reportable Rechecks
 
-- `lrMultipartParseInFlight` is incremented by `tryAcquireLrMultipartParseSlot()` at `route.ts:63-73`.
-- The slot is acquired at `route.ts:130`.
-- Two quota branches can return after acquisition and before any `finally`: `tracker.count + 1 > UPLOAD_MAX_FILES_PER_WINDOW` at `route.ts:147-151`, and `tracker.bytes + declaredUploadBytes > MAX_TOTAL_UPLOAD_BYTES` at `route.ts:153-157`.
-- The only release is in the `finally` around `request.formData()` at `route.ts:177-185`, which those quota returns never reach.
-
-**Causal chain / failure scenario:** after a PAT/admin reaches the one-hour upload count or cumulative-byte window, the next LR upload request passes header checks, acquires the singleton parse slot, hits one of the quota returns, and exits without calling `releaseMultipartParseSlot()`. `lrMultipartParseInFlight` remains `1` for the life of the Node process. Every later LR upload, including unrelated admins/tokens, fails at `route.ts:130-135` with "Another Lightroom upload is being parsed; retry shortly" until the container restarts.
-
-The existing source-contract test checks that the semaphore exists, is acquired before `request.formData()`, and is released in a `finally` near `formData()` (`lr-upload-hdr-gate.test.ts:267-278`). It does not assert that all returns after acquisition release the slot; the narrow test still passes on this broken control flow.
-
-**Fix:** move `tryAcquireLrMultipartParseSlot()` until after quota early returns and immediately before the upload-tracker preclaim/body parse, or wrap every post-acquire branch in a single `try/finally` that releases on all exits. Add a regression test that extracts the source region between acquisition and `request.formData()` and fails on `return NextResponse` before a release, or add an executable route test that forces the over-window branch and then proves a second request can acquire the slot.
-
-## Final sweep
-
-- Schema/migration/reconcile: checked the Drizzle schema, migration list through `0028_rate_limit_bucket_start_idx`, journal ordering, and `reconcileLegacySchema` coverage. No new missing column/index/drop mirror was found.
-- Restore/race paths: restore now holds restore, upload-contract, color-backfill, and semantic-backfill locks; enters durable maintenance before queue/background drains; and releases in finally. No fresh restore-maintenance race was promoted.
-- Deploy/docs drift: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/docker-compose.yml`, and `apps/web/Dockerfile` still match the documented bind-mount/prune/host-network/remote-env contracts. I did not re-raise Cycle 33 deferred items such as Docker CI coverage, `/api/live` deploy readiness semantics, global advisory-lock names, process-local limits, or semantic newest-window scans.
-- Public/search/body gates: the old semantic body-read-before-limit finding is fixed at HEAD. Similar search is GET-only and shares the documented scan-window limitation, already deferred in Cycle 33.
-- Tests run only where they directly validated the new finding's test gap. Full lint/typecheck/build/Vitest/E2E were not run because this was a read-only review lane, not an implementation lane.
+- No new source-level finding was found in the reviewed upload, delete, processing/backfill, public listing/search/share/photo, admin restore/settings/users/tokens, migration, or deploy code.
+- The archived cycle-35 review files predate current HEAD and cite stale issues already closed by current source; they were treated only as historical context.
+- No cycle-33 deferred item was re-raised. Current HEAD did not add evidence that those deferred product-policy items are newly schedulable in this lane.
+- No quality gates were run because this lane was explicitly read-only and no source behavior was changed.

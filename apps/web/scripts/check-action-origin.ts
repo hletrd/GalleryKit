@@ -189,6 +189,14 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
     return current;
 }
 
+function isNullLiteral(node: ts.Expression): boolean {
+    return node.kind === ts.SyntaxKind.NullKeyword;
+}
+
+function isUndefinedIdentifier(node: ts.Expression): boolean {
+    return ts.isIdentifier(node) && node.text === 'undefined';
+}
+
 function conditionChecksGuardVariable(expression: ts.Expression, guardName: string): boolean {
     const unwrapped = unwrapExpression(expression);
     if (ts.isIdentifier(unwrapped)) {
@@ -198,8 +206,18 @@ function conditionChecksGuardVariable(expression: ts.Expression, guardName: stri
     if (ts.isBinaryExpression(unwrapped)) {
         const left = unwrapExpression(unwrapped.left);
         const right = unwrapExpression(unwrapped.right);
-        return (ts.isIdentifier(left) && left.text === guardName)
-            || (ts.isIdentifier(right) && right.text === guardName);
+        const leftIsGuard = ts.isIdentifier(left) && left.text === guardName;
+        const rightIsGuard = ts.isIdentifier(right) && right.text === guardName;
+        if (!leftIsGuard && !rightIsGuard) return false;
+
+        const compared = leftIsGuard ? right : left;
+        if (unwrapped.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken) {
+            return isNullLiteral(compared);
+        }
+        if (unwrapped.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken) {
+            return isNullLiteral(compared) || isUndefinedIdentifier(compared);
+        }
+        return false;
     }
 
     return false;
@@ -256,6 +274,8 @@ const MUTATING_FUNCTION_NAMES = new Set([
     'revalidateTag',
 ]);
 
+const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:delete|remove|insert|update|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|restore|dump)(?:[A-Z_]|$)/i;
+
 const PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES = new Set([
     'getCurrentUser',
     'getSession',
@@ -271,13 +291,39 @@ const PUBLIC_RATE_LIMIT_HELPER_NAMES = new Set([
     'checkViewRecordRateLimit',
 ]);
 
+function collectImportedSideEffectFunctionNames(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement) || !statement.importClause) continue;
+
+        const defaultName = statement.importClause.name?.text;
+        if (defaultName && IMPORTED_SIDE_EFFECT_NAME_RE.test(defaultName)) {
+            names.add(defaultName);
+        }
+
+        const bindings = statement.importClause.namedBindings;
+        if (!bindings || !ts.isNamedImports(bindings)) continue;
+        for (const element of bindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (IMPORTED_SIDE_EFFECT_NAME_RE.test(importedName)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
 /**
  * R4C2 SEC-R4C2-02: generic walker — true when any node in the subtree is a
  * DIRECT mutating call (`.insert(...)` / `.update(...)` / `logAuditEvent(...)`
  * / `revalidate*(...)` etc.). Used both for the pre-guard-mutation ordering
  * check and to reject `@action-origin-exempt` comments on mutating bodies.
  */
-function nodeContainsMutatingCall(root: ts.Node, localMutatingFunctions: Set<string> = new Set()): boolean {
+function nodeContainsMutatingCall(
+    root: ts.Node,
+    localMutatingFunctions: Set<string> = new Set(),
+    importedSideEffectFunctionNames: Set<string> = new Set(),
+): boolean {
     let found = false;
     const visit = (node: ts.Node) => {
         if (found) return;
@@ -295,6 +341,10 @@ function nodeContainsMutatingCall(root: ts.Node, localMutatingFunctions: Set<str
                 found = true;
                 return;
             }
+            if (ts.isIdentifier(callee) && importedSideEffectFunctionNames.has(callee.text)) {
+                found = true;
+                return;
+            }
         }
         ts.forEachChild(node, visit);
     };
@@ -302,8 +352,12 @@ function nodeContainsMutatingCall(root: ts.Node, localMutatingFunctions: Set<str
     return found;
 }
 
-function statementContainsPreGuardMutation(statement: ts.Statement, localMutatingFunctions: Set<string>): boolean {
-    return nodeContainsMutatingCall(statement, localMutatingFunctions);
+function statementContainsPreGuardMutation(
+    statement: ts.Statement,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
+    return nodeContainsMutatingCall(statement, localMutatingFunctions, importedSideEffectFunctionNames);
 }
 
 function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
@@ -324,7 +378,7 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
     return nodeContainsCallNamed(statement, PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
 }
 
-function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
+function publicActionCallsRateLimitBeforeMutation(body: ts.Node, importedSideEffectFunctionNames: Set<string>): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimitGate = false;
     let sawMutationBeforeRateLimit = false;
@@ -407,6 +461,10 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
                 sawMutationBeforeRateLimit = true;
                 return;
             }
+            if (ts.isIdentifier(callee) && importedSideEffectFunctionNames.has(callee.text) && !sawRateLimitGate) {
+                sawMutationBeforeRateLimit = true;
+                return;
+            }
         }
 
         ts.forEachChild(node, visitMutation);
@@ -448,7 +506,12 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     return sawRateLimitGate && !sawMutationBeforeRateLimit;
 }
 
-function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set<string>, localMutatingFunctions: Set<string>): boolean {
+function functionCallsRequireSameOriginAdmin(
+    body: ts.Node,
+    approvedImports: Set<string>,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
     // calling it is not sufficient because callers must return early on that
@@ -465,7 +528,7 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
 
         const preGuardStatements = body.statements.slice(0, index);
         if (
-            preGuardStatements.some((statement) => statementContainsPreGuardMutation(statement, localMutatingFunctions))
+            preGuardStatements.some((statement) => statementContainsPreGuardMutation(statement, localMutatingFunctions, importedSideEffectFunctionNames))
             || preGuardStatements.some(statementContainsPreOriginAuthRead)
         ) {
             return false;
@@ -476,7 +539,7 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
                 return true;
             }
             if (
-                statementContainsPreGuardMutation(followingStatement, localMutatingFunctions)
+                statementContainsPreGuardMutation(followingStatement, localMutatingFunctions, importedSideEffectFunctionNames)
                 || statementContainsPreOriginAuthRead(followingStatement)
             ) {
                 return false;
@@ -493,6 +556,7 @@ function functionCallsAuthSameOriginGuard(
     body: ts.Node,
     approvedHasTrustedSameOriginImports: Set<string>,
     localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
 ): boolean {
     if (!ts.isBlock(body)) {
         return false;
@@ -519,7 +583,7 @@ function functionCallsAuthSameOriginGuard(
 
         const preGuardStatements = body.statements.slice(0, index);
         if (
-            preGuardStatements.some((preGuardStatement) => statementContainsPreGuardMutation(preGuardStatement, localMutatingFunctions))
+            preGuardStatements.some((preGuardStatement) => statementContainsPreGuardMutation(preGuardStatement, localMutatingFunctions, importedSideEffectFunctionNames))
             || preGuardStatements.some(statementContainsPreOriginAuthRead)
         ) {
             return false;
@@ -564,6 +628,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
+    const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
     const localMutatingFunctions = new Set<string>();
 
@@ -573,7 +638,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             && statement.name
             && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(statement.name.text)
             && statement.body
-            && nodeContainsMutatingCall(statement.body)
+            && nodeContainsMutatingCall(statement.body, new Set(), importedSideEffectFunctionNames)
         ) {
             localMutatingFunctions.add(statement.name.text);
             continue;
@@ -584,7 +649,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             if (
                 (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
                 && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(decl.name.text)
-                && nodeContainsMutatingCall(decl.initializer.body)
+                && nodeContainsMutatingCall(decl.initializer.body, new Set(), importedSideEffectFunctionNames)
             ) {
                 localMutatingFunctions.add(decl.name.text);
             }
@@ -602,8 +667,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             // entirely — the guard could later be refactored away with the
             // gate still green. An exempt comment on a body containing a
             // direct mutating call is therefore a hard failure, not a skip.
-            if (body && nodeContainsMutatingCall(body, localMutatingFunctions)) {
-                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body)) {
+            if (body && nodeContainsMutatingCall(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
+                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body, importedSideEffectFunctionNames)) {
                     report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);
                     return;
                 }
@@ -621,9 +686,19 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             return;
         }
 
-        const hasStandardGuard = functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports, localMutatingFunctions);
+        const hasStandardGuard = functionCallsRequireSameOriginAdmin(
+            body,
+            approvedRequireSameOriginImports,
+            localMutatingFunctions,
+            importedSideEffectFunctionNames,
+        );
         const hasAuthGuard = isAuthActionsFile
-            && functionCallsAuthSameOriginGuard(body, approvedHasTrustedSameOriginImports, localMutatingFunctions);
+            && functionCallsAuthSameOriginGuard(
+                body,
+                approvedHasTrustedSameOriginImports,
+                localMutatingFunctions,
+                importedSideEffectFunctionNames,
+            );
         if (!hasStandardGuard && !hasAuthGuard) {
             report.failed.push(
                 `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,

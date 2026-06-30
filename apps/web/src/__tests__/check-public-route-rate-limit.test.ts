@@ -593,6 +593,23 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when an imported side-effect helper runs before an approved rate-limit gate', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            import { writeDangerously } from '@/lib/dangerous-write';
+
+            export async function POST(request) {
+                await writeDangerously(request);
+                const overLimit = preIncrementShareAttempt('1.2.3.4');
+                if (overLimit) return { status: 429 };
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('fails when mutation is hidden behind two local helper calls before the rate-limit gate', () => {
         const source = `
             import { preIncrementShareAttempt } from '@/lib/rate-limit';

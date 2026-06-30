@@ -55,6 +55,8 @@ const MUTATING_CALL_METHOD_NAMES = new Set([
     'execute',
 ]);
 
+const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:delete|remove|insert|update|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|restore|dump)(?:[A-Z_]|$)/i;
+
 const EXPENSIVE_GET_MARKERS = [
     'ImageResponse',
     'pickFirstAvailablePhotoBuffer',
@@ -142,21 +144,45 @@ function collectApprovedRateLimitImports(sourceFile: ts.SourceFile): Set<string>
     return approved;
 }
 
+function collectImportedSideEffectFunctionNames(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement) || !statement.importClause) continue;
+
+        const defaultName = statement.importClause.name?.text;
+        if (defaultName && IMPORTED_SIDE_EFFECT_NAME_RE.test(defaultName)) {
+            names.add(defaultName);
+        }
+
+        const bindings = statement.importClause.namedBindings;
+        if (!bindings || !ts.isNamedImports(bindings)) continue;
+        for (const element of bindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (IMPORTED_SIDE_EFFECT_NAME_RE.test(importedName)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
 function isRateLimitHelperCall(node: ts.CallExpression, approvedRateLimitImports: Set<string>): boolean {
     const callee = node.expression;
     if (!ts.isIdentifier(callee)) return false;
     return approvedRateLimitImports.has(callee.text);
 }
 
-function isKnownMutationCall(node: ts.CallExpression): boolean {
+function isKnownMutationCall(node: ts.CallExpression, importedSideEffectFunctionNames: Set<string> = new Set()): boolean {
     const callee = node.expression;
-    return ts.isPropertyAccessExpression(callee) && MUTATING_CALL_METHOD_NAMES.has(callee.name.text);
+    return (ts.isPropertyAccessExpression(callee) && MUTATING_CALL_METHOD_NAMES.has(callee.name.text))
+        || (ts.isIdentifier(callee) && importedSideEffectFunctionNames.has(callee.text));
 }
 
 function bodyCallsRateLimitBeforeMutation(
     body: ts.Node | undefined,
     approvedRateLimitImports: Set<string>,
     localMutatingFunctions: Set<string> = new Set(),
+    importedSideEffectFunctionNames: Set<string> = new Set(),
 ): boolean {
     if (!body) return false;
 
@@ -167,7 +193,7 @@ function bodyCallsRateLimitBeforeMutation(
     const inspectExpression = (node: ts.Node) => {
         if (ts.isCallExpression(node)) {
             if (
-                isKnownMutationCall(node)
+                isKnownMutationCall(node, importedSideEffectFunctionNames)
                 || (ts.isIdentifier(node.expression) && localMutatingFunctions.has(node.expression.text))
             ) {
                 sawMutation = true;
@@ -242,7 +268,7 @@ function bodyCallsRateLimitBeforeMutation(
             if (ts.isFunctionLike(node) && node !== statement) return;
             if (ts.isCallExpression(node)) {
                 if (
-                    isKnownMutationCall(node)
+                    isKnownMutationCall(node, importedSideEffectFunctionNames)
                     || (ts.isIdentifier(node.expression) && localMutatingFunctions.has(node.expression.text))
                 ) statementHasMutation = true;
             }
@@ -442,6 +468,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     }
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRateLimitImports = collectApprovedRateLimitImports(sourceFile);
+    const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
 
     // Find any exported mutating handler in the file
     const localBodies = new Map<string, ts.Node | undefined>();
@@ -469,7 +496,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                 if (ts.isCallExpression(node)) {
                     const callee = node.expression;
                     if (
-                        isKnownMutationCall(node)
+                        isKnownMutationCall(node, importedSideEffectFunctionNames)
                         || (ts.isIdentifier(callee) && localMutatingFunctions.has(callee.text))
                     ) {
                         containsMutation = true;
@@ -580,7 +607,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    if (mutatingHandlers.length > 0 && mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localMutatingFunctions))) {
+    if (mutatingHandlers.length > 0 && mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(
+        handler.body,
+        approvedRateLimitImports,
+        localMutatingFunctions,
+        importedSideEffectFunctionNames,
+    ))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else if (mutatingHandlers.length > 0) {
         report.failed.push(
