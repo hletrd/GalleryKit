@@ -35,6 +35,11 @@ const files = scanRoots
   .flatMap(collectJavaScriptFiles)
   .sort();
 
+if (files.length === 0) {
+  console.error(`No JavaScript script files found under ${scanRoots.join(', ')}; script discovery likely broke.`);
+  process.exit(1);
+}
+
 for (const file of files) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }

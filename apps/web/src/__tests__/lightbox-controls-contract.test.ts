@@ -19,6 +19,10 @@ const SRC = readFileSync(
     resolve(__dirname, '../components/lightbox.tsx'),
     'utf-8',
 );
+const PIP_SRC = readFileSync(
+    resolve(__dirname, '../components/lightbox-color-pip.tsx'),
+    'utf-8',
+);
 
 describe('lightbox hide-timer focus modality (UX-R4C6-03)', () => {
     it('consults :focus-visible in the shared hide terminal', () => {
@@ -46,6 +50,12 @@ describe('lightbox hide-timer focus modality (UX-R4C6-03)', () => {
     it('closes and removes the color pip from tab order when controls auto-hide', () => {
         expect(SRC).toContain('setColorPipOpen(false)');
         expect(SRC).toContain('interactive={controlsVisible}');
+    });
+
+    it('disables color-pip pointer and click handling when controls auto-hide', () => {
+        expect(PIP_SRC).toContain("interactive ? 'pointer-events-auto' : 'pointer-events-none'");
+        expect(PIP_SRC).toContain('onClick={interactive ? onToggle : undefined}');
+        expect(PIP_SRC).toContain('aria-hidden={!interactive}');
     });
 
     it('does not remove essential controls from the accessibility tree during idle visual hide', () => {

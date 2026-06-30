@@ -85,6 +85,7 @@ describe('shared page display titles', () => {
             if (key === 'sharedPhoto') return 'Shared Photo';
             if (key === 'photo') return 'Photo';
             if (key === 'viewGallery') return 'View Gallery';
+            if (key === 'backToSharedPhotos') return 'Back to shared photos';
             if (key === 'viewCount') return `Count ${values?.count ?? ''}`.trim();
             return key;
         });
@@ -140,6 +141,8 @@ describe('shared page display titles', () => {
 
         expect(markup).toContain('#Night');
         expect(markup).toContain('data-fallback=\"Photo\"');
+        expect(markup).toContain('href=\"/en/g/CDEFGHJKLM\"');
+        expect(markup).toContain('Back to shared photos');
     });
 
     it('preserves a meaningful shared photo title even when tags exist', async () => {

@@ -407,6 +407,7 @@
   },
   "shared": {
     "viewGallery": "View Gallery",
+    "backToSharedPhotos": "Back to shared photos",
     "sharedPhoto": "Shared Photo",
     "ogNotFoundTitle": "Photo Not Found",
     "ogNotFoundDescription": "This shared photo could not be found.",

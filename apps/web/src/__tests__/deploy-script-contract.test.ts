@@ -87,6 +87,8 @@ describe('deploy script safety contract', () => {
         expect(composeConfig).toContain('NEXT_UPLOAD_BODY_MAX_BYTES: ${NEXT_UPLOAD_BODY_MAX_BYTES:-}');
         expect(dockerfile).toContain('ARG NEXT_UPLOAD_BODY_MAX_BYTES');
         expect(dockerfile).toContain('ENV NEXT_UPLOAD_BODY_MAX_BYTES=${NEXT_UPLOAD_BODY_MAX_BYTES}');
+        expect(deploymentDocs).toContain('NEXT_UPLOAD_BODY_MAX_BYTES=278921216');
+        expect(deploymentDocs).toContain('BASE_URL`, `IMAGE_BASE_URL`, `UPLOAD_MAX_TOTAL_BYTES`, or `NEXT_UPLOAD_BODY_MAX_BYTES`');
     });
 
     it('packages immutable public assets while runtime public data stays mounted narrowly', () => {

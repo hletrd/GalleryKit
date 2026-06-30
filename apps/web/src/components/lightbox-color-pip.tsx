@@ -159,10 +159,13 @@ export function LightboxColorPip({ image, t, open, onToggle, interactive = true,
         : undefined;
 
     return (
-        <div className="pointer-events-auto absolute bottom-4 left-4 z-10">
+        <div
+            className={`absolute bottom-4 left-4 z-10 ${interactive ? 'pointer-events-auto' : 'pointer-events-none'}`}
+            aria-hidden={!interactive}
+        >
             <button
                 type="button"
-                onClick={onToggle}
+                onClick={interactive ? onToggle : undefined}
                 tabIndex={interactive ? 0 : -1}
                 className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
                 aria-expanded={interactive && open}

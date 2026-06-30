@@ -4,11 +4,16 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 41/100 Implementation Plan — active (`cycle-41-2026-07-01-plan.md`)
+- Cycle 42/100 Implementation Plan — active (`cycle-42-2026-07-01-plan.md`)
+- Cycle 42/100 Deferred Findings — deferred (`cycle-42-2026-07-01-deferred.md`)
+
+## Recent Plans
+
+- Cycle 41/100 Implementation Plan — implementation pushed; committed deploy evidence not found (`cycle-41-2026-07-01-plan.md`)
 - Cycle 41/100 Deferred Findings — no new deferred items (`cycle-41-2026-07-01-deferred.md`)
 - Cycle 40/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-40-2026-07-01-plan.md`)
 - Cycle 40/100 Deferred Findings — deferred (`cycle-40-2026-07-01-deferred.md`)
-- Cycle 39/100 Implementation Plan — active (`cycle-39-2026-06-30-plan.md`)
+- Cycle 39/100 Implementation Plan — historical active marker retained; read matching final report before inferring state (`cycle-39-2026-06-30-plan.md`)
 - Cycle 39/100 Deferred Findings — deferred (`cycle-39-2026-06-30-deferred.md`)
 - Cycle 38/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-38-2026-06-30-plan.md`)
 - Cycle 38/100 Deferred Findings — deferred (`cycle-38-2026-06-30-deferred.md`)
@@ -16,8 +21,6 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 - Cycle 37/100 Deferred Findings — deferred (`cycle-37-2026-06-30-deferred.md`)
 - Cycle 36/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-36-2026-06-30-plan.md`)
 - Cycle 36/100 Deferred Findings — deferred (`cycle-36-2026-06-30-deferred.md`)
-
-## Recent Plans
 
 - Cycle 35/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-35-2026-06-30-plan.md`)
 - Cycle 35/100 Deferred Findings — no new deferred items (`cycle-35-2026-06-30-deferred.md`)

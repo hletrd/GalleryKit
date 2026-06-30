@@ -187,26 +187,59 @@ function collectPreOriginAuthReadNames(sourceFile: ts.SourceFile): Set<string> {
     return names;
 }
 
-function collectDbReadNames(sourceFile: ts.SourceFile): Set<string> {
-    const names = new Set(['db']);
+type DbReadBindings = {
+    directNames: Set<string>;
+    namespaceNames: Set<string>;
+};
+
+function stripModuleExtension(target: string): string {
+    return target
+        .replace(/\.(?:[cm]?[jt]sx?)$/, '')
+        .replace(/\/index$/, '');
+}
+
+function normalizeModuleSpecifier(moduleSpecifier: string, relative: string): string {
+    if (moduleSpecifier.startsWith('@/')) {
+        return stripModuleExtension(`src/${moduleSpecifier.slice(2)}`);
+    }
+    if (!moduleSpecifier.startsWith('.')) {
+        return stripModuleExtension(moduleSpecifier);
+    }
+    const sourceDir = path.posix.dirname(relative.replace(/\\/g, '/'));
+    return stripModuleExtension(path.posix.normalize(path.posix.join(sourceDir, moduleSpecifier)));
+}
+
+function isDbModuleSpecifier(moduleSpecifier: string, relative: string): boolean {
+    if (moduleSpecifier === DB_MODULE) return true;
+    const normalized = normalizeModuleSpecifier(moduleSpecifier, relative);
+    return normalized === 'src/db' || normalized.endsWith('/src/db');
+}
+
+function collectDbReadBindings(sourceFile: ts.SourceFile, relative: string): DbReadBindings {
+    const directNames = new Set(['db']);
+    const namespaceNames = new Set<string>();
     for (const statement of sourceFile.statements) {
         if (
             !ts.isImportDeclaration(statement)
             || !statement.importClause?.namedBindings
-            || !ts.isNamedImports(statement.importClause.namedBindings)
             || !ts.isStringLiteral(statement.moduleSpecifier)
-            || statement.moduleSpecifier.text !== DB_MODULE
+            || !isDbModuleSpecifier(statement.moduleSpecifier.text, relative)
         ) {
             continue;
         }
+        if (ts.isNamespaceImport(statement.importClause.namedBindings)) {
+            namespaceNames.add(statement.importClause.namedBindings.name.text);
+            continue;
+        }
+        if (!ts.isNamedImports(statement.importClause.namedBindings)) continue;
         for (const element of statement.importClause.namedBindings.elements) {
             const importedName = element.propertyName?.text ?? element.name.text;
             if (importedName === 'db') {
-                names.add(element.name.text);
+                directNames.add(element.name.text);
             }
         }
     }
-    return names;
+    return { directNames, namespaceNames };
 }
 
 function isRequireSameOriginAdminExpression(node: ts.Node, approvedImports: Set<string>): boolean {
@@ -452,8 +485,21 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement, preOriginAu
     return nodeContainsCallNamed(statement, preOriginAuthReadNames);
 }
 
-function nodeContainsProtectedRead(root: ts.Node, dbReadNames: Set<string>): boolean {
+function nodeContainsProtectedRead(root: ts.Node, dbReadBindings: DbReadBindings): boolean {
     const DRIZZLE_RELATIONAL_READ_METHODS = new Set(['findFirst', 'findMany']);
+    const isDbReadRoot = (node: ts.Expression): boolean => {
+        if (ts.isIdentifier(node)) {
+            return dbReadBindings.directNames.has(node.text);
+        }
+        if (
+            ts.isPropertyAccessExpression(node)
+            && node.name.text === 'db'
+            && ts.isIdentifier(node.expression)
+        ) {
+            return dbReadBindings.namespaceNames.has(node.expression.text);
+        }
+        return false;
+    };
     const isDrizzleRelationalReadCall = (node: ts.CallExpression): boolean => {
         const callee = node.expression;
         if (!ts.isPropertyAccessExpression(callee) || !DRIZZLE_RELATIONAL_READ_METHODS.has(callee.name.text)) {
@@ -465,8 +511,7 @@ function nodeContainsProtectedRead(root: ts.Node, dbReadNames: Set<string>): boo
         return (
             ts.isPropertyAccessExpression(queryAccess)
             && queryAccess.name.text === 'query'
-            && ts.isIdentifier(queryAccess.expression)
-            && dbReadNames.has(queryAccess.expression.text)
+            && isDbReadRoot(queryAccess.expression)
         );
     };
 
@@ -520,7 +565,7 @@ function exemptReadHasAuthBeforeProtectedRead(
     body: ts.Node,
     approvedImports: Set<string>,
     preOriginAuthReadNames: Set<string>,
-    dbReadNames: Set<string>,
+    dbReadBindings: DbReadBindings,
 ): boolean {
     if (!ts.isBlock(body)) {
         return true;
@@ -528,7 +573,7 @@ function exemptReadHasAuthBeforeProtectedRead(
 
     let sawAuth = false;
     for (const statement of body.statements) {
-        if (!sawAuth && nodeContainsProtectedRead(statement, dbReadNames)) {
+        if (!sawAuth && nodeContainsProtectedRead(statement, dbReadBindings)) {
             return false;
         }
         if (statementContainsReadAuth(statement, approvedImports, preOriginAuthReadNames)) {
@@ -546,59 +591,152 @@ function publicActionCallsRateLimitBeforeMutation(
     if (!ts.isBlock(body)) return false;
     let sawRateLimitGate = false;
     let sawMutationBeforeRateLimit = false;
-    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'checkViewRecordRateLimit', 'preIncrementLoadMoreAttempt', 'checkLoadMoreRateLimit']);
-    const rateLimitResultNames = new Set<string>();
+    const booleanRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt']);
+    const statusRateLimitNames = new Set(['checkViewRecordRateLimit', 'checkLoadMoreRateLimit']);
+    const publicRateLimitNames = new Set([...booleanRateLimitNames, ...statusRateLimitNames]);
+    const booleanRateLimitResultNames = new Set<string>();
+    const statusRateLimitResultNames = new Set<string>();
 
-    const expressionCallsRateLimit = (node: ts.Node): boolean => {
-        let found = false;
+    const actionBodyShadowsRateLimit = (): boolean => {
+        let shadows = false;
+        const checkBindingName = (name: ts.BindingName) => {
+            if (ts.isIdentifier(name) && publicRateLimitNames.has(name.text)) {
+                shadows = true;
+            }
+        };
         const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
+            if (shadows) return;
+            if (ts.isFunctionDeclaration(current) && current.name && publicRateLimitNames.has(current.name.text)) {
+                shadows = true;
+                return;
+            }
+            if (ts.isVariableDeclaration(current)) {
+                checkBindingName(current.name);
+            }
             if (
-                ts.isCallExpression(current)
-                && ts.isIdentifier(current.expression)
-                && publicRateLimitNames.has(current.expression.text)
+                current !== body
+                && ts.isFunctionLike(current)
             ) {
-                found = true;
+                for (const parameter of current.parameters) {
+                    checkBindingName(parameter.name);
+                }
                 return;
             }
             ts.forEachChild(current, visit);
         };
-        visit(node);
-        return found;
+        for (const statement of body.statements) visit(statement);
+        return shadows;
     };
 
-    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
-        let found = false;
-        const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
-            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
-                found = true;
-                return;
+    if (actionBodyShadowsRateLimit()) return false;
+
+    const unwrapPublicExpression = (expression: ts.Expression): ts.Expression => {
+        let current = expression;
+        while (ts.isParenthesizedExpression(current) || ts.isAwaitExpression(current)) {
+            current = ts.isParenthesizedExpression(current) ? current.expression : current.expression;
+        }
+        return current;
+    };
+
+    const rateLimitCallKind = (expression: ts.Expression): 'boolean' | 'status' | null => {
+        const unwrapped = unwrapPublicExpression(expression);
+        if (!ts.isCallExpression(unwrapped) || !ts.isIdentifier(unwrapped.expression)) return null;
+        if (booleanRateLimitNames.has(unwrapped.expression.text)) return 'boolean';
+        if (statusRateLimitNames.has(unwrapped.expression.text)) return 'status';
+        return null;
+    };
+
+    const isTrueLiteral = (expression: ts.Expression): boolean => {
+        return unwrapPublicExpression(expression).kind === ts.SyntaxKind.TrueKeyword;
+    };
+
+    const isFalseLiteral = (expression: ts.Expression): boolean => {
+        return unwrapPublicExpression(expression).kind === ts.SyntaxKind.FalseKeyword;
+    };
+
+    const isRateLimitedLiteral = (expression: ts.Expression): boolean => {
+        const unwrapped = unwrapPublicExpression(expression);
+        return ts.isStringLiteral(unwrapped) && unwrapped.text === 'rateLimited';
+    };
+
+    const isBooleanRateLimitResult = (expression: ts.Expression): boolean => {
+        const unwrapped = unwrapPublicExpression(expression);
+        return ts.isIdentifier(unwrapped) && booleanRateLimitResultNames.has(unwrapped.text);
+    };
+
+    const isStatusRateLimitProperty = (expression: ts.Expression): boolean => {
+        const unwrapped = unwrapPublicExpression(expression);
+        if (!ts.isPropertyAccessExpression(unwrapped) || unwrapped.name.text !== 'status') {
+            return false;
+        }
+        const receiver = unwrapPublicExpression(unwrapped.expression);
+        if (rateLimitCallKind(receiver) === 'status') {
+            return true;
+        }
+        return ts.isIdentifier(receiver) && statusRateLimitResultNames.has(receiver.text);
+    };
+
+    const expressionIsPositiveRateLimitGate = (expression: ts.Expression): boolean => {
+        const unwrapped = unwrapPublicExpression(expression);
+        if (ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken) {
+            return false;
+        }
+        if (rateLimitCallKind(unwrapped) === 'boolean') {
+            return true;
+        }
+        if (isBooleanRateLimitResult(unwrapped)) {
+            return true;
+        }
+        if (!ts.isBinaryExpression(unwrapped)) {
+            return false;
+        }
+
+        const leftIsBoolean = isBooleanRateLimitResult(unwrapped.left);
+        const rightIsBoolean = isBooleanRateLimitResult(unwrapped.right);
+        if (leftIsBoolean || rightIsBoolean) {
+            const compared = leftIsBoolean ? unwrapped.right : unwrapped.left;
+            switch (unwrapped.operatorToken.kind) {
+                case ts.SyntaxKind.EqualsEqualsEqualsToken:
+                case ts.SyntaxKind.EqualsEqualsToken:
+                    return isTrueLiteral(compared);
+                case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+                case ts.SyntaxKind.ExclamationEqualsToken:
+                    return isFalseLiteral(compared);
+                default:
+                    return false;
             }
-            ts.forEachChild(current, visit);
-        };
-        visit(node);
-        return found;
+        }
+
+        const leftIsStatus = isStatusRateLimitProperty(unwrapped.left);
+        const rightIsStatus = isStatusRateLimitProperty(unwrapped.right);
+        if (!leftIsStatus && !rightIsStatus) return false;
+        const compared = leftIsStatus ? unwrapped.right : unwrapped.left;
+        switch (unwrapped.operatorToken.kind) {
+            case ts.SyntaxKind.EqualsEqualsEqualsToken:
+            case ts.SyntaxKind.EqualsEqualsToken:
+                return isRateLimitedLiteral(compared);
+            default:
+                return false;
+        }
     };
 
     const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
-                if (
-                    ts.isIdentifier(decl.name)
-                    && decl.initializer
-                    && expressionCallsRateLimit(decl.initializer)
-                ) {
-                    rateLimitResultNames.add(decl.name.text);
+                if (ts.isIdentifier(decl.name) && decl.initializer) {
+                    const kind = rateLimitCallKind(decl.initializer);
+                    if (kind === 'boolean') {
+                        booleanRateLimitResultNames.add(decl.name.text);
+                    } else if (kind === 'status') {
+                        statusRateLimitResultNames.add(decl.name.text);
+                    }
                 }
             }
             return false;
         }
         if (ts.isIfStatement(statement)) {
             return (
-                (expressionCallsRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
+                expressionIsPositiveRateLimitGate(statement.expression)
                 && branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames)
             );
         }
@@ -825,7 +963,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
     const preOriginAuthReadNames = collectPreOriginAuthReadNames(sourceFile);
-    const dbReadNames = collectDbReadNames(sourceFile);
+    const dbReadBindings = collectDbReadBindings(sourceFile, relative);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
     const isActionBarrelFile = /(?:^|[/\\])app[/\\]actions\.[cm]?[jt]sx?$/.test(relative);
@@ -916,7 +1054,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 body
                 && !isAuthActionsFile
                 && !relative.endsWith('actions/public.ts')
-                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports, preOriginAuthReadNames, dbReadNames)
+                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports, preOriginAuthReadNames, dbReadBindings)
             ) {
                 report.failed.push(
                     `EXEMPT READ WITHOUT AUTH: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' and performs protected reads before isAdmin(), getCurrentUser(), or requireSameOriginAdmin()`,

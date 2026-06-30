@@ -1093,6 +1093,36 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
     });
 
+    it('allows an exempt public mutation when a captured boolean limiter result gates the insert', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const overLimit = isViewRecordRateLimited(params.ip, Date.now());
+                if (overLimit === true) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
+    it('allows an exempt public mutation when a captured status limiter result gates the insert', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+                if (limitResult.status === 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
     it('fails an exempt public mutation without a pre-insert public rate limit', () => {
         const src = `
             /** @action-origin-exempt: public analytics endpoint */
@@ -1101,6 +1131,101 @@ describe('checkActionSource — public analytics actions', () => {
             }
         `;
         const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when a direct boolean limiter gate is inverted', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                if (!isViewRecordRateLimited(params.ip, Date.now())) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when a captured boolean limiter checks for false', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const overLimit = isViewRecordRateLimited(params.ip, Date.now());
+                if (overLimit === false) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when a captured boolean limiter is compared from false', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const overLimit = isViewRecordRateLimited(params.ip, Date.now());
+                if (false === overLimit) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when a status limiter exits on ok', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'ok') return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when a captured status limiter exits on not-rate-limited', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+                if (limitResult.status !== 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when an action-local no-op shadows a limiter helper', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                function checkViewRecordRateLimit() {
+                    return { status: 'rateLimited' };
+                }
+                if (checkViewRecordRateLimit().status === 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
@@ -1136,12 +1261,55 @@ describe('checkActionSource — protected read detection', () => {
         expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
     });
 
+    it('fails read-only exemptions that perform namespace Drizzle relational reads before auth', () => {
+        const src = `
+            import * as database from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                return database.db.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('fails read-only exemptions that perform relative-import Drizzle relational reads before auth', () => {
+        const src = `
+            import { db as database } from '../../db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                return database.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
     it('allows Drizzle relational reads after an auth check in read-only exemptions', () => {
         const src = `
             /** @action-origin-exempt: read-only admin getter */
             export async function listSessions() {
                 if (!(await isAdmin())) return [];
                 return db.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): src/app/actions/admin-sessions.ts::listSessions');
+    });
+
+    it('allows namespace Drizzle relational reads after an auth check in read-only exemptions', () => {
+        const src = `
+            import * as database from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                if (!(await isAdmin())) return [];
+                return database.db.query.sessions.findMany();
             }
         `;
         const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
