@@ -15,7 +15,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 ## Deploy
 
 - **`npm run deploy` from repo root** is per-iteration policy. Runs after every commit pushed to `master`. Reads gitignored `.env.deploy`. No staging.
-- The deploy host and SSH credentials are config-driven via the gitignored root `.env.deploy` (copy from `.env.deploy.example`); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in `.env.deploy` (see `CLAUDE.md` "Remote Deploy Helper").
+- The deploy host and SSH credentials are config-driven via the gitignored root `.env.deploy` (copy from `.env.deploy.example`, then `chmod 600 .env.deploy`); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in `.env.deploy` (see `CLAUDE.md` "Remote Deploy Helper").
 - **`apps/web/deploy.sh` auto-prunes Docker after every deploy** (`container` + `image -af` + `builder -af` + `volume` prune — `volume` WITHOUT `-a`) so the disk-constrained host stays clean. The prune runs AFTER `up -d`, so the live container + its image survive; in-use data is never touched (persistence is bind mounts `./data`, `./public/uploads`, `./public/resources`, read-only `./src/site-config.json`, plus host MySQL; immutable public assets come from the built image). Preserve all three guarantees (prune-after-up, bind-mounted data, no `-a` on the auto `volume prune`) if you change it. See `CLAUDE.md` "Disk hygiene".
 - **Never `npm install` inside the running `gallerykit-web` container** — it clobbers prod-deps and crashes the site. For one-off scripts use a `--rm` sidecar from `web-web:latest` with read-only source mounts (see `CLAUDE.md` "Backfill" section).
 
@@ -30,7 +30,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 - `npm run lint --workspace=apps/web` — ESLint
 - `npm run lint:api-auth --workspace=apps/web` — every admin-API export must wrap `withAdminAuth(...)`
-- `npm run lint:action-origin --workspace=apps/web` — every mutating server action must return-early on `requireSameOriginAdmin()` (or carry an explicit `@action-origin-exempt` comment)
+- `npm run lint:action-origin --workspace=apps/web` — every mutating non-auth server action must return-early on `requireSameOriginAdmin()` (or carry an explicit `@action-origin-exempt` comment); `auth.ts` is scanned with its approved `hasTrustedSameOrigin` guard shape
 - `npm run lint:public-route-rate-limit --workspace=apps/web` — every PUBLIC API route exporting a mutating handler (POST/PUT/PATCH/DELETE) or expensive GET handler must call a rate-limit pre-increment helper before mutation/expensive work (or carry an explicit `@public-no-rate-limit-required: <reason>` comment); cheap operational GET handlers are not scanned
 - `npm run typecheck --workspace=apps/web` — `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts`; test-file type errors only surface here, not through the build
 - `npm run build --workspace=apps/web` — Next.js + tsc

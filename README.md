@@ -122,6 +122,7 @@ To let local automation deploy without re-entering SSH details each run, keep th
 
 ```bash
 cp .env.deploy.example .env.deploy
+chmod 600 .env.deploy
 $EDITOR .env.deploy
 npm run deploy
 ```

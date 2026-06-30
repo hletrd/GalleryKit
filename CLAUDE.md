@@ -389,7 +389,7 @@ docker run --rm \
 
 - **Delete-while-processing**: Queue checks row exists before + conditional UPDATE after processing; orphaned files cleaned up
 - **Concurrent tag creation**: `INSERT IGNORE` + slug collision detection with warnings
-- **Topic route-segment serialization**: the `gallerykit_topic_route_segments` advisory lock (`withTopicRouteMutationLock`) wraps **`createTopic`, `updateTopic`, AND `createTopicAlias`** — not just renames — so a topic create, rename, or alias creation cannot race another into the same route segment. A `TopicRouteLockTimeoutError` can therefore surface on any of the three operations.
+- **Topic route-segment serialization**: the `gallerykit_topic_route_segments` advisory lock (`withTopicRouteMutationLock`) wraps **`createTopic`, `updateTopic`, `deleteTopic`, AND `createTopicAlias`** — not just renames — so a topic create, rename, delete, or alias creation cannot race another route-segment mutation. A `TopicRouteLockTimeoutError` can therefore surface on any of the four operations.
 - **Topic slug rename**: the rename is a delete+insert recreate; one transaction re-points EVERY store that references the old slug before deleting the old row — `images.topic`, `topicAliases.topicSlug`, `topic_views.topic` (the three FK children; `topic_views` was added R16C16 DBG-16-01 — missing it CASCADE-wiped up to `VIEW_RETENTION_DAYS` of analytics), and `smart_collections.query_json` eq/in topic predicates (R16C16 DBG-16-03; `contains`/range predicates are intentionally NOT remapped). No `ON UPDATE CASCADE` exists, so each child is re-pointed by hand — adding a new slug-referencing store requires extending this transaction.
 - **Upload quota TOCTOU**: per-window upload count/byte limits are checked SYNCHRONOUSLY then the claim is made before the first `await` (disk + topic-exists), so two concurrent same-key uploads cannot both pass before either claims (R16C16 CR-16-01). Every awaited early-return AND the topic-exists query's throw path rolls the claim back via `settleUploadTrackerClaim(..., 0, 0)` so a rejected/errored upload leaves no phantom claim (R17C17 CR-17-1).
 - **Batch delete**: Wrapped in DB transaction (imageTags + images atomic)
@@ -617,8 +617,8 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration and aliased exports are rejected — use the direct variable-export form so the wrapper is explicit.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-api-auth.test.ts`.
 - `npm run lint:action-origin --workspace=apps/web`
-  - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), excluding basename `auth`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
+  - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), including `auth.ts`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
+  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. Auth actions are scanned too, but they use the approved `hasTrustedSameOrigin` branch before login/logout/password-change mutation. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
   - Read-only exports must carry an explicit leading comment containing `@action-origin-exempt: <reason>`; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
 - `npm run lint:public-route-rate-limit --workspace=apps/web`
@@ -628,7 +628,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
-**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` is intentionally excluded by name because it owns its own same-origin handling. `public.ts` is scanned too: intentionally unauthenticated public mutating actions must carry `@action-origin-exempt` and prove their own rate-limit-before-mutation contract in code/tests.
+**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` is scanned and owns its stricter `hasTrustedSameOrigin` guard shape. `public.ts` is scanned too: intentionally unauthenticated public mutating actions must carry `@action-origin-exempt` and prove their own rate-limit-before-mutation contract in code/tests.
 
 ## Touch-Target Audit
 
@@ -680,6 +680,7 @@ The repo-level deploy helper reads a gitignored root `.env.deploy` file when pre
 
 ```bash
 cp .env.deploy.example .env.deploy
+chmod 600 .env.deploy
 npm run deploy
 ```
 

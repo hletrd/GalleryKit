@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = 'b0fcdd98-p7';
+const SW_VERSION = '67d2683e-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -59,7 +59,6 @@ function isHtmlRoute(request) {
 function isRevocableShareHtmlRoute(pathname) {
   return (
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[csg]\/[^/]+\/?$/.test(pathname) ||
-    /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?p\/\d+\/?$/.test(pathname) ||
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?map\/?$/.test(pathname)
   );
 }

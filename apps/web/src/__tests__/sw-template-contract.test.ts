@@ -68,16 +68,26 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(TEMPLATE).toMatch(/age > HTML_MAX_AGE_MS/);
     });
 
-    it('bypasses revocable share pages instead of offline-caching them', () => {
+    it('bypasses revocable share pages and public object pages instead of offline-caching them', () => {
         expect(TEMPLATE).toMatch(/function isRevocableShareHtmlRoute\(pathname\)/);
         expect(TEMPLATE).toContain('[csg]\\/[^/]+');
-        expect(TEMPLATE).toContain('p\\/\\d+');
         expect(TEMPLATE).toMatch(/map\\\/\?\$/);
         const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
         const shareBypassIdx = fetchHandler.indexOf('isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)');
         const htmlCacheIdx = fetchHandler.indexOf('event.respondWith(networkFirstHtml(request))');
         expect(shareBypassIdx).toBeGreaterThan(-1);
         expect(htmlCacheIdx).toBeGreaterThan(shareBypassIdx);
+    });
+
+    it('keeps normal photo pages eligible for the offline HTML fallback', () => {
+        const classifier = TEMPLATE.slice(
+            TEMPLATE.indexOf('function isRevocableShareHtmlRoute'),
+            TEMPLATE.indexOf('function isSensitiveResponse'),
+        );
+
+        expect(classifier).not.toContain('p\\/\\d+');
+        expect(classifier).toContain('[csg]\\/[^/]+');
+        expect(classifier).toMatch(/map\\\/\?\$/);
     });
 
     it('bypasses unlocalized and localized admin routes', () => {

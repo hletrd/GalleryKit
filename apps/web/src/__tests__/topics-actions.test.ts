@@ -144,7 +144,7 @@ vi.mock('@/lib/action-guards', () => ({
     requireSameOriginAdmin: vi.fn(async () => null),
 }));
 
-import { createTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible, updateTopic } from '@/app/actions/topics';
+import { createTopic, createTopicAlias, deleteTopic, deleteTopicAlias, setTopicMapVisible, updateTopic } from '@/app/actions/topics';
 
 describe('topic actions', () => {
     beforeEach(() => {
@@ -547,6 +547,28 @@ describe('topic actions', () => {
         expect(lockQueryMock).toHaveBeenCalled();
         expect(insertMock).toHaveBeenCalledTimes(1);
         expect(releaseLockQueryMock).toHaveBeenCalled();
+    });
+
+    it('serializes topic deletion behind the shared route lock before deleting', async () => {
+        const txSelectMock = vi
+            .fn()
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: null }]));
+        const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+        transactionMock.mockImplementationOnce(async (callback: (tx: {
+            select: typeof txSelectMock;
+            delete: typeof txDeleteMock;
+        }) => Promise<void>) => callback({
+            select: txSelectMock,
+            delete: txDeleteMock,
+        }));
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ success: true });
+        expect(lockQueryMock).toHaveBeenCalled();
+        expect(txDeleteMock).toHaveBeenCalledTimes(1);
+        expect(releaseLockQueryMock).toHaveBeenCalled();
+        expect(lockQueryMock.mock.invocationCallOrder[0]).toBeLessThan(txDeleteMock.mock.invocationCallOrder[0]);
+        expect(txDeleteMock.mock.invocationCallOrder[0]).toBeLessThan(releaseLockQueryMock.mock.invocationCallOrder[0]);
     });
 
     it('creates a topic when the route segment is free (COR-R4C19-01)', async () => {

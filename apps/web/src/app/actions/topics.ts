@@ -430,15 +430,17 @@ export async function deleteTopic(slug: string) {
         // Transaction prevents TOCTOU: image could be added between check and delete
         let deletedImageFilename: string | null = null;
         let deletedRows = 0;
-        await db.transaction(async (tx) => {
-            const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, cleanSlug)).limit(1);
-            if (headerImages.length > 0) {
-                throw new TopicHasImagesError();
-            }
-            const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
-            deletedImageFilename = topicRecord?.image_filename ?? null;
-            const [delResult] = await tx.delete(topics).where(eq(topics.slug, cleanSlug));
-            deletedRows = delResult.affectedRows;
+        await withTopicRouteMutationLock(async () => {
+            await db.transaction(async (tx) => {
+                const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, cleanSlug)).limit(1);
+                if (headerImages.length > 0) {
+                    throw new TopicHasImagesError();
+                }
+                const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
+                deletedImageFilename = topicRecord?.image_filename ?? null;
+                const [delResult] = await tx.delete(topics).where(eq(topics.slug, cleanSlug));
+                deletedRows = delResult.affectedRows;
+            });
         });
         if (deletedRows === 0) {
             return { error: t('topicNotFound') };
@@ -468,6 +470,9 @@ export async function deleteTopic(slug: string) {
          }
          if (hasMySQLErrorCode(e, 'ER_ROW_IS_REFERENCED_2')) {
              return { error: t('cannotDeleteCategoryWithImages') };
+         }
+         if (e instanceof TopicRouteLockTimeoutError) {
+             return { error: t('failedToDeleteTopic') };
          }
          console.error('Failed to delete topic', e);
          return { error: t('failedToDeleteTopic') };
