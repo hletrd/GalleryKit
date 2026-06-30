@@ -248,6 +248,7 @@ describe('getImagesForSmartCollection source contract (single lookahead + cursor
     }
 
     const fn = extractFunction('getImagesForSmartCollection');
+    const litePageFn = extractFunction('getImagesLitePage');
 
     it('normalizes the cursor input and applies buildCursorCondition on the cursor path', () => {
         expect(fn).toContain('normalizeImageListCursor(offsetOrCursor)');
@@ -257,6 +258,13 @@ describe('getImagesForSmartCollection source contract (single lookahead + cursor
     it('keeps cursor and offset lookaheads inside the helper (callers must not add another)', () => {
         const lookaheads = fn.match(/normalizedPageSize \+ 1/g) ?? [];
         expect(lookaheads).toHaveLength(2);
+    });
+
+    it('clamps visible page size to LISTING_QUERY_LIMIT before adding one lookahead row', () => {
+        expect(fn).toContain('Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT)');
+        expect(litePageFn).toContain('Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT)');
+        expect(fn).not.toContain('Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE)');
+        expect(litePageFn).not.toContain('Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE)');
     });
 
     it('uses a cursor-only select without COUNT(*) OVER() on the cursor path', () => {

@@ -907,7 +907,7 @@ export async function getImagesLitePage(
         return { images: [], totalCount: 0, hasMore: false };
     }
 
-    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT);
     const baseQuery = db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
@@ -1439,7 +1439,7 @@ export async function getImagesForSmartCollection(
     pageSize: number = 30,
     offsetOrCursor: number | ImageListCursorInput = 0,
 ) {
-    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT);
 
     const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
     const cursorCondition = normalizedCursor ? buildCursorCondition(normalizedCursor) : undefined;
