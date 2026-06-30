@@ -1,220 +1,107 @@
-# UI/UX Designer Reviewer - Cycle 29
+# Cycle 30 UI/UX Designer Reviewer
 
-Date: 2026-06-30
+Reviewer: ui-ux-designer-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-Mode: Prompt 1 review only. No product-code changes implemented.
-Reviewer note: adapted only the UI/UX critique style; no BurstPick-specific paths or assumptions were used.
+Date: 2026-06-30
+Scope: GalleryKit UI/UX review. The installed reviewer prompt was BurstPick-specific; this artifact uses only its professional UI/UX review intent and applies it to GalleryKit.
 
-## Process And Evidence
+## Executive Summary
 
-Read first:
+GalleryKit is not a professional culling instrument; it is a publishing and browsing surface for finished photography. Judged on that actual product, the public browsing UI is pleasant and mostly accessible, but two interaction systems are not yet production-grade: discovery search fails on the live demo for a normal query, and share links have creation affordances without lifecycle affordances. The map also has an accessibility/performance design flaw when GPS-visible collections grow. UI/UX readiness: 7/10 for current browsing, 5/10 for admin trust workflows.
 
-- `AGENTS.md`
-- `CLAUDE.md`
+## Information Architecture Assessment
 
-Inventory and review covered:
+The public IA is simple: localized home/topic/photo/share/map/timeline/privacy pages under a sticky nav, with admin pages separated behind `/admin`. This matches GalleryKit's "finished-photo publishing" scope. The weak IA is operational: "Share" is treated as an action, not an object with state. A share link becomes an external public artifact, but the admin navigation does not expose a place to audit, copy again, expire, or revoke it.
 
-- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, photo, shared link/group, smart collection, map, timeline/year, privacy, loading/error.
-- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected shell, dashboard/upload/image management, categories, tags, settings, SEO, password, users, DB, tokens, analytics.
-- Shared UI: `nav-client.tsx`, `search.tsx`, `home-client.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `map/*`, `upload-dropzone.tsx`, `image-manager.tsx`, `admin-*`, `tag-*`, `ui/*`.
-- Styling/themes: `apps/web/src/app/[locale]/globals.css`, `tailwind.config.ts`, theme provider and theme helpers.
-- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Tests/docs: touch target audit, focus-visible scan, US-P15 a11y contracts, i18n parity, theme token/resolve tests, E2E public/admin/nav specs, current `.context/reviews/designer.md`, prior `ui-ux-designer-reviewer.md`, and existing screenshot/browser artifact inventories.
+## Visual Design Audit
 
-Browser evidence reused from the main cycle 29 designer pass:
+Live desktop/mobile pages use consistent Tailwind tokens, restrained typography, rounded photo cards, visible focus rings, and a quiet gallery-first hierarchy. Sampled controls met the 44 px target. The design concern is not visual polish; it is state representation. Search failure is visually indistinguishable from a generic transient problem, semantic search appears as an advanced promise in the same dialog, and map scale has no progressive disclosure beyond an all-or-nothing marker/list render.
 
-- Local app was run at `http://localhost:3001`; `localhost:3000` was occupied by another app.
-- `/en/privacy` loaded and exposed coherent `lang`, `dir`, nav, main, footer, search/theme/locale controls.
-- Search dialog focus/inert/scroll-lock behavior was verified live.
-- `/en` hit the app error boundary because local MySQL was unavailable: `connect ECONNREFUSED 127.0.0.1:3306`.
-- Populated gallery/admin DB-backed runtime traversal was blocked by the unavailable DB.
+## Interaction Findings
 
-Focused validation I ran:
+### C30-UXR-01 - Live search returns a generic failure for a normal gallery query
 
-```text
-npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/theme-resolve.test.ts
-Test Files 6 passed; Tests 53 passed.
-```
+Severity: High
+Confidence: High for symptom, Medium for root cause
+Region: `#search-dialog`, `#search-input`; `apps/web/src/components/search.tsx:160-270`, `apps/web/src/components/search.tsx:473-476`, `apps/web/src/app/actions/public.ts:236-317`, `apps/web/src/lib/data.ts:1490-1628`
 
-## Confirmed Issues
+Concrete failure scenario: A keyboard user presses Cmd/Ctrl+K, types a visible term like `JIHOON`, waits, and hears/sees "Search failed. Please try again." There are no results, no error code, and no path to recover beyond retrying the same broken action.
 
-### C29-UXR-01 - Theme control hydrates with a different label/icon than the server rendered
+Suggested fix: Fix the underlying production query failure and add a targeted seeded-browser smoke for a known title/tag. Return specific server-action statuses for DB/query failures and display a clear temporary-unavailable state.
+
+### C30-UXR-02 - Search result list is keyboard-designed, but unproven because the live result path fails
+
+Severity: Medium
+Confidence: Medium
+Region: `apps/web/src/components/search.tsx:73-109`, `apps/web/src/components/search.tsx:394-426`, `apps/web/src/components/search.tsx:451-472`
+
+Concrete failure scenario: The component implements `role="combobox"` plus `aria-activedescendant` and arrow/Enter activation, but a live user never reaches result navigation when keyword search fails. If this regresses further, result anchors are `tabIndex={-1}`, so Tab users rely entirely on the custom combobox behavior.
+
+Suggested fix: After fixing search, add E2E coverage for open dialog -> type seeded query -> ArrowDown -> Enter -> navigates to expected photo, and a screen-reader-oriented assertion that active descendant and selected option update.
+
+### C30-UXR-03 - Share creation has no UI memory or undo/revoke path
 
 Severity: Medium
 Confidence: High
-Type: Confirmed issue
+Region: `apps/web/src/components/photo-viewer.tsx:586-618`, `apps/web/src/components/image-manager.tsx:194-210`, `apps/web/src/app/actions/sharing.ts:317-397`
 
-Sources:
+Concrete failure scenario: The admin copies a share URL but misses the toast, closes the tab, or later needs to pull access. There is no visible "active shares" state in the photo, image manager, or analytics UI, even though revoke/delete actions exist server-side.
 
-- `apps/web/src/components/nav-client.tsx:39-47` reads `useTheme()`, falls back to `system`, and builds the accessible label.
-- `apps/web/src/components/nav-client.tsx:166-176` renders theme-specific icon branches and button label/title.
-- `apps/web/src/app/[locale]/layout.tsx:130-138` configures `next-themes` with `storageKey="gallery_theme"`.
-- `apps/web/src/lib/theme.ts:39-46` defines the system -> light -> dark -> oled cycle.
-- Runtime evidence in `.context/reviews/designer.md`: stored `gallery_theme=dark` produced server label/icon for System/Monitor and hydrated client label/icon for Dark/Moon with a React hydration mismatch.
+Suggested fix: Model shares as durable admin objects. Add active-state badges on shared photos/groups, a manage-shares table, and confirmation-backed revoke/delete actions.
 
-Failure scenario:
-
-A returning visitor with `gallery_theme=dark` or `oled` opens any public page. The server HTML exposes the theme button as "Theme: System. Switch to Light." with a Monitor icon; hydration then swaps to the stored theme label/icon. In development this logs a hydration mismatch and regenerates the subtree. For keyboard and screen-reader users, the first nav pass can announce the wrong current theme and next action.
-
-Fix:
-
-Render a stable theme button until the client has mounted and `useTheme()` has resolved from storage. Keep the 44 px dimensions stable during the swap. Add a component/source test or Playwright check that seeds `gallery_theme=dark`/`oled` before navigation and asserts there is no hydration error and no accessible-name mismatch.
-
-### C29-UXR-02 - Public GPS map publishing is exposed as a one-click table switch
+### C30-UXR-04 - Public map exposes an unbounded-feeling accessibility surface
 
 Severity: Medium
 Confidence: High
-Type: Confirmed issue
+Region: `apps/web/src/app/[locale]/(public)/map/page.tsx:75-99`, `apps/web/src/components/map/map-client.tsx:76-90`, `apps/web/src/components/map/map-client.tsx:119-140`, `apps/web/src/lib/data.ts:1649-1685`
 
-Sources:
+Concrete failure scenario: With thousands of GPS-visible photos, the accessible list below the map becomes thousands of links. Screen-reader and keyboard users pay the full cost of a data-heavy visual map even if they skip the map.
 
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:64-78` immediately calls `setTopicMapVisible(slug, !currentValue)`.
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:259-265` renders the switch with only an aria-label and disabled in-flight state.
-- `apps/web/src/app/actions/topics.ts:600-625` persists `topics.map_visible` and revalidates app data.
-- `apps/web/src/lib/data.ts:1660-1685` documents `getMapImages()` as the only public latitude/longitude surface and filters by `topics.map_visible = true`.
-- `apps/web/messages/en.json:107-109`, `apps/web/messages/ko.json:107-109` label the column/toggle as public GPS map visibility.
+Suggested fix: Add list pagination/virtualization and cluster/viewport loading. Announce total/truncated counts and expose filters before the map/list payload.
 
-Failure scenario:
+### C30-UXR-05 - Generic route errors are not designed as public gallery states
 
-An admin scanning the Categories table accidentally toggles a private or client category on a trackpad. The app shows only a success toast, while every processed GPS-bearing photo in that category becomes available on `/map` after revalidation. The data flow is intentional, but the affordance treats a privacy-impacting publication action like a harmless display preference.
+Severity: Low-Medium
+Confidence: Medium
+Region: `apps/web/src/app/[locale]/error.tsx:22-57`
 
-Fix:
+Concrete failure scenario: A visitor on a photo, topic, timeline, or map page sees "Something went wrong loading this page" with Home/Try Again, but no explanation related to gallery data, restore maintenance, search outage, or temporary database unavailability.
 
-Gate only the false -> true transition with an `AlertDialog` using explicit copy such as "Publish GPS". Include the category label, explain that geotagged photos in the category become public on `/map`, and show an affected-photo count if cheap to query. Keep true -> false fast. During the request, either apply an optimistic switch state or expose a row-level `aria-live` status so the disabled switch does not look stuck.
+Suggested fix: Add public route-level unavailable states with product-specific copy and keep normal public chrome when safe.
 
-### C29-UXR-03 - Public map can render 10,000 markers and 10,000 accessible list links in one page
+## Accessibility Report
 
-Severity: Medium
-Confidence: High
-Type: Confirmed issue
+- Positive evidence: skip link to `#main-content`, nav landmark labels, dialog focus trap, focus-visible rings, 44 px sampled controls, map skip link, localized status text, and Korean/English key parity.
+- Main WCAG risks: generic error messaging affects understandable recovery; map fallback can become an excessive keyboard/screen-reader burden; search failure prevents proving the combobox result path.
+- Reduced motion: source uses reduced-motion hooks in lightbox and CSS patterns exist in prior tests; no new issue found.
+- Color independence: P3 badges include text; no color-only critical state found in sampled public UI.
 
-Sources:
+## Responsive Review
 
-- `apps/web/src/lib/data.ts:1649-1658` sets `MAP_MAX_MARKERS = 10000` and notes clustering/viewport loading would be needed beyond the cap.
-- `apps/web/src/lib/data.ts:1667-1685` returns up to 10,000 public GPS rows, request-fresh.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:37-56` maps every row into client markers.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:83-95` renders every marker again as a fallback `<Link>` in `#map-photo-list`.
-- `apps/web/src/components/map/map-client.tsx:76-93` computes full-array bounds.
-- `apps/web/src/components/map/map-client.tsx:118-140` renders every marker as a Leaflet `<Marker>`/`<Popup>`.
+Live 1440x900 and 390x844 pages rendered without observed overlap. The mobile nav collapses topics and preserves search/theme/locale controls. Home masonry adapts column count. The map and semantic search risks are data-size/responsiveness risks rather than breakpoint CSS issues.
 
-Failure scenario:
+## Loading, Empty, Error States
 
-A travel or event archive enables public GPS for several dense categories. A mobile visitor opens `/map` and receives thousands of markers plus thousands of fallback links. Leaflet mounts a large marker set, `FitBounds` scans all points, and assistive-tech users are presented with a very long link list. The page can feel frozen and the accessible fallback becomes hard to navigate at the same moment the map needs more structure.
+- Good: `/en/map` empty state is clear; global loading has `role="status"`; photo loading has a lightbox-aware full-screen loader.
+- Weak: search failure and route error shell are generic. Share creation relies on transient toast feedback and lacks a persistent state view.
 
-Fix:
+## Product Scope Alignment
 
-Use clustering or viewport-bounded marker loading, and page or virtualize the accessible list. If a server cap remains, expose a localized truncation notice and filtering affordance so visitors know whether they are seeing all public GPS photos or only the most recent subset.
+GalleryKit does not claim culling/editing/scoring, and the UI does not accidentally introduce those workflows. Admin batch operations are metadata-oriented. The main product/UX mismatch is that search and sharing are marketed as core publishing features but their live/revocation experience is incomplete.
 
-### C29-UXR-04 - Public DB failures collapse to a generic localized route error shell
+## Rechecked Fixed Items
 
-Severity: Medium
-Confidence: High
-Type: Confirmed issue
+- GPS public-map switch now prompts before publishing coordinates.
+- Privacy copy now states that short-lived full-IP rate-limit buckets may exist.
+- Theme control uses mounted state before reading client theme.
+- README/app README now warn about first-upload GPS-stripping decisions.
 
-Sources:
+## Skipped Areas
 
-- `apps/web/src/app/[locale]/error.tsx:22-57` renders a standalone generic error shell with a minimal nav, Try again, and Return to Gallery.
-- `apps/web/src/app/[locale]/(public)/layout.tsx:1-17` normally provides full public nav/main/footer.
-- `apps/web/src/app/[locale]/(public)/page.tsx:151-173` checks restore maintenance, then awaits DB-backed SEO/config/tag/topic/gallery reads without a route-local unavailable state.
-- `apps/web/messages/en.json:706-710`, `apps/web/messages/ko.json:706-710` use generic "Something went wrong loading this page" copy.
-- Runtime evidence in `.context/reviews/designer.md`: `/en` with local DB down rendered the generic error boundary and lost the normal public shell controls.
+- No production admin login or mutations.
+- No local seeded DB/browser run; live public pages and source were used.
+- No axe run in this turn; accessibility findings are DOM/source/manual-review based.
 
-Failure scenario:
+## Final Verdict
 
-A visitor hits the gallery during a MySQL restart, migration problem, or first-run DB setup issue. Instead of a gallery-specific unavailable/maintenance state inside the normal public IA, they see a generic "Error" page with minimal navigation. They cannot tell whether the gallery is empty, temporarily unavailable, or broken.
-
-Fix:
-
-For expected public DB-read failures on home/topic/photo/map routes, catch and render a localized `PublicDataUnavailable` or maintenance-like shell inside the normal public layout where possible. Preserve public nav/footer/search/theme/locale affordances when they can be resolved safely. Add a test that mocks a `getTopicsCached()` or `getImagesLitePage()` failure and asserts product-specific recovery copy.
-
-## Risks Needing Manual Validation
-
-### C29-UXR-R1 - Opt-in admin E2E selectors are stale after the admin main-content rename
-
-Severity: Low
-Confidence: High
-Type: Validation risk, not a product UI defect
-
-Sources:
-
-- `apps/web/src/app/[locale]/admin/layout.tsx:19-27` states the old `#admin-content` target was replaced by the global `#main-content` target.
-- `apps/web/e2e/helpers.ts:195` still waits for `#admin-content`.
-- `apps/web/e2e/admin.spec.ts:24-34` still expects `#admin-content table`.
-- `apps/web/e2e/admin.spec.ts:138-140` still scopes upload file input lookup to `#admin-content`.
-
-Failure scenario:
-
-When `E2E_ADMIN_ENABLED=true`, admin browser coverage can fail on stale selectors before it exercises category, tag, user, password, DB, and upload flows. That weakens future UI regression evidence for the exact protected admin surfaces that were blocked in this local runtime pass by missing MySQL.
-
-Fix:
-
-Update the E2E helpers/specs to use `#main-content`, role-based landmarks, or more specific page-level selectors. Then run the admin E2E lane against a seeded local DB/admin session.
-
-### C29-UXR-R2 - Populated gallery/admin runtime review remains DB-blocked
-
-Severity: Low
-Confidence: High
-Type: Manual validation gap
-
-Sources:
-
-- `.context/reviews/designer.md` records the local runtime blocker: `connect ECONNREFUSED 127.0.0.1:3306`.
-- DB-backed public home data begins at `apps/web/src/app/[locale]/(public)/page.tsx:157-173`.
-- Protected dashboard data begins at `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`.
-
-Failure scenario:
-
-Static review and focused tests can miss visual density, scrolling, responsive table/card behavior, and real upload/image-management states that only appear with seeded photos, tags, topics, GPS data, and admin auth.
-
-Fix:
-
-Run a seeded local DB or known-safe review environment and capture desktop/mobile passes through populated home, photo, map, admin dashboard/upload, categories, settings, and DB pages. Include dark/light/OLED and Korean locale snapshots.
-
-## Rechecked Previous Findings
-
-- Prior image-manager horizontal overflow issue is fixed in current source: `apps/web/src/components/image-manager.tsx:424-425` now uses `min-w-0 overflow-x-auto rounded-md border`; wide columns remain contained.
-- Prior slideshow interval field-level validation issue is fixed: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:154-174` validates the field; `settings-client.tsx:698-714` marks `aria-invalid`, associates help/error text, and renders `role="alert"`.
-- Public/admin skip-link targets are covered: `apps/web/src/app/[locale]/layout.tsx:123-128`, public layout `apps/web/src/app/[locale]/(public)/layout.tsx:8-16`, admin layout `apps/web/src/app/[locale]/admin/layout.tsx:19-27`, and error boundary `apps/web/src/app/[locale]/error.tsx:34-56`.
-- Touch target and focus-visible policies have broad source gates: `apps/web/src/__tests__/touch-target-audit.test.ts:42-83` and `apps/web/src/__tests__/focus-visible-links-scan.test.ts:52-88`.
-- Korean/English key parity and theme-token contracts passed in the focused validation run.
-
-## Covered Area Summary
-
-Information architecture:
-
-- Reviewed localized public shell, topic/tag filters, public map/timeline/year/privacy pages, shared routes, smart collections, admin grouping, and admin nav. Main IA issue is the generic public DB-error fallback; main privacy-affordance issue is the one-click GPS map switch.
-
-Interaction design:
-
-- Reviewed search dialog, nav expansion, theme cycling, locale switching, lightbox/photo viewer controls, upload dropzone, tags, category map toggle, settings validation, DB restore confirmation, and admin tables. Confirmed issues are theme hydration and GPS-publication confirmation.
-
-Accessibility:
-
-- Reviewed landmarks, skip links, labels, aria-live regions, combobox/listbox patterns, dialog/focus-trap behavior, touch targets, focus-visible rings, field validation, and map fallback list. Focused a11y/touch/focus tests passed. Map scale remains an accessibility risk because the fallback can become thousands of links.
-
-Responsive behavior:
-
-- Reviewed nav wrapping, public masonry, photo viewer, map loader, admin layout, image manager overflow, and table/card patterns. No new source-backed responsive defect was found besides map scale.
-
-Loading/empty/error states:
-
-- Reviewed global/public/admin loading and error files, topic empty state, search states, upload states, map empty/loading, and restore-maintenance copy. Confirmed issue is generic DB failure UX.
-
-Themes/color:
-
-- Reviewed light/dark/OLED tokens, forced-colors CSS, reduced-motion CSS, HDR/P3 badge display rules, and tests. No contrast regression found; theme hydration remains an interaction/accessibility mismatch.
-
-i18n:
-
-- Reviewed `en.json`/`ko.json`, plural convention from `CLAUDE.md`, map/category/error/theme/search keys, and parity tests. No new translation-key gap found.
-
-## Final Missed-Issues Sweep
-
-Final sweep covered `aria-*`, `role`, `tabIndex`, `aria-live`, `focus-visible`, `sr-only`, dialog/focus-trap code, search/listbox semantics, map/list fallback, admin table overflow, touch-target tests, reduced-motion CSS, forced-colors CSS, dark/light/OLED tokens, loading/empty/error states, validation flows, privacy/GPS copy, Korean/English messages, and E2E selectors.
-
-Reported findings:
-
-- Confirmed product UI/UX issues: 4
-- Validation risks needing manual follow-up: 2
-
-No product code was modified.
+The UI helps casual public browsing today, but it still gets in the way of trust-critical workflows: finding photos, managing shared access, and browsing GPS data at scale. Fix search reliability first, then design share management as a first-class admin object and make map scale progressive.
