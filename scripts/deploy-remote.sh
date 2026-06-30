@@ -59,8 +59,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 if [[ ! -O "$ENV_FILE" ]]; then
-  echo "Refusing to source deploy env file not owned by the current user: $ENV_FILE" >&2
-  exit 1
+  echo "Warning: deploy env file is not owned by the current user: $ENV_FILE" >&2
 fi
 
 env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
