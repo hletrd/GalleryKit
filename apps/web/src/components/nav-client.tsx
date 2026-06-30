@@ -40,6 +40,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const [isExpanded, setIsExpanded] = useState(false);
     const currentTheme = (theme ?? 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
+    const hasExpandableMobileContent = topics.length > 0;
     const themeAriaLabel = t('aria.cycleTheme', {
         theme: t(`theme.${currentTheme}`),
         nextTheme: t(`theme.${nextThemeValue}`),
@@ -96,22 +97,24 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 {/* Mobile Expand Toggle. Sized to the 44x44 touch-target
                     minimum (Apple HIG / Google MDN) — F-2; the previous `p-2`
                     rendered 32x32 which is below WCAG 2.5.5 AAA. */}
-                <button
-                    onClick={() => setIsExpanded(!isExpanded)}
-                    className={cn(
-                        "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                        isExpanded ? "ml-auto mt-1" : "order-last ml-1"
-                    )}
-                    aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
-                    aria-expanded={isExpanded}
-                    aria-controls="primary-nav-topics primary-nav-controls"
-                >
-                    {isExpanded ? (
-                        <ChevronUp className="h-4 w-4" />
-                    ) : (
-                        <ChevronDown className="h-4 w-4" />
-                    )}
-                </button>
+                {hasExpandableMobileContent && (
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className={cn(
+                            "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                            isExpanded ? "ml-auto mt-1" : "order-last ml-1"
+                        )}
+                        aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
+                        aria-expanded={isExpanded}
+                        aria-controls="primary-nav-topics primary-nav-controls"
+                    >
+                        {isExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4" />
+                        )}
+                    </button>
+                )}
 
                 {/* Topics */}
                 <div id="primary-nav-topics" className={cn(

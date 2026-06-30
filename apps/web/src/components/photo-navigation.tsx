@@ -25,6 +25,9 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [isSnapping, setIsSnapping] = useState(false);
+    const [shouldReduceMotion, setShouldReduceMotion] = useState(
+        () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
     const touchStartX = useRef(0);
     const touchStartY = useRef(0);
     const isSwiping = useRef(false);
@@ -40,6 +43,13 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         }
         router.push(getPhotoPath(id));
     }, [getPhotoPath, onSelectId, router]);
+
+    useEffect(() => {
+        const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const handler = (event: MediaQueryListEvent) => setShouldReduceMotion(event.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }, []);
 
     useEffect(() => {
         // Skip touch handling when lightbox is open — it handles its own navigation
@@ -150,7 +160,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         ? Math.min(-swipeOffset / SWIPE_THRESHOLD, 1)
         : 0;
 
-    const transitionStyle = isSnapping
+    const transitionStyle = isSnapping && !shouldReduceMotion
         ? { transition: 'transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.25s ease' }
         : {};
 
@@ -218,7 +228,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 shared-group e2e click test caught it). z-20 matches the swipe
                 indicators above and restores pointer access. */}
             {prevId && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-20">
+                <div className={`absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 z-20 ${shouldReduceMotion ? '' : 'transition-opacity'}`}>
                     <Button
                         variant="secondary"
                         size="icon"
@@ -232,7 +242,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             )}
 
             {nextId && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-20">
+                <div className={`absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 z-20 ${shouldReduceMotion ? '' : 'transition-opacity'}`}>
                     <Button
                         variant="secondary"
                         size="icon"

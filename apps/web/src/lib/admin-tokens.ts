@@ -1,6 +1,6 @@
 /**
  * Admin Personal Access Tokens (PATs) for non-browser integrations such as
- * the Lightroom Classic publish plugin.
+ * Lightroom-compatible external publish clients.
  *
  * Tokens are issued in the format `gk_<base64url(32 random bytes)>` (43 chars
  * after the prefix). Only the SHA-256 digest of the token is persisted in the
@@ -15,6 +15,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
+import { safeInsertId } from '@/lib/validation';
 
 export const TOKEN_PREFIX = 'gk_';
 export const TOKEN_RANDOM_BYTES = 32;
@@ -22,6 +23,9 @@ export const TOKEN_RANDOM_BYTES = 32;
 export const TOKEN_PLAINTEXT_LENGTH = TOKEN_PREFIX.length + 43;
 
 export type AdminTokenScope = 'lr:upload' | 'lr:read' | 'lr:delete';
+// Only `lr:upload` has shipped routes today. `lr:read` and `lr:delete` are
+// reserved so stored token scopes can remain forward-compatible when matching
+// external-client routes are added.
 export const ALL_SCOPES: readonly AdminTokenScope[] = ['lr:upload', 'lr:read', 'lr:delete'] as const;
 
 export interface AdminTokenRecord {
@@ -222,9 +226,15 @@ export async function createToken(opts: {
         INSERT INTO admin_tokens (user_id, label, token_hash, scopes, expires_at)
         VALUES (${opts.userId}, ${cleanLabel}, ${hash}, ${scopesJson}, ${expiresAt})
     `);
-    // mysql2 returns ResultSetHeader with insertId for INSERT.
-    const header = (Array.isArray(result) ? result[0] : result) as { insertId?: number };
-    const insertId = typeof header?.insertId === 'number' ? header.insertId : 0;
+    // mysql2 can return insertId as number or BigInt depending on connection
+    // flags. Use the repo-wide guard so audit targets never fall back to `0`
+    // for a valid BigInt id.
+    const header = (Array.isArray(result) ? result[0] : result) as { insertId?: unknown };
+    const rawInsertId = header?.insertId;
+    if (typeof rawInsertId !== 'number' && typeof rawInsertId !== 'bigint') {
+        throw new Error('admin token insert did not return a valid insertId');
+    }
+    const insertId = safeInsertId(rawInsertId);
     return { plaintext, id: insertId };
 }
 

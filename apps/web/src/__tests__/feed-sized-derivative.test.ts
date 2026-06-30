@@ -7,8 +7,8 @@
  * Before R25-M1, both feeds called
  *   sizedImageFilename(img.filename_jpeg, 1536)
  * with no `imageSizes` argument. The helper defaulted to
- * `DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096]` and trivially picked
- * `1536`. After an admin reconfigure that drops `1536` from `image_sizes`
+ * the built-in default size list and trivially picked `1536`. After an admin
+ * reconfigure that drops `1536` from `image_sizes`
  * (and a backfill that re-encodes existing photos at the new sizes),
  * every entry's `<media:content>` URL pointed at a `_1536.jpg` that did
  * not exist on disk and the RSS-reader preview silently 404'd.

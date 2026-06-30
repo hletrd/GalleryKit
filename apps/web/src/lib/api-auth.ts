@@ -53,7 +53,7 @@ export interface WithAdminAuthOptions {
  * verified token is exposed via `getAdminAuthToken(request)` while the
  * handler runs, then cleared immediately after the handler settles. Cookie
  * fallback handlers that need attribution should call `getCurrentUser()`.
- * This is required for non-browser integrations (e.g. the Lightroom plugin).
+ * This is required for non-browser integrations (e.g. external publish clients).
  */
 export function withAdminAuth<T extends unknown[]>(
     handler: (...args: T) => Promise<Response>,
@@ -66,7 +66,7 @@ export function withAdminAuth<T extends unknown[]>(
             : null;
 
         // US-P53: token path runs first so token-bearing requests bypass the
-        // same-origin check (cross-origin clients like Lightroom Classic
+        // same-origin check (cross-origin publish clients
         // cannot satisfy same-origin). The token's `scopes` set is the
         // authorization gate.
         if (options?.allowTokenScope && headers) {

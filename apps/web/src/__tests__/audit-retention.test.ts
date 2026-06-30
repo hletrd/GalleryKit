@@ -8,9 +8,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { whereMock, deleteMock, ltMock } = vi.hoisted(() => {
-    const whereMock = vi.fn(async () => undefined);
+const { limitMock, whereMock, deleteMock, ltMock } = vi.hoisted(() => {
+    const limitMock = vi.fn(async () => [{ affectedRows: 0 }]);
+    const whereMock = vi.fn(() => ({ limit: limitMock }));
     return {
+        limitMock,
         whereMock,
         deleteMock: vi.fn(() => ({ where: whereMock })),
         ltMock: vi.fn((col: unknown, cutoff: Date) => ({ col, cutoff })),
@@ -39,6 +41,7 @@ beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-11T00:00:00Z'));
     whereMock.mockClear();
+    limitMock.mockClear();
     deleteMock.mockClear();
     ltMock.mockClear();
     delete process.env.AUDIT_LOG_RETENTION_DAYS;
@@ -91,5 +94,18 @@ describe('purgeOldAuditLog retention validation (COR-R4C6-10)', () => {
         process.env.AUDIT_LOG_RETENTION_DAYS = '1e3';
         await purgeOldAuditLog();
         expect(lastCutoff().getTime()).toBe(Date.now() - 1000 * DAY_MS);
+    });
+
+    it('deletes expired audit rows in bounded batches', async () => {
+        limitMock
+            .mockResolvedValueOnce([{ affectedRows: 500 }])
+            .mockResolvedValueOnce([{ affectedRows: 27 }]);
+
+        await purgeOldAuditLog(7 * DAY_MS);
+
+        expect(deleteMock).toHaveBeenCalledTimes(2);
+        expect(whereMock).toHaveBeenCalledTimes(2);
+        expect(limitMock).toHaveBeenCalledWith(500);
+        expect(limitMock).toHaveBeenCalledTimes(2);
     });
 });

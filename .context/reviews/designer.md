@@ -1,197 +1,164 @@
-# Cycle 22 Designer / UI-UX Review
+# Cycle 23 Designer / UI-UX Deep Review
 
 Date: 2026-06-30
 Role: designer / UI-UX reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-Output constraint: review artifact only; no source-code edits, no commit, no push.
+Scope constraint: review artifact only; source changes were limited to this file.
 
-## Method and Runtime Evidence
+## Method
 
-I read the workspace instructions from `AGENTS.md`, the project context in `CLAUDE.md`, and the agent-browser CLI skill instructions before reviewing. I used the app where feasible and fell back to source, DOM, computed-state, accessibility-snapshot, and test review for DB-backed surfaces.
+Read first: `AGENTS.md`, full `CLAUDE.md`, and the local agent-browser skill docs for core navigation, query/snapshot, interaction, wait, debug, config, visual, and network/storage.
 
-Local server command and output:
+Inventory covered:
 
-```text
-npm run dev --workspace=apps/web
+- Public routes/components: `apps/web/src/app/[locale]/(public)/**`, `components/nav-client.tsx`, `home-client.tsx`, `search.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `photo-navigation.tsx`, `color-details-section.tsx`, `map/**`.
+- Admin routes/components: `apps/web/src/app/[locale]/admin/**`, `admin-header.tsx`, `admin-nav.tsx`, `upload-dropzone.tsx`, `image-manager.tsx`, `admin-user-manager.tsx`, `bulk-edit-dialog.tsx`.
+- Design system/styling: `globals.css`, `components/ui/**`, theme provider, Tailwind-style class usage in TSX.
+- i18n/assets/tests/docs: `apps/web/messages/{en,ko}.json`, `public/fonts`, `public/icons`, `public/resources`, `public/uploads`, `apps/web/e2e/**`, `apps/web/src/__tests__/**`, `.context/reviews/**`, `.context/plans/**`.
 
-> web@0.1.0 dev
-> next dev
+Browser-backed review:
 
- ⚠ Port 3000 is in use by process 9985, using available port 3001 instead.
-   ▲ Next.js 16.2.9 (Turbopack)
-   - Local:         http://localhost:3001
-   - Network:       http://172.30.62.1:3001
-   - Environments: .env.local
-
- ✓ Ready in 1626ms
-Could not connect to database to bootstrap queue (ECONNREFUSED). Retrying image queue bootstrap in 30s.
-```
-
-Agent-browser routes exercised:
-
-- `http://localhost:3001/en`: rendered the localized error boundary because the home route tried to query MySQL. Accessibility snapshot exposed `link "Skip to content"`, `main`, `region "Error"`, heading `Error`, button `Try again`, and link `Return to Gallery`. Console included `Error: Failed query: select slug, label, order, image_filename, map_visible ... from topics ...` plus settings/config DB fallback warnings.
-- `http://localhost:3001/en/privacy`: loaded the public shell. Snapshot exposed `Main navigation`, GalleryKit home link, `Search photos` button, theme button, Korean language switch, `main` privacy content, and footer links.
-- `http://localhost:3001/en/admin`: loaded the login form. Snapshot exposed heading `Admin`, labels `Username` and `Password`, required textboxes, `Show password`, and `Sign in`.
-
-Agent-browser interaction evidence:
-
-- Search dialog: clicking `Search photos` on `/en/privacy` focused `#search-input` with role `combobox`, `aria-expanded="false"`, and a dialog present. Pressing Escape removed the dialog and restored focus to the `Search photos` trigger.
-- Mobile nav at `390x844`: clicking `Expand menu` set `aria-expanded="true"`, produced a visible controls box of `358x44`, and computed horizontal overflow was `0`.
-- Admin login at `390x844`: username, password, password-toggle, and submit controls were all at least `44px` high/wide. `Show password` changed the input type to `text`, set `aria-pressed="true"`, and changed the label to `Hide password`. Wrong credentials produced an `alert` with `Authentication failed. Please try again.`
-
-Targeted validation run:
-
-```text
-npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/hdr-badge-contrast.test.ts
-
-Test Files  5 passed (5)
-Tests       55 passed (55)
-```
-
-## UI Inventory Examined
-
-Documentation and product constraints:
-
-- `CLAUDE.md:267-270` - photographer intent, no edit/culling/scoring product boundary.
-- `CLAUDE.md:302-306` - derivative output is static and settings-hash based.
-- `CLAUDE.md:331-341` - byte-affecting color/HDR setting changes require re-encoding and can run through an in-app backfill button with DB connection limits.
-- `AGENTS.md` from the prompt - review scope, quality gates, deploy/schema/security conventions.
-
-Public routes and shells:
-
-- `apps/web/src/app/[locale]/layout.tsx:61-138` - viewport color-scheme, `lang`/`dir`, skip link, theme provider.
-- `apps/web/src/app/[locale]/error.tsx:1-55` - localized public error boundary.
-- `apps/web/src/app/[locale]/not-found.tsx:1-50` - localized not-found page with nav/footer shell.
-- `apps/web/src/app/[locale]/(public)/page.tsx` and `apps/web/src/components/home-client.tsx:255-453` - home IA, LCP reservation, masonry/grid loading, reduced-motion back-to-top.
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx` - static privacy route used for browser interaction.
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `c/[slug]/page.tsx`, `[topic]/page.tsx`, `map/page.tsx`, `timeline/page.tsx`, and `year/[year]/page.tsx` - DB-backed public IA inspected by source, not fully exercised because MySQL was unavailable.
-
-Admin routes and forms:
-
-- `apps/web/src/app/[locale]/admin/login-form.tsx:26-100` - login form labels, password reveal, alert behavior.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:172-320` - settings save and backfill controls.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-238` - Lightroom token plaintext dialog.
-- `apps/web/src/components/upload-dropzone.tsx:352-537` - upload empty states, GPS warning, progress, errors, dropzone roles.
-- `apps/web/src/components/tag-input.tsx:208-275` - combobox/listbox tagging pattern.
-
-Shared components and primitives:
-
-- `apps/web/src/components/nav-client.tsx:83-181` - public nav, mobile expansion, language/theme/search controls.
-- `apps/web/src/components/search.tsx:313-517` - search focus restore, dialog, combobox/listbox, live region, semantic toggles.
-- `apps/web/src/components/lightbox.tsx:92-681` - reduced motion, dialog roles, controls, status.
-- `apps/web/src/components/photo-viewer.tsx:355-704` - keyboard shortcuts, screen-reader headings/hints, reduced motion.
-- `apps/web/src/components/ui/button.tsx:23-29` - 44px minimum button variants.
-- `apps/web/src/components/ui/dialog.tsx:50-89` - dialog content and default close button.
-- `apps/web/src/components/ui/table.tsx:7-19` - responsive horizontal table overflow.
-- `apps/web/src/app/[locale]/globals.css:14-181` and `:253-279` - light/dark/oled tokens, HDR/P3 badge colors, forced-colors support, reduced-motion suppression.
-
-Tests and verification references:
-
-- `apps/web/src/__tests__/touch-target-audit.test.ts:1-245`
-- `apps/web/src/__tests__/focus-visible-links-scan.test.ts:1-77`
-- `apps/web/src/__tests__/a11y-us-p15.test.ts:25-112`
-- `apps/web/src/__tests__/i18n-key-parity.test.ts:43-72`
-- `apps/web/src/__tests__/hdr-badge-contrast.test.ts:58-83`
-- `apps/web/e2e/public.spec.ts:21-123`
-- `apps/web/e2e/admin.spec.ts:11-160`
-- `apps/web/e2e/nav-visual-check.spec.ts:40-79`
+- Existing `:3000` was another app, so I started GalleryKit on `http://localhost:3001` with `npm --workspace=apps/web run dev -- -p 3001`.
+- DB-backed routes were blocked by local MySQL/schema state. `/en` and `/en/map` rendered route errors with console query failures. I used browser evidence for static/auth/error surfaces and source/e2e evidence for DB-backed gallery/photo/admin screens.
+- Confirmed `/en/privacy` public shell and `/en/admin` login with agent-browser accessibility snapshots, DOM boxes, styles, validation state, and page errors/console.
+- Confirmed i18n key parity with a JSON key-count script: `en=826`, `ko=826`, no missing keys.
 
 ## Findings
 
-### 1. Public error boundary drops the site shell and can strand users on a failing home route
+### 1. Error pages can keep the failed route title instead of announcing an error
 
 Severity: Medium
 Confidence: High
-Status: Confirmed by browser and source
-Areas: information architecture, error state UX, keyboard recovery, i18n shell consistency
+Status: Confirmed
+Area: error state UX, screen-reader/browser-tab orientation
 
 Evidence:
 
-- Browser selector/evidence: `http://localhost:3001/en` rendered only `link "Skip to content"`, `main`, `region "Error"`, heading `Error`, paragraph `Something went wrong loading this page.`, button `Try again`, and link `Return to Gallery`.
-- Browser console evidence: the page failed from a DB-backed home query, `Failed query: select slug, label, order, image_filename, map_visible ... from topics ...`.
-- `apps/web/src/app/[locale]/error.tsx:22-53` renders a standalone `<main>` with the error copy and two actions, but no `Nav` or `Footer`.
-- `apps/web/src/app/[locale]/not-found.tsx:7-11` explicitly documents that stripping the public shell was previously a UX problem, and `apps/web/src/app/[locale]/not-found.tsx:20` plus `:47` include `Nav` and `Footer`.
+- Browser: `http://localhost:3001/en/map` showed heading `Error`, text `Something went wrong loading this page.`, actions `Try again` and `Return to Gallery`, but `document.title` stayed `Map | GalleryKit`.
+- Source: `apps/web/src/app/[locale]/error.tsx:16-20` sets the title only when `document.title.trim()` is empty.
+- Source: `apps/web/src/app/[locale]/(public)/map/page.tsx:12-24` sets normal map metadata, so the error boundary inherits a non-error title.
 
 Failure scenario:
 
-A transient DB outage or route-loader exception on the public home page leaves visitors in a generic error state with no visible search, topics, language switch, theme control, footer links, or admin/privacy escape hatch. On the home route, `Return to Gallery` points back to the same failing IA entry point, so the main recovery path can loop.
+A visitor lands on a broken DB-backed page. The visual content says "Error", but browser history, tabs, and assistive tech title context still identify the failed page as "Map" or another route. That makes recovery and support reporting more confusing.
 
-Suggested fix:
+Concrete fix:
 
-Mirror the not-found shell in the localized error boundary: render `Nav`, keep the `main`/skip-link target, and render `Footer`. If the current route is already the localized home path, avoid presenting `Return to Gallery` as the primary recovery action; use `Try again` plus stable fallback links such as Privacy/Admin or a route-safe home link only when it changes location. Add a source or e2e assertion that localized error pages preserve the public shell.
+Set the localized error title unconditionally in the route error boundary, e.g. `${t('error.title')} | ${siteTitle}`, or use Next metadata if available for error boundaries. Add a regression test that forces a route error and asserts both visible heading and `document.title`.
 
-### 2. Settings can trigger a site-wide derivative re-encode with one click and no confirmation
-
-Severity: High
-Confidence: High
-Status: Confirmed by source
-Areas: affordance safety, admin workflow, perceived performance, photographer-output trust
-
-Evidence:
-
-- `CLAUDE.md:302-306` states derivative output is static and tied to image settings hashes.
-- `CLAUDE.md:331-337` states flipping color/quality/size settings requires a backfill pass to re-encode existing photos, and that the in-app Settings page has a `Re-encode existing photos` button.
-- `CLAUDE.md:339-341` notes the in-app backfill can use up to five DB connections at the shipped pool size.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:172-183` defines `handleBackfill`, which immediately calls `triggerBackfill()` and queues the background runner.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:297-305` says the button is visible whenever the gallery has photos.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:315-320` wires the visible button directly to `onClick={handleBackfill}`; it is disabled only while `isBackfilling`.
-
-Failure scenario:
-
-An admin scanning the settings page taps `Re-encode now` by mistake on a production gallery. The action can enqueue a CPU/IO/DB-heavy derivative rewrite and alter photo delivery bytes/cache state, while the UI offers no confirmation, no estimate, and no explicit warning that this is a broad background operation.
-
-Suggested fix:
-
-Wrap this action in an explicit confirmation flow before `triggerBackfill()` runs. The dialog should include the approximate photo count, what will be regenerated, whether originals are untouched, expected resource impact, and whether the job can be cancelled. For stronger protection, require typing a short confirmation phrase such as `RE-ENCODE` when the affected count is non-trivial, and keep the button disabled while settings are dirty unless the user first saves the new settings.
-
-### 3. Token plaintext dialog shows a close affordance that intentionally does nothing before acknowledgment
+### 2. The public error boundary drops the normal public shell
 
 Severity: Medium
 Confidence: High
-Status: Confirmed by source
-Areas: modal affordances, focus trap behavior, keyboard expectations, screen-reader feedback
+Status: Confirmed
+Area: information architecture, error recovery, responsive navigation
 
 Evidence:
 
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-195` keeps the dialog open unless `plaintextAcknowledged` is true.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:197` renders `DialogContent` without overriding its close-button behavior.
-- `apps/web/src/components/ui/dialog.tsx:50-89` defaults `showCloseButton = true` and renders a `DialogPrimitive.Close` button.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:216-235` requires the acknowledgment checkbox before the `Done` button is enabled.
+- Browser: `/en/map` error snapshot exposed only `nav "Site navigation"` with a single `Gallery` link, then the error region. No main public nav, search, theme, locale switch, footer, privacy link, GitHub link, or admin link.
+- Source: `apps/web/src/app/[locale]/error.tsx:22-61` renders a standalone `<main>` and local one-link `<nav>`.
+- Contrast: `apps/web/src/app/[locale]/not-found.tsx:7-11` documents that a stripped dead-end page was a previous UX problem, then renders `Nav` at `:20` and `Footer` at `:47`.
 
 Failure scenario:
 
-After generating a token, an admin clicks the visible `X`, presses Escape, or clicks outside the modal before checking the acknowledgment box. The dialog remains open because the state handler refuses to close it, but the visible close affordance gave the opposite expectation. Keyboard and screen-reader users get no inline explanation that the close attempt was blocked by the acknowledgment requirement.
+During a DB outage or route-level exception, users lose the same recovery tools that still work on static routes: search, language switching, theme control, footer/admin/privacy links, and topic navigation when available. On a failing home-like route, `Return to Gallery` can also loop back into another failing DB route.
 
-Suggested fix:
+Concrete fix:
 
-Make the modal visibly non-dismissable until acknowledgment is complete. Pass `showCloseButton={false}` to `DialogContent` while `plaintextAcknowledged` is false, prevent outside/Escape dismiss with a short inline explanation, and keep `Done` as the only closing affordance. Alternatively, allow close attempts to focus the checkbox and announce an inline error such as `Acknowledge that the token has been saved before closing.`
+Mirror the not-found shell for recoverable localized route errors: render the normal `Nav`, keep the `main-content` target, and include `Footer`. If avoiding `Nav` because it could be part of the failure, add a stable fallback shell with locale/theme/admin/privacy links and a clear "current page failed" title.
 
-## Verified Controls and Non-Findings
+### 3. Lightbox controls can remain invisible but pointer-active after auto-hide
 
-- Search modal focus management is strong in the tested static route: the trigger moved focus into `#search-input`, Escape closed the dialog, and focus returned to the trigger. Source support: `apps/web/src/components/search.tsx:313-324`, `:370-383`, and `:391-449`.
-- Mobile public nav met the 44px target and did not horizontally overflow in the tested `390x844` viewport. Source support: `apps/web/src/components/nav-client.tsx:99-179` and `apps/web/src/components/ui/button.tsx:23-29`.
-- Admin login labels, required controls, password reveal state, and alert feedback were confirmed by browser interaction. Source support: `apps/web/src/app/[locale]/admin/login-form.tsx:45-96`.
-- Global reduced-motion handling is present for CSS transitions/animations and component-level scroll behavior. Source support: `apps/web/src/app/[locale]/globals.css:253-279`, `apps/web/src/components/lightbox.tsx:92-109`, and `apps/web/src/components/photo-viewer.tsx:681-688`.
-- Dark/light/oled themes and forced-colors tokens are implemented in CSS and theme provider setup. Source support: `apps/web/src/app/[locale]/layout.tsx:119-138` and `apps/web/src/app/[locale]/globals.css:14-181`.
-- i18n key parity is covered by tests and passed in the targeted run. Source support: `apps/web/src/__tests__/i18n-key-parity.test.ts:43-72`.
-- RTL is not currently a runtime locale in the inspected app surface; `layout.tsx:93-111` does set `dir` from locale metadata, so future RTL support has a central hook but was not browser-verified.
+Severity: Medium
+Confidence: Medium
+Status: Likely source risk; needs manual/browser validation with seeded photos
+Area: affordances, focus/keyboard parity, pointer interaction
 
-## Coverage by Requested Area
+Evidence:
 
-- Information architecture: reviewed public shell, localized error/not-found, privacy, home source, topic/search/map/timeline/year/share source, admin route map, and footer/nav behavior.
-- Affordances: reviewed public search/nav controls, admin login, settings backfill, token dialog, upload empty/error/progress states.
-- Focus and keyboard navigation: exercised search dialog, admin password toggle, mobile menu; reviewed lightbox/photo-viewer keyboard code and focus-visible tests.
-- WCAG 2.2 accessibility: checked skip link, 44px target tests, focus-visible tests, ARIA dialog/combobox/listbox patterns, alerts, live regions, forced-colors CSS, reduced-motion CSS.
-- Contrast: relied on source token review and passed HDR badge contrast tests; no raw screenshot-only contrast claims were made.
-- Responsive breakpoints: exercised mobile nav/login at `390x844`; reviewed home stable card dimensions and table horizontal scroll source.
-- Loading/empty/error states: reviewed route error boundary, home loading/CLS reservation, upload empty state, login error, and source-level public loading surfaces.
-- Form validation UX: reviewed login and settings; finding 2 covers destructive admin action safety, and earlier validation work remains relevant but was not re-raised because this cycle focused on newly confirmed issues.
-- Dark/light mode: reviewed provider/CSS; browser state was theme-pinned to `light`, so no dark-mode browser finding is claimed.
-- i18n/RTL: reviewed locale messages parity and `lang`/`dir`; RTL was source-reviewed only.
-- Perceived performance/LCP/CLS/INP risks: reviewed home LCP/CLS reservation, backfill resource impact, DB-failure behavior, and search/admin interaction responsiveness in browser.
+- Source: `apps/web/src/components/lightbox.tsx:369-371` makes hidden controls `tabIndex=-1` and `aria-hidden=true`, but does not disable pointer events.
+- Source: `apps/web/src/components/lightbox.tsx:543-550` hides the controls overlay by setting opacity to `0`.
+- Source: individual hidden controls keep `pointer-events-auto`, e.g. close/fullscreen/slideshow at `apps/web/src/components/lightbox.tsx:552-600` and prev/next at `:620-643`.
 
-## Final Sweep and Skipped Files
+Failure scenario:
 
-Skipped from browser execution because MySQL was unavailable: DB-backed home content, topic/category/tag/year/timeline/map result states, photo detail pages, shared gallery/photo routes, protected admin dashboards, upload flows, and token generation. These were inspected by source where relevant.
+After the auto-hide timer fires, the controls become transparent and unavailable to keyboard/AT, but the top-right and edge hit zones can still intercept clicks. A user trying to click the image/backdrop may accidentally close the lightbox, toggle fullscreen, or navigate photos through invisible controls.
 
-Skipped from source review: generated `.next`, `node_modules`, static image assets, uploaded media, and unrelated non-UI scripts. I did not run the Playwright e2e suite because the local DB/admin seed was unavailable; the relevant e2e files were read for coverage expectations instead.
+Concrete fix:
+
+When `controlsVisible` is false, also apply `pointer-events-none` to each control or to a stateful wrapper that children cannot override. Add a seeded e2e check: open lightbox, wait for auto-hide, click top-right/edge coordinates, assert no hidden control action fires until mouse/focus reveals controls again.
+
+### 4. Mobile nav shows an expand button even when there are no hidden topics
+
+Severity: Low
+Confidence: High
+Status: Confirmed on DB-fallback static page
+Area: mobile affordance, empty state
+
+Evidence:
+
+- Browser: `/en/privacy` at `390x844` exposed `button "Expand menu"` with `aria-expanded=false`, while the topics container had no topic links because topic loading fell back to `[]`.
+- Source: `apps/web/src/components/nav-client.tsx:99-107` renders the expand/collapse button unconditionally.
+- Source: `apps/web/src/components/nav-client.tsx:117-153` maps `topics`, but there is no empty-topic guard.
+- Source: `apps/web/src/components/nav-client.tsx:155-179` keeps search/theme/locale visible in the collapsed mobile bar, so the expander may reveal no new actionable content.
+
+Failure scenario:
+
+Fresh installs, DB outages, or galleries with zero public topics show a menu affordance that appears to promise hidden navigation but only changes layout or reveals already-visible controls. This is minor, but it erodes trust in the mobile nav.
+
+Concrete fix:
+
+Render the expand button only when `topics.length > 0` or when the collapsed state truly hides controls at the active breakpoint. If it remains, change the label and controlled region so it accurately describes what will appear.
+
+### 5. Login required-field validation is not localized or persistent
+
+Severity: Low
+Confidence: High
+Status: Confirmed
+Area: form validation UX, i18n, WCAG error identification
+
+Evidence:
+
+- Browser: submitting empty `/ko/admin` focused `username`, exposed invalid controls, and browser validation messages were English: `Please fill out this field.` No visible `role=alert` or inline Korean error appeared.
+- Source: `apps/web/src/app/[locale]/admin/login-form.tsx:43-52` and `:63-72` rely on native `required` inputs with no `aria-invalid`, `aria-describedby`, or localized inline required-field message.
+- Source: server-action errors do have an alert at `apps/web/src/app/[locale]/admin/login-form.tsx:89-93`, so this gap is limited to client-side required-field validation.
+
+Failure scenario:
+
+Korean admins or assistive-tech users who submit an empty login form get ephemeral browser chrome in the browser language instead of persistent in-page Korean feedback tied to the fields. The message disappears after focus changes and is harder to review.
+
+Concrete fix:
+
+Intercept submit, validate empty username/password in component state, set `aria-invalid`, attach `aria-describedby` to persistent localized messages, and move focus to the first invalid field. Keep native constraints as a fallback.
+
+## Verified Strengths / Non-Findings
+
+- Public static shell: `/en/privacy` snapshot exposed `Main navigation`, `Search photos`, theme, locale switch, semantic `main`, footer links, and no page errors.
+- Touch targets: browser boxes for public nav controls and admin login controls were 44px or larger.
+- Search dialog: source includes focus return, body scroll lock, dialog role, combobox/listbox pattern, and polite live status (`apps/web/src/components/search.tsx:313-324`, `:370-449`). Browser confirmed dialog focus entered `#search-input` and body overflow locked.
+- Photo viewer/lightbox: source includes single H1 strategy, shortcut descriptions, focus traps, reduced-motion handling, status regions, and 44px controls (`photo-viewer.tsx:525-704`, `lightbox.tsx:431-687`).
+- Color/HDR surfaces: source gates admin-only HDR/color metadata and includes forced-colors CSS (`globals.css:145-181`, `color-details-section.tsx:194-204`, `:532-560`).
+- i18n/RTL: messages are key-parity clean; `layout.tsx:93-111` sets `lang` and `dir`. Runtime RTL was not exercised because only `en` and `ko` are supported (`lib/constants.ts:1-4`; `lib/locale-path.ts:37-40`).
+- Reduced motion: global CSS suppresses animations/transitions and hover scale (`globals.css:253-279`), and lightbox/photo-viewer use reduced-motion hooks.
+
+## Coverage Notes
+
+Confirmed in browser:
+
+- `/en/privacy`, `/en/admin`, `/ko/admin`, `/en/map` error state.
+- Accessibility snapshots, DOM boxes/styles, validation state, console/page error checks, mobile viewport `390x844`, desktop viewport `1440x1000`.
+
+Blocked from browser by DB/auth/seed state:
+
+- DB-backed home gallery, topics, smart collections, timeline/year, map results, photo detail, shared photo/group, protected admin dashboard/settings/tokens/upload flows.
+- These were source-reviewed and cross-checked against e2e/source-contract tests where relevant.
+
+Skipped:
+
+- Generated `.next`, `node_modules`, uploaded media binaries, static image pixel review, and non-UI backend scripts unless they affected UI state.
+- Full Playwright suite was not run because the local DB/admin seed was unavailable; e2e files were read for coverage expectations.
+
+Final missed-issues sweep:
+
+- Re-ran targeted `rg` sweeps for `error`, `lightbox`, `search`, `login`, `nav`, `theme`, `reduced`, `motion`, `touch`, `rtl`, `i18n`, `aria`, and `focus` across source tests and e2e.
+- Rechecked working tree before writing: existing unrelated review files were already modified; this review only changed `.context/reviews/designer.md`.

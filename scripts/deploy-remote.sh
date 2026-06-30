@@ -58,6 +58,21 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+if [[ ! -O "$ENV_FILE" ]]; then
+  echo "Refusing to source deploy env file not owned by the current user: $ENV_FILE" >&2
+  exit 1
+fi
+
+env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
+env_perms=$((10#$env_mode))
+env_group_perms=$(((env_perms / 10) % 10))
+env_world_perms=$((env_perms % 10))
+if (( (env_group_perms & 3) != 0 || (env_world_perms & 3) != 0 )); then
+  echo "Refusing to source deploy env file with unsafe permissions ($env_mode): $ENV_FILE" >&2
+  echo "Run: chmod 600 \"$ENV_FILE\"" >&2
+  exit 1
+fi
+
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"

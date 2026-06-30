@@ -14,7 +14,6 @@
  *   docker run --rm --network host \
  *     -v .../apps/web/src:/app/apps/web/src:ro \
  *     -v .../apps/web/scripts:/app/apps/web/scripts:ro \
- *     -v .../apps/web/data:/app/data \
  *     -v .../data/models/clip:/app/data/models/clip:ro \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \

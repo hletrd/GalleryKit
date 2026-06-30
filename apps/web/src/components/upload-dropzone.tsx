@@ -21,6 +21,11 @@ export interface PendingUploadItem {
     file: File;
 }
 
+type SkippedUploadFile = {
+    name: string;
+    reason: string;
+};
+
 interface UploadLimits {
     maxFiles: number;
     maxFileBytes: number;
@@ -66,6 +71,7 @@ export function UploadDropzone({
     const filesRef = useRef<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
     const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
+    const [skippedFiles, setSkippedFiles] = useState<SkippedUploadFile[]>([]);
     const { t, locale } = useTranslation();
     const hasTopics = topics.length > 0;
     const showFirstUploadGpsWarning = !stripGpsOnUpload && !hasExistingImages;
@@ -146,22 +152,37 @@ export function UploadDropzone({
         const remainingFiles = Math.max(uploadLimits.maxFiles - currentFiles.length, 0);
         const remainingBytes = Math.max(uploadLimits.maxTotalBytes - existingBytes, 0);
         const nextFiles: File[] = [];
+        const nextSkippedFiles: SkippedUploadFile[] = [];
         let nextBytes = 0;
 
         for (const file of acceptedFiles) {
-            if (
-                file.size > uploadLimits.maxFileBytes
-                || nextFiles.length >= remainingFiles
-                || nextBytes + file.size > remainingBytes
-            ) {
+            if (file.size > uploadLimits.maxFileBytes) {
+                nextSkippedFiles.push({
+                    name: file.name,
+                    reason: t('upload.skipFileTooLarge', { maxFileSize: formatBytes(uploadLimits.maxFileBytes) }),
+                });
+                continue;
+            }
+            if (nextFiles.length >= remainingFiles) {
+                nextSkippedFiles.push({
+                    name: file.name,
+                    reason: t('upload.skipTooManyFiles', { maxFiles: uploadLimits.maxFiles }),
+                });
+                continue;
+            }
+            if (nextBytes + file.size > remainingBytes) {
+                nextSkippedFiles.push({
+                    name: file.name,
+                    reason: t('upload.skipBatchTooLarge', { maxSize: formatBytes(uploadLimits.maxTotalBytes) }),
+                });
                 continue;
             }
             nextFiles.push(file);
             nextBytes += file.size;
         }
 
-        const rejectedCount = acceptedFiles.length - nextFiles.length;
-        if (rejectedCount > 0) {
+        setSkippedFiles(nextSkippedFiles);
+        if (nextSkippedFiles.length > 0) {
             toast.error(t('upload.limitExceeded', {
                 maxFiles: uploadLimits.maxFiles,
                 maxFileSize: formatBytes(uploadLimits.maxFileBytes),
@@ -432,6 +453,19 @@ export function UploadDropzone({
                     </p>
                 </div>
 
+                {skippedFiles.length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/35 dark:text-amber-100" role="status" aria-live="polite">
+                        <p className="font-medium">{t('upload.skippedTitle', { count: skippedFiles.length })}</p>
+                        <ul className="mt-1 space-y-1">
+                            {skippedFiles.slice(0, 5).map((file) => (
+                                <li key={`${file.name}-${file.reason}`} className="break-words">
+                                    <span className="font-medium">{file.name}</span>: {file.reason}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
                 {/* Progress Bar during upload */}
                 {uploading && (
                     <div className="space-y-2">
@@ -460,10 +494,10 @@ export function UploadDropzone({
                     <div className={`space-y-4 ${uploading ? 'opacity-50' : ''}`} aria-disabled={uploading}>
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
-                            <Button variant="ghost" size="sm" disabled={uploading} onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive-text">{t('upload.clearAll')}</Button>
+                            <Button variant="ghost" size="sm" disabled={uploading} onClick={() => { filesRef.current = []; setFiles([]); setSkippedFiles([]); }} className="min-h-11 px-3 text-destructive-text">{t('upload.clearAll')}</Button>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             {files.map(({ id: fileId, file }, i) => {
                                 const localTags = perFileTags[fileId] || [];
                                 const previewUrl = previewUrls.get(fileId) || '';

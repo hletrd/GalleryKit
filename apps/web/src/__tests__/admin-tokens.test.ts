@@ -280,3 +280,32 @@ describe('verifyToken', () => {
         expect(mockExecute).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('createToken', () => {
+    const mockExecute = vi.fn();
+
+    beforeEach(() => {
+        vi.doMock('@/db', () => ({
+            db: { execute: mockExecute },
+        }));
+    });
+
+    afterEach(() => {
+        vi.clearAllMocks();
+        vi.resetModules();
+    });
+
+    it('uses safe insert id coercion for BigInt insertId values', async () => {
+        mockExecute.mockResolvedValue([{ insertId: BigInt(7) }, []]);
+        const { createToken } = await import('@/lib/admin-tokens');
+
+        const result = await createToken({
+            userId: 42,
+            label: 'Lightroom publish',
+            scopes: ['lr:upload'],
+        });
+
+        expect(result.id).toBe(7);
+        expect(result.plaintext.startsWith(TOKEN_PREFIX)).toBe(true);
+    });
+});

@@ -161,12 +161,11 @@ async function main() {
   }
   const dbName = process.env.DB_NAME?.trim() ?? '';
   const explicitlyAllowed = process.env.E2E_ALLOW_DESTRUCTIVE_SEED === 'true';
-  const ciAllowed = process.env.CI === 'true';
   const disposableDbName = DISPOSABLE_DB_NAME_PATTERN.test(dbName);
-  if (!explicitlyAllowed && !ciAllowed && !disposableDbName) {
+  if (!explicitlyAllowed && !disposableDbName) {
       console.error(
         'Refusing to run seed-e2e against DB_NAME=' +
-        `${dbName || '(unset)'}. Set E2E_ALLOW_DESTRUCTIVE_SEED=true or use a disposable DB name containing e2e/test/ci.`,
+        `${dbName || '(unset)'}. Set E2E_ALLOW_DESTRUCTIVE_SEED=true or use a disposable DB name containing e2e/test/ci. CI=true alone is not sufficient.`,
       );
       process.exit(1);
   }

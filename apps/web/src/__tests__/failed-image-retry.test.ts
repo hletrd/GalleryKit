@@ -96,6 +96,20 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(actionsSource).toMatch(/state\.permanentlyFailedIds\.delete\s*\(\s*id\s*\)/);
         });
 
+        it('does not clear in-memory failure state or enqueue when no failed row was updated', () => {
+            const clearIdx = actionsSource.indexOf('const clearResult = await db.update(images)');
+            const affectedIdx = actionsSource.indexOf('affectedRows', clearIdx);
+            const notFailedReturnIdx = actionsSource.indexOf("return { error: t('imageNotInFailedState') }", affectedIdx);
+            const stateIdx = actionsSource.indexOf('const state = getProcessingQueueState()');
+            const enqueueIdx = actionsSource.indexOf('const enqueued = enqueueImageProcessing');
+
+            expect(clearIdx).toBeGreaterThan(0);
+            expect(affectedIdx).toBeGreaterThan(clearIdx);
+            expect(notFailedReturnIdx).toBeGreaterThan(affectedIdx);
+            expect(notFailedReturnIdx).toBeLessThan(stateIdx);
+            expect(notFailedReturnIdx).toBeLessThan(enqueueIdx);
+        });
+
         it('calls enqueueImageProcessing with the full job payload', () => {
             expect(actionsSource).toMatch(/enqueueImageProcessing\s*\(\s*\{/);
             expect(actionsSource).toMatch(/filenameOriginal:\s*image\.filename_original/);

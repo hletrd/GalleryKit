@@ -6,6 +6,8 @@ import { lt } from 'drizzle-orm';
 // more likely to survive truncation while still capturing the full metadata when
 // it fits within the limit.
 const SECURITY_PRIORITY_KEYS = ['ip', 'userAgent', 'action', 'userId', 'targetType', 'targetId'];
+const AUDIT_PURGE_BATCH = 500;
+const AUDIT_PURGE_MAX_BATCHES = 20;
 
 /**
  * Reorder metadata object so security-relevant fields appear first.
@@ -119,5 +121,14 @@ export async function purgeOldAuditLog(maxAgeMs?: number): Promise<void> {
             : DEFAULT_MAX_AGE_MS;
     }
     const cutoff = new Date(Date.now() - effectiveMaxAgeMs);
-    await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
+    for (let batch = 0; batch < AUDIT_PURGE_MAX_BATCHES; batch++) {
+        const result = await db.delete(auditLog)
+            .where(lt(auditLog.created_at, cutoff))
+            .limit(AUDIT_PURGE_BATCH);
+        const header = (Array.isArray(result) ? result[0] : result) as { affectedRows?: number | bigint | string };
+        const affectedRows = Number(header?.affectedRows ?? 0);
+        if (!Number.isFinite(affectedRows) || affectedRows < AUDIT_PURGE_BATCH) {
+            break;
+        }
+    }
 }

@@ -39,7 +39,7 @@ GalleryKit is built for photographers and small teams who want to publish edited
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
-- **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. Live on the [demo](https://gallery.atik.kr)
+- **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. The demo has it operator-enabled; fresh installs do not.
 - **Progressive Web App** -- installable PWA with a service worker for visited image caching and an offline HTML fallback; it is not a full offline gallery sync
 - **Sharing** -- per-photo and group share links with Base56 short keys
 - **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
@@ -62,9 +62,11 @@ File-backed site configuration lives in `apps/web/src/site-config.json` for stat
     "nav_title": "Navigation Title",
     "home_link": "/",
     "footer_text": "Footer Text",
-    "google_analytics_id": "G-XXXXXXXXXX"
+    "google_analytics_id": ""
 }
 ```
+
+Leave `google_analytics_id` empty to keep analytics fully first-party/self-hosted. Set it to a valid GA measurement id only when you intentionally enable Google Analytics.
 
 ## Directory Structure
 

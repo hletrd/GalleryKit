@@ -1,5 +1,10 @@
 FROM node:24-slim AS build-base
 
+# Supply-chain note: keep this base on the latest Node 24 LTS line, and record
+# the resolved `node:24-slim` digest in deploy/build logs before changing this
+# file. Debian security package updates are intentionally consumed from the
+# base image rather than frozen in apt install lines.
+
 # Install build tooling needed to compile native dependencies during npm install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \

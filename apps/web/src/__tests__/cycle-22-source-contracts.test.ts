@@ -100,10 +100,11 @@ describe('cycle 22 source contracts', () => {
             source.indexOf('let successCount = 0;'),
         );
 
-        expect(claimToProcessing).toContain('settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0)');
+        expect(claimToProcessing).toContain('const settleClaim = (successfulFiles: number, successfulBytes: number)');
+        expect(claimToProcessing).toContain('settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successfulFiles, successfulBytes)');
         expect(claimToProcessing).toContain('Failed to inspect upload disk space');
-        expect(claimToProcessing).toContain('MUST roll the claim back on throw');
+        expect(claimToProcessing).toContain('The one-shot settleClaim helper owns all post-claim exits');
         expect(claimToProcessing).toContain('try {\n            [topicRow] = await db.select');
-        expect(claimToProcessing).toContain('} catch (err) {\n            settleUploadTrackerClaim');
+        expect(claimToProcessing).toContain('} catch (err) {\n            settleClaim(0, 0);');
     });
 });

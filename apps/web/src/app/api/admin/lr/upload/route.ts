@@ -1,10 +1,10 @@
 /**
  * POST /api/admin/lr/upload
  *
- * Accepts a multipart upload from external upload clients, including a
- * Lightroom Classic publish-client implementation, and creates a new image
- * record. GalleryKit exposes the server-side API only; it does not bundle or
- * distribute a Lightroom plugin. Authentication is via the
+ * Accepts a multipart upload from external publish clients, including
+ * Lightroom-compatible implementations, and creates a new image record.
+ * GalleryKit exposes the server-side API only; it does not bundle or
+ * distribute a client plugin. Authentication is via the
  * `X-GalleryKit-Token` header (PAT with scope `lr:upload`); ordinary browser
  * admin-session cookies are also accepted as a fallback for testing.
  *
@@ -60,7 +60,7 @@ const NO_CACHE = {
 // R21-L1: pin to Node runtime explicitly. The route uses `db` (mysql2),
 // the Sharp-backed image-processing pipeline (libvips bindings), and
 // the in-process upload queue — all Node-only. A future Next.js
-// default flip to Edge would break the Lightroom publish-plugin's
+// default flip to Edge would break the external publish-client
 // primary integration path with zero in-product diagnostic. Matches
 // the Node-runtime pinning convention (R20-L2) used across Node-bound routes.
 export const runtime = 'nodejs';
@@ -337,7 +337,7 @@ export const POST = withAdminAuth(
         // (which throws BY CONTRACT on producer drift, AGG2-L03) bare — a
         // throw there leaked the pre-claimed tracker quota for the rest of
         // the 1-hour window, orphaned the on-disk original, and surfaced a
-        // non-JSON Next.js 500 the Lightroom plugin cannot parse. The early
+        // non-JSON Next.js 500 an external publish client cannot parse. The early
         // returns inside this block settle their own claims (the settle
         // closure is idempotent) and are unaffected. Post-insert work
         // (enqueue/audit/revalidate) stays OUTSIDE: once the row exists,
@@ -349,7 +349,7 @@ export const POST = withAdminAuth(
         // the Lightroom PAT path, mirroring the browser upload action
         // (app/actions/images.ts). `allow_hdr_ingest` (default false) is
         // documented as "PQ/HLG sources rejected at upload by default"; before
-        // this gate the Lightroom publish-plugin path — the primary non-browser
+        // this gate the external publish-client path — the primary non-browser
         // ingest — silently accepted HDR sources the admin had asked to reject.
         // Not a public-honesty issue (is_hdr / transfer_function are admin-only
         // and process-image encodes SDR derivatives regardless), but a genuine
@@ -517,7 +517,7 @@ export const POST = withAdminAuth(
 
         // R18-M2: bump audit-log failure severity from console.debug to
         // console.warn so log shippers (Datadog/Loki) retain the line for
-        // post-incident triage. The token-bearing publish-plugin path is
+        // post-incident triage. The token-bearing publish-client path is
         // the high-trust audit surface — silently dropping audit failures
         // makes "who uploaded image #N" unanswerable for multi-photographer
         // studios. Structured payload mirrors the cycle 5-8 webhook log

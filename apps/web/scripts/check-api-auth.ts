@@ -16,11 +16,9 @@ import * as ts from 'typescript';
 
 const API_ADMIN_DIR = path.resolve(__dirname, '../src/app/api/admin');
 
-// C5R-RPL-02: accept every route file extension Next.js 16 resolves,
-// not just `.ts` / `.js`. Next.js 16 App Router accepts `route.tsx`,
-// `route.mjs`, and `route.cjs` identically — failing to discover them
-// means new route files in those formats would evade the withAdminAuth
-// lint gate.
+// C5R-RPL-02: scan every route file extension that appears in supported
+// App Router projects, not just `.ts` / `.js`. If a future route lands in
+// one of these formats, it must still pass the withAdminAuth lint gate.
 const ROUTE_FILE_NAMES = new Set([
     'route.ts',
     'route.tsx',

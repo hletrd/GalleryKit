@@ -79,7 +79,8 @@ export const images = mysqlTable("images", {
     original_file_size: bigint('original_file_size', { mode: 'number' }),
     blur_data_url: text('blur_data_url'),
 
-    // US-P52: AI-generated alt text suggestion. NULL until caption hook runs.
+    // US-P52: EXIF-derived alt text suggestion with a future AI-caption hook.
+    // NULL until a caption producer runs.
     // PUBLIC field — used as <img alt> fallback when image.title is empty (SEO + a11y).
     // Admin-set alt (title/description) always takes precedence; this is never auto-applied.
     alt_text_suggested: text('alt_text_suggested'),
@@ -190,7 +191,7 @@ export const sessions = mysqlTable("sessions", {
 }));
 
 // US-P53: Admin Personal Access Tokens (PATs) for non-browser integrations
-// such as the Lightroom Classic publish plugin. Only the SHA-256 digest of
+// such as Lightroom-compatible external publish clients. Only the SHA-256 digest of
 // the token is persisted; plaintext is shown to the admin exactly once at
 // creation time. The lib at apps/web/src/lib/admin-tokens.ts fails closed
 // when this table is missing (verify returns null, list returns []).

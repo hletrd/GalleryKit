@@ -5,8 +5,8 @@
  * must happen synchronously AFTER the (synchronous) limit checks and BEFORE the
  * first `await` (disk pre-check + topic-exists query). Otherwise two concurrent
  * same-key uploads can both pass the checks before either claims and jointly
- * exceed the per-window limits. Each awaited validation that follows the claim
- * must roll it back (`settleUploadTrackerClaim(..., 0, 0)`) on early return.
+ * exceed the per-window limits. A one-shot settlement helper owns every
+ * post-claim exit so future branches cannot double-decrement or leak the claim.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -31,15 +31,14 @@ describe('uploadImages TOCTOU claim ordering (R16C16 CR-16-01)', () => {
         expect(claimIdx).toBeLessThan(topicQueryIdx);
     });
 
-    it('rolls the claim back on every awaited early-return path', () => {
-        // Disk-insufficient (freeBytes < 1GiB), disk-check catch, topic-query
-        // catch (R17C17), and topic-not-found each undo the claim with a
-        // zero-success settle.
-        const rollbacks = SRC.match(
-            /settleUploadTrackerClaim\(uploadTracker,\s*uploadTrackerKey,\s*files\.length,\s*totalSize,\s*0,\s*0\)/g,
-        );
-        expect(rollbacks).not.toBeNull();
-        expect(rollbacks!.length).toBe(4);
+    it('uses a one-shot settlement helper for post-claim exits', () => {
+        expect(SRC).toContain('let trackerSettled = false');
+        expect(SRC).toContain('const settleClaim = (successfulFiles: number, successfulBytes: number)');
+        expect(SRC).toMatch(/if\s*\(\s*trackerSettled\s*\)\s*return/);
+        const zeroRollbacks = SRC.match(/settleClaim\(0,\s*0\)/g);
+        expect(zeroRollbacks).not.toBeNull();
+        expect(zeroRollbacks!.length).toBeGreaterThanOrEqual(4);
+        expect(SRC).toContain('settleClaim(successCount, uploadedBytes)');
     });
 
     it('settles the claim then re-throws if the topic-exists query throws (R17C17 CR-17-1)', () => {
@@ -51,7 +50,7 @@ describe('uploadImages TOCTOU claim ordering (R16C16 CR-16-01)', () => {
         expect(topicQueryIdx).toBeGreaterThan(0);
         const after = SRC.slice(topicQueryIdx);
         const catchMatch = after.match(
-            /catch \(err\) \{\s*settleUploadTrackerClaim\(uploadTracker,\s*uploadTrackerKey,\s*files\.length,\s*totalSize,\s*0,\s*0\);\s*throw err;\s*\}/,
+            /catch \(err\) \{\s*settleClaim\(0,\s*0\);\s*throw err;\s*\}/,
         );
         expect(catchMatch).not.toBeNull();
     });

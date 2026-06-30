@@ -6,11 +6,14 @@ const serveUploadSource = readFileSync(resolve(__dirname, '..', 'lib', 'serve-up
 const backupDownloadSource = readFileSync(resolve(__dirname, '..', 'app', 'api', 'admin', 'db', 'download', 'route.ts'), 'utf8');
 
 describe('resolved-path streaming contracts', () => {
-    it('serves uploads from the validated realpath, not the pre-validation path', () => {
+    it('serves uploads from the validated descriptor, not a path reopen', () => {
         expect(serveUploadSource).toContain('const resolvedPath = await realpath(absolutePath)');
-        expect(serveUploadSource).toContain('createReadStream(resolvedPath)');
-        expect(serveUploadSource).toContain('not descriptor-backed');
+        expect(serveUploadSource).toContain("fileHandle = await open(resolvedPath, 'r')");
+        expect(serveUploadSource).toContain('const stats = await fileHandle.stat();');
+        expect(serveUploadSource).toContain('fileStream = fileHandle.createReadStream({ autoClose: true })');
+        expect(serveUploadSource).toContain('same descriptor');
         expect(serveUploadSource).not.toContain('createReadStream(absolutePath)');
+        expect(serveUploadSource).not.toContain('createReadStream(resolvedPath)');
     });
 
     it('downloads backups from a validated file handle, not a path reopen', () => {

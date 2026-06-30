@@ -369,6 +369,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     const controlVisibilityProps = controlsVisible
         ? {}
         : { tabIndex: -1, 'aria-hidden': true as const };
+    const controlPointerEventsClass = controlsVisible ? 'pointer-events-auto' : 'pointer-events-none';
 
     const { avifSrcSet, webpSrcSet, jpegSrc, jpegBaseSrc } = useMemo(() => {
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
@@ -552,7 +553,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 <button
                     ref={closeButtonRef}
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className={`${controlPointerEventsClass} absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -572,7 +573,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className={`${controlPointerEventsClass} absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -596,7 +597,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {totalCount != null && totalCount > 1 && (
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className={`${controlPointerEventsClass} absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(prev => !prev);
@@ -619,7 +620,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {prevId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="group pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20"
+                        className={`group ${controlPointerEventsClass} absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20`}
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -640,7 +641,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {nextId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="group pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20"
+                        className={`group ${controlPointerEventsClass} absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white outline-none hover:bg-black/20`}
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);

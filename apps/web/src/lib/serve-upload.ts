@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
-import { createReadStream } from 'fs';
-import { lstat, realpath } from 'fs/promises';
+import { lstat, open, realpath, type FileHandle } from 'fs/promises';
 import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
 // R4C1 PERF-R4C1-07: import the version constant from its definition site
@@ -164,7 +163,8 @@ export async function serveUploadFile(
     const relativePath = path.join(...pathSegments);
     const absolutePath = path.join(UPLOAD_ROOT, relativePath);
 
-    let fileStream: ReturnType<typeof createReadStream> | null = null;
+    let fileHandle: FileHandle | null = null;
+    let fileStream: ReturnType<FileHandle['createReadStream']> | null = null;
     try {
         const resolvedRoot = await realpath(UPLOAD_ROOT).catch((err: unknown) => {
             if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -172,14 +172,20 @@ export async function serveUploadFile(
             }
             throw err;
         });
-        const stats = await lstat(absolutePath);
-
-        if (stats.isSymbolicLink() || !stats.isFile()) {
+        const pathStats = await lstat(absolutePath);
+        if (pathStats.isSymbolicLink()) {
             return new NextResponse('Access denied', { status: 403 });
         }
-
         const resolvedPath = await realpath(absolutePath);
         if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+            return new NextResponse('Access denied', { status: 403 });
+        }
+        fileHandle = await open(resolvedPath, 'r');
+        const stats = await fileHandle.stat();
+
+        if (!stats.isFile()) {
+            await fileHandle.close();
+            fileHandle = null;
             return new NextResponse('Access denied', { status: 403 });
         }
 
@@ -260,13 +266,12 @@ export async function serveUploadFile(
             return new NextResponse(null, { headers: responseHeaders });
         }
 
-        // Create stream and convert to web ReadableStream for proper lifecycle management
-        // Stream from the resolved (realpath) path, not the original path, to
-        // reduce the path-replacement race where the original segment could
-        // be swapped before createReadStream(). This is not descriptor-backed
-        // validation; the opened object is still checked by the same-host
-        // filesystem trust boundary.
-        fileStream = createReadStream(resolvedPath);
+        // Create stream and convert to web ReadableStream for proper lifecycle
+        // management. The stream is opened from the same descriptor that was
+        // stat()'d above, so headers and body describe the same file even if
+        // the pathname is replaced after validation.
+        fileStream = fileHandle.createReadStream({ autoClose: true });
+        fileHandle = null;
 
         // AGG-H5 (run-6 cycle-2): if the request is already aborted by the time
         // we get here, don't even open the body — release the fd and bail.
@@ -303,6 +308,9 @@ export async function serveUploadFile(
         // Clean up stream on error
         if (fileStream) {
             fileStream.destroy();
+        }
+        if (fileHandle) {
+            await fileHandle.close().catch(() => undefined);
         }
         if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
             return new NextResponse('File not found', { status: 404 });

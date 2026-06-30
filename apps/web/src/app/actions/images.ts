@@ -240,6 +240,12 @@ export async function uploadImages(formData: FormData) {
         tracker.bytes += totalSize;
         tracker.count += files.length;
         uploadTracker.set(uploadTrackerKey, tracker);
+        let trackerSettled = false;
+        const settleClaim = (successfulFiles: number, successfulBytes: number) => {
+            if (trackerSettled) return;
+            trackerSettled = true;
+            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successfulFiles, successfulBytes);
+        };
 
         // Disk space pre-check: require at least 1GB free before accepting uploads.
         // Ensure the upload tree exists first so fresh volumes do not map ENOENT
@@ -255,12 +261,12 @@ export async function uploadImages(formData: FormData) {
             const freeBytes = stats.bavail * stats.bsize;
             if (freeBytes < 1024 * 1024 * 1024) {
                 // Roll back the claim (no upload happened): settle with 0 success.
-                settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+                settleClaim(0, 0);
                 return { error: t('insufficientDiskSpace') };
             }
         } catch (err) {
             console.error('Failed to inspect upload disk space', err);
-            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+            settleClaim(0, 0);
             return { error: t('insufficientDiskSpace') };
         }
 
@@ -275,8 +281,8 @@ export async function uploadImages(formData: FormData) {
         // restart mid-request) would leak the claim — inflating this admin+IP
         // window by +files.length/+totalSize with zero files stored until the
         // ~1 h tracking window expires. Mirror the disk pre-check's settle-on-throw.
-        // INVARIANT: any await added between the claim (above) and the final
-        // settle (success/all-failed paths below) MUST roll the claim back on throw.
+        // The one-shot settleClaim helper owns all post-claim exits, so future
+        // branches can settle safely without double-decrementing.
         let topicRow: { slug: string } | undefined;
         try {
             [topicRow] = await db.select({ slug: topics.slug })
@@ -284,11 +290,11 @@ export async function uploadImages(formData: FormData) {
                 .where(eq(topics.slug, topic))
                 .limit(1);
         } catch (err) {
-            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+            settleClaim(0, 0);
             throw err;
         }
         if (!topicRow) {
-            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0);
+            settleClaim(0, 0);
             return { error: t('topicNotFound') };
         }
 
@@ -568,7 +574,7 @@ export async function uploadImages(formData: FormData) {
         // rawRejectedFiles so they can surface their own specific message.
         const totalFailures = failedFiles.length + rawRejectedCount;
         if (totalFailures > 0 && successCount === 0) {
-            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+            settleClaim(successCount, uploadedBytes);
             // P3-2: return specific error when ALL failures are HDR-ingest
             // rejections and there are no other failure categories.
             if (hdrRejectedCount > 0 && failedFiles.length === hdrRejectedCount && rawRejectedCount === 0) {
@@ -593,7 +599,7 @@ export async function uploadImages(formData: FormData) {
         }
 
         // Reconcile the pre-claimed quota with the uploads that actually finished.
-        settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+        settleClaim(successCount, uploadedBytes);
 
         // Audit log for upload action
         logAuditEvent(currentUser.id, 'image_upload', 'image', undefined, undefined, {
@@ -1237,9 +1243,14 @@ export async function retryFailedImage(id: number) {
     const serializedSnapshot = serializeProcessingSettingsSnapshot(processingSettingsSnapshot);
 
     // Clear the failure columns only after a fresh strict snapshot is ready.
-    await db.update(images)
+    const clearResult = await db.update(images)
         .set({ processing_error: null, failed_at: null, processing_settings_json: serializedSnapshot })
         .where(eq(images.id, id));
+    const clearHeader = (Array.isArray(clearResult) ? clearResult[0] : clearResult) as { affectedRows?: number | bigint | string };
+    const affectedRows = Number(clearHeader?.affectedRows ?? 0);
+    if (!Number.isFinite(affectedRows) || affectedRows <= 0) {
+        return { error: t('imageNotInFailedState') };
+    }
 
     // Remove from the in-memory permanently-failed set so the bootstrap
     // scan will discover it on the next run.

@@ -628,7 +628,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             </div>
 
             <div className={cn(
-                "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
+                "grid gap-8 flex-1 photo-viewer-grid",
                 showInfo ? "grid-cols-1 lg:grid-cols-[1fr_350px]" : "grid-cols-1"
             )}>
                 {/* F-10: collapse `min-h-[500px]` on mobile to `40vh` so a

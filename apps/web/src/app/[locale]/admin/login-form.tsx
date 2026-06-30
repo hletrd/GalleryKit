@@ -4,7 +4,7 @@ import { login } from '@/app/actions';
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { useActionState, useState } from 'react';
+import { useActionState, useState, type FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
 import { useTranslations } from 'next-intl';
@@ -16,12 +16,31 @@ const initialState = {
 
 export function LoginForm() {
     const t = useTranslations('login');
+    const serverT = useTranslations('serverActions');
     const { locale } = useTranslation();
     const [state, formAction, isPending] = useActionState(login, initialState);
     // F-13: track whether the password field is unmasked so users can verify
     // what they typed (especially relevant on mobile keyboards with
     // autocorrect). Default to masked.
     const [showPassword, setShowPassword] = useState(false);
+    const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
+
+    const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+        const formData = new FormData(event.currentTarget);
+        const nextErrors = {
+            username: String(formData.get('username') ?? '').trim() ? undefined : serverT('usernameRequired'),
+            password: String(formData.get('password') ?? '') ? undefined : serverT('passwordRequired'),
+        };
+        setFieldErrors(nextErrors);
+
+        if (nextErrors.username || nextErrors.password) {
+            event.preventDefault();
+            const firstInvalid = event.currentTarget.querySelector<HTMLInputElement>(
+                nextErrors.username ? '#login-username' : '#login-password'
+            );
+            firstInvalid?.focus();
+        }
+    };
 
     return (
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -31,7 +50,7 @@ export function LoginForm() {
                     <CardDescription>{t('description')}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form action={formAction} className="space-y-4">
+                    <form action={formAction} onSubmit={handleSubmit} noValidate className="space-y-4">
                         <input type="hidden" name="locale" value={locale} />
                         {/* F-12: persistent visible labels above each input
                             so the field identity stays visible after the user
@@ -46,10 +65,17 @@ export function LoginForm() {
                                 name="username"
                                 placeholder={t('username')}
                                 required
+                                aria-invalid={fieldErrors.username ? 'true' : undefined}
+                                aria-describedby={fieldErrors.username ? 'login-username-error' : undefined}
                                 autoFocus
                                 autoComplete="username"
                                 maxLength={64}
                             />
+                            {fieldErrors.username && (
+                                <p id="login-username-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.username}
+                                </p>
+                            )}
                         </div>
                         <div className="space-y-1">
                             <label htmlFor="login-password" className="text-sm font-medium block">
@@ -66,6 +92,8 @@ export function LoginForm() {
                                     name="password"
                                     placeholder={t('password')}
                                     required
+                                    aria-invalid={fieldErrors.password ? 'true' : undefined}
+                                    aria-describedby={fieldErrors.password ? 'login-password-error' : undefined}
                                     autoComplete="current-password"
                                     maxLength={1024}
                                     className="pr-11"
@@ -85,6 +113,11 @@ export function LoginForm() {
                                     )}
                                 </button>
                             </div>
+                            {fieldErrors.password && (
+                                <p id="login-password-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.password}
+                                </p>
+                            )}
                         </div>
                         {state?.error && (
                             <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive-text" role="alert" aria-live="assertive">
