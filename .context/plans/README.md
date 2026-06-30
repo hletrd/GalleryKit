@@ -8,7 +8,7 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Recent Plans
 
-- Cycle 45/100 Implementation Plan — no source fixes scheduled; gates/push/deploy handled by Cycle 45 runner (`cycle-45-2026-07-01-plan.md`)
+- Cycle 45/100 Implementation Plan — no source fixes scheduled; convergence docs committed/pushed/deployed; deploy evidence recorded in plan (`cycle-45-2026-07-01-plan.md`)
 - Cycle 45/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-45-2026-07-01-deferred.md`)
 - Cycle 44/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-44-2026-07-01-plan.md`)
 - Cycle 44/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-44-2026-07-01-deferred.md`)
