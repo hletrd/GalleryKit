@@ -1,146 +1,111 @@
-# Cycle 27 Code Review
+# Cycle 28 Code Review
 
-Reviewer: cycle-27 code-reviewer
-Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `50dfcda0895c2af563836a71d656fbf9ae2048c9`
+Reviewer: cycle-28 code-reviewer  
+Repo: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `395de19bf474f729fac15f693f260c1190428842`  
 Date: 2026-06-30 KST
 
 ## Inventory
 
-Read first: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/_aggregate.md`, `.context/plans/cycle-26-2026-06-30-deferred.md`, prior `.context/reviews/code-reviewer.md`, and archived cycle-27 aggregate/deferred notes.
+Read first and treated as review constraints:
 
-Tracked review-relevant inventory:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.context/reviews/_aggregate.md`
+- Prior `.context/reviews/code-reviewer.md`
+- `README.md`
+- `apps/web/README.md`
 
-| Area | Count |
+Tracked review-relevant code/config/docs inventoried and included in the sweep:
+
+| Area | Coverage |
 | --- | ---: |
-| App Router/API/actions | 77 |
-| Components | 58 |
-| Shared/domain/runtime libs | 98 |
-| DB schema | 3 |
-| Unit/source-contract tests | 276 |
-| E2E tests | 8 |
-| Scripts | 28 |
-| Drizzle migrations/meta | 31 |
-| Current/archived reviews | 1678 |
-| Plans | 97 |
-| Docs | 2 |
+| `apps/web/src/**/*` source, tests, app routes, server actions, components, libraries | all tracked files |
+| `apps/web/scripts/**/*` operator/build/migration scripts | all tracked files |
+| `apps/web/drizzle/**/*` migrations and Drizzle metadata | all tracked files |
+| `apps/web/e2e/**/*` Playwright specs/helpers/fixtures | all tracked files |
+| Root and app configs (`package.json`, `next.config.ts`, TS configs, Vitest, Playwright, Docker, NGINX) | all tracked files |
+| PWA/service-worker sources (`apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `scripts/build-sw.ts`) | all tracked files |
+| Current review/plan history under `.context/reviews` and `.context/plans` | reviewed for stale/deferred issue dedupe |
 
-Reviewed categories: admin/public server actions, admin API wrappers, public API routes, restore/backup flow, SQL restore scanner, restore lifecycle/recovery script, upload/LR upload and queue coordination, data-layer privacy selects, schema/migration journal, modal/focus helpers, representative public/admin page interactions, and current tests around the touched areas. I also inspected the delta since the previous reviewed HEAD `d13d6637..50dfcda0`.
+Inventory commands produced 3,852 review-relevant filesystem entries after excluding `.git`, `node_modules`, `.next`, test reports, and `.claude/worktrees`. The tracked app/script/migration/e2e surface was 586 files; the TypeScript/JavaScript/SQL app surface under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e` was 574 files / 87,125 lines.
 
-Known deferred items from cycle 26 were not duplicated: public error shell UX, approximate analytics restore-boundary work, exact public listing totals, upload lock span, GPS-strip memory, masonry/map/CSV/timeline/nav/SW performance items.
+Manual line-level inspection focused on the cross-file interactions most relevant to quality and logic risk:
 
-## Confirmed Issues
+- Restore lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.{mjs,ts}`, `apps/web/src/instrumentation.ts`
+- Public analytics and data flushing: `apps/web/src/app/actions/public.ts`, public photo/topic/share pages, `apps/web/src/lib/data.ts`, `apps/web/src/__tests__/public-actions.test.ts`, `apps/web/src/__tests__/data-view-count-flush.test.ts`
+- Upload/image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, upload/dropzone component, upload and queue tests
+- Auth/action/API gates: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/proxy.ts`, lint scripts for API auth/action origin/public rate limits
+- Privacy/search/semantic surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, semantic API routes, CLIP model/embedding libraries, privacy and semantic tests
+- Service worker/offline cache: `apps/web/public/sw.template.js`, generated `sw.js`, SW contract tests, cache helpers
+- Migrations/schema/operator scripts: Drizzle SQL/meta, `apps/web/scripts/migrate.js`, reconcile/migration tests, backfill scripts and tests
 
-### C27-CODE-MED-01 - Restore scanner still accepts MySQL INSERT forms that bypass the cross-schema target check
+Generated/build/cache directories and binary fixture contents were not manually read byte-for-byte; their references, tracked metadata, and source contracts were included where relevant. No review-relevant source, config, migration, test, or documentation file in the current tracked surface was intentionally skipped.
 
+## Findings
+
+### C28-CODE-MED-01 - Public analytics inserts can still cross the restore-maintenance boundary
+
+Classification: Likely issue  
 Severity: Medium  
-Confidence: High  
+Confidence: Medium
+
 Regions:
 
-- `apps/web/src/lib/sql-restore-scan.ts:40-53`
-- `apps/web/src/lib/sql-restore-scan.ts:190-206`
-- `apps/web/src/app/[locale]/admin/db-actions.ts:623-647`
-- `apps/web/src/__tests__/sql-restore-scan.test.ts:53-95`
+- `apps/web/src/app/actions/public.ts:408-437`
+- `apps/web/src/app/actions/public.ts:443-469`
+- `apps/web/src/app/actions/public.ts:475-505`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:491-495`
+- `apps/web/src/__tests__/public-actions.test.ts:241-253`
+- `apps/web/src/__tests__/public-actions.test.ts:327-342`
 
 Problem:
-The restore scanner added a write-target allowlist, but `SQL_WRITE_TARGET_PATTERN` only recognizes `INSERT` when it is immediately followed by optional `IGNORE` and then `INTO`. MySQL also accepts `INSERT HIGH_PRIORITY INTO ...`, `INSERT LOW_PRIORITY INTO ...`, `INSERT DELAYED INTO ...`, and `INSERT tbl_name ...` without `INTO`. Those forms skip `hasDisallowedRestoreWriteTarget()` entirely, and the denylist does not treat `INSERT` as dangerous.
-
-I verified the current helper returns `false` for all of these:
-
-- `INSERT HIGH_PRIORITY INTO otherdb.images VALUES (1);`
-- `INSERT LOW_PRIORITY INTO otherdb.images VALUES (1);`
-- `INSERT DELAYED INTO otherdb.images VALUES (1);`
-- `INSERT otherdb.images VALUES (1);`
+The public view recorders intentionally schedule direct analytics inserts without awaiting or tracking them. Each recorder checks `isRestoreMaintenanceActive()` before and after target validation, but the actual `db.insert(...).values(...).catch(...)` runs independently after that last check. Restore maintenance drains `flushBufferedSharedGroupViewCounts()` and `quiesceImageProcessingQueueForRestore()` before import, but there is no equivalent drain or pause for already-scheduled direct inserts into `image_views`, `topic_views`, or `shared_group_views`.
 
 Concrete failure scenario:
-An admin or compromised admin session uploads a crafted restore file. The scanner passes it at `db-actions.ts:623-647`, then `mysql --one-database` imports it. On an overprivileged/co-hosted MySQL account, a statement like `INSERT HIGH_PRIORITY INTO otherdb.images VALUES (...)` can write outside the GalleryKit schema despite the intended cross-schema block. This is the same trust boundary the cycle-26 scanner fix was meant to close, but the grammar coverage is incomplete.
+A public photo/topic/share render starts just before an admin DB restore. The recorder passes the maintenance checks at `public.ts:418` and `public.ts:428` (or the sibling topic/group checks), then schedules the insert at `public.ts:430-437`. The admin restore then enters maintenance and proceeds after draining only the buffered shared-group counter and image queue at `db-actions.ts:491-495`. The detached analytics insert can land during the `mysql` import or just after the restored snapshot is loaded, creating analytics rows that belong to the pre-restore request rather than the restored DB state. The tests currently pin the non-blocking behavior and the pre-insert maintenance checks, but they do not prove a restore-start drain for inserts already handed to the DB promise chain.
 
 Suggested fix:
-Replace the single broad regex with a small token scanner for DDL/DML statement heads, or expand the grammar to cover MySQL's legal modifiers:
+Move public analytics writes behind a tiny tracked recorder similar to the image queue/shared counter drains: increment an in-flight counter before scheduling the insert, re-check the durable maintenance marker immediately before the write, and expose `quiescePublicAnalyticsForRestore()` for `db-actions.ts` to await after `beginDurableRestoreMaintenance()`. If strict non-blocking page rendering is still required, keep the render detached but make the detached work observable and drainable by restore maintenance. Add a regression test where maintenance begins after target validation but before the tracked insert resolves.
 
-- `INSERT [LOW_PRIORITY | DELAYED | HIGH_PRIORITY] [IGNORE] [INTO] target`
-- `REPLACE [LOW_PRIORITY | DELAYED] [INTO] target`
-- `CREATE [TEMPORARY] TABLE ...` with temporary tables rejected unless there is a documented restore need
+### C28-CODE-LOW-01 - Browser upload audit metadata undercounts RAW rejects in multi-file server-action calls
 
-Add regression tests for every accepted MySQL spelling above, especially schema-qualified targets with modifiers and no `INTO`.
+Classification: Confirmed issue  
+Severity: Low  
+Confidence: High
 
-### C27-CODE-MED-02 - Restore scanner allows temporary app-table creates that can shadow restored data
-
-Severity: Medium  
-Confidence: Medium-High  
 Regions:
 
-- `apps/web/src/lib/sql-restore-scan.ts:42-45`
-- `apps/web/src/lib/sql-restore-scan.ts:200-206`
-- `apps/web/src/__tests__/sql-restore-scan.test.ts:31-51`
+- `apps/web/src/app/actions/images.ts:558-575`
+- `apps/web/src/app/actions/images.ts:595-610`
+- `apps/web/src/app/actions/images.ts:615-626`
+- `apps/web/src/__tests__/images-actions.test.ts:299-306`
 
 Problem:
-`CREATE TEMPORARY TABLE` is explicitly included in the allowed write-target grammar, and the allowlist then accepts it when the table name is one of `APP_BACKUP_TABLES`. The app's own backup shape does not need temporary app tables. The current tests even allow `DROP TEMPORARY TABLE images`, but there is no test that rejects `CREATE TEMPORARY TABLE images`.
+`uploadImages()` tracks RAW rejections separately from generic failures. It correctly computes `totalFailures = failedFiles.length + rawRejectedCount` and returns `rawRejectedCount` / `rawRejectedFiles` to the caller, but the audit event records only `failed: failedFiles.length`. A mixed multi-file server-action call with at least one success and one RAW reject therefore writes an `image_upload` audit row that says zero failed files even though the action returned a RAW rejection warning.
 
 Concrete failure scenario:
-A crafted restore file contains:
-
-```sql
-DROP TABLE IF EXISTS `images`;
-CREATE TEMPORARY TABLE `images` (...);
-INSERT INTO `images` VALUES (...);
-```
-
-The scanner allows the known app table target. During the mysql session, inserts can go to the temporary `images` table, then vanish when the session exits. Depending on the exact dump shape and migration baseline state, post-restore reconciliation may either recreate an empty permanent table or leave the operator in a failed-restore recovery flow, but the restore scanner should not admit this non-mysqldump shape in the first place.
+An operator or future client submits one `FormData` containing `photo.jpg` and `raw.nef`. The JPEG succeeds, the RAW path increments `rawRejectedCount`, and the action returns success with a RAW warning. The audit row at `images.ts:605-610` records `{ count: 1, failed: 0 }`, so later incident/audit review cannot reconcile the UI warning or returned `rawRejectedFiles` with the audit log. The current browser dropzone sends one file per action call, which reduces normal UI exposure, but the server action itself still accepts multiple `files` entries and has multi-file accounting.
 
 Suggested fix:
-Reject `CREATE TEMPORARY TABLE` and `DROP TEMPORARY TABLE` in restore files unless a future backup path intentionally emits them. App-generated `mysqldump` table resets are ordinary `DROP TABLE IF EXISTS` plus permanent `CREATE TABLE`; keep the allowlist that narrow. Add tests asserting `containsDangerousSql('CREATE TEMPORARY TABLE images (...)') === true`.
-
-## Likely Issues
-
-No additional likely code-quality/logic issues met the bar after deduplicating cycle-26 deferred findings.
-
-## Risks Needing Manual Validation
-
-### C27-CODE-RISK-01 - Custom modal isolation may not handle later portaled descendants inside focus traps
-
-Severity: Low-Medium  
-Confidence: Medium  
-Regions:
-
-- `apps/web/src/components/use-modal-tree-isolation.ts:20-65`
-- `apps/web/src/components/info-bottom-sheet.tsx:188-220`
-- `apps/web/src/components/ui/dropdown-menu.tsx:34-50`
-- `apps/web/src/components/photo-viewer.tsx:934-972`
-
-Risk:
-`useModalTreeIsolation()` walks and inert-hides existing siblings once when the custom modal opens. Radix `DropdownMenuContent` portals content to `document.body` after interaction. The desktop photo viewer uses the download dropdown outside a custom focus trap, but the mobile info bottom sheet wraps its sheet in `FocusTrap`. If a dropdown/menu is opened from inside the sheet, its content may live outside the trap/modal subtree. That can produce either unreachable keyboard focus or assistive-tech exposure outside the `aria-modal` tree.
-
-Manual validation scenario:
-On a mobile-sized viewport, open the photo info bottom sheet for a wide-gamut image with both JPEG and AVIF download options, expand the sheet, open the download dropdown, and test keyboard/screen-reader traversal. Confirm whether menu items receive focus and whether background or unrelated body content appears in the accessibility tree.
-
-Suggested fix if reproduced:
-Either render portaled popover/menu content into a container inside the modal root, or move these custom modals to Radix `Dialog`/`Sheet` primitives that coordinate modal layering and portals. Add a browser/a11y regression test for the bottom-sheet download dropdown.
+Record a total failure count in audit metadata, for example `failed: failedFiles.length + rawRejectedCount`, and include `rawRejectedCount` / sanitized RAW filenames if the audit log is expected to explain rejection categories. Add a unit test for a mixed success-plus-RAW FormData call so the action return and audit metadata stay consistent.
 
 ## Validation Evidence
 
 Commands run:
 
-- `git diff --stat d13d6637..HEAD`
-- `git diff --name-only d13d6637..HEAD`
-- `git ls-files` inventory/counts
-- `npm run restore:maintenance --workspace=apps/web -- status` - passed, marker inactive
-- `npm test --workspace=apps/web -- sql-restore-scan restore-maintenance` - passed, 2 files / 28 tests
 - `npm run lint:api-auth --workspace=apps/web` - passed
 - `npm run lint:action-origin --workspace=apps/web` - passed
 - `npm run lint:public-route-rate-limit --workspace=apps/web` - passed
-- Direct helper check via `npm exec --workspace=apps/web -- tsx -e ...` confirmed `containsDangerousSql(...)` returns `false` for the INSERT modifier/no-INTO bypasses and temporary app-table create.
+- `npm run typecheck --workspace=apps/web` - passed
+- `npm run lint --workspace=apps/web` - passed
+- `npm test --workspace=apps/web` - passed: 270 test files, 2 skipped; 2,528 tests passed, 4 skipped
+- `find`/`git ls-files` inventory sweeps for tracked source, tests, scripts, migrations, docs, configs, and review history
+- `rg` sweeps for analytics recorders, unawaited writes, audit events, restore/backfill/runbook terms, TODO/FIXME/BUG markers, skipped/focused tests, and stale cycle-27 findings
+- `git diff`/source inspection confirmed the cycle-27 SQL restore scanner and maintenance recovery findings are fixed in the current source and were not refiled
+
+`npm run test:e2e --workspace=apps/web` was not run because this was a code-quality review and the identified issues are server-action/race/accounting defects covered better by targeted unit/source-contract tests.
 
 ## Final Sweep Confirmation
 
-Final sweep covered:
-
-- Restore and backup: durable marker, recovery CLI, advisory locks, temp-file scanning/import, post-restore migration handoff.
-- SQL restore scanner: comment/literal stripping, target allowlist, cross-schema protections, known tests and uncovered MySQL grammar forms.
-- Auth/action/API gates: admin API wrapper, same-origin action scanner, public mutating route scanner, semantic/OG/LR routes.
-- Upload and processing coordination: browser upload, LR upload, upload tracker, processing contract lock, restore maintenance gates, queue quiesce/resume.
-- Data/privacy/schema: public/admin select fields, search enrichment select, Drizzle schema, migration journal, reconcile/migration script.
-- UI maintainability: custom modal isolation, search/lightbox/bottom-sheet focus surfaces, Radix portal interaction risk.
-- Current review/plan history: current cycle-26 aggregate/deferred list, archived cycle-27 aggregate, and existing code-reviewer report.
-
-Stop condition met: review file written, confirmed findings separated from likely/manual-validation risks, known deferred policy items not repeated, and verification evidence recorded.
+Final sweep covered restore/backup, public analytics, upload/LR upload, image queue/backfill, auth/session/API gates, public route rate limits, data privacy selects, search/semantic routes, service worker cache behavior, migration/reconcile scripts, schema/journal metadata, tests, configs, and current `.context` review/plan history. No relevant file from the tracked code/config/test/migration/documentation surface was skipped. Stop condition met: report written with exact regions, concrete failure scenarios, fixes, severity, confidence, validation evidence, and stale prior-cycle findings deduplicated.
