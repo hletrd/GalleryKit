@@ -20,9 +20,9 @@ import { Histogram } from '@/components/histogram';
 import ColorDetailsSection, { humanizeColorPrimaries } from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
-import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { buildDownloadFilename } from '@/lib/download-filename';
+import { getJpegDownloadCopy } from '@/lib/download-labels';
 import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 
 interface InfoBottomSheetProps {
@@ -163,6 +163,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         ? buildDownloadFilename(image.title, image.id, 'avif')
         : null;
     const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
+    const jpegDownloadCopy = getJpegDownloadCopy({ isWideGamutSource, forceSrgbDerivatives });
     // R5-L-BUNDLE: isNonTrivialColor uses only public-safe fields.
     // color_pipeline_decision is admin-only so it is not included here;
     // the peek chip's inner content handles its own conditional rendering.
@@ -499,10 +500,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                 <DropdownMenuTrigger asChild>
                                                     <Button className="w-full gap-2 min-h-11">
                                                         <Download className="h-4 w-4" />
-                                                        {/* R16C16 C16-F2: color_pipeline_decision is admin-only — gate for symmetry. */}
-                                                        {isAdmin && isP3Pipeline(image.color_pipeline_decision)
-                                                            ? t('viewer.downloadP3Jpeg')
-                                                            : t('viewer.downloadJpeg')}
+                                                        {t(jpegDownloadCopy.labelKey)}
                                                         <ChevronDown className="h-4 w-4 ml-auto" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
@@ -513,8 +511,8 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                             download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                             className="flex flex-col"
                                                         >
-                                                            <span>{t('viewer.downloadSrgbJpeg')}</span>
-                                                            <span className="text-xs text-muted-foreground">{t('viewer.downloadSrgbJpegDesc')}</span>
+                                                            <span>{t(jpegDownloadCopy.labelKey)}</span>
+                                                            <span className="text-xs text-muted-foreground">{t(jpegDownloadCopy.descriptionKey)}</span>
                                                         </a>
                                                     </DropdownMenuItem>
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">

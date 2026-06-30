@@ -35,7 +35,7 @@ import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, hu
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { buildDownloadFilename } from '@/lib/download-filename';
-import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
+import { getJpegDownloadCopy } from '@/lib/download-labels';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 import { getAvifSupportPromise } from '@/lib/avif-support';
 
@@ -207,6 +207,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         ? buildDownloadFilename(image.title, image.id, 'avif')
         : null;
     const isWideGamutSource = isWideGamutPrimary(image?.color_primaries);
+    const jpegDownloadCopy = getJpegDownloadCopy({ isWideGamutSource, forceSrgbDerivatives });
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 
@@ -938,12 +939,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <DropdownMenuTrigger asChild>
                                                 <Button className="w-full gap-2 min-h-11">
                                                     <Download className="h-4 w-4" />
-                                                    {/* R16C16 C16-F2: color_pipeline_decision is admin-only;
-                                                        gate the read on isAdmin for symmetry with the other
-                                                        isP3Pipeline call sites (behaviour unchanged — null → false → plain JPEG label publicly). */}
-                                                    {isAdmin && isP3Pipeline(image.color_pipeline_decision)
-                                                        ? t('viewer.downloadP3Jpeg')
-                                                        : t('viewer.downloadJpeg')}
+                                                    {t(jpegDownloadCopy.labelKey)}
                                                     <ChevronDown className="h-4 w-4 ml-auto" />
                                                 </Button>
                                             </DropdownMenuTrigger>
@@ -954,8 +950,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                         download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                         className="flex flex-col"
                                                     >
-                                                        <span>{t('viewer.downloadSrgbJpeg')}</span>
-                                                        <span className="text-xs text-muted-foreground">{t('viewer.downloadSrgbJpegDesc')}</span>
+                                                        <span>{t(jpegDownloadCopy.labelKey)}</span>
+                                                        <span className="text-xs text-muted-foreground">{t(jpegDownloadCopy.descriptionKey)}</span>
                                                     </a>
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem asChild className="h-auto min-h-11 py-2">

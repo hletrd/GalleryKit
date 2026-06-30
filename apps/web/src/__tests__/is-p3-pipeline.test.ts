@@ -1,7 +1,6 @@
 /**
  * C6-A2 / C6-COL-MED-1 / C6-UX-MED-1: lock the `isP3Pipeline` predicate
- * helper and the call-site contract on the gamut-aware download-button
- * surfaces.
+ * helper and the call-site contract on gamut-aware color-detail surfaces.
  *
  * Two-part fixture-style test:
  *
@@ -10,8 +9,8 @@
  * and asserts `isP3Pipeline` returns the expected boolean. Also covers
  * null / undefined / empty-string / non-enum inputs.
  *
- * Part 2 — call-site lock. Source-inspects `info-bottom-sheet.tsx` and
- * `photo-viewer.tsx` and asserts:
+ * Part 2 — call-site lock. Source-inspects `color-details-section.tsx`
+ * and asserts:
  *   1. They import `isP3Pipeline` from `@/lib/color-pipeline-decisions`.
  *   2. They do NOT contain the inline `startsWith('p3-from-')` literal.
  *
@@ -68,17 +67,10 @@ describe('isP3Pipeline — enum coverage (Part 1, runtime correctness)', () => {
 });
 
 describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
-    // C7-A2 / C7-COL-MED-1 / C7-UX-MED-1 / C7-CRIT-MED-1: extend the
-    // consumer list to include `color-details-section.tsx`. C6-A1
-    // consolidated the predicate at three sites in `info-bottom-sheet.tsx`
-    // and `photo-viewer.tsx`, but missed the fourth site at
-    // `color-details-section.tsx:230` (driving the "Delivered bit depth"
-    // row label). C7-A1 fixed the fourth site; this lock prevents
-    // regression and ensures any future consolidation audit treats all
-    // four consumers as a unit.
+    // Cycle 40 moved public download labels off `color_pipeline_decision`
+    // because that field is admin-only. `isP3Pipeline` remains the canonical
+    // predicate for admin-visible color-detail surfaces.
     const consumerPaths: ReadonlyArray<readonly [name: string, path: string]> = [
-        ['info-bottom-sheet.tsx', resolve(__dirname, '../components/info-bottom-sheet.tsx')],
-        ['photo-viewer.tsx', resolve(__dirname, '../components/photo-viewer.tsx')],
         ['color-details-section.tsx', resolve(__dirname, '../components/color-details-section.tsx')],
     ];
 
@@ -94,8 +86,6 @@ describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
     it.each(consumerPaths)('contains at least one isP3Pipeline call (%s)', (_name, path) => {
         const src = readFileSync(path, 'utf8');
         // Lock that the helper is actually used after being imported.
-        // (info-bottom-sheet.tsx has 2 call sites, photo-viewer.tsx has 1,
-        // color-details-section.tsx has 1.)
         expect(src).toMatch(/isP3Pipeline\s*\(/);
     });
 
@@ -120,5 +110,25 @@ describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
         // matches only `p3-from-*`). C7-A1 replaced it with the helper.
         // This lock prevents regression on every consumer of the predicate.
         expect(src).not.toMatch(/\.startsWith\(\s*['"]p3['"]\s*\)/);
+    });
+});
+
+describe('download label surfaces — public-safe gamut contract', () => {
+    const downloadLabelConsumers: ReadonlyArray<readonly [name: string, path: string]> = [
+        ['info-bottom-sheet.tsx', resolve(__dirname, '../components/info-bottom-sheet.tsx')],
+        ['photo-viewer.tsx', resolve(__dirname, '../components/photo-viewer.tsx')],
+    ];
+
+    it.each(downloadLabelConsumers)('uses getJpegDownloadCopy for JPEG download labels (%s)', (_name, path) => {
+        const src = readFileSync(path, 'utf8');
+        expect(src).toMatch(
+            /import\s*\{[^}]*\bgetJpegDownloadCopy\b[^}]*\}\s*from\s*['"]@\/lib\/download-labels['"]/,
+        );
+        expect(src).toContain('getJpegDownloadCopy({ isWideGamutSource, forceSrgbDerivatives })');
+    });
+
+    it.each(downloadLabelConsumers)('does not read admin-only color_pipeline_decision for download labels (%s)', (_name, path) => {
+        const src = readFileSync(path, 'utf8');
+        expect(src).not.toContain('isP3Pipeline(image.color_pipeline_decision)');
     });
 });

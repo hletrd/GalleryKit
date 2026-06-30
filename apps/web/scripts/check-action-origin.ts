@@ -408,13 +408,33 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
 }
 
 function nodeContainsProtectedRead(root: ts.Node): boolean {
+    const DRIZZLE_RELATIONAL_READ_METHODS = new Set(['findFirst', 'findMany']);
+    const isDrizzleRelationalReadCall = (node: ts.CallExpression): boolean => {
+        const callee = node.expression;
+        if (!ts.isPropertyAccessExpression(callee) || !DRIZZLE_RELATIONAL_READ_METHODS.has(callee.name.text)) {
+            return false;
+        }
+        const tableAccess = callee.expression;
+        if (!ts.isPropertyAccessExpression(tableAccess)) return false;
+        const queryAccess = tableAccess.expression;
+        return (
+            ts.isPropertyAccessExpression(queryAccess)
+            && queryAccess.name.text === 'query'
+            && ts.isIdentifier(queryAccess.expression)
+            && queryAccess.expression.text === 'db'
+        );
+    };
+
     let found = false;
     const visit = (node: ts.Node) => {
         if (found) return;
         if (ts.isFunctionLike(node) && node !== root) return;
         if (ts.isCallExpression(node)) {
             const callee = node.expression;
-            if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'select') {
+            if (
+                (ts.isPropertyAccessExpression(callee) && callee.name.text === 'select')
+                || isDrizzleRelationalReadCall(node)
+            ) {
                 found = true;
                 return;
             }

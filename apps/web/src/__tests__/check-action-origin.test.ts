@@ -1073,6 +1073,33 @@ describe('checkActionSource — public analytics actions', () => {
     });
 });
 
+describe('checkActionSource — protected read detection', () => {
+    it('fails read-only exemptions that perform Drizzle relational reads before auth', () => {
+        const src = `
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                return db.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('allows Drizzle relational reads after an auth check in read-only exemptions', () => {
+        const src = `
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                if (!(await isAdmin())) return [];
+                return db.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): src/app/actions/admin-sessions.ts::listSessions');
+    });
+});
+
 describe('checkActionSource — app/actions.ts barrel', () => {
     it('allows the real top-level action barrel because it only re-exports action modules and types', () => {
         const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/actions.ts'), 'utf8');

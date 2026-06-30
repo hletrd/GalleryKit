@@ -355,6 +355,7 @@
     "downloadSrgbJpeg": "Download (sRGB JPEG)",
     "downloadSrgbJpegDesc": "Compatible with all devices and browsers",
     "downloadP3Jpeg": "Download (8-bit Display P3 JPEG)",
+    "downloadP3JpegDesc": "Color-managed wide-gamut JPEG for P3-capable workflows",
     "downloadP3Avif": "Download (Display P3 AVIF)",
     "downloadP3AvifDesc": "Smaller file, wider gamut — modern browsers only",
     "viewerDescription": "Photo viewer. Use the buttons to open fullscreen, share, and view information.",

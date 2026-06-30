@@ -313,6 +313,48 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('expensive GET');
     });
 
+    it('fails expensive public GET handlers when DB-backed imported data helpers are called without a limiter', () => {
+        const source = `
+            import { getTopicBySlug } from '@/lib/data';
+            export async function GET() {
+                const topic = await getTopicBySlug('weddings');
+                return Response.json({ topic });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes DB-backed imported data helpers after a limiter gate', () => {
+        const source = `
+            import { getTopicBySlug } from '@/lib/data';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                const overLimit = preIncrementSemanticAttempt('203.0.113.10', Date.now());
+                if (overLimit) return Response.json({}, { status: 429 });
+                const topic = await getTopicBySlug('weddings');
+                return Response.json({ topic });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails expensive public GET handlers when DB-backed data helpers are called through namespace imports', () => {
+        const source = `
+            import * as data from '@/lib/data';
+            export async function GET() {
+                const latest = await data.getLatestImageForOg();
+                return Response.json({ latest });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
     it('allows the upload helper only with a reasoned public-route exemption', () => {
         const source = `
             import { serveUploadFile } from '@/lib/serve-upload';
@@ -898,6 +940,15 @@ describe('checkPublicRouteSource', () => {
         const result = checkPublicRouteSource(source, 'route.ts');
         expect(result.failed).toHaveLength(1);
         expect(result.failed[0]).toContain('UNSUPPORTED GET RE-EXPORT');
+    });
+
+    it('fails closed on named HEAD re-exports from another module', () => {
+        const source = `
+            export { HEAD } from './handlers';
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('UNSUPPORTED HEAD RE-EXPORT');
     });
 });
 

@@ -13,9 +13,10 @@ const PHOTO_VIEWER_PATH = '/Users/hletrd/flash-shared/gallery/apps/web/src/compo
 describe('photo-viewer download dropdown (P3-1)', () => {
     it('does not reference _hdr.avif in the download section', async () => {
         const source = await fs.readFile(PHOTO_VIEWER_PATH, 'utf-8');
-        // Find the download dropdown section — between downloadSrgbJpeg and DropdownMenuContent close
+        // Find the download dropdown section — now keyed by the delivery-aware
+        // JPEG copy helper instead of a hard-coded sRGB label.
         const dropdownMatch = source.match(
-            /downloadSrgbJpeg[\s\S]*?DropdownMenuContent[\s\S]*?\/DropdownMenu>/
+            /jpegDownloadCopy[\s\S]*?DropdownMenuContent[\s\S]*?\/DropdownMenu>/
         );
         if (!dropdownMatch) {
             throw new Error('Could not locate download dropdown in photo-viewer.tsx');
@@ -43,10 +44,10 @@ describe('photo-viewer admin-only field gating (R16C16 DES-16-02 / C16-F2)', () 
         expect(source).not.toMatch(/\{\s*hasExifData\(image\.bit_depth\)\s*&&/);
     });
 
-    it('gates the isP3Pipeline download label on isAdmin', async () => {
+    it('does not use admin-only color_pipeline_decision for public download labels', async () => {
         const source = await fs.readFile(PHOTO_VIEWER_PATH, 'utf-8');
-        // color_pipeline_decision is admin-only; the download label read must be gated.
-        expect(source).toMatch(/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/);
+        expect(source).toContain('getJpegDownloadCopy({ isWideGamutSource, forceSrgbDerivatives })');
+        expect(source).not.toContain('isP3Pipeline(image.color_pipeline_decision)');
     });
 });
 
@@ -58,13 +59,9 @@ describe('info-bottom-sheet admin-only field gating (R16C16 DES-16-02 / C16-F2)'
     // sheet fix was NOT covered by any test — removing `isAdmin &&` from line 500 of
     // info-bottom-sheet.tsx would expose the admin-only color_pipeline_decision field
     // to public users on mobile without failing any prior test.
-    it('gates the isP3Pipeline label on isAdmin in info-bottom-sheet.tsx', async () => {
+    it('does not use admin-only color_pipeline_decision for mobile public download labels', async () => {
         const source = await fs.readFile(INFO_BOTTOM_SHEET_PATH, 'utf-8');
-        // color_pipeline_decision is admin-only (_PrivacySensitiveKeys). The mobile
-        // bottom-sheet render MUST carry `isAdmin &&` to mirror the photo-viewer fix.
-        expect(source).toMatch(/isAdmin\s*&&\s*isP3Pipeline\(image\.color_pipeline_decision\)/);
-        // Also lock that there is no ungated `{isP3Pipeline(image.color_pipeline_decision) &&`
-        // form anywhere in the file.
-        expect(source).not.toMatch(/\{\s*isP3Pipeline\(image\.color_pipeline_decision\)\s*&&/);
+        expect(source).toContain('getJpegDownloadCopy({ isWideGamutSource, forceSrgbDerivatives })');
+        expect(source).not.toContain('isP3Pipeline(image.color_pipeline_decision)');
     });
 });

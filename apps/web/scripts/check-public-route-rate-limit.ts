@@ -75,6 +75,23 @@ const EXPENSIVE_GET_MARKERS = [
     'sharp',
 ];
 
+const EXPENSIVE_READ_IMPORT_MODULES = new Set([
+    '@/db',
+    '@/lib/analytics-data',
+    '@/lib/clip-inference',
+    '@/lib/clip-model',
+    '@/lib/data',
+    '@/lib/data-timeline',
+    '@/lib/gallery-config',
+    '@/lib/og-photo-fetch',
+    '@/lib/serve-upload',
+]);
+
+type ImportedExpensiveReadFunctions = {
+    identifiers: Set<string>;
+    namespaces: Set<string>;
+};
+
 function findRouteFiles(dir: string): string[] {
     const results: string[] = [];
     if (!fs.existsSync(dir)) return results;
@@ -181,6 +198,39 @@ function collectImportedSideEffectFunctionNames(sourceFile: ts.SourceFile): Set<
         }
     }
     return names;
+}
+
+function collectImportedExpensiveReadFunctions(sourceFile: ts.SourceFile): ImportedExpensiveReadFunctions {
+    const identifiers = new Set<string>();
+    const namespaces = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !statement.importClause
+            || statement.importClause.isTypeOnly
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || !EXPENSIVE_READ_IMPORT_MODULES.has(statement.moduleSpecifier.text)
+        ) {
+            continue;
+        }
+
+        if (statement.importClause.name) {
+            identifiers.add(statement.importClause.name.text);
+        }
+
+        const bindings = statement.importClause.namedBindings;
+        if (!bindings) continue;
+        if (ts.isNamespaceImport(bindings)) {
+            namespaces.add(bindings.name.text);
+            continue;
+        }
+        if (!ts.isNamedImports(bindings)) continue;
+        for (const element of bindings.elements) {
+            if (element.isTypeOnly) continue;
+            identifiers.add(element.name.text);
+        }
+    }
+    return { identifiers, namespaces };
 }
 
 function isRateLimitHelperCall(node: ts.CallExpression, approvedRateLimitImports: Set<string>): boolean {
@@ -332,6 +382,7 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
     approvedRateLimitImports: Set<string>,
     sourceFile: ts.SourceFile,
     localExpensiveGetFunctions: Set<string>,
+    importedExpensiveReadFunctions: ImportedExpensiveReadFunctions,
 ): boolean {
     if (!body) return false;
 
@@ -397,7 +448,7 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
     };
 
     const nodeContainsExpensiveWork = (node: ts.Node | undefined): boolean => {
-        return bodyContainsExpensiveGetWork(node, sourceFile, localExpensiveGetFunctions);
+        return bodyContainsExpensiveGetWork(node, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions);
     };
 
     const statementContainsExpensiveWork = (statement: ts.Statement): boolean => {
@@ -449,6 +500,7 @@ function bodyContainsExpensiveGetWork(
     body: ts.Node | undefined,
     sourceFile: ts.SourceFile,
     localExpensiveGetFunctions: Set<string> = new Set(),
+    importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = { identifiers: new Set(), namespaces: new Set() },
 ): boolean {
     if (!body) return false;
     const text = body.getText(sourceFile);
@@ -460,13 +512,26 @@ function bodyContainsExpensiveGetWork(
     const visit = (node: ts.Node) => {
         if (found) return;
         if (ts.isFunctionLike(node) && node !== body) return;
-        if (
-            ts.isCallExpression(node)
-            && ts.isIdentifier(node.expression)
-            && localExpensiveGetFunctions.has(node.expression.text)
-        ) {
-            found = true;
-            return;
+        if (ts.isCallExpression(node)) {
+            const callee = node.expression;
+            if (
+                ts.isIdentifier(callee)
+                && (
+                    localExpensiveGetFunctions.has(callee.text)
+                    || importedExpensiveReadFunctions.identifiers.has(callee.text)
+                )
+            ) {
+                found = true;
+                return;
+            }
+            if (
+                ts.isPropertyAccessExpression(callee)
+                && ts.isIdentifier(callee.expression)
+                && importedExpensiveReadFunctions.namespaces.has(callee.expression.text)
+            ) {
+                found = true;
+                return;
+            }
         }
         ts.forEachChild(node, visit);
     };
@@ -486,6 +551,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRateLimitImports = collectApprovedRateLimitImports(sourceFile);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
+    const importedExpensiveReadFunctions = collectImportedExpensiveReadFunctions(sourceFile);
 
     // Find any exported mutating handler in the file
     const localBodies = new Map<string, ts.Node | undefined>();
@@ -536,7 +602,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         expensiveGetSetChanged = false;
         for (const [name, body] of localBodies) {
             if (!body || localExpensiveGetFunctions.has(name)) continue;
-            if (bodyContainsExpensiveGetWork(body, sourceFile, localExpensiveGetFunctions)) {
+            if (bodyContainsExpensiveGetWork(body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions)) {
                 localExpensiveGetFunctions.add(name);
                 expensiveGetSetChanged = true;
             }
@@ -631,7 +697,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         .replace(/'[^']*'/g, '');
     const hasExemption = EXEMPT_COMMENT_RE.test(withoutStrings);
     if (hasExemption) {
-        const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
+        const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));
         const protectedHandlers = [...mutatingHandlers, ...expensiveReadHandlers];
         const protectedReadMethods = new Set(expensiveReadHandlers.map((handler) => handler.method));
         const isSingleGetHeadPair = (
@@ -667,9 +733,9 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         );
     }
 
-    const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
+    const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));
     if (expensiveReadHandlers.length > 0 && !hasExemption) {
-        const unmeteredReadHandlers = expensiveReadHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions));
+        const unmeteredReadHandlers = expensiveReadHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));
         if (unmeteredReadHandlers.length > 0) {
             report.failed.push(
                 `MISSING RATE LIMIT: ${relative} exports expensive GET/HEAD handler(s) ${unmeteredReadHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`

@@ -1,13 +1,11 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-39-2026-06-30/_aggregate.md`
+Current aggregate: `cycle-40-2026-07-01/_aggregate.md`
 
-Cycle 39 scheduled five findings:
+Cycle 40 scheduled three findings:
 
-- `UI-C39-01` - search empty/error status is visible but hidden from assistive tech.
-- `PERF-C39-01` - service-worker image LRU metadata writes can race.
-- `PERF-C39-02` - service-worker cache writes buffer every image body for sizing.
-- `TEST-C39-01` - `lint:action-origin` does not constrain the top-level action barrel.
-- `TEST-C39-02` - public route rate-limit lint ignores expensive `HEAD` handlers.
+- `UI-C40-01` - wide-gamut JPEG download labels must reflect P3 vs forced-sRGB delivery.
+- `TV-40-01` - `lint:action-origin` must treat Drizzle relational reads as protected reads before auth.
+- `TV-40-02` - `lint:public-route-rate-limit` must treat imported DB-backed data helpers as expensive public reads.
 
-Cycle 39 deferred four findings in `.context/plans/cycle-39-2026-06-30-deferred.md`: feed/sitemap index planning, backfill pipeline-version index planning, broad imported-helper side-effect classification, and sidecar keyset pagination.
+Cycle 40 deferred `TV-40-03` in `.context/plans/cycle-40-2026-07-01-deferred.md` and carried forward cycle-39 migration/index and broader scanner-model items.
