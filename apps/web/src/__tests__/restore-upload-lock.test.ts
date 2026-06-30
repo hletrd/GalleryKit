@@ -106,6 +106,7 @@ describe('restore/upload writer coordination', () => {
         const flagIdx = source.indexOf('let imageQueueQuiesced = false');
         const quiesceIdx = source.indexOf('await quiesceImageProcessingQueueForRestore()');
         const setIdx = source.indexOf('imageQueueQuiesced = true');
+        const drainIdx = source.indexOf('await drainBackgroundDbWritesForRestore()');
         const maintenanceExitIdx = source.indexOf('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
         const resumeConditionIdx = source.indexOf('if (restoreLifecycleVerified || imageQueueQuiesced)');
         const resumeIdx = source.indexOf('await resumeImageProcessingQueueAfterRestore()');
@@ -113,6 +114,7 @@ describe('restore/upload writer coordination', () => {
         expect(flagIdx).toBeGreaterThan(-1);
         expect(quiesceIdx).toBeGreaterThan(flagIdx);
         expect(setIdx).toBeGreaterThan(quiesceIdx);
+        expect(drainIdx).toBeGreaterThan(setIdx);
         expect(maintenanceExitIdx).toBeGreaterThan(setIdx);
         expect(resumeConditionIdx).toBeGreaterThan(maintenanceExitIdx);
         expect(resumeIdx).toBeGreaterThan(resumeConditionIdx);

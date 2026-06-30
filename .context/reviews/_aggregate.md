@@ -1,597 +1,275 @@
-# Cycle 29 Aggregate Review
+# Cycle 30/100 Aggregate Review
 
-Date: 2026-06-30  
-HEAD reviewed: `b4fa1f64`  
-Cycle: 29/100  
-Scope: Prompt 1 review aggregation only.
+Date: 2026-06-30 KST
+HEAD reviewed by agents: `6938659b` plus committed cycle-30 review artifacts
+Status: Prompt 1 complete; implementation planning follows in `.context/plans/cycle-30-2026-06-30-plan.md`
 
 ## Agent Coverage
 
-Completed review artifacts:
+Review agents completed and wrote provenance files:
 
-- `code-reviewer.md`: no confirmed code-quality issues; residual runtime validation risks.
-- `perf-reviewer.md`: 9 performance/scalability findings.
-- `security-reviewer.md`: no confirmed security vulnerabilities; 3 operational validation risks.
-- `test-engineer.md`: 7 test/gate coverage findings.
-- `architect.md`: 4 architecture/operational findings.
-- `designer.md`: 4 UI/UX findings with browser evidence.
-- `critic.md`: 6 confirmed process/product/performance issues plus risks.
-- `verifier.md`: 4 confirmed issues, 1 likely issue, and validation risks.
-- `tracer.md`: 1 likely issue and 3 validation risks.
-- `debugger.md`: 1 confirmed bug and 2 validation risks.
-- `document-specialist.md`: 4 confirmed documentation drift issues and 1 likely doc issue.
-- `ui-ux-designer-reviewer.md`: 4 confirmed UI/UX issues and 2 validation risks.
-- `product-marketer-reviewer.md`: 3 confirmed trust/product-copy issues, 1 likely issue, and 2 validation risks.
+- `code-reviewer`: `.context/reviews/code-reviewer.md`
+- `architect`: `.context/reviews/architect.md`
+- `security-reviewer`: `.context/reviews/security-reviewer.md`
+- `perf-reviewer`: `.context/reviews/perf-reviewer.md`
+- `performance-reviewer`: `.context/reviews/performance-reviewer.md`
+- `tracer`: `.context/reviews/tracer.md`
+- `verifier`: `.context/reviews/verifier.md`
+- `debugger`: `.context/reviews/debugger.md`
+- `test-engineer`: `.context/reviews/test-engineer.md`
+- `document-specialist`: `.context/reviews/document-specialist.md`
+- `critic`: `.context/reviews/critic.md`
+- `designer`: `.context/reviews/designer.md`
+- `ui-ux-designer-reviewer`: `.context/reviews/ui-ux-designer-reviewer.md`
+- `product-marketer-reviewer`: `.context/reviews/product-marketer-reviewer.md`
 
-No review subagent failed after retry. The custom reviewer prompt files referenced another product, so the agents were explicitly instructed to adapt only the reviewer lens to GalleryKit.
+UI/UX review was included because this repository contains a Next.js web UI. The designer lane used live/browser evidence against the public gallery where feasible and cited text-extractable findings in its review files.
 
 ## Merged Findings
 
-### AGG-C29-01 - Rate-limit bucket retention deletes by an unindexed time column
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer, architect, verifier, critic  
-Status: Confirmed issue
-
-Evidence: `apps/web/src/db/schema.ts:212-219` defines only primary key `(ip, bucket_type, bucket_start)`, while `apps/web/src/lib/rate-limit.ts:515-517` deletes by `bucket_start < cutoff`. Migrations/reconcile mirror the missing index.
-
-Failure scenario: bot/search/view traffic creates many rows, and the hourly purge scans/locks the rate-limit table on the single MySQL writer.
-
-Fix: add a `bucket_start`-leading index in schema, migration, and reconcile, and make purge deletion chunked/bounded.
-
-### AGG-C29-02 - Semantic and similar search perform request-thread brute-force vector scoring
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer, architect, critic  
-Status: Confirmed scalability issue
-
-Evidence: `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:164-201`, and `apps/web/src/lib/clip-embeddings.ts:36-44`.
-
-Failure scenario: raising `SEMANTIC_SCAN_LIMIT` or concurrent requests can monopolize the Node event loop while decoding/scoring thousands of vectors.
-
-Fix: bound request-thread work with smaller caps/concurrency/yielding or move scoring to workers/vector index. This is larger than a narrow cycle fix and should be deferred unless capacity validation demands it now.
-
-### AGG-C29-03 - Public map can render 10,000 markers and 10,000 fallback links
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer, critic, designer, ui-ux-designer-reviewer  
-Status: Confirmed UI/performance issue
-
-Evidence: `apps/web/src/lib/data.ts:1649-1685`, `apps/web/src/app/[locale]/(public)/map/page.tsx:37-56`, `:83-95`, and `apps/web/src/components/map/map-client.tsx:76-93`, `:118-140`.
-
-Failure scenario: GPS-rich galleries freeze mobile browsers and overwhelm assistive-tech users on `/map`.
-
-Fix: reduce initial cap and add clustering/viewport loading plus paginated/virtualized fallback list. A full clustered implementation is a larger feature; a cap/truncation notice is a reasonable near-term fix.
-
-### AGG-C29-04 - Public search uses leading-wildcard LIKE scans
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer  
-Status: Confirmed scalability issue
-
-Evidence: `apps/web/src/lib/data.ts:1545-1621` and `apps/web/src/app/actions/public.ts:236-306`.
-
-Failure scenario: short/common public searches scan processed images, tags, and aliases under concurrent traffic.
-
-Fix: introduce a search index or stricter query constraints. Defer unless it becomes a measured production bottleneck.
-
-### AGG-C29-05 - Timeline/year/On This Day use non-sargable date functions
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer  
-Status: Likely scalability issue
-
-Evidence: `apps/web/src/lib/data-timeline.ts:97-116`, `:129-141`, `:186-207`.
-
-Failure scenario: archive pages scan processed rows row-by-row as gallery size grows.
-
-Fix: convert year/month predicates to ranges and use generated/indexed month/day columns for On This Day. Defer schema work unless paired with broader archive performance work.
-
-### AGG-C29-06 - Feed and sitemap freshness ordering lacks a supporting index
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: perf-reviewer  
-Status: Likely scalability issue
-
-Evidence: `apps/web/src/lib/data.ts:828-853`, `:1635-1646`; schema lacks `(processed, updated_at, created_at, id)`.
-
-Failure scenario: crawlers/feed readers trigger expensive sorts over processed rows.
-
-Fix: add freshness index if feed/sitemap latency appears in production.
-
-### AGG-C29-07 - First-page gallery and smart collections compute exact totals with `COUNT(*) OVER()`
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: perf-reviewer  
-Status: Likely scalability issue
-
-Evidence: `apps/web/src/lib/data.ts:878-907`, `:1325-1364`.
-
-Failure scenario: first public page loads pay all-row grouped count cost even when pagination only needs `limit + 1`.
-
-Fix: remove exact hot-path counts or cache/materialize them. Defer unless measured.
-
-### AGG-C29-08 - Upload/bulk tag resolution is serial and chatty
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: perf-reviewer  
-Status: Confirmed performance issue
-
-Evidence: `apps/web/src/app/actions/images.ts:301-329`, `:1132-1156`, and `apps/web/src/lib/tag-records.ts:29-68`.
-
-Failure scenario: admin batch uploads or bulk tag edits spend many serialized DB round trips.
-
-Fix: batch tag lookup/insert/reselect. Defer as a low-severity admin-path optimization.
-
-### AGG-C29-09 - Service worker waits on per-image HEAD probes before serving cached derivatives
-
-Severity: Low  
-Confidence: Medium  
-Cross-agent agreement: perf-reviewer  
-Status: Manual-validation risk
-
-Evidence: `apps/web/public/sw.template.js:34-38`, `:184-287`.
-
-Failure scenario: warm cached gallery paints are delayed by synchronous HEAD probes on lossy networks.
-
-Fix: validate with throttled traces; if confirmed, serve cached bytes immediately and revalidate in background.
-
-### AGG-C29-10 - Map GPS privacy test reimplements logic instead of testing `getMapImages()`
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Confirmed test-quality gap
-
-Evidence: production code at `apps/web/src/lib/data.ts:1660-1697`; copied test logic at `apps/web/src/__tests__/map-privacy.test.ts:80-130`.
-
-Failure scenario: the production query drops `topics.map_visible=true` or GPS predicates while tests still pass.
-
-Fix: add a behavior/source test that exercises `getMapImages()` or locks the query chain/guard directly.
-
-### AGG-C29-11 - Semantic stub ranking lacks formula-distinguishing behavior coverage
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Confirmed test gap
-
-Evidence: `apps/web/src/app/api/search/semantic/route.ts:296-302`; current tests use vectors where dot product and cosine agree.
-
-Failure scenario: route switches to unconditional dot product and stub rankings become magnitude-biased without behavior-test failure.
-
-Fix: add a non-normalized vector behavior test where cosine and dot product produce different order.
-
-### AGG-C29-12 - Real CLIP activation tests are skipped by default CI
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Confirmed coverage gap
-
-Evidence: `apps/web/src/__tests__/clip-offline-load.test.ts`, `clip-semantic-integration.test.ts`, and `.github/workflows/quality.yml`.
-
-Failure scenario: production model loading breaks but normal PR CI stays green.
-
-Fix: add scheduled/manual CI with seeded models, or record as a release-blocking manual gate.
-
-### AGG-C29-13 - Public GET rate-limit enforcement is outside the custom gate
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier, critic  
-Status: Confirmed gate blind spot
-
-Evidence: `apps/web/scripts/check-public-route-rate-limit.ts:1-12`, `:36`, `:344-346`.
-
-Failure scenario: a future expensive public GET route ships without a limiter because the gate only scans mutating methods.
-
-Fix: extend the gate to audit expensive public GET route markers or require explicit exemptions.
-
-### AGG-C29-14 - E2E browser matrix is desktop Chromium only
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Manual-validation/coverage risk
-
-Evidence: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:72-77`.
-
-Failure scenario: Safari/WebKit-specific P3/HDR/focus/service-worker behavior regresses without CI coverage.
-
-Fix: add small WebKit smoke project or defer as infrastructure/browser-matrix work.
-
-### AGG-C29-15 - Important public pages have no browser smoke path
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Confirmed E2E coverage gap
-
-Evidence: no E2E coverage for `/map`, `/timeline`, `/year`, or `/c`; routes exist under `apps/web/src/app/[locale]/(public)/`.
-
-Failure scenario: route hydration or translation failure ships unnoticed.
-
-Fix: add cheap route-smoke specs with seeded fixtures.
-
-### AGG-C29-16 - Nav visual E2E writes screenshots without asserting baselines
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: test-engineer, verifier  
-Status: Confirmed test-quality gap
-
-Evidence: `apps/web/e2e/nav-visual-check.spec.ts:51`, `:65`, `:78`.
-
-Failure scenario: visual regressions create new screenshots but tests still pass.
-
-Fix: add `toHaveScreenshot` baselines or document/rename as artifact-only geometry smoke.
-
-### AGG-C29-17 - Public DB-backed `generateMetadata()` bypasses restore-maintenance guards
-
-Severity: Low  
-Confidence: Medium  
-Cross-agent agreement: architect, verifier, tracer  
-Status: Likely issue
-
-Evidence: body guards in public routes, but metadata functions call `getSeoSettings()`, `getImageCached()`, `getTopicBySlugCached()`, etc. before maintenance fallback.
-
-Failure scenario: restore drops/imports DB tables; public bodies would render maintenance, but metadata reads can throw or emit wrong metadata.
-
-Fix: add a shared metadata guard returning static noindex maintenance metadata before DB reads.
-
-### AGG-C29-18 - Proxy/header trust needs production validation
-
-Severity: Medium if misconfigured  
-Confidence: Medium  
-Cross-agent agreement: architect, security-reviewer, tracer, product-marketer-reviewer  
-Status: Manual-validation risk
-
-Evidence: `TRUST_PROXY=true` in compose, `request-origin.ts`, `rate-limit.ts`, and nginx forwarding headers.
-
-Failure scenario: direct Next access or wrong forwarded-header chain causes false same-origin checks or collapsed rate-limit buckets.
-
-Fix: validate deployed topology and document header chain; optionally add runtime/admin warning.
-
-### AGG-C29-19 - `.context/plans/` is documented as committed history but ignored
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: critic  
-Status: Confirmed process issue
-
-Evidence: `AGENTS.md` says plans are committed history; `.gitignore:19-21` ignores `.context/plans/**`.
-
-Failure scenario: this or future cycles write plans that are not staged/committed by default.
-
-Fix: unignore `.context/plans/` and `.context/plans/**`.
-
-### AGG-C29-20 - Runtime/transient artifacts remain tracked despite ignore policy
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: critic  
-Status: Confirmed repo-hygiene issue
-
-Evidence: tracked `.omc` files and review `.log`/`.pid` artifacts despite ignore rules.
-
-Failure scenario: stale logs/PIDs confuse later agents or leak environment detail.
-
-Fix: decide archival policy and remove cached transient artifacts. This is potentially broad and should be deferred unless scoped carefully.
-
-### AGG-C29-21 - App README upload flow still leads operators to upload before GPS decision
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: critic  
-Status: Confirmed documentation/privacy issue
-
-Evidence: `apps/web/README.md:7-24`, `gallery-config-shared.ts` default `strip_gps_on_upload=false`, settings lock once photos exist.
-
-Failure scenario: operator uploads a geotagged first photo before reviewing GPS stripping, then the setting is locked.
-
-Fix: update app README to review Settings before first upload.
-
-### AGG-C29-22 - Current photographer baseline in `CLAUDE.md` is stale
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: document-specialist  
-Status: Confirmed doc drift
-
-Evidence: `CLAUDE.md:559-567` points to photographer-r4 while later r6-r8/run-9 artifacts exist.
-
-Failure scenario: future agents use stale r4 as current baseline and duplicate or miss work.
-
-Fix: update the audit-history section to name current/latest baselines.
-
-### AGG-C29-23 - Auto alt-text feature/runbook is undocumented
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: document-specialist  
-Status: Confirmed doc drift
-
-Evidence: `auto_alt_text_enabled`, `caption-generator.ts`, queue/backfill script exist; README/CLAUDE/app README omit contract.
-
-Failure scenario: operator expects real AI captioning or automatic backfill; old rows remain null.
-
-Fix: document default-off EXIF-stub behavior, public fallback chain, bulk apply, and `backfill-alt-text.ts`.
-
-### AGG-C29-24 - Public route freshness docs omit current dynamic surfaces
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: document-specialist  
-Status: Confirmed doc drift
-
-Evidence: `CLAUDE.md` mentions photo/topic/shared/home but source also sets `revalidate=0` for smart collections, timeline, year, and map.
-
-Failure scenario: future performance work reintroduces ISR on dynamic archive/map pages.
-
-Fix: update docs with full category rule.
-
-### AGG-C29-25 - Touch-target docs omit app-level scanned files
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: document-specialist  
-Status: Confirmed doc drift
-
-Evidence: `CLAUDE.md` documents `SCAN_ROOTS`; `touch-target-audit.test.ts` also has `appLevelExtraFiles`.
-
-Failure scenario: maintainers are surprised by root-level error/layout/loading audit failures.
-
-Fix: update docs.
-
-### AGG-C29-26 - Historical migration comments use superseded product language
-
-Severity: Low  
-Confidence: Medium  
-Cross-agent agreement: document-specialist  
-Status: Likely doc issue
-
-Evidence: old migration comments mention Lightroom plugin and Florence-2.
-
-Failure scenario: grep-based readers infer unsupported current features.
-
-Fix: add errata in docs rather than editing old migrations casually.
-
-### AGG-C29-27 - Semantic embedding sidecar bypasses runtime mode resolver
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: tracer  
-Status: Likely issue
-
-Evidence: runtime uses `getGalleryConfig()`; `apps/web/scripts/backfill-clip-embeddings.ts:87-124` reads raw DB mode.
-
-Failure scenario: DB says production but env opt-in is absent; runtime disables search while sidecar writes misleading stub embeddings.
-
-Fix: use shared runtime resolver semantics or require resolved target mode unless `--force`.
-
-### AGG-C29-28 - Color sidecar lacks per-image processing claims
-
-Severity: Low  
-Confidence: Medium  
-Cross-agent agreement: tracer  
-Status: Manual-validation risk
-
-Evidence: queue and in-app backfill use per-image locks; `scripts/backfill-color-pipeline.ts` only takes the global lock.
-
-Failure scenario: future flow overlaps sidecar with per-image processing and derivative bytes/DB state diverge.
-
-Fix: mirror per-image claim or test the non-overlap invariant.
-
-### AGG-C29-29 - Deploy success uses liveness, not DB-backed readiness
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: tracer  
-Status: Manual-validation risk
-
-Evidence: `apps/web/deploy.sh` accepts `/api/live`; `/api/health` has optional DB readiness.
-
-Failure scenario: deploy reports success after Next starts while DB is unavailable or restore maintenance active.
-
-Fix: split deploy readiness from Docker liveness.
-
-### AGG-C29-30 - `SimilarPhotos` permanently caches transient fetch failures
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: debugger  
-Status: Confirmed bug
-
-Evidence: `apps/web/src/components/similar-photos.tsx:78-108`, `:137-147`.
-
-Failure scenario: first open hits 429/503/network error; closing/reopening cannot retry until remount.
-
-Fix: clear `fetchedRef` on retryable errors or add an explicit retry control.
-
-### AGG-C29-31 - Lightroom upload materializes multipart body before exact file-size rejection
-
-Severity: Medium if route is exposed to untrusted PAT clients  
-Confidence: Medium  
-Cross-agent agreement: debugger  
-Status: Manual-validation risk
-
-Evidence: `apps/web/src/app/api/admin/lr/upload/route.ts:85-112`, `:153-172`.
-
-Failure scenario: authenticated oversized multipart bodies are buffered before exact file-size 413.
-
-Fix: validate Next buffering/proxy caps; consider streaming parser or tighter cap.
-
-### AGG-C29-32 - Unwired CLIP backfill action reports per-row failures as successful skips
-
-Severity: Low while unwired  
-Confidence: Medium  
-Cross-agent agreement: debugger  
-Status: Manual-validation risk
-
-Evidence: `apps/web/src/app/actions/embeddings.ts:53-55`, `:145-188`; no production call sites found.
-
-Failure scenario: future UI wires it and operators see successful backfill despite failures.
-
-Fix: remove dead action or return explicit failure semantics before wiring.
-
-### AGG-C29-33 - Theme control hydrates with different label/icon than server render
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: designer, ui-ux-designer-reviewer  
-Status: Confirmed UI/a11y issue
-
-Evidence: `apps/web/src/components/nav-client.tsx:35-45`, `:160-176`; browser evidence shows dark theme storage causing hydration mismatch.
-
-Failure scenario: returning dark/OLED visitors get wrong initial accessible name/icon and React regenerates subtree.
-
-Fix: render stable placeholder until mounted/client theme resolved.
-
-### AGG-C29-34 - Public GPS map publishing is a one-click switch
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: designer, ui-ux-designer-reviewer  
-Status: Confirmed privacy-affordance issue
-
-Evidence: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:64-78`, `:259-265`; `getMapImages()` exposes GPS for `topics.map_visible=true`.
-
-Failure scenario: accidental toggle publishes all GPS-bearing photos in a category.
-
-Fix: require confirmation on false-to-true transition, ideally with affected count.
-
-### AGG-C29-35 - DB-backed public failures collapse to generic route error shell
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: designer, ui-ux-designer-reviewer  
-Status: Confirmed UX issue
-
-Evidence: `apps/web/src/app/[locale]/error.tsx:22-57` and runtime DB-down browser evidence.
-
-Failure scenario: transient DB failure looks like a generic broken page instead of gallery-specific unavailable/maintenance state.
-
-Fix: add product-specific data-unavailable fallback or handle expected DB errors in public routes.
-
-### AGG-C29-36 - Admin E2E selectors are stale after main-content rename
-
-Severity: Low  
-Confidence: High  
-Cross-agent agreement: ui-ux-designer-reviewer  
-Status: Confirmed validation risk
-
-Evidence: `apps/web/src/app/[locale]/admin/layout.tsx:19-27` uses `#main-content`; `apps/web/e2e/helpers.ts:195` and `admin.spec.ts` still use `#admin-content`.
-
-Failure scenario: opt-in admin E2E fails before exercising admin flows.
-
-Fix: update selectors to `#main-content` or roles.
-
-### AGG-C29-37 - GPS privacy positioning conflicts with default-off stripping
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: product-marketer-reviewer, critic  
-Status: Confirmed trust/product issue
-
-Evidence: README emphasizes private originals; default `strip_gps_on_upload=false`; toggle locks after images exist.
-
-Failure scenario: photographer expects private-original safety but first upload retains GPS.
-
-Fix: make first-run GPS decision harder to miss, or default stripping on. At minimum update docs/copy.
-
-### AGG-C29-38 - Public privacy copy omits short-lived full-IP rate-limit storage
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: product-marketer-reviewer  
-Status: Confirmed privacy-copy issue
-
-Evidence: privacy copy in `apps/web/messages/en.json`; DB-backed `rate_limit_buckets.ip`; public actions call rate limiters.
-
-Failure scenario: privacy-conscious visitor believes no full IP is stored, while rate-limit buckets persist IPs temporarily.
-
-Fix: update privacy copy in English and Korean to distinguish analytics from short-lived abuse-prevention records.
-
-### AGG-C29-39 - Share links can be created in UI but not listed/revoked in UI
-
-Severity: Medium  
-Confidence: High  
-Cross-agent agreement: product-marketer-reviewer  
-Status: Confirmed product gap
-
-Evidence: create actions are used by UI; revoke/delete actions exist but no production UI call sites.
-
-Failure scenario: admin cannot revoke leaked share URLs from the app.
-
-Fix: add admin share-management UI. Defer if too large for this cycle, but record explicitly.
-
-### AGG-C29-40 - App-level backups can be misunderstood as complete file backups
-
-Severity: Low-Medium  
-Confidence: Medium  
-Cross-agent agreement: product-marketer-reviewer  
-Status: Likely documentation issue
-
-Evidence: README private-original/backups wording; DB page copy says DB only.
-
-Failure scenario: operator keeps SQL dump but loses original/derivative/resource files.
-
-Fix: add backup completeness note to Getting Started/Docker docs.
-
-### AGG-C29-41 - Semantic-search/demo claims depend on deployed operator state
-
-Severity: Low-Medium  
-Confidence: High  
-Cross-agent agreement: product-marketer-reviewer, verifier/test-engineer related CLIP coverage  
-Status: Manual-validation risk
-
-Evidence: README says semantic search; runtime depends on DB row, env opt-in, weights, embeddings.
-
-Failure scenario: live demo claims semantic search but deployed host is disabled/stub/no embeddings.
-
-Fix: validate host state before public claims and consider operator status readout.
-
-### AGG-C29-42 - Production sitemap and Playwright browser-flow validation remain runtime gaps
-
-Severity: Low  
-Confidence: Medium  
-Cross-agent agreement: code-reviewer  
-Status: Manual-validation risk
-
-Evidence: `sitemap.ts` intentionally falls back when local DB unavailable; Playwright was not fully run by code-reviewer.
-
-Failure scenario: production sitemap remains fallback-only or browser flows fail outside unit/build gates.
-
-Fix: post-deploy sitemap smoke and configured Playwright run when browser-flow evidence is required.
-
-## Aggregate Counts
-
-New findings produced this cycle: 42.
-
-High-signal cross-agent implementation candidates:
-
-1. `AGG-C29-01` rate-limit retention index/chunking.
-2. `AGG-C29-10` map privacy behavior coverage.
-3. `AGG-C29-11` semantic stub-ranking behavior coverage.
-4. `AGG-C29-13` public expensive GET rate-limit gate.
-5. `AGG-C29-17` restore-maintenance metadata guard.
-6. `AGG-C29-19` unignore `.context/plans`.
-7. `AGG-C29-21` app README first-upload GPS guidance.
-8. `AGG-C29-23` auto-alt-text docs.
-9. `AGG-C29-27` CLIP sidecar mode resolver.
-10. `AGG-C29-30` SimilarPhotos retry.
-11. `AGG-C29-33` theme hydration guard.
-12. `AGG-C29-34` GPS map publishing confirmation.
-13. `AGG-C29-36` stale admin E2E selectors.
-14. `AGG-C29-38` privacy copy for short-lived IP rate-limit buckets.
-
-Items requiring deferral/manual validation must be recorded in Prompt 2 with original severity/confidence preserved.
+### AGG-C30-01 - Restore prep can leave the image-processing queue paused after partial setup failure
+
+- Source agents: debugger
+- Severity/confidence: High / High
+- Evidence: `apps/web/src/app/[locale]/admin/db-actions.ts`, restore prep sequence around `quiesceImageProcessingQueueForRestore()`, `drainBackgroundDbWritesForRestore()`, and `imageQueueQuiesced`.
+- Problem: if quiescing the image queue succeeds but a later restore-prep step fails before `imageQueueQuiesced` is set, the cleanup path can skip queue resume even though the queue is already paused.
+- Failure scenario: a transient DB/write-drain failure during restore preparation leaves normal image processing paused after restore fails early.
+- Suggested fix: mark the queue as quiesced immediately after the quiesce call succeeds, before later prep steps, and lock the ordering in a regression test.
+
+### AGG-C30-02 - Map privacy tests do not execute `getMapImages()`
+
+- Source agents: verifier, test-engineer
+- Severity/confidence: High / High (highest from test-engineer)
+- Evidence: `apps/web/src/__tests__/map-privacy.test.ts`; `apps/web/src/lib/data.ts` `getMapImages()`.
+- Problem: existing coverage checked source strings and reimplemented guard logic, but did not run the production function that exposes GPS-bearing public map rows.
+- Failure scenario: a refactor can preserve strings or test-only guard logic while changing the actual query/return path, weakening the map privacy contract without a failing behavior test.
+- Suggested fix: add a mocked DB-chain behavior test that invokes `getMapImages()`, verifies the map-visible/GPS query shape, and verifies the runtime leak guard throws on a bad row.
+
+### AGG-C30-03 - Expensive public GET linting proves limiter presence, not limiter dominance
+
+- Source agents: verifier
+- Severity/confidence: Medium / Medium
+- Evidence: `apps/web/scripts/check-public-route-rate-limit.ts`; `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
+- Problem: the public route scanner accepted an expensive GET handler if a rate-limit helper appeared anywhere in the handler body, even after DB/image/embedding work.
+- Failure scenario: a public route could run expensive work and only then reject as rate-limited, defeating the protection during abuse.
+- Suggested fix: require a pre-increment rate-limit gate before expensive marker statements for public expensive GET handlers and add passing/failing tests.
+
+### AGG-C30-04 - `AGENTS.md` contradicts the public-route rate-limit GET gate
+
+- Source agents: document-specialist
+- Severity/confidence: Medium / High
+- Evidence: `AGENTS.md` quality-gate list; `apps/web/scripts/check-public-route-rate-limit.ts`.
+- Problem: docs still said GET handlers are not scanned even though the gate scans expensive GET handlers.
+- Failure scenario: future agents may add or review public GET routes using stale instructions and accidentally weaken rate-limit coverage.
+- Suggested fix: update the AGENTS gate description to mention expensive GET handlers and cheap operational GET exemptions.
+
+### AGG-C30-05 - Live keyword search fails for a normal visible gallery term
+
+- Source agents: critic, designer, ui-ux-designer-reviewer, product-marketer-reviewer
+- Severity/confidence: High / High for live symptom, Medium for root cause
+- Evidence: live browser review of the public search UI, plus search UI copy in `apps/web/src/components/search.tsx` and messages in `apps/web/messages/*.json`.
+- Problem: the live demo returned a generic failure for a normal query, blocking a primary discovery workflow and weakening the "operator-controlled search" claim.
+- Failure scenario: visitors search for a visible name/term, receive a generic failure, and cannot distinguish temporary search unavailability from no results or input issues.
+- Suggested fix: make the generic failure copy accurately state temporary unavailability, keep short-query UX distinct, and validate the production root cause with logs or live request evidence when available.
+
+### AGG-C30-06 - `/api/health` behavior/docs need liveness-vs-readiness clarity
+
+- Source agents: verifier, debugger
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/src/app/api/health/route.ts`; `apps/web/src/__tests__/health-route.test.ts`; docs references in `README.md`, `apps/web/README.md`, and `CLAUDE.md`.
+- Problem: reviewers flagged potential confusion around default liveness-only behavior versus optional DB readiness and restore-maintenance responses.
+- Failure scenario: an operator points a public liveness probe at a readiness mode or interprets restore-maintenance `503` as a container crash instead of intentional unavailability.
+- Suggested fix: retain current tests and docs if they are already aligned; otherwise clarify docs.
+
+### AGG-C30-07 - Dormant local storage backend validates a path, then reopens by path
+
+- Source agents: code-reviewer, architect
+- Severity/confidence: Medium / Medium (architect), Low / Medium (code-reviewer)
+- Evidence: `apps/web/src/lib/storage/local.ts`; contrast with `apps/web/src/lib/serve-upload.ts` and `apps/web/src/lib/process-image.ts`.
+- Problem: the future storage abstraction does not preserve the live pipeline's opened-handle read validation and atomic temp-rename write behavior.
+- Failure scenario: if future image/resource paths are routed through this backend, readers may observe partial writes or path swaps between validation and open.
+- Suggested fix: harden the backend before live adoption or explicitly quarantine it as not suitable for the live image pipeline.
+
+### AGG-C30-08 - Service worker LRU metadata updates can lose entries under concurrent image fetches
+
+- Source agents: perf-reviewer, performance-reviewer, tracer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/public/sw.template.js` image-cache metadata update flow.
+- Problem: concurrent cache writes can read, mutate, and write shared metadata without serialization.
+- Failure scenario: one fetch overwrites another fetch's metadata update, causing inaccurate LRU pruning and cache growth/eviction drift.
+- Suggested fix: serialize image-cache metadata updates or use a merge/update helper that re-reads before commit.
+
+### AGG-C30-09 - Color pipeline sidecar materializes all candidates and schedules all tasks before draining
+
+- Source agents: perf-reviewer, performance-reviewer, tracer
+- Severity/confidence: Medium / High
+- Evidence: `scripts/backfill-color-pipeline.ts`.
+- Problem: the sidecar can materialize all candidate rows and enqueue all tasks up front instead of bounded causal batches.
+- Failure scenario: large libraries put avoidable memory and queue pressure on the sidecar/DB during operator backfills.
+- Suggested fix: page candidates and schedule bounded batches with progress persisted between batches.
+
+### AGG-C30-10 - Public map can serialize and hydrate up to 10,000 markers plus a 10,000-item fallback list
+
+- Source agents: perf-reviewer, performance-reviewer, critic, designer, ui-ux-designer-reviewer, product-marketer-reviewer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/src/lib/data.ts` `MAP_MAX_MARKERS`; `apps/web/src/app/[locale]/(public)/map/page.tsx`; `apps/web/src/components/map/map-client.tsx`.
+- Problem: the DB cap prevents unbounded queries but still permits a very large client payload, DOM/list fallback, and assistive-technology surface.
+- Failure scenario: a map-visible collection near the cap creates slow mobile hydration and overwhelming keyboard/screen-reader navigation.
+- Suggested fix: add clustering, viewport/bbox loading, accessible pagination/virtualization, and smaller initial payload limits.
+
+### AGG-C30-11 - Semantic and similar search remain request-thread brute-force scans
+
+- Source agents: architect, perf-reviewer, performance-reviewer, tracer, critic, designer, product-marketer-reviewer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/src/lib/clip-embeddings.ts`; `apps/web/src/app/api/search/semantic/route.ts`; `apps/web/src/app/api/search/similar/[id]/route.ts`.
+- Problem: semantic requests read and score many embeddings in the Next.js request process, bounded only by configurable scan caps.
+- Failure scenario: higher corpus size or raised scan limits can monopolize CPU/DB time and make older relevant images undiscoverable beyond the newest-first scan window.
+- Suggested fix: move retrieval behind a vector/search boundary, precomputed candidate layer, worker architecture, or measured production cap.
+
+### AGG-C30-12 - Public exact counts remain on dynamic first-page and smart-collection queries
+
+- Source agents: perf-reviewer, performance-reviewer, tracer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/src/lib/data.ts` first-page listing and smart collection count paths.
+- Problem: exact grouped totals still run on hot public paths.
+- Failure scenario: first paint for listing pages couples to count-query cost as the gallery grows.
+- Suggested fix: replace exact totals with cached/approximate/deferred counts where product copy permits.
+
+### AGG-C30-13 - Leading-wildcard public search predicates can force text scans
+
+- Source agents: perf-reviewer, performance-reviewer
+- Severity/confidence: Medium / Medium
+- Evidence: `apps/web/src/lib/data.ts` public keyword search; `apps/web/src/app/actions/public.ts`.
+- Problem: contains-style predicates are hard for MySQL indexes to satisfy.
+- Failure scenario: search traffic over a larger corpus burns DB CPU even when results are limited.
+- Suggested fix: use a full-text/ngram/search index or a dedicated search path.
+
+### AGG-C30-14 - Real CLIP activation tests are skipped by default CI
+
+- Source agents: test-engineer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/src/__tests__/clip-offline-load.test.ts`; `apps/web/src/__tests__/clip-semantic-integration.test.ts`; CI workflow.
+- Problem: real model loading/integration tests depend on external weights and are skipped by default.
+- Failure scenario: dependency/runtime drift breaks production CLIP activation while the normal gate remains green.
+- Suggested fix: add scheduled or release-gated CI with cached weights and explicit operator-mode validation.
+
+### AGG-C30-15 - Important public pages lack browser smoke coverage
+
+- Source agents: test-engineer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/e2e/**`; public route set under `apps/web/src/app/[locale]/(public)`.
+- Problem: map/timeline/year/smart-collection public flows are not covered by browser smoke tests.
+- Failure scenario: SSR/hydration or responsive issues ship despite unit/source gates.
+- Suggested fix: add seeded Playwright smoke flows for the missing public pages.
+
+### AGG-C30-16 - Nav visual tests save screenshots but do not compare baselines
+
+- Source agents: test-engineer
+- Severity/confidence: Low / High
+- Evidence: `apps/web/e2e/nav-visual-check.spec.ts`.
+- Problem: screenshot artifacts are captured but not asserted against baselines.
+- Failure scenario: visual regressions are only noticed manually after reviewing artifacts.
+- Suggested fix: adopt stable screenshot baselines or remove "visual" implication from the test name/docs.
+
+### AGG-C30-17 - E2E browser matrix is desktop Chromium only
+
+- Source agents: test-engineer
+- Severity/confidence: Medium / High
+- Evidence: `apps/web/playwright.config.ts`; CI workflow.
+- Problem: WebKit/mobile/P3-relevant browser behavior is not covered in the regular E2E matrix.
+- Failure scenario: Safari/mobile rendering or interaction regressions escape gates.
+- Suggested fix: add targeted WebKit/mobile lanes for color/navigation/gallery-critical paths when CI budget allows.
+
+### AGG-C30-18 - Share links can be created from UI but not listed or revoked from UI
+
+- Source agents: critic, designer, ui-ux-designer-reviewer, product-marketer-reviewer
+- Severity/confidence: Medium / High
+- Evidence: share creation UI/actions versus lack of admin management/revoke affordance.
+- Problem: share lifecycle is incomplete for client-delivery trust.
+- Failure scenario: an admin creates a link, later cannot discover or revoke it through the UI after circumstances change.
+- Suggested fix: build a share management UI that lists active links, exposes metadata, and calls existing revoke/delete capabilities.
+
+### AGG-C30-19 - Search result list keyboard behavior is unproven because live results fail
+
+- Source agents: ui-ux-designer-reviewer
+- Severity/confidence: Medium / Medium
+- Evidence: live browser search failure and `apps/web/src/components/search.tsx`.
+- Problem: the result-list keyboard design cannot be validated end-to-end while normal live search returns errors.
+- Failure scenario: focus/keyboard issues in result navigation remain hidden behind the failure path.
+- Suggested fix: after search works live, run browser/a11y smoke coverage for search results.
+
+### AGG-C30-20 - Generic route error shell hides product-specific recovery context
+
+- Source agents: critic, designer, ui-ux-designer-reviewer
+- Severity/confidence: Low-Medium / Medium
+- Evidence: `apps/web/src/app/[locale]/error.tsx` and live DB/search failure UX.
+- Problem: generic public error copy does not distinguish gallery maintenance, search unavailability, DB outage, or retryable failures.
+- Failure scenario: users see a generic shell with no useful next action or expectation.
+- Suggested fix: add context-aware error states for public gallery failures.
+
+### AGG-C30-21 - Semantic-search copy is prominent relative to operational maturity
+
+- Source agents: designer, product-marketer-reviewer
+- Severity/confidence: Medium / High
+- Evidence: README/public copy and search UI positioning.
+- Problem: semantic search is honestly gated, but still prominent next to a failing baseline search path and operational setup complexity.
+- Failure scenario: visitors infer AI search is a polished core feature while operator state or fallback behavior is not ready.
+- Suggested fix: rebalance copy and status indicators after live search and semantic ops validation.
+
+### AGG-C30-22 - Backup completeness remains easy to misunderstand
+
+- Source agents: product-marketer-reviewer
+- Severity/confidence: Low-Medium / Medium
+- Evidence: top-level README backup/private-original positioning.
+- Problem: SQL backup/restore is easy to confuse with full rollback of DB plus mutable file stores.
+- Failure scenario: an operator keeps SQL dumps but misses private originals, derivatives, or runtime resources needed for full restore.
+- Suggested fix: keep DB-vs-file backup wording prominent in README/deploy docs.
+
+### AGG-C30-23 - Public TLS/header-trust topology needs live validation
+
+- Source agents: security-reviewer, performance-reviewer, tracer
+- Severity/confidence: Medium / Medium
+- Evidence: `TRUST_PROXY`/nginx topology, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`.
+- Problem: source assumes documented trusted-hop topology; production must match it.
+- Failure scenario: direct app exposure or forwarded-header chain mismatch can break origin checks or rate-limit identity.
+- Suggested fix: validate the deployed edge chain and document the observed hop configuration.
+
+### AGG-C30-24 - Admin DB restore dump provenance and grants are a hard trust boundary
+
+- Source agents: security-reviewer
+- Severity/confidence: Medium / Medium
+- Evidence: admin DB restore path in `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- Problem: restore intentionally imports security-sensitive tables from SQL dumps.
+- Failure scenario: an admin imports an untrusted or tampered dump and restores malicious admin/session/settings state.
+- Suggested fix: keep restore admin-only, document dump provenance requirements, and validate operational grants.
+
+### AGG-C30-25 - Public map publishes exact GPS for opted-in topics; operator intent must be verified
+
+- Source agents: security-reviewer
+- Severity/confidence: Low / High
+- Evidence: `apps/web/src/lib/data.ts` map select and admin topic map-visible behavior.
+- Problem: the behavior is intentional but privacy-sensitive.
+- Failure scenario: an operator toggles map visibility without understanding exact GPS publication.
+- Suggested fix: retain explicit admin confirmation/copy and validate operator understanding in UX.
+
+### AGG-C30-26 - Timeline archive date functions need production scale validation
+
+- Source agents: perf-reviewer, performance-reviewer, tracer
+- Severity/confidence: Low / Medium
+- Evidence: `apps/web/src/lib/data-timeline.ts`.
+- Problem: non-sargable date extraction is documented but still scale-dependent.
+- Failure scenario: archive routes become slow on larger datasets.
+- Suggested fix: run production `EXPLAIN`/slow-query validation before archive scale grows.
+
+### AGG-C30-27 - Queue/deploy shutdown budget may be too small for worst-case image side effects
+
+- Source agents: performance-reviewer
+- Severity/confidence: Low / Low
+- Evidence: queue/deploy shutdown interactions and image side-effect paths.
+- Problem: worst-case shutdown duration is not measured.
+- Failure scenario: deploy shutdown truncates long-running image work.
+- Suggested fix: measure shutdown under large in-flight processing and tune budget if needed.
+
+## AGENT FAILURES
+
+None. Named specialist roles were not all directly available as native callable agent names, so review lanes were grouped through available native subagents; each required reviewer perspective produced its own provenance file. No lane remained failed after retry.

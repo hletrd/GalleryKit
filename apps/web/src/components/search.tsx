@@ -25,7 +25,7 @@ import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 // AGG-C8-04 (run-6 cycle-8): the semantic route rejects queries shorter than this
 // many code points with HTTP 400 (api/search/semantic/route.ts: `countCodePoints(query) < 3`).
 // Mirror that minimum client-side so a short semantic query shows the helpful
-// "too short" message instead of mapping the 400 to "Search failed. Please try again."
+// "too short" message instead of mapping the 400 to the generic unavailable state.
 const SEMANTIC_MIN_QUERY_CODEPOINTS = 3;
 
 interface SearchProps {
@@ -172,7 +172,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             if (semantic) {
                 // AGG-C8-04 (run-6 cycle-8): guard the semantic minimum client-side.
                 // Without this, a 1-2 char query reaches the route, returns 400, and
-                // falls through to the generic 'error' branch ("Search failed."). The
+                // falls through to the generic 'error' branch. The
                 // keyword path surfaces a helpful message for the analogous case, so the
                 // semantic path should too.
                 if (countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS) {

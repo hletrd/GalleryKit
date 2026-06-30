@@ -1,249 +1,187 @@
-# Cycle 29 Performance Reviewer Report
+# Cycle 30 Perf Reviewer Report
 
-Review target: `/Users/hletrd/flash-shared/gallery`
-Review role: `cycle-29 perf-reviewer`
-HEAD reviewed: `b4fa1f64`
-Mode: review-only. Product code was not changed; this report is the only intended edit.
+Review target: current HEAD `666b74f8704024bb1a1fa1faa02a8e34114e678c`
+Review role: `perf-reviewer`
+Mode: review-only. Product code was not changed.
 
 ## Inventory
 
-Required context read first:
+Read first:
 
 - `AGENTS.md`
 - `CLAUDE.md`
 
-Repository inventory evidence:
+Current source inventory:
 
-- `rg --files apps/web/src apps/web/scripts apps/web/drizzle apps/web/public apps/web/e2e | wc -l` => 765 review-relevant source/script/schema/public/e2e files.
-- Broad content inventory used `rg` over `sharp`, `processImage`, `PQueue`, `queue`, `concurrency`, `cache(`, `revalidate`, `fetch(`, `Promise.all`, timers, `Map`, rate limiting, SQL/Drizzle/MySQL, service worker, observers, React memoization, masonry, analytics views, semantic embeddings, CLIP, backfill, cleanup, retention, pool, and transaction patterns.
+- `apps/web/src`: 518 TypeScript/JavaScript source files, 81,758 lines.
+- Largest active files inspected: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, semantic search routes, service worker cache code, map UI, rate-limit code, deploy/runtime config.
+- Runtime shape from `CLAUDE.md`: one web instance, process-local queues and maps, MySQL pool size 10, image queue default concurrency 1, service worker image cache cap 50 MB, public dynamic gallery pages use `revalidate = 0`.
 
-Relevant surfaces examined:
+Review sweeps covered:
 
-- Image processing, upload, queues, storage, cleanup, and backfills: `apps/web/src/lib/process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, `process-topic-image.ts`, `upload-paths.ts`, `upload-tracker*.ts`, `storage/*`, `scripts/backfill-color-pipeline.ts`, `scripts/backfill-clip-embeddings.ts`.
-- DB/data/query/cache surfaces: `apps/web/src/db/index.ts`, `db/schema.ts`, `lib/data.ts`, `data-timeline.ts`, `analytics-data.ts`, `analytics.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, `view-retention.ts`, `gallery-config*.ts`, `settings-hash.ts`, `smart-collections.ts`, `serve-upload.ts`.
-- Public/admin routes and actions: public pages under `apps/web/src/app/[locale]/(public)`, API routes under `apps/web/src/app/api`, actions under `apps/web/src/app/actions`, admin DB/analytics/settings/dashboard pages.
-- Client/UI responsiveness surfaces: `home-client.tsx`, `load-more.tsx`, `search.tsx`, `similar-photos.tsx`, `map/*`, `histogram.tsx`, `lightbox.tsx`, `photo-viewer.tsx`, `image-zoom.tsx`, `upload-dropzone.tsx`, `image-manager.tsx`.
-- Static worker/cache/runtime/deploy config: `apps/web/public/sw.template.js`, `sw.js`, `histogram-worker.js`, `next.config.ts`, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `deploy.sh`.
-- Existing tests relevant to this review: queue/backfill/view-retention/rate-limit/search/semantic/map/service-worker/touch-target/source-contract tests under `apps/web/src/__tests__/`.
+- DB query shape: gallery listing, smart collections, keyword search, timeline, map, semantic search, feeds, analytics, rate-limit buckets.
+- CPU/memory: Sharp fan-out, CLIP/embedding decode and scoring, service worker metadata, sidecar queues, map hydration, masonry load-more.
+- Concurrency and async traces: image queue claims, backfill locks, upload/restore drains, background side effects, service worker read-modify-write paths.
+- Bounded-map/rate-limit growth: in-memory maps, DB bucket purge, proxy/IP behavior.
 
-## Findings Summary
+## Confirmed Issues
 
-Total findings: 9.
+### PERF30-01 - Service worker LRU metadata updates can lose entries under concurrent image fetches
 
-- Confirmed issues: 5
-- Likely risks: 3
-- Manual-validation risk: 1
-- Highest severity: Medium
-
-## Findings
-
-### PERF-29-01 - Semantic and similar search do synchronous O(N * 512) scoring on the Node request thread
-
-Status: Confirmed
 Severity: Medium
 Confidence: High
+Status: Confirmed issue
 
 Evidence:
 
-- `apps/web/src/app/api/search/semantic/route.ts:263-311` fetches up to `SEMANTIC_SCAN_LIMIT` embeddings, decodes every row, computes similarity in `.map(...)`, then sorts via `topK`.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:164-201` repeats the same full-scan/dot-product path for image similarity.
-- `apps/web/src/lib/clip-embeddings.ts:36-44` allows `SEMANTIC_SCAN_LIMIT` up to 25,000 rows.
-- `apps/web/src/lib/clip-embeddings.ts:141-152` decodes every embedding row into a fresh `Float32Array` before scoring.
+- `apps/web/public/sw.template.js:100-130` implements `recordAndEvict()` as `getMeta() -> mutate Map -> setMeta(entries)`.
+- `apps/web/public/sw.template.js:161-175` implements `touchMeta()` with the same whole-document read-modify-write pattern.
+- `apps/web/public/sw.template.js:177-181` implements `deleteMeta()` with the same pattern.
+- `apps/web/public/sw.template.js:203-217` calls `recordAndEvict()` from revalidating GETs.
+- `apps/web/public/sw.template.js:258-262` calls `touchMeta()` asynchronously on the 304 HEAD path.
 
 Failure scenario:
 
-Production semantic search is enabled and the scan limit is raised for recall. A few concurrent semantic/similar requests return from MySQL, then each request decodes thousands of 2048-byte vectors and runs millions of multiply/add operations plus sorting on the main Node event loop. During those loops, the single web process delays SSR, server actions, queue callbacks, and admin work even though CLIP inference itself is separately queued.
+A warm masonry page paints many cached derivatives while several missing or stale images revalidate at the same time. Multiple service worker requests read the same `/__meta__` JSON blob, each mutates its local `Map`, and each writes the entire blob back. The last writer wins. Cache entries remain in `IMAGE_CACHE`, but their metadata entries can disappear, so the 50 MB LRU cap undercounts real cache bytes and future eviction cannot delete lost entries. The user sees browser quota churn, repeated cold fetches, and incorrect recency after busy gallery paints.
 
-Fix:
+Suggested fix:
 
-Move scan/scoring off the request event loop or avoid brute-force scoring there. Short term: add a process-global semaphore for semantic scan/scoring and chunk/yield with `setImmediate` between batches. Better: use worker threads or a sidecar for decode/scoring. Long term: use a vector index/ANN service or DB-side vector capability so public requests fetch only candidate IDs. Keep `SEMANTIC_SCAN_LIMIT` low until this is addressed.
+Serialize metadata mutations in the service worker with a process-global promise chain or mutex around `getMeta/mutate/setMeta`. A stronger fix is to store one metadata record per URL in IndexedDB or a cache entry that can be updated independently. Add a service-worker test that runs concurrent `recordAndEvict()` and `touchMeta()` calls against the same starting metadata and asserts no unrelated entry is lost.
 
-### PERF-29-02 - Public map can still serialize and mount up to 10,000 markers plus 10,000 list rows
+### PERF30-02 - Color pipeline sidecar materializes all candidates and enqueues all tasks before draining
 
-Status: Confirmed
 Severity: Medium
 Confidence: High
+Status: Confirmed issue
 
 Evidence:
 
-- `apps/web/src/lib/data.ts:1649-1685` hard-caps map rows at `MAP_MAX_MARKERS = 10000`.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:38-56` fetches all map images server-side and maps them into client props.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:74-95` renders the map plus a full fallback `<ul>` item for every marker.
-- `apps/web/src/components/map/map-client.tsx:86-90` allocates latitude/longitude arrays and spreads them into `Math.min` / `Math.max`.
-- `apps/web/src/components/map/map-client.tsx:119-140` renders one React Leaflet `<Marker>` and `<Popup>` per marker.
+- `apps/web/scripts/backfill-color-pipeline.ts:343-360` selects every processed stale candidate into `rows` with no `LIMIT`.
+- `apps/web/scripts/backfill-color-pipeline.ts:475-512` iterates all `rows`, adds one PQueue closure per row, then waits for `queue.onIdle()`.
+- `apps/web/src/lib/admin-backfill-runner.ts:394-423` shows the safer in-app shape: keyset-paginated batches of 100 candidates.
 
 Failure scenario:
 
-An admin enables map visibility for a large travel/archive topic. A visitor opens `/map`; the server serializes thousands of marker props, the client hydrates Leaflet, creates thousands of marker/popup components, and also renders the accessible list. Mid-range mobile browsers can freeze or become unresponsive despite the DB result being technically bounded.
+After a pipeline version bump or with `--force-reencode`, a large gallery can have tens of thousands of processed candidates. The sidecar asks MySQL to materialize the full result and then stores the full row array plus one pending closure per image before the queue has drained. On a disk-constrained or memory-constrained deploy host, the script can inflate RSS, slow MySQL with a large initial result, or OOM before useful progress is committed.
 
-Fix:
+Suggested fix:
 
-Make `/map` viewport/cluster based. Lower the initial cap to a UI-safe number, load markers by bbox/zoom, use marker clustering or a canvas/vector layer, paginate or limit the fallback list, and replace the spread-based bounds calculation with a single loop.
+Mirror the in-app runner: fetch `id > cursor ORDER BY id ASC LIMIT 100`, enqueue only that batch, drain it, flush DB updates, then fetch the next batch. Keep per-batch counters and update arrays local to the batch. If the script must preserve a start-of-run snapshot, stream IDs to a small temp table instead of keeping all candidates and closures in Node memory.
 
-### PERF-29-03 - Rate-limit bucket GC deletes by an unindexed suffix and is unchunked
+### PERF30-03 - Public map can serialize and hydrate up to 10,000 markers plus a 10,000-item fallback list
 
-Status: Confirmed
 Severity: Medium
 Confidence: High
+Status: Confirmed issue
 
 Evidence:
 
-- `apps/web/src/db/schema.ts:212-219` defines `rate_limit_buckets` with primary key `(ip, bucket_type, bucket_start)` and no index leading with `bucket_start`.
-- `apps/web/src/lib/rate-limit.ts:515-517` purges expired rows with one `DELETE ... WHERE bucket_start < cutoff`.
-- `apps/web/src/lib/image-queue.ts:1019-1045` runs this purge at startup and hourly from the queue GC timer.
-- In contrast, `apps/web/src/lib/view-retention.ts:64-90` uses indexed, chunked deletion for view-event retention.
+- `apps/web/src/lib/data.ts:1667-1685` returns up to `MAP_MAX_MARKERS` map rows.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:41-60` fetches all rows server-side and serializes every marker into client props.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:87-96` renders a normal list item for every marker.
+- `apps/web/src/components/map/map-client.tsx:86-90` allocates latitude/longitude arrays and spreads them into `Math.min`/`Math.max`.
+- `apps/web/src/components/map/map-client.tsx:119-140` renders one React Leaflet `Marker` and `Popup` subtree per marker.
 
 Failure scenario:
 
-A rotating-IP bot creates many rate-limit buckets across public search/load-more/view-record endpoints. The hourly purge must scan the table to find expired rows because `bucket_start` is the third PK column, then deletes all matches in one statement. On the shared MySQL writer this can produce lock/CPU spikes and connection-pool queueing for live requests.
+An admin marks a large travel/archive topic as map-visible. A visitor opens `/map`; the server serializes thousands of markers, the browser hydrates thousands of Leaflet marker components and thousands of list items, and bounds fitting allocates and spreads two large arrays. Mid-range mobile browsers can freeze or become unresponsive even though the DB result is bounded.
 
-Fix:
+Suggested fix:
 
-Add a migration with an index leading on `bucket_start`, for example `(bucket_start, ip, bucket_type)`, then make `purgeOldBuckets` batch with a delete limit and bounded loop like `view-retention.ts`.
+Lower the initial client payload to a UI-safe count and load markers by viewport/bbox. Use clustering or a canvas/vector layer for map rendering, and virtualize or paginate the fallback list. Replace the spread-based bounds calculation with a single loop.
 
-### PERF-29-04 - Public keyword search uses leading-wildcard LIKE scans across images, tags, and aliases
+## Likely Issues
 
-Status: Confirmed
+### PERF30-04 - Semantic search scan limits allow request-thread decode, score, and full sort costs to scale too high
+
 Severity: Medium
 Confidence: High
+Status: Likely issue
 
 Evidence:
 
-- `apps/web/src/app/actions/public.ts:236-306` exposes public keyword search with rate limiting.
-- `apps/web/src/lib/data.ts:1545-1563` searches title, description, camera model, lens model, topic slug, and topic label with `containsLike`.
-- `apps/web/src/lib/data.ts:1590-1621` then runs tag and topic-alias joined branches, also with `containsLike`, when the first branch does not fill the result limit.
-- The schema indexes at `apps/web/src/db/schema.ts:116-120` support gallery chronology/topic/user-filename patterns, not leading-wildcard contains search.
+- `apps/web/src/lib/clip-embeddings.ts:36-44` allows `SEMANTIC_SCAN_LIMIT` and `SEMANTIC_TOP_K_MAX` up to 25,000.
+- `apps/web/src/app/api/search/semantic/route.ts:270-279` fetches up to that many embedding blobs for the active model.
+- `apps/web/src/app/api/search/semantic/route.ts:301-311` decodes every embedding, computes every score, and then calls `topK()`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:164-201` repeats the same scan and score pattern for similar-image search.
+- `apps/web/src/lib/clip-embeddings.ts:164-168` filters and sorts the full scored array before slicing.
 
 Failure scenario:
 
-On a larger gallery, common short queries force scans over processed images and, if the first branch returns fewer than 20 rows, additional joined scans over tags and aliases. A few concurrent users or scripted searches drive DB CPU/filesort pressure despite per-IP rate limiting.
+Production semantic search is enabled and an operator raises `SEMANTIC_SCAN_LIMIT` for recall. Ten concurrent requests at the 25,000-row cap can fetch hundreds of MB of embedding blobs from MySQL, allocate many `Float32Array`s, compute millions of dot-product operations, and sort large arrays on the single Node event loop. Public SSR, server actions, queue callbacks, and admin requests can stall behind GC and CPU work even though the endpoint is rate-limited.
 
-Fix:
+Suggested fix:
 
-Introduce a purpose-built search index: MySQL FULLTEXT where acceptable, or an ngram/search table for Korean/partial matching. Raise the minimum keyword length for contains search, make tag/alias lookup exact or prefix where possible, and consider short TTL caching for frequent public queries.
+Keep the production cap lower until a different retrieval path exists. Replace full sort with a fixed-size min-heap. Chunk scoring and yield between batches, or move decode/scoring to worker threads or a sidecar. Long term, use an ANN/vector index so public requests retrieve only candidate IDs.
 
-### PERF-29-05 - Timeline, year, and On This Day queries apply non-sargable date functions to `capture_date`
+### PERF30-05 - Public exact counts remain on first-page listing and smart-collection queries
 
-Status: Likely risk
 Severity: Medium
 Confidence: High
+Status: Likely issue
 
 Evidence:
 
-- `apps/web/src/lib/data-timeline.ts:97-116` uses `MONTH(capture_date)` and `DAY(capture_date)` for On This Day.
-- `apps/web/src/lib/data-timeline.ts:129-141` uses `YEAR(capture_date)` for the year index.
-- `apps/web/src/lib/data-timeline.ts:186-207` uses `YEAR(capture_date)` and optional `MONTH(capture_date)` for timeline/year pages.
-- `apps/web/src/db/schema.ts:116-118` has `(processed, capture_date, created_at)` and topic/capture-date indexes, but function-wrapped `capture_date` prevents range use beyond the `processed` prefix.
+- `apps/web/src/lib/data.ts:878-907` adds `COUNT(*) OVER()` to the public listing query while also joining tags, grouping by image ID, ordering chronologically, and limiting to `pageSize + 1`.
+- `apps/web/src/lib/data.ts:1417-1460` uses a cursor path for later smart-collection pages but keeps `COUNT(*) OVER()` on the initial/offset path.
+- `apps/web/src/lib/data.ts:856-875` only needs `rows.length > pageSize` for `hasMore`; the exact `totalCount` is additional hot-path work.
 
 Failure scenario:
 
-As the gallery grows, public `/timeline`, `/year/[year]`, and homepage On This Day calls scan the processed image slice and evaluate date functions row-by-row before returning capped results. The code comments already acknowledge the issue; the risk becomes material when image count grows past personal-gallery scale or crawler traffic hits these dynamic routes repeatedly.
+The homepage, topic pages, or public smart-collection first pages receive crawler or visitor traffic. Each request returns about 30 visible cards but asks MySQL to compute an exact grouped total over every matching row. On galleries with many tags or broad smart collections, this turns the hottest unauthenticated page into a scan/count/sort workload.
 
-Fix:
+Suggested fix:
 
-Use range predicates for year/month pages: `capture_date >= 'YYYY-01-01' AND capture_date < 'YYYY+1-01-01'`, and month ranges inside the selected year. For On This Day, add generated/indexed month/day columns or maintain a small calendar lookup table indexed as `(processed, capture_month, capture_day, capture_date, created_at, id)`.
+Remove exact public totals from dynamic hot paths. Use `LIMIT pageSize + 1` for pagination and show "more" rather than exact counts, or read counts from a cached/materialized rollup updated by image/tag mutations. For smart collections, keep the cursor-safe query shape even on page 1 when possible.
 
-### PERF-29-06 - Feed and sitemap freshness ordering lacks a supporting image index
+### PERF30-06 - Public keyword and smart-collection contains predicates can force text scans
 
-Status: Likely risk
-Severity: Low
-Confidence: High
-
-Evidence:
-
-- `apps/web/src/lib/data.ts:828-853` orders feeds by `updated_at DESC, created_at DESC, id DESC`.
-- `apps/web/src/lib/data.ts:1635-1646` orders sitemap image IDs the same way, with a limit up to 50,000.
-- `apps/web/src/db/schema.ts:116-120` has processed/capture-date, processed/created-at, topic/capture-date, user-filename, and uploaded-by indexes, but no `(processed, updated_at, created_at, id)` index.
-- `apps/web/src/app/feed.xml/route.ts:29-40` and `apps/web/src/app/sitemap.ts:40-49` call these helpers.
-
-Failure scenario:
-
-Crawlers/feed readers request feed and sitemap around upload/edit periods. The route frequency is mitigated by conditional/feed logic and sitemap ISR, but each run still sorts processed rows by `updated_at` without an index aligned to the ordering. Sitemap can request many IDs.
-
-Fix:
-
-Add `(processed, updated_at, created_at, id)`. If topic feeds are important, add `(topic, processed, updated_at, created_at, id)` or first fetch ordered IDs from the freshness index and then aggregate tags only for those IDs.
-
-### PERF-29-07 - First-page gallery and smart-collection loads compute exact total count via `COUNT(*) OVER()` on grouped listing queries
-
-Status: Likely risk
 Severity: Medium
-Confidence: High
+Confidence: Medium
+Status: Likely issue
 
 Evidence:
 
-- `apps/web/src/lib/data.ts:878-907` adds `COUNT(*) OVER()` to the public listing query with `LEFT JOIN imageTags`, `LEFT JOIN tags`, `GROUP BY images.id`, chronological ordering, and `LIMIT pageSize + 1`.
-- `apps/web/src/lib/data.ts:856-875` reads `total_count` only to return `totalCount`; `hasMore` is already derivable from `limit + 1`.
-- `apps/web/src/app/[locale]/(public)/page.tsx:171-173` calls this for the public homepage.
-- `apps/web/src/lib/data.ts:1325-1364` applies the same pattern to initial smart-collection pages, called by `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:106-107`.
+- `apps/web/src/lib/data.ts:1545-1563` searches title, description, camera, lens, topic slug, and topic label with `containsLike()`.
+- `apps/web/src/lib/data.ts:1590-1621` falls back to tag and alias branches that also use `containsLike()` and run in parallel.
+- `apps/web/src/lib/smart-collections.ts:221-223` compiles field `contains` predicates to `containsLike()`.
+- `apps/web/src/lib/smart-collections.ts:261-267` compiles tag `contains` predicates through a subquery with `containsLike(tags.name, ...)`.
 
 Failure scenario:
 
-The root gallery or a public smart collection receives regular traffic with thousands of tagged images. Each initial page returns about 30 visible rows but asks MySQL to compute the exact grouped total. That turns a bounded listing into an all-matching-row count/sort cost on hot public pages.
+Common short search terms or admin-created public smart collections with broad `contains` predicates trigger leading-wildcard scans over image text columns, tags, and aliases. Per-IP budgets and page-size caps bound result volume, but they do not make the DB predicates sargable. Public requests can still spend CPU scanning and grouping rows.
 
-Fix:
+Suggested fix:
 
-Remove exact counts from the hot path. Show loaded count plus "more", use a cached/materialized count maintained on image/tag mutations, or fetch counts separately behind a TTL. Keep `LIMIT pageSize + 1` for pagination.
+Introduce a search-specific index: MySQL FULLTEXT where acceptable, an ngram table for Korean/partial search, or a normalized token table for tags/topics. Raise minimum lengths for contains search, prefer exact/prefix matching for tag and alias branches, and add EXPLAIN-based guardrails for public smart collections before publishing them.
 
-### PERF-29-08 - Upload and bulk tag paths resolve tags serially with multiple DB round trips per tag
+## Risks Needing Manual Validation
 
-Status: Confirmed
-Severity: Low
-Confidence: High
+### PERF30-07 - Timeline and On This Day routes use documented non-sargable date functions
 
-Evidence:
-
-- `apps/web/src/app/actions/images.ts:301-329` loops over every unique upload tag and awaits `ensureTagRecord` serially.
-- `apps/web/src/lib/tag-records.ts:66-68` implements `ensureTagRecord` as `insert ignore` followed by `selectTagByNameOrSlug`.
-- `apps/web/src/lib/tag-records.ts:29-44` can run two SELECTs per tag after the insert.
-- `apps/web/src/app/actions/images.ts:1132-1156` repeats serial tag addition/removal resolution inside the bulk-update transaction.
-
-Failure scenario:
-
-An admin uploads a batch with many comma-separated tags or bulk-adds/removes several tags over many images. The request performs many serialized DB round trips while holding the upload quota/processing contract branch, and the bulk path holds a transaction while resolving tag metadata. Admin responsiveness degrades and locks live longer than necessary.
-
-Fix:
-
-Batch tag resolution: normalize names/slugs, fetch existing rows with `WHERE name IN (...) OR slug IN (...)`, insert missing rows in one `INSERT IGNORE ... VALUES (...)`, then re-select once. In the bulk path, resolve tag records outside the image mutation transaction where possible; keep only image/tag row mutations inside the transaction.
-
-### PERF-29-09 - Service worker waits on per-image HEAD probes before serving cached derivatives
-
-Status: Manual-validation risk
 Severity: Low
 Confidence: Medium
+Status: Risk needing manual validation
 
 Evidence:
 
-- `apps/web/public/sw.template.js:34-38` sets `HEAD_REVALIDATE_TIMEOUT_MS = 300`.
-- `apps/web/public/sw.template.js:184-287` serves cached derivatives only after a HEAD revalidation when the cached response has an ETag.
-- `apps/web/public/sw.template.js:253-257` awaits the HEAD request on the display path before returning the cached response.
-- `apps/web/src/lib/serve-upload.ts:18-82` optimizes server-side settings-hash/ETag work, but the browser still pays request scheduling and one round trip per cached tile.
+- `apps/web/src/lib/data-timeline.ts:97-116` uses `MONTH(capture_date)` and `DAY(capture_date)`.
+- `apps/web/src/lib/data-timeline.ts:129-145` uses `YEAR(capture_date)` for the year list.
+- `apps/web/src/lib/data-timeline.ts:186-207` uses `YEAR(capture_date)` and optional `MONTH(capture_date)` for timeline pages.
+- The comments at `apps/web/src/lib/data-timeline.ts:92-95` and `apps/web/src/lib/data-timeline.ts:180-184` explicitly acknowledge this as personal-gallery-scale behavior.
 
 Failure scenario:
 
-A returning mobile visitor opens a cached gallery over slow, lossy, or captive-network conditions. The service worker has cached image bytes, but each cached derivative with an ETag can wait up to 300 ms for HEAD before painting. Many tiles can issue many HEADs concurrently, delaying a page that should feel instant from local cache.
+If the image table grows well beyond current personal-gallery scale, `/timeline`, `/year/[year]`, and On This Day widgets scan the processed dated slice and evaluate date functions row-by-row on dynamic public pages. Crawlers can amplify the cost across year/month URLs.
 
-Fix:
+Suggested fix:
 
-Validate with a throttled browser trace. If confirmed, serve cached bytes immediately and revalidate in the background. Preserve color-setting freshness with a route-level/settings manifest fetched once per page, a SW version/settings-hash broadcast, or a bounded global revalidation gate rather than one synchronous HEAD per cached image.
+Use range predicates for year and month pages. For On This Day, add generated/indexed month/day columns or maintain an archive rollup table. Validate with `EXPLAIN ANALYZE` against a production-size DB before deciding severity.
 
-## Positive Controls Observed
+## Final Sweep Notes
 
-- DB pool is bounded at 10 connections with queue limit 20 (`apps/web/src/db/index.ts:23-33`).
-- Sharp/libvips concurrency and cache are bounded (`apps/web/src/lib/process-image.ts:35-57`).
-- Image queue concurrency is capped against DB pool headroom (`apps/web/src/lib/image-queue.ts:88-108`).
-- Queue GC, shutdown, restore quiesce, retry maps, and bootstrap continuation are explicitly guarded (`apps/web/src/lib/image-queue.ts:1008-1050` plus surrounding queue code).
-- Image derivative writes use atomic temp/final handling and backup restore on failure (`apps/web/src/lib/process-image.ts:1200-1228` and following generation code).
-- View-event retention cleanup is indexed and chunked (`apps/web/src/lib/view-retention.ts:64-90`).
-- Upload serving avoids importing Sharp and caches/refreshes settings hash with a short TTL and inflight dedupe (`apps/web/src/lib/serve-upload.ts:1-82`).
-- Public load-more uses cursor/keyset pagination after the first page and guards stale client responses (`apps/web/src/app/actions/public.ts`, `apps/web/src/components/load-more.tsx`).
-- Search UI debounces requests, aborts semantic fetches, and guards stale responses (`apps/web/src/components/search.tsx`).
-- Histogram pixel binning is worker-based; the main thread downsizes via canvas before transferring the buffer (`apps/web/src/components/histogram.tsx`, `apps/web/public/histogram-worker.js`).
-
-## Final Missed-Issues Sweep
-
-Final sweep re-ran repository-wide `rg` over unbounded results, date functions, `COUNT(*) OVER`, `LIKE`/`containsLike`, semantic scan limits, `Promise.all`, timers, maps, queue/background patterns, and service-worker cache paths. The active findings above cover the material performance/concurrency/UI-responsiveness issues found in this pass.
-
-Files intentionally not line-reviewed: binary fixtures, screenshots, fonts/icons, generated upload assets, and archived review screenshots. They were inventoried where present but excluded unless they participate in runtime behavior.
-
-No tests were run because the task is Prompt 1 review-only and requested no implementation. Evidence is static source inspection with exact file/line citations.
+- Rate limiter/map growth: in-memory rate-limit maps use bounded maps with hard-cap enforcement at `apps/web/src/lib/bounded-map.ts:91-99` and pruning at `apps/web/src/lib/bounded-map.ts:156-187`. I did not find a confirmed unbounded in-memory rate-limit map in current HEAD.
+- Image queue: queue concurrency defaults to 1 and is clamped in `apps/web/src/lib/image-queue.ts:76-108`; per-image claims are held through encode work. This is a deliberate connection-pinning tradeoff rather than a new confirmed bug in this pass.
+- Sharp pipeline: `apps/web/src/lib/process-image.ts` disables Sharp cache and caps libvips concurrency. No new confirmed per-image memory leak was found.
+- UI responsiveness: `load-more` and search components guard stale responses and duplicate loads; the strongest confirmed UI risk in this cycle is the `/map` marker/list payload.
+- Skipped areas: generated build output, binary assets, uploads/data directories, `.git`, `node_modules`, historical screenshots, and prior review archives were not line-reviewed. Prior reports were used only to avoid stale assumptions.

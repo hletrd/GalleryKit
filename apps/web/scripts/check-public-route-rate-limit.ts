@@ -276,6 +276,105 @@ function bodyCallsApprovedRateLimit(body: ts.Node | undefined, approvedRateLimit
     return found;
 }
 
+function bodyCallsRateLimitBeforeExpensiveGetWork(
+    body: ts.Node | undefined,
+    approvedRateLimitImports: Set<string>,
+    sourceFile: ts.SourceFile,
+): boolean {
+    if (!body) return false;
+
+    let sawRateLimitGate = false;
+    const rateLimitResultNames = new Set<string>();
+
+    const expressionHasTopLevelRateLimit = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const conditionReturnsEarly = (statement: ts.Statement): boolean => {
+        if (ts.isReturnStatement(statement)) return true;
+        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
+        return false;
+    };
+
+    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
+        let found = false;
+        const visit = (current: ts.Node) => {
+            if (found) return;
+            if (ts.isFunctionLike(current)) return;
+            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
+                found = true;
+                return;
+            }
+            ts.forEachChild(current, visit);
+        };
+        visit(node);
+        return found;
+    };
+
+    const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
+        if (ts.isVariableStatement(statement)) {
+            for (const decl of statement.declarationList.declarations) {
+                if (
+                    ts.isIdentifier(decl.name)
+                    && decl.initializer
+                    && expressionHasTopLevelRateLimit(decl.initializer)
+                ) {
+                    rateLimitResultNames.add(decl.name.text);
+                }
+            }
+            return false;
+        }
+        if (ts.isIfStatement(statement)) {
+            return (
+                (expressionHasTopLevelRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
+                && conditionReturnsEarly(statement.thenStatement)
+            );
+        }
+        return false;
+    };
+
+    const statementContainsExpensiveWork = (statement: ts.Statement): boolean => {
+        const text = statement.getText(sourceFile);
+        return EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker));
+    };
+
+    const inspectStatements = (statements: ts.NodeArray<ts.Statement>): boolean => {
+        for (const statement of statements) {
+            if (ts.isTryStatement(statement)) {
+                if (!inspectStatements(statement.tryBlock.statements)) {
+                    return false;
+                }
+                continue;
+            }
+            if (!sawRateLimitGate && statementContainsExpensiveWork(statement)) {
+                return false;
+            }
+            if (statementHasRateLimitGate(statement)) {
+                sawRateLimitGate = true;
+            }
+        }
+        return sawRateLimitGate;
+    };
+
+    if (ts.isBlock(body)) {
+        inspectStatements(body.statements);
+        return sawRateLimitGate;
+    }
+
+    return bodyCallsApprovedRateLimit(body, approvedRateLimitImports);
+}
+
 function bodyContainsExpensiveGetWork(body: ts.Node | undefined, sourceFile: ts.SourceFile): boolean {
     if (!body) return false;
     const text = body.getText(sourceFile);
@@ -427,10 +526,10 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
 
     const expensiveGetHandlers = getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile));
     if (expensiveGetHandlers.length > 0 && !hasExemption) {
-        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsApprovedRateLimit(handler.body, approvedRateLimitImports));
+        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile));
         if (unmeteredGetHandlers.length > 0) {
             report.failed.push(
-                `MISSING RATE LIMIT: ${relative} exports expensive GET handler(s) ${unmeteredGetHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper.`
+                `MISSING RATE LIMIT: ${relative} exports expensive GET handler(s) ${unmeteredGetHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`
             );
         } else {
             report.passed.push(`OK: ${relative} (expensive GET uses rate-limit helper)`);

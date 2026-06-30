@@ -493,8 +493,8 @@ export async function restoreDatabase(formData: FormData) {
             try {
                 await flushBufferedSharedGroupViewCounts();
                 await quiesceImageProcessingQueueForRestore();
-                await drainBackgroundDbWritesForRestore();
                 imageQueueQuiesced = true;
+                await drainBackgroundDbWritesForRestore();
             } catch (err) {
                 console.error('Failed to prepare restore maintenance window', err);
                 return { success: false, error: t('restoreFailed') };

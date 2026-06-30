@@ -129,6 +129,57 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails expensive public GET handlers when the limiter appears after expensive work', () => {
+        const source = `
+            import { db } from '@/db';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                const rows = await db.select().from(images).limit(10);
+                if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
+    it('passes expensive public GET handlers when a captured limiter result returns before expensive work', () => {
+        const source = `
+            import { db } from '@/db';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                const overLimit = preIncrementSemanticAttempt('203.0.113.10', Date.now());
+                if (overLimit) return Response.json({}, { status: 429 });
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
+    it('passes expensive public GET handlers when the limiter gate is inside a try block before expensive work', () => {
+        const source = `
+            import { ImageResponse } from 'next/og';
+            import { getSeoSettings } from '@/lib/data';
+            import { preIncrementOgAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                try {
+                    if (preIncrementOgAttempt('203.0.113.10', Date.now())) return new Response('limited', { status: 429 });
+                    const seo = await getSeoSettings();
+                    return new ImageResponse(<div>{seo.title}</div>);
+                } catch {
+                    return new Response('failed', { status: 500 });
+                }
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.tsx');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
     it('passes expensive public GET handlers with a reasoned exemption', () => {
         const source = `
             import { db } from '@/db';

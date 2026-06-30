@@ -4,7 +4,7 @@
  * over the test tree was empty. The guard rejects a sub-3-codepoint semantic
  * query client-side and routes it to the `invalidSemantic` status ("at least 3
  * characters") instead of letting it reach the route, get a 400, and fall through
- * to the generic `error` status ("Search failed. Please try again.") — the
+ * to the generic `error` status — the
  * misleading server-error UX for a user-input problem that AGG-C8-04 closed.
  *
  * The repo locks client-component behaviors with source contracts (no jsdom render

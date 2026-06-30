@@ -420,7 +420,7 @@
     "toggleHint": "to toggle search",
     "searching": "Searching…",
     "resultsCount": "{count, plural, one {# result} other {# results}}",
-    "error": "Search failed. Please try again.",
+    "error": "Search is temporarily unavailable. Please try again later.",
     "rateLimited": "Too many searches. Please wait a moment and try again.",
     "maintenance": "Search is temporarily unavailable during maintenance.",
     "semanticSetupRequired": "Semantic search is not configured yet. Ask an admin to seed model weights, enable production mode, and backfill embeddings.",
