@@ -26,7 +26,10 @@
 
 ---
 
-GalleryKit is built for photographers and small teams who want to publish edited work without handing originals, analytics, or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions, and leaves heavy operator features such as semantic search behind explicit setup steps.
+GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
+
+**For:** finished-photo publishing, private original storage, self-hosted sharing, color-faithful delivery, and operator-controlled search.  
+**Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
 
 ## Features
 

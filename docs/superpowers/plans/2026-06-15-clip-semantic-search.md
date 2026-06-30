@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-> **Historical record, not current instructions:** this plan is complete. The checklist below is marked done to prevent future agents from re-running old TDD/install/commit steps. Use current code, `CLAUDE.md`, and the status banner in the linked spec for live CLIP operation and activation guidance.
+> **Historical record, not current instructions:** this plan is complete. The checklist below is marked done to prevent future agents from re-running old TDD/install/commit steps. Some code snippets intentionally show the design-time shape from June 2026 and are not operator runbooks. Use current code, `apps/web/README.md`, `CLAUDE.md`, and the status banner in the linked spec for live CLIP operation and activation guidance.
 
 **Goal:** Replace GalleryKit's stub CLIP encoder with a real multilingual (jina-clip-v2-class) encoder so natural-language search (Korean + English) and "similar photos" genuinely work, fully self-hosted on CPU.
 

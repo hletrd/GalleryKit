@@ -63,8 +63,9 @@ npm run init                  # Full DB initialization
 # Linting
 npm run lint --workspace=apps/web  # ESLint check
 
-# Docker Deployment
-docker compose -f apps/web/docker-compose.yml up -d --build
+# Local/manual Docker smoke only. Production per-iteration deploys use
+# `npm run deploy` from the repo root.
+docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build
 ```
 
 ## Environment Variables
@@ -654,7 +655,7 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
    - `footer_text` — footer text
    - `google_analytics_id` — optional GA measurement id (empty to disable)
    DB-backed admin settings override the editable SEO/branding fields at runtime, but `site-config.json` is the fallback for fresh installs and static build-time values.
-4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
+4. For local/manual Docker smoke only, run `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build`. Production per-iteration deploys use `npm run deploy` from the repo root.
 5. Initialize DB: container runs committed migrations automatically
 6. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`
 

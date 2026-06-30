@@ -43,7 +43,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 ## Environment notes
 
 - `BASE_URL` should point at the public app origin used for sitemap/metadata URLs. Production builds reject missing or placeholder public URLs, so set a real `BASE_URL` or replace `src/site-config.json.url` before building a production image.
-- File-backed `src/site-config.json` owns static links/analytics defaults. Admin-editable SEO and branding fields are stored in the database and override file defaults at runtime.
+- File-backed `src/site-config.json` owns static links/analytics defaults. Admin-editable SEO and branding fields are stored in the database and override file defaults at runtime. Leave `google_analytics_id` empty to keep analytics fully first-party/self-hosted; setting it loads Google Analytics on public pages and is a deliberate third-party analytics opt-in.
 - `IMAGE_BASE_URL` is optional. Set it to an absolute CDN origin or path prefix (for example `https://cdn.example.com` or `https://cdn.example.com/gallery`) **before** `next build` so Next.js and CSP both allow the remote asset host. Production builds reject plaintext `http://` asset origins and URLs with credentials, query strings, or hashes.
 - For non-local `DB_HOST` values, backup/restore CLI calls require verified TLS with `DB_SSL_CA=/path/to/ca.pem` unless you explicitly set `DB_SSL=false` for a trusted private link.
 - Leave `IMAGE_BASE_URL` unset for local/self-hosted uploads served directly from the app.
