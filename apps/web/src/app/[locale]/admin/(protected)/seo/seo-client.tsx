@@ -173,11 +173,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             value={settings.seo_og_image_url}
                             onChange={(e) => handleChange('seo_og_image_url', e.target.value)}
                             placeholder={t('seo.ogImageUrlPlaceholder')}
-	                            maxLength={500}
-	                            type="url"
-	                            aria-describedby="seo-og-image-help"
-	                        />
-	                        <p id="seo-og-image-help" className="text-xs text-muted-foreground">{t('seo.ogImageUrlHint')}</p>
+                            maxLength={500}
+                            type="text"
+                            inputMode="url"
+                            aria-describedby="seo-og-image-help"
+                        />
+                        <p id="seo-og-image-help" className="text-xs text-muted-foreground">{t('seo.ogImageUrlHint')}</p>
                     </div>
                 </CardContent>
             </Card>

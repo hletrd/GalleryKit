@@ -122,6 +122,7 @@ COPY --from=builder --chown=node:node /app/apps/web/public ./apps/web/public
 COPY --from=builder --chown=node:node /app/apps/web/drizzle ./apps/web/drizzle
 COPY --from=builder --chown=node:node /app/apps/web/scripts/migrate.js ./apps/web/scripts/migrate.js
 COPY --from=builder --chown=node:node /app/apps/web/scripts/mysql-connection-options.js ./apps/web/scripts/mysql-connection-options.js
+COPY --from=builder --chown=node:node /app/apps/web/scripts/restore-maintenance-recovery.mjs ./apps/web/scripts/restore-maintenance-recovery.mjs
 COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 
 # Production dependencies for migrate.js (needs argon2, mysql2, drizzle-orm natively).

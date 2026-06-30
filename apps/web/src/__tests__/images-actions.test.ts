@@ -4,6 +4,7 @@ const {
     statfsMock,
     mkdirMock,
     insertMock,
+    updateMock,
     isAdminMock,
     getCurrentUserMock,
     getTranslationsMock,
@@ -22,10 +23,13 @@ const {
     acquireUploadProcessingContractLockMock,
     uploadContractReleaseMock,
     selectResultMock,
+    metadataImageMock,
+    sharedGroupRowsMock,
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
     mkdirMock: vi.fn(),
     insertMock: vi.fn(),
+    updateMock: vi.fn(),
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
     getTranslationsMock: vi.fn(),
@@ -47,6 +51,8 @@ const {
     // Default: topic found (upload proceeds). Individual tests override
     // to return [] (topic not found).
     selectResultMock: vi.fn().mockResolvedValue([{ slug: 'travel' }]),
+    metadataImageMock: vi.fn().mockResolvedValue([{ topic: 'travel', share_key: 'share-key' }]),
+    sharedGroupRowsMock: vi.fn().mockResolvedValue([{ key: 'group-key' }]),
 }));
 
 function makeInsertChain<T>(result: T) {
@@ -64,18 +70,31 @@ vi.mock('fs/promises', () => ({
 vi.mock('@/db', () => ({
     db: {
         insert: insertMock,
+        update: updateMock,
         // C11-MED-01: select mock for topic-existence check in uploadImages.
         // Uses selectResultMock so individual tests can override the result.
-        select: vi.fn(() => ({
+        select: vi.fn((selection?: Record<string, unknown>) => ({
             from: vi.fn(() => ({
-                where: vi.fn(() => ({
-                    limit: selectResultMock,
+                innerJoin: vi.fn(() => ({
+                    where: sharedGroupRowsMock,
                 })),
+                where: vi.fn(() => {
+                    if (selection && 'topic' in selection && 'share_key' in selection) {
+                        return metadataImageMock();
+                    }
+                    return {
+                        limit: selectResultMock,
+                    };
+                }),
             })),
         })),
     },
     images: {
         id: 'images.id',
+        topic: 'images.topic',
+        share_key: 'images.share_key',
+        title: 'images.title',
+        description: 'images.description',
     },
     imageTags: {
         imageId: 'image_tags.image_id',
@@ -83,6 +102,14 @@ vi.mock('@/db', () => ({
     },
     topics: {
         slug: 'topics.slug',
+    },
+    sharedGroups: {
+        id: 'shared_groups.id',
+        key: 'shared_groups.key',
+    },
+    sharedGroupImages: {
+        groupId: 'shared_group_images.group_id',
+        imageId: 'shared_group_images.image_id',
     },
 }));
 
@@ -99,6 +126,7 @@ vi.mock('@/lib/process-image', () => ({
     saveOriginalAndGetMetadata: saveOriginalAndGetMetadataMock,
     extractExifForDb: extractExifForDbMock,
     deleteImageVariantsStrict: vi.fn(),
+    RawFileError: class RawFileError extends Error {},
     IMAGE_PIPELINE_VERSION: 5,
 }));
 
@@ -175,7 +203,7 @@ vi.mock('@/lib/tag-records', () => ({
     ensureTagRecord: ensureTagRecordMock,
 }));
 
-import { uploadImages } from '@/app/actions/images';
+import { updateImageMetadata, uploadImages } from '@/app/actions/images';
 
 describe('uploadImages', () => {
     beforeEach(() => {
@@ -188,6 +216,12 @@ describe('uploadImages', () => {
         mkdirMock.mockReset();
         mkdirMock.mockResolvedValue(undefined);
         insertMock.mockReset();
+        updateMock.mockReset();
+        updateMock.mockReturnValue({
+            set: vi.fn().mockReturnValue({
+                where: vi.fn().mockResolvedValue([{ affectedRows: 1 }]),
+            }),
+        });
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 1 });
         getTranslationsMock.mockResolvedValue((key: string) => key);
@@ -234,6 +268,10 @@ describe('uploadImages', () => {
         // C11-MED-01: reset select result to default (topic found)
         selectResultMock.mockReset();
         selectResultMock.mockResolvedValue([{ slug: 'travel' }]);
+        metadataImageMock.mockReset();
+        metadataImageMock.mockResolvedValue([{ topic: 'travel', share_key: 'share-key' }]);
+        sharedGroupRowsMock.mockReset();
+        sharedGroupRowsMock.mockResolvedValue([{ key: 'group-key' }]);
     });
 
     it('revalidates the affected topic path after a successful upload', async () => {
@@ -260,6 +298,12 @@ describe('uploadImages', () => {
 
         await expect(uploadImages(formData)).resolves.toMatchObject({ success: true, count: 1 });
         expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/', '/admin/dashboard', '/travel');
+        expect(logAuditEventMock).toHaveBeenCalledWith(1, 'image_upload', 'image', undefined, undefined, {
+            count: 1,
+            failed: 0,
+            topic: 'travel',
+            tags: '',
+        });
         expect(uploadContractReleaseMock).toHaveBeenCalled();
         expect(enqueueImageProcessingMock).toHaveBeenCalledWith(expect.objectContaining({
             id: 9,
@@ -500,5 +544,49 @@ describe('uploadImages', () => {
         });
         expect(insertMock).toHaveBeenCalled();
         expect(enqueueImageProcessingMock).toHaveBeenCalled();
+    });
+
+    it('does not log upload audit when every file fails before persistence', async () => {
+        saveOriginalAndGetMetadataMock.mockRejectedValueOnce(new Error('decode failed'));
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'broken.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'allUploadsFailed' });
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
+
+    it('updates image metadata with sanitized return values, audit, and all affected cache paths', async () => {
+        await expect(updateImageMetadata(9, '  New title  ', '  Description  ')).resolves.toEqual({
+            success: true,
+            title: 'New title',
+            description: 'Description',
+        });
+
+        expect(updateMock).toHaveBeenCalled();
+        expect(logAuditEventMock).toHaveBeenCalledWith(1, 'image_update', 'image', '9');
+        expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith(
+            '/p/9',
+            '/admin/dashboard',
+            '/',
+            '/travel',
+            '/s/share-key',
+            '/g/group-key',
+        );
+    });
+
+    it('does not audit or revalidate failed image metadata updates', async () => {
+        updateMock.mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+                where: vi.fn().mockResolvedValue([{ affectedRows: 0 }]),
+            }),
+        });
+
+        await expect(updateImageMetadata(9, 'Title', 'Description')).resolves.toEqual({ error: 'imageNotFound' });
+
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+        expect(revalidateLocalizedPathsMock).not.toHaveBeenCalled();
     });
 });

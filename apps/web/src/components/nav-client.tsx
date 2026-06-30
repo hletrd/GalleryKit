@@ -85,7 +85,9 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
         <nav aria-label={t('aria.mainNav')} className="sticky top-0 z-50 w-full bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
             <div className={cn(
                 "container mx-auto flex items-center px-4 transition-all duration-300",
-                isExpanded ? "h-auto py-3 flex-wrap items-start" : "h-16 overflow-hidden"
+                isExpanded
+                    ? "h-auto py-3 flex-wrap items-start"
+                    : "h-16 overflow-hidden md:h-auto md:min-h-16 md:overflow-visible md:flex-wrap md:py-2 md:items-start"
             )}>
                 {/* Title */}
                 <div className={cn("flex items-center mr-3 md:mr-6 gap-4 min-w-0 shrink", isExpanded && "pt-1")}>

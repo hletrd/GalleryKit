@@ -29,13 +29,14 @@
  *
  * Advisory lock
  * ─────────────
- * Uses MySQL GET_LOCK so two concurrent backfill invocations serialize
- * rather than racing the same rows. The lock is released automatically
- * when the dedicated connection closes.
+ * Uses MySQL GET_LOCK so two concurrent backfill invocations cannot race the
+ * same rows. The sidecar waits briefly, then exits non-zero if another full
+ * run is still active. The lock is released automatically when the dedicated
+ * connection closes.
  *
  * The sidecar and in-app runner both acquire the same
  * `gallerykit_color_pipeline_backfill` advisory lock, so full backfill runs
- * serialize. Per-image retry actions use their own
+ * are mutually exclusive. Per-image retry actions use their own
  * `gallerykit:image-processing:{id}` claims instead of the global backfill lock.
  */
 

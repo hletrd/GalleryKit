@@ -74,7 +74,12 @@ function migrateLegacyOriginalUploads(appRoot) {
         return;
     }
 
-    fs.mkdirSync(privateOriginalRoot, { recursive: true });
+    fs.mkdirSync(privateOriginalRoot, { recursive: true, mode: 0o700 });
+    try {
+        fs.chmodSync(privateOriginalRoot, 0o700);
+    } catch (error) {
+        console.warn(`[Migration] Could not tighten private original directory mode for ${privateOriginalRoot}:`, error);
+    }
     const entries = fs.readdirSync(legacyOriginalRoot, { withFileTypes: true });
     let moved = 0;
 
@@ -111,6 +116,11 @@ function migrateLegacyOriginalUploads(appRoot) {
             } else {
                 throw error;
             }
+        }
+        try {
+            fs.chmodSync(target, 0o600);
+        } catch (error) {
+            console.warn(`[Migration] Could not tighten migrated original file mode for ${target}:`, error);
         }
         moved++;
     }

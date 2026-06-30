@@ -37,15 +37,19 @@ const ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN = new RegExp(
     'gi',
 );
 const SQL_IDENTIFIER_PATTERN = '(?:`(?:``|[^`])+`|[A-Za-z0-9_$]+)';
+const SQL_SCHEMA_QUALIFIED_IDENTIFIER_PATTERN = new RegExp(
+    `(?:^|[^A-Za-z0-9_$\`])${SQL_IDENTIFIER_PATTERN}\\s*\\.\\s*${SQL_IDENTIFIER_PATTERN}`,
+    'i',
+);
 const SQL_WRITE_TARGET_PATTERN = new RegExp(
     [
         '\\b(?:',
-        'CREATE\\s+(?:TEMPORARY\\s+)?TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?',
-        '|ALTER\\s+TABLE',
-        '|INSERT\\s+(?:IGNORE\\s+)?INTO',
-        '|REPLACE(?:\\s+INTO)?',
-        '|UPDATE(?:\\s+LOW_PRIORITY)?(?:\\s+IGNORE)?',
-        ')\\s+(',
+        'CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+',
+        '|ALTER\\s+TABLE\\s+',
+        '|INSERT\\s+(?:(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)\\s+)?(?:IGNORE\\s+)?(?:INTO\\s+)?',
+        '|REPLACE(?:\\s+(?:LOW_PRIORITY|DELAYED))?(?:\\s+INTO)?\\s+',
+        '|UPDATE(?:\\s+LOW_PRIORITY)?(?:\\s+IGNORE)?\\s+',
+        ')(',
         SQL_IDENTIFIER_PATTERN,
         ')(?:\\s*\\.\\s*(',
         SQL_IDENTIFIER_PATTERN,
@@ -71,6 +75,8 @@ const DANGEROUS_SQL_PATTERNS = [
     // accepting arbitrary table drops/deletes/truncates creates a data-loss
     // path that --one-database does not prevent.
     /\bDROP\s+TABLE\b/i,
+    /\bCREATE\s+TEMPORARY\s+TABLE\b/i,
+    /\bDROP\s+TEMPORARY\s+TABLE\b/i,
     /\bTRUNCATE\s+(?:TABLE\s+)?/i,
     /\bDELETE\s+FROM\b/i,
     // C4R-RPL2-05: also block CREATE DATABASE. `--one-database` filters out
@@ -179,6 +185,20 @@ function stripSqlCommentsAndValueLiterals(input: string): string {
     ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
 }
 
+function stripSqlCommentsAsSpacesAndValueLiterals(input: string): string {
+    const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
+    const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, (match) => ' '.repeat(match.length));
+    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+
+    return [
+        /'(?:''|\\.|[^'\\])*'/gs,
+        /"(?:\"\"|\\.|[^"\\])*"/gs,
+        /0x[0-9a-fA-F]+/g,
+        /b'[01]+'/g,
+        /0b[01]+/g,
+    ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
+}
+
 function normalizeSqlIdentifier(identifier: string) {
     const trimmed = identifier.trim();
     if (trimmed.startsWith('`') && trimmed.endsWith('`')) {
@@ -188,21 +208,31 @@ function normalizeSqlIdentifier(identifier: string) {
 }
 
 function hasDisallowedRestoreWriteTarget(input: string) {
-    const sanitized = stripSqlCommentsAndValueLiterals(input);
-    SQL_WRITE_TARGET_PATTERN.lastIndex = 0;
+    const sanitizedForms = [
+        stripSqlCommentsAndValueLiterals(input),
+        stripSqlCommentsAsSpacesAndValueLiterals(input),
+    ];
 
-    let match: RegExpExecArray | null;
-    while ((match = SQL_WRITE_TARGET_PATTERN.exec(sanitized)) !== null) {
-        const firstIdentifier = normalizeSqlIdentifier(match[1] ?? '');
-        const secondIdentifier = match[2] ? normalizeSqlIdentifier(match[2]) : null;
-        if (!firstIdentifier) continue;
-
-        if (secondIdentifier) {
+    for (const sanitized of sanitizedForms) {
+        if (SQL_SCHEMA_QUALIFIED_IDENTIFIER_PATTERN.test(sanitized)) {
             return true;
         }
 
-        if (!APP_BACKUP_TABLE_SET.has(firstIdentifier)) {
-            return true;
+        SQL_WRITE_TARGET_PATTERN.lastIndex = 0;
+
+        let match: RegExpExecArray | null;
+        while ((match = SQL_WRITE_TARGET_PATTERN.exec(sanitized)) !== null) {
+            const firstIdentifier = normalizeSqlIdentifier(match[1] ?? '');
+            const secondIdentifier = match[2] ? normalizeSqlIdentifier(match[2]) : null;
+            if (!firstIdentifier) continue;
+
+            if (secondIdentifier) {
+                return true;
+            }
+
+            if (!APP_BACKUP_TABLE_SET.has(firstIdentifier)) {
+                return true;
+            }
         }
     }
 

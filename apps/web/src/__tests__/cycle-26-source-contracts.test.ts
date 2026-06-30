@@ -24,12 +24,14 @@ describe('cycle 26 source contracts', () => {
     });
 
     it('restore maintenance recovery command requires an explicit clear confirmation', () => {
-        const script = readFileSync(join(process.cwd(), 'scripts/restore-maintenance-recovery.ts'), 'utf8');
+        const script = readFileSync(join(process.cwd(), 'scripts/restore-maintenance-recovery.mjs'), 'utf8');
         const packageJson = readFileSync(join(process.cwd(), 'package.json'), 'utf8');
+        const dockerfile = readFileSync(join(process.cwd(), 'Dockerfile'), 'utf8');
 
-        expect(packageJson).toContain('"restore:maintenance": "tsx scripts/restore-maintenance-recovery.ts"');
+        expect(packageJson).toContain('"restore:maintenance": "node scripts/restore-maintenance-recovery.mjs"');
+        expect(dockerfile).toContain('restore-maintenance-recovery.mjs ./apps/web/scripts/restore-maintenance-recovery.mjs');
         expect(script).toContain("'--confirm-clear-restore-maintenance'");
         expect(script).toContain('Refusing to clear restore maintenance without');
-        expect(script).toContain('clearDurableRestoreMaintenanceForRecovery()');
+        expect(script).toContain('clearMarker()');
     });
 });

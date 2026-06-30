@@ -83,4 +83,20 @@ describe('migrateLegacyOriginalUploads', () => {
         await expect(fsp.access(source)).rejects.toThrow();
         await expect(fsp.readFile(target, 'utf8')).resolves.toBe('copied across devices');
     });
+
+    it('normalizes migrated private original permissions', async () => {
+        const source = path.join(legacyOriginalRoot(), 'permissive.jpg');
+        const target = path.join(privateOriginalRoot(), 'permissive.jpg');
+        await fsp.writeFile(source, 'legacy original');
+        await fsp.chmod(source, 0o644);
+        await fsp.chmod(privateOriginalRoot(), 0o755);
+
+        migrate.migrateLegacyOriginalUploads(appRoot());
+
+        const targetMode = (await fsp.stat(target)).mode & 0o777;
+        const privateRootMode = (await fsp.stat(privateOriginalRoot())).mode & 0o777;
+
+        expect(targetMode & 0o077).toBe(0);
+        expect(privateRootMode & 0o077).toBe(0);
+    });
 });

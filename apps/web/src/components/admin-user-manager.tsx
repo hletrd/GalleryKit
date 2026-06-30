@@ -111,12 +111,12 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             </div>
                             <div className="space-y-2">
                                 <label htmlFor="create-password" className="text-sm font-medium">{t('users.password')}</label>
-                                <Input id="create-password" name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" onChange={() => setConfirmError(null)} />
-                                <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
+                                <Input id="create-password" name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" aria-describedby="create-password-help" onChange={() => setConfirmError(null)} />
+                                <p id="create-password-help" className="text-xs text-muted-foreground">{t('password.minLength')}</p>
                             </div>
                             <div className="space-y-2">
                                 <label htmlFor="create-confirm-password" className="text-sm font-medium">{t('password.confirm')}</label>
-                                <Input id="create-confirm-password" ref={confirmPasswordRef} name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" aria-invalid={!!confirmError} aria-describedby={confirmError ? "create-confirm-password-error" : undefined} onChange={() => setConfirmError(null)} />
+                                <Input id="create-confirm-password" ref={confirmPasswordRef} name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" aria-invalid={!!confirmError} aria-describedby={confirmError ? "create-password-help create-confirm-password-error" : "create-password-help"} onChange={() => setConfirmError(null)} />
                                 {confirmError && (
                                     <p id="create-confirm-password-error" className="text-sm text-destructive-text" role="alert">
                                         {confirmError}

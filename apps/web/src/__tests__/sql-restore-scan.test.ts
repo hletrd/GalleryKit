@@ -44,7 +44,8 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('DROP TABLE images;')).toBe(true);
         expect(containsDangerousSql('DROP TABLE IF EXISTS `images`;')).toBe(false);
         expect(containsDangerousSql('DROP TABLE IF EXISTS `unknown_table`;')).toBe(true);
-        expect(containsDangerousSql('DROP TEMPORARY TABLE images;')).toBe(false);
+        expect(containsDangerousSql('DROP TEMPORARY TABLE images;')).toBe(true);
+        expect(containsDangerousSql('CREATE TEMPORARY TABLE images (id INT);')).toBe(true);
         expect(containsDangerousSql('DELETE FROM images WHERE id = 1;')).toBe(true);
         expect(containsDangerousSql('TRUNCATE TABLE sessions;')).toBe(true);
         expect(containsDangerousSql("INSERT INTO images VALUES ('DROP TABLE images');")).toBe(false);
@@ -55,7 +56,12 @@ describe('containsDangerousSql', () => {
             'CREATE TABLE otherdb.images (id INT);',
             'ALTER TABLE otherdb.images ADD COLUMN title varchar(255);',
             'INSERT INTO otherdb.images VALUES (1);',
+            'INSERT LOW_PRIORITY INTO otherdb.images VALUES (1);',
+            'INSERT DELAYED INTO otherdb.images VALUES (1);',
+            'INSERT HIGH_PRIORITY INTO otherdb.images VALUES (1);',
+            'INSERT otherdb.images VALUES (1);',
             'REPLACE INTO otherdb.images VALUES (1);',
+            'REPLACE LOW_PRIORITY INTO otherdb.images VALUES (1);',
             'UPDATE otherdb.images SET title = "x";',
             'CREATE TABLE `otherdb`.`images` (id INT);',
             'INSERT INTO `otherdb`.`images` VALUES (1);',
@@ -71,7 +77,10 @@ describe('containsDangerousSql', () => {
             'CREATE TABLE unknown_table (id INT);',
             'ALTER TABLE unknown_table ADD COLUMN title varchar(255);',
             'INSERT INTO unknown_table VALUES (1);',
+            'INSERT HIGH_PRIORITY INTO unknown_table VALUES (1);',
+            'INSERT unknown_table VALUES (1);',
             'REPLACE INTO unknown_table VALUES (1);',
+            'REPLACE DELAYED INTO unknown_table VALUES (1);',
             'UPDATE unknown_table SET title = "x";',
         ];
 
@@ -86,7 +95,10 @@ describe('containsDangerousSql', () => {
             'CREATE TABLE IF NOT EXISTS topics (`slug` varchar(255) NOT NULL);',
             'ALTER TABLE images DISABLE KEYS;',
             'INSERT INTO `images` VALUES (1);',
+            'INSERT HIGH_PRIORITY INTO `images` VALUES (1);',
+            'INSERT `images` VALUES (1);',
             'REPLACE INTO tags VALUES (1, "travel");',
+            'REPLACE LOW_PRIORITY INTO tags VALUES (1, "travel");',
             'UPDATE topic_views SET view_count = 1;',
         ];
 
@@ -100,6 +112,10 @@ describe('containsDangerousSql', () => {
             'DROP/**/TABLE images;',
             'DROP/**/DATABASE gallerykit;',
             'CREATE/**/DATABASE other;',
+            'CREATE/**/TABLE rogue (id INT);',
+            'INSERT/**/INTO rogue VALUES (1);',
+            'INSERT/**/INTO otherdb.images VALUES (1);',
+            'UPDATE/**/rogue SET id = 1;',
             "CREATE/**/USER 'x'@'%' IDENTIFIED BY 'pw';",
             'DELETE/**/FROM images WHERE id = 1;',
             'TRUNCATE/**/TABLE sessions;',
@@ -109,6 +125,19 @@ describe('containsDangerousSql', () => {
         ];
 
         for (const statement of maliciousStatements) {
+            expect(containsDangerousSql(statement), statement).toBe(true);
+        }
+    });
+
+    it('blocks schema-qualified read sources in otherwise allowed restore statements', () => {
+        const statements = [
+            'INSERT INTO images SELECT * FROM otherdb.images;',
+            'CREATE TABLE images AS SELECT * FROM otherdb.images;',
+            'INSERT INTO `images` SELECT * FROM `otherdb`.`images`;',
+            'CREATE TABLE `images` AS SELECT * FROM `otherdb`.`images`;',
+        ];
+
+        for (const statement of statements) {
             expect(containsDangerousSql(statement), statement).toBe(true);
         }
     });

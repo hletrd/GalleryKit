@@ -114,7 +114,7 @@ vi.mock('@/lib/action-guards', () => ({
     requireSameOriginAdmin: vi.fn(async () => null),
 }));
 
-import { addTagToImage, batchAddTags, batchUpdateImageTags } from '@/app/actions/tags';
+import { addTagToImage, batchAddTags, batchUpdateImageTags, updateTag } from '@/app/actions/tags';
 
 describe('tag actions', () => {
     beforeEach(() => {
@@ -145,6 +145,54 @@ describe('tag actions', () => {
 
         await expect(addTagToImage(42, 'Nature')).resolves.toEqual({ error: 'imageNotFound' });
         expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('updates a tag with audit, dashboard revalidation, and linked-image timestamp touch', async () => {
+        const txImageUpdateWhere = vi.fn().mockResolvedValue([{ affectedRows: 2 }]);
+        const txTagUpdateWhere = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
+        selectMock.mockReturnValueOnce(makeSelectChain([{ id: 7 }]));
+        transactionMock.mockImplementation(async (callback: (tx: {
+            select: typeof selectMock;
+            update: typeof updateMock;
+        }) => Promise<void>) => {
+            const txSelect = vi.fn().mockReturnValueOnce(makeSelectChain([{ id: 10 }, { id: 11 }]));
+            const txUpdate = vi.fn()
+                .mockReturnValueOnce({
+                    set: vi.fn().mockReturnValue({
+                        where: txTagUpdateWhere,
+                    }),
+                })
+                .mockReturnValueOnce({
+                    set: vi.fn().mockReturnValue({
+                        where: txImageUpdateWhere,
+                    }),
+                });
+
+            await callback({
+                select: txSelect,
+                update: txUpdate,
+            });
+        });
+
+        await expect(updateTag(7, 'Night Sky')).resolves.toEqual({ success: true });
+
+        expect(logAuditEventMock).toHaveBeenCalledWith(1, 'tag_update', 'tag', '7', undefined, {
+            name: 'Night Sky',
+            slug: 'night-sky',
+        });
+        expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/admin/tags', '/admin/dashboard', '/');
+        expect(txTagUpdateWhere).toHaveBeenCalled();
+        expect(txImageUpdateWhere).toHaveBeenCalled();
+    });
+
+    it('does not audit or revalidate updateTag failures before mutation', async () => {
+        selectMock.mockReturnValueOnce(makeSelectChain([]));
+
+        await expect(updateTag(7, 'Night Sky')).resolves.toEqual({ error: 'tagNotFound' });
+
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+        expect(revalidateLocalizedPathsMock).not.toHaveBeenCalled();
     });
 
     it('rejects batchAddTags when the requested tag collides with another tag slug', async () => {
