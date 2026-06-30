@@ -214,7 +214,7 @@ describe('checkActionSource — function declarations', () => {
     it('fails when aliased auth/session reads happen before the same-origin guard', () => {
         const src = `
             import { requireSameOriginAdmin } from '@/lib/action-guards';
-            import { isAdmin as canAdmin, getCurrentUser as readUser } from '@/lib/auth';
+            import { isAdmin as canAdmin, getCurrentUser as readUser } from '@/app/actions/auth';
 
             export async function deleteFoo(id) {
                 if (!(await canAdmin())) return { error: 'unauthorized' };
@@ -548,7 +548,7 @@ describe('checkActionSource — function declarations', () => {
     it('skips exempt admin read-only bodies with aliased DB reads after aliased auth checks', () => {
         const src = `
             import { db as database } from '@/db';
-            import { isAdmin as canAdmin } from '@/lib/auth';
+            import { isAdmin as canAdmin } from '@/app/actions/auth';
 
             /** @action-origin-exempt: read-only admin getter */
             export async function listSessions() {
@@ -1007,6 +1007,23 @@ describe('checkActionSource — approved guard import source', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when an approved requireSameOriginAdmin import is shadowed inside the action', () => {
+        const src = `
+            import { requireSameOriginAdmin } from '@/lib/action-guards';
+            export async function deleteFoo(id) {
+                const requireSameOriginAdmin = async () => null;
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('passes when the approved guard is imported under an alias', () => {
         const src = `
             import { requireSameOriginAdmin as checkActionOrigin } from '@/lib/action-guards';
@@ -1230,6 +1247,34 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
 
+    it('fails an exempt public mutation when an exported function parameter shadows a limiter helper', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id, isViewRecordRateLimited = () => false) {
+                if (isViewRecordRateLimited('1.2.3.4', Date.now())) return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when an exported arrow parameter shadows a status limiter helper', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export const recordView = async (id, checkViewRecordRateLimit = async () => ({ status: 'ok' })) => {
+                if ((await checkViewRecordRateLimit()).status === 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
+            };
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
     it('fails an exempt public mutation when the rate-limit rejection branch mutates before return', () => {
         const src = `
             /** @action-origin-exempt: public analytics endpoint */
@@ -1315,6 +1360,55 @@ describe('checkActionSource — protected read detection', () => {
         const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): src/app/actions/admin-sessions.ts::listSessions');
+    });
+
+    it('fails read-only exemptions when an auth call is ignored before a protected read', () => {
+        const src = `
+            import { db } from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                await isAdmin();
+                return db.select().from(sessions);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('fails read-only exemptions when the auth call does not dominate protected reads', () => {
+        const src = `
+            import { db } from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions(flag) {
+                if (flag) await isAdmin();
+                return db.select().from(sessions);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('fails read-only exemptions when auth aliases come from unapproved modules', () => {
+        const src = `
+            import { db } from '@/db';
+            import { isAdmin as canAdmin } from './not-auth';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                if (!(await canAdmin())) return [];
+                return db.select().from(sessions);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
     });
 });
 

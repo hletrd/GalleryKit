@@ -1006,6 +1006,49 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when an approved rate-limit import is shadowed by a handler parameter', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export async function POST(request, preIncrementShareAttempt = () => false) {
+                if (preIncrementShareAttempt('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when an approved rate-limit import is shadowed by an arrow handler parameter', () => {
+        const source = `
+            import { checkAndIncrementSearchAttempt } from '@/lib/rate-limit';
+            export const POST = async (request, checkAndIncrementSearchAttempt = () => false) => {
+                if (checkAndIncrementSearchAttempt('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            };
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when an approved rate-limit import is shadowed inside the handler body', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                const preIncrementShareAttempt = () => false;
+                if (preIncrementShareAttempt('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
     it('detects PUT/PATCH/DELETE as mutating handlers', () => {
         const source = `
             export async function PUT(request) {

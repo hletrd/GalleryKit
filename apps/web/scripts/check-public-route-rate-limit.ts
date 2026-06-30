@@ -140,7 +140,56 @@ type CheckReport = {
 type HandlerBody = {
     method: string;
     body: ts.Node | undefined;
+    shadowsApprovedRateLimit: boolean;
 };
+
+type FunctionBodyInfo = {
+    body: ts.Node | undefined;
+    parameters: readonly ts.ParameterDeclaration[];
+};
+
+function bindingNameIntersects(name: ts.BindingName, candidates: Set<string>): boolean {
+    if (ts.isIdentifier(name)) {
+        return candidates.has(name.text);
+    }
+    return name.elements.some((element) => {
+        return ts.isBindingElement(element) && bindingNameIntersects(element.name, candidates);
+    });
+}
+
+function parametersIntersect(parameters: readonly ts.ParameterDeclaration[], candidates: Set<string>): boolean {
+    return parameters.some((parameter) => bindingNameIntersects(parameter.name, candidates));
+}
+
+function bodyDeclaresBindingName(body: ts.Node | undefined, candidates: Set<string>): boolean {
+    if (!body) return false;
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionDeclaration(node) && node.name && candidates.has(node.name.text)) {
+            found = true;
+            return;
+        }
+        if (ts.isVariableDeclaration(node) && bindingNameIntersects(node.name, candidates)) {
+            found = true;
+            return;
+        }
+        if (node !== body && ts.isFunctionLike(node)) {
+            if (parametersIntersect(node.parameters, candidates)) {
+                found = true;
+            }
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
+function functionInfoShadowsName(info: FunctionBodyInfo | undefined, candidates: Set<string>): boolean {
+    if (!info || candidates.size === 0) return false;
+    return parametersIntersect(info.parameters, candidates) || bodyDeclaresBindingName(info.body, candidates);
+}
 
 function isFunctionLikeInitializer(node: ts.Expression | undefined): node is ts.ArrowFunction | ts.FunctionExpression | ts.CallExpression {
     return Boolean(node && (
@@ -150,26 +199,40 @@ function isFunctionLikeInitializer(node: ts.Expression | undefined): node is ts.
     ));
 }
 
-function expressionBody(node: ts.Expression | undefined): ts.Node | undefined {
+function functionInfoFromInitializer(node: ts.Expression | undefined): FunctionBodyInfo | undefined {
     if (!node) return undefined;
-    if (ts.isArrowFunction(node)) return node.body;
-    if (ts.isFunctionExpression(node)) return node.body;
-    if (ts.isCallExpression(node)) return node;
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+        return { body: node.body, parameters: [...node.parameters] };
+    }
+    if (ts.isCallExpression(node)) {
+        return { body: node, parameters: [] };
+    }
     return undefined;
 }
 
 function handlerBodyFromExportedVariable(
     initializer: ts.Expression | undefined,
-    localBodies: Map<string, ts.Node | undefined>,
-): { body: ts.Node | undefined; unsupportedAlias: string | null } | null {
-    if (isFunctionLikeInitializer(initializer)) {
-        return { body: expressionBody(initializer), unsupportedAlias: null };
+    localBodies: Map<string, FunctionBodyInfo>,
+    approvedRateLimitImports: Set<string>,
+): { body: ts.Node | undefined; unsupportedAlias: string | null; shadowsApprovedRateLimit: boolean } | null {
+    const directInfo = functionInfoFromInitializer(initializer);
+    if (directInfo) {
+        return {
+            body: directInfo.body,
+            unsupportedAlias: null,
+            shadowsApprovedRateLimit: functionInfoShadowsName(directInfo, approvedRateLimitImports),
+        };
     }
     if (initializer && ts.isIdentifier(initializer)) {
-        if (localBodies.has(initializer.text)) {
-            return { body: localBodies.get(initializer.text), unsupportedAlias: null };
+        const localInfo = localBodies.get(initializer.text);
+        if (localInfo) {
+            return {
+                body: localInfo.body,
+                unsupportedAlias: null,
+                shadowsApprovedRateLimit: functionInfoShadowsName(localInfo, approvedRateLimitImports),
+            };
         }
-        return { body: undefined, unsupportedAlias: initializer.text };
+        return { body: undefined, unsupportedAlias: initializer.text, shadowsApprovedRateLimit: false };
     }
     return null;
 }
@@ -426,8 +489,9 @@ function bodyCallsRateLimitBeforeMutation(
     importedSideEffectFunctionNames: Set<string> = new Set(),
     localExpensiveGetFunctions: Set<string> = new Set(),
     importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = emptyImportedExpensiveReadFunctions(),
+    shadowsApprovedRateLimit: boolean = false,
 ): boolean {
-    if (!body) return false;
+    if (!body || shadowsApprovedRateLimit) return false;
 
     let sawRateLimitGate = false;
     let sawProtectedWork = false;
@@ -508,8 +572,9 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
     sourceFile: ts.SourceFile,
     localExpensiveGetFunctions: Set<string>,
     importedExpensiveReadFunctions: ImportedExpensiveReadFunctions,
+    shadowsApprovedRateLimit: boolean = false,
 ): boolean {
-    if (!body) return false;
+    if (!body || shadowsApprovedRateLimit) return false;
 
     let sawRateLimitGate = false;
     const rateLimitResultNames = new Set<string>();
@@ -632,28 +697,31 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     const importedExpensiveReadFunctions = collectImportedExpensiveReadFunctions(sourceFile, relative);
 
     // Find any exported mutating handler in the file
-    const localBodies = new Map<string, ts.Node | undefined>();
+    const localBodies = new Map<string, FunctionBodyInfo>();
     for (const statement of sourceFile.statements) {
         if (ts.isFunctionDeclaration(statement) && statement.name) {
-            localBodies.set(statement.name.text, statement.body);
+            localBodies.set(statement.name.text, { body: statement.body, parameters: [...statement.parameters] });
             continue;
         }
         if (!ts.isVariableStatement(statement)) continue;
         for (const decl of statement.declarationList.declarations) {
             if (!ts.isIdentifier(decl.name) || !isFunctionLikeInitializer(decl.initializer)) continue;
-            localBodies.set(decl.name.text, expressionBody(decl.initializer));
+            const info = functionInfoFromInitializer(decl.initializer);
+            if (info) {
+                localBodies.set(decl.name.text, info);
+            }
         }
     }
     const localMutatingFunctions = new Set<string>();
     let mutatingSetChanged = true;
     while (mutatingSetChanged) {
         mutatingSetChanged = false;
-        for (const [name, body] of localBodies) {
-            if (!body || localMutatingFunctions.has(name)) continue;
+        for (const [name, info] of localBodies) {
+            if (!info.body || localMutatingFunctions.has(name)) continue;
             let containsMutation = false;
             const visit = (node: ts.Node) => {
                 if (containsMutation) return;
-                if (ts.isFunctionLike(node) && node !== body) return;
+                if (ts.isFunctionLike(node) && node !== info.body) return;
                 if (ts.isCallExpression(node)) {
                     const callee = node.expression;
                     if (
@@ -666,7 +734,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                 }
                 ts.forEachChild(node, visit);
             };
-            visit(body);
+            visit(info.body);
             if (containsMutation) {
                 localMutatingFunctions.add(name);
                 mutatingSetChanged = true;
@@ -678,9 +746,9 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     let expensiveGetSetChanged = true;
     while (expensiveGetSetChanged) {
         expensiveGetSetChanged = false;
-        for (const [name, body] of localBodies) {
-            if (!body || localExpensiveGetFunctions.has(name)) continue;
-            if (bodyContainsExpensiveGetWork(body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions)) {
+        for (const [name, info] of localBodies) {
+            if (!info.body || localExpensiveGetFunctions.has(name)) continue;
+            if (bodyContainsExpensiveGetWork(info.body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions)) {
                 localExpensiveGetFunctions.add(name);
                 expensiveGetSetChanged = true;
             }
@@ -707,16 +775,18 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             return report;
         }
         if (ts.isFunctionDeclaration(statement) && statement.name) {
+            const info: FunctionBodyInfo = { body: statement.body, parameters: [...statement.parameters] };
+            const shadowsApprovedRateLimit = functionInfoShadowsName(info, approvedRateLimitImports);
             if (MUTATING_METHODS.has(statement.name.text)) {
-                mutatingHandlers.push({ method: statement.name.text, body: statement.body });
+                mutatingHandlers.push({ method: statement.name.text, body: statement.body, shadowsApprovedRateLimit });
             } else if (EXPENSIVE_READ_METHODS.has(statement.name.text)) {
-                readHandlers.push({ method: statement.name.text, body: statement.body });
+                readHandlers.push({ method: statement.name.text, body: statement.body, shadowsApprovedRateLimit });
             }
         }
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
                 if (ts.isIdentifier(decl.name) && MUTATING_METHODS.has(decl.name.text)) {
-                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies);
+                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies, approvedRateLimitImports);
                     if (handler?.unsupportedAlias) {
                         report.failed.push(
                             `UNSUPPORTED HANDLER ALIAS: ${relative} exports ${decl.name.text} = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
@@ -724,13 +794,17 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                         continue;
                     }
                     if (handler) {
-                        mutatingHandlers.push({ method: decl.name.text, body: handler.body });
+                        mutatingHandlers.push({
+                            method: decl.name.text,
+                            body: handler.body,
+                            shadowsApprovedRateLimit: handler.shadowsApprovedRateLimit,
+                        });
                     }
                 } else if (
                     ts.isIdentifier(decl.name)
                     && EXPENSIVE_READ_METHODS.has(decl.name.text)
                 ) {
-                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies);
+                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies, approvedRateLimitImports);
                     if (handler?.unsupportedAlias) {
                         report.failed.push(
                             `UNSUPPORTED HANDLER ALIAS: ${relative} exports ${decl.name.text} = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
@@ -738,7 +812,11 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                         continue;
                     }
                     if (handler) {
-                        readHandlers.push({ method: decl.name.text, body: handler.body });
+                        readHandlers.push({
+                            method: decl.name.text,
+                            body: handler.body,
+                            shadowsApprovedRateLimit: handler.shadowsApprovedRateLimit,
+                        });
                     }
                 }
             }
@@ -748,7 +826,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             for (const element of statement.exportClause.elements) {
                 if (ts.isIdentifier(element.name) && MUTATING_METHODS.has(element.name.text)) {
                     const localName = element.propertyName?.text ?? element.name.text;
-                    mutatingHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
+                    const localInfo = localBodies.get(localName);
+                    mutatingHandlers.push({
+                        method: element.name.text,
+                        body: localInfo?.body,
+                        shadowsApprovedRateLimit: functionInfoShadowsName(localInfo, approvedRateLimitImports),
+                    });
                 } else if (ts.isIdentifier(element.name) && EXPENSIVE_READ_METHODS.has(element.name.text)) {
                     if (statement.moduleSpecifier) {
                         const reExportLabel = element.name.text === 'GET'
@@ -760,7 +843,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                         continue;
                     }
                     const localName = element.propertyName?.text ?? element.name.text;
-                    readHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
+                    const localInfo = localBodies.get(localName);
+                    readHandlers.push({
+                        method: element.name.text,
+                        body: localInfo?.body,
+                        shadowsApprovedRateLimit: functionInfoShadowsName(localInfo, approvedRateLimitImports),
+                    });
                 }
             }
         }
@@ -806,6 +894,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         importedSideEffectFunctionNames,
         localExpensiveGetFunctions,
         importedExpensiveReadFunctions,
+        handler.shadowsApprovedRateLimit,
     ))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else if (mutatingHandlers.length > 0) {
@@ -816,7 +905,14 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
 
     const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));
     if (expensiveReadHandlers.length > 0 && !hasExemption) {
-        const unmeteredReadHandlers = expensiveReadHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));
+        const unmeteredReadHandlers = expensiveReadHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(
+            handler.body,
+            approvedRateLimitImports,
+            sourceFile,
+            localExpensiveGetFunctions,
+            importedExpensiveReadFunctions,
+            handler.shadowsApprovedRateLimit,
+        ));
         if (unmeteredReadHandlers.length > 0) {
             report.failed.push(
                 `MISSING RATE LIMIT: ${relative} exports expensive GET/HEAD handler(s) ${unmeteredReadHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`

@@ -49,6 +49,10 @@ const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.
 
 const APPROVED_ACTION_GUARD_MODULE = '@/lib/action-guards';
 const APPROVED_AUTH_GUARD_MODULE = '@/lib/request-origin';
+const APPROVED_PRE_ORIGIN_AUTH_READ_MODULES = new Set([
+    '@/app/actions',
+    '@/app/actions/auth',
+]);
 const DB_MODULE = '@/db';
 
 /**
@@ -172,15 +176,21 @@ function collectPreOriginAuthReadNames(sourceFile: ts.SourceFile): Set<string> {
     for (const statement of sourceFile.statements) {
         if (
             !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
             || !statement.importClause?.namedBindings
             || !ts.isNamedImports(statement.importClause.namedBindings)
         ) {
             continue;
         }
+        const approvedModule = APPROVED_PRE_ORIGIN_AUTH_READ_MODULES.has(statement.moduleSpecifier.text);
         for (const element of statement.importClause.namedBindings.elements) {
             const importedName = element.propertyName?.text ?? element.name.text;
             if (PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES.has(importedName)) {
-                names.add(element.name.text);
+                if (approvedModule) {
+                    names.add(element.name.text);
+                } else {
+                    names.delete(element.name.text);
+                }
             }
         }
     }
@@ -191,6 +201,53 @@ type DbReadBindings = {
     directNames: Set<string>;
     namespaceNames: Set<string>;
 };
+
+type FunctionBodyInfo = {
+    body: ts.Node;
+    parameters: readonly ts.ParameterDeclaration[];
+};
+
+function bindingNameIntersects(name: ts.BindingName, candidates: Set<string>): boolean {
+    if (ts.isIdentifier(name)) {
+        return candidates.has(name.text);
+    }
+    return name.elements.some((element) => {
+        return ts.isBindingElement(element) && bindingNameIntersects(element.name, candidates);
+    });
+}
+
+function parametersIntersect(parameters: readonly ts.ParameterDeclaration[], candidates: Set<string>): boolean {
+    return parameters.some((parameter) => bindingNameIntersects(parameter.name, candidates));
+}
+
+function bodyDeclaresBindingName(body: ts.Node, candidates: Set<string>): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionDeclaration(node) && node.name && candidates.has(node.name.text)) {
+            found = true;
+            return;
+        }
+        if (ts.isVariableDeclaration(node) && bindingNameIntersects(node.name, candidates)) {
+            found = true;
+            return;
+        }
+        if (node !== body && ts.isFunctionLike(node)) {
+            if (parametersIntersect(node.parameters, candidates)) {
+                found = true;
+            }
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
+function functionInfoDeclaresBindingName(info: FunctionBodyInfo | undefined, candidates: Set<string>): boolean {
+    if (!info || candidates.size === 0) return false;
+    return parametersIntersect(info.parameters, candidates) || bodyDeclaresBindingName(info.body, candidates);
+}
 
 function stripModuleExtension(target: string): string {
     return target
@@ -542,23 +599,112 @@ function nodeContainsProtectedRead(root: ts.Node, dbReadBindings: DbReadBindings
     return found;
 }
 
-function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set<string>, preOriginAuthReadNames: Set<string>): boolean {
-    let found = false;
-    const visit = (node: ts.Node) => {
-        if (found) return;
-        if (ts.isFunctionLike(node) && node !== statement) return;
-        if (isRequireSameOriginAdminExpression(node, approvedImports)) {
-            found = true;
-            return;
+function unwrapReadAuthExpression(expression: ts.Expression): ts.Expression {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAwaitExpression(current)) {
+        current = ts.isParenthesizedExpression(current) ? current.expression : current.expression;
+    }
+    return current;
+}
+
+function isPreOriginAuthReadExpression(expression: ts.Expression, preOriginAuthReadNames: Set<string>): boolean {
+    const unwrapped = unwrapReadAuthExpression(expression);
+    return ts.isCallExpression(unwrapped)
+        && ts.isIdentifier(unwrapped.expression)
+        && preOriginAuthReadNames.has(unwrapped.expression.text);
+}
+
+function readAuthInitializerKind(
+    expression: ts.Expression,
+    approvedImports: Set<string>,
+    preOriginAuthReadNames: Set<string>,
+): 'error' | 'auth' | null {
+    if (isRequireSameOriginAdminExpression(expression, approvedImports)) {
+        return 'error';
+    }
+    if (isPreOriginAuthReadExpression(expression, preOriginAuthReadNames)) {
+        return 'auth';
+    }
+    return null;
+}
+
+function conditionChecksReadAuthEarlyExit(
+    expression: ts.Expression,
+    originErrorNames: Set<string>,
+    authResultNames: Set<string>,
+    approvedImports: Set<string>,
+    preOriginAuthReadNames: Set<string>,
+): boolean {
+    const unwrapped = unwrapReadAuthExpression(expression);
+    if (ts.isIdentifier(unwrapped)) {
+        return originErrorNames.has(unwrapped.text);
+    }
+
+    if (ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken) {
+        const operand = unwrapReadAuthExpression(unwrapped.operand);
+        if (ts.isIdentifier(operand)) {
+            return authResultNames.has(operand.text);
         }
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && preOriginAuthReadNames.has(node.expression.text)) {
-            found = true;
-            return;
+        return isPreOriginAuthReadExpression(operand, preOriginAuthReadNames);
+    }
+
+    if (ts.isBinaryExpression(unwrapped)) {
+        const left = unwrapReadAuthExpression(unwrapped.left);
+        const right = unwrapReadAuthExpression(unwrapped.right);
+        const leftName = ts.isIdentifier(left) ? left.text : null;
+        const rightName = ts.isIdentifier(right) ? right.text : null;
+        const compared = leftName ? right : left;
+        const name = leftName ?? rightName;
+        if (!name) return false;
+
+        if (originErrorNames.has(name)) {
+            if (
+                unwrapped.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+                || unwrapped.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken
+            ) {
+                return isNullLiteral(compared) || isUndefinedIdentifier(compared);
+            }
+            return false;
         }
-        ts.forEachChild(node, visit);
-    };
-    visit(statement);
-    return found;
+
+        if (authResultNames.has(name)) {
+            if (
+                unwrapped.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+                || unwrapped.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken
+            ) {
+                return isNullLiteral(compared) || isUndefinedIdentifier(compared);
+            }
+        }
+    }
+
+    return isRequireSameOriginAdminExpression(unwrapped, approvedImports);
+}
+
+function statementEstablishesReadAuth(
+    statement: ts.Statement,
+    originErrorNames: Set<string>,
+    authResultNames: Set<string>,
+    approvedImports: Set<string>,
+    preOriginAuthReadNames: Set<string>,
+): boolean {
+    if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+            const kind = readAuthInitializerKind(declaration.initializer, approvedImports, preOriginAuthReadNames);
+            if (kind === 'error') {
+                originErrorNames.add(declaration.name.text);
+            } else if (kind === 'auth') {
+                authResultNames.add(declaration.name.text);
+            }
+        }
+        return false;
+    }
+
+    if (!ts.isIfStatement(statement)) {
+        return false;
+    }
+    return conditionChecksReadAuthEarlyExit(statement.expression, originErrorNames, authResultNames, approvedImports, preOriginAuthReadNames)
+        && branchExitsBeforeSideEffect(statement.thenStatement, new Set(), new Set(), preOriginAuthReadNames);
 }
 
 function exemptReadHasAuthBeforeProtectedRead(
@@ -566,17 +712,23 @@ function exemptReadHasAuthBeforeProtectedRead(
     approvedImports: Set<string>,
     preOriginAuthReadNames: Set<string>,
     dbReadBindings: DbReadBindings,
+    actionShadowsReadAuth: boolean = false,
 ): boolean {
     if (!ts.isBlock(body)) {
         return true;
     }
+    if (actionShadowsReadAuth) {
+        return false;
+    }
 
     let sawAuth = false;
+    const originErrorNames = new Set<string>();
+    const authResultNames = new Set<string>();
     for (const statement of body.statements) {
         if (!sawAuth && nodeContainsProtectedRead(statement, dbReadBindings)) {
             return false;
         }
-        if (statementContainsReadAuth(statement, approvedImports, preOriginAuthReadNames)) {
+        if (statementEstablishesReadAuth(statement, originErrorNames, authResultNames, approvedImports, preOriginAuthReadNames)) {
             sawAuth = true;
         }
     }
@@ -587,6 +739,7 @@ function publicActionCallsRateLimitBeforeMutation(
     body: ts.Node,
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
+    actionShadowsRateLimit: boolean = false,
 ): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimitGate = false;
@@ -628,7 +781,7 @@ function publicActionCallsRateLimitBeforeMutation(
         return shadows;
     };
 
-    if (actionBodyShadowsRateLimit()) return false;
+    if (actionShadowsRateLimit || actionBodyShadowsRateLimit()) return false;
 
     const unwrapPublicExpression = (expression: ts.Expression): ts.Expression => {
         let current = expression;
@@ -812,6 +965,7 @@ function functionCallsRequireSameOriginAdmin(
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
     preOriginAuthReadNames: Set<string>,
+    actionShadowsApprovedGuard: boolean = false,
 ): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
@@ -819,7 +973,7 @@ function functionCallsRequireSameOriginAdmin(
     // value before mutating state. Recursive AST search let dead branches,
     // uncalled nested helpers, and ignored guard results satisfy the gate even
     // though the real action path had no provenance enforcement.
-    if (!ts.isBlock(body)) {
+    if (!ts.isBlock(body) || actionShadowsApprovedGuard) {
         return false;
     }
 
@@ -910,21 +1064,21 @@ function isAllowedActionBarrelModuleSpecifier(moduleSpecifier: ts.Expression | u
     );
 }
 
-function functionBodyFromExpression(
+function functionInfoFromExpression(
     expression: ts.Expression | undefined,
     options: { requireAsync?: boolean } = {},
-): ts.Node | undefined {
+): FunctionBodyInfo | undefined {
     if (!expression) return undefined;
     if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
         if (options.requireAsync && !hasAsyncModifier(expression)) return undefined;
-        return expression.body;
+        return { body: expression.body, parameters: [...expression.parameters] };
     }
     if (ts.isCallExpression(expression)) {
         const functionArgs = expression.arguments.filter((arg) => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg));
         if (functionArgs.length !== 1) return undefined;
         const [arg] = functionArgs;
         if (options.requireAsync && !hasAsyncModifier(arg)) return undefined;
-        return arg.body;
+        return { body: arg.body, parameters: [...arg.parameters] };
     }
     return undefined;
 }
@@ -967,20 +1121,20 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
     const isActionBarrelFile = /(?:^|[/\\])app[/\\]actions\.[cm]?[jt]sx?$/.test(relative);
-    const localBodies = new Map<string, ts.Node>();
+    const localBodies = new Map<string, FunctionBodyInfo>();
     const localMutatingFunctions = new Set<string>();
 
     for (const statement of sourceFile.statements) {
         if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
-            localBodies.set(statement.name.text, statement.body);
+            localBodies.set(statement.name.text, { body: statement.body, parameters: [...statement.parameters] });
             continue;
         }
         if (!ts.isVariableStatement(statement)) continue;
         for (const decl of statement.declarationList.declarations) {
             if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
-            const body = functionBodyFromExpression(decl.initializer);
-            if (body) {
-                localBodies.set(decl.name.text, body);
+            const info = functionInfoFromExpression(decl.initializer);
+            if (info) {
+                localBodies.set(decl.name.text, info);
             }
         }
     }
@@ -988,9 +1142,9 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     let mutatingSetChanged = true;
     while (mutatingSetChanged) {
         mutatingSetChanged = false;
-        for (const [name, body] of localBodies) {
+        for (const [name, info] of localBodies) {
             if (PUBLIC_RATE_LIMIT_HELPER_NAMES.has(name) || localMutatingFunctions.has(name)) continue;
-            if (nodeContainsMutatingCall(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
+            if (nodeContainsMutatingCall(info.body, localMutatingFunctions, importedSideEffectFunctionNames)) {
                 localMutatingFunctions.add(name);
                 mutatingSetChanged = true;
             }
@@ -1025,7 +1179,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
         return report;
     }
 
-    const evaluateBody = (owner: ts.Node, body: ts.Node | undefined, name: string) => {
+    const evaluateBody = (owner: ts.Node, bodyInfo: FunctionBodyInfo | undefined, name: string) => {
+        const body = bodyInfo?.body;
         if (hasExemptTag(owner, content) && !hasReasonedExemptComment(owner, content)) {
             report.failed.push(
                 `MALFORMED ACTION-ORIGIN EXEMPTION: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' without a non-empty ': <reason>'; document why the export is read-only or intentionally public`,
@@ -1041,7 +1196,15 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             // gate still green. An exempt comment on a body containing a
             // direct mutating call is therefore a hard failure, not a skip.
             if (body && nodeContainsMutatingCall(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
-                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
+                if (
+                    relative.endsWith('actions/public.ts')
+                    && publicActionCallsRateLimitBeforeMutation(
+                        body,
+                        localMutatingFunctions,
+                        importedSideEffectFunctionNames,
+                        functionInfoDeclaresBindingName(bodyInfo, PUBLIC_RATE_LIMIT_HELPER_NAMES),
+                    )
+                ) {
                     report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);
                     return;
                 }
@@ -1054,7 +1217,13 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 body
                 && !isAuthActionsFile
                 && !relative.endsWith('actions/public.ts')
-                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports, preOriginAuthReadNames, dbReadBindings)
+                && !exemptReadHasAuthBeforeProtectedRead(
+                    body,
+                    approvedRequireSameOriginImports,
+                    preOriginAuthReadNames,
+                    dbReadBindings,
+                    functionInfoDeclaresBindingName(bodyInfo, preOriginAuthReadNames),
+                )
             ) {
                 report.failed.push(
                     `EXEMPT READ WITHOUT AUTH: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' and performs protected reads before isAdmin(), getCurrentUser(), or requireSameOriginAdmin()`,
@@ -1076,6 +1245,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             localMutatingFunctions,
             importedSideEffectFunctionNames,
             preOriginAuthReadNames,
+            functionInfoDeclaresBindingName(bodyInfo, approvedRequireSameOriginImports),
         );
         const hasAuthGuard = isAuthActionsFile
             && functionCallsAuthSameOriginGuard(
@@ -1138,7 +1308,13 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 continue;
             }
             if (!isExported || !isAsync || !statement.name) continue;
-            evaluateBody(statement, statement.body, statement.name.text);
+            if (!statement.body) {
+                report.failed.push(
+                    `UNSUPPORTED action declaration without body: ${relative}:${lineOf(statement)} ${statement.name.text} must expose a local body so requireSameOriginAdmin() can be verified`,
+                );
+                continue;
+            }
+            evaluateBody(statement, { body: statement.body, parameters: [...statement.parameters] }, statement.name.text);
             continue;
         }
 
@@ -1154,17 +1330,17 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             const init = declaration.initializer;
             if (!init) continue;
             const name = declaration.name.text;
-            const exportedBody = functionBodyFromExpression(init, { requireAsync: true });
-            if (exportedBody) {
+            const exportedInfo = functionInfoFromExpression(init, { requireAsync: true });
+            if (exportedInfo) {
                 // `export const …` comments attach to the VariableStatement,
                 // not the inner VariableDeclaration or wrapped function arg.
-                evaluateBody(statement, exportedBody, name);
+                evaluateBody(statement, exportedInfo, name);
                 continue;
             }
             if (ts.isIdentifier(init)) {
-                const aliasedBody = localBodies.get(init.text);
-                if (aliasedBody) {
-                    evaluateBody(statement, aliasedBody, name);
+                const aliasedInfo = localBodies.get(init.text);
+                if (aliasedInfo) {
+                    evaluateBody(statement, aliasedInfo, name);
                     continue;
                 }
                 report.failed.push(

@@ -1,12 +1,12 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-42-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-43-2026-07-01/_aggregate.md`
 
-Cycle 42 scheduled eight findings:
+Cycle 43 scheduled four findings:
 
-- `PA-42-01`, `TV-C42-01`, and `TV-C42-02` - harden `lint:action-origin` for namespace/relative DB protected reads, positive-only public analytics limiter gates, and limiter-name shadowing.
-- `TV-C42-03` - make JS script syntax checking fail closed on zero discovered files.
-- `UX-C42-01` / `A11Y-C42-02` - keep selected shared-group photos within the curated share and disable hidden color-pip pointer targets.
-- `DOC-C42-01` / `DOC-C42-02` - document the build-time `NEXT_UPLOAD_BODY_MAX_BYTES` knob and close stale Cycle 41 context.
+- `C43-01` / `PA-43-01` - reject public analytics limiter helper shadowing from exported action parameters in `lint:action-origin`.
+- `TV-C43-01` - reject trusted guard/rate-limit calls when local bindings shadow approved imported identifiers in `lint:action-origin` and `lint:public-route-rate-limit`.
+- `TV-C43-02` - require effective, approved read-auth proof before read-only action exemptions can perform protected reads.
+- `DOC-C43-01` - close Cycle 42 source-closure context while preserving that committed deploy evidence was not found.
 
-Cycle 42 defers `PA-42-02` in `.context/plans/cycle-42-2026-07-01-deferred.md` because production CLIP web-bootstrap locking needs a broader runtime coordination decision. Prior script-typing, migration/index, scanner-model, and sidecar-pagination items remain carried forward.
+Cycle 43 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward in `.context/plans/cycle-43-2026-07-01-deferred.md`.
