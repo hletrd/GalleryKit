@@ -279,6 +279,26 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when imported credential mutators run before the same-origin guard', () => {
+        const src = `
+            import { requireSameOriginAdmin } from '@/lib/action-guards';
+            import { createToken, revokeToken } from '@/lib/admin-tokens';
+
+            export async function rotateCredential(id) {
+                await createToken({ userId: 1, name: 'fixture', scopes: ['lr:read'] });
+                await revokeToken(id);
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/lr-tokens.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('rotateCredential');
+    });
+
     it('parses TSX action files with JSX syntax', () => {
         const src = withApprovedActionGuard(`
             export async function updateFoo(id) {
@@ -579,6 +599,25 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('UNSUPPORTED exported call wrapper');
     });
+
+    it('fails closed for multi-callback exported call wrappers', () => {
+        const src = withApprovedActionGuard(`
+            export const mutateFoo = wrap(
+                async function guardOnly() {
+                    const originError = await requireSameOriginAdmin();
+                    if (originError) return { error: originError };
+                },
+                async function runMutation() {
+                    await db.delete(rows).where(eq(rows.id, 1));
+                },
+            );
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED exported call wrapper');
+        expect(report.failed[0]).toContain('mutateFoo');
+    });
 });
 
 describe('checkActionSource — function-expression exports', () => {
@@ -758,6 +797,47 @@ describe('checkActionSource — mixed file', () => {
 });
 
 describe('checkActionSource — aliased exports', () => {
+    it('checks exported identifier aliases that resolve to local async bodies', () => {
+        const src = withApprovedActionGuard(`
+            const impl = async function impl(id) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.update(foo).set({ id });
+                return { success: true };
+            };
+            export const updateFoo = impl;
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: actions/fixture.ts::updateFoo']);
+    });
+
+    it('fails exported identifier aliases whose resolved body lacks a guard', () => {
+        const src = withApprovedActionGuard(`
+            const impl = async function impl(id) {
+                await db.insert(foo).values({ id });
+                return { success: true };
+            };
+            export const createFoo = impl;
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('createFoo');
+    });
+
+    it('fails closed for exported identifier aliases whose target cannot be resolved', () => {
+        const src = `
+            export const createFoo = importedCreateFoo;
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED exported identifier alias');
+        expect(report.failed[0]).toContain('createFoo');
+    });
+
     it('fails closed for aliased mutating exports that the scanner cannot inspect', () => {
         const src = withApprovedActionGuard(`
             const deleteFoo = async (id) => {

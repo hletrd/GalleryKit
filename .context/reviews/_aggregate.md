@@ -1,16 +1,14 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-36-2026-06-30/_aggregate.md`
+Current aggregate: `cycle-37-2026-06-30/_aggregate.md`
 
-Cycle 36 scheduled five findings for this cycle:
+Cycle 37 scheduled three high-severity scanner findings for this cycle:
 
-- `AGG-C36-01` - action-origin guard branches can mutate before returning.
-- `AGG-C36-02` - action-origin local mutating-helper discovery is order-dependent.
-- `AGG-C36-03` - action-origin scanner ignores wrapped and default exported actions.
-- `AGG-C36-04` - public-route rate-limit scanner misses imported expensive GET helpers.
-- `AGG-C36-05` - `reconcileLegacySchema` does not repair the admin-token owner FK.
+- `AGG-C37-01` - imported credential mutators can run before the same-origin guard.
+- `AGG-C37-02` - `lint:action-origin` silently ignores exported identifier aliases.
+- `AGG-C37-03` - multi-callback wrappers can hide unguarded mutators.
 
-Cycle 36 deferred six lower-priority performance and UX findings in `.context/plans/cycle-36-2026-06-30-deferred.md`.
+Cycle 37 deferred two findings in `.context/plans/cycle-37-2026-06-30-deferred.md`: destructive-policy-bound FK orphan convergence and medium-severity CLIP bootstrap sweep ownership.
 
 ---
 

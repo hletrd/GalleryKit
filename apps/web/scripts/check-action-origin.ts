@@ -291,7 +291,7 @@ const MUTATING_FUNCTION_NAMES = new Set([
     'revalidateTag',
 ]);
 
-const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:delete|remove|insert|update|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|restore|dump)(?:[A-Z_]|$)/i;
+const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:create|delete|remove|insert|update|upsert|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|revoke|issue|mint|rotate|restore|dump)(?:[A-Z_]|$)/i;
 
 const PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES = new Set([
     'getCurrentUser',
@@ -629,12 +629,11 @@ function functionBodyFromExpression(
         return expression.body;
     }
     if (ts.isCallExpression(expression)) {
-        for (const arg of expression.arguments) {
-            if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
-                if (options.requireAsync && !hasAsyncModifier(arg)) return undefined;
-                return arg.body;
-            }
-        }
+        const functionArgs = expression.arguments.filter((arg) => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg));
+        if (functionArgs.length !== 1) return undefined;
+        const [arg] = functionArgs;
+        if (options.requireAsync && !hasAsyncModifier(arg)) return undefined;
+        return arg.body;
     }
     return undefined;
 }
@@ -823,9 +822,20 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 evaluateBody(statement, exportedBody, name);
                 continue;
             }
+            if (ts.isIdentifier(init)) {
+                const aliasedBody = localBodies.get(init.text);
+                if (aliasedBody) {
+                    evaluateBody(statement, aliasedBody, name);
+                    continue;
+                }
+                report.failed.push(
+                    `UNSUPPORTED exported identifier alias: ${relative}:${lineOf(statement)} ${name} aliases ${init.text}, but this scanner could not resolve that body. Use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
+                );
+                continue;
+            }
             if (ts.isCallExpression(init)) {
                 report.failed.push(
-                    `UNSUPPORTED exported call wrapper: ${relative}:${lineOf(statement)} ${name} must wrap an async function body directly or use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
+                    `UNSUPPORTED exported call wrapper: ${relative}:${lineOf(statement)} ${name} must wrap exactly one async function body directly or use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
                 );
                 continue;
             }

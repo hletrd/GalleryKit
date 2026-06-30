@@ -55,7 +55,7 @@ const MUTATING_CALL_METHOD_NAMES = new Set([
     'execute',
 ]);
 
-const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:delete|remove|insert|update|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|restore|dump)(?:[A-Z_]|$)/i;
+const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:create|delete|remove|insert|update|upsert|write|enqueue|settle|cleanup|log|revalidate|track|mark|begin|end|resume|quiesce|drain|flush|acquire|release|revoke|issue|mint|rotate|restore|dump)(?:[A-Z_]|$)/i;
 
 const EXPENSIVE_GET_MARKERS = [
     'ImageResponse',
