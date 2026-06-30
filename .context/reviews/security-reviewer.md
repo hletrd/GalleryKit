@@ -1,19 +1,25 @@
-# Cycle 27 Security Reviewer Report
+# Cycle 28 Security Reviewer Report
 
 Date: 2026-06-30
 Role: security-reviewer
 Scope: Entire repository under `/Users/hletrd/flash-shared/gallery`
-Mode: Read-only source review. No application code changes made.
+Mode: Review/report update only. No application source code changes made.
 
 ## Inventory
 
 Reviewed the repository under the security-reviewer brief for OWASP Top 10, auth/authz, CSRF/same-origin, rate limits, path traversal, unsafe raw SQL, secrets, SSRF, upload safety, and admin/public privacy separation.
 
 Primary docs and policy sources reviewed:
-- `AGENTS.md` instructions provided in the user prompt, including "do not edit code" and review-output requirements.
+- `AGENTS.md` instructions provided in the user prompt, including autonomy, commit/deploy policy, security-review output requirements, and project-specific quality gates.
 - `CLAUDE.md` security architecture, environment-variable guidance, permanently deferred decisions, schema/migration rules, and lint gates.
-- Prior review state in `.context/reviews/security-reviewer.md`, especially Cycle 26 SEC-26-01.
+- Prior review state in `.context/reviews/security-reviewer.md`, especially Cycle 27 risks and the closed Cycle 26 restore-scanner finding.
 - Deferred/permanent-policy references, including `CLAUDE.md:569-570` for 2FA/WebAuthn and paid-download/Stripe non-goals. These are not re-filed.
+
+Repository inventory method:
+- `git ls-files` reported 2598 tracked files. The current live review inventory was narrowed by security relevance, not by sampling: all current source, app routes, server actions, API routes, libraries, scripts, migrations, deployment config, CI config, tracked env examples, docs, and security-relevant tests were inventoried.
+- The generated current-code/config/doc inventory contained 620 tracked files, covering `.github/**`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/**`, root scripts, package manifests/lockfiles, `apps/web/{Dockerfile,deploy.sh,docker-compose.yml,nginx/default.conf,next.config.ts,drizzle.config.ts,playwright.config.ts,tsconfig*}`, `apps/web/drizzle/**`, `apps/web/messages/**`, `apps/web/public/**`, `apps/web/scripts/**`, `apps/web/e2e/**`, and `apps/web/src/**`.
+- `apps/web/src` contains 512 TypeScript/JavaScript source/test files. Security-sensitive application files were reviewed by full inventory plus repo-wide pattern sweeps for route handlers, server actions, auth wrappers, origins, cookies, upload paths, SQL, child processes, filesystem access, secrets, redirects, fetches, and privacy field exposure.
+- `.context/reviews/**`, `.context/plans/**`, and `plan/**` historical artifacts were checked for prior security context and regressions, but were not treated as live runtime attack surface.
 
 Review-relevant source categories inventoried and examined:
 - Admin API auth wrappers and PAT auth: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`, `apps/web/src/app/api/admin/**`.
@@ -30,9 +36,9 @@ Review-relevant source categories inventoried and examined:
 - `npm run lint:api-auth --workspace=apps/web`: passed. Confirmed both admin API routes export through `withAdminAuth(...)`.
 - `npm run lint:action-origin --workspace=apps/web`: passed. Confirmed all scanned mutating server actions enforce `requireSameOriginAdmin()` or carry an explicit exempt comment.
 - `npm run lint:public-route-rate-limit --workspace=apps/web`: passed. Confirmed public mutating API route coverage for rate limiting.
-- `npm audit --workspace=apps/web --audit-level=moderate`: passed, `found 0 vulnerabilities`.
-- Focused Vitest suite passed: 18 files, 312 tests.
-  - Included `check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`, `privacy-fields`, `search-route-privacy`, `sql-restore-scan`, `serve-upload`, `upload-paths`, `uploads-route-method-wiring`, `request-origin`, `api-auth-response-headers`, `session-verify`, `sanitize-stderr`, `csv-escape`, `tracked-secrets`, `admin-tokens`, `semantic-search-rate-limit`, and `lr-upload-hdr-gate`.
+- `npm audit --workspace=apps/web --json`: passed with `total: 0` vulnerabilities across 724 dependencies.
+- Focused Vitest suite passed: 25 files, 355 tests.
+  - Included `check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`, `privacy-fields`, `search-route-privacy`, `sql-restore-scan`, `serve-upload`, `upload-paths`, `uploads-route-method-wiring`, `request-origin`, `api-auth-response-headers`, `session-verify`, `sanitize-stderr`, `csv-escape`, `tracked-secrets`, `admin-tokens`, `semantic-search-rate-limit`, `lr-upload-hdr-gate`, `backup-download-route`, `content-security-policy`, `db-restore`, `gps-exif-strip-isobmff`, `map-privacy`, `restore-upload-lock`, and `mysql-cli-ssl`.
 - Tracked secret grep found environment variable names, documentation placeholders, tests, and historical-deferred references, but no committed private key or live token pattern in tracked HEAD.
 
 ## Confirmed Issues
@@ -45,7 +51,7 @@ None.
 
 ## Risks Needing Manual Validation
 
-### RV-27-01 - Medium - Proxy/header trust and TLS edge assumptions must match production
+### RV-28-01 - Medium - Proxy/header trust and TLS edge assumptions must match production
 
 Confidence: Medium
 
@@ -68,18 +74,19 @@ If production runs with `TRUST_PROXY=true` while requests can reach Next.js or a
 Suggested fix / validation:
 Operationally validate that the public edge terminates HTTPS, redirects cleartext traffic before the internal nginx hop, and strips or overwrites inbound `X-Forwarded-*` headers. Leave `TRUST_PROXY=false` for direct-to-Next deployments. If this app is deployed behind a different proxy, copy the header-overwrite behavior from `apps/web/nginx/default.conf`.
 
-### RV-27-02 - Medium - DB restore blast radius still depends on MySQL account least privilege
+### RV-28-02 - Medium - DB restore blast radius still depends on MySQL account least privilege
 
 Confidence: Medium
 
 Location:
-- `apps/web/src/lib/sql-restore-scan.ts:39-55`
-- `apps/web/src/lib/sql-restore-scan.ts:190-221`
+- `apps/web/src/lib/sql-restore-scan.ts:12-31`
+- `apps/web/src/lib/sql-restore-scan.ts:39-59`
+- `apps/web/src/lib/sql-restore-scan.ts:210-251`
 - `apps/web/src/app/[locale]/admin/db-actions.ts:618-647`
 - `apps/web/src/app/[locale]/admin/db-actions.ts:672-678`
 
 What I verified:
-The Cycle 26 restore-scanner issue is fixed in current source. The scanner now extracts write targets for `CREATE TABLE`, `ALTER TABLE`, `INSERT INTO`, `REPLACE`, and `UPDATE` (`sql-restore-scan.ts:39-55`), rejects schema-qualified targets (`sql-restore-scan.ts:200-202`), rejects writes to tables outside `APP_BACKUP_TABLES` (`sql-restore-scan.ts:204-206`), and applies that check before the dangerous-SQL denylist (`sql-restore-scan.ts:212-221`). The restore action scans the uploaded dump before invoking the MySQL client (`db-actions.ts:618-647`) and still runs `mysql --one-database DB_NAME` for import (`db-actions.ts:672-678`).
+The Cycle 26 restore-scanner issue is fixed in current source. The scanner keeps an explicit app-table allowlist (`sql-restore-scan.ts:12-31`), extracts write targets for `CREATE TABLE`, `ALTER TABLE`, `INSERT INTO`, `REPLACE`, and `UPDATE` (`sql-restore-scan.ts:39-59`), rejects schema-qualified targets and writes to tables outside `APP_BACKUP_TABLES` (`sql-restore-scan.ts:210-239`), and applies that check before the dangerous-SQL denylist (`sql-restore-scan.ts:242-251`). The restore action scans the uploaded dump before invoking the MySQL client (`db-actions.ts:618-647`) and still runs `mysql --one-database DB_NAME` for import (`db-actions.ts:672-678`).
 
 Failure scenario:
 A future scanner blind spot or MySQL grammar edge case would have a much larger impact if the GalleryKit DB user has grants outside the application schema. `--one-database` is useful defense-in-depth but should not be the only containment layer for a restore process that executes SQL from an uploaded admin file.
@@ -87,7 +94,7 @@ A future scanner blind spot or MySQL grammar edge case would have a much larger 
 Suggested fix / validation:
 Verify the production MySQL user has only the minimum needed privileges on `DB_NAME.*` and no grants on sibling schemas, global objects, routines, users, or files. Keep the restore scanner allowlist tests in the focused security suite whenever restore grammar changes.
 
-### RV-27-03 - Low - Gitignored runtime secret files were intentionally not inspected
+### RV-28-03 - Low - Gitignored runtime secret files were intentionally not inspected
 
 Confidence: High
 
@@ -96,9 +103,11 @@ Location:
 - `README.md:134-143`
 - `CLAUDE.md:79-86`
 - `apps/web/deploy.sh:18`
+- `apps/web/.env.local.example:18-30`
+- `.env.deploy.example:1-14`
 
 What I verified:
-Tracked source requires a production `SESSION_SECRET` of at least 32 characters and refuses the DB fallback in production (`session.ts:19-35`). Tracked documentation uses placeholders for DB/admin/session values (`README.md:134-143`, `CLAUDE.md:79-86`). The deploy script requires local env files for real credentials (`apps/web/deploy.sh:18`). I did not read gitignored runtime secret files such as `.env.deploy` or `.env.local`.
+Tracked source requires a production `SESSION_SECRET` of at least 32 characters and refuses the DB fallback in production (`session.ts:19-35`). Tracked documentation and env examples use placeholders for DB/admin/session values (`README.md:134-143`, `CLAUDE.md:79-86`, `apps/web/.env.local.example:18-30`, `.env.deploy.example:1-14`). The deploy script requires local env files for real credentials (`apps/web/deploy.sh:18`). I did not read gitignored runtime secret files such as `.env.deploy` or `.env.local`.
 
 Failure scenario:
 If a local or production gitignored env file contains weak, reused, or historically leaked credentials, the tracked source review will not detect it. This is an operational secret-management risk, not a confirmed repository leak.
@@ -158,11 +167,11 @@ Manually validate production `SESSION_SECRET`, DB credentials, admin bootstrap s
 
 ## Not Re-Filed
 
-- Cycle 26 SEC-26-01 is closed by current scanner logic. See `apps/web/src/lib/sql-restore-scan.ts:39-55`, `190-221`, and the passing `sql-restore-scan` tests in the focused suite.
+- Cycle 26 SEC-26-01 is closed by current scanner logic. See `apps/web/src/lib/sql-restore-scan.ts:12-31`, `39-59`, `210-251`, and the passing `sql-restore-scan` tests in the focused suite.
 - 2FA/WebAuthn is a documented product non-goal for this personal-gallery threat model (`CLAUDE.md:569`).
 - Paid downloads/Stripe are removed and documented not to be reintroduced without a new product decision (`CLAUDE.md:570`).
 - Historical checked-in secret exposure remains an operational rotation concern, not a current tracked-HEAD code finding; current tracked docs use placeholders and production session secret enforcement is present.
-- Prior build-toolchain/transitive audit concerns were not re-filed because `npm audit --workspace=apps/web --audit-level=moderate` currently reports zero vulnerabilities.
+- Prior build-toolchain/transitive audit concerns were not re-filed because `npm audit --workspace=apps/web --json` currently reports zero vulnerabilities.
 
 ## Final Sweep Confirmation
 
@@ -178,4 +187,4 @@ Final sweep completed after validation. Categories reviewed:
 - Upload safety: browser upload, Lightroom PAT upload, Sharp metadata path, GPS stripping, HDR gate, body and disk caps.
 - Admin/public privacy separation: public select guards, map-only GPS exception, shared/photo/search/semantic result enrichment.
 
-Result: No confirmed or likely new security defects found in code during Cycle 27. Three deployment/operations checks remain for manual validation.
+Result: No confirmed or likely new security defects found in code during Cycle 28. Three deployment/operations checks remain for manual validation. No current live application, deployment, configuration, documentation, migration, script, or security-relevant test file in the review inventory was skipped; archived review/plan artifacts were used for context rather than treated as runtime code.
