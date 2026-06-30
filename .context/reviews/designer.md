@@ -1,262 +1,100 @@
-# Designer Review - Cycle 20
+# Cycle 21 Designer Review
 
-Role: cycle-20 designer / ui-ux-designer-reviewer for
-`/Users/hletrd/flash-shared/gallery`. Scope: UI/UX/accessibility review of the
-GalleryKit web UI. Write scope: this artifact only. No implementation code,
-commits, pushes, or deploys were performed.
+Date: 2026-06-30
+Role: designer
+Scope: Next.js GalleryKit frontend in `/Users/hletrd/flash-shared/gallery`
 
 ## Method
 
-Followed `AGENTS.md` and `CLAUDE.md`. Loaded the local `agent-browser` skill
-instructions for core navigation, config, wait, query, interact, visual, debug,
-network, and state before browser work.
+- Read `AGENTS.md` and `CLAUDE.md` first, including the repo-specific deploy, schema, privacy, color/HDR, touch-target, i18n, and review-history rules.
+- Inventoried the UI surface before findings: public routes under `apps/web/src/app/[locale]/(public)`, admin routes under `apps/web/src/app/[locale]/admin`, shared components under `apps/web/src/components`, messages in `apps/web/messages/{en,ko}.json`, e2e flows in `apps/web/e2e`, and UI/a11y tests in `apps/web/src/__tests__`.
+- Used the agent-browser skills where feasible. Port 3000 was already serving an unrelated `ccusage` app, so I started GalleryKit on port 3001. The local GalleryKit route loaded, but the dev server could not connect to MySQL (`ECONNREFUSED 127.0.0.1:3306`), so browser interaction was limited to the localized route error boundary. The error page exposed skip link, main region, `Error` heading, retry button, and return link; screenshot captured at `/tmp/gallerykit-3001-error.png`. The temporary dev server was stopped after inspection.
+- Final missed-issues sweep compared current source against previous review themes: nav/focus rings, home card prefetch, empty states, lightbox focus hiding, settings backfill, settings validation, i18n messages, and touch-target/focus tests.
 
-Local boot:
+## UI Inventory
 
-```text
-npm run dev
-Next.js 16.2.9 ready at http://localhost:3001
-Could not connect to database to bootstrap queue (ECONNREFUSED).
-```
-
-Local public data routes were DB-blocked, so browser evidence for public gallery
-flows used `https://gallery.atik.kr` as requested. Local evidence was still used
-for the admin login and route error shell.
-
-Browser evidence collected with `agent-browser`:
-
-- Local `/en`: rendered route error boundary because MySQL was unavailable.
-  Accessibility tree exposed `main`, region `Error`, button `Try again`, and link
-  `Return to Gallery`.
-- Local `/en/admin` at 390 x 844: accessible login form with `Username`,
-  `Password`, password reveal, and 44 px controls.
-- Live `/en` at 1440 x 1000: main nav, tag filter, photo grid, load-more, footer;
-  screenshot `/tmp/gallery-cycle20-home-desktop.png`.
-- Live `/en` at 390 x 844: collapsed and expanded mobile nav metrics;
-  screenshots `/tmp/gallery-cycle20-home-mobile-collapsed.png` and
-  `/tmp/gallery-cycle20-home-mobile-expanded-clean.png`.
-- Live `/en/p/348` at 1440 x 1000 and 390 x 844: photo viewer controls,
-  accessibility snapshot, no default download/info panel on desktop;
-  screenshot `/tmp/gallery-cycle20-photo-mobile.png`.
-- Live search dialog: keyword query `JIHOON` produced a generic error; semantic
-  query `concert stage` posted to `/api/search/semantic`, stayed in loading for
-  ~14 s, then returned 20 listbox options.
-- Live `/en/map`: empty geotagged map state rendered `Map` plus "No geotagged
-  photos are available on the map."
-
-Source/tests/docs inspected:
-
-- Docs/contracts: `CLAUDE.md`, `package.json`, prior `.context/reviews/designer.md`.
-- Public IA: localized public routes under `apps/web/src/app/[locale]/(public)`,
-  `NavClient`, `HomeClient`, `GridPicture`, `Search`, `PhotoViewer`,
-  `PhotoNavigation`, `ImageZoom`, `InfoBottomSheet`, `Lightbox`, map components.
-- Admin IA/forms: login, dashboard/upload/image manager, categories/tags,
-  settings, SEO, tokens, users, DB, analytics.
-- Styling/a11y: `globals.css`, shadcn/Radix primitives, focus-visible tests,
-  touch-target audit, i18n messages, route loading/error/not-found shells.
+- Public information architecture: localized public layout, home grid/masonry, topic pages, tag/category pages, search page, map, timeline, year archive, shared photo routes, privacy page, error/not-found boundaries.
+- Admin information architecture: dashboard, upload/dropzone, image manager, categories, tags, SEO, settings, tokens, password/users, DB maintenance, analytics, login.
+- Shared UI and interaction surfaces: `nav-client`, `search`, `home-client`, `photo-viewer`, `lightbox`, `lightbox-color-pip`, `info-bottom-sheet`, `load-more`, `tag-filter`, `upload-dropzone`, `image-manager`, `tag-input`, Radix-style UI primitives, theme/locale plumbing.
+- Validation surfaces checked: touch-target audit, focus-visible contracts, i18n parity, settings server action validators, admin API/action-origin/rate-limit lint contracts where relevant.
 
 ## Findings
 
-### DES20-01 - Keyword search fails on live gallery for normal tag/person queries
+### 1. Invisible keyboard stop remains in the lightbox color pip when controls auto-hide
 
 Severity: High
-Confidence: High for user-visible failure, Medium for root cause
-Status: Open
+Confidence: High
+Areas: focus/keyboard navigation, WCAG 2.2, affordances, modal behavior
 
-Route/selector/evidence:
-
-- Route: `https://gallery.atik.kr/en`
-- Interaction: expand mobile nav, open `button[aria-label="Search photos"]`,
-  type `JIHOON` into `#search-input`.
-- DOM result: `#search-input[aria-expanded="false"]`, no `#search-results`, live
-  region text `Search failed. Please try again.`
-- Network evidence: one `POST https://gallery.atik.kr/en` server-action request
-  returned `200`; the UI still rendered the structured error state.
-- Control comparison: enabling `#semantic-search-toggle` and querying
-  `concert stage` hit `POST /api/search/semantic` and eventually returned
-  `20 results`, so the search dialog itself is interactive.
-
-Source region:
-
-- `apps/web/src/components/search.tsx:237-245` maps `searchImagesAction(...)`
-  non-ok statuses into the dialog state.
-- `apps/web/src/components/search.tsx:464-467` renders the generic visible error.
-- `apps/web/src/app/actions/public.ts:305-317` catches `searchImages(...)`
-  failures and returns `{ status: 'error', results: [] }`.
-- `apps/web/src/lib/data.ts:1490-1632` performs the keyword/tag/alias search SQL.
+Evidence:
+- `apps/web/src/components/lightbox.tsx:368-370` derives `controlVisibilityProps` as `{ tabIndex: -1, 'aria-hidden': true }` when the overlay controls are hidden.
+- `apps/web/src/components/lightbox.tsx:551-656` applies those hidden-state props to close, fullscreen, play/pause, previous, and next controls.
+- `apps/web/src/components/lightbox.tsx:659-669` renders `LightboxColorPip` inside the same opacity-hidden overlay but does not pass the hidden-state props or `controlsVisible`.
+- `apps/web/src/components/lightbox-color-pip.tsx:160-191` renders the pip trigger as an independent focusable `<button>`.
+- `apps/web/src/__tests__/lightbox-controls-contract.test.ts:23-44` covers the shared hide timer and blur behavior, but it only reads `lightbox.tsx`; it does not assert that the nested color-pip trigger leaves the tab order when the overlay is hidden.
 
 Failure scenario:
-
-A visitor tries the obvious public search path for a visible tag/person name.
-Instead of results or a recoverable "no matches" state, they get a generic error
-with no explanation and no alternate path except manually toggling semantic
-search.
+On a fine-pointer desktop, the lightbox overlay fades to `opacity: 0` after the hide timer. Keyboard users tab within the focus trap. The main controls are removed from tab order, but the color-pip trigger can still receive focus inside an invisible, pointer-events-disabled overlay. The user gets an unannounced focus stop with no visible target or focus ring, and activating it can open a panel the user did not see.
 
 Suggested fix:
+Thread the lightbox hidden state into `LightboxColorPip`. When controls are hidden and the pip is closed, set the pip trigger to `tabIndex={-1}` and `aria-hidden`, or move the pip out of the hidden overlay and make focus reveal visible controls first. Add a contract test that asserts `.lightbox-color-pip` is also excluded from the tab order when `controlsVisible` is false.
 
-Reproduce against production-like MySQL and inspect the `searchImagesAction
-failed` server log for the failing query. Add an e2e/search regression that
-searches a known tag/person and asserts a listbox result. Keep the generic
-fallback, but add a more actionable visitor-facing state if the keyword backend is
-temporarily unavailable while semantic search is configured.
+### 2. The settings backfill CTA promises re-encoding next to a state it cannot actually process
 
-### DES20-02 - Mobile collapsed nav shows clipped topic links while hiding search/theme/language
+Severity: High
+Confidence: High
+Areas: affordances, form outcome clarity, color/HDR workflow, perceived trust
+
+Evidence:
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:253-263` shows a "Backfill required" status when existing photos are present and a color/HDR-impacting setting is dirty.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:274-296` immediately renders "Re-encode existing photos" with a `Re-encode now` button that calls `handleBackfill`.
+- `apps/web/src/app/actions/admin-backfill.ts:32-49` exposes `triggerBackfill()` with no `forceReencode` or settings-change mode.
+- `apps/web/src/lib/admin-backfill-runner.ts:383-388` counts only rows where `pipeline_version` is null or below `IMAGE_PIPELINE_VERSION`; `apps/web/src/lib/admin-backfill-runner.ts:413-420` fetches the same restricted candidate set.
+- The messages acknowledge the mismatch: `apps/web/messages/en.json:762-769` and `apps/web/messages/ko.json:762-769` say settings-only changes need the sidecar `--force-reencode`, while the same card still presents a primary in-app re-encode CTA.
+- The sidecar path can do the missing operation: `apps/web/scripts/backfill-color-pipeline.ts:331-340` switches to all processed images when `--force-reencode` is set.
+
+Failure scenario:
+An admin changes JPEG/AVIF quality, chroma subsampling, forced sRGB derivatives, or another byte-affecting color/HDR setting on a gallery whose photos already have the current pipeline version. The warning says existing photos need new bytes, and the adjacent button says "Re-encode now." The in-app runner sees zero stale-version rows and returns "All photos are already at the current pipeline version. Nothing to re-encode." The stale derivatives remain in place, but the UI has taught the admin that the requested re-encode was handled.
+
+Suggested fix:
+Split the card into two explicit paths: "Apply current pipeline version" for stale-version rows, and "Force re-encode for changed settings" for settings-only byte changes. The second path should either call a guarded in-app `forceReencode` action with an explicit confirmation and progress copy, or disable the in-app button and show the exact operator command/runbook for the sidecar path. Do not show a primary "Re-encode now" affordance in the settings-only state unless it can actually re-encode current-version rows.
+
+### 3. Settings validation errors are toast-only and not associated with the invalid field
 
 Severity: Medium
 Confidence: High
-Status: Open
+Areas: form validation UX, WCAG 2.2 error identification, keyboard/screen-reader recovery
 
-Route/selector/evidence:
-
-- Route: `https://gallery.atik.kr/en`, viewport 390 x 844.
-- Collapsed DOM metrics:
-  - `button[aria-controls="primary-nav-topics primary-nav-controls"]`
-    `aria-expanded="false"`, box `x=180 w=44`.
-  - Topic link `TWS`, box `x=224 w=55`.
-  - Topic link `TOMORROW X TOGETHER`, box `x=288 w=200 right=488`, clipped past
-    the 390 px viewport.
-  - Search/theme/language controls all measured `w=0 h=0`.
-- Expanded metrics after the same selector click: `aria-expanded="true"`,
-  nav height `172`, controls visible at `y=116`.
-- Screenshot evidence: `/tmp/gallery-cycle20-home-mobile-collapsed.png`,
-  `/tmp/gallery-cycle20-home-mobile-expanded-clean.png`.
-
-Source region:
-
-- `apps/web/src/components/nav-client.tsx:84-88` makes the nav row `h-16
-  overflow-hidden` when collapsed.
-- `apps/web/src/components/nav-client.tsx:99-108` renders the mobile expand
-  toggle before topics.
-- `apps/web/src/components/nav-client.tsx:117-123` keeps topics in the collapsed
-  row with horizontal overflow.
-- `apps/web/src/components/nav-client.tsx:155-159` hides search/theme/language
-  controls on collapsed mobile.
+Evidence:
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:186-217` saves changed settings via a button handler and maps server failures to `toast.error(result.error || saveFailed)`; no field error state, focus movement, or inline recovery target is set.
+- Numeric and patterned inputs such as WebP/AVIF/JPEG quality at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:347-388`, image sizes at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:391-404`, wide-gamut pixel cap at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:527-540`, and slideshow interval at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:591-603` have help text but no `aria-invalid`, no error text node, and no error-specific `aria-describedby`.
+- `apps/web/src/app/actions/settings.ts:60-65` rejects invalid values with a generic translated `invalidSettingValue` keyed by setting name.
+- `apps/web/src/lib/gallery-config-shared.ts:147-191` has precise validators for quality ranges, image sizes, slideshow interval, AVIF effort, chroma options, and pixel caps, but those constraints are not reflected as client-side field-level validation state.
 
 Failure scenario:
-
-On a phone, the header visually advertises two partially competing navigation
-models: a chevron menu plus clipped topic pills. The primary utility actions
-including search and language are hidden until expansion, but the collapsed row
-does not clearly communicate that the chevron reveals those utilities rather than
-more topics.
+A keyboard or screen-reader admin enters `999` for AVIF quality or a malformed image-size list, then activates Save. Because this is not a native form submit flow, the browser's constraint UI is not the recovery path. The user only gets a transient toast such as "Invalid setting value: image_quality_avif"; focus remains on the Save button, and the offending input is not marked or described as invalid.
 
 Suggested fix:
+Add field-level validation using the existing shared validators before calling `updateGallerySettings`. Store errors by setting key, set `aria-invalid="true"` on invalid controls, append error text to each control's `aria-describedby`, and move focus to the first invalid field after Save. Keep the server validation as the source of truth, but map server errors back to the relevant field when the key is known.
 
-Use a dedicated collapsed mobile header: brand + search + menu, or brand + menu
-only with topics hidden until expanded. If topic preview is intentional, make it a
-separate horizontally scrollable row below the header and keep utility controls
-discoverable.
+## Coverage Notes
 
-### DES20-03 - Home masonry auto-prefetches every visible photo detail route
+- Information architecture: public and admin route grouping is clear and consistent with `localizePath`; no new IA blocker found beyond the settings/backfill mismatch above.
+- Affordances: the strongest affordance issue is the backfill CTA promising a settings-only re-encode it cannot perform.
+- Focus and keyboard navigation: previous nav/footer/search focus-ring gaps appear addressed in current source/tests; the remaining source-confirmed defect is the hidden lightbox color-pip tab stop.
+- WCAG 2.2 accessibility: touch-target contracts are present, skip link/error boundary are present, and current findings map to visible focus/error identification concerns.
+- Responsive breakpoints: inspected mobile nav, home grid, lightbox, info bottom sheet, upload dropzone, and image manager patterns. Runtime responsive browser verification was limited by the missing local DB.
+- Loading, empty, and error states: home/load-more/search/error boundary states exist in source; local browser smoke reached the error boundary due DB unavailability and it rendered a retry/back path.
+- Form validation UX: settings page has the field-level validation gap above; login/upload/tag surfaces have clearer labels and status affordances in source.
+- Dark/light mode: theme options and tokenized colors are present; no source-confirmed dark/light-only blocker found in this pass.
+- i18n: English and Korean messages cover the reviewed settings/backfill copy; the mismatch exists in both locales rather than being a translation gap.
+- Perceived performance: home cards now use disabled prefetch for photo links, image components use responsive sizing/blur where expected, and no new source-confirmed perceived-performance issue was found.
 
-Severity: Medium
-Confidence: High
-Status: Open
+## Missed-Issues Sweep
 
-Route/selector/evidence:
+- Rechecked old cycle themes: home card `prefetch={false}`, mobile nav focus rings, footer/year/search focus rings, empty-state actions, lightbox hide-timer focus behavior, and touch-target audit coverage.
+- Looked for hidden interactive controls inside opacity-hidden overlays; only `LightboxColorPip` remained source-confirmed.
+- Looked for user-facing settings states where copy and action semantics diverge; the settings-only backfill path remained source-confirmed.
+- Looked for validation that could strand keyboard users after Save; settings remained source-confirmed because save errors are toast-only.
 
-- Route: `https://gallery.atik.kr/en`, desktop viewport.
-- Browser network after initial render, before clicking any card, showed RSC
-  prefetches for many visible photo links, including:
-  `/en/p/324?_rsc=...`, `/en/p/325?_rsc=...`, `/en/p/326?_rsc=...`,
-  `/en/p/327?_rsc=...`, `/en/p/332?_rsc=...`, `/en/p/333?_rsc=...`,
-  `/en/p/337?_rsc=...`, `/en/p/338?_rsc=...`, `/en/p/339?_rsc=...`,
-  `/en/p/340?_rsc=...`, `/en/p/345?_rsc=...`, `/en/p/346?_rsc=...`,
-  `/en/p/347?_rsc=...`, `/en/p/348?_rsc=...`.
-- Same capture also showed topic route prefetches for `/en/tws` and
-  `/en/tomorrow-x-together`.
-
-Source region:
-
-- `apps/web/src/components/home-client.tsx:323-327` renders each masonry card as
-  a default Next `<Link>` with no `prefetch={false}`.
-- Similar archive/shared masonry links exist in
-  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:196-201`,
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:238-243`, and
-  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:189-203`.
-
-Failure scenario:
-
-A visitor opening the home page on mobile data or a low-power device pays for a
-burst of route/data prefetches for many photos they may never open. On the server,
-each prefetch can also add DB and RSC rendering work exactly when the first image
-grid is trying to feel fast.
-
-Suggested fix:
-
-Disable automatic prefetch on dense photo-grid links and replace it with bounded
-intent prefetching: hover/focus for pointer/keyboard, or only the first N visible
-cards after idle on non-metered connections. Keep explicit prev/next prefetches
-on photo pages where user intent is clearer.
-
-### DES20-04 - Desktop photo pages default to hiding metadata, color details, similar photos, and downloads
-
-Severity: Medium
-Confidence: High
-Status: Open
-
-Route/selector/evidence:
-
-- Route: `https://gallery.atik.kr/en/p/348`, viewport 1440 x 1000.
-- Accessibility snapshot exposed only `Back to TWS`, `Open fullscreen view`,
-  `Info`, `Next photo`, and the zoomable photo button in `main`.
-- DOM probe: `hasDownload=false`; `mainText` contained the title, shortcuts,
-  back link, info button, and photo navigation status only.
-
-Source region:
-
-- `apps/web/src/components/photo-viewer.tsx:104-114` initializes and persists
-  `isPinned` from `sessionStorage`, defaulting to `false`.
-- `apps/web/src/components/photo-viewer.tsx:175` maps `showInfo` directly from
-  `isPinned`.
-- `apps/web/src/components/photo-viewer.tsx:739-750` hides the sidebar unless
-  `showInfo` is true.
-- The hidden sidebar body beginning at `apps/web/src/components/photo-viewer.tsx:750`
-  contains tags, description, color/HDR details, wide-gamut hint, similar photos,
-  histogram/EXIF, and download links.
-
-Failure scenario:
-
-A desktop visitor follows a direct photo or shared link, views the image, and
-misses download, caption, capture/color context, and similar-photo discovery
-because the page opens in an immersive state with only a generic `Info` button as
-the entry point.
-
-Suggested fix:
-
-Default the desktop sidebar open for direct photo pages, or surface a compact
-always-visible summary/download strip outside the collapsible panel. If the
-immersive default remains, make the first-run desktop affordance more explicit
-and expose download/color status without requiring the panel.
-
-## Positive Evidence
-
-- Touch targets measured at 44 px or larger for the tested nav, tag chips, login
-  fields, admin login actions, photo toolbar buttons, and footer links.
-- Search dialog uses a named modal dialog, focus starts on `#search-input`, body
-  scroll locks while open, and `Escape`/close affordances are present.
-- Semantic search has an explanatory production hint and returns a proper
-  combobox/listbox/options pattern after the long server request resolves.
-- Reduced-motion and forced-colors CSS are present in `globals.css`, and source
-  review found reduced-motion checks in photo viewer, lightbox, and zoom surfaces.
-- Korean/English message files have matching search/map/nav keys in the reviewed
-  regions; Korean text is natural enough for the surfaced controls inspected.
-- Empty/error states exist for route errors, no geotagged map photos, no topics
-  before upload, upload failures, load-more failures, and search statuses.
-
-## Missed-Issue Sweep
-
-Rechecked prior cycle-19 items against current source:
-
-- Photo swipe navigation is now scoped to `swipeTargetRef` in
-  `photo-navigation.tsx:47-143`; not carried forward.
-- Image zoom now includes `accessibleName` in the zoom button name at
-  `image-zoom.tsx:343-365`; not carried forward.
-- Timeline sticky headings now use `top-16` at
-  `timeline/page.tsx:205-208`; not carried forward.
-- Admin image manager remains table-based on narrow screens, but I could not
-  gather authenticated browser evidence this pass; left as residual risk rather
-  than a current finding.
-
-No critical UI/UX issue was found. The highest-impact current gap is the live
-keyword-search failure because it breaks a primary public discovery affordance.
+Finding count: 3

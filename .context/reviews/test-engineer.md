@@ -1,43 +1,107 @@
-# Test-Engineer Review - Cycle 20
+# Test-Engineer Review - Cycle 21
 
 Date: 2026-06-30 KST
-HEAD reviewed: `24c82c71` (`docs(reviews): 📝 add cycle 20 perf review`)
-Scope: repository-wide review of tests, lint scripts, build/type gates, invariants, fixtures, flaky/weak assertions, missing regression locks, TDD opportunities, gate blind spots, and source-contract test quality. No implementation files were modified.
+HEAD reviewed: `1ed96484` (`docs(security): preserve cycle 21 audit evidence`)
+Scope: repository-wide review of current HEAD for test coverage gaps, flaky tests, weak assertions, gate blind spots, and TDD opportunities tied to real product risk. No implementation code was modified.
 
 ## Inventory
 
-Required docs and context read first:
+Required context read first:
 
 - `AGENTS.md`
 - `CLAUDE.md`
 - `/Users/hletrd/.agents/skills/code-review/SKILL.md`
-- `.context/reviews/run4-cycle20/*`
-- `plan/plan-311-run4-cycle20-fixes.md`
-- `plan/plan-312-run4-cycle20-deferred.md`
-- `.context/gate-logs/cycle-20/baseline.log`
 
-Test and gate surface inventoried:
+Current source/test inventory:
 
-- Unit/integration: 264 Vitest files under `apps/web/src/__tests__`.
-- Browser E2E: 5 Playwright specs under `apps/web/e2e`.
-- Public API routes: 8 route handlers under `apps/web/src/app/api`.
-- Server actions: 13 files under `apps/web/src/app/actions`.
-- Non-API route handlers: 4 files (`uploads` GET/HEAD and feed GET routes).
-- Blocking gates: ESLint, api-auth scanner, action-origin scanner, public-route-rate-limit scanner, typecheck, build, Vitest, Playwright E2E.
-- Structural test patterns: source-contract tests, custom scanner fixtures, privacy `SENSITIVE_KEYS`, migration journal monotonicity, service-worker generated/template contracts, touch-target audit, deployment script contracts, and E2E admin/public/origin/nav specs.
+- App/source files under `apps/web/src`: 503 TypeScript/TSX/JS/MJS files.
+- Unit/integration tests under `apps/web/src/__tests__`: 271 files.
+- Playwright E2E/support files under `apps/web/e2e`: 8 files.
+- Public/admin route handlers inventoried under `apps/web/src/app/**/route.ts(x)`.
+- Server actions inventoried under `apps/web/src/app/actions/*.ts`.
+- Gate scripts reviewed: `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, Vitest config, Playwright config, and source-contract scanner tests.
 
-Validation performed:
+Focused implementation/test files inspected:
 
-- `npm test --workspace=apps/web -- --run src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/clip-model-contract.test.ts src/__tests__/og-photo-fallback.test.ts src/__tests__/cycle-19-source-contracts.test.ts src/__tests__/seo-actions.test.ts`: passed, 6 files / 78 tests.
-- `npm run lint:api-auth --workspace=apps/web`: passed.
-- `npm run lint:action-origin --workspace=apps/web`: passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/__tests__/backup-download-route.test.ts`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/__tests__/public-actions.test.ts`
+- `apps/web/src/__tests__/cycle-20-source-contracts.test.ts`
+- `apps/web/src/lib/clip-model.ts`
+- `apps/web/src/__tests__/clip-model-contract.test.ts`
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts`
+- `apps/web/src/__tests__/clip-offline-load.test.ts`
+- `apps/web/src/__tests__/semantic-route-production.test.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/lib/image-queue.ts`
+- upload/retry/queue tests around processing snapshots and failed-image retry.
 
-Full lint/typecheck/build/all-unit/E2E were not run during this review pass.
+Validation notes:
 
-## Confirmed Findings
+- This was a review pass; I did not run the full lint/typecheck/build/test suite.
+- Other cycle-21 artifacts report recent full gates green, but the findings below are based on fresh source/test inspection at current HEAD.
+- The detected `tdd` routing has no readable skill surface in this session, so TDD is treated as a review criterion.
 
-### TE20-01 - CLIP queue abort/concurrency behavior is still source-contract tested, not behavior-tested
+## Findings
+
+### TEST21-01 - No-prefetch source contract misses the remaining hover prefetch path that can inflate analytics
+
+Severity: Medium
+Confidence: High
+Status: Confirmed weak assertion / gate blind spot
+
+Exact file+region:
+
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156` records a photo view during server render.
+- `apps/web/src/components/photo-navigation.tsx:220-228` and `apps/web/src/components/photo-navigation.tsx:235-242` still call `router.prefetch(getPhotoPath(prevId|nextId))` on hover.
+- `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:25-31` claims to test that photo detail prefetch is gone, but it checks only home cards, hidden adjacent links, and the old `photo-viewer.tsx` `router.prefetch(buildPhotoPath(id))` string.
+- `apps/web/src/__tests__/public-actions.test.ts:241-318` covers recorder behavior directly, not whether prefetch/hover can trigger the page render that calls it.
+
+Failure scenario:
+
+A visitor opens a photo and hovers the previous/next controls. The remaining manual prefetch can render adjacent photo routes, and those routes call `recordPhotoView` as render-time side effects. The current "does not prefetch photo detail routes" test still passes because it never scans `photo-navigation.tsx` for `router.prefetch(getPhotoPath(...))`.
+
+Suggested fix/test:
+
+Prefer a behavior regression: in Playwright or a route-level harness, hover previous/next and assert no analytics insert/rate-limit consumption occurs until navigation commits. At minimum, expand the source contract to scan all photo-navigation/client files for `router.prefetch(` targeting `/p/` routes, and rename the test if hover prefetch remains intentional.
+
+TDD opportunity:
+
+Write the failing regression against `photo-navigation.tsx` first: assert no photo-detail route prefetch calls exist while analytics remains render-bound. Then either remove/replace the hover prefetch or move analytics to a committed-view client effect.
+
+### TEST21-02 - Backup download tests miss post-open failures that leak the validated file descriptor
+
+Severity: Low-Medium
+Confidence: High
+Status: Confirmed missing regression test with live failure path
+
+Exact file+region:
+
+- `apps/web/src/app/api/admin/db/download/route.ts:56-64` opens a validated file handle and closes it only for the non-file branch.
+- `apps/web/src/app/api/admin/db/download/route.ts:66-74` awaits `getCurrentUser()` and `logAuditEvent()` before creating the stream that would own the descriptor.
+- `apps/web/src/app/api/admin/db/download/route.ts:87-99` catches errors but has no handle reference/close path.
+- `apps/web/src/__tests__/backup-download-route.test.ts:170-184` covers `open()` rejection before a descriptor exists, not a throw after `open()` succeeds.
+
+Failure scenario:
+
+If `getCurrentUser()` or another pre-stream step throws after `open()` succeeds, the route returns 500 and leaves the file descriptor open. Repeated failed backup downloads can exhaust descriptors in the single web process. Existing tests stay green because they only simulate a failed `open()`.
+
+Suggested fix/test:
+
+Add a route test where `openMock` returns a fake handle with `stat`, `createReadStream`, and `close` spies, then make `getCurrentUserMock` reject. Assert the response is 500, `close` is called exactly once, and no stream is created. Fix with a `fileHandle` variable outside the try or a nested try/finally that closes until ownership transfers to `createReadStream()`.
+
+TDD opportunity:
+
+Start with the failing fake-handle test; it is deterministic and does not require real filesystem streaming.
+
+### TEST21-03 - CLIP inference queue safety is still source-contract tested, not behavior-tested
 
 Severity: Medium
 Confidence: High
@@ -45,155 +109,84 @@ Status: Confirmed weak assertion
 
 Exact file+region:
 
-- `apps/web/src/lib/clip-model.ts:65-160` implements shared queue state, waiter removal, timeout rejection, abort listener cleanup, and slot release.
+- `apps/web/src/lib/clip-model.ts:65-160` owns `activeInferenceCount`, `inferenceWaiters`, queue-full rejection, timeout rejection, abort listener cleanup, and slot release.
 - `apps/web/src/lib/clip-model.ts:228-236` passes `InferenceSlotOptions` through `embedTextReal`.
-- `apps/web/src/app/api/search/semantic/route.ts:247-260` passes `request.signal` to production text embedding and maps abort errors to 499.
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-50` only asserts source strings such as `ClipInferenceQueueAbortError`, `signal.addEventListener('abort'`, and `}), options)`.
+- `apps/web/src/app/api/search/semantic/route.ts:253-257` relies on that abort behavior for production text embedding.
+- `apps/web/src/__tests__/clip-model-contract.test.ts:32-50` only checks source strings such as `ClipInferenceQueueTimeoutError`, `signal.addEventListener('abort'`, and `}), options)`.
 
-Missing/weak test scenario:
+Failure scenario:
 
-No test drives actual queue behavior. A refactor can preserve the strings while breaking the invariant: aborted waiters may remain queued, timed-out waiters may still be woken by `inferenceWaiters.shift()?.resolve()`, `activeInferenceCount` may be decremented too early, or an aborted request may still reach `model(...)`.
+A refactor can preserve all strings while breaking the queue: aborted waiters may remain queued, timed-out waiters may still be woken by `inferenceWaiters.shift()?.resolve()`, `activeInferenceCount` may decrement too early, or a request aborted while waiting may still reach `model(...)`. The production semantic route would then waste scarce CLIP slots under cancelled requests.
 
-Suggested test/fix:
+Suggested fix/test:
 
-Extract a small queue helper or expose a test-only model/tokenizer injection seam. Add fake-timer tests that saturate `CLIP_INFERENCE_CONCURRENCY`, enqueue and abort a second request, assert the model callback is not invoked for that request, assert `CLIP_INFERENCE_MAX_PENDING` throws `ClipInferenceQueueFullError`, and advance timers past `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` to prove timed-out waiters are removed and never woken later.
+Extract a small queue helper or add a test-only model/tokenizer injection seam. Use fake timers to saturate `CLIP_INFERENCE_CONCURRENCY`, enqueue a second request, abort it, and assert the fake model is not called. Add queue-full and timeout tests that prove removed waiters are never resolved later.
 
 TDD opportunity:
 
-Write the aborting-waiter test first against a narrow queue helper, watch it fail against the current source-only coverage, then move the current implementation behind that helper without changing route semantics.
+Write the aborting-waiter test first against the smallest possible queue seam, then move the current implementation behind it without changing route behavior.
 
-### TE20-02 - Recent dialog/swipe/accessibility fixes are locked by source text instead of runtime UI tests
+### TEST21-04 - Real CLIP production behavior is opt-in and skipped by the default gate
 
-Severity: Medium
+Severity: Low-Medium
+Confidence: High
+Status: Confirmed conditional coverage gap
+
+Exact file+region:
+
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips real semantic ranking unless `CLIP_INTEGRATION=1`.
+- `apps/web/src/__tests__/clip-offline-load.test.ts:15-41` skips offline production-load proof unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist.
+- `apps/web/src/__tests__/semantic-route-production.test.ts:3-16` mocks `embedTextReal`, so default route tests do not load the real model.
+- `CLAUDE.md` documents production semantic search is active with real `jina-clip-v2` embeddings, so this is a live production mode rather than an experimental dead path.
+
+Failure scenario:
+
+The default blocking suite can pass while the production model layout, pinned revision, tokenizer/model compatibility, Korean/English ranking quality, or offline `CLIP_MODELS_ROOT` load path is broken. That failure would surface only during operator seeding/backfill or live semantic search.
+
+Suggested fix/test:
+
+Keep heavy model tests out of every PR if necessary, but add a scheduled or release-blocking CI lane with seeded weights that runs `clip-offline-load.test.ts` and `clip-semantic-integration.test.ts`. If CI storage is too costly, add an explicit pre-deploy command/checklist and make the deploy/activation docs point to a required evidence artifact.
+
+TDD opportunity:
+
+Start with the offline-load test as the release gate because it proves the exact production seed-to-runtime path without needing a full DB.
+
+### TEST21-05 - Failed-image retry snapshot forwarding is not behavior-tested or exhaustiveness-guarded
+
+Severity: Low-Medium
 Confidence: High
 Status: Confirmed coverage gap
 
 Exact file+region:
 
-- `apps/web/src/components/bulk-edit-dialog.tsx:81-103` stores and resets stateful draft modes/values.
-- `apps/web/src/components/bulk-edit-dialog.tsx:155-160` resets after successful submit.
-- `apps/web/src/components/photo-navigation.tsx:47-48` reads `swipeTargetRef.current`; `apps/web/src/components/photo-navigation.tsx:134-142` binds/removes touch listeners on that element.
-- `apps/web/src/components/photo-viewer.tsx:689-697` wires the media container ref into `PhotoNavigation`.
-- `apps/web/src/components/image-zoom.tsx:343-365` builds and renders the zoom accessible name; `apps/web/src/components/photo-viewer.tsx:554` and `apps/web/src/components/photo-viewer.tsx:724` pass the current photo identity into it.
-- `apps/web/src/__tests__/cycle-19-source-contracts.test.ts:27-54` checks these contracts by reading source text.
-- `apps/web/e2e/test-fixes.spec.ts:49-75` and `apps/web/e2e/public.spec.ts:61-83` cover adjacent UI paths but not these exact regressions.
+- `apps/web/src/lib/image-queue.ts:92-119` defines the processing snapshot fields.
+- `apps/web/src/lib/image-queue.ts:208-232` defines corresponding optional `ImageProcessingJob` fields.
+- Browser upload forwards the snapshot at `apps/web/src/app/actions/images.ts:500-526` and is behavior-tested at `apps/web/src/__tests__/images-actions.test.ts:239-276`.
+- Lightroom upload forwards the snapshot at `apps/web/src/app/api/admin/lr/upload/route.ts:479-505`, but the regression is source-regex only at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-394`.
+- Failed-image retry forwards the snapshot at `apps/web/src/app/actions/images.ts:1255-1271`, but `apps/web/src/__tests__/failed-image-retry.test.ts:87-103` only checks for a fresh snapshot, serialized persistence, and a generic `enqueueImageProcessing({ ... colorSignals ... })` payload.
 
-Missing/weak test scenario:
+Failure scenario:
 
-The current tests do not render the dialog, dispatch real touch events, or inspect the browser accessibility tree. The source strings can remain while behavior regresses: a parent-driven close might preserve hidden destructive draft modes, a ref change might attach swipe handlers to the wrong element, or the zoom control might render as only "Zoom in" while `accessibleName` still appears in source.
+Retrying a failed image is supposed to reprocess with the current admin settings. A future edit could drop `forceSrgbDerivatives`, chroma, effort, max-source-pixels, auto-alt, or semantic mode from the retry enqueue payload and tests would still pass. The image would retry with different behavior than a fresh browser upload or LR publish until another backfill corrects it.
 
-Suggested test/fix:
+Suggested fix/test:
 
-Add Playwright coverage for the browser-native behaviors:
-
-- Open bulk edit, set a non-default mode, submit successfully, reopen, and assert defaults are restored.
-- On mobile, swipe over page chrome/metadata and assert the photo ID does not change; swipe over the media container and assert it does.
-- Open a seeded photo, focus the main zoom control, and assert its accessible name includes the photo identity plus zoom action.
-
-If Playwright is too slow for the dialog case, add `@testing-library/react` with jsdom/happy-dom for `BulkEditDialog` only.
+Add a behavior test for `retryFailedImage` mirroring the browser upload assertion: mock `getGalleryConfigStrict` with distinctive values and assert `enqueueImageProcessingMock` receives every `ProcessingSettingsSnapshot` field. Longer term, add an exhaustiveness helper that maps `ProcessingSettingsSnapshot` to `ImageProcessingJob` in one place so TypeScript catches new fields.
 
 TDD opportunity:
 
-Start with the bulk-edit reopen regression because it is deterministic and low-cost: make the test fail by selecting `clear`, submitting, toggling `open` false/true, and asserting all modes return to `leave`.
+Write the retry behavior test first with a deliberately distinctive config. It should fail if any snapshot field is removed from the retry enqueue payload.
 
-### TE20-03 - Per-photo OG route behavior is under-tested at the route boundary
-
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed weak assertion
-
-Exact file+region:
-
-- `apps/web/src/app/api/og/photo/[id]/route.tsx:45-56` charges the OG limiter and rolls back only invalid IDs.
-- `apps/web/src/app/api/og/photo/[id]/route.tsx:58-129` performs DB/config lookup, canonical-origin fetch, missing-photo fallback, and all-derivatives-missing fallback.
-- `apps/web/src/app/api/og/photo/[id]/route.tsx:223-240` converts ImageResponse output through Sharp and handles catch fallback.
-- `apps/web/src/app/api/og/photo/[id]/route.tsx:249-295` builds canonical fallback redirects.
-- `apps/web/src/__tests__/og-photo-fallback.test.ts:40-87` route-level assertions are source-grep contracts.
-- `apps/web/src/__tests__/og-photo-fallback.test.ts:111-203` runtime tests cover only `pickFirstAvailablePhotoBuffer`.
-- `apps/web/src/__tests__/og-route-source-contracts.test.ts:5-11` source-checks the sibling topic OG route.
-
-Missing/weak test scenario:
-
-The helper can be correct while the route glues it incorrectly. The current tests would miss wrong helper arguments, a request-origin fallback redirect, limiter refund drift after DB work, catch-path cache-control drift, or a successful route returning the wrong content type after Sharp post-processing.
-
-Suggested test/fix:
-
-Add mocked route tests that call `GET()` directly. Mock `getImageCached`, `getSeoSettings`, `getGalleryConfig`, `pickFirstAvailablePhotoBuffer`, `next/og`, and `sharp`. Assert status, `Cache-Control`, `Content-Type`, limiter/rollback calls, canonical `Location`, and helper args for invalid ID, missing photo, canonical URL parse failure, all-derivatives-missing, success, and catch fallback.
-
-TDD opportunity:
-
-Write the invalid-ID and missing-photo route tests first because they need the fewest mocks and prove the charged/rollback policy at runtime instead of through string counts.
-
-### TE20-04 - Nav visual checks create screenshots but do not compare them
-
-Severity: Low
-Confidence: High
-Status: Confirmed false-confidence risk
-
-Exact file+region:
-
-- `apps/web/e2e/nav-visual-check.spec.ts:6-38` checks visible nav targets for 44 px size and pairwise non-overlap.
-- `apps/web/e2e/nav-visual-check.spec.ts:41-52` writes `test-results/nav-collapsed-mobile.png`.
-- `apps/web/e2e/nav-visual-check.spec.ts:54-66` writes `test-results/nav-expanded-mobile.png`.
-- `apps/web/e2e/nav-visual-check.spec.ts:68-79` writes `test-results/nav-desktop.png`.
-
-Missing/weak test scenario:
-
-No `expect(page).toHaveScreenshot(...)` or baseline comparison runs. Color, spacing, typography, active states, clipping, z-index, or a visually broken but non-overlapping layout can regress while the "visual checks" pass. The screenshots are diagnostic artifacts, not a regression gate.
-
-Suggested test/fix:
-
-Either convert one or more states to real Playwright visual snapshots with stable masks and `toHaveScreenshot`, or rename/comment the spec as a nav layout-smoke test. If snapshot churn is too high, add targeted metric assertions for the visual invariants the repo actually needs.
-
-TDD opportunity:
-
-Start with one stable mobile-expanded screenshot baseline. If that proves noisy, keep the metric checks but stop presenting this file as visual-regression coverage.
-
-## Likely Issues
-
-### TE20-05 - Rate-limit policy comments contradict current source-contract tests
-
-Severity: Low
-Confidence: High
-Status: Likely future-test risk
-
-Exact file+region:
-
-- `apps/web/src/lib/rate-limit.ts:24-30` says semantic text search refunds only pre-work short-query rejections, but current semantic route tests assert short/long query and disabled mode stay charged.
-- `apps/web/src/lib/rate-limit.ts:53-55` says `og-photo-fallback.test.ts` enforces "exactly two" pre-DB rollbacks.
-- `apps/web/src/lib/rate-limit.ts:287-300` repeats that the photo route has "exactly two" pre-DB rollbacks.
-- `apps/web/src/__tests__/og-photo-fallback.test.ts:53-75` currently asserts exactly one `rollbackOgAttempt(ip)` occurrence in the photo route.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:232-267` asserts no rollback for short/long query and disabled mode.
-- `apps/web/src/__tests__/similar-route.test.ts:167-184` asserts disabled/stub mode stays charged for similar search.
-
-Missing/weak test scenario:
-
-The behavior tests are stronger than the prose today, but the stale comments are likely to seed incorrect future tests. A future maintainer could "fix" tests or implementation toward the old comments, reintroducing free config probes or changing the OG refund policy while believing they are following the documented contract.
-
-Suggested test/fix:
-
-Align the comments with current tested behavior. For semantic search, state that route-level tests intentionally keep disabled mode and query-length rejections charged after the config lookup. For the OG photo route, change "exactly two" to "exactly one" or describe the actual invalid-ID-only rollback. A small source-contract test for these comments is optional; removing contradictory examples is enough if behavior tests remain authoritative.
-
-## Coverage Notes
-
-- Strong areas: server-action scanner fixtures, admin API wrapper scanner, semantic/similar route behavior, privacy select guards, migration journal monotonicity, SQL restore scanner, upload processing, color/HDR parsing, service-worker cache helper, tracked-secret hygiene, and touch-target/focus source scans.
-- Recurring weak pattern: source-contract tests are used for client UI and route glue where a real DOM or mocked route invocation would be more reliable. Source contracts are useful as cheap tripwires, but they should not be the only gate for stateful React behavior, DOM event scoping, accessible names, or multi-branch route glue.
-- E2E suite is intentionally small and single-worker. It covers public smoke, search, lightbox open/close, shared navigation, nav layout smoke, admin login/navigation/topic create/delete/upload when admin credentials are enabled, and origin guard. It does not yet cover semantic search UI, similar-photo UI, OG route responses, bulk edit dialog behavior, or mobile swipe scoping.
-- Local Playwright admin coverage can still skip when plaintext admin credentials are unavailable: `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:27-31`, and `apps/web/e2e/helpers.ts:28-45`. The CI sentinel mitigates this when `CI=true`; local `npm run test:e2e` can pass with those admin branches skipped.
-- The cycle-20 SEO OG backslash regression is now locked by behavior-level validator tests at `apps/web/src/__tests__/seo-actions.test.ts:14-28`; I did not re-report the fixed implementation issue.
-
-## Final Missed-Issue Sweep
+## Final Missed-Issues Sweep
 
 Final sweep covered:
 
-- Test config, Playwright config, typecheck config, root/app package scripts.
-- All API route files under `apps/web/src/app/api`.
-- Non-API route handlers under `apps/web/src/app/**/route.ts`.
-- Custom lint scanner scripts and their fixture tests.
-- Current semantic/similar route tests and CLIP queue source contracts.
-- OG route/helper tests and the fixed SEO OG validator tests.
-- Recent cycle-19 source contracts and adjacent E2E specs.
-- Cycle-20 historical reviews, fixes, deferred ledger, and baseline gate log.
-- Source-contract-heavy tests, skipped tests, timeout/fake-timer usage, and Playwright screenshot usage.
+- Existing top-level cycle-20 `test-engineer.md` and current cycle-21 code/review/plan artifacts.
+- Route/action inventory under `apps/web/src/app`, including public analytics, OG/search routes, backup download, upload serving, and server actions.
+- Scanner tests for auth, action-origin, public route rate limits, touch targets, focus-visible rings, privacy fields, migration journal/reconcile, and service-worker contracts.
+- Source-contract-heavy tests and whether their implementation targets still match current source.
+- Skipped/conditional suites, especially real CLIP and admin E2E coverage.
+- Upload/LR/retry processing snapshot parity tests.
+- Flake indicators: fake timers, wall-clock sleeps, `.skip`, screenshots without assertions, and build-output exclusion rules.
 
-No critical or high-severity test gaps were found. Confirmed test-engineering findings: 4. Likely future-test risk: 1.
+No critical or high-severity test-engineering findings were confirmed. Confirmed findings: 5.

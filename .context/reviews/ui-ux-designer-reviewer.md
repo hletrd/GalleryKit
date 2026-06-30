@@ -1,229 +1,204 @@
-# UI/UX Designer Review - Cycle 19
+# Cycle 21 UI/UX Designer Review - GalleryKit
 
-- Reviewer lane: `ui-ux-designer-reviewer`
-- Repo: `/Users/hletrd/flash-shared/gallery`
-- HEAD: `d4aea50f`
-- Date: 2026-06-30
-- Scope: GalleryKit Next.js web UI/UX/design-system surface at current HEAD.
-- Write scope: review artifact only. No source code changes, no commit, no push.
-- Prompt note: read `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`; applied its senior UI/UX review method to this web gallery/admin product and ignored Swift/BurstPick-specific file requirements that do not exist here.
+Reviewer: `ui-ux-designer-reviewer`
+Scope: GalleryKit Next.js public gallery/photo/search/map/share UI and admin UI
+Repo state reviewed: `1ed96484`
+Date: 2026-06-30
 
-## Executive Summary
+## Method
 
-GalleryKit is visually coherent and materially better than a default shadcn/Tailwind gallery, but its biggest remaining interaction failure is that the primary photo object is still not a trustworthy accessible object: on the live photo page the focused photo surface is named "Click to zoom in" while the image alt is only "Photo", despite the page title containing meaningful tag-derived context. Design quality score: 7/10. The public gallery is strong on touch target sizing, dark/OLED support, loading/error states, and photographer-oriented color/HDR honesty; the weaker areas are primary-photo semantics, global mobile swipe scoping, hidden metadata/download affordances, and admin management ergonomics on narrow screens.
+I read the workspace instructions in `AGENTS.md`, the GalleryKit knowledge base in `CLAUDE.md`, and the custom reviewer prompt at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`. The prompt is written for BurstPick/SwiftUI, so I adapted its professional UI review principles to GalleryKit's web surfaces: photographer workflow fit, accessibility, responsive layout, keyboard/focus, state handling, i18n, visual hierarchy, design-system consistency, and the 44 px touch-target policy.
 
-## Method And Evidence
+I inventoried the UI with `omx explore`, inspected the relevant source files directly, used `agent-browser` against the live public site where feasible, and ran targeted UI tests.
 
-1. Read repo guidance: AGENTS instructions supplied in prompt, `CLAUDE.md`, local custom reviewer prompt, and Playwright skill instructions.
-2. Required `.context/project/*.md` files listed by the custom prompt were not present, so `CLAUDE.md` and source were treated as project authority.
-3. Source-reviewed 100 TSX/CSS UI files under `apps/web/src/components` and `apps/web/src/app/[locale]`, focusing on public navigation, masonry, photo viewer, lightbox, search, map, admin shell, admin upload, image manager, analytics, forms, and primitives.
-4. Ran live browser/DOM audit against `https://gallery.atik.kr/en` because local port `127.0.0.1:3100` was not running. Captured:
-   - `/tmp/uiux-home-desktop.png`
-   - `/tmp/uiux-home-mobile.png`
-   - `/tmp/uiux-photo-desktop.png`
-   - `/tmp/uiux-photo-mobile.png`
-   - `/tmp/uiux-admin-login-mobile.png`
-5. Live DOM measurements:
-   - Home desktop 1440x900: no horizontal overflow, 30 images, nav 64 px high, visible buttons >= 44 px.
-   - Home mobile 390x844: no horizontal overflow, visible buttons >= 44 px, one-column masonry cards 358 px wide.
-   - Photo desktop `/en/p/348`: `.photo-viewer-image` measured 1230x772, image alt `"Photo"`, closest focused zoom surface `role="button"` with aria-label `"Click to zoom in"`.
-   - Photo mobile `/en/p/348`: `.photo-viewer-image` measured 340x638, same generic alt/zoom label.
-   - Admin login mobile: password reveal and submit controls measured 44 px high.
-6. Ran targeted validation:
-   - `npm test --workspace=apps/web -- touch-target-audit.test.ts focus-visible-rings-cycle20.test.ts info-bottom-sheet-ia.test.ts a11y-us-p15.test.ts`
-   - Result: 4 files passed, 35 tests passed.
-7. i18n parity check: `apps/web/messages/en.json` and `apps/web/messages/ko.json` both contain 816 leaf strings.
+Validation evidence:
 
-## Information Architecture Assessment
+- `agent-browser` mobile viewport `390x844` on `https://gallery.atik.kr/en`: no horizontal overflow on the home page or photo page; visible buttons/links were 44 px or larger; screenshots saved at `/tmp/gallery-uiux-c21-home-mobile.png` and `/tmp/gallery-uiux-c21-photo-mobile.png`.
+- `agent-browser` desktop viewport `1440x900` on `/en/p/348`: no horizontal overflow; screenshot saved at `/tmp/gallery-uiux-c21-photo-desktop.png`.
+- Live photo page `/en/p/348` exposed a meaningful page heading, but the primary photo image alt was `Photo` and the zoom button accessible name was `Photo. Click to zoom in`.
+- Targeted tests passed: `npm test --workspace=apps/web -- touch-target-audit.test.ts focus-visible-rings-cycle20.test.ts i18n-key-parity.test.ts` -> 3 files, 23 tests.
 
-The public information architecture is sound for a self-hosted portfolio/gallery: sticky global nav, topic links, tag filters, masonry browsing, photo pages, map/timeline/year routes, public shares, and admin-only operational routes. The public layout also has a real skip link and focused `<main>` target in `apps/web/src/app/[locale]/layout.tsx:119-128` and `apps/web/src/app/[locale]/(public)/layout.tsx:7-16`.
+## UI Inventory
 
-State visibility is mixed. Filter state is visible in the H1 and active tag chips in `apps/web/src/components/home-client.tsx:257-273`; photo position is visible and live-announced in `apps/web/src/components/photo-viewer.tsx:727-732`; route errors and not-found states are recoverable in `apps/web/src/app/[locale]/error.tsx:22-53` and `apps/web/src/app/[locale]/not-found.tsx:18-48`. However, desktop photo metadata, download, histogram, similar photos, and color details remain behind an info toggle by default in `apps/web/src/components/photo-viewer.tsx:103-108`, `174-175`, and `736-999`.
+Public gallery and navigation:
 
-The admin IA is complete but not yet optimized for frequent on-location workflows. The nav exposes every admin section in one horizontal wrapping cluster in `apps/web/src/components/admin-nav.tsx:15-49`, which is discoverable, but the image management task is still a desktop table rather than a responsive photo-management surface.
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/grid-picture.tsx`
+- `apps/web/src/components/load-more.tsx`
 
-## Visual Design Audit
+Photo, search, map, and sharing:
 
-The design system has concrete tokens and enforcement. Theme variables for light, dark, and OLED are defined in `apps/web/src/app/[locale]/globals.css:13-101`; reduced motion is respected globally in `apps/web/src/app/[locale]/globals.css:253-279`; high-contrast forced-colors rules exist for photo overlays and color chips in `apps/web/src/app/[locale]/globals.css:164-182` and `281-300`. The Button primitive enforces 44 px minimum controls across default, small, and icon variants in `apps/web/src/components/ui/button.tsx:23-30`.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/similar-photos.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx`
+- `apps/web/src/components/map/map-loader.tsx`
+- `apps/web/src/components/map/map-client.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/sharing.ts`
 
-Public visual hierarchy is generally good: photo content dominates, nav is restrained, masonry cards preserve aspect ratios and avoid horizontal overflow in live desktop/mobile checks. Color/HDR visual language is functional rather than decorative, with P3/HDR chip gating in `apps/web/src/app/[locale]/globals.css:145-162`, photo card P3 badges in `apps/web/src/components/home-client.tsx:382-391`, and detailed color disclosure in `apps/web/src/components/color-details-section.tsx:299-520`.
+Admin UI:
 
-The main visual weakness is hidden density rather than chaotic styling. On photo pages the default desktop composition is immersive, but important client-facing tasks are behind the info panel. On admin pages, table density is efficient on desktop but breaks the visual/task hierarchy on small screens because preview, tags, date, gamut, and actions are spatially separated across columns.
-
-## Interaction Design Critique
-
-Keyboard support is better than average for a web gallery. Photo pages support ArrowLeft/ArrowRight, F, I, C, and H in `apps/web/src/components/photo-viewer.tsx:387-418`; lightbox supports Escape, arrows, F, C, H, and Space in `apps/web/src/components/lightbox.tsx:306-357`; search supports Cmd/Ctrl+K, Escape, combobox arrows, and IME-aware Enter handling in `apps/web/src/components/search.tsx:294-311` and `391-421`.
-
-Touch support is also deliberate: nav, tag chips, photo controls, bottom sheet, upload controls, and admin buttons mostly meet the 44 px floor. The targeted touch/focus tests passed. The remaining interaction concerns are scoped but important: the photo swipe recognizer listens on `window`, the main photo semantic role is generic zoom, and admin management still forces horizontal table cognition on narrow screens.
-
-Feedback latency appears acceptable. Photo blur placeholders and transitions are implemented in `apps/web/src/components/photo-viewer.tsx:123-132` and `696-725`, with reduced-motion handling. Masonry cards use `content-visibility: auto` in `apps/web/src/app/[locale]/globals.css:231-235`, eager loading for above-fold cards in `apps/web/src/components/home-client.tsx:296-360`, and live demo first render reached network idle in about 1.1 to 1.2 seconds for tested public pages.
-
-## Workflow Design Evaluation
-
-For public gallery consumers, the workflow is clear: browse topic/tag masonry, open photo, navigate adjacent photos, enter lightbox, inspect info, download, and share where authorized. The map and analytics surfaces also include explicit empty/approximate states.
-
-For the photographer/admin workflow, upload is comparatively strong: dropzone disabling is honest, upload progress is announced, per-file previews exist, and topic/tag assignment is integrated in `apps/web/src/components/upload-dropzone.tsx:344-520`. Post-upload management is the bottleneck. `ImageManager` gives powerful batch edit/share/delete/tag actions, but the only layout is a 9-column table in `apps/web/src/components/image-manager.tsx:421-591`, which is not a first-class phone/tablet workflow.
-
-This is not Lightroom or Photo Mechanic, and it should not pretend to be a 10,000-image culling instrument. As a portfolio and delivery gallery it is close; as an event-day management surface it still needs a responsive card/list mode and stronger primary-photo semantics.
-
-## Accessibility Report
-
-Positive:
-
-- Skip-to-content is implemented with a programmatically focusable target: `apps/web/src/app/[locale]/layout.tsx:119-128` and `apps/web/src/app/[locale]/(public)/layout.tsx:7-16`.
-- Touch target and focus tests passed: 35 targeted tests.
-- Buttons and controls generally include focus-visible rings and 44 px sizing.
-- Search dialog uses dialog/combobox/listbox roles and live status in `apps/web/src/components/search.tsx:378-449`.
-- Error, not-found, and loading states have landmarks/status semantics in `apps/web/src/app/[locale]/error.tsx:22-53`, `not-found.tsx:18-48`, and `loading.tsx:6-12`.
-- Locale message parity is intact at 816 EN and 816 KO leaves.
-
-Failures and risks:
-
-- The primary photo surface has a generic interactive name. Live DOM: `.photo-viewer-image` alt was `"Photo"` and the focused wrapper was `[role="button"][aria-label="Click to zoom in"]`. Source: `apps/web/src/components/image-zoom.tsx:343-362` wraps the image slot with the zoom role/name, and `apps/web/src/components/photo-viewer.tsx:467-483` / `508-548` provide the image alt from `getConcisePhotoAltText`.
-- Swipe navigation is global to `window`, which can hijack horizontal gestures that begin outside the image surface. Source: `apps/web/src/components/photo-navigation.tsx:47-60` and `131-133`.
-- Color badges use color plus text, which is acceptable. P3/HDR are not color-only.
-- RTL is structurally future-proofed via `dir={getLocaleDirection(locale)}` in `apps/web/src/app/[locale]/layout.tsx:94-100`, but only EN/KO are shipped, so RTL behavior was not validated.
-
-## Platform Fidelity Check
-
-Web platform conventions are mostly respected. Links remain links, buttons are buttons, dialogs trap focus, Escape closes overlays, and responsive breakpoints avoid page-level horizontal overflow in live checks. The theme system supports system/light/dark/OLED via `apps/web/src/app/[locale]/layout.tsx:130-137`. The mobile bottom sheet uses dynamic viewport/safe-area handling in `apps/web/src/components/info-bottom-sheet.tsx:194-210` and `282-287`.
-
-The main platform mismatch is gesture scope. Mobile browsers already reserve horizontal gestures for browser navigation, carousel-like content, and nested panning. A `window`-level touch recognizer for photo navigation is too broad for a page that also contains nav, toolbar, metadata, and footer.
-
-## Competitive UX Comparison
-
-| Feature | Lightroom Classic | Capture One | Photo Mechanic | DaVinci Resolve | GalleryKit Verdict |
-| --- | --- | --- | --- | --- | --- |
-| Primary asset semantics | Photo identity is always visible in filmstrip/metadata | Strong metadata panels | Filename/IPTC always central | Clip identity visible in media bins | Worse for assistive tech: focused photo says zoom, not identity |
-| Keyboard next/prev | Single-key/arrows | Strong | Very strong | Strong | Same for basic next/prev |
-| Rapid culling/rating | First-class flags/ratings/color labels | First-class | Best-in-class speed | Not photo-culling focused | Missing by product scope |
-| Compare/survey | First-class | Strong | Contact sheet/preview workflow | Multi-view layouts | Missing by product scope |
-| Metadata visibility | Panels are persistent and configurable | Persistent panels | Dense always-visible data | Inspector panels | Partially hidden by default on photo pages |
-| Mobile delivery viewing | Not primary | Not primary | Not primary | Not primary | Better: responsive public gallery/lightbox |
-| Admin/event-day mobile management | Not primary | Desktop tool | Desktop tool | Desktop tool | Needs mobile card/list mode |
-| Color/HDR disclosure | Strong in develop context | Strong | Limited | Strong | Strong for web gallery, with honest P3/HDR notes |
-
-## Design System Assessment
-
-The design system is real, not just incidental Tailwind classes. It has:
-
-- Central theme tokens: `apps/web/src/app/[locale]/globals.css:13-101`.
-- Button size and focus policy: `apps/web/src/components/ui/button.tsx:7-30`.
-- shadcn/Radix primitives under `apps/web/src/components/ui/**`.
-- Cross-cutting motion, contrast, photo-rendering, and forced-colors rules in `globals.css`.
-- Tests for touch targets and focus-visible rings.
-
-Remaining system gap: responsive data-management patterns are not yet encoded. Tables recur in admin and analytics surfaces, but there is no shared "dense table on desktop, card/list on mobile" primitive. That leaves every admin surface to solve narrow screens ad hoc.
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/*`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/*`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/*`
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/*`
+- `apps/web/src/app/[locale]/admin/(protected)/password/*`
+- `apps/web/src/app/[locale]/admin/(protected)/db/*`
+- `apps/web/src/components/ui/*`
 
 ## Findings
 
-### UIUX-C19-01 - Primary photo accessibility collapses to "Click to zoom in" and generic "Photo"
+### 1. Primary photo and lightbox alt labels collapse to generic "Photo" on tag-only images
 
-- Severity: High
-- Confidence: High
-- Surface/selector: `/[locale]/p/[id]`, `.photo-viewer-image` inside `ImageZoom`, closest `[role="button"]`.
-- Evidence:
-  - Live demo `/en/p/348` at 1440x900: `.photo-viewer-image` alt was `"Photo"` while the page title/H1 was `#JIHOON #DOHOON #Color in Music Festival`.
-  - Live demo same page: closest focusable photo wrapper was `role="button"` with `aria-label="Click to zoom in"`, size 1230x772.
-  - `apps/web/src/components/image-zoom.tsx:343-362` wraps the photo slot in a focusable `div role="button"` and names it only by zoom state.
-  - `apps/web/src/components/photo-viewer.tsx:467-483` and `508-548` render the image alt via `getConcisePhotoAltText(...)`.
-  - `apps/web/src/lib/photo-title.ts:85-122` can produce meaningful title/tag-derived alt text, but current live data path still fell back to the generic string.
-- Failure scenario: A screen-reader or keyboard user opens a direct client delivery link, tabs to the main object, and hears only "Click to zoom in button" or "Photo". They cannot confirm which image is open from the primary surface, despite visible users seeing the meaningful document title and tags.
-- Fix: Preserve the photo identity as the accessible object. Prefer a semantic `figure`/`img` with descriptive alt and a separate zoom button, or pass a composed label such as `"Photo: {displayTitle}. Click to zoom in"` plus `aria-describedby` for shortcut details. Add a regression using real tag-only rows so `/p/[id]` cannot fall back to generic `"Photo"` when tags/title exist.
+Severity: High
+Confidence: High
 
-### UIUX-C19-02 - Mobile photo swipe navigation is registered on `window`, not the photo surface
+Evidence:
 
-- Severity: Medium
-- Confidence: High
-- Surface/selector: `/[locale]/p/[id]`, `PhotoNavigation` touch handlers.
-- Evidence:
-  - `apps/web/src/components/photo-navigation.tsx:47-60` records every `window` touch start/move and calls `preventDefault()` when horizontal movement exceeds 10 px.
-  - `apps/web/src/components/photo-navigation.tsx:96-133` completes navigation from the same global gesture and registers `touchstart`, `touchmove`, and `touchend` on `window`.
-  - `apps/web/src/components/photo-viewer.tsx:687-694` visually places `PhotoNavigation` inside the media box, but the event listeners are not scoped to that media box.
-- Failure scenario: A mobile user begins a horizontal gesture over page chrome, footer, or metadata while trying to scroll/reposition. The gallery can treat that gesture as next/previous photo navigation, causing unexpected context loss.
-- Fix: Scope swipe listeners to a media-container ref, or store the touch-start target and ignore gestures that begin outside the photo/navigation region. Add an e2e touch regression that swipes over toolbar/metadata/footer and verifies the photo id does not change.
+- `apps/web/src/components/photo-viewer.tsx:520-522` computes `primaryPhotoAccessibleName` with `getConcisePhotoAltText(image, t('common.photo'))`.
+- `apps/web/src/components/photo-viewer.tsx:690-692` passes that name into `ImageZoom`.
+- `apps/web/src/components/image-zoom.tsx:343-365` uses the accessible name to label the zoom button.
+- `apps/web/src/components/photo-viewer.tsx:408-410` computes the related-photo image alt text with the same helper, and `apps/web/src/components/photo-viewer.tsx:435-495` applies that value to related image `alt` text.
+- `apps/web/src/components/lightbox.tsx:496-499` also uses `getConcisePhotoAltText(image, t('common.photo'))` for lightbox image alt text.
+- `apps/web/src/lib/photo-title.ts:85-121` lets `getConcisePhotoAltText` use `title`, `tag_names`, or `alt_text_suggested`, but it does not use the `tags` array shape returned for a single public photo.
+- `apps/web/src/lib/data.ts:1024-1035` selects the public image fields for `getImage`, then `apps/web/src/lib/data.ts:1116-1169` fetches and returns `tags: imageTagsResult`; it does not add `tag_names` to the image object.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:158-163` proves the page can build a meaningful display title and keywords from `image.tags`.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:267-283` passes both `image` and `tags` into `PhotoViewer`, but the viewer's alt helper only sees `image`.
+- Live browser check on `/en/p/348`: the visible page heading was `#JIHOON #DOHOON #Color in Music Festival`, while the main image alt was only `Photo` and the zoom control announced `Photo. Click to zoom in`.
 
-### UIUX-C19-03 - Desktop photo pages hide download, metadata, color details, histogram, and similar photos by default
+Failure scenario:
 
-- Severity: Medium
-- Confidence: High
-- Surface/selector: `/[locale]/p/[id]`, desktop info sidebar.
-- Evidence:
-  - `apps/web/src/components/photo-viewer.tsx:103-108` initializes `isPinned` from `sessionStorage`, defaulting to `false`.
-  - `apps/web/src/components/photo-viewer.tsx:174-175` derives `showInfo` directly from `isPinned`.
-  - `apps/web/src/components/photo-viewer.tsx:736-747` hides the desktop sidebar unless `showInfo` is true.
-  - The hidden panel contains color details, wide-gamut hint, similar photos, EXIF, histogram, capture date, and download controls at `apps/web/src/components/photo-viewer.tsx:787-999`.
-  - Live desktop `/en/p/348` text sample exposed "Back to TWS", fullscreen, and "Info", but no download/color/metadata content until the info control is used.
-- Failure scenario: A client or photographer opens a direct photo link, reviews the image, and misses the download button or P3/sRGB delivery disclosure because the panel is collapsed and the only persistent affordance is an "Info" button.
-- Fix: Default the info sidebar open on desktop direct photo pages, or add a compact always-visible metadata/download strip below the photo. If keeping the immersive default, make the first-run affordance explicit and persistent enough that download/color disclosure is not hidden behind a generic toggle.
+A screen-reader or keyboard user opens a direct photo/share link and tabs to the primary media. The page visually identifies the photo through tags, but the interactive photo object is announced only as "Photo", so the user cannot tell which image they are about to zoom, share, or navigate from.
 
-### UIUX-C19-04 - Admin image management is still a 9-column desktop table on narrow screens
+Suggested fix:
 
-- Severity: Medium
-- Confidence: High
-- Surface/selector: `/[locale]/admin/dashboard`, `ImageManager`.
-- Evidence:
-  - `apps/web/src/components/image-manager.tsx:421-591` renders one table for every viewport.
-  - The table has nine columns: select, preview, title, filename, topic, tags, gamut, date, actions at `apps/web/src/components/image-manager.tsx:421-445`.
-  - The preview column reserves a 128 px square at `apps/web/src/components/image-manager.tsx:463-479`.
-  - The tags column reserves `min-w-[200px]` at `apps/web/src/components/image-manager.tsx:491-524`.
-  - Row actions live at the far right in `apps/web/src/components/image-manager.tsx:544-579`.
-- Failure scenario: A photographer uploads images from a phone or small tablet, then needs to tag, edit, share, or delete recent images. They must horizontally pan a dense table where selection, preview, tags, gamut, date, and actions are separated, increasing wrong-row edits and slowing event-day work.
-- Fix: Keep the table for desktop, but add a below-`lg` card/list layout with thumbnail, title/filename, topic/date/gamut, tags, and edit/share/delete actions in one vertical unit. Move bulk actions into a sticky bottom bar on narrow screens so selected count and actions stay spatially connected.
+Unify the photo accessible-name source with the page-title source. Either extend `getConcisePhotoAltText` to accept `tags?: TagInfo[]`, or normalize `tag_names` onto the image object returned by `getImage` and shared-photo queries. Then pass the same computed name into `PhotoViewer`, `ImageZoom`, related-photo thumbnails, and `Lightbox`. Add a regression test for a tag-only photo page asserting the main image/zoom accessible name is not the generic `common.photo` fallback.
 
-### UIUX-C19-05 - The admin design system lacks a reusable responsive data-surface primitive
+### 2. Similar-photo recommendations can expose repeated indistinguishable "Photo" links
 
-- Severity: Low
-- Confidence: Medium
-- Surface/selector: admin tables and analytics tables.
-- Evidence:
-  - `ImageManager` hand-builds the complex table in `apps/web/src/components/image-manager.tsx:421-591`.
-  - Analytics independently hand-builds multiple horizontally scrollable tables in `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:91-275`.
-  - Admin nav and buttons have consistent target/focus rules, but there is no shared table-to-card/list contract comparable to the Button primitive's size contract in `apps/web/src/components/ui/button.tsx:23-30`.
-- Failure scenario: Future admin pages continue to add `overflow-x-auto` tables with inconsistent mobile behavior, and reviewers must rediscover touch/focus/layout issues per page rather than relying on a system primitive.
-- Fix: Add a shared `ResponsiveDataSurface` pattern or documented component contract: table on desktop, cards or definition-list rows below `lg`, sticky bulk-action region when selectable, and standard empty/loading/error slots. Then migrate ImageManager first because it has the highest task frequency.
+Severity: Medium
+Confidence: Medium-High
+
+Evidence:
+
+- `apps/web/src/components/similar-photos.tsx:136-141` documents that the fallback label is the localized `common.photo` value when title and description are absent.
+- `apps/web/src/components/similar-photos.tsx:186-194` uses that label for both the link `aria-label` and image `alt`.
+- `apps/web/src/components/search.tsx:100-105` shows a better nearby pattern: search result labels fall back to `Photo {id}` and include contextual metadata when available.
+
+Failure scenario:
+
+When semantic search returns several similar photos without title or description, assistive-technology users hear a list of repeated links all named "Photo". The recommendations become difficult to compare and the user has no stable way to choose one result over another.
+
+Suggested fix:
+
+Make fallback recommendation labels unique and contextual. At minimum use `Photo {imageId}`. Prefer adding topic label, year/date, camera/lens, or tags from the similar-photo API payload when available. Add a component test that renders multiple title-less similar photos and asserts link names are unique.
+
+### 3. Admin image management remains a desktop table with horizontal panning on narrow screens
+
+Severity: Medium
+Confidence: High
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132` embeds `ImageManager` inside a constrained `max-h... overflow-auto` panel.
+- `apps/web/src/components/image-manager.tsx:424-448` renders a single table for all viewport sizes with selection, preview, title, filename, topic, tags, gamut, date, and actions columns.
+- `apps/web/src/components/image-manager.tsx:467-479` gives the preview cell a fixed 128 px thumbnail.
+- `apps/web/src/components/image-manager.tsx:494-528` gives the tags cell a full inline `TagInput` with `min-w-[200px]`.
+- `apps/web/src/components/image-manager.tsx:547-582` places the row actions at the far right of the table.
+- `apps/web/src/components/image-manager.tsx:586-590` has an empty state, but not a mobile-optimized data layout.
+
+Failure scenario:
+
+An admin using a phone or small tablet after an upload must horizontally pan through a dense table to review filename, tags, topic, gamut, and actions. That slows the event-day workflow and increases the chance of editing or deleting the wrong row because the preview, metadata, and actions do not stay visually grouped.
+
+Suggested fix:
+
+Add a responsive admin media-list presentation below the desktop breakpoint. Keep the desktop table, but render mobile rows as cards or compact list items with thumbnail, title/file, topic/date/gamut, tags, and row actions in one vertical unit. Keep selected-count and bulk actions in a sticky toolbar so selection state stays visible while scrolling.
+
+### 4. Admin data tables repeat horizontal-scroll patterns instead of sharing a responsive data-surface primitive
+
+Severity: Low-Medium
+Confidence: Medium
+
+Evidence:
+
+- `apps/web/src/components/image-manager.tsx:424-595` implements a bespoke image table.
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:218-279` wraps a `min-w-[760px]` table in `overflow-x-auto`.
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:96-129` wraps a `min-w-[520px]` table in `overflow-x-auto`.
+- `apps/web/src/components/admin-user-manager.tsx:137-177` wraps a `min-w-[520px]` table in `overflow-x-auto`.
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:91-274` repeats multiple bordered horizontal-scroll table sections.
+
+Failure scenario:
+
+Each admin area solves data display separately, so fixes for focus order, mobile reading order, empty/error slots, and touch ergonomics must be rediscovered page by page. The current pattern works technically, but it encourages horizontal panning as the default answer for administrative workflows.
+
+Suggested fix:
+
+Introduce a shared responsive admin data-surface component or convention: desktop table, mobile definition-list/card rows, standard loading/empty/error slots, consistent row actions, and optional sticky bulk selection. Migrate `ImageManager` first because it has the highest workflow pressure, then reuse the same contract for topics, tags, users, and analytics tables.
+
+### 5. Admin Users nests one card inside another and duplicates hierarchy chrome
+
+Severity: Low
+Confidence: High
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx:16-24` renders an outer `Card` with its own `CardHeader`, title, and description, then renders `AdminUserManager`.
+- `apps/web/src/components/admin-user-manager.tsx:88-136` returns another `Card` with a second `CardHeader`, title, description, and create-user form.
+
+Failure scenario:
+
+The Users page has duplicated card borders, duplicated header hierarchy, and extra padding before the actual table. It reads as less deliberate than the rest of the admin UI and costs vertical space in a workflow where admins need to scan user status and actions quickly.
+
+Suggested fix:
+
+Choose one owner for the card chrome. Either remove the outer card in `users/page.tsx`, or let `AdminUserManager` render a plain section/div when embedded. Keep one page title, one description, and one bordered data surface.
 
 ## Positive Observations
 
-- Touch target governance is effective. Button variants floor to 44 px in `apps/web/src/components/ui/button.tsx:23-30`, and targeted tests passed 35 checks.
-- Live public pages had no horizontal overflow at 390 px or 1440 px.
-- The public masonry uses aspect-ratio reservations, column-count syncing, above-fold priority, and `content-visibility`, visible in `apps/web/src/components/home-client.tsx:195-237`, `296-360`, and `apps/web/src/app/[locale]/globals.css:231-235`.
-- Search is one of the strongest interaction surfaces: Cmd/Ctrl+K, IME safety, live status, combobox/listbox semantics, and focus restoration in `apps/web/src/components/search.tsx:294-324` and `378-524`.
-- Lightbox controls are appropriately large, keyboard-accessible, and reduced-motion aware in `apps/web/src/components/lightbox.tsx:420-685`.
-- Mobile info bottom sheet handles drag, focus trap, dynamic viewport height, safe area, and expanded/peek states in `apps/web/src/components/info-bottom-sheet.tsx:42-210`.
-- Color/HDR honesty is a differentiator: display-gated P3/HDR chips, wide-gamut hints, delivered bit-depth disclosures, and copyable color metadata are implemented in `globals.css`, `color-details-section.tsx`, and `wide-gamut-hint.tsx`.
-- Error and not-found states are intentionally navigable and accessible rather than blank failures.
-- EN/KO message parity is currently healthy.
+- Public layout includes a skip link and main target: `apps/web/src/app/[locale]/(public)/layout.tsx:7-16`, with the skip-link styling in `apps/web/src/app/globals.css:103-118`.
+- The design token system covers light, dark, OLED, reduced-motion, and forced-colors cases in `apps/web/src/app/globals.css:13-101`, `apps/web/src/app/globals.css:164-182`, and `apps/web/src/app/globals.css:253-279`.
+- The component library encodes the 44 px touch-target policy in core controls such as `apps/web/src/components/ui/button.tsx:23-30` and `apps/web/src/components/ui/switch.tsx:24-54`.
+- Search has strong keyboard handling: `apps/web/src/components/search.tsx:294-311` handles Cmd/Ctrl+K, Escape, and IME composition; `apps/web/src/components/search.tsx:391-421` provides a combobox pattern; `apps/web/src/components/search.tsx:436-446` announces status.
+- Map fallback/accessibility is better than a map-only experience: `apps/web/src/app/[locale]/(public)/map/page.tsx:55-89` includes an empty state, skip-map affordance, and accessible list links.
+- Shared routes handle missing/invalid states rather than presenting blank pages: `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:84-102` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:233-237`.
 
-## Prioritized Design Recommendations
+## Missed-Issues Sweep
 
-### Tier 0 - Blocking
+I rechecked the prior high-risk areas from the earlier review before closing this pass:
 
-No Tier 0 blocker found for the public gallery's basic browse/open/view workflow. The product is usable today for public gallery delivery.
+- The desktop photo-info default is no longer an unconditional hidden panel. `apps/web/src/components/photo-viewer.tsx:104-110` now opens on desktop when there is no stored session override.
+- Photo swipe listeners are no longer global window listeners. `apps/web/src/components/photo-navigation.tsx:44-49` scopes swipe start to the provided target, `apps/web/src/components/photo-navigation.tsx:134-142` cleans that target up, and `apps/web/src/components/photo-viewer.tsx:656-664` passes the media container ref.
+- Public browser smoke checks did not show horizontal overflow on the mobile home or photo page.
+- The targeted touch-target, focus-ring, and i18n parity tests passed.
 
-### Tier 1 - High Impact
-
-1. Fix primary photo semantics so the focused photo surface exposes the actual photo identity, not only the zoom action.
-2. Scope mobile swipe navigation to the photo surface.
-3. Make desktop photo metadata/download/color disclosure visible by default or persistently discoverable.
-4. Add mobile card/list management for admin image rows.
-
-### Tier 2 - Polish
-
-1. Create a reusable responsive data-surface pattern for admin tables.
-2. Audit live data rows where image alt falls back to `"Photo"` despite tags/title being available.
-3. Consider a richer first-run cue for the Info panel on direct photo links.
-4. Keep reducing ad hoc table markup in analytics/admin pages.
-
-### Tier 3 - Refinement
-
-1. Validate RTL behavior before adding an RTL locale. The `dir` hook exists, but layouts have not been tested.
-2. Add browser-level accessibility snapshots for photo pages with tag-only images.
-3. Add gesture tests for photo pages on mobile viewports.
-4. Add visual regression coverage for dark, OLED, and forced-colors critical surfaces.
-
-## Final Verdict
-
-GalleryKit's UI helps public visitors browse and inspect photos, and it is unusually strong for a self-hosted gallery on color/HDR transparency, touch sizing, reduced motion, and localized recovery states. It still gets in the way for assistive-tech users on the most important object in the app - the photo itself - and for admins trying to manage recent uploads on narrow screens.
-
-Design-readiness: good for public portfolio/gallery use, acceptable for desktop admin use, not yet strong for mobile admin/event-day management. Before calling the UI "well-designed" for professional photo delivery, fix the primary photo accessible name, scope gestures, and make metadata/download affordances visible enough that clients do not have to discover them by chance.
+Final count: 5 findings.

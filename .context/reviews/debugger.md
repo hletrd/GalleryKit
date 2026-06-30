@@ -1,7 +1,8 @@
-# Cycle 20 Debugger Review
+# Cycle 21 Debugger Review
 
-Review lane: `debugger`  
-Date: 2026-06-30 KST  
+Review lane: `debugger`
+Date: 2026-06-30 KST
+HEAD reviewed: `1ed96484` (`docs(security): preserve cycle 21 audit evidence`)
 Mode: repository-wide latent bug / failure-mode / regression review. No implementation code was changed. No commit or push was made.
 
 ## Inventory
@@ -10,185 +11,102 @@ Primary guidance and workflow inputs read:
 - `AGENTS.md`
 - `CLAUDE.md`
 - `/Users/hletrd/.agents/skills/code-review/SKILL.md`
-- Prior cycle artifacts: `.context/reviews/debugger.md`, `.context/reviews/_aggregate.md`, `.context/plans/cycle-20-deferred.md`
+- Prior review artifacts: `.context/reviews/debugger.md`, `.context/reviews/archive/cycle-21/debugger.md`, `.context/reviews/archive/cycle-21/_aggregate.md`, `.context/reviews/_aggregate.md`
 
 Repository inventory performed before findings:
-- Counted tracked source/doc/config surface, excluding generated `.next`: `api=8`, `actions=13`, `lib=97`, `components=57`, `unit_tests=269`, `e2e=8`, `scripts=27`, `drizzle=31`, `config=14`.
-- Inventoried app routes and server actions under `apps/web/src/app`, including public/admin APIs, upload serving, feeds, OG routes, health/live probes, semantic search, similar search, DB admin actions, and all action modules.
-- Inspected bug-prone source regions across uploads, Lightroom upload, delete paths, DB backup/restore, restore maintenance, upload-processing locks, image queue, CLIP inference queue, public rate limits, OG rendering, backup download, audit retention, migration/deploy scripts, and nginx/Docker config.
-- Compared adjacent implementations and tests for zero-row mutation handling, rollback accounting, child-process watchdogs, route runtime pins, privacy select guards, and cleanup paths.
+- Counted current source surface: `api=8`, `actions=14` including `db-actions.ts`, `lib=97`, `components=57`, `scripts=27`, `drizzle=31`, `unit_tests=270`, `e2e=8`, `config=21`.
+- Inventoried app routes/actions/components/libs/scripts under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/drizzle`.
+- Re-checked prior debugger findings against current HEAD: DB child-process SIGKILL fallback is fixed, smart-collection missing/private load-more no longer refunds after lookup, single-image delete now returns not-found on `deletedRows === 0`, backup download now streams from one validated file handle, topic `order` parsing now uses `Number()`, semantic limits now read env with bounded clamps, and similar-search now checks abort between async phases.
+- Focused sweep areas: route prefetch side effects, analytics recording, upload/delete cleanup, atomic image writes, audit/view retention, backup/download streaming, upload serving, queue timers, CLIP scan limits, parser coercion, auth/origin/rate-limit lint coverage, and current source-contract tests.
 
 ## Confirmed Findings
 
-### DBG20-01 - DB child-process SIGKILL fallback is inert after SIGTERM
+### DBG21-01 - Photo hover prefetch can count adjacent photos as viewed
 
-Severity: High  
-Confidence: High  
+Severity: Medium
+Confidence: Medium-High
+Status: Confirmed code path; runtime count inflation should be validated with a browser/network trace.
+
+Code regions:
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156` records a photo view during server render.
+- `apps/web/src/components/photo-navigation.tsx:220-228` prefetches the previous photo route on hover.
+- `apps/web/src/components/photo-navigation.tsx:235-243` prefetches the next photo route on hover.
+- `apps/web/src/app/actions/public.ts:370-389` inserts an `image_views` row once `recordPhotoView()` runs.
+- Same render-time analytics pattern also exists at `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:105-107`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164`, and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127-132`.
+
+Failure scenario:
+On a photo page with adjacent images, a desktop user moves the pointer over the Prev/Next controls. `router.prefetch(getPhotoPath(...))` asks Next for the target route payload. The target photo page renders on the server and runs `void recordPhotoView(image.id)` before the user clicks or sees the target photo. That can insert a durable `image_views` row for a non-committed view, inflating analytics and consuming the public view-recording rate-limit budget.
+
+Suggested fix:
+Move view recording to a committed client-visible boundary, for example a small client component that calls a dedicated analytics endpoint/action from `useEffect` after hydration and only for the route actually displayed. Until that exists, remove/manual-disable `router.prefetch()` for photo navigation or make the server-side recorder detect and ignore RSC prefetch requests. Add an e2e or route-level regression proving hover prefetch does not write `image_views`.
+
+### DBG21-02 - Audit retention purge still runs as one unbounded DELETE
+
+Severity: Low operational risk
+Confidence: High
 Status: Confirmed
 
 Code regions:
-- `apps/web/src/app/[locale]/admin/db-actions.ts:36-57` defines the shared 30-minute child-process watchdog.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:52-55` sends `SIGTERM`, then checks `if (!child.killed)` before sending `SIGKILL`.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:217-224` arms the watchdog for `mysqldump`.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:629-631` arms it for `mysql` restore import.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:720-724` arms it for post-restore migrations.
-
-Root-cause hypothesis:
-`ChildProcess.killed` becomes true once a signal was successfully sent, not when the process has actually exited. After `child.kill('SIGTERM')`, the grace timer usually sees `child.killed === true`, so it never sends the intended `SIGKILL`.
+- `apps/web/src/lib/audit.ts:97-122` computes the cutoff and deletes every matching audit row in one statement.
+- `apps/web/src/lib/view-retention.ts:31-87` shows the established bounded chunking pattern for high-volume retention deletes.
 
 Failure scenario:
-A wedged `mysql`, `mysqldump`, or migration child ignores or does not promptly handle `SIGTERM`. The action resolves failure and the surrounding restore/backup flow proceeds, but the child can remain alive past the grace period. The restore case is most dangerous: `failRestore()` returns `keepMaintenance: true`, while the outer `finally` still releases DB/backfill/upload locks. A still-running `mysql` import can continue mutating the DB after the request has reported failure and coordination locks are gone.
+If audit volume grows, or an operator lowers `AUDIT_LOG_RETENTION_DAYS` after a long-running instance, the hourly cleanup can issue one large `DELETE FROM audit_log WHERE created_at < cutoff`. On MySQL this can hold locks and create a large transaction/binlog burst. The positive-retention parsing is now safe, but the delete shape is still operationally unbounded.
 
 Suggested fix:
-Track actual process exit with a local `exited` flag set from `exit`/`close`, or use `child.exitCode !== null || child.signalCode !== null`/an equivalent settled flag. The grace timer should send `SIGKILL` unless exit was observed. Add a unit/source test that simulates timeout and asserts both `SIGTERM` and delayed `SIGKILL` are attempted when no exit event fires.
+Mirror `purgeOldViewEvents()`: delete audit rows in batches with a per-sweep iteration cap, return the deleted count for observability, and extend `audit-retention.test.ts` to lock the chunked behavior.
 
-### DBG20-02 - Smart-collection load-more refunds after protected DB work
+### DBG21-03 - Upload fallback serving validates by path, then reopens by path
 
-Severity: Medium  
-Confidence: High  
-Status: Confirmed
+Severity: Low
+Confidence: Medium
+Status: Residual same-host race; not remotely exploitable without local write access.
 
 Code regions:
-- `apps/web/src/app/actions/public.ts:197-203` pre-increments the public load-more limiter.
-- `apps/web/src/app/actions/public.ts:207-211` looks up `getSmartCollectionBySlugCached(slug)`, then rolls back the limiter when the collection is missing or private.
-- `apps/web/src/lib/rate-limit.ts:24-57` documents that public DB/CPU routes should stay charged once protected work begins.
-
-Root-cause hypothesis:
-The smart-collection path reuses a fairness-style rollback helper after a DB lookup, while the route’s protected resource is the lookup/query work itself. That makes invalid/private slugs cheaper than successful requests.
+- `apps/web/src/lib/serve-upload.ts:175-184` `lstat()`/`realpath()` validate the requested derivative path and containment.
+- `apps/web/src/lib/serve-upload.ts:216-257` computes `ETag` and `Content-Length` from that earlier `stats` object.
+- `apps/web/src/lib/serve-upload.ts:263-300` later calls `createReadStream(resolvedPath)` by path, not by an already-open descriptor.
+- `apps/web/src/app/api/admin/db/download/route.ts:56-75` shows the stronger descriptor-backed pattern now used for backup downloads.
 
 Failure scenario:
-A caller repeatedly probes syntactically valid but nonexistent or private collection slugs. Every request performs a collection DB/cache lookup and then gets refunded, so the limiter no longer represents consumed DB work and the endpoint becomes a low-cost enumeration/resource-amplification surface.
+A same-host process with write access to `apps/web/public/uploads` replaces a validated derivative file after `serveUploadFile()` has read `stats`/`realpath()` but before `createReadStream(resolvedPath)` opens the path. The response can advertise the old `Content-Length`/`ETag` while streaming bytes from the replacement file. The path validation still prevents traversal and symlink serving, so this is a local filesystem trust-boundary issue, but the backup download route has already moved to descriptor-backed streaming to close the same metadata/body split.
 
 Suggested fix:
-Keep nonexistent/private collection responses charged after `getSmartCollectionBySlugCached()` runs. Add a regression around `loadMoreSmartCollectionImages` proving the invalid/private post-lookup branch does not call `rollbackLoadMoreAttempt`.
-
-### DBG20-03 - Single-image delete can report success after deleting zero rows
-
-Severity: Low  
-Confidence: Medium  
-Status: Confirmed race, low impact
-
-Code regions:
-- `apps/web/src/app/actions/images.ts:645-655` selects the image before deletion.
-- `apps/web/src/app/actions/images.ts:685-691` deletes rows and stores `deletedRows`.
-- `apps/web/src/app/actions/images.ts:693-697` only suppresses audit logging when `deletedRows === 0`.
-- `apps/web/src/app/actions/images.ts:699-720` still attempts file cleanup, revalidation, and returns `{ success: true }`.
-
-Root-cause hypothesis:
-The action handles the audit duplicate case but does not make the post-transaction behavior conditional on the row actually being deleted.
-
-Failure scenario:
-Two admins delete the same image concurrently. Both select the row. The first transaction deletes it. The second transaction deletes zero rows but still runs cleanup/revalidation and returns success. File cleanup is mostly idempotent, so this is not data loss, but the UI receives a stale success and cleanup failures/noise can be attributed to a request that did not delete anything.
-
-Suggested fix:
-If `deletedRows === 0`, return the same stale/not-found shape used for missing images and skip file cleanup/revalidation. Keep the existing audit suppression. Add a concurrency/source regression similar to the tag/topic zero-row handling tests.
-
-### DBG20-04 - Audit retention purge is a single unbounded DELETE
-
-Severity: Low operational risk  
-Confidence: High  
-Status: Confirmed
-
-Code regions:
-- `apps/web/src/lib/audit.ts:97-122` computes the retention cutoff and deletes all matching audit rows in one statement.
-- `apps/web/src/lib/view-retention.ts:31-83` shows the established chunked-retention pattern for high-volume analytics tables.
-
-Root-cause hypothesis:
-Audit retention inherited the simple delete shape after retention parsing was hardened, but it was not updated to the repo’s newer chunked-delete convention.
-
-Failure scenario:
-If audit volume grows or retention is lowered after a long-running instance, the hourly GC can issue one large `DELETE` against `audit_log`, holding locks and generating a large transaction. Today audit volume is likely low, so this is operationally gated, but it is asymmetric with view retention’s bounded cleanup.
-
-Suggested fix:
-Delete audit rows in bounded chunks with a per-run iteration cap, mirroring `purgeOldViewEvents()`. Keep the existing positive-retention parsing tests and add a chunking/source or unit regression.
-
-## Likely / Validation Risks
-
-### DBG20-RISK-01 - Failed restore keeps maintenance active without an evident in-app recovery path
-
-Severity: Medium operational risk  
-Confidence: Medium  
-Status: Risk needing validation
-
-Code regions:
-- `apps/web/src/app/[locale]/admin/db-actions.ts:450-462` ends restore maintenance only when restore succeeded or `keepMaintenance` is false.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:618-628` resolves stream/stdin/timeout failures with `keepMaintenance: true`.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:650-679` keeps maintenance after post-restore migration failure or nonzero `mysql` exit.
-- `apps/web/src/lib/restore-maintenance.ts:1-60` stores maintenance state process-locally.
-
-Root-cause hypothesis:
-Fail-closed maintenance is correct when DB state may be partially restored, but recovery appears to depend on process restart or manual intervention rather than an explicit admin/operator recovery path.
-
-Failure scenario:
-A restore import partially applies and then fails, or post-restore migration fails. The app remains in restore maintenance, public/admin mutations stay blocked, and image processing remains paused. If the UI does not expose a deliberate recovery action or runbook, operators may see a stuck app with no obvious next step.
-
-Suggested fix:
-Validate the admin UI/recovery path. If absent, add an explicit operator-only recovery action with strong warning text, or document the manual recovery procedure where the DB restore UI surfaces the failed-maintenance state. Preserve fail-closed behavior for uncertain partial restores.
-
-### DBG20-RISK-02 - Backup download validation and stream can diverge under same-host replacement
-
-Severity: Low  
-Confidence: Medium  
-Status: Risk needing validation
-
-Code regions:
-- `apps/web/src/app/api/admin/db/download/route.ts:50-64` validates `lstat()`/`realpath()` and containment.
-- `apps/web/src/app/api/admin/db/download/route.ts:72-84` opens a new stream from the earlier realpath and sends the earlier `stats.size` as `Content-Length`.
-
-Root-cause hypothesis:
-The route validates by path, then opens by path later. It reduces symlink/path traversal risk, but does not bind metadata and stream contents to the same file descriptor.
-
-Failure scenario:
-A same-host process with write access to `data/backups` replaces a backup file after validation but before `createReadStream()`. The response can stream bytes from a different file state while advertising the old `Content-Length`. This is mostly a local-admin trust-boundary issue, not a remote exploit.
-
-Suggested fix:
-Use descriptor-backed `open`/`fstat`/streaming so validation, `Content-Length`, and bytes come from the same file handle, or explicitly document backup-directory write access as trusted local operator capability.
-
-### DBG20-RISK-03 - Topic OG tag parser allocates the full query value before taking 20 tags
-
-Severity: Low  
-Confidence: Medium  
-Status: Likely, infrastructure-dependent
-
-Code regions:
-- `apps/web/src/app/api/og/route.tsx:35-39` accepts `tags` without a route-local max length.
-- `apps/web/src/app/api/og/route.tsx:84-88` calls `tags.split(',')` before `slice(0, 20)`.
-
-Root-cause hypothesis:
-The rendered output is bounded to 20 tags, but parsing is not bounded to 20 candidate tokens or a maximum input length.
-
-Failure scenario:
-An unusually large admitted `tags` query allocates and filters an array for every comma-separated segment even though only 20 tags are rendered. Production proxy URL limits may blunt this, but the route itself does not express the bound.
-
-Suggested fix:
-Reject excessive `tags.length` before splitting, or replace the split chain with a small parser that stops after 20 candidate tags.
+Open the validated derivative once and derive `stat`, `ETag`, `Content-Length`, and the response stream from that file descriptor. Keep the existing symlink/non-file/containment checks, then add a unit test modeled after `backup-download-route.test.ts` that proves metadata and bytes are bound to the same opened file.
 
 ## Positive Debugging Evidence / Non-Findings
 
-- Adjacent delete actions for topics, tags, and smart collections check `affectedRows === 0` before success; the stale-success race is isolated to single-image delete in the inspected action set.
-- Browser upload and Lightroom upload both have preclaim/settle paths, disk checks, topic-existence checks, late restore-maintenance cleanup, GPS/HDR gates, and upload-processing contract locks.
-- Image queue processing uses per-image advisory locks, validates filenames before enqueue, retries processing/claim failures, persists permanent failures, cleans derivatives on delete-during-processing, and drains tracked caption/embedding side effects on shutdown/restore.
-- Semantic text search now threads `request.signal` into `embedTextReal`; `clip-model.ts` removes aborted waiters and re-checks abort after slot acquisition.
-- Admin API and public route lint fixtures exist for auth/rate-limit invariants; source scans did not find a new unwrapped admin API route or public mutating API route without the expected scanner coverage.
-- Privacy-sensitive public selects are centralized/guarded; I did not find a public data path selecting original filenames, user filenames, uploaded-by IDs, raw GPS coordinates, or admin-only color/HDR diagnostics outside documented admin/map behavior.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:39-77` now tracks `exit`/`close` and sends delayed `SIGKILL` unless the child actually settled; the old `child.killed` bug is gone.
+- `apps/web/src/app/actions/public.ts:207-211` no longer rolls back the load-more limiter after a missing/private smart-collection lookup; invalid/private probes remain charged after DB work.
+- `apps/web/src/app/actions/images.ts:685-695` now returns `imageNotFound` when a concurrent single-image delete deletes zero rows, before file cleanup/revalidation.
+- `apps/web/src/app/api/admin/db/download/route.ts:56-75` now validates, stats, and streams from the same `FileHandle`; the prior path-backed backup download race is closed.
+- `apps/web/src/app/actions/topics.ts:108-113` and `:214-219` now use `Number()` plus `Number.isFinite()` for topic ordering; the archived cycle-21 `parseInt('1e3')` finding is fixed and covered.
+- `apps/web/src/lib/clip-embeddings.ts:36-44` now reads and clamps `SEMANTIC_SCAN_LIMIT` / `SEMANTIC_TOP_K_MAX`; targeted env tests pass.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:82-204` now checks `request.signal` between route phases. The synchronous decode/score loop remains bounded by `SEMANTIC_SCAN_LIMIT`, so I treated it as a scale/perf residual rather than a debugger finding.
+- `apps/web/src/lib/data.ts:164-174` now deletes `viewCountRetryCount` entries when post-flush buffer eviction drops a group, closing the stale retry-count sibling.
+- I inspected the archived DBG21-02 hard-link/copy concern in `process-image.ts:1391-1418`; current control flow does not re-copy into the already hard-linked temp after a post-link rename failure, so I did not file it as a current defect.
+
+## Validation Evidence
+
+Commands run:
+- `npm run lint:api-auth --workspace=apps/web` → 2 admin routes OK.
+- `npm run lint:action-origin --workspace=apps/web` → all mutating server actions enforce same-origin provenance; public analytics/load-more/search exemptions are explicit.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` → public mutating route scan OK; semantic route uses rate-limit helper.
+- `npm test --workspace=apps/web -- topics-actions.test.ts clip-semantic-limits-env.test.ts backup-download-route.test.ts public-actions.test.ts` → 4 files passed, 61 tests passed.
+
+I did not run the full lint/typecheck/build/Vitest/e2e suite because this assignment requested a review artifact only and no implementation changes.
 
 ## Final Missed-Issue Sweep
 
 Final sweep covered:
-- Route/action inventories, auth/origin wrappers, public route rate-limit policies, rollback helpers, and source-contract tests.
-- Upload and LR upload quota settlement, cleanup after failed saves/inserts, queue enqueueing, and restore-maintenance races.
-- DB backup/restore child processes, advisory locks, restore maintenance, temp-file cleanup, post-restore migrations, backup download streaming, and deploy/migration scripts.
-- Image queue retry/permanent-failure transitions, bootstrap continuation, CLIP embedding side effects, shutdown/restore drains, and stale delete cleanup.
-- Public OG/feed/search/similar/upload-serving routes, analytics fire-and-forget inserts, smart collection parsing, sitemap/feed freshness, and resource bounds.
-- Schema/migrations/journal/reconcile paths, privacy-field guards, lint scripts, Docker/nginx config, and prior cycle deferred findings.
-
-Validation evidence:
-- Static review and source scans only; I did not run full lint/typecheck/test/build gates because this assignment requested a review artifact only and no implementation changes.
-- Exact file/line references above were taken from the current workspace with `nl -ba`/`rg`.
-- Existing uncommitted review artifacts were present before this lane; this file is the only path intentionally changed.
+- App route/action inventories, same-origin/auth wrappers, public rate-limit policies, and rollback-after-protected-work behavior.
+- Analytics recorders and render/prefetch paths for photo, shared photo, topic, and shared group pages.
+- Upload, Lightroom upload, retry, image queue, admin backfill, delete, and restore-maintenance cleanup paths.
+- DB backup/restore child processes, file-handle streaming, upload serving, migration/reconcile scripts, Docker/nginx/deploy config, and retention jobs.
+- Parser/coercion sites (`parseInt`, `Number`, env integer helpers), timer lifecycles, abort handling, and bounded in-memory maps.
+- Prior cycle-21 archived findings and current aggregate findings to avoid re-filing issues already fixed in HEAD.
 
 Final count:
-- High: 1
 - Medium: 1
 - Low: 2
-- Validation risks: 3
+- Total confirmed findings: 3
