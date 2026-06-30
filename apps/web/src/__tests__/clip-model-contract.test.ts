@@ -43,8 +43,17 @@ describe('clip-model module contract', () => {
     expect(src).toContain('function releaseInferenceSlot()');
     expect(src).toMatch(/const\s+nextWaiter\s*=\s*inferenceWaiters\.shift\(\)/);
     expect(src).toMatch(/if\s*\(\s*nextWaiter\s*\)\s*\{[\s\S]*nextWaiter\.resolve\(\)[\s\S]*return;/);
-    expect(src).toMatch(/finally\s*\{[\s\S]*releaseInferenceSlot\(\);[\s\S]*\}/);
+    expect(src).toMatch(/finally\s*\{[\s\S]*if\s*\(\s*ownsInferenceSlot\s*\)[\s\S]*releaseInferenceSlot\(\);[\s\S]*\}/);
     expect(src).not.toMatch(/activeInferenceCount--;\s*inferenceWaiters\.shift\(\)\?\.resolve\(\)/);
+  });
+
+  it('releases a queued slot when the request aborts after handoff', () => {
+    expect(src).toContain('let ownsInferenceSlot = false');
+    expect(src).toMatch(/await waitForInferenceSlot\(options\.signal\);[\s\S]{0,120}ownsInferenceSlot = true;[\s\S]{0,120}throwIfInferenceAborted\(options\.signal\);/);
+    const waitStart = src.indexOf('async function waitForInferenceSlot');
+    const waitEnd = src.indexOf('function releaseInferenceSlot', waitStart);
+    const waitBody = src.slice(waitStart, waitEnd);
+    expect(waitBody).not.toMatch(/await new Promise[\s\S]*throwIfInferenceAborted\(signal\);/);
   });
 
   it('threads AbortSignal through queued text inference', () => {

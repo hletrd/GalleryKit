@@ -142,7 +142,6 @@ async function waitForInferenceSlot(signal?: AbortSignal): Promise<void> {
         }
         inferenceWaiters.push(waiter);
     });
-    throwIfInferenceAborted(signal);
 }
 
 function releaseInferenceSlot(): void {
@@ -156,16 +155,20 @@ function releaseInferenceSlot(): void {
 
 async function withInferenceSlot<T>(fn: () => Promise<T>, options: InferenceSlotOptions = {}): Promise<T> {
     throwIfInferenceAborted(options.signal);
-    if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
-        await waitForInferenceSlot(options.signal);
-    } else {
-        activeInferenceCount++;
-    }
+    let ownsInferenceSlot = false;
     try {
+        if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
+            await waitForInferenceSlot(options.signal);
+        } else {
+            activeInferenceCount++;
+        }
+        ownsInferenceSlot = true;
         throwIfInferenceAborted(options.signal);
         return await fn();
     } finally {
-        releaseInferenceSlot();
+        if (ownsInferenceSlot) {
+            releaseInferenceSlot();
+        }
     }
 }
 
