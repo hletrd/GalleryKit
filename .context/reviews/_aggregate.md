@@ -1,9 +1,9 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-50-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-51-2026-07-01/_aggregate.md`
 
-Cycle 50 produced one deduplicated finding:
+Cycle 51 produced one deduplicated finding:
 
-- `C50-01` - service-worker photo-page fallback regression test checks template substrings instead of concrete classifier behavior and generated-worker parity.
+- `C51-01` - Cycle 50 plan/index ledger still marked the pushed/deployed Cycle 50 service-worker test fix as active and deploy-unknown.
 
-Cycle 50 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.
+Cycle 51 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.
