@@ -197,6 +197,28 @@ function collectPreOriginAuthReadNames(sourceFile: ts.SourceFile): Set<string> {
     return names;
 }
 
+function collectApprovedReadAuthNames(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+            || !APPROVED_PRE_ORIGIN_AUTH_READ_MODULES.has(statement.moduleSpecifier.text)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES.has(importedName)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
 type DbReadBindings = {
     directNames: Set<string>;
     namespaceNames: Set<string>;
@@ -710,12 +732,12 @@ function statementEstablishesReadAuth(
 function exemptReadHasAuthBeforeProtectedRead(
     body: ts.Node,
     approvedImports: Set<string>,
-    preOriginAuthReadNames: Set<string>,
+    approvedReadAuthNames: Set<string>,
     dbReadBindings: DbReadBindings,
     actionShadowsReadAuth: boolean = false,
 ): boolean {
     if (!ts.isBlock(body)) {
-        return true;
+        return !nodeContainsProtectedRead(body, dbReadBindings);
     }
     if (actionShadowsReadAuth) {
         return false;
@@ -728,7 +750,7 @@ function exemptReadHasAuthBeforeProtectedRead(
         if (!sawAuth && nodeContainsProtectedRead(statement, dbReadBindings)) {
             return false;
         }
-        if (statementEstablishesReadAuth(statement, originErrorNames, authResultNames, approvedImports, preOriginAuthReadNames)) {
+        if (statementEstablishesReadAuth(statement, originErrorNames, authResultNames, approvedImports, approvedReadAuthNames)) {
             sawAuth = true;
         }
     }
@@ -1117,6 +1139,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
     const preOriginAuthReadNames = collectPreOriginAuthReadNames(sourceFile);
+    const approvedReadAuthNames = collectApprovedReadAuthNames(sourceFile);
     const dbReadBindings = collectDbReadBindings(sourceFile, relative);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
@@ -1220,9 +1243,9 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 && !exemptReadHasAuthBeforeProtectedRead(
                     body,
                     approvedRequireSameOriginImports,
-                    preOriginAuthReadNames,
+                    approvedReadAuthNames,
                     dbReadBindings,
-                    functionInfoDeclaresBindingName(bodyInfo, preOriginAuthReadNames),
+                    functionInfoDeclaresBindingName(bodyInfo, approvedReadAuthNames),
                 )
             ) {
                 report.failed.push(

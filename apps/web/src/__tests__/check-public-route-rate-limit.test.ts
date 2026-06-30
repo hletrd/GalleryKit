@@ -208,6 +208,40 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('before expensive work');
     });
 
+    it('fails closed for concise expensive public GET bodies with protected work before a later limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export const GET = async () => (
+                await db.select().from(images),
+                preIncrementShareAttempt('1.2.3.4')
+                    ? new Response(null, { status: 429 })
+                    : Response.json({ ok: true })
+            );
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/foo/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
+    it('fails closed for concise expensive public HEAD bodies with protected work before a later limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export const HEAD = async () => (
+                await db.select().from(images),
+                preIncrementShareAttempt('1.2.3.4')
+                    ? new Response(null, { status: 429 })
+                    : new Response(null, { status: 204 })
+            );
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/foo/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
     it('passes expensive public GET handlers when a captured limiter result returns before expensive work', () => {
         const source = `
             import { db } from '@/db';

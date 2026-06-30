@@ -76,7 +76,8 @@ The resolver heals a stored `semantic_search_mode='production'` back to `disable
 1. **Seed weights** (sidecar `--rm`): `scripts/download-clip-models.ts` with `CLIP_MODELS_ROOT` set to the bind-mount path.
 2. **Backfill embeddings** for existing photos: run `scripts/backfill-clip-embeddings.ts --production --force` in a sidecar with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and `CLIP_MODELS_ROOT=/app/data/models/clip`. The `--force` flag skips the DB mode gate so you can pre-populate embeddings before flipping the admin setting, but the script still requires the explicit production env opt-in. If the script logs that it reached `SEMANTIC_SCAN_LIMIT`, repeat the same command until it completes without that message.
 3. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
-4. Set the DB row `admin_settings.semantic_search_mode='production'`.
+4. Apply that env change to the live web container before flipping the DB mode: run the normal root `npm run deploy` from the deploy checkout, or recreate the stack with `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build` for a local/manual Docker smoke. The running Node process reads `SEMANTIC_SEARCH_ALLOW_PRODUCTION` from its container environment; editing `.env.local` alone does not update an already-running container.
+5. Set the DB row `admin_settings.semantic_search_mode='production'`.
 
 New uploads are embedded automatically (fire-and-forget, lower priority than derivative generation). See `CLAUDE.md` → **"CLIP semantic search — seeding model weights on the deploy host"** for the exact `--rm` sidecar commands (the prod runtime container has no `tsx`/source, so model ops run from a sidecar off `web-web:latest` with read-only source mounts).
 

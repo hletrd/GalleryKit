@@ -19,6 +19,11 @@ const withApprovedActionGuard = (body: string) => `
     ${body}
 `;
 
+const withApprovedReadAuth = (body: string) => `
+    import { isAdmin } from '@/app/actions/auth';
+    ${body}
+`;
+
 describe('checkActionSource — function declarations', () => {
     it('fails when a mutating function declaration omits requireSameOriginAdmin', () => {
         const src = `
@@ -533,7 +538,24 @@ describe('checkActionSource — function declarations', () => {
     });
 
     it('skips exempt admin read-only bodies after an auth check', () => {
+        const src = withApprovedReadAuth(`
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listThings() {
+                if (!(await isAdmin())) return [];
+                return db.select().from(things).orderBy(things.name);
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::listThings');
+    });
+
+    it('fails exempt admin read-only bodies gated by a same-file fake auth helper', () => {
         const src = `
+            function isAdmin() {
+                return true;
+            }
+
             /** @action-origin-exempt: read-only admin getter */
             export async function listThings() {
                 if (!(await isAdmin())) return [];
@@ -541,8 +563,9 @@ describe('checkActionSource — function declarations', () => {
             }
         `;
         const report = checkActionSource(src, 'actions/fixture.ts');
-        expect(report.failed).toEqual([]);
-        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::listThings');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
     });
 
     it('skips exempt admin read-only bodies with aliased DB reads after aliased auth checks', () => {
@@ -665,14 +688,14 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
     });
 
     it('skips wrapped read-only exports only with an explicit exemption', () => {
-        const src = `
+        const src = withApprovedReadAuth(`
             import { cache } from 'react';
             /** @action-origin-exempt: read-only cached lookup */
             export const getFoo = cache(async function getFoo() {
                 if (!(await isAdmin())) return [];
                 return db.select().from(rows);
             });
-        `;
+        `);
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::getFoo');
@@ -1335,20 +1358,20 @@ describe('checkActionSource — protected read detection', () => {
     });
 
     it('allows Drizzle relational reads after an auth check in read-only exemptions', () => {
-        const src = `
+        const src = withApprovedReadAuth(`
             /** @action-origin-exempt: read-only admin getter */
             export async function listSessions() {
                 if (!(await isAdmin())) return [];
                 return db.query.sessions.findMany();
             }
-        `;
+        `);
         const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): src/app/actions/admin-sessions.ts::listSessions');
     });
 
     it('allows namespace Drizzle relational reads after an auth check in read-only exemptions', () => {
-        const src = `
+        const src = withApprovedReadAuth(`
             import * as database from '@/db';
 
             /** @action-origin-exempt: read-only admin getter */
@@ -1356,10 +1379,37 @@ describe('checkActionSource — protected read detection', () => {
                 if (!(await isAdmin())) return [];
                 return database.db.query.sessions.findMany();
             }
-        `;
+        `);
         const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): src/app/actions/admin-sessions.ts::listSessions');
+    });
+
+    it('fails read-only exemptions that use concise arrow bodies for protected reads', () => {
+        const src = `
+            import { db } from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export const listSessions = async () => db.select().from(sessions);
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('fails read-only exemptions when concise arrow auth dominance is not modeled', () => {
+        const src = `
+            import { db } from '@/db';
+            import { isAdmin } from '@/app/actions/auth';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export const listSessions = async () => (await isAdmin()) ? db.select().from(sessions) : [];
+        `;
+        const report = checkActionSource(src, 'src/app/actions/admin-sessions.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
     });
 
     it('fails read-only exemptions when an auth call is ignored before a protected read', () => {

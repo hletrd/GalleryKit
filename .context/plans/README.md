@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 43/100 Implementation Plan — active (`cycle-43-2026-07-01-plan.md`)
-- Cycle 43/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-43-2026-07-01-deferred.md`)
+- Cycle 44/100 Implementation Plan — active (`cycle-44-2026-07-01-plan.md`)
+- Cycle 44/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-44-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 43/100 Implementation Plan — implementation source committed/pushed/deployed; Cycle 44 invocation states `f417d86b` was the current deployed `master` HEAD at start (`cycle-43-2026-07-01-plan.md`)
+- Cycle 43/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-43-2026-07-01-deferred.md`)
 - Cycle 42/100 Implementation Plan — implementation source committed/pushed; committed deploy evidence not found (`cycle-42-2026-07-01-plan.md`)
 - Cycle 42/100 Deferred Findings — deferred (`cycle-42-2026-07-01-deferred.md`)
 - Cycle 41/100 Implementation Plan — implementation pushed; committed deploy evidence not found (`cycle-41-2026-07-01-plan.md`)

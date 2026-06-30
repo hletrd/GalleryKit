@@ -550,22 +550,6 @@ function bodyCallsRateLimitBeforeMutation(
     return sawRateLimitGate && !sawProtectedWork;
 }
 
-function bodyCallsApprovedRateLimit(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
-    if (!body) return false;
-    let found = false;
-    const visit = (node: ts.Node) => {
-        if (found) return;
-        if (ts.isFunctionLike(node) && node !== body) return;
-        if (ts.isCallExpression(node) && isRateLimitHelperCall(node, approvedRateLimitImports)) {
-            found = true;
-            return;
-        }
-        ts.forEachChild(node, visit);
-    };
-    visit(body);
-    return found;
-}
-
 function bodyCallsRateLimitBeforeExpensiveGetWork(
     body: ts.Node | undefined,
     approvedRateLimitImports: Set<string>,
@@ -625,7 +609,7 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
         return inspectStatements(body.statements);
     }
 
-    return bodyCallsApprovedRateLimit(body, approvedRateLimitImports);
+    return false;
 }
 
 function bodyContainsExpensiveGetWork(

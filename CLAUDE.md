@@ -549,8 +549,11 @@ The backfill processes at most `SEMANTIC_SCAN_LIMIT` candidate rows per run and 
 `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (AGG-C10-02). The admin Settings UI intentionally
 offers only Disabled/Stub — there is no one-click production toggle. To go live: seed the
 weights (above), run the `--production --force` backfill (above), set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`
-in `.env.local`, and set the DB row `admin_settings.semantic_search_mode='production'`. Without
-the env flag the routes 503 regardless of the DB value.
+in `.env.local`, apply that env change to the live web container with the normal root
+`npm run deploy` (or a local/manual `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build`
+smoke), then set the DB row `admin_settings.semantic_search_mode='production'`. The running
+Node process reads this flag from its container environment, so editing `.env.local` alone does
+not update an already-running container. Without the env flag the routes 503 regardless of the DB value.
 
 **Runtime limits:** `SEMANTIC_SCAN_LIMIT` (default 2000, hard cap 25000) caps the newest-first brute-force vector scan
 for semantic search — the maximum number of embedding rows the route will read from the
