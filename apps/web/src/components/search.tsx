@@ -471,7 +471,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                 ))}
                             </div>
                         ) : query.trim() ? (
-                            <div className="p-8 text-center text-muted-foreground text-sm" aria-hidden="true">
+                            <div className="p-8 text-center text-muted-foreground text-sm">
                                 {loading ? '' : searchStatus ? t(`search.${searchStatus}`) : t('search.noResults')}
                             </div>
                         ) : (

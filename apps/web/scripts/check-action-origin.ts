@@ -18,6 +18,8 @@
  *   intentionally unauthenticated analytics writes.
  * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
  *   it lives outside the `actions/` directory).
+ * - `apps/web/src/app/actions.ts` (top-level compatibility barrel), which
+ *   must stay a pure action-module re-export surface.
  *
  * Glob-based recursive discovery means new action files added to
  * `actions/` (including nested subdirectories like
@@ -100,6 +102,9 @@ function discoverActionFiles(): string[] {
     }
     // Also include the admin db-actions file which lives outside app/actions/.
     found.push(path.join(REPO_SRC, 'app/[locale]/admin/db-actions.ts'));
+    // Also include the top-level action barrel so it cannot grow direct
+    // action exports outside the recursive app/actions/ scan.
+    found.push(path.join(REPO_SRC, 'app/actions.ts'));
     return found.sort();
 }
 
@@ -688,6 +693,14 @@ function hasAsyncModifier(node: ts.Node): boolean {
     return !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
 }
 
+function isAllowedActionBarrelModuleSpecifier(moduleSpecifier: ts.Expression | undefined): boolean {
+    return (
+        !!moduleSpecifier
+        && ts.isStringLiteral(moduleSpecifier)
+        && moduleSpecifier.text.startsWith('./actions/')
+    );
+}
+
 function functionBodyFromExpression(
     expression: ts.Expression | undefined,
     options: { requireAsync?: boolean } = {},
@@ -742,6 +755,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
+    const isActionBarrelFile = /(?:^|[/\\])app[/\\]actions\.[cm]?[jt]sx?$/.test(relative);
     const localBodies = new Map<string, ts.Node>();
     const localMutatingFunctions = new Set<string>();
 
@@ -774,6 +788,31 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
 
     const lineOf = (node: ts.Node) =>
         sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+
+    if (isActionBarrelFile) {
+        for (const statement of sourceFile.statements) {
+            if (ts.isImportDeclaration(statement)) continue;
+            if (ts.isExportDeclaration(statement)) {
+                if (statement.isTypeOnly) continue;
+                if (isAllowedActionBarrelModuleSpecifier(statement.moduleSpecifier)) continue;
+                report.failed.push(
+                    `UNSUPPORTED ACTION BARREL EXPORT: ${relative}:${lineOf(statement)} app/actions.ts may only re-export values from './actions/*' modules or type-only exports`,
+                );
+                continue;
+            }
+            const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
+            const isExported = !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+            if (isExported || ts.isExportAssignment(statement)) {
+                report.failed.push(
+                    `UNSUPPORTED ACTION BARREL EXPORT: ${relative}:${lineOf(statement)} app/actions.ts must stay a pure action-module re-export barrel; put direct action bodies under app/actions/`,
+                );
+            }
+        }
+        if (report.failed.length === 0) {
+            report.passed.push(`OK (action barrel): ${relative}`);
+        }
+        return report;
+    }
 
     const evaluateBody = (owner: ts.Node, body: ts.Node | undefined, name: string) => {
         if (hasExemptTag(owner, content) && !hasReasonedExemptComment(owner, content)) {

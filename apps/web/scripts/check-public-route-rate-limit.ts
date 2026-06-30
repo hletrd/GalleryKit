@@ -6,7 +6,7 @@
  *   (b) calls one of the documented rate-limit pre-increment helpers
  *       from `@/lib/rate-limit`.
  *
- * Expensive GET handlers are also scanned. A public GET route that imports or
+ * Expensive GET/HEAD handlers are also scanned. A public read route that imports or
  * calls DB/image/filesystem/embedding work must either call an approved
  * rate-limit helper or opt out with `@public-no-rate-limit-required: <reason>`.
  *
@@ -35,7 +35,7 @@ const ROUTE_FILE_NAMES = new Set([
 ]);
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const EXPENSIVE_GET_METHOD = 'GET';
+const EXPENSIVE_READ_METHODS = new Set(['GET', 'HEAD']);
 
 // Recognized rate-limit invocation shapes. The helper must be imported from an
 // approved rate-limit module; a local/noop function with the same prefix does
@@ -544,7 +544,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     }
 
     const mutatingHandlers: HandlerBody[] = [];
-    const getHandlers: HandlerBody[] = [];
+    const readHandlers: HandlerBody[] = [];
     for (const statement of sourceFile.statements) {
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
         const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -565,8 +565,8 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         if (ts.isFunctionDeclaration(statement) && statement.name) {
             if (MUTATING_METHODS.has(statement.name.text)) {
                 mutatingHandlers.push({ method: statement.name.text, body: statement.body });
-            } else if (statement.name.text === EXPENSIVE_GET_METHOD) {
-                getHandlers.push({ method: statement.name.text, body: statement.body });
+            } else if (EXPENSIVE_READ_METHODS.has(statement.name.text)) {
+                readHandlers.push({ method: statement.name.text, body: statement.body });
             }
         }
         if (ts.isVariableStatement(statement)) {
@@ -584,17 +584,17 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                     }
                 } else if (
                     ts.isIdentifier(decl.name)
-                    && decl.name.text === EXPENSIVE_GET_METHOD
+                    && EXPENSIVE_READ_METHODS.has(decl.name.text)
                 ) {
                     const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies);
                     if (handler?.unsupportedAlias) {
                         report.failed.push(
-                            `UNSUPPORTED HANDLER ALIAS: ${relative} exports GET = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
+                            `UNSUPPORTED HANDLER ALIAS: ${relative} exports ${decl.name.text} = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
                         );
                         continue;
                     }
                     if (handler) {
-                        getHandlers.push({ method: decl.name.text, body: handler.body });
+                        readHandlers.push({ method: decl.name.text, body: handler.body });
                     }
                 }
             }
@@ -605,15 +605,18 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                 if (ts.isIdentifier(element.name) && MUTATING_METHODS.has(element.name.text)) {
                     const localName = element.propertyName?.text ?? element.name.text;
                     mutatingHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
-                } else if (ts.isIdentifier(element.name) && element.name.text === EXPENSIVE_GET_METHOD) {
+                } else if (ts.isIdentifier(element.name) && EXPENSIVE_READ_METHODS.has(element.name.text)) {
                     if (statement.moduleSpecifier) {
+                        const reExportLabel = element.name.text === 'GET'
+                            ? 'UNSUPPORTED GET RE-EXPORT'
+                            : 'UNSUPPORTED HEAD RE-EXPORT';
                         report.failed.push(
-                            `UNSUPPORTED GET RE-EXPORT: ${relative} re-exports GET from another module, which hides expensive work from this scanner. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
+                            `${reExportLabel}: ${relative} re-exports ${element.name.text} from another module, which hides expensive work from this scanner. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
                         );
                         continue;
                     }
                     const localName = element.propertyName?.text ?? element.name.text;
-                    getHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
+                    readHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
                 }
             }
         }
@@ -628,10 +631,19 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         .replace(/'[^']*'/g, '');
     const hasExemption = EXEMPT_COMMENT_RE.test(withoutStrings);
     if (hasExemption) {
-        const protectedSurfaceCount = mutatingHandlers.length + getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions)).length;
-        if (protectedSurfaceCount > 1) {
+        const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
+        const protectedHandlers = [...mutatingHandlers, ...expensiveReadHandlers];
+        const protectedReadMethods = new Set(expensiveReadHandlers.map((handler) => handler.method));
+        const isSingleGetHeadPair = (
+            mutatingHandlers.length === 0
+            && protectedHandlers.length === protectedReadMethods.size
+            && protectedReadMethods.size === 2
+            && protectedReadMethods.has('GET')
+            && protectedReadMethods.has('HEAD')
+        );
+        if (protectedHandlers.length > 1 && !isSingleGetHeadPair) {
             report.failed.push(
-                `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports protected handlers ${[...mutatingHandlers, ...getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions))].map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt protected handler.`,
+                `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports protected handlers ${protectedHandlers.map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt protected handler.`,
             );
             return report;
         }
@@ -655,20 +667,20 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         );
     }
 
-    const expensiveGetHandlers = getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
-    if (expensiveGetHandlers.length > 0 && !hasExemption) {
-        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions));
-        if (unmeteredGetHandlers.length > 0) {
+    const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
+    if (expensiveReadHandlers.length > 0 && !hasExemption) {
+        const unmeteredReadHandlers = expensiveReadHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions));
+        if (unmeteredReadHandlers.length > 0) {
             report.failed.push(
-                `MISSING RATE LIMIT: ${relative} exports expensive GET handler(s) ${unmeteredGetHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`
+                `MISSING RATE LIMIT: ${relative} exports expensive GET/HEAD handler(s) ${unmeteredReadHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`
             );
         } else {
-            report.passed.push(`OK: ${relative} (expensive GET uses rate-limit helper)`);
+            report.passed.push(`OK: ${relative} (expensive GET uses rate-limit helper for GET/HEAD handlers)`);
         }
     }
 
-    if (mutatingHandlers.length === 0 && expensiveGetHandlers.length === 0 && !hasExemption) {
-        report.passed.push(`OK: ${relative} (no mutating or expensive GET handlers)`);
+    if (mutatingHandlers.length === 0 && expensiveReadHandlers.length === 0 && !hasExemption) {
+        report.passed.push(`OK: ${relative} (no mutating or expensive GET handlers; HEAD is treated as an expensive read)`);
     }
 
     return report;

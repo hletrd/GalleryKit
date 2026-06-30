@@ -246,6 +246,20 @@ describe('sw-cache: recordAndEvict LRU eviction', () => {
     expect(cache.deleted).toContain(B);       // oldest-by-recency → evicted
     expect(snap.has(B)).toBe(false);
   });
+
+  it('serializes concurrent metadata writes so tracked cache entries are not lost', async () => {
+    const A = 'http://localhost/uploads/avif/concurrent-a.avif';
+    const B = 'http://localhost/uploads/avif/concurrent-b.avif';
+
+    await Promise.all([
+      recordAndEvict(A, 4, cache, meta, 50),
+      recordAndEvict(B, 5, cache, meta, 50),
+    ]);
+
+    const snap = meta.snapshot();
+    expect([...snap.keys()].sort()).toEqual([A, B].sort());
+    expect(await totalCacheSize(meta)).toBe(9);
+  });
 });
 
 describe('sw-cache: removeEntry', () => {

@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '36c3f4a5-p7';
+const SW_VERSION = '533c2634-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -95,39 +95,49 @@ async function setMeta(entries) {
   );
 }
 
+let metaMutationQueue = Promise.resolve();
+
+function withMetaMutation(operation) {
+  const run = metaMutationQueue.then(operation, operation);
+  metaMutationQueue = run.catch(() => {});
+  return run;
+}
+
 // ─── LRU eviction ────────────────────────────────────────────────────────────
 
 async function recordAndEvict(url, newSize) {
-  const imageCache = await caches.open(IMAGE_CACHE);
-  const entries = await getMeta();
+  return withMetaMutation(async () => {
+    const imageCache = await caches.open(IMAGE_CACHE);
+    const entries = await getMeta();
 
-  // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
-  // order tracks recency (a plain set() on an existing key keeps the original
-  // position). This lets eviction be a head-walk (oldest first) instead of a
-  // re-ordering pass (O(n log n)) on every near-cap image cache write.
-  // Keep in lockstep with lib/sw-cache.ts.
-  entries.delete(url);
-  entries.set(url, { url, size: newSize, timestamp: Date.now() });
+    // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
+    // order tracks recency (a plain set() on an existing key keeps the original
+    // position). This lets eviction be a head-walk (oldest first) instead of a
+    // re-ordering pass (O(n log n)) on every near-cap image cache write.
+    // Keep in lockstep with lib/sw-cache.ts.
+    entries.delete(url);
+    entries.set(url, { url, size: newSize, timestamp: Date.now() });
 
-  let total = 0;
-  for (const e of entries.values()) total += e.size;
+    let total = 0;
+    for (const e of entries.values()) total += e.size;
 
-  if (total > MAX_IMAGE_BYTES) {
-    // Head-walk in insertion (= recency) order: oldest first, no sort.
-    for (const entry of entries.values()) {
-      if (total <= MAX_IMAGE_BYTES) break;
-      const deleted = await imageCache.delete(entry.url);
-      // Only adjust the running total if the entry was actually present
-      // in the cache. Browser quota evictions may have removed it
-      // independently of our metadata Map.
-      if (deleted) {
-        total -= entry.size;
+    if (total > MAX_IMAGE_BYTES) {
+      // Head-walk in insertion (= recency) order: oldest first, no sort.
+      for (const entry of entries.values()) {
+        if (total <= MAX_IMAGE_BYTES) break;
+        const deleted = await imageCache.delete(entry.url);
+        // Only adjust the running total if the entry was actually present
+        // in the cache. Browser quota evictions may have removed it
+        // independently of our metadata Map.
+        if (deleted) {
+          total -= entry.size;
+        }
+        entries.delete(entry.url);
       }
-      entries.delete(entry.url);
     }
-  }
 
-  await setMeta(entries);
+    await setMeta(entries);
+  });
 }
 
 async function evictHtmlCacheIfNeeded() {
@@ -159,26 +169,41 @@ async function evictHtmlCacheIfNeeded() {
  * responses); never triggers eviction because no size grows.
  */
 async function touchMeta(url, knownSize) {
-  const entries = await getMeta();
-  const existing = entries.get(url);
-  // AGG-H3 (run-6 cycle-2): delete-then-set so a touched entry moves to the
-  // Map's tail. The eviction head-walk relies on insertion order == recency,
-  // so a 304-touch must reposition the entry too, otherwise a
-  // recently-revalidated image could be evicted as if it were old.
-  entries.delete(url);
-  entries.set(url, {
-    url,
-    size: existing && existing.size ? existing.size : knownSize,
-    timestamp: Date.now(),
+  return withMetaMutation(async () => {
+    const entries = await getMeta();
+    const existing = entries.get(url);
+    // AGG-H3 (run-6 cycle-2): delete-then-set so a touched entry moves to the
+    // Map's tail. The eviction head-walk relies on insertion order == recency,
+    // so a 304-touch must reposition the entry too, otherwise a
+    // recently-revalidated image could be evicted as if it were old.
+    entries.delete(url);
+    entries.set(url, {
+      url,
+      size: existing && existing.size ? existing.size : knownSize,
+      timestamp: Date.now(),
+    });
+    await setMeta(entries);
   });
-  await setMeta(entries);
 }
 
 async function deleteMeta(url) {
-  const entries = await getMeta();
-  if (entries.delete(url)) {
-    await setMeta(entries);
+  return withMetaMutation(async () => {
+    const entries = await getMeta();
+    if (entries.delete(url)) {
+      await setMeta(entries);
+    }
+  });
+}
+
+async function responseSize(response) {
+  const contentLength = response.headers.get('Content-Length');
+  if (contentLength !== null) {
+    const parsed = Number(contentLength);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
   }
+  return (await response.clone().blob()).size;
 }
 
 async function staleWhileRevalidateImage(request) {
@@ -209,9 +234,7 @@ async function staleWhileRevalidateImage(request) {
           }
           if (isSensitiveResponse(networkResponse)) return networkResponse;
           if (!networkResponse.ok) return networkResponse;
-          const clone = networkResponse.clone();
-          const blob = await clone.blob();
-          const size = blob.size;
+          const size = await responseSize(networkResponse);
           await imageCache.put(cacheKey, networkResponse.clone());
           await recordAndEvict(request.url, size);
           return networkResponse;

@@ -1072,3 +1072,35 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
 });
+
+describe('checkActionSource — app/actions.ts barrel', () => {
+    it('allows the real top-level action barrel because it only re-exports action modules and types', () => {
+        const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app/actions.ts'), 'utf8');
+        const report = checkActionSource(source, 'src/app/actions.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (action barrel): src/app/actions.ts');
+    });
+
+    it('fails direct action bodies in the top-level barrel', () => {
+        const src = `
+            export async function deleteImage(id) {
+                await db.delete(images).where(eq(images.id, id));
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED ACTION BARREL EXPORT');
+    });
+
+    it('fails value re-exports from non-action modules in the top-level barrel', () => {
+        const src = `
+            export { deleteImage } from '@/lib/data';
+            export type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
+        `;
+        const report = checkActionSource(src, 'src/app/actions.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED ACTION BARREL EXPORT');
+    });
+});

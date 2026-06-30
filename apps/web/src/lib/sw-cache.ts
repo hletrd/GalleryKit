@@ -44,6 +44,14 @@ export interface MetaStore {
   setAll(entries: Map<string, CacheEntry>): Promise<void>;
 }
 
+let metaMutationQueue: Promise<unknown> = Promise.resolve();
+
+function withMetaMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const run = metaMutationQueue.then(operation, operation);
+  metaMutationQueue = run.catch(() => undefined);
+  return run;
+}
+
 // ─── Admin-route bypass ───────────────────────────────────────────────────────
 
 /**
@@ -96,53 +104,55 @@ export async function recordAndEvict(
   meta: MetaStore,
   maxBytes: number = MAX_IMAGE_CACHE_BYTES,
 ): Promise<number> {
-  const entries = await meta.getAll();
+  return withMetaMutation(async () => {
+    const entries = await meta.getAll();
 
-  // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
-  // order tracks RECENCY. A plain Map.set() on an existing key updates the
-  // value but keeps the key's original insertion position, so iteration order
-  // would NOT reflect recency after a re-touch — which is why the old code had
-  // to Array.from(...).sort() (O(n log n)) on every near-cap write. Moving a
-  // re-touched entry to the tail lets eviction be a simple head-walk (oldest
-  // first) with no sort.
-  entries.delete(url);
-  entries.set(url, { url, size: newSize, timestamp: Date.now() });
+    // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
+    // order tracks RECENCY. A plain Map.set() on an existing key updates the
+    // value but keeps the key's original insertion position, so iteration order
+    // would NOT reflect recency after a re-touch — which is why the old code had
+    // to Array.from(...).sort() (O(n log n)) on every near-cap write. Moving a
+    // re-touched entry to the tail lets eviction be a simple head-walk (oldest
+    // first) with no sort.
+    entries.delete(url);
+    entries.set(url, { url, size: newSize, timestamp: Date.now() });
 
-  // Total is still summed once here (O(n)) because the metadata is rebuilt
-  // from the persisted JSON blob each call; that re-parse is inherent to the
-  // whole-blob storage model (out of scope to change this cycle). The
-  // avoidable cost the review flagged was the per-write O(n log n) sort, which
-  // the insertion-order recency above eliminates.
-  let total = 0;
-  for (const e of entries.values()) {
-    total += e.size;
-  }
-
-  let evicted = 0;
-
-  if (total > maxBytes) {
-    // Head-walk in insertion (= recency) order: oldest entries come first, so
-    // we evict from the front until under cap. No sort needed.
-    for (const entry of entries.values()) {
-      if (total <= maxBytes) break;
-      // Never evict the entry we just added if we can avoid it — but if we
-      // absolutely must (e.g. single entry > cap) we do so anyway.
-      const deleted = await cache.delete(entry.url);
-      // R4C6 TEST-R4C6-11: only adjust the running total / evicted count
-      // when the entry was actually present in the cache. Browser quota
-      // evictions may have removed it independently of our metadata Map —
-      // the shipped template gained this guard and the reference module
-      // had drifted behind it (and overcounted `evicted`).
-      if (deleted) {
-        evicted += entry.size;
-        total -= entry.size;
-      }
-      entries.delete(entry.url);
+    // Total is still summed once here (O(n)) because the metadata is rebuilt
+    // from the persisted JSON blob each call; that re-parse is inherent to the
+    // whole-blob storage model (out of scope to change this cycle). The
+    // avoidable cost the review flagged was the per-write O(n log n) sort, which
+    // the insertion-order recency above eliminates.
+    let total = 0;
+    for (const e of entries.values()) {
+      total += e.size;
     }
-  }
 
-  await meta.setAll(entries);
-  return evicted;
+    let evicted = 0;
+
+    if (total > maxBytes) {
+      // Head-walk in insertion (= recency) order: oldest entries come first, so
+      // we evict from the front until under cap. No sort needed.
+      for (const entry of entries.values()) {
+        if (total <= maxBytes) break;
+        // Never evict the entry we just added if we can avoid it — but if we
+        // absolutely must (e.g. single entry > cap) we do so anyway.
+        const deleted = await cache.delete(entry.url);
+        // R4C6 TEST-R4C6-11: only adjust the running total / evicted count
+        // when the entry was actually present in the cache. Browser quota
+        // evictions may have removed it independently of our metadata Map —
+        // the shipped template gained this guard and the reference module
+        // had drifted behind it (and overcounted `evicted`).
+        if (deleted) {
+          evicted += entry.size;
+          total -= entry.size;
+        }
+        entries.delete(entry.url);
+      }
+    }
+
+    await meta.setAll(entries);
+    return evicted;
+  });
 }
 
 /**
@@ -153,9 +163,11 @@ export async function removeEntry(
   url: string,
   meta: MetaStore,
 ): Promise<void> {
-  const entries = await meta.getAll();
-  entries.delete(url);
-  await meta.setAll(entries);
+  await withMetaMutation(async () => {
+    const entries = await meta.getAll();
+    entries.delete(url);
+    await meta.setAll(entries);
+  });
 }
 
 /**

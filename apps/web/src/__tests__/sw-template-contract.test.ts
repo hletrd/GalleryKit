@@ -131,6 +131,14 @@ describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-1
         const fn = TEMPLATE.slice(fnIdx, TEMPLATE.indexOf('async function', fnIdx + 1));
         expect(fn).toMatch(/entries\.delete\(url\);\s*\n\s*entries\.set\(url,/);
     });
+
+    it('serializes metadata mutations so concurrent cache writes cannot drop entries', () => {
+        expect(TEMPLATE).toContain('let metaMutationQueue = Promise.resolve();');
+        expect(TEMPLATE).toContain('metaMutationQueue = run.catch(() => {});');
+        expect(TEMPLATE).toMatch(/async function recordAndEvict\(url, newSize\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
+        expect(TEMPLATE).toMatch(/async function touchMeta\(url, knownSize\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
+        expect(TEMPLATE).toMatch(/async function deleteMeta\(url\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
+    });
 });
 
 describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
@@ -170,6 +178,16 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const fn = imageFn();
         expect(fn).toMatch(/const fresh = await startRevalidate\(\);/);
         expect(fn).toMatch(/const response = await startRevalidate\(\);/);
+    });
+
+    it('uses Content-Length for image sizing before falling back to blob buffering', () => {
+        const sizeFnIdx = TEMPLATE.indexOf('async function responseSize');
+        expect(sizeFnIdx).toBeGreaterThan(-1);
+        const sizeFn = TEMPLATE.slice(sizeFnIdx, TEMPLATE.indexOf('async function staleWhileRevalidateImage', sizeFnIdx));
+        expect(sizeFn).toContain("response.headers.get('Content-Length')");
+        expect(sizeFn).toMatch(/Number\.isFinite\(parsed\) && parsed >= 0/);
+        expect(sizeFn).toMatch(/return \(await response\.clone\(\)\.blob\(\)\)\.size;/);
+        expect(imageFn()).toMatch(/const size = await responseSize\(networkResponse\);/);
     });
 
     // AGG-R8c3-11/TEST-3 (run-8 c3): the synchronous HEAD ETag probe MUST be

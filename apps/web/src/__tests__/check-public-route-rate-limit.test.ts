@@ -326,6 +326,48 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
     });
 
+    it('fails expensive public HEAD handlers without a limiter or exemption', () => {
+        const source = `
+            import { serveUploadFile } from '@/lib/serve-upload';
+            export async function HEAD(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'HEAD', request.signal);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+        expect(result.failed[0]).toContain('HEAD');
+    });
+
+    it('allows expensive public HEAD handlers with a reasoned exemption', () => {
+        const source = `
+            import { serveUploadFile } from '@/lib/serve-upload';
+            // @public-no-rate-limit-required: public derivative serving is bounded by cache validators and path containment
+            export async function HEAD(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'HEAD', request.signal);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
+    });
+
+    it('allows the paired upload GET and HEAD handlers to share one reasoned exemption', () => {
+        const source = `
+            import { serveUploadFile } from '@/lib/serve-upload';
+            // @public-no-rate-limit-required: public derivative serving is bounded by cache validators and path containment
+            export async function GET(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'GET', request.signal);
+            }
+            export async function HEAD(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'HEAD', request.signal);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
+    });
+
     it('passes expensive public GET local helper calls after a limiter gate', () => {
         const source = `
             import { db } from '@/db';
