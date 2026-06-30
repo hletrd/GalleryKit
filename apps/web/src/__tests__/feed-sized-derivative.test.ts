@@ -60,17 +60,13 @@ for (const [label, source] of SUITES) {
             expect(source).toContain('getGalleryConfig');
         });
 
-        it('checks feed freshness before composing the full feed', () => {
-            expect(source).toContain('getFeedUpdatedAt');
-            const freshnessIndex = source.indexOf('getFeedUpdatedAt(');
-            const rowsIndex = source.indexOf('getImagesForFeed(');
-            const seoIndex = source.indexOf('getSeoSettings(');
-            const configIndex = source.indexOf('getGalleryConfig(');
-            expect(freshnessIndex).toBeGreaterThan(-1);
-            expect(rowsIndex).toBeGreaterThan(freshnessIndex);
-            expect(seoIndex).toBeGreaterThan(freshnessIndex);
-            expect(configIndex).toBeGreaterThan(freshnessIndex);
-            expect(source.indexOf('status: 304', freshnessIndex)).toBeGreaterThan(freshnessIndex);
+        it('uses XML content ETags for 304s so SEO/settings changes invalidate the feed', () => {
+            expect(source).toContain('createAtomFeedEtag(xml)');
+            expect(source).toContain("request.headers.get('if-none-match')");
+            expect(source).toContain('isEtagMatch(ifNoneMatch, etag)');
+            expect(source).toContain("'ETag': etag");
+            expect(source).not.toContain('isFeedNotModified');
+            expect(source).not.toContain('getFeedUpdatedAt');
         });
 
         it('picks the nearest configured size via findNearestImageSize(config.imageSizes, 1536)', () => {

@@ -1,10 +1,10 @@
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getFeedUpdatedAt, getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
+import { getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
-import { isFeedNotModified } from '@/lib/feed-conditional';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getTranslations } from 'next-intl/server';
@@ -24,6 +24,18 @@ function toIso(value: unknown): string | null {
     } catch {
         return null;
     }
+}
+
+function createAtomFeedEtag(xml: string): string {
+    return `W/"atom-${createHash('sha256').update(xml).digest('base64url').slice(0, 22)}"`;
+}
+
+function isEtagMatch(ifNoneMatch: string | null, etag: string): boolean {
+    if (!ifNoneMatch) return false;
+    return ifNoneMatch.split(',').some((candidate) => {
+        const value = candidate.trim();
+        return value === '*' || value === etag;
+    });
 }
 
 export async function GET(
@@ -47,28 +59,11 @@ export async function GET(
         return new NextResponse(null, { status: 404 });
     }
 
-    const ifModifiedSince = request.headers.get('if-modified-since');
-    const [topicData, feedFreshness] = await Promise.all([
-        getTopicBySlug(topicSlug),
-        getFeedUpdatedAt(topicSlug),
-    ]);
+    const ifNoneMatch = request.headers.get('if-none-match');
+    const topicData = await getTopicBySlug(topicSlug);
 
     if (!topicData) {
         return new NextResponse(null, { status: 404 });
-    }
-
-    const feedFreshnessUpdated = feedFreshness
-        ? toIso(feedFreshness.updated_at) ?? toIso(feedFreshness.created_at)
-        : null;
-    if (feedFreshnessUpdated && isFeedNotModified(ifModifiedSince, feedFreshnessUpdated)) {
-        return new NextResponse(null, {
-            status: 304,
-            headers: {
-                'Cache-Control': CACHE_CONTROL,
-                'Vary': 'Accept-Language',
-                'Last-Modified': new Date(feedFreshnessUpdated).toUTCString(),
-            },
-        });
     }
 
     const [seo, config, tCommon] = await Promise.all([
@@ -160,15 +155,19 @@ export async function GET(
         lastModifiedHeader = new Date().toUTCString();
     }
 
-    // R19-M1: 304 Not Modified when If-Modified-Since covers feedUpdated
-    // (second precision per RFC 7232 §3.3). Mirrors the root /feed.xml.
-    if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
+    // C32-FEED: the rendered XML also depends on SEO/feed-shaping settings
+    // that do not expose a reliable updated_at. Use a content-derived ETag
+    // for 304s so settings-only changes force a fresh 200 instead of a stale
+    // If-Modified-Since short-circuit.
+    const etag = createAtomFeedEtag(xml);
+    if (isEtagMatch(ifNoneMatch, etag)) {
         return new NextResponse(null, {
             status: 304,
             headers: {
                 'Cache-Control': CACHE_CONTROL,
                 'Vary': 'Accept-Language',
                 'Last-Modified': lastModifiedHeader,
+                'ETag': etag,
             },
         });
     }
@@ -182,6 +181,7 @@ export async function GET(
             'Vary': 'Accept-Language',
             // R18-L3: Last-Modified for client-side conditional GETs.
             'Last-Modified': lastModifiedHeader,
+            'ETag': etag,
         },
     });
 }

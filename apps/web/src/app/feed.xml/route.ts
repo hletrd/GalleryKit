@@ -1,11 +1,11 @@
+import { createHash } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getFeedUpdatedAt, getImagesForFeed, getSeoSettings } from '@/lib/data';
+import { getImagesForFeed, getSeoSettings } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_LOCALE } from '@/lib/constants';
 import { localizePath } from '@/lib/locale-path';
-import { isFeedNotModified } from '@/lib/feed-conditional';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import siteConfig from '@/site-config.json';
@@ -26,23 +26,20 @@ function toIso(value: unknown): string | null {
     }
 }
 
-export async function GET(request: NextRequest) {
-    const ifModifiedSince = request.headers.get('if-modified-since');
-    const feedFreshness = await getFeedUpdatedAt();
-    const feedFreshnessUpdated = feedFreshness
-        ? toIso(feedFreshness.updated_at) ?? toIso(feedFreshness.created_at)
-        : null;
-    if (feedFreshnessUpdated && isFeedNotModified(ifModifiedSince, feedFreshnessUpdated)) {
-        return new NextResponse(null, {
-            status: 304,
-            headers: {
-                'Cache-Control': CACHE_CONTROL,
-                'Vary': 'Accept-Language',
-                'Last-Modified': new Date(feedFreshnessUpdated).toUTCString(),
-            },
-        });
-    }
+function createAtomFeedEtag(xml: string): string {
+    return `W/"atom-${createHash('sha256').update(xml).digest('base64url').slice(0, 22)}"`;
+}
 
+function isEtagMatch(ifNoneMatch: string | null, etag: string): boolean {
+    if (!ifNoneMatch) return false;
+    return ifNoneMatch.split(',').some((candidate) => {
+        const value = candidate.trim();
+        return value === '*' || value === etag;
+    });
+}
+
+export async function GET(request: NextRequest) {
+    const ifNoneMatch = request.headers.get('if-none-match');
     const [seo, config] = await Promise.all([
         getSeoSettings(),
         getGalleryConfig(),
@@ -151,19 +148,19 @@ export async function GET(request: NextRequest) {
         lastModifiedHeader = new Date().toUTCString();
     }
 
-    // R19-M1: close the R18-L3 plan note's open item. RSS readers
-    // (NetNewsWire, Inoreader, Feedly, Miniflux, FreshRSS, TT-RSS) all
-    // issue If-Modified-Since on subsequent polls; without a 304 response
-    // they re-download the full feed body even when nothing changed.
-    // RFC 7232 §3.3: compare at second precision (HTTP-date is
-    // second-precision; the ISO ms must be floored to match).
-    if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
+    // C32-FEED: the rendered XML also depends on SEO/feed-shaping settings
+    // that do not expose a reliable updated_at. Use a content-derived ETag
+    // for 304s so settings-only changes force a fresh 200 instead of a stale
+    // If-Modified-Since short-circuit.
+    const etag = createAtomFeedEtag(xml);
+    if (isEtagMatch(ifNoneMatch, etag)) {
         return new NextResponse(null, {
             status: 304,
             headers: {
                 'Cache-Control': CACHE_CONTROL,
                 'Vary': 'Accept-Language',
                 'Last-Modified': lastModifiedHeader,
+                'ETag': etag,
             },
         });
     }
@@ -178,6 +175,7 @@ export async function GET(request: NextRequest) {
             'Vary': 'Accept-Language',
             // R18-L3: Last-Modified for client-side conditional GETs.
             'Last-Modified': lastModifiedHeader,
+            'ETag': etag,
         },
     });
 }
