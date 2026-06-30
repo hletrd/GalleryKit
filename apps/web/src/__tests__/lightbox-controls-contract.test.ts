@@ -42,6 +42,11 @@ describe('lightbox hide-timer focus modality (UX-R4C6-03)', () => {
         const timerArms = SRC.match(/setTimeout\(hideControlsRespectingFocus, 3000\)/g) ?? [];
         expect(timerArms.length).toBe(2);
     });
+
+    it('closes and removes the color pip from tab order when controls auto-hide', () => {
+        expect(SRC).toContain('setColorPipOpen(false)');
+        expect(SRC).toContain('interactive={controlsVisible}');
+    });
 });
 
 describe('lightbox <img> accessible name (A11Y-R4C6-04)', () => {

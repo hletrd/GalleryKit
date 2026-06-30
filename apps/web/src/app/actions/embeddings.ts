@@ -10,7 +10,8 @@
  * to avoid overloading the server.
  */
 
-import { db, images, imageEmbeddings } from '@/db';
+import { db, connection, images, imageEmbeddings } from '@/db';
+import type { RowDataPacket } from 'mysql2/promise';
 import { eq, notExists, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -22,6 +23,7 @@ import { resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { LOCK_SEMANTIC_EMBEDDING_BACKFILL } from '@/lib/advisory-locks';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
@@ -100,7 +102,22 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     // honest and matching the sidecar if it is ever surfaced.
     const modelVersion = semanticMode === 'production' ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
+    const lockConn = await connection.getConnection();
+    let semanticBackfillLockHeld = false;
     try {
+        const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
+        );
+        const acquired = lockRows[0]?.acquired;
+        if (acquired !== 1 && acquired !== BigInt(1)) {
+            return { status: 'error', message: t('restoreInProgress') };
+        }
+        semanticBackfillLockHeld = true;
+
+        const maintenanceAfterLock = getRestoreMaintenanceMessage(t('restoreInProgress'));
+        if (maintenanceAfterLock) return { status: 'error', message: maintenanceAfterLock };
+
         // Select processed images without an embedding row FOR THE ACTIVE model_version
         // (bounded by SEMANTIC_SCAN_LIMIT), mirroring the sidecar's per-version selection.
         const pending = await db
@@ -177,5 +194,12 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         // (C6-RPF-03 / R4C4-05 lineage).
         console.error('CLIP embedding backfill failed', err);
         return { status: 'error', message: t('embeddingBackfillFailed') };
+    } finally {
+        if (semanticBackfillLockHeld) {
+            await lockConn.query('SELECT RELEASE_LOCK(?)', [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
+                console.debug('RELEASE_LOCK (semantic embedding backfill action) failed:', err);
+            });
+        }
+        lockConn.release();
     }
 }

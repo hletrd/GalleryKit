@@ -372,10 +372,10 @@ export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()
     return (semanticRateLimit.get(ip)?.count ?? 0) > SEMANTIC_RATE_LIMIT_MAX;
 }
 
-/** Roll back a pre-incremented semantic search rate-limit counter. Used when the
- *  request exits before the guarded embedding/vector-scan resource is consumed
- *  (for example disabled mode). Malformed or too-short bodies that were already
- *  read stay charged per the route-level posture. */
+/** Roll back a pre-incremented semantic search rate-limit counter. Used only
+ *  when a request exits before semantic mode lookup or body admission consumes
+ *  protected work. Disabled/stub-mode responses and malformed or too-short
+ *  bodies that were already read stay charged per the route-level posture. */
 export function rollbackSemanticAttempt(ip: string) {
     const currentEntry = semanticRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {

@@ -9,8 +9,8 @@
  * lock names are scoped to the MySQL SERVER, not to an individual database. Two
  * GalleryKit instances pointed at the same MySQL server share the same lock
  * namespace and will serialize each other's restores, upload-contract changes,
- * topic renames, admin-user deletes, color-pipeline backfill runs
- * (`LOCK_COLOR_PIPELINE_BACKFILL`, defined below) and image-processing claims
+ * topic renames, admin-user deletes, color-pipeline backfill runs, semantic
+ * embedding backfill runs, and image-processing claims
  * across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock
  * names with a per-instance identifier if multi-tenant co-location is required.
  */
@@ -42,3 +42,6 @@ export const getImageProcessingLockName = (jobId: number) =>
 
 /** Lock serializes color pipeline backfill operations (one backfill at a time). */
 export const LOCK_COLOR_PIPELINE_BACKFILL = 'gallerykit_color_pipeline_backfill';
+
+/** Lock serializes CLIP embedding backfill operations against database restore. */
+export const LOCK_SEMANTIC_EMBEDDING_BACKFILL = 'gallerykit_semantic_embedding_backfill';

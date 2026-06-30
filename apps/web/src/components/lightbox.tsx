@@ -169,6 +169,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             }
             active.blur();
         }
+        setColorPipOpen(false);
         controlsVisibleRef.current = false;
         setControlsVisible(false);
     }, []);
@@ -662,6 +663,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     t={t}
                     open={colorPipOpen}
                     onToggle={() => setColorPipOpen(prev => !prev)}
+                    interactive={controlsVisible}
                     imageSizes={imageSizes}
                     cycleModeRef={colorPipCycleModeRef}
                     isAdmin={isAdmin}

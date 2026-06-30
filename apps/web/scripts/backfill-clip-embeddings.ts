@@ -67,12 +67,14 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-import { db, images, imageEmbeddings, adminSettings } from '../src/db';
+import { db, connection, images, imageEmbeddings, adminSettings } from '../src/db';
+import type { RowDataPacket } from 'mysql2/promise';
 import { eq, and, notExists, gt, asc } from 'drizzle-orm';
 import { embedImageStub } from '../src/lib/clip-inference';
 import { embedImageReal } from '../src/lib/clip-model';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
+import { LOCK_SEMANTIC_EMBEDDING_BACKFILL } from '../src/lib/advisory-locks';
 
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 2;
@@ -91,21 +93,35 @@ async function checkSemanticModeEnabled(): Promise<boolean> {
     return rows[0]?.value !== undefined && rows[0].value !== 'disabled';
 }
 
-async function main() {
+async function main(): Promise<number> {
     console.log(`[backfill-clip-embeddings] Starting… mode=${PRODUCTION_FLAG ? 'production' : 'stub'} targetModelVersion=${TARGET_MODEL_VERSION}`);
 
-    if (!FORCE_FLAG) {
-        const enabled = await checkSemanticModeEnabled();
-        if (!enabled) {
-            console.log('[backfill-clip-embeddings] semantic_search_mode is "disabled" (or unset). Set it to "stub"/"production" in admin settings or run with --force to skip this check.');
-            process.exit(0);
+    const lockConn = await connection.getConnection();
+    let semanticBackfillLockHeld = false;
+    try {
+        const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
+        );
+        const acquired = lockRows[0]?.acquired;
+        if (acquired !== 1 && acquired !== BigInt(1)) {
+            console.error('[backfill-clip-embeddings] Another semantic embedding backfill or database restore is active; retry later.');
+            return 1;
         }
-    } else {
-        console.log('[backfill-clip-embeddings] --force flag set, skipping semantic_search_mode check.');
-    }
+        semanticBackfillLockHeld = true;
 
-    let processed = 0;
-    let failed = 0;
+        if (!FORCE_FLAG) {
+            const enabled = await checkSemanticModeEnabled();
+            if (!enabled) {
+                console.log('[backfill-clip-embeddings] semantic_search_mode is "disabled" (or unset). Set it to "stub"/"production" in admin settings or run with --force to skip this check.');
+                return 0;
+            }
+        } else {
+            console.log('[backfill-clip-embeddings] --force flag set, skipping semantic_search_mode check.');
+        }
+
+        let processed = 0;
+        let failed = 0;
     // COR-R4C19-04: keyset pagination instead of LIMIT/OFFSET. Each upsert
     // removes its row from the notExists() WHERE set, so advancing an OFFSET
     // skipped ~half the backlog. A strictly-increasing id cursor survives
@@ -113,14 +129,14 @@ async function main() {
     // insert, and turns each batch into an index range seek.
     // (OBS-R4C19-E: the dead `skipped` counter is gone — every selected row
     // is either processed or failed.)
-    let cursor = 0;
+        let cursor = 0;
 
-    for (;;) {
-        const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
-        if (remainingScanBudget === 0) {
-            console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
-            break;
-        }
+        for (;;) {
+            const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
+            if (remainingScanBudget === 0) {
+                console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
+                break;
+            }
 
         // Select processed images without an embedding row AT THE TARGET
         // model_version. A row embedded under a DIFFERENT version (e.g. a stub
@@ -128,80 +144,90 @@ async function main() {
         // filename_original is needed for --production to resolve the original
         // file path the SAME way the upload hook (image-queue.ts) does; it is
         // cheap to select unconditionally and stub mode simply ignores it.
-        const rows = await db
-            .select({ id: images.id, filenameOriginal: images.filename_original })
-            .from(images)
-            .where(
-                and(
-                    eq(images.processed, true),
-                    gt(images.id, cursor),
-                    notExists(
-                        db.select({ imageId: imageEmbeddings.imageId })
-                            .from(imageEmbeddings)
-                            .where(and(
-                                eq(imageEmbeddings.imageId, images.id),
-                                eq(imageEmbeddings.modelVersion, TARGET_MODEL_VERSION),
-                            )),
+            const rows = await db
+                .select({ id: images.id, filenameOriginal: images.filename_original })
+                .from(images)
+                .where(
+                    and(
+                        eq(images.processed, true),
+                        gt(images.id, cursor),
+                        notExists(
+                            db.select({ imageId: imageEmbeddings.imageId })
+                                .from(imageEmbeddings)
+                                .where(and(
+                                    eq(imageEmbeddings.imageId, images.id),
+                                    eq(imageEmbeddings.modelVersion, TARGET_MODEL_VERSION),
+                                )),
+                        ),
                     ),
-                ),
-            )
-            .orderBy(asc(images.id))
-            .limit(Math.min(BATCH_SIZE, remainingScanBudget));
+                )
+                .orderBy(asc(images.id))
+                .limit(Math.min(BATCH_SIZE, remainingScanBudget));
 
-        if (rows.length === 0) break;
-        cursor = rows[rows.length - 1].id;
+            if (rows.length === 0) break;
+            cursor = rows[rows.length - 1].id;
 
-        // Process with bounded concurrency
-        for (let i = 0; i < rows.length; i += BATCH_CONCURRENCY) {
-            const chunk = rows.slice(i, i + BATCH_CONCURRENCY);
-            await Promise.all(chunk.map(async ({ id, filenameOriginal }) => {
-                try {
-                    let embedding: Float32Array;
-                    if (PRODUCTION_FLAG) {
-                        if (!filenameOriginal) { failed++; return; }
-                        const originalPath = await resolveOriginalUploadPath(filenameOriginal);
-                        if (!originalPath) { failed++; return; }
-                        embedding = await embedImageReal(originalPath);
-                    } else {
-                        embedding = embedImageStub(id);
-                    }
-                    // AGG-C10-01: store the RAW 2048-byte float32 buffer (not base64) so
-                    // the read path (decodeEmbeddingColumn) round-trips it. The Drizzle
-                    // `text()` column is a schema approximation over a MEDIUMBLOB, so the
-                    // Buffer is cast through `unknown` at this single write site.
-                    const buf = embeddingToBuffer(embedding);
-                    const embeddingValue = buf as unknown as string;
-                    await db.insert(imageEmbeddings)
-                        .values({
-                            imageId: id,
-                            embedding: embeddingValue,
-                            modelVersion: TARGET_MODEL_VERSION,
-                        })
-                        .onDuplicateKeyUpdate({
-                            set: {
+            // Process with bounded concurrency
+            for (let i = 0; i < rows.length; i += BATCH_CONCURRENCY) {
+                const chunk = rows.slice(i, i + BATCH_CONCURRENCY);
+                await Promise.all(chunk.map(async ({ id, filenameOriginal }) => {
+                    try {
+                        let embedding: Float32Array;
+                        if (PRODUCTION_FLAG) {
+                            if (!filenameOriginal) { failed++; return; }
+                            const originalPath = await resolveOriginalUploadPath(filenameOriginal);
+                            if (!originalPath) { failed++; return; }
+                            embedding = await embedImageReal(originalPath);
+                        } else {
+                            embedding = embedImageStub(id);
+                        }
+                        // AGG-C10-01: store the RAW 2048-byte float32 buffer (not base64) so
+                        // the read path (decodeEmbeddingColumn) round-trips it. The Drizzle
+                        // `text()` column is a schema approximation over a MEDIUMBLOB, so the
+                        // Buffer is cast through `unknown` at this single write site.
+                        const buf = embeddingToBuffer(embedding);
+                        const embeddingValue = buf as unknown as string;
+                        await db.insert(imageEmbeddings)
+                            .values({
+                                imageId: id,
                                 embedding: embeddingValue,
                                 modelVersion: TARGET_MODEL_VERSION,
-                            },
-                        });
-                    processed++;
-                    if (processed % 100 === 0) {
-                        console.log(`[backfill-clip-embeddings] Processed ${processed} images…`);
+                            })
+                            .onDuplicateKeyUpdate({
+                                set: {
+                                    embedding: embeddingValue,
+                                    modelVersion: TARGET_MODEL_VERSION,
+                                },
+                            });
+                        processed++;
+                        if (processed % 100 === 0) {
+                            console.log(`[backfill-clip-embeddings] Processed ${processed} images…`);
+                        }
+                    } catch (err) {
+                        console.error(`[backfill-clip-embeddings] Failed for image ${id}:`, err);
+                        failed++;
                     }
-                } catch (err) {
-                    console.error(`[backfill-clip-embeddings] Failed for image ${id}:`, err);
-                    failed++;
-                }
-            }));
+                }));
+            }
+
+            if (rows.length < BATCH_SIZE) break;
         }
 
-        if (rows.length < BATCH_SIZE) break;
+        console.log(`[backfill-clip-embeddings] Done. mode=${PRODUCTION_FLAG ? 'production' : 'stub'} processed=${processed} failed=${failed}`);
+        return failed > 0 ? 1 : 0;
+    } finally {
+        if (semanticBackfillLockHeld) {
+            await lockConn.query('SELECT RELEASE_LOCK(?)', [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
+                console.debug('[backfill-clip-embeddings] RELEASE_LOCK failed:', err);
+            });
+        }
+        lockConn.release();
     }
-
-    console.log(`[backfill-clip-embeddings] Done. mode=${PRODUCTION_FLAG ? 'production' : 'stub'} processed=${processed} failed=${failed}`);
-    process.exit(failed > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
+main().then((exitCode) => {
+    process.exit(exitCode);
+}).catch((err) => {
     console.error('[backfill-clip-embeddings] Fatal error:', err);
     process.exit(1);
 });

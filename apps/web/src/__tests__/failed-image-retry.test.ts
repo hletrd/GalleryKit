@@ -99,6 +99,15 @@ describe('R10-H2: failed image persistence and retry', () => {
         it('calls enqueueImageProcessing with the full job payload', () => {
             expect(actionsSource).toMatch(/enqueueImageProcessing\s*\(\s*\{/);
             expect(actionsSource).toMatch(/filenameOriginal:\s*image\.filename_original/);
+            expect(actionsSource).toMatch(/quality:\s*processingSettingsSnapshot\.quality/);
+            expect(actionsSource).toMatch(/imageSizes:\s*processingSettingsSnapshot\.imageSizes/);
+            expect(actionsSource).toMatch(/forceSrgbDerivatives:\s*processingSettingsSnapshot\.forceSrgbDerivatives/);
+            expect(actionsSource).toMatch(/wideGamutJpegChroma:\s*processingSettingsSnapshot\.wideGamutJpegChroma/);
+            expect(actionsSource).toMatch(/avifEffort:\s*processingSettingsSnapshot\.avifEffort/);
+            expect(actionsSource).toMatch(/sdrJpegChroma:\s*processingSettingsSnapshot\.sdrJpegChroma/);
+            expect(actionsSource).toMatch(/wideGamutMaxSourcePixels:\s*processingSettingsSnapshot\.wideGamutMaxSourcePixels/);
+            expect(actionsSource).toMatch(/autoAltTextEnabled:\s*processingSettingsSnapshot\.autoAltTextEnabled/);
+            expect(actionsSource).toMatch(/semanticSearchMode:\s*processingSettingsSnapshot\.semanticSearchMode/);
             expect(actionsSource).toMatch(/colorSignals:\s*\{/);
         });
 

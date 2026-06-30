@@ -14,6 +14,11 @@ describe('backfill re-embed contract', () => {
   it('does not gate on the obsolete semantic_search_enabled key', () => {
     expect(src).not.toContain("'semantic_search_enabled'");
   });
+  it('serializes the sidecar against restore with the semantic backfill advisory lock', () => {
+    expect(src).toContain('LOCK_SEMANTIC_EMBEDDING_BACKFILL');
+    expect(src).toContain('SELECT GET_LOCK(?, 0) AS acquired');
+    expect(src).toContain('SELECT RELEASE_LOCK(?)');
+  });
 });
 
 // AGG-C8-05 (run-6 cycle-8): the unwired backfillClipEmbeddings server action must
@@ -32,5 +37,10 @@ describe('backfillClipEmbeddings action — model_version-aware selection', () =
     expect(declIdx).toBeGreaterThan(-1);
     expect(notExistsIdx).toBeGreaterThan(-1);
     expect(declIdx).toBeLessThan(notExistsIdx);
+  });
+  it('serializes the server action against restore with the semantic backfill advisory lock', () => {
+    expect(actionSrc).toContain('LOCK_SEMANTIC_EMBEDDING_BACKFILL');
+    expect(actionSrc).toContain('SELECT GET_LOCK(?, 0) AS acquired');
+    expect(actionSrc).toContain('SELECT RELEASE_LOCK(?)');
   });
 });

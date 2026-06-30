@@ -5,7 +5,6 @@ import { useTranslation } from "@/components/i18n-provider";
 import { useRef, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -86,10 +85,10 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     }
 
     return (
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+        <div className="space-y-4">
+            <div className="flex flex-row items-center justify-between gap-3">
                 <div>
-                    <CardTitle>{t('users.adminUsers')}</CardTitle>
+                    <h2 className="text-lg font-semibold">{t('users.adminUsers')}</h2>
                 </div>
                 <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setConfirmError(null); }}>
                     <DialogTrigger asChild>
@@ -132,8 +131,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                         </form>
                     </DialogContent>
                 </Dialog>
-            </CardHeader>
-            <CardContent>
+            </div>
                 <div className="overflow-x-auto rounded-md border">
                     <Table className="min-w-[520px]">
                         <TableHeader>
@@ -175,7 +173,6 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                         </TableBody>
                     </Table>
                 </div>
-            </CardContent>
             {/* COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
                 dialog stays open with the in-flight label until the delete
                 settles; ESC / overlay / Cancel are inert mid-flight. */}
@@ -202,6 +199,6 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </Card>
+        </div>
     );
 }

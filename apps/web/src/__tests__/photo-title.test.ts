@@ -70,6 +70,13 @@ describe('lite photo title helpers', () => {
         expect(getConcisePhotoAltText({ title: 'IMG_0001.JPG', tag_names: 'Seoul,Night' }, 'Photo')).toBe('Seoul, Night');
     });
 
+    it('uses hydrated tag arrays for direct photo accessible names', () => {
+        expect(getConcisePhotoAltText({
+            title: 'IMG_0001.JPG',
+            tags: [{ name: 'Portrait_Session', slug: 'portrait_session' }],
+        }, 'Photo')).toBe('Portrait Session');
+    });
+
     // AGG1L-LOW-01 / plan-301-A: underscore normalization is applied at
     // the helper level (`humanizeTagLabel` inside `getPhotoDisplayTitle`)
     // so visible display title, alt text, and JSON-LD `name` all agree.

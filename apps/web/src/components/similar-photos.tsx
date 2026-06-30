@@ -133,12 +133,10 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                             {results.map((item) => {
                                 const sizedSrc = sizedImageUrl('/uploads/jpeg', item.filename_jpeg, thumbnailSize, imageSizes);
                                 const baseSrc = imageUrl(`/uploads/jpeg/${item.filename_jpeg}`);
-                                // DES-R9C4-01: guarantee a non-empty accessible name on the
-                                // thumbnail <Link> even when both title and description are
-                                // null (the common case). Falls back to the localized "Photo"
-                                // string, matching the sibling search.tsx:83 pattern, so the
-                                // link never has an empty accname (WCAG 4.1.2 / 2.4.4 Level A).
-                                const label = item.title ?? item.description ?? tCommon('photo');
+                                // C21 AGG-C21-23: keep the fallback non-empty AND unique so
+                                // a strip of untitled related-photo links does not read as
+                                // repeated "Photo" controls to assistive technology.
+                                const label = item.title ?? item.description ?? `${tCommon('photo')} ${item.imageId}`;
                                 return (
                                     <SimilarThumb
                                         key={item.imageId}

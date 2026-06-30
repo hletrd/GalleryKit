@@ -182,4 +182,23 @@ describe('backup download route', () => {
         expect(response.status).toBe(500);
         expect(await response.text()).toBe('Internal Server Error');
     });
+
+    it('closes an opened file handle when a pre-stream step fails', async () => {
+        const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
+        await fsp.writeFile(filePath, 'backup-data');
+        const fileHandle = await fsp.open(filePath, 'r');
+        const closeSpy = vi.spyOn(fileHandle, 'close');
+        openMock.mockResolvedValueOnce(fileHandle);
+        getCurrentUserMock.mockRejectedValueOnce(new Error('session lookup failed'));
+
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+            headers: {
+                host: 'localhost',
+                referer: 'http://localhost/admin/db',
+            },
+        }));
+
+        expect(response.status).toBe(500);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
 });

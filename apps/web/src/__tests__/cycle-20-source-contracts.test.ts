@@ -26,9 +26,11 @@ describe('cycle 20 source contracts', () => {
         const home = readSrc('components/home-client.tsx');
         const photoPage = readSrc('app/[locale]/(public)/p/[id]/page.tsx');
         const viewer = readSrc('components/photo-viewer.tsx');
+        const navigation = readSrc('components/photo-navigation.tsx');
         expect(home).toContain('prefetch={false}');
         expect(photoPage).toContain('prefetch={false} className="hidden"');
         expect(viewer).not.toContain('router.prefetch(buildPhotoPath(id))');
+        expect(navigation).not.toContain('router.prefetch(getPhotoPath(');
     });
 
     it('records single-photo share views through the same public photo-view recorder', () => {
@@ -40,7 +42,7 @@ describe('cycle 20 source contracts', () => {
     it('streams admin backup downloads from the validated file handle', () => {
         const src = readSrc('app/api/admin/db/download/route.ts');
         expect(src).toContain("import { open, realpath } from 'fs/promises'");
-        expect(src).toContain('const fileHandle = await open(resolvedFilePath,');
+        expect(src).toContain("fileHandle = await open(resolvedFilePath, 'r')");
         expect(src).toContain('const stats = await fileHandle.stat();');
         expect(src).toContain('const stream = fileHandle.createReadStream();');
         expect(src).not.toContain('createReadStream(resolvedFilePath)');

@@ -39,6 +39,8 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
             });
         }
 
+    let fileHandle: Awaited<ReturnType<typeof open>> | null = null;
+    let streamOwnsFileHandle = false;
     try {
         const resolvedBackupsDir = await realpath(backupsDir).catch((err: unknown) => {
             if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -53,10 +55,11 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
                 headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
             });
         }
-        const fileHandle = await open(resolvedFilePath, 'r');
+        fileHandle = await open(resolvedFilePath, 'r');
         const stats = await fileHandle.stat();
         if (!stats.isFile()) {
             await fileHandle.close();
+            fileHandle = null;
             return new NextResponse('Access denied', {
                 status: 403,
                 headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
@@ -72,6 +75,7 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         // Stream from the already-validated file handle so Content-Length and
         // bytes come from the same descriptor instead of a later path reopen.
         const stream = fileHandle.createReadStream();
+        streamOwnsFileHandle = true;
         const webStream = Readable.toWeb(stream) as ReadableStream;
 
         return new NextResponse(webStream, {
@@ -85,6 +89,11 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
             },
         });
     } catch (err: unknown) {
+        if (fileHandle && !streamOwnsFileHandle) {
+            await fileHandle.close().catch((closeErr) => {
+                console.debug('Failed to close backup file handle after download error:', closeErr);
+            });
+        }
         if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
             return new NextResponse('File not found', {
                 status: 404,

@@ -22,6 +22,7 @@ interface LightboxColorPipProps {
     t: (key: string, values?: Record<string, string | number>) => string;
     open: boolean;
     onToggle: () => void;
+    interactive?: boolean;
     imageSizes?: number[];
     cycleModeRef?: React.RefObject<(() => void) | null>;
     /** R10-L20: replicate delivered bit depth + format chips. */
@@ -40,7 +41,7 @@ interface LightboxColorPipProps {
  * P4-C5 / R4-L2 / UX-L2: chip uses `min-h-11` so the touch-target floor
  * (≥ 44 px per WCAG 2.5.5 / Apple HIG) is met without padding inflation.
  */
-export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef, isAdmin = false, forceSrgbDerivatives = false }: LightboxColorPipProps) {
+export function LightboxColorPip({ image, t, open, onToggle, interactive = true, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef, isAdmin = false, forceSrgbDerivatives = false }: LightboxColorPipProps) {
     // C14-02: gate admin-only `transfer_function`/`color_pipeline_decision` on
     // `isAdmin` to match the AGG-M3 convention in the sibling
     // color-details-section.tsx. No-op for current behavior (both undefined for
@@ -162,8 +163,9 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
             <button
                 type="button"
                 onClick={onToggle}
+                tabIndex={interactive ? 0 : -1}
                 className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
-                aria-expanded={open}
+                aria-expanded={interactive && open}
                 aria-label={`${t('aria.toggleColorPip')}: ${[
                     primaries || t('viewer.colorUnknown'),
                     transfer,
@@ -189,7 +191,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                     </span>
                 )}
             </button>
-            {open && (
+            {interactive && open && (
                 <div className="mt-1.5 rounded-lg bg-black/80 p-3 text-xs text-white backdrop-blur-sm min-w-[180px] space-y-1.5">
                     {image.color_primaries && (
                         <div className="flex justify-between gap-3">

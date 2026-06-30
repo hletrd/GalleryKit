@@ -62,6 +62,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     const [isBackfilling, startBackfillTransition] = useTransition();
     const defaults = getSettingDefaults();
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     // R10-M14: also keep the last-committed values in component STATE
     // (parallel to the existing `initialRef` snapshot used inside the
     // save callback) so render can compare current vs. baseline without
@@ -132,7 +133,33 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
 
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
+        setFieldErrors(prev => {
+            if (!prev[key]) return prev;
+            const { [key]: _cleared, ...rest } = prev;
+            return rest;
+        });
     };
+
+    const validateSettings = useCallback(() => {
+        const nextErrors: Record<string, string> = {};
+        const addRangeError = (key: string, value: string | undefined, min: number, max: number) => {
+            if (!value?.trim()) return;
+            const parsed = Number(value);
+            if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+                nextErrors[key] = t('settings.numberRangeError', { min, max });
+            }
+        };
+
+        addRangeError('image_quality_webp', settings.image_quality_webp, 1, 100);
+        addRangeError('image_quality_avif', settings.image_quality_avif, 1, 100);
+        addRangeError('image_quality_jpeg', settings.image_quality_jpeg, 1, 100);
+        addRangeError('wide_gamut_max_source_pixels', settings.wide_gamut_max_source_pixels, 10000000, 200000000);
+        if (!hasExistingImages && settings.image_sizes?.trim() && normalizeConfiguredImageSizes(settings.image_sizes) === null) {
+            nextErrors.image_sizes = t('settings.imageSizesError');
+        }
+        setFieldErrors(nextErrors);
+        return nextErrors;
+    }, [hasExistingImages, settings.image_quality_avif, settings.image_quality_jpeg, settings.image_quality_webp, settings.image_sizes, settings.wide_gamut_max_source_pixels, t]);
 
     // R10-M14: track whether any backfill-relevant field is dirty (current
     // value differs from the last committed baseline snapshot). The
@@ -184,6 +211,11 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     };
 
     const handleSave = () => {
+        const validationErrors = validateSettings();
+        if (Object.keys(validationErrors).length > 0) {
+            toast.error(t('settings.validationFailed'));
+            return;
+        }
         startTransition(async () => {
             try {
                 // Only send changed fields to reduce transaction size and conflict window
@@ -354,8 +386,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_webp || ''}
                                 onChange={(e) => handleChange('image_quality_webp', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_webp')}
-                                aria-describedby="image-quality-webp-help"
+                                aria-invalid={!!fieldErrors.image_quality_webp}
+                                aria-describedby={fieldErrors.image_quality_webp ? 'image-quality-webp-error image-quality-webp-help' : 'image-quality-webp-help'}
                             />
+                            {fieldErrors.image_quality_webp && (
+                                <p id="image-quality-webp-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.image_quality_webp}
+                                </p>
+                            )}
                             <p id="image-quality-webp-help" className="text-xs text-muted-foreground">{t('settings.qualityHintWebp')}</p>
                         </div>
                         <div className="space-y-2">
@@ -368,8 +406,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_avif || ''}
                                 onChange={(e) => handleChange('image_quality_avif', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_avif')}
-                                aria-describedby="image-quality-avif-help"
+                                aria-invalid={!!fieldErrors.image_quality_avif}
+                                aria-describedby={fieldErrors.image_quality_avif ? 'image-quality-avif-error image-quality-avif-help' : 'image-quality-avif-help'}
                             />
+                            {fieldErrors.image_quality_avif && (
+                                <p id="image-quality-avif-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.image_quality_avif}
+                                </p>
+                            )}
                             <p id="image-quality-avif-help" className="text-xs text-muted-foreground">{t('settings.qualityHintAvif')}</p>
                         </div>
                         <div className="space-y-2">
@@ -382,8 +426,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_jpeg || ''}
                                 onChange={(e) => handleChange('image_quality_jpeg', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_jpeg')}
-                                aria-describedby="image-quality-jpeg-help"
+                                aria-invalid={!!fieldErrors.image_quality_jpeg}
+                                aria-describedby={fieldErrors.image_quality_jpeg ? 'image-quality-jpeg-error image-quality-jpeg-help' : 'image-quality-jpeg-help'}
                             />
+                            {fieldErrors.image_quality_jpeg && (
+                                <p id="image-quality-jpeg-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.image_quality_jpeg}
+                                </p>
+                            )}
                             <p id="image-quality-jpeg-help" className="text-xs text-muted-foreground">{t('settings.qualityHintJpeg')}</p>
                         </div>
                     </div>
@@ -397,8 +447,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             placeholder={getPlaceholder('image_sizes')}
                             pattern="[0-9]+(\s*,\s*[0-9]+)*"
                             disabled={hasExistingImages}
-                            aria-describedby="image-sizes-help"
+                            aria-invalid={!!fieldErrors.image_sizes}
+                            aria-describedby={fieldErrors.image_sizes ? 'image-sizes-error image-sizes-help' : 'image-sizes-help'}
                         />
+                        {fieldErrors.image_sizes && (
+                            <p id="image-sizes-error" className="text-sm text-destructive-text" role="alert">
+                                {fieldErrors.image_sizes}
+                            </p>
+                        )}
                         <p id="image-sizes-help" className="text-xs text-muted-foreground">
                             {hasExistingImages ? t('settings.imageSizesLockedHint') : t('settings.imageSizesHint')}
                         </p>
@@ -535,8 +591,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.wide_gamut_max_source_pixels || ''}
                                 placeholder={getPlaceholder('wide_gamut_max_source_pixels')}
                                 onChange={(e) => handleChange('wide_gamut_max_source_pixels', e.target.value)}
-                                aria-describedby="wide-gamut-max-source-pixels-help"
+                                aria-invalid={!!fieldErrors.wide_gamut_max_source_pixels}
+                                aria-describedby={fieldErrors.wide_gamut_max_source_pixels ? 'wide-gamut-max-source-pixels-error wide-gamut-max-source-pixels-help' : 'wide-gamut-max-source-pixels-help'}
                             />
+                            {fieldErrors.wide_gamut_max_source_pixels && (
+                                <p id="wide-gamut-max-source-pixels-error" className="text-sm text-destructive-text" role="alert">
+                                    {fieldErrors.wide_gamut_max_source_pixels}
+                                </p>
+                            )}
                             <p id="wide-gamut-max-source-pixels-help" className="text-xs text-muted-foreground">{t('settings.wideGamutMaxSourcePixelsHint')}</p>
                         </div>
                     </div>

@@ -31,6 +31,19 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain("console.debug('RELEASE_LOCK (backfill restore finally) failed:', err)");
     });
 
+    it('holds the semantic embedding backfill lock during database restore', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+
+        const colorLockIdx = source.indexOf('[LOCK_COLOR_PIPELINE_BACKFILL]');
+        const semanticLockIdx = source.indexOf('[LOCK_SEMANTIC_EMBEDDING_BACKFILL]');
+        const maintenanceIdx = source.indexOf('if (!beginRestoreMaintenance({ allowExisting: true }))');
+        expect(colorLockIdx).toBeGreaterThan(-1);
+        expect(semanticLockIdx).toBeGreaterThan(colorLockIdx);
+        expect(maintenanceIdx).toBeGreaterThan(semanticLockIdx);
+        expect(source).toContain('semanticBackfillLockHeld = true');
+        expect(source).toContain("console.debug('RELEASE_LOCK (semantic-backfill restore finally) failed:', err)");
+    });
+
     it('runs migrations after mysql import before reporting restore success', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
 

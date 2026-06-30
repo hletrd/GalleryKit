@@ -86,6 +86,7 @@ export function getConcisePhotoAltText(
     image: {
         title: string | null | undefined;
         tag_names?: string | null | undefined;
+        tags?: TagInfo[] | null | undefined;
         // US-P52: AI-generated alt text suggestion. Used as fallback when
         // title and tags are absent. Admin-set alt always takes precedence.
         alt_text_suggested?: string | null | undefined;
@@ -103,7 +104,7 @@ export function getConcisePhotoAltText(
     // US-P52: if neither title nor tags produce a non-fallback result,
     // use alt_text_suggested before the generic fallback string.
     const hasMeaningfulTitle = image.title && image.title.trim() && !isFilenameLikeTitle(image.title);
-    const hasTags = image.tag_names && image.tag_names.trim();
+    const hasTags = (image.tag_names && image.tag_names.trim()) || (image.tags && image.tags.length > 0);
     if (!hasMeaningfulTitle && !hasTags && image.alt_text_suggested && image.alt_text_suggested.trim()) {
         // CRT-R5C1-02 / CRT-R5C2-03: strip the stub prefix so '[AUTO] Photo taken with ...'
         // never reaches visible titles, <title>, or OG meta tags.
@@ -116,8 +117,10 @@ export function getConcisePhotoAltText(
         }
         // Stripped remainder was empty — fall through to generic fallback below.
     }
-    return getPhotoDisplayTitleFromTagNames(image, fallback)
+    const displayTitle = image.tags && image.tags.length > 0
+        ? getPhotoDisplayTitle({ title: image.title ?? null, tags: image.tags }, fallback)
+        : getPhotoDisplayTitleFromTagNames(image, fallback);
+    return displayTitle
         .replace(/^#+/, '')
         .replace(/\s+#/g, ', ');
 }
-

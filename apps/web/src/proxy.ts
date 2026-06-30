@@ -49,24 +49,13 @@ function withProductionCspRequest(request: NextRequest): NextRequest {
   return getRequestWithHeaders(request, requestHeaders);
 }
 
-// Matches /admin/... subpaths but NOT the login page itself (/admin exactly, or /admin with no trailing slash)
-// Protected: /[locale]/admin/anything or /admin/anything (default locale, no prefix)
+// Matches /admin/... subpaths but NOT the login page itself (/admin exactly,
+// or /[locale]/admin exactly with no trailing slash).
 function isProtectedAdminRoute(pathname: string): boolean {
-  for (const locale of LOCALES) {
-    // e.g. /en/admin/dashboard or /en/admin/
-    if (pathname.startsWith(`/${locale}/admin/`) || pathname === `/${locale}/admin`) {
-      // The login page is exactly /[locale]/admin (no trailing slash, no subpath)
-      // We protect everything under /[locale]/admin/ (with slash) but NOT /[locale]/admin itself
-      if (pathname.startsWith(`/${locale}/admin/`)) {
-        return true;
-      }
-    }
+  if (LOCALES.some((locale) => pathname.startsWith(`/${locale}/admin/`))) {
+    return true;
   }
   // Default locale (no prefix): /admin/...
-  // Note: /admin exactly (no trailing slash, no subpath) is the default-locale
-  // login page and is intentionally NOT protected here — it falls through because
-  // !pathname.startsWith('/admin/') when pathname is '/admin'. This mirrors the
-  // locale-prefixed branch above where pathname === `/${locale}/admin` is excluded.
   if (pathname.startsWith('/admin/')) {
     return true;
   }
