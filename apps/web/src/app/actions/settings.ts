@@ -63,6 +63,9 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         if (!isValidSettingValue(key as GallerySettingKey, value)) {
             return { error: t('invalidSettingValue', { key }) };
         }
+        if (key === 'semantic_search_mode' && value === 'production') {
+            return { error: t('semanticSearchProductionUiUnsupported') };
+        }
     }
 
     const changesUploadProcessingContract = ['image_sizes', 'strip_gps_on_upload']

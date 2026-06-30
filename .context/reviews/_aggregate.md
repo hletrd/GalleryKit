@@ -1,10 +1,11 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-52-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-53-2026-07-01/_aggregate.md`
 
-Cycle 52 produced two deduplicated findings:
+Cycle 53 produced three deduplicated findings:
 
-- `C52-01` - Cycle 51 plan/index ledger still marked the pushed/deployed Cycle 51 ledger fix as active and deploy-unknown.
-- `C52-02` - Admin Settings could show semantic search as Disabled while operator-enabled production semantic search was actually active.
+- `C53-01` - Settings action could still persist `semantic_search_mode='production'` from the UI mutation path.
+- `C53-02` - Healed stored-production state could display like ordinary Disabled and remain persisted as raw `production`.
+- `C53-03` - Cycle 52 ledger and coverage wording overstated closure.
 
-Cycle 52 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.
+Cycle 53 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.

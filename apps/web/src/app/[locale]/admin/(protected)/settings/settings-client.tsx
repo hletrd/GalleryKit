@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select';
 import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, RefreshCcw } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
+import { getSemanticSearchSelectValue, getWritableSemanticSearchModeFromSelect, STORED_SEMANTIC_PRODUCTION_INACTIVE } from '@/lib/semantic-search-settings-ui';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
 import { triggerBackfill, getBackfillStatus, type BackfillStatusResult } from '@/app/actions/admin-backfill';
@@ -297,11 +298,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     const getPlaceholder = (key: string) => defaults[key as GallerySettingKey] || '';
     const hasStoredSemanticProduction = settings.semantic_search_mode === 'production';
     const isSemanticProductionActive = hasStoredSemanticProduction && resolvedSemanticSearchMode === 'production';
-    const semanticSearchSelectValue = (() => {
-        if (isSemanticProductionActive) return 'production';
-        if (settings.semantic_search_mode === 'stub') return 'stub';
-        return 'disabled';
-    })();
+    const semanticSearchSelectValue = getSemanticSearchSelectValue(settings.semantic_search_mode, resolvedSemanticSearchMode);
     const semanticSearchModeDescribedBy = [
         'semantic-search-mode-help',
         isSemanticProductionActive
@@ -801,12 +798,14 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                         </div>
                         <Select
                             // AGG-R5C3-13 (COR-R5C3-04): coerce the controlled value to a
-                            // valid SelectItem. When production is operator-enabled, show a
-                            // disabled read-only production item instead of implying Disabled.
-                            // When the resolver heals production to disabled, the warning below
-                            // still reads the RAW map.
+                            // valid SelectItem. Operator-owned production rows render as disabled
+                            // read-only states. A healed production row gets its own sentinel value
+                            // so choosing real Disabled/Stub changes the raw value and persists it.
                             value={semanticSearchSelectValue}
-                            onValueChange={(value) => handleChange('semantic_search_mode', value)}
+                            onValueChange={(value) => {
+                                const writableMode = getWritableSemanticSearchModeFromSelect(value);
+                                if (writableMode) handleChange('semantic_search_mode', writableMode);
+                            }}
                         >
                             <SelectTrigger id="semantic-search-mode" className="w-full sm:w-[240px]" aria-describedby={semanticSearchModeDescribedBy}>
                                 <SelectValue />
@@ -823,6 +822,11 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                                 {isSemanticProductionActive && (
                                     <SelectItem value="production" disabled>
                                         {t('settings.semanticSearchModeProductionActive')}
+                                    </SelectItem>
+                                )}
+                                {hasStoredSemanticProduction && !isSemanticProductionActive && (
+                                    <SelectItem value={STORED_SEMANTIC_PRODUCTION_INACTIVE} disabled>
+                                        {t('settings.semanticSearchModeProductionInactive')}
                                     </SelectItem>
                                 )}
                             </SelectContent>
