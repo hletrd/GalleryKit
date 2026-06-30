@@ -1,712 +1,407 @@
-# Cycle 21 Aggregate Review
+# Cycle 22 Review Aggregate
 
-Date: 2026-06-30 KST
-Baseline HEAD at review start: `2cc619bb` (`fix(cycle20): close review-plan-fix findings`)
-Current HEAD during aggregation: `1ed96484` (`docs(security): preserve cycle 21 audit evidence`)
+Date: 2026-06-30
+Base reviewed: current `master` after cycle 21 plus cycle-22 review artifact commits.
 
-## Review Fan-Out
+## Agent Coverage
 
-Native subagent roles available in this environment were `default`, `explorer`, and `worker`; the named reviewer roles were executed as `default` subagents with role-specific prompts. The first attempt to spawn `test-engineer` hit the native thread limit and was retried after a slot was freed.
+Callable native agent roles in this environment were `default`, `explorer`, and `worker`; the requested specialist names were therefore executed as worker lanes with specialist prompts. The environment allowed five concurrent child agents in practice, so the fan-out ran in bounded waves. No requested lane failed after retry.
 
-Returned review lanes:
+Completed review lanes:
 
-- `code-reviewer.md`
-- `perf-reviewer.md`
-- `security-reviewer.md` (0 findings)
-- `critic.md`
-- `verifier.md`
-- `test-engineer.md`
-- `tracer.md`
-- `architect.md`
-- `debugger.md`
-- `document-specialist.md`
-- `designer.md`
-- `product-marketer-reviewer.md`
-- `ui-ux-designer-reviewer.md`
+- `code-reviewer`
+- `perf-reviewer`
+- `security-reviewer`
+- `critic`
+- `verifier`
+- `test-engineer`
+- `tracer`
+- `architect`
+- `debugger`
+- `document-specialist`
+- `designer`
+- discovered reviewer prompt: `product-marketer-reviewer`
+- discovered reviewer prompt: `ui-ux-designer-reviewer`
 
-Discovered custom reviewer prompts included `product-marketer-reviewer` and `ui-ux-designer-reviewer`; both were adapted to GalleryKit because their installed prompt bodies reference another product.
+UI review was in scope because this is a Next/React app. The designer lane used `agent-browser` against a local app on `http://localhost:3001`, recorded the local DB `ECONNREFUSED` fallback, and backed findings with browser/source/test evidence.
 
-Agent failures: none after retry. Some review lanes committed and pushed their review artifacts (`ef698815`, `81cd6270`, `a1bc95d4`, `3046df67`, `1ed96484`); uncommitted review artifacts remain for lanes instructed not to commit.
+## Findings Summary
 
-## Aggregate Findings
+Total deduped findings: 31
 
-### AGG-C21-01 - Primary photo/lightbox alt labels collapse to generic "Photo" on tag-only images
+- High: 4
+- Medium: 17
+- Low / Low-Medium: 10
 
-Severity: High
-Confidence: High
-Sources: ui-ux-designer-reviewer
-Status: Confirmed
+Cross-agent agreement is noted below. Items reported by multiple agents should be treated as higher signal than their raw severity alone.
 
-Citations:
+## High
 
-- `apps/web/src/components/photo-viewer.tsx:520-522`
-- `apps/web/src/components/photo-viewer.tsx:690-692`
-- `apps/web/src/components/image-zoom.tsx:343-365`
-- `apps/web/src/components/lightbox.tsx:496-499`
-- `apps/web/src/lib/photo-title.ts:85-121`
-- `apps/web/src/lib/data.ts:1116-1169`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:158-163`
+### AGG22-01 - Advisory-lock callers can leak acquired MySQL locks
 
-Problem: direct photo pages can build meaningful titles from `image.tags`, but `PhotoViewer`, `ImageZoom`, and lightbox alt text call `getConcisePhotoAltText(image, "Photo")`, which does not see the tag array returned by `getImage`.
+Severity: High  
+Confidence: High  
+Status: confirmed  
+Reported by: `code-reviewer` (`CR22-CR-01`), `verifier` (`V22-01`)
 
-Fix direction: normalize tag names into the image object or extend the helper to accept tag arrays, then use the same computed accessible name across the page, viewer, zoom button, related thumbnails, and lightbox.
+Evidence: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, and `apps/web/scripts/backfill-color-pipeline.ts` use advisory-lock result checks that accept numeric `1` but reject `BigInt(1)`, while sibling lock code treats both as acquired.
 
-### AGG-C21-02 - Lightbox color pip can leave an invisible keyboard stop when controls auto-hide
+Failure scenario: a MySQL driver returns `1n`; the app has acquired the lock but the helper throws before releasing it, pinning lock state to the pooled session and making later work fail or serialize incorrectly.
 
-Severity: High
-Confidence: High
-Sources: designer
-Status: Confirmed
+Suggested fix: normalize advisory-lock scalar values through one helper that accepts `1`, `1n`, and equivalent driver string forms where appropriate; use it at every `GET_LOCK` / `RELEASE_LOCK` call site and add regression tests for `bigint`.
 
-Citations:
+### AGG22-02 - Settings exposes site-wide derivative re-encode as a one-click action
 
-- `apps/web/src/components/lightbox.tsx`
-- `apps/web/src/components/lightbox-color-pip.tsx`
+Severity: High  
+Confidence: High  
+Status: confirmed UX risk  
+Reported by: `designer`, `ui-ux-designer-reviewer`; related marketing truthfulness issue in `product-marketer-reviewer`
 
-Problem: the auto-hidden lightbox controls can leave the color pip reachable/focusable even while visually hidden, creating a confusing keyboard stop.
+Evidence: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx` exposes the re-encode/backfill trigger without an explicit confirmation step.
 
-Fix direction: when controls are hidden, remove the pip trigger/panel from tab order or keep controls visible while any child has focus. Add focused keyboard regression coverage.
+Failure scenario: an admin intending to save ordinary settings starts a CPU/disk intensive gallery-wide re-encode, slowing the single web instance and creating operational surprise.
 
-### AGG-C21-03 - Settings backfill CTA promises re-encoding next to a state it cannot process
+Suggested fix: require an explicit confirmation dialog with scope, cost, and cancel/confirm language before starting re-encode. Keep the existing server-side maintenance guards.
 
-Severity: High
-Confidence: High
-Sources: designer
-Status: Confirmed
+### AGG22-03 - README "without handing analytics to SaaS" conflicts with optional Google Analytics
 
-Citations:
+Severity: High  
+Confidence: High  
+Status: confirmed documentation/positioning mismatch  
+Reported by: `product-marketer-reviewer`
 
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
+Evidence: `apps/web/README.md` positions GalleryKit as avoiding SaaS analytics, while `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json`, and runtime config support `google_analytics_id`.
 
-Problem: the Settings UI backfill/re-encode CTA sits next to admin states where no actionable re-encode can happen, so the control overpromises work it cannot perform.
+Failure scenario: privacy-focused users trust the README claim, deploy with inherited config, and unintentionally enable third-party analytics.
 
-Fix direction: disable or reword the CTA when no eligible images/settings changes exist, and make the state-specific reason visible inline rather than only through a generic action affordance.
+Suggested fix: make the README precise: self-hosted analytics are built in; optional Google Analytics exists and is disabled unless configured.
 
-### AGG-C21-04 - README positioning is still a feature inventory, not a launch proposition
+### AGG22-04 - Public P3 badge is visually present but hidden from assistive tech
 
-Severity: High
-Confidence: High
-Sources: product-marketer-reviewer
-Status: Confirmed
+Severity: High/Medium (highest reported Medium, escalated by accessibility impact)  
+Confidence: High  
+Status: confirmed  
+Reported by: `ui-ux-designer-reviewer`
 
-Citations:
+Evidence: public masonry/card P3 badge markup in `apps/web/src/components/grid-picture.tsx` or its badge rendering path is visual-only / `aria-hidden` while it communicates color-delivery information.
 
-- `README.md:7-44`
+Failure scenario: screen-reader users cannot discover wide-gamut/HDR delivery state that sighted users see.
 
-Problem: the root README leads with framework and feature inventory. The strongest product promise, a self-hosted photographer gallery focused on color accuracy, private originals, controlled sharing, and no editing/culling surface, is assembled only after reading deeper details.
+Suggested fix: add an accessible label or screen-reader text for meaningful color badges while preserving decorative hidden status only for duplicated icons.
 
-Fix direction: rewrite the README lead and early feature hierarchy around the product wedge and operator/photographer outcomes, while preserving precise technical proof points.
+## Medium
 
-### AGG-C21-05 - CLIP embedding backfills can write through a database restore window
+### AGG22-05 - Smart-collection tag predicates accept numeric values but compile as tag-name strings
 
-Severity: Medium
-Confidence: High
-Sources: tracer
-Status: Confirmed
+Severity: Medium  
+Confidence: High  
+Status: confirmed correctness issue  
+Reported by: `code-reviewer` (`CR22-CR-02`), `verifier` (`V22-02`)
 
-Citations:
+Evidence: smart-collection validation accepts numeric tag predicate values while query compilation treats them as tag-name strings.
 
-- `apps/web/src/app/[locale]/admin/db-actions.ts:387-458`
-- `apps/web/src/lib/restore-maintenance.ts:1-56`
-- `apps/web/src/lib/image-queue.ts:350-368`
-- `apps/web/src/app/actions/embeddings.ts:55-181`
-- `apps/web/scripts/backfill-clip-embeddings.ts:94-201`
-- `apps/web/src/lib/advisory-locks.ts:19-44`
+Failure scenario: a stored predicate using a numeric tag id returns no matches or wrong matches, making dynamic public collections silently incomplete.
 
-Problem: restore locks backup/upload/color-backfill work and quiesces the in-process image queue, but semantic embedding backfills do not acquire any restore-conflicting advisory lock. The sidecar script cannot see the process-local restore flag.
+Suggested fix: align validator and compiler. Either reject non-string tag values at parse time or compile numeric values as ids. Add regression tests.
 
-Fix direction: add a semantic embedding backfill advisory lock, have restore acquire it with the other restore-conflicting locks, and have both CLIP backfill entry points hold it for the run.
+### AGG22-06 - `CLAUDE.md` still documents stale Docker compose commands
 
-### AGG-C21-06 - Backup download leaks the opened descriptor if a pre-stream step throws
+Severity: Medium  
+Confidence: High  
+Status: confirmed doc/operator mismatch  
+Reported by: `architect`, `critic`, `verifier`, `document-specialist`
 
-Severity: Low-Medium
-Confidence: High
-Sources: verifier, test-engineer, architect
-Status: Confirmed
+Evidence: `CLAUDE.md` still includes lower-level `docker compose -f apps/web/docker-compose.yml up -d --build` commands despite repo policy that deploys go through `npm run deploy` and `.env.deploy`.
 
-Citations:
+Failure scenario: an operator follows stale docs and bypasses the remote deploy helper or required env-driven build/deploy path.
 
-- `apps/web/src/app/api/admin/db/download/route.ts:56-74`
-- `apps/web/src/app/api/admin/db/download/route.ts:87-99`
-- `apps/web/src/__tests__/backup-download-route.test.ts:170-184`
+Suggested fix: update lower-level commands to clearly mark local/manual use only and point normal production deployment to `npm run deploy`.
 
-Problem: the route opens a validated file handle, then awaits current-user/audit work before constructing the stream. If a pre-stream step throws, the catch path has no handle reference to close.
+### AGG22-07 - Upload ingest has multiple implementation owners
 
-Fix direction: keep the handle in outer scope, track stream ownership transfer, close unowned handles in catch, and add a regression that throws after `open()` succeeds.
+Severity: Medium  
+Confidence: High  
+Status: architecture risk  
+Reported by: `architect`, `critic`
 
-### AGG-C21-07 - Photo hover prefetch can count adjacent photos as viewed
+Evidence: browser upload and Lightroom/PAT upload paths duplicate ingest logic around original persistence, quota, validation, metadata, and queue creation.
 
-Severity: Medium
-Confidence: High
-Sources: code-reviewer, test-engineer, debugger
-Status: Likely/confirmed source risk
+Failure scenario: a future privacy, quota, or image-processing fix lands in one ingest owner and not the other.
 
-Citations:
+Suggested fix: extract a shared ingest service with route-specific auth/body parsing only at the edge.
 
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156`
-- `apps/web/src/components/photo-navigation.tsx:220-228`
-- `apps/web/src/components/photo-navigation.tsx:235-242`
-- `apps/web/src/app/actions/public.ts:370-390`
-- `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:25-31`
+### AGG22-08 - Queue workers can pin most shared MySQL pool connections during image encoding
 
-Problem: photo page render records a view, while previous/next buttons still manually prefetch adjacent photo routes on hover. App Router prefetch can evaluate server components before committed navigation.
+Severity: Medium  
+Confidence: High  
+Status: performance/architecture risk  
+Reported by: `architect`, `critic`
 
-Fix direction: remove adjacent photo hover prefetch while analytics remains render-bound, or move analytics to a committed-view client effect. Extend tests to cover `photo-navigation.tsx`.
+Evidence: queue/backfill workers hold DB/advisory-lock resources around Sharp work on the same pool used by live requests.
 
-### AGG-C21-08 - Manual Docker deployment docs omit `--env-file` for build-time args
+Failure scenario: long image processing saturates the shared 10-connection pool and causes live gallery/admin traffic to queue behind background work.
 
-Severity: Medium
-Confidence: High
-Sources: verifier, architect
-Status: Confirmed
+Suggested fix: shorten lock/connection hold time or move long-running image encode coordination to dedicated connections/pools with explicit budget tests.
 
-Citations:
+### AGG22-09 - Single-process topology is documented but not enforced
 
-- `README.md:175-182`
-- `CLAUDE.md:642-659`
-- `apps/web/docker-compose.yml:4-22`
-- `apps/web/deploy.sh:30-32`
-- `apps/web/src/__tests__/deploy-script-contract.test.ts:56-60`
+Severity: Medium  
+Confidence: High  
+Status: deployment architecture risk  
+Reported by: `architect`, `critic`
 
-Problem: the scripted deploy uses `docker compose --env-file apps/web/.env.local ... --build`, but manual README/CLAUDE commands still omit `--env-file`, so build args can differ from runtime `env_file`.
+Evidence: process-local queues/rate limits/maintenance state assume one web instance, but code/config do not fail closed if scaled.
 
-Fix direction: update manual commands and add a source-contract test so documented build commands do not drift from deploy behavior.
+Failure scenario: an operator scales the web service horizontally and weakens rate limits, upload coordination, and maintenance state.
 
-### AGG-C21-09 - Upload ingest remains duplicated across browser, Lightroom, and retry paths
+Suggested fix: add a startup/config guard or explicit instance-count contract, and document how to migrate to shared coordination before scale-out.
 
-Severity: Medium
-Confidence: High
-Sources: code-reviewer, critic, architect
-Status: Confirmed
+### AGG22-10 - Mutable `topics.slug` natural key requires manual fan-out
 
-Citations:
+Severity: Medium  
+Confidence: High  
+Status: data consistency risk  
+Reported by: `architect`, `critic`
 
-- `apps/web/src/app/actions/images.ts:114-190`
-- `apps/web/src/app/actions/images.ts:340-531`
-- `apps/web/src/app/actions/images.ts:1236-1282`
-- `apps/web/src/app/api/admin/lr/upload/route.ts:15-18`
-- `apps/web/src/app/api/admin/lr/upload/route.ts:225-516`
-- `apps/web/src/lib/image-queue.ts:92-120`
+Evidence: topic slug is used as a natural key across images/views/routes and rename paths manually update dependents.
 
-Problem: browser upload, Lightroom upload, and retry processing still manually construct one ingest lifecycle, so new gates or processing snapshot fields can drift by entry point.
+Failure scenario: an interrupted rename or missed future table leaves orphaned topic references.
 
-Fix direction: extract a server-only ingest builder/service and add exhaustiveness coverage for processing snapshot/job field forwarding.
+Suggested fix: move to immutable topic ids for relational state or centralize transactional rename fan-out with regression coverage for every dependent table.
 
-### AGG-C21-10 - Image queue workers can pin most of the shared MySQL pool during Sharp work
+### AGG22-11 - Upload quota settlement still depends on hand-maintained settle points
 
-Severity: Medium
-Confidence: High
-Sources: perf-reviewer, critic, architect
-Status: Confirmed operational/performance risk
+Severity: Medium  
+Confidence: High  
+Status: correctness/testability risk  
+Reported by: `critic`, `debugger`, `test-engineer`
 
-Citations:
+Evidence: quota claim/settle/release invariants are protected by source topology checks and comments more than stateful failure-path tests.
 
-- `apps/web/src/db/index.ts:23-38`
-- `apps/web/src/lib/image-queue.ts:87-90`
-- `apps/web/src/lib/image-queue.ts:446-455`
-- `apps/web/src/lib/image-queue.ts:519-657`
-- `apps/web/src/lib/image-queue.ts:812-815`
+Failure scenario: a future early return after quota claim leaks quota and blocks later uploads.
 
-Problem: queue workers hold shared-pool advisory-lock connections across CPU/file-heavy Sharp processing; raising `QUEUE_CONCURRENCY` can consume most pool connections.
+Suggested fix: wrap upload claim lifecycle in a structured scope/helper and add stateful failure tests around all error paths.
 
-Fix direction: use a durable row claim, dedicated advisory-lock pool, or pool-budget-derived queue concurrency cap.
+### AGG22-12 - Public error boundary drops the site shell and can strand users
 
-### AGG-C21-11 - Single-process topology is documented but not enforced
+Severity: Medium  
+Confidence: High  
+Status: confirmed UI risk  
+Reported by: `designer`, `ui-ux-designer-reviewer`
 
-Severity: Medium
-Confidence: High
-Sources: critic, architect
-Status: Confirmed latent topology risk
+Evidence: `apps/web/src/app/[locale]/error.tsx` renders an error state without the normal public navigation shell and routes retry/back behavior toward the same failing route.
 
-Citations:
+Failure scenario: a transient home/gallery error leaves visitors without navigation to working topic/share/privacy pages.
 
-- `CLAUDE.md:232-235`
-- `apps/web/src/lib/restore-maintenance.ts:1-56`
-- `apps/web/src/lib/upload-tracker-state.ts:7-20`
-- `apps/web/src/lib/data.ts:13-249`
+Suggested fix: render the public shell/navigation in the route error boundary and provide a stable home/link escape.
 
-Problem: restore maintenance, upload quota state, queue state, some rate limits, and buffered view counts are process-local, but startup/runtime does not enforce the documented single-web-instance topology.
+### AGG22-13 - Token plaintext dialog shows dismiss controls that intentionally do nothing
 
-Fix direction: add a startup guard/lease or shared coordination backend before supporting scale-out; at minimum add a visible runtime warning for multiple web replicas.
+Severity: Medium  
+Confidence: High  
+Status: confirmed UX issue  
+Reported by: `designer`, `ui-ux-designer-reviewer`
 
-### AGG-C21-12 - Topic slug is a mutable natural key with manual fan-out
+Evidence: token creation dialog keeps a close affordance visible even while dismissal is blocked until acknowledgment.
 
-Severity: Medium
-Confidence: High
-Sources: architect
-Status: Confirmed architectural risk
+Failure scenario: admins click close/Escape, nothing happens, and the modal feels broken at the exact moment a secret must be copied.
 
-Citations:
+Suggested fix: hide/disable misleading dismiss controls or make them open an explicit acknowledgment path.
 
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/db/schema.ts`
-- `apps/web/src/lib/smart-collections.ts`
+### AGG22-14 - Lightroom upload route lacks route-behavior regression coverage
 
-Problem: topic rename uses a mutable natural key and requires manual updates across every slug-referencing child store and smart-collection predicate.
+Severity: Medium  
+Confidence: High  
+Status: test gap  
+Reported by: `test-engineer`
 
-Fix direction: plan a surrogate immutable topic id or stronger centralized fan-out contract before adding new topic references.
+Evidence: scanner/source-text fixtures guard route shape, but the external upload API lacks enough behavioral tests proving auth scope, limits, and route responses.
 
-### AGG-C21-13 - Public map ships and hydrates up to 10,000 markers at once
+Failure scenario: a refactor satisfies source scanners while route behavior regresses for Lightroom clients.
 
-Severity: Low-Medium
-Confidence: High
-Sources: critic
-Status: Confirmed scale risk
+Suggested fix: add route-level tests for accepted/rejected token scopes, body limits where feasible, and successful queued upload response shape.
 
-Citations:
+### AGG22-15 - CLIP inference pool tests rely on string matching instead of concurrency behavior
 
-- `apps/web/src/lib/data.ts:1649-1685`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:31-89`
-- `apps/web/src/components/map/map-client.tsx:118-140`
+Severity: Medium  
+Confidence: Medium/High  
+Status: test gap  
+Reported by: `test-engineer`
 
-Problem: map payloads are all-or-nothing up to 10,000 GPS rows, including fallback links and one Leaflet marker per row.
+Evidence: tests assert structural strings rather than exercising queue saturation, abort removal, timeout, and concurrency bounds.
 
-Fix direction: add bbox loading, clustering, visible caps, or paginated accessible fallback.
+Failure scenario: semaphore/pending-queue behavior regresses while string fixtures remain unchanged.
 
-### AGG-C21-14 - Infinite masonry keeps every loaded card in client state and DOM
+Suggested fix: add deterministic fake-inference concurrency tests.
 
-Severity: Medium
-Confidence: High
-Sources: perf-reviewer, critic
-Status: Confirmed scale/UI risk
+### AGG22-16 - Real CLIP/offline model smoke coverage is skipped by default
 
-Citations:
+Severity: Medium  
+Confidence: Medium/High  
+Status: test/ops gap  
+Reported by: `test-engineer`
 
-- `apps/web/src/components/home-client.tsx:124-130`
-- `apps/web/src/components/home-client.tsx:286-410`
-- `apps/web/src/components/load-more.tsx:116-132`
+Evidence: production semantic search path depends on offline model weights, but default gates use mocks.
 
-Problem: infinite scroll appends every page forever, leaving all cards, images, observers, and layout work mounted.
+Failure scenario: deployment goes green while the real offline model cannot load on the production platform.
 
-Fix direction: virtualize/window the masonry feed or cap automatic loading and switch to explicit pagination.
+Suggested fix: add an opt-in smoke test/runbook gate for seeded model environments.
 
-### AGG-C21-15 - Initial public gallery pages do grouped count work on every dynamic request
+### AGG22-17 - Admin image management remains desktop-table-only on narrow screens
 
-Severity: Medium
-Confidence: High
-Sources: perf-reviewer
-Status: Confirmed performance risk
+Severity: Medium  
+Confidence: High  
+Status: UI responsiveness issue  
+Reported by: `ui-ux-designer-reviewer`; similar cycle-21 issue carried forward
 
-Citations:
+Evidence: admin image management uses a table/horizontal panning layout as the only management surface.
 
-- `apps/web/src/lib/data.ts:878-907`
-- `apps/web/src/app/[locale]/(public)/page.tsx:14-16`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:17`
-- `apps/web/src/components/home-client.tsx:267-269`
+Failure scenario: mobile or narrow-window admins must horizontally pan to perform repeated management tasks.
 
-Problem: dynamic home/topic renders compute a grouped tag join plus exact `COUNT(*) OVER()` for small first pages.
+Suggested fix: add responsive card/list rows or a shared responsive data-surface primitive.
 
-Fix direction: split card-page fetching from exact counts/tag aggregation, cache counts, or remove exact totals from the public hot path.
+### AGG22-18 - Route/file comments overstate Next.js route-handler extension support
 
-### AGG-C21-16 - CSV export materializes the full export in server and browser memory
+Severity: Medium/Low  
+Confidence: High  
+Status: documentation mismatch  
+Reported by: `document-specialist`
 
-Severity: Medium
-Confidence: High
-Sources: perf-reviewer
-Status: Confirmed performance risk
+Evidence: route-file extension comments include unsupported or overstated extension claims compared with official Next.js route handler docs.
 
-Citations:
+Failure scenario: future contributors add files the framework will not route or scanners will not cover.
 
-- `apps/web/src/app/[locale]/admin/db-actions.ts:79-159`
+Suggested fix: align comments with official Next.js route-handler file conventions and keep scanner scope explicit.
 
-Problem: CSV export loads up to 50,000 rows, builds an array of lines, joins one large string, and returns it through a server action.
+### AGG22-19 - Settings re-encode CTA overpromises for settings-only changes
 
-Fix direction: move export to an authenticated streaming route or background file job.
+Severity: Medium  
+Confidence: High  
+Status: documentation/UX mismatch  
+Reported by: `product-marketer-reviewer`; related to AGG22-02
 
-### AGG-C21-17 - Admin analytics fans out multiple aggregate scans against the shared pool
+Evidence: Settings copy implies re-encode fixes all color/quality setting effects, while static-path cache invalidation and actual byte rewrites have caveats.
 
-Severity: Low-Medium
-Confidence: Medium
-Sources: perf-reviewer
-Status: Risk
+Failure scenario: admin expects immediate global consistency after one action but sees stale derivatives until backfill/static cache behavior catches up.
 
-Citations:
+Suggested fix: tighten copy to describe what re-encode does, when it is needed, and what remains cache-dependent.
 
-- `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx:24-36`
-- `apps/web/src/lib/analytics-data.ts`
+### AGG22-20 - README positioning lacks proof-led "for/not for" clarity
 
-Problem: the analytics page runs five grouped aggregate queries concurrently; the `all` window can widen scans on the shared pool.
+Severity: Medium  
+Confidence: Medium/High  
+Status: product documentation gap  
+Reported by: `product-marketer-reviewer`
 
-Fix direction: serialize or cap analytics fanout, cache aggregates, or move heavy analytics to a background/materialized summary.
+Evidence: README states features but does not foreground that GalleryKit is finished-photo publishing, not editing/culling/proofing SaaS, nor attach proof points to core claims.
 
-### AGG-C21-18 - Timeline/archive date filters are non-sargable on dynamic public pages
+Failure scenario: wrong-fit users adopt expecting editing/proofing workflows that the repo explicitly does not support.
 
-Severity: Low
-Confidence: High
-Sources: perf-reviewer
-Status: Confirmed performance risk
+Suggested fix: add a concise "For / not for" and proof-points section.
 
-Citations:
+## Low / Low-Medium
 
-- `apps/web/src/lib/data-timeline.ts`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
+### AGG22-21 - Dynamic public gallery first pages still pay grouped exact-count work
 
-Problem: date predicates use computed date parts, limiting index use on dynamic public pages.
+Severity: Medium (performance), considered deferrable if scoped  
+Confidence: High  
+Reported by: `perf-reviewer`
 
-Fix direction: use range predicates or persisted generated columns/indexes for timeline lookup shapes.
+Suggested fix: avoid exact counts on initial public pages or cache/count asynchronously.
 
-### AGG-C21-19 - Semantic rate-limit helper comment still names disabled mode as refundable
+### AGG22-22 - Infinite masonry keeps all loaded cards mounted
 
-Severity: Low
-Confidence: High
-Sources: critic, tracer
-Status: Confirmed docs/contract drift
+Severity: Medium (performance)  
+Confidence: High  
+Reported by: `perf-reviewer`
 
-Citations:
+Suggested fix: add virtualization/windowing once gallery size and UX constraints justify it.
 
-- `apps/web/src/lib/rate-limit.ts:361-378`
-- `apps/web/src/app/api/search/semantic/route.ts:173-200`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:98-126`
+### AGG22-23 - CSV export materializes the full export in server and browser memory
 
-Problem: route behavior intentionally keeps disabled/stub mode charged after config lookup, but the helper comment still lists disabled mode as a rollback example.
+Severity: Medium (performance)  
+Confidence: High  
+Reported by: `perf-reviewer`
 
-Fix direction: update the helper comment and add a source-contract assertion if this policy is important.
+Suggested fix: stream CSV server-side and download progressively.
 
-### AGG-C21-20 - CLIP inference queue safety is source-contract tested, not behavior-tested
+### AGG22-24 - Admin analytics fans out aggregate scans on shared DB pool
 
-Severity: Medium
-Confidence: High
-Sources: test-engineer
-Status: Confirmed coverage gap
+Severity: Low-Medium  
+Confidence: Medium  
+Reported by: `perf-reviewer`
 
-Citations:
+Suggested fix: cache/materialize heavy aggregate metrics or sequence queries with pool-budget awareness.
 
-- `apps/web/src/lib/clip-model.ts:65-160`
-- `apps/web/src/lib/clip-model.ts:228-236`
-- `apps/web/src/app/api/search/semantic/route.ts:253-257`
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-50`
+### AGG22-25 - Timeline/date archive filters are non-sargable
 
-Problem: abort, timeout, queue-full, and slot-release behavior for CLIP inference are guarded mainly by source-string tests.
+Severity: Low  
+Confidence: High  
+Reported by: `perf-reviewer`
 
-Fix direction: extract a queue seam or inject a fake model/tokenizer and add behavior tests with fake timers and aborted waiters.
+Suggested fix: use generated columns/indexable date bounds or range predicates.
 
-### AGG-C21-21 - Real CLIP production behavior is opt-in and skipped by the default gate
+### AGG22-26 - Shared topic lists compute per-topic latest timestamps on common renders
 
-Severity: Low-Medium
-Confidence: High
-Sources: test-engineer
-Status: Confirmed coverage gap
+Severity: Low  
+Confidence: Medium  
+Reported by: `perf-reviewer`
 
-Citations:
+Suggested fix: cache or denormalize latest-topic timestamps where traffic warrants.
 
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`
-- `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`
-- `apps/web/src/__tests__/semantic-route-production.test.ts:3-16`
-- `CLAUDE.md` semantic-search production notes
+### AGG22-27 - Audit retention deletes all expired rows in one statement
 
-Problem: production semantic search is live, but default gates mock or skip real model/offline-load proof.
+Severity: Low  
+Confidence: High  
+Reported by: `critic`, `debugger`
 
-Fix direction: add a release/scheduled CI lane or pre-deploy evidence checklist for seeded real weights and offline production model loading.
+Suggested fix: use chunked retention deletion matching view-retention patterns.
 
-### AGG-C21-22 - Failed-image retry snapshot forwarding lacks behavior/exhaustiveness coverage
+### AGG22-28 - Upload fallback serving validates one path and opens a later path by name
 
-Severity: Low-Medium
-Confidence: High
-Sources: test-engineer
-Status: Confirmed coverage gap
+Severity: Low  
+Confidence: Medium  
+Reported by: `critic`, `debugger`
 
-Citations:
+Suggested fix: open by file descriptor after validation or revalidate immediately before streaming.
 
-- `apps/web/src/lib/image-queue.ts:92-119`
-- `apps/web/src/lib/image-queue.ts:208-232`
-- `apps/web/src/app/actions/images.ts:1255-1271`
-- `apps/web/src/__tests__/failed-image-retry.test.ts:87-103`
+### AGG22-29 - Docker image and apt inputs are mutable
 
-Problem: retry uses a fresh processing snapshot, but tests do not assert every snapshot field reaches `enqueueImageProcessing`.
+Severity: Low  
+Confidence: High  
+Reported by: `security-reviewer`
 
-Fix direction: add a behavior test with distinctive config values, or centralize snapshot-to-job mapping for TypeScript exhaustiveness.
+Suggested fix: pin runtime base images or apt package versions where operationally acceptable.
 
-### AGG-C21-23 - Similar-photo recommendations can expose repeated indistinguishable "Photo" links
+### AGG22-30 - Deploy helper executes shell from trusted but unchecked env file
 
-Severity: Medium
-Confidence: Medium-High
-Sources: ui-ux-designer-reviewer
-Status: Confirmed accessibility risk
+Severity: Low  
+Confidence: Medium  
+Reported by: `security-reviewer`
 
-Citations:
+Suggested fix: document trust boundary and validate command override format if this becomes multi-operator.
 
-- `apps/web/src/components/similar-photos.tsx:136-141`
-- `apps/web/src/components/similar-photos.tsx:186-194`
-- `apps/web/src/components/search.tsx:100-105`
+### AGG22-31 - Nginx template unsafe if exposed directly as public edge
 
-Problem: multiple title-less/description-less similar-photo links can all be named "Photo".
+Severity: Low  
+Confidence: Medium  
+Reported by: `security-reviewer`
 
-Fix direction: make fallback labels unique and contextual, at least `Photo {imageId}`, and add a component test.
+Suggested fix: document reverse-proxy boundary prominently or harden the template for public-edge TLS/HSTS use.
 
-### AGG-C21-24 - Admin image management remains a desktop table with horizontal panning on narrow screens
+## Additional Low Documentation / UI Findings
 
-Severity: Medium
-Confidence: High
-Sources: ui-ux-designer-reviewer
-Status: Confirmed UX risk
+The following were recorded in per-agent files and should be planned/deferred explicitly even where they are not separately expanded above:
 
-Citations:
+- `DOC22-01`: `CLAUDE.md` still hardcodes deploy host despite config-driven deploy behavior.
+- `DOC22-02`: `.env.local.example` omits several documented operator controls.
+- `DOC22-03`: lower-level comments still imply a bundled Lightroom plugin.
+- `DOC22-04`: historical CLIP plan contains obsolete snippets.
+- `TEST22-04`: deployment command drift is not caught by deployment contract tests.
+- `V22-04`: cycle-22 tests pass without proving exact regression edges.
+- `UI22-06`: upload staging becomes cramped on phones.
+- `UI22-07`: admin navigation is a flat ten-link wrap with no task grouping.
 
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`
-- `apps/web/src/components/image-manager.tsx:424-590`
+## Agent Failures
 
-Problem: admin image management keeps one dense table across small screens, requiring horizontal panning for preview, metadata, tags, and actions.
-
-Fix direction: add a responsive card/list presentation below the desktop breakpoint while preserving the desktop table.
-
-### AGG-C21-25 - Admin data tables repeat horizontal-scroll patterns instead of a responsive primitive
-
-Severity: Low-Medium
-Confidence: Medium
-Sources: ui-ux-designer-reviewer
-Status: Confirmed design-system risk
-
-Citations:
-
-- `apps/web/src/components/image-manager.tsx:424-595`
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:218-279`
-- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:96-129`
-- `apps/web/src/components/admin-user-manager.tsx:137-177`
-- `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:91-274`
-
-Problem: each admin area uses its own horizontal-scroll table pattern, spreading mobile/focus/empty-state fixes across pages.
-
-Fix direction: introduce a shared responsive data-surface convention or component.
-
-### AGG-C21-26 - Admin Users nests a card inside another card
-
-Severity: Low
-Confidence: High
-Sources: ui-ux-designer-reviewer
-Status: Confirmed polish issue
-
-Citations:
-
-- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx:16-24`
-- `apps/web/src/components/admin-user-manager.tsx:88-136`
-
-Problem: the Users page renders outer card chrome, then `AdminUserManager` renders another card with a second header.
-
-Fix direction: make one owner for page/card chrome and render the manager as a plain section when embedded.
-
-### AGG-C21-27 - Settings validation errors are toast-only and not associated with invalid fields
-
-Severity: Medium
-Confidence: High
-Sources: designer
-Status: Confirmed accessibility/UX risk
-
-Citations:
-
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-
-Problem: validation failures are surfaced as transient toasts without persistent field-associated error text.
-
-Fix direction: add inline field errors with `aria-invalid`/`aria-describedby` and keep toast as secondary notification.
-
-### AGG-C21-28 - Self-hosted onboarding punts database bootstrap to the reader
-
-Severity: Medium
-Confidence: High
-Sources: product-marketer-reviewer
-Status: Confirmed documentation gap
-
-Citations:
-
-- `README.md:83-106`
-- `apps/web/README.md:7-21`
-
-Problem: quick start says to create a MySQL database/user first, but does not provide a copy-pasteable local bootstrap path.
-
-Fix direction: add minimal local MySQL creation examples or a clearly separated Docker/dev DB path.
-
-### AGG-C21-29 - Semantic search activation is split across UI, README, and internal runbook
-
-Severity: Medium
-Confidence: High
-Sources: product-marketer-reviewer
-Status: Confirmed documentation/product gap
-
-Citations:
-
-- `README.md:37`
-- `apps/web/README.md:56-77`
-- `CLAUDE.md` CLIP semantic-search runbook
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-
-Problem: semantic search is a live demo claim, but production activation requires stitching together public docs, admin UI copy, and internal operator notes.
-
-Fix direction: make the public app README the authoritative activation runbook or link to a committed operator doc with exact sidecar commands.
-
-### AGG-C21-30 - Upload API tokens are surfaced without a public integration contract
-
-Severity: Medium
-Confidence: High
-Sources: product-marketer-reviewer
-Status: Confirmed documentation gap
-
-Citations:
-
-- `README.md:40`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-
-Problem: the README mentions PAT-authenticated external uploads but does not document endpoint, headers, scopes, multipart fields, limits, or response shape.
-
-Fix direction: add an Upload API section with the route contract and curl example.
-
-### AGG-C21-31 - Auto Alt-Text is visible although implementation is an EXIF stub
-
-Severity: Low
-Confidence: High
-Sources: product-marketer-reviewer
-Status: Confirmed product-copy risk
-
-Citations:
-
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:620-632`
-- `apps/web/messages/en.json:731-734`
-- `apps/web/src/lib/caption-generator.ts:1-62`
-- `apps/web/src/lib/image-queue.ts:678-695`
-
-Problem: "Auto Alt-Text" commonly implies visual captioning, but the current implementation produces EXIF-derived hints.
-
-Fix direction: rename visible copy to "EXIF Alt-Text Hints" until model-backed captioning ships, or hide it under experimental settings.
-
-### AGG-C21-32 - Root README directory tree omits persisted runtime stores
-
-Severity: Low
-Confidence: High
-Sources: document-specialist
-Status: Confirmed docs drift
-
-Citations:
-
-- `README.md:64-81`
-- `CLAUDE.md` repository structure / deploy persistence notes
-
-Problem: the root README tree lists `public/uploads` but omits `public/resources` and private `data/uploads/original`.
-
-Fix direction: update the tree to match persistence-critical directories.
-
-### AGG-C21-33 - CLAUDE hardcodes deploy host despite config-driven helper rule
-
-Severity: Low
-Confidence: High
-Sources: document-specialist
-Status: Confirmed docs drift
-
-Citations:
-
-- `CLAUDE.md` backfill/CLIP sidecar examples
-- `AGENTS.md` deploy helper rule
-
-Problem: internal runbook examples hardcode the production host path while AGENTS says deploy host and SSH credentials are config-driven.
-
-Fix direction: replace host-specific examples with placeholders or explicitly mark them as current-production examples.
-
-### AGG-C21-34 - Code comments still imply a bundled Lightroom plugin
-
-Severity: Low
-Confidence: Medium-High
-Sources: document-specialist
-Status: Confirmed docs/comment drift
-
-Citations:
-
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/messages/*`
-- README token/upload wording
-
-Problem: some comments/copy still use Lightroom-plugin wording even though the repo ships only the server API.
-
-Fix direction: consistently describe "Lightroom-compatible upload API" or "external upload clients", not a bundled plugin.
-
-### AGG-C21-35 - Historical CLIP superpower plan contains obsolete snippets
-
-Severity: Low
-Confidence: Medium
-Sources: document-specialist
-Status: Confirmed historical-doc drift
-
-Citations:
-
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-
-Problem: a completed historical plan still contains outdated code snippets that can mislead future maintainers.
-
-Fix direction: add a stale/historical note or update the snippets to point to current code.
-
-### AGG-C21-36 - Non-archived `.context/plan/plan-cycle21.md` contradicts current semantic stub-mode behavior
-
-Severity: Low
-Confidence: High
-Sources: verifier
-Status: Confirmed plan drift
-
-Citations:
-
-- `.context/plan/plan-cycle21.md:10-24`
-- `.context/plan/plan-cycle21.md:101-106`
-- `apps/web/src/app/api/search/semantic/route.ts:19-31`
-- `apps/web/src/app/api/search/semantic/route.ts:186-203`
-- `apps/web/src/__tests__/semantic-search-route.test.ts:113-115`
-
-Problem: a non-archived plan says semantic text search must reject stub mode, while current code/docs/tests intentionally serve stub mode with disclaimers.
-
-Fix direction: mark the stale plan superseded or update/archive it so active planning does not reintroduce the old contract.
-
-### AGG-C21-37 - `isProtectedAdminRoute` carries a dead localized admin equality branch
-
-Severity: Low
-Confidence: High
-Sources: code-reviewer
-Status: Confirmed maintainability issue
-
-Citations:
-
-- `apps/web/src/proxy.ts:57-61`
-
-Problem: the outer condition includes `/{locale}/admin`, but the inner return only covers `/{locale}/admin/*`; behavior is correct, but the branch is misleading.
-
-Fix direction: simplify the condition or comment that localized admin root is intentionally not protected.
-
-### AGG-C21-38 - Audit retention purge remains a single unbounded DELETE
-
-Severity: Low
-Confidence: High
-Sources: debugger
-Status: Confirmed operational risk
-
-Citations:
-
-- `apps/web/src/lib/audit.ts:97-122`
-
-Problem: audit retention deletes all expired rows in one statement, unlike chunked analytics retention.
-
-Fix direction: chunk audit deletion if audit volume grows or audit retention becomes high-write.
-
-### AGG-C21-39 - Upload fallback serving validates by path, then reopens by path
-
-Severity: Low
-Confidence: Medium
-Sources: debugger
-Status: Risk
-
-Citations:
-
-- `apps/web/src/lib/serve-upload.ts`
-
-Problem: fallback upload serving validates a path and later opens by path rather than descriptor, leaving a small TOCTOU pattern.
-
-Fix direction: use descriptor-backed stat/streaming like the backup download route.
-
-## Cross-Agent Notes
-
-High-signal duplicated findings:
-
-- Upload ingest duplication: code-reviewer, critic, architect.
-- Image queue/shared pool pressure: perf-reviewer, critic, architect.
-- Manual Docker `--env-file` drift: verifier, architect.
-- Backup descriptor leak: verifier, test-engineer, architect.
-- Render-time analytics/prefetch: code-reviewer, test-engineer, debugger.
-- Semantic rollback comment drift: critic, tracer.
-
-No confirmed security vulnerabilities were reported by `security-reviewer`; several operational/correctness risks still need implementation or explicit deferral.
+None. The only orchestration constraint was the runtime child-agent limit; review lanes were completed in waves.

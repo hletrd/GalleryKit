@@ -1,192 +1,158 @@
-# Test-Engineer Review - Cycle 21
+# Cycle 22 Test-Engineer Review
 
-Date: 2026-06-30 KST
-HEAD reviewed: `1ed96484` (`docs(security): preserve cycle 21 audit evidence`)
-Scope: repository-wide review of current HEAD for test coverage gaps, flaky tests, weak assertions, gate blind spots, and TDD opportunities tied to real product risk. No implementation code was modified.
+Review target: current `HEAD` (`e072975c`, `master...origin/master`) in `/Users/hletrd/flash-shared/gallery`.
 
-## Inventory
+Scope: test coverage gaps, flaky tests, missing regression locks, weak fixtures, TDD opportunities, and gate blind spots. I did not edit source code and did not commit or push. This artifact is the only file intentionally changed.
 
-Required context read first:
+## Inventory Examined
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+Project and workflow guidance:
 
-Current source/test inventory:
+- `AGENTS.md` instructions supplied in the prompt, including no source edits, review artifact output, quality gates, and deploy/git rules.
+- `CLAUDE.md:90-117` for stack, key files, and CLIP/semantic-search runtime environment.
+- `CLAUDE.md:430-443` for migration runbook and Drizzle journal constraints.
+- `CLAUDE.md:495-500` for CLIP semantic-search production/offline model expectations.
+- `CLAUDE.md:642-657` for deployment checklist and operator commands.
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md` for review output expectations.
 
-- App/source files under `apps/web/src`: 503 TypeScript/TSX/JS/MJS files.
-- Unit/integration tests under `apps/web/src/__tests__`: 271 files.
-- Playwright E2E/support files under `apps/web/e2e`: 8 files.
-- Public/admin route handlers inventoried under `apps/web/src/app/**/route.ts(x)`.
-- Server actions inventoried under `apps/web/src/app/actions/*.ts`.
-- Gate scripts reviewed: `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, Vitest config, Playwright config, and source-contract scanner tests.
+Gate and test configuration:
 
-Focused implementation/test files inspected:
+- `apps/web/package.json:9-26` for lint, typecheck, build, unit, E2E, and custom lint gates.
+- `apps/web/vitest.config.ts:1-16` for unit-test include/exclude and timeout settings.
+- `apps/web/playwright.config.ts:1-83` for E2E worker, browser, local-server, and remote-admin behavior.
+- `apps/web/e2e/admin.spec.ts:1-160` and `apps/web/e2e/helpers.ts:1-172` for browser-flow coverage and admin test gating.
 
-- `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/__tests__/backup-download-route.test.ts`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
-- `apps/web/src/components/photo-navigation.tsx`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/__tests__/public-actions.test.ts`
-- `apps/web/src/__tests__/cycle-20-source-contracts.test.ts`
-- `apps/web/src/lib/clip-model.ts`
-- `apps/web/src/__tests__/clip-model-contract.test.ts`
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts`
-- `apps/web/src/__tests__/clip-offline-load.test.ts`
-- `apps/web/src/__tests__/semantic-route-production.test.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/image-queue.ts`
-- upload/retry/queue tests around processing snapshots and failed-image retry.
+Focused live code and tests:
 
-Validation notes:
+- Upload and Lightroom ingest: `apps/web/src/app/actions/images.ts:238-586`, `apps/web/src/app/api/admin/lr/upload/route.ts:114-516`, `apps/web/src/__tests__/images-actions.test.ts:239-277`, `apps/web/src/__tests__/images-action-toctou-claim.test.ts:1-57`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-450`, `apps/web/src/__tests__/upload-tracker.test.ts:1-76`.
+- Semantic search and CLIP: `apps/web/src/lib/clip-model.ts:53-160`, `apps/web/src/lib/clip-model.ts:228-264`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts:164-177`, `apps/web/src/__tests__/clip-model-contract.test.ts:1-50`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:1-80`, `apps/web/src/__tests__/clip-offline-load.test.ts:1-65`, `apps/web/src/__tests__/semantic-route-production.test.ts:1-41`, `apps/web/src/__tests__/semantic-search-route.test.ts`, `apps/web/src/__tests__/similar-route.test.ts:59-78`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:1-76`.
+- Deployment and docs locks: `apps/web/deploy.sh`, `apps/web/src/__tests__/deploy-script-contract.test.ts:1-68`, `README.md:188`, `CLAUDE.md:67`, `CLAUDE.md:657`.
+- Regression context: `.context/reviews/architect.md`, `.context/reviews/perf-reviewer.md`, `.context/plans/cycle-22-deferred.md`, prior `.context/reviews/test-engineer.md`.
 
-- This was a review pass; I did not run the full lint/typecheck/build/test suite.
-- Other cycle-21 artifacts report recent full gates green, but the findings below are based on fresh source/test inspection at current HEAD.
-- The detected `tdd` routing has no readable skill surface in this session, so TDD is treated as a review criterion.
+I also spot-checked recently fixed areas so they would not be re-filed: backup download handle cleanup (`apps/web/src/app/api/admin/db/download/route.ts:42-96`, `apps/web/src/__tests__/backup-download-route.test.ts:186-203`) and photo navigation prefetch removal (`apps/web/src/components/photo-navigation.tsx:220-245`).
 
 ## Findings
 
-### TEST21-01 - No-prefetch source contract misses the remaining hover prefetch path that can inflate analytics
+### TEST22-01 - Lightroom upload route is protected mostly by source-text contracts, not route behavior
 
-Severity: Medium
-Confidence: High
-Status: Confirmed weak assertion / gate blind spot
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed coverage gap / weak fixture
+- Evidence:
+  - `apps/web/src/app/api/admin/lr/upload/route.ts:114-151` claims upload quota and defines the `settleUpload` path.
+  - `apps/web/src/app/api/admin/lr/upload/route.ts:153-240` contains early validation and topic failure branches that must settle quota correctly.
+  - `apps/web/src/app/api/admin/lr/upload/route.ts:243-516` performs config snapshotting, disk checks, original save, post-save processing, DB insert, and queue enqueue.
+  - `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15` explicitly describes the test as a source-contract guardrail.
+  - `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-394` verifies the queue payload using regex against route source instead of executing `POST`.
+  - `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:407-450` verifies post-save containment by source ordering/string assertions.
+  - In contrast, browser upload has a behavior-level snapshot assertion in `apps/web/src/__tests__/images-actions.test.ts:239-277`.
+- Concrete failure scenario:
+  - A refactor keeps the same strings in `route.ts` but changes runtime data flow, for example by passing stale config into `enqueueImageProcessing`, failing to settle quota after a parsed-form error, or constructing `FormData` fields differently. The source-contract test still passes because the tokens and order remain present, while Lightroom upload breaks only in production or during manual testing.
+- Suggested fix:
+  - Add a behavior-level route harness for `POST` with a synthetic `NextRequest`/`FormData` upload and mocked DB, upload tracker, config snapshot, file save, and queue modules.
+  - Cover at least: successful upload enqueues the exact snapshot payload; validation failure settles quota; topic lookup failure settles quota; disk/full or save failure settles quota and does not enqueue.
+  - Keep the source-contract tests only for invariants that are genuinely hard to execute, such as broad ordering constraints.
+- TDD opportunity:
+  - Start with a failing test that executes the Lightroom `POST` success path and asserts `enqueueImageProcessing` receives the same HDR/color fields currently regex-locked in `lr-upload-hdr-gate.test.ts:384-394`.
 
-Exact file+region:
+### TEST22-02 - CLIP inference pool and queue behavior is asserted by string matching instead of concurrency tests
 
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156` records a photo view during server render.
-- `apps/web/src/components/photo-navigation.tsx:220-228` and `apps/web/src/components/photo-navigation.tsx:235-242` still call `router.prefetch(getPhotoPath(prevId|nextId))` on hover.
-- `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:25-31` claims to test that photo detail prefetch is gone, but it checks only home cards, hidden adjacent links, and the old `photo-viewer.tsx` `router.prefetch(buildPhotoPath(id))` string.
-- `apps/web/src/__tests__/public-actions.test.ts:241-318` covers recorder behavior directly, not whether prefetch/hover can trigger the page render that calls it.
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed regression-lock gap
+- Evidence:
+  - `apps/web/src/lib/clip-model.ts:53-64` parses `CLIP_INFERENCE_CONCURRENCY`, `CLIP_INFERENCE_MAX_PENDING`, and `CLIP_INFERENCE_QUEUE_TIMEOUT_MS`.
+  - `apps/web/src/lib/clip-model.ts:65-72` stores global active inference and waiter state.
+  - `apps/web/src/lib/clip-model.ts:99-109` removes waiters.
+  - `apps/web/src/lib/clip-model.ts:117-145` implements timeout and abort-aware `waitForInferenceSlot`.
+  - `apps/web/src/lib/clip-model.ts:148-160` increments/decrements active inference count and releases the next waiter.
+  - `apps/web/src/__tests__/clip-model-contract.test.ts:32-40` checks queue-full, timeout, waiter removal, and release behavior by source strings only.
+  - `apps/web/src/__tests__/clip-model-contract.test.ts:42-50` checks abort-signal threading by source strings only.
+- Concrete failure scenario:
+  - A race in waiter removal causes an aborted or timed-out semantic-search request to remain queued and later run anyway, or a thrown inference leaves `activeInferenceCount` elevated. The contract test still passes as long as matching text remains in the file, but production requests can hang, overrun memory, or return work for a disconnected client.
+- Suggested fix:
+  - Factor the pool into an injectable helper or export a test-only resettable scheduler.
+  - Add deterministic fake-timer tests for: max pending rejection, timeout removal, abort removal, release after success, release after throw, and "aborted waiter is never executed".
+  - Exercise the semantic route with an aborted request and assert `embedTextReal` is not started after abort where practical.
+- TDD opportunity:
+  - Write a failing fake-timer test for `CLIP_INFERENCE_CONCURRENCY=1`, `MAX_PENDING=1`: start one held inference, queue one request, abort it, release the held inference, and assert the aborted queued task never runs.
 
-Failure scenario:
+### TEST22-03 - Real CLIP/offline model smoke coverage is skipped by default while production route tests use mocks
 
-A visitor opens a photo and hovers the previous/next controls. The remaining manual prefetch can render adjacent photo routes, and those routes call `recordPhotoView` as render-time side effects. The current "does not prefetch photo detail routes" test still passes because it never scans `photo-navigation.tsx` for `router.prefetch(getPhotoPath(...))`.
+- Severity: Low-Medium
+- Confidence: High
+- Status: Confirmed conditional gate blind spot
+- Evidence:
+  - `CLAUDE.md:110-114` documents production CLIP runtime settings including `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, `CLIP_MODELS_ROOT`, and inference queue limits.
+  - `CLAUDE.md:495-500` says real CLIP weights are not baked into the image and must be mounted at runtime.
+  - `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-9` says the real CLIP test is skipped by default when weights are absent.
+  - `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31` gates the suite on `CLIP_INTEGRATION=1`.
+  - `apps/web/src/__tests__/clip-offline-load.test.ts:15-18` says offline load only runs with `CLIP_OFFLINE_LOAD=1` and seeded weights.
+  - `apps/web/src/__tests__/clip-offline-load.test.ts:32-41` skips when required model files are missing.
+  - `apps/web/src/__tests__/semantic-route-production.test.ts:3-4` mocks `embedTextReal`, and `apps/web/src/__tests__/semantic-route-production.test.ts:41` asserts the mock was called.
+  - `apps/web/package.json:13` defines `test` as plain `vitest run`, with no CLIP integration lane.
+- Concrete failure scenario:
+  - A dependency, packaging, model-path, or ONNX/session change breaks real offline model loading. Unit and production-route tests still pass because they mock embedding, and the real smoke tests silently skip in the default gate. The first hard failure appears after deploy when `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
+- Suggested fix:
+  - Add a documented optional CI/job or deploy preflight lane that seeds minimal approved CLIP assets and runs `CLIP_OFFLINE_LOAD=1 CLIP_INTEGRATION=1 vitest run src/__tests__/clip-offline-load.test.ts src/__tests__/clip-semantic-integration.test.ts`.
+  - If full weights are too heavy for every run, add a lightweight "model mount/readability/session bootstrap" script that fails loudly when production CLIP is enabled but weights are absent or incompatible.
+  - Make the skip visible in normal test output with an explicit post-test summary or dedicated npm script.
+- TDD opportunity:
+  - Add a failing preflight test around the production env contract: when `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, the configured `CLIP_MODELS_ROOT` must contain the required files and the loader must initialize at least once.
 
-Suggested fix/test:
+### TEST22-04 - Deployment command drift in docs is not caught by the deployment contract test
 
-Prefer a behavior regression: in Playwright or a route-level harness, hover previous/next and assert no analytics insert/rate-limit consumption occurs until navigation commits. At minimum, expand the source contract to scan all photo-navigation/client files for `router.prefetch(` targeting `/p/` routes, and rename the test if hover prefetch remains intentional.
+- Severity: Low-Medium
+- Confidence: High
+- Status: Confirmed gate blind spot
+- Evidence:
+  - `README.md:188` shows the corrected command with `--env-file apps/web/.env.local`.
+  - `CLAUDE.md:67` still shows `docker compose -f apps/web/docker-compose.yml up -d --build` without the env file.
+  - `CLAUDE.md:657` repeats the stale deployment checklist command without the env file.
+  - `apps/web/src/__tests__/deploy-script-contract.test.ts:12-18` builds a `deploymentDocs` string from `deploy.sh`, `AGENTS.md`, `CLAUDE.md`, `README.md`, and `apps/web/README.md`.
+  - `apps/web/src/__tests__/deploy-script-contract.test.ts:56-60` asserts `--env-file` only in `deployScript`, not in documented manual compose commands.
+  - `apps/web/src/__tests__/deploy-script-contract.test.ts:40-45` and `apps/web/src/__tests__/deploy-script-contract.test.ts:63-68` use `deploymentDocs` for other documentation invariants, proving the test already has the docs loaded but misses this drift.
+- Concrete failure scenario:
+  - An operator follows `CLAUDE.md:657`, runs compose without `--env-file`, and builds/deploys with missing public URL or runtime-derived build args. The deployment contract test passes because the script is correct, even though the operator-facing runbook is wrong.
+- Suggested fix:
+  - Update the stale `CLAUDE.md` commands.
+  - Extend `deploy-script-contract.test.ts` to scan documented `docker compose ... up -d --build` commands and require `--env-file apps/web/.env.local` unless the line is explicitly marked as an example that assumes exported environment variables.
+  - Keep this as a docs/gate test because the failure mode is operator behavior, not app code behavior.
+- TDD opportunity:
+  - First add a test that extracts compose build lines from `deploymentDocs`; it should fail on current `CLAUDE.md:67` and `CLAUDE.md:657`.
 
-TDD opportunity:
+### TEST22-05 - Browser upload quota claim/settle invariant relies on source topology checks instead of stateful failure tests
 
-Write the failing regression against `photo-navigation.tsx` first: assert no photo-detail route prefetch calls exist while analytics remains render-bound. Then either remove/replace the hover prefetch or move analytics to a committed-view client effect.
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed weak regression lock
+- Evidence:
+  - `apps/web/src/app/actions/images.ts:238-242` claims upload quota before several asynchronous validations.
+  - `apps/web/src/app/actions/images.ts:244-292` includes disk and topic failure branches that must settle the preclaimed quota.
+  - `apps/web/src/app/actions/images.ts:267-279` carries the key invariant comment: any `await` added between claim and final settle must roll back on throw.
+  - `apps/web/src/app/actions/images.ts:340-586` contains the per-file async processing loop and all-failed settlement path.
+  - `apps/web/src/__tests__/images-action-toctou-claim.test.ts:1-10` describes the test as a source-order guard against TOCTOU and rollback regressions.
+  - `apps/web/src/__tests__/images-action-toctou-claim.test.ts:18-31` asserts source ordering around the quota claim.
+  - `apps/web/src/__tests__/images-action-toctou-claim.test.ts:34-43` asserts there are exactly four zero-success settle call shapes by regex.
+  - `apps/web/src/__tests__/upload-tracker.test.ts:1-76` tests tracker primitives, but does not execute `uploadImages` failure paths with the tracker wired in.
+- Concrete failure scenario:
+  - A future awaited validation is inserted after quota claim and before the per-file `try`, or an existing branch starts throwing before a settle call. The regex count can still pass if the expected source snippets remain elsewhere, but the upload tracker leaks claimed bytes/count for up to the reset window, causing admins to hit false quota limits.
+- Suggested fix:
+  - Add behavior tests for `uploadImages` with mocked `getUploadTracker`, `statfs`, topic lookup, file save, and DB insert failures.
+  - Assert tracker state or `settleUpload` calls after: low disk, disk check throw, missing topic, topic query throw, save failure, DB insert failure, and all-files-failed.
+  - Consider centralizing claim settlement behind a small idempotent helper so tests can assert one observable cleanup path instead of source topology.
+- TDD opportunity:
+  - Start with a failing behavior test that forces a topic lookup throw after quota claim and asserts claimed quota returns to zero.
 
-### TEST21-02 - Backup download tests miss post-open failures that leak the validated file descriptor
+## Final Sweep and Skipped Files
 
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed missing regression test with live failure path
+I inspected the main app/test/gate surfaces that affect uploads, Lightroom ingest, semantic search/CLIP, deployment, admin E2E, and recently changed regression areas. I also used existing cycle 22 architect/performance reviews and the deferred plan as cross-checks, but the findings above are independently grounded in current files.
 
-Exact file+region:
+Skipped or intentionally not exhaustively reviewed:
 
-- `apps/web/src/app/api/admin/db/download/route.ts:56-64` opens a validated file handle and closes it only for the non-file branch.
-- `apps/web/src/app/api/admin/db/download/route.ts:66-74` awaits `getCurrentUser()` and `logAuditEvent()` before creating the stream that would own the descriptor.
-- `apps/web/src/app/api/admin/db/download/route.ts:87-99` catches errors but has no handle reference/close path.
-- `apps/web/src/__tests__/backup-download-route.test.ts:170-184` covers `open()` rejection before a descriptor exists, not a throw after `open()` succeeds.
+- Binary/static assets, uploaded-image fixtures, generated screenshots, and cache/build outputs.
+- Historical review and plan artifacts beyond the current cycle context and prior test-engineer baseline.
+- Full line-by-line review of every UI component where no test-gate or regression-lock signal surfaced during repository search.
+- Full execution of the entire test suite; this was a review-only pass focused on coverage design and gate blind spots. No runtime failures are claimed here.
 
-Failure scenario:
-
-If `getCurrentUser()` or another pre-stream step throws after `open()` succeeds, the route returns 500 and leaves the file descriptor open. Repeated failed backup downloads can exhaust descriptors in the single web process. Existing tests stay green because they only simulate a failed `open()`.
-
-Suggested fix/test:
-
-Add a route test where `openMock` returns a fake handle with `stat`, `createReadStream`, and `close` spies, then make `getCurrentUserMock` reject. Assert the response is 500, `close` is called exactly once, and no stream is created. Fix with a `fileHandle` variable outside the try or a nested try/finally that closes until ownership transfers to `createReadStream()`.
-
-TDD opportunity:
-
-Start with the failing fake-handle test; it is deterministic and does not require real filesystem streaming.
-
-### TEST21-03 - CLIP inference queue safety is still source-contract tested, not behavior-tested
-
-Severity: Medium
-Confidence: High
-Status: Confirmed weak assertion
-
-Exact file+region:
-
-- `apps/web/src/lib/clip-model.ts:65-160` owns `activeInferenceCount`, `inferenceWaiters`, queue-full rejection, timeout rejection, abort listener cleanup, and slot release.
-- `apps/web/src/lib/clip-model.ts:228-236` passes `InferenceSlotOptions` through `embedTextReal`.
-- `apps/web/src/app/api/search/semantic/route.ts:253-257` relies on that abort behavior for production text embedding.
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-50` only checks source strings such as `ClipInferenceQueueTimeoutError`, `signal.addEventListener('abort'`, and `}), options)`.
-
-Failure scenario:
-
-A refactor can preserve all strings while breaking the queue: aborted waiters may remain queued, timed-out waiters may still be woken by `inferenceWaiters.shift()?.resolve()`, `activeInferenceCount` may decrement too early, or a request aborted while waiting may still reach `model(...)`. The production semantic route would then waste scarce CLIP slots under cancelled requests.
-
-Suggested fix/test:
-
-Extract a small queue helper or add a test-only model/tokenizer injection seam. Use fake timers to saturate `CLIP_INFERENCE_CONCURRENCY`, enqueue a second request, abort it, and assert the fake model is not called. Add queue-full and timeout tests that prove removed waiters are never resolved later.
-
-TDD opportunity:
-
-Write the aborting-waiter test first against the smallest possible queue seam, then move the current implementation behind it without changing route behavior.
-
-### TEST21-04 - Real CLIP production behavior is opt-in and skipped by the default gate
-
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed conditional coverage gap
-
-Exact file+region:
-
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips real semantic ranking unless `CLIP_INTEGRATION=1`.
-- `apps/web/src/__tests__/clip-offline-load.test.ts:15-41` skips offline production-load proof unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist.
-- `apps/web/src/__tests__/semantic-route-production.test.ts:3-16` mocks `embedTextReal`, so default route tests do not load the real model.
-- `CLAUDE.md` documents production semantic search is active with real `jina-clip-v2` embeddings, so this is a live production mode rather than an experimental dead path.
-
-Failure scenario:
-
-The default blocking suite can pass while the production model layout, pinned revision, tokenizer/model compatibility, Korean/English ranking quality, or offline `CLIP_MODELS_ROOT` load path is broken. That failure would surface only during operator seeding/backfill or live semantic search.
-
-Suggested fix/test:
-
-Keep heavy model tests out of every PR if necessary, but add a scheduled or release-blocking CI lane with seeded weights that runs `clip-offline-load.test.ts` and `clip-semantic-integration.test.ts`. If CI storage is too costly, add an explicit pre-deploy command/checklist and make the deploy/activation docs point to a required evidence artifact.
-
-TDD opportunity:
-
-Start with the offline-load test as the release gate because it proves the exact production seed-to-runtime path without needing a full DB.
-
-### TEST21-05 - Failed-image retry snapshot forwarding is not behavior-tested or exhaustiveness-guarded
-
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed coverage gap
-
-Exact file+region:
-
-- `apps/web/src/lib/image-queue.ts:92-119` defines the processing snapshot fields.
-- `apps/web/src/lib/image-queue.ts:208-232` defines corresponding optional `ImageProcessingJob` fields.
-- Browser upload forwards the snapshot at `apps/web/src/app/actions/images.ts:500-526` and is behavior-tested at `apps/web/src/__tests__/images-actions.test.ts:239-276`.
-- Lightroom upload forwards the snapshot at `apps/web/src/app/api/admin/lr/upload/route.ts:479-505`, but the regression is source-regex only at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-394`.
-- Failed-image retry forwards the snapshot at `apps/web/src/app/actions/images.ts:1255-1271`, but `apps/web/src/__tests__/failed-image-retry.test.ts:87-103` only checks for a fresh snapshot, serialized persistence, and a generic `enqueueImageProcessing({ ... colorSignals ... })` payload.
-
-Failure scenario:
-
-Retrying a failed image is supposed to reprocess with the current admin settings. A future edit could drop `forceSrgbDerivatives`, chroma, effort, max-source-pixels, auto-alt, or semantic mode from the retry enqueue payload and tests would still pass. The image would retry with different behavior than a fresh browser upload or LR publish until another backfill corrects it.
-
-Suggested fix/test:
-
-Add a behavior test for `retryFailedImage` mirroring the browser upload assertion: mock `getGalleryConfigStrict` with distinctive values and assert `enqueueImageProcessingMock` receives every `ProcessingSettingsSnapshot` field. Longer term, add an exhaustiveness helper that maps `ProcessingSettingsSnapshot` to `ImageProcessingJob` in one place so TypeScript catches new fields.
-
-TDD opportunity:
-
-Write the retry behavior test first with a deliberately distinctive config. It should fail if any snapshot field is removed from the retry enqueue payload.
-
-## Final Missed-Issues Sweep
-
-Final sweep covered:
-
-- Existing top-level cycle-20 `test-engineer.md` and current cycle-21 code/review/plan artifacts.
-- Route/action inventory under `apps/web/src/app`, including public analytics, OG/search routes, backup download, upload serving, and server actions.
-- Scanner tests for auth, action-origin, public route rate limits, touch targets, focus-visible rings, privacy fields, migration journal/reconcile, and service-worker contracts.
-- Source-contract-heavy tests and whether their implementation targets still match current source.
-- Skipped/conditional suites, especially real CLIP and admin E2E coverage.
-- Upload/LR/retry processing snapshot parity tests.
-- Flake indicators: fake timers, wall-clock sleeps, `.skip`, screenshots without assertions, and build-output exclusion rules.
-
-No critical or high-severity test-engineering findings were confirmed. Confirmed findings: 5.
+No source-code edits, commits, pushes, or deploy actions were performed.

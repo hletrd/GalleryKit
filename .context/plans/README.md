@@ -2,6 +2,8 @@
 
 ## Active Plans
 
+- Cycle 22/100 Implementation Plan — TODO (`cycle-22-2026-06-30-plan.md`)
+- Cycle 22/100 Deferred Findings — TODO / deferred (`cycle-22-2026-06-30-deferred.md`)
 - Cycle 21/100 Implementation Plan — TODO (`cycle-21-2026-06-30-plan.md`)
 - Cycle 21/100 Deferred Findings — TODO / deferred (`cycle-21-2026-06-30-deferred.md`)
 - Cycle 19/100 Deferred Findings — TODO / deferred (`../../plan/plan-377-cycle19-deferred.md`)

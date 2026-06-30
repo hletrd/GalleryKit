@@ -1,3 +1,224 @@
+# Cycle 22 UI/UX Designer Reviewer - GalleryKit
+
+Reviewer: `ui-ux-designer-reviewer-style`
+Scope: GalleryKit public gallery/photo/search/map/share surfaces plus admin information architecture and operational UI
+Repo state reviewed: `85b0291f`
+Date: 2026-06-30
+Constraint: review artifact only; no source-code edits, no commit, no push.
+
+## Inventory
+
+Reviewed context and standing constraints:
+
+- `AGENTS.md` from the user prompt: autonomous execution, no source edits for this lane, GalleryKit-specific workflow rules, no commit/push for this task.
+- `CLAUDE.md:267-270`: product boundary is presentation/delivery of edited photographer intent; no culling/scoring/editing features.
+- `CLAUDE.md:308-314`: current photographer-facing color audit surfaces.
+- `CLAUDE.md:555-563`: prior photographer review history.
+- `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`: adapted only the general professional UI/UX review lens; ignored BurstPick-specific SwiftUI paths.
+
+Reviewed public surfaces:
+
+- `apps/web/src/components/nav-client.tsx:83-181` - public navigation, mobile expansion, search/theme/locale controls.
+- `apps/web/src/components/home-client.tsx:255-460` - public masonry information hierarchy, badges, loading/empty affordances, back-to-top.
+- `apps/web/src/components/search.tsx:290-524` - search dialog, keyboard/focus behavior, semantic-search toggle.
+- `apps/web/src/app/[locale]/error.tsx:22-53` and `apps/web/src/app/[locale]/not-found.tsx:7-49` - localized failure/dead-end IA.
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:158-283` - photo detail metadata/JSON-LD handoff into the viewer.
+- `apps/web/src/components/photo-viewer.tsx:355-704` - photo keyboard shortcuts, media stage, sidebar/bottom-sheet handoff.
+- `apps/web/src/components/lightbox.tsx:81-687` - full-screen viewer, slideshow, controls auto-hide, keyboard handling.
+- `apps/web/src/components/lightbox-color-pip.tsx:161-280` and `apps/web/src/components/info-bottom-sheet.tsx:237-539` - compact/mobile color and metadata surfaces.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:52-91` and `apps/web/src/components/map/map-client.tsx:97-141` - map/list accessibility fallback.
+
+Reviewed admin surfaces:
+
+- `apps/web/src/app/[locale]/admin/login-form.tsx` - login interaction evidence via existing browser artifact.
+- `apps/web/src/components/admin-nav.tsx:15-49` - protected admin navigation IA.
+- `apps/web/src/components/upload-dropzone.tsx:352-557` - upload staging, per-file tags, progress and first-run category affordance.
+- `apps/web/src/components/image-manager.tsx:424-595` - image management table, selection, tags, gamut/HDR badges, row actions.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:172-328` - settings save/backfill action model.
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-237` and `apps/web/src/components/ui/dialog.tsx:50-89` - token plaintext modal behavior.
+
+Browser/artifact evidence used:
+
+- Main designer lane artifact `.context/reviews/designer.md` reports agent-browser checks on `/en/privacy`, `/en/admin`, mobile nav at `390x844`, search focus/escape restore, and local DB-backed home failure.
+- Existing screenshot `.context/browser-home-mobile-expanded.png`: mobile home at 390 px shows compact public IA and no obvious horizontal overflow.
+- Existing screenshot `.context/admin-login.png`: admin login shows visible focus treatment and compact centered form.
+
+## Findings
+
+### 1. Route error state drops the public shell and can loop users back into the same failure
+
+Severity: Medium
+Confidence: High
+Status: Open
+Area: information architecture, error-state design, keyboard recovery
+
+Evidence:
+
+- `apps/web/src/app/[locale]/error.tsx:22-53` renders only a standalone `main` with an error card, `Try again`, and a localized home link.
+- `apps/web/src/app/[locale]/not-found.tsx:7-11` explicitly notes that a stripped dead-end page was a prior wayfinding failure, and `apps/web/src/app/[locale]/not-found.tsx:20-47` now includes `Nav`, `main`, and `Footer`.
+- Browser evidence from `.context/reviews/designer.md`: local `/en` with DB unavailable exposed only skip link, `main`, error region, `Try again`, and `Return to Gallery`; the console showed a failed `topics` query.
+
+Failure scenario:
+
+A visitor lands on the home page during a transient DB outage. The visible recovery link points to the same gallery entry route that just failed, while search, topics, locale switch, theme, footer links, and admin/privacy routes disappear. Keyboard users can activate two controls, but neither gives broader wayfinding.
+
+Suggested fix:
+
+Make the localized route error boundary use the same public shell pattern as `not-found`: render `Nav`, keep `main#main-content`, and render `Footer`. On the localized home route, de-emphasize or hide a "back to gallery" link that resolves to the current failed route; prefer `Try again` plus stable fallback links.
+
+### 2. Site-wide re-encode is exposed as a one-click settings action
+
+Severity: High
+Confidence: High
+Status: Open
+Area: interaction safety, operational UX, photographer delivery trust
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:172-211` calls `triggerBackfill()` directly from `handleBackfill`.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:297-305` documents that the action is visible whenever the gallery has photos, including manual pipeline-version backfills.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:315-328` wires the visible CTA straight to `onClick={handleBackfill}` with no confirmation step.
+- `CLAUDE.md:331-341` describes this as a real in-app color-pipeline backfill that re-encodes existing photos under shared DB/CPU constraints.
+
+Failure scenario:
+
+An admin reviewing settings after an event taps the re-encode CTA unintentionally. The UI can queue a broad background rewrite of existing photo derivatives, affect cache state, and consume constrained host resources before the admin has confirmed scope, count, or timing.
+
+Suggested fix:
+
+Insert a confirmation dialog before `triggerBackfill()`. Show affected-photo count, which derivative settings will be applied, that originals are untouched, expected resource impact, and whether cancellation is available. For large galleries, require a typed confirmation phrase and keep the action visually distinct from ordinary "save settings".
+
+### 3. Token plaintext modal advertises dismiss controls that are intentionally blocked
+
+Severity: Medium
+Confidence: High
+Status: Open
+Area: modal affordance, focus trap behavior, screen-reader feedback
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:188-195` refuses to close the plaintext token dialog unless `plaintextAcknowledged` is true.
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:197-237` renders the dialog content, acknowledgement checkbox, and disabled Done button, but does not suppress the default close button.
+- `apps/web/src/components/ui/dialog.tsx:50-89` defaults `showCloseButton = true` and renders a top-right `DialogPrimitive.Close` button.
+
+Failure scenario:
+
+After creating a Lightroom token, an admin presses Escape or activates the visible X before checking the acknowledgement box. Nothing closes, but the UI does not explain why. The result is a modal that looks dismissible and behaves non-dismissibly, which is especially poor inside a focus trap.
+
+Suggested fix:
+
+While acknowledgement is false, render `DialogContent showCloseButton={false}` and block outside/Escape dismiss with explicit helper text. Alternatively, allow close attempts to move focus to the checkbox and announce a short inline message: "Acknowledge that the token was saved before closing."
+
+### 4. Public masonry P3 badge is visually present but hidden from assistive tech
+
+Severity: Medium
+Confidence: High
+Status: Open
+Area: accessibility, color independence, photographer metadata visibility
+
+Evidence:
+
+- `apps/web/src/components/home-client.tsx:383-391` renders a visible `P3` badge for wide-gamut images.
+- `apps/web/src/components/home-client.tsx:386-389` sets that badge to `aria-hidden="true"`.
+- `CLAUDE.md:308-314` identifies color/HDR chips as a real photographer-facing audit surface, not decoration.
+
+Failure scenario:
+
+A screen-reader user scanning the gallery grid hears the photo link/title but does not get the same wide-gamut signal that sighted users see. For a gallery whose core promise is accurate color delivery, hiding the P3 cue makes the public grid less truthful for non-visual users.
+
+Suggested fix:
+
+Keep the visual badge but expose a concise accessible label, for example `role="img" aria-label="Display P3"` or a visually hidden sibling inside the photo link. If the badge remains display-gated by device capability, ensure the accessible cue appears under the same condition so screen-reader output matches visible state.
+
+### 5. Admin image management still uses a desktop table as the only layout
+
+Severity: Medium
+Confidence: High
+Status: Open
+Area: responsive behavior, admin workflow, interaction density
+
+Evidence:
+
+- `apps/web/src/components/image-manager.tsx:424-448` renders a full table with selection, preview, title, filename, topic, tags, gamut, date, and actions columns.
+- `apps/web/src/components/image-manager.tsx:467-475` reserves a fixed `h-32 w-32` preview in each row.
+- `apps/web/src/components/image-manager.tsx:494-528` puts a `min-w-[200px]` tag editor inside a table cell.
+- `apps/web/src/components/image-manager.tsx:547-582` places edit/delete actions at the far right of the row.
+
+Failure scenario:
+
+On a phone or narrow tablet, an admin checking uploads has to pan horizontally between the thumbnail, filename, tags, color status, and actions. That breaks the visual grouping between media and controls and raises the chance of editing or deleting the wrong image during a post-shoot upload pass.
+
+Suggested fix:
+
+Keep the table for desktop, but add a compact mobile media-list below the table breakpoint: thumbnail, title/file, topic/date, P3/HDR, tags, and actions in one vertical row/card. Keep bulk selection in a sticky toolbar so selected count and destructive actions stay visible while scrolling.
+
+### 6. Upload staging becomes cramped on phones before the actual upload starts
+
+Severity: Low-Medium
+Confidence: Medium
+Status: Open
+Area: responsive behavior, batch-upload workflow
+
+Evidence:
+
+- `apps/web/src/components/upload-dropzone.tsx:459-466` renders selected files in `grid grid-cols-2 md:grid-cols-3`.
+- `apps/web/src/components/upload-dropzone.tsx:501-531` puts filename, size, inherited tags, and a per-file `TagInput` into each preview card.
+- Existing screenshot `.context/browser-home-mobile-expanded.png` confirms the 390 px review viewport used for mobile checks; two upload cards at that width would leave roughly half-width columns for tag editing and long camera filenames.
+
+Failure scenario:
+
+An admin uploads several photos from a phone and needs to add or verify per-file tags. Two columns leave little room for filenames and the tag combobox, increasing truncation and making per-file corrections feel fussy before the upload has even started.
+
+Suggested fix:
+
+Use one selected-file column below `sm`, then two columns at `sm` and three at `md`. Keep the thumbnail compact but give filename and per-file tags full row width. For larger batches, consider a sticky upload footer with file count and the primary upload button.
+
+### 7. Admin navigation is a flat ten-link wrap with no task grouping
+
+Severity: Low-Medium
+Confidence: Medium
+Status: Open
+Area: information architecture, professional workflow fit
+
+Evidence:
+
+- `apps/web/src/components/admin-nav.tsx:15-26` defines ten peer links: Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, DB, Analytics.
+- `apps/web/src/components/admin-nav.tsx:28-49` renders them as one wrapping horizontal nav group.
+
+Failure scenario:
+
+As GalleryKit grows, operationally different tasks sit at the same IA level: publishing/upload work, content taxonomy, site settings, account/token security, database maintenance, and analytics. On narrow screens this becomes a wrapped link cloud rather than a task model, so admins have to remember labels instead of navigating by workflow.
+
+Suggested fix:
+
+Group admin IA into stable clusters such as Content, Publishing, Site, Security, Operations, and Insights. On desktop this can remain a compact nav with separators or sections; on mobile it should become a menu or grouped list rather than an unstructured wrap.
+
+## Positive Evidence
+
+- Public search has solid focus management: `apps/web/src/components/search.tsx:313-324` restores trigger focus, `:370-383` creates a modal dialog, and `:391-421` implements combobox keyboard state with IME guards.
+- The mobile public nav has explicit 44 px controls: `apps/web/src/components/nav-client.tsx:99-107` for expansion and `:160-178` for search/theme/locale controls.
+- Photo viewer and lightbox shortcuts are discoverable through `aria-keyshortcuts`/titles on core controls: `apps/web/src/components/photo-viewer.tsx:559-626` and `apps/web/src/components/lightbox.tsx:551-657`.
+- Map has a non-map fallback list and skip affordance: `apps/web/src/app/[locale]/(public)/map/page.tsx:59-89`.
+- The lightbox color pip no longer has the older accessible-name gap: `apps/web/src/components/lightbox-color-pip.tsx:169-176` includes primaries/transfer/HDR in the button label.
+- Similar-photo fallback labels are now unique: `apps/web/src/components/similar-photos.tsx:136-144` falls back to `Photo {imageId}`.
+- The shared `getConcisePhotoAltText` now accepts both `tag_names` and `tags`: `apps/web/src/lib/photo-title.ts:85-125`.
+
+## Final Sweep
+
+I did not edit source code, run destructive commands, commit, or push. I checked the existing main designer review and did not copy its wording; overlapping issues are re-stated only where this lane independently confirmed the source evidence.
+
+Previously open or likely issues that I am not re-raising:
+
+- Generic tag-only photo alt text appears fixed by `apps/web/src/lib/photo-title.ts:85-125`.
+- Repeated "Photo" similar-result links appear fixed by `apps/web/src/components/similar-photos.tsx:136-144`.
+- Lightbox color pip screen-reader color metadata appears fixed by `apps/web/src/components/lightbox-color-pip.tsx:169-176`.
+- Admin gamut/HDR visibility appears improved by `apps/web/src/components/image-manager.tsx:530-540`.
+- Mobile public nav and admin login touch/focus behavior had browser evidence in `.context/reviews/designer.md` and `.context/admin-login.png`; I did not find a new blocker there.
+
+Remaining validation gap: I did not run a fresh local browser session because DB-backed routes were already known unavailable in the main designer lane. Findings above are grounded in source references and existing browser artifacts.
+
+---
+
 # Cycle 21 UI/UX Designer Review - GalleryKit
 
 Reviewer: `ui-ux-designer-reviewer`
