@@ -10,6 +10,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey, SemanticSearchMode } from '@/lib/gallery-config-shared';
+import { buildChangedGallerySettingsPayload } from '@/lib/settings-submit-payload';
 import { Switch } from '@/components/ui/switch';
 import {
     AlertDialog,
@@ -261,16 +262,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
         startTransition(async () => {
             try {
                 // Only send changed fields to reduce transaction size and conflict window
-                const changed = Object.fromEntries(
-                    Object.entries(settings)
-                        .map(([key, value]) => {
-                            if (key === 'image_sizes' && value.trim()) {
-                                return [key, normalizeConfiguredImageSizes(value) ?? value] as const;
-                            }
-                            return [key, value] as const;
-                        })
-                        .filter(([k, v]) => v !== initialRef.current[k])
-                );
+                const changed = buildChangedGallerySettingsPayload(settings, initialRef.current);
                 if (Object.keys(changed).length === 0) {
                     toast.info(t('settings.noChanges'));
                     return;

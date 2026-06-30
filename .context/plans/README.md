@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 53/100 Implementation Plan — active; Settings production-mode action boundary, healed-production clear path, and ledger closure scheduled (`cycle-53-2026-07-01-plan.md`)
-- Cycle 53/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-53-2026-07-01-deferred.md`)
+- Cycle 54/100 Implementation Plan — active; Cycle 53 ledger closure and Settings inactive-production payload coverage scheduled (`cycle-54-2026-07-01-plan.md`)
+- Cycle 54/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-54-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 53/100 Implementation Plan — active; Settings production-mode action boundary, healed-production clear path, and ledger closure scheduled (`cycle-53-2026-07-01-plan.md`)
+- Cycle 54/100 Implementation Plan — active; Cycle 53 ledger closure and Settings inactive-production payload coverage scheduled (`cycle-54-2026-07-01-plan.md`)
+- Cycle 54/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-54-2026-07-01-deferred.md`)
+- Cycle 53/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 54 started from deployed `1a65247c` (`cycle-53-2026-07-01-plan.md`)
 - Cycle 53/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-53-2026-07-01-deferred.md`)
 - Cycle 52/100 Implementation Plan — implementation committed/pushed; Cycle 53 started from deployed `17db8e38` (`cycle-52-2026-07-01-plan.md`)
 - Cycle 52/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-52-2026-07-01-deferred.md`)
