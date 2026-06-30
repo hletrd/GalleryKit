@@ -1,99 +1,77 @@
-# Verifier Review - Cycle 23
+# Verifier Review - Cycle 24/100
 
-Date: 2026-06-30 KST
-HEAD reviewed: `45208b21` (`test(cycle22): ✅ lock review regression contracts`)
-Scope: evidence-based verifier review of the current repository against `AGENTS.md`, `CLAUDE.md`, cycle-23 review artifacts, live source behavior, tests, scripts, migrations, and cross-file invariants. Source code was not edited. This review artifact is the only file intentionally changed by this verifier pass.
+Role: verifier  
+Review target: current HEAD `0cc094dd76d51e88fe163c0b7075e3f0b341f74c` (`fix(deploy): allow mounted deploy env ownership`)  
+Workspace: `/Users/hletrd/flash-shared/gallery`  
+Date: 2026-06-30
 
-## Inventory Built First
+## Scope And Inventory
 
-Required instructions and project docs examined:
+I reviewed current HEAD, not prior-cycle assumptions. `git status --short` was clean before the review artifact edit.
 
-- `AGENTS.md`.
-- `CLAUDE.md`.
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- `README.md`.
-- `apps/web/README.md`.
-- `package.json`.
-- `apps/web/package.json`.
+Relevant behavior under review: the repo-level deploy helper must read the gitignored root `.env.deploy` when present, allow this checkout's mounted env file even when its numeric owner differs from the local user, keep unsafe permission refusal before sourcing, derive the SSH deploy command from config, and delegate production deploy to `apps/web/deploy.sh` without weakening the documented Docker prune/data-persistence invariants.
 
-Cycle/review artifacts examined:
+Relevant files inventoried and examined:
 
-- `.context/reviews/archive/_aggregate-c23-deep.md`.
-- `.context/reviews/archive/code-reviewer-c23.md`.
-- `.context/reviews/archive/cycle23-comprehensive-review.md`.
-- Existing `.context/reviews/verifier.md` from cycle 22 before replacement.
+- Deploy helper and direct entrypoint: `scripts/deploy-remote.sh`, `package.json`.
+- Deploy docs/contracts: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.env.deploy.example`.
+- Host deploy/runtime config: `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`.
+- Build-context persistence guards: `.dockerignore`, `apps/web/.dockerignore`.
+- Test contracts directly covering this surface: `apps/web/src/__tests__/deploy-script-contract.test.ts`, plus related source-contract references in `apps/web/src/__tests__/cycle-21-source-contracts.test.ts` and `apps/web/src/__tests__/client-source-contracts.test.ts`.
 
-Implementation, test, and operations inventory:
+I also ran repo-wide targeted searches for deploy/env/prune terms across tracked docs, plans, reviews, tests, and scripts to avoid sampling only the changed file.
 
-- Built a tracked-file inventory of 2,578 repo files.
-- Counted 597 tracked review-relevant files across `apps/web/src/**`, `apps/web/scripts/**`, `apps/web/drizzle/**`, `apps/web/e2e/**`, configs, deploy files, `README.md`, `CLAUDE.md`, and `AGENTS.md`.
-- Directly inspected the live server actions, API routes, core libraries, schema/migrations, deploy scripts, tests, and UI surfaces implicated by current and adjacent review history.
-- Re-verified archived cycle-23 findings against current implementation. The prior batch-tag, bulk-delete, topic-label sanitization, topic-alias sanitization, topic-alias delete audit, and restore-cancel i18n findings are already fixed in current code.
+## Confirmed Issues
 
-Repository-wide/static sweeps run:
+None.
 
-- Route/action auth and rate-limit surface sweeps for `withAdminAuth`, `requireSameOriginAdmin`, mutating handlers, public handlers, and rate-limit pre-increment helpers.
-- Advisory-lock sweep for every `GET_LOCK` call site and `isAdvisoryLockAcquired` use.
-- Insert-ID sweep for `insertId`, `safeInsertId`, and remaining manual coercions.
-- Privacy-field sweep across `schema.ts`, `data.ts`, `search-enrichment-fields.ts`, and `privacy-fields.test.ts`.
-- Migration journal/SQL file existence and timestamp-order check. The historical non-monotonic journal entry remains present and is documented/guarded by the custom migrator; no missing SQL file was found.
-- Node-runtime sweep for Node-only APIs in App Router route handlers.
-- JSON-LD/dangerous HTML sweep; inspected all live `dangerouslySetInnerHTML` JSON-LD sites and confirmed they use `safeJsonLd`.
-- Deployment-doc sweep for stale `docker compose ... --build` commands.
+The HEAD diff is limited to `scripts/deploy-remote.sh:61-63`, changing the prior non-owner hard failure into a warning. The surrounding checks still reject group/world write or execute bits before sourcing the env file at `scripts/deploy-remote.sh:65-73`, and the file is sourced only after those checks at `scripts/deploy-remote.sh:75-78`.
 
-Validation run:
+Why this matches the contract:
 
-- `npm run lint:api-auth --workspace=apps/web`: passed.
-- `npm run lint:action-origin --workspace=apps/web`: passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
-- `npm run lint --workspace=apps/web`: passed.
-- `npm run typecheck --workspace=apps/web`: passed.
-- Targeted Vitest: `admin-tokens.test.ts`, `lr-tokens-action.test.ts`, `smart-collections.test.ts`, `advisory-locks.test.ts`, `deploy-script-contract.test.ts`, `privacy-fields.test.ts`, `check-api-auth.test.ts`, `check-action-origin.test.ts`, `check-public-route-rate-limit.test.ts`: passed, 9 files / 199 tests.
-- Full Vitest: passed, 265 files / 2,485 tests; 2 files / 4 tests skipped.
+- Root `.env.deploy` precedence and fallback are implemented at `scripts/deploy-remote.sh:22-29`, matching `CLAUDE.md:662-671`, `README.md:120-130`, `AGENTS.md:17-18`, and `.env.deploy.example:1-4`.
+- The deploy command remains config-derived from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `DEPLOY_PATH`, and optional `DEPLOY_REMOTE_SCRIPT` at `scripts/deploy-remote.sh:31-52`; `DEPLOY_CMD` remains the explicit escape hatch at `scripts/deploy-remote.sh:80-83`.
+- `package.json:11-22` routes `npm run deploy` to `./scripts/deploy-remote.sh`.
+- Host deploy still starts the stack before pruning at `apps/web/deploy.sh:28-59`, and `docker volume prune` remains `-f` only, not `-a`.
+- Compose persistence still uses narrow bind mounts for data, uploads, resources, and read-only site config at `apps/web/docker-compose.yml:24-28`, matching the persistence guarantees in `AGENTS.md:19`, `CLAUDE.md:471-473`, and `README.md:196-198`.
+- Build contexts still exclude mutable runtime public data at `.dockerignore:16-20` and `apps/web/.dockerignore:7-10`.
 
-Workspace note: `.context/reviews/code-reviewer.md` was already modified before this verifier wrote the report. I left it untouched.
+## Likely Issues
 
-## Confirmed Findings
+None identified.
 
-### V23-01 - Lightroom token creation drops non-number MySQL `insertId` values to `0`
+The only subtle area is local secret-file hygiene: `scripts/deploy-remote.sh:69` intentionally rejects group/world write or execute bits, not group/world read bits. That is consistent with the HEAD commit's stated constraint and preserves the pre-existing permission model. I did not classify it as a current defect because the docs describe `.env.deploy` as gitignored SSH target configuration, not as a private-key material file, and the current local mounted `.env.deploy` is `0644`, non-owner, and readable.
 
-Severity: Low  
-Confidence: High  
-Status: Confirmed code defect  
-Category: correctness / audit accuracy
+## Risks Needing Manual Validation
 
-Evidence:
+1. Live remote deploy was not exercised in this verifier pass.
+   - Severity: Low
+   - Confidence: High
+   - Code/docs region: `scripts/deploy-remote.sh:85-86`, `CLAUDE.md:463-473`, `apps/web/deploy.sh:10-32`.
+   - Scenario: local helper validation passes, but the remote host rejects SSH, `git pull --ff-only`, Docker build, or runtime startup for environment-specific reasons.
+   - Fix/validation: run `npm run deploy` only in an authorized deploy iteration, then probe `/api/live` and inspect deploy output for the post-`up -d` prune/`df -h /` lines.
 
-- `apps/web/src/lib/admin-tokens.ts:221-228` inserts the token row, types the result header as `{ insertId?: number }`, and returns `0` unless `typeof header.insertId === 'number'`.
-- The repo already has a canonical helper for this exact risk: `apps/web/src/lib/validation.ts:174-199` documents that MySQL `insertId` may be `BigInt`, validates safe coercion, and throws on unsafe overflow.
-- Current insert-ID call sites for image upload, admin-user create, group-share create, and LR upload use `safeInsertId`: `apps/web/src/app/actions/images.ts:464-465`, `apps/web/src/app/actions/admin-users.ts:153-154`, `apps/web/src/app/actions/sharing.ts:262-263`, and `apps/web/src/app/api/admin/lr/upload/route.ts:458-462`.
-- `createLrToken` trusts the returned ID for the audit target: `apps/web/src/app/actions/lr-tokens.ts:87-99`.
-- `apps/web/src/__tests__/admin-tokens.test.ts` covers token format, verification, scope parsing, and mark-used behavior, but does not cover `createToken` with `insertId: BigInt(7)`.
+2. Non-owner env behavior depends on the mounted file being readable by the current user.
+   - Severity: Low
+   - Confidence: High
+   - Code/docs region: warning at `scripts/deploy-remote.sh:61-63`, source at `scripts/deploy-remote.sh:75-78`.
+   - Scenario: another checkout has a non-owned `.env.deploy` with mode `0600`; the helper no longer fails at the owner check, but `source "$ENV_FILE"` fails with permission denied.
+   - Fix/validation: keep the mounted file readable by the local user or set `DEPLOY_ENV_FILE` to a readable path. If future policy requires non-owner `0600` support, use filesystem ownership/ACLs outside this script rather than weakening the source-time permission boundary.
 
-Failure scenario:
+## Validation Evidence
 
-If mysql2 returns a `BigInt` insert ID for `admin_tokens` under driver/server settings or a high auto-increment value, the row is created successfully but `createToken` returns `{ id: 0 }`. The plaintext token still works because verification is hash-based, but the creation audit event records target `admin_token:0`, and callers receive a row ID that never existed. If the value is beyond `Number.MAX_SAFE_INTEGER`, the current code also fails open to `0` instead of throwing like the other protected insert-ID paths.
+- `bash -n scripts/deploy-remote.sh && bash -n apps/web/deploy.sh` passed.
+- Temporary-env smoke: `DEPLOY_ENV_FILE=<0600 temp file>` with `DEPLOY_CMD='printf helper-ok'` executed successfully.
+- Temporary-env permission checks: mode `0622` and mode `0611` both refused before sourcing with "Refusing to source deploy env file with unsafe permissions".
+- Temporary-env read-permitted check: mode `0644` executed successfully, matching the intended local mounted `.env.deploy` behavior.
+- `npm test --workspace=apps/web -- --run src/__tests__/deploy-script-contract.test.ts` passed: 1 file, 8 tests.
+- `npm run typecheck --workspace=apps/web -- --help` unintentionally ran the app typecheck prerequisite before printing npm help for the second script; the app typecheck portion passed through Next route type generation and `tsc -p tsconfig.typecheck.json --noEmit`. I did not count this as full typecheck coverage because `typecheck:scripts` was not run normally.
+- Local `.env.deploy` metadata was checked without reading secret values: regular file, mode `644`, uid/gid `3000`, readable by current user, not owned by current user. `.env.deploy` is gitignored by `.gitignore:18`.
 
-Concrete fix:
+## Final Sweep And Skipped Files
 
-Import `safeInsertId` into `apps/web/src/lib/admin-tokens.ts`, widen the header type to `{ insertId?: number | bigint }`, and replace the manual `typeof === 'number' ? ... : 0` fallback with `safeInsertId(header?.insertId ?? 0)` or an explicit throw when the header is missing. Add a unit test for `createToken` where mocked `db.execute` returns `[{ insertId: BigInt(7) }, []]`, and another for an unsafe BigInt overflow if you want parity with `validation.test.ts`.
+Final sweep covered deploy helper command construction, env-file precedence, unsafe permission checks, config-driven SSH derivation, docs alignment, Docker deploy prune ordering, bind-mount persistence guarantees, Docker build-context excludes, and direct test contracts for those invariants.
 
-## Likely / Manual-Validation Risks
+Skipped as not relevant to this HEAD behavior: application feature source under `apps/web/src/**` outside the deploy/source-contract tests, migrations, binary/image fixtures, generated `.next` output, screenshots, local `.omx`/`.omc` state, and historical `.context` artifacts except where targeted searches established deploy-contract context. I did not read secret contents from `.env.deploy` or `apps/web/.env.local`.
 
-No additional likely or manual-validation-only risks were found that I would elevate as actionable this cycle. Known carry-forward items remain documented in prior review aggregates, including CSP `style-src 'unsafe-inline'`, the large `data.ts` module, API-route CSP coverage, process-local runtime state under single-instance topology, and historical migration-journal non-monotonicity.
-
-## Re-verified Correct / Not Findings
-
-- Archived C23 UI double-submit findings are fixed: `image-manager.tsx` now guards Enter submission with `!isBatchAddingTag` and disables/settles the bulk-delete confirmation while `isBulkDeleting`.
-- Archived C23 topic sanitization/audit findings are fixed: topic labels use `sanitizeAdminString`, aliases use `requireCleanInput`, and `deleteTopicAlias` logs only when `affectedRows > 0`.
-- Cycle-22 advisory-lock issue is fixed: all current `GET_LOCK` call sites use `isAdvisoryLockAcquired`, which accepts `1`, `BigInt(1)`, and `'1'`.
-- Cycle-22 smart-collection tag-value issue is fixed: tag predicates now require string values before compile.
-- Cycle-22 Docker compose docs drift is fixed in `README.md`, `CLAUDE.md`, `apps/web/deploy.sh`, and the deploy contract test.
-- JSON-LD script injection sites inspected in public photo/home/topic/collection/timeline/year pages route through `safeJsonLd`.
-- API/admin route auth, mutating action origin guards, and public mutating route rate-limit gates passed their dedicated scanners.
-
-## Final Missed-Issues Sweep / Skipped Files
-
-Final sweep covered docs, current and archived cycle-23 reviews, package scripts, deploy helpers, Docker/nginx config, migrations and journal, schema, data/privacy fields, server actions, API routes, admin DB backup/restore, advisory locks, upload/processing paths, CLIP semantic search, public analytics/actions, OG routes, service-worker contracts, JSON-LD render sites, i18n messages touched by reviewed flows, and relevant unit tests.
-
-Skipped or not exhaustively read manually: generated/runtime-heavy paths (`node_modules`, `.next`, local uploads/data, screenshots, binary fixtures, and build cache files) and older historical plan/review archives outside the current/adjacent cycle evidence chain. Those were not current executable behavior. Playwright E2E was not rerun because the confirmed finding is a server-side token ID/audit edge, and the full Vitest/unit plus static gates already cover the relevant branch.
+Verdict: no confirmed or likely correctness issue in current HEAD for the deploy-helper ownership change.

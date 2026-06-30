@@ -7,6 +7,7 @@ import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { isFeedNotModified } from '@/lib/feed-conditional';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { getTranslations } from 'next-intl/server';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -46,10 +47,11 @@ export async function GET(
         return new NextResponse(null, { status: 404 });
     }
 
-    const [seo, topicData, config] = await Promise.all([
+    const [seo, topicData, config, tCommon] = await Promise.all([
         getSeoSettings(),
         getTopicBySlug(topicSlug),
         getGalleryConfig(),
+        getTranslations({ locale, namespace: 'common' }),
     ]);
 
     if (!topicData) {
@@ -74,7 +76,7 @@ export async function GET(
     const entries = rows.map((img) => {
         const photoPath = localizePath(locale, `/p/${img.id}`);
         const photoUrl = `${baseUrl}${photoPath}`;
-        const title = getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`);
+        const title = getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`);
 
         const jpegSized = sizedImageFilename(img.filename_jpeg, feedJpegSize, config.imageSizes);
         const mediaUrl = absoluteImageUrl(`/uploads/jpeg/${jpegSized}`, baseUrl);

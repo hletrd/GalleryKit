@@ -1,235 +1,167 @@
-# Cycle 23 Critic Review
+# Cycle 24 Critic Review
 
-Reviewer: cycle 23 critic
-Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `45208b2181add5db64395e4dac30134cfd1fcf35` on `master`
-Source edits: none. This review artifact is the only file written.
-Commit/push/deploy: not performed because this task asked for a review artifact only and production deploys are outside this review write.
+Reviewer: cycle 24 critic  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `0cc094dd76d51e88fe163c0b7075e3f0b341f74c` on `master`  
+Change surface reviewed: HEAD commit `fix(deploy): 🐛 allow mounted deploy env ownership`, which changes only `scripts/deploy-remote.sh`.  
+Source edits: none. This review artifact is the only file written by this critic pass.
 
-## Inventory Examined
+## Inventory First
 
-Guidance and current review state:
+Review-relevant tracked files were inventoried before findings:
 
-- `AGENTS.md:1-49` for workspace git, deploy, schema, quality-gate, and review-output rules.
-- `CLAUDE.md:1-671` for architecture, security model, runtime topology, color/HDR, migration, CLIP, deploy, and testing contracts.
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md:1-145` for the required review stance.
-- Current cycle-22 artifacts and follow-up plan state: `.context/reviews/_aggregate.md:1-420`, `.context/reviews/critic.md` previous content, `.context/plans/cycle-22-2026-06-30-plan.md:1-105`, `.context/plans/cycle-22-2026-06-30-deferred.md:1-74`.
-- Recent post-review commits: `4b3a4107`, `f9c03aff`, `bb62c0be`, `88ea74e1`, and `45208b21`.
+- Live source/config/docs set: 590 tracked files across `apps/web/src`, `apps/web/e2e`, `apps/web/scripts`, root `scripts`, `apps/web/drizzle`, manifests, deploy files, CI, `README.md`, `CLAUDE.md`, and `AGENTS.md`.
+- Runtime app breadth examined: app routes/pages, API routes, server actions, auth/session/origin guards, public search/share routes, data selectors/privacy guards, upload ingest, image queue, image processing, restore/backup, migrations, deployment, Docker, settings, rate limits, CLIP activation, nav/search/photo-viewer UI surfaces, unit tests, and e2e tests.
+- Historical `.context/` and `plan/` archives were inventoried as context but not treated as live product code. The current review output file is the only `.context` file intentionally modified.
 
-Repository breadth checked:
+Current worktree note: `git status --short` showed an unrelated modified `.context/reviews/verifier.md` before this file write. It was not read as source-of-truth for this review and was not modified.
 
-- App/router/actions/API: browser upload, Lightroom/PAT upload, public semantic and similar search routes, OG routes, public server actions, admin DB actions, settings, tokens, topics, collections, and route/error surfaces.
-- Core libraries: DB pool, advisory locks, image queue, image processing entry points, upload tracker, restore maintenance, data selectors/privacy guards, settings hash, smart collections, serve-upload, audit/view retention, CLIP model/path/limits, rate limits, validation, storage quarantine, and migration runner.
-- Deploy/config/docs: root/web package manifests, Dockerfile, compose, nginx, deploy helper docs, README files, `.env.local.example`, `CLAUDE.md`, migrations, journal, and migration tests.
-- Tests/source contracts: cycle-22 source contracts, advisory locks, smart collections, migration journal, privacy fields, audit retention, serve-upload, topic slug registry, semantic scan/route tests, CLIP model/offline gated tests, and relevant UI source-contract tests.
+## Validation Evidence
 
-Validation evidence:
+- `git rev-parse --short HEAD` -> `0cc094dd`.
+- `git show --stat --name-only HEAD` confirmed the HEAD change surface is only `scripts/deploy-remote.sh`.
+- `bash -n scripts/deploy-remote.sh` passed.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm test --workspace=apps/web -- deploy-script-contract.test.ts` passed: 1 file, 8 tests.
+- Full `lint`, `typecheck`, `build`, full Vitest, and Playwright were not rerun in this critic pass because the task was read-only except for this review artifact.
 
-- `git rev-parse HEAD` returned `45208b2181add5db64395e4dac30134cfd1fcf35`; `git status --short` was clean before this artifact edit.
-- Focused Vitest subset passed: `cycle-22-source-contracts.test.ts`, `advisory-locks.test.ts`, `smart-collections.test.ts`, `migration-journal.test.ts`, `migration-journal-monotonicity.test.ts`, `privacy-fields.test.ts`, `audit-retention.test.ts`, `serve-upload.test.ts` -> 8 files, 80 tests passed.
-- Security lint gates passed:
-  - `npm run lint:api-auth --workspace=apps/web`
-  - `npm run lint:action-origin --workspace=apps/web`
-  - `npm run lint:public-route-rate-limit --workspace=apps/web`
-- Full lint/typecheck/build/Vitest/Playwright were not rerun in this critic pass because no source code was changed. Cycle-22 implementation records full gates green, and this pass reran the guards most relevant to the current findings.
+## Confirmed Issues
 
-## Findings
+### CRIT24-01 - Deploy env files can be group/world-readable and still get sourced
 
-### CRIT23-01 - Foreground image queue can pin most of the shared MySQL pool when concurrency is raised
+Severity: High  
+Confidence: High  
+Area: operational risk, credential handling, documentation drift  
+
+Evidence:
+
+- The deploy helper sources the selected deploy env file after a permissions check in `scripts/deploy-remote.sh:65-77`.
+- The check splits group/world permission digits but rejects only write/execute bits: `((env_group_perms & 3) != 0 || (env_world_perms & 3) != 0)` at `scripts/deploy-remote.sh:67-72`. Read bit `4` is accepted.
+- The same error message tells operators to run `chmod 600` at `scripts/deploy-remote.sh:70-71`, but modes such as `0644` and `0640` pass the current predicate.
+- The env file carries deploy target and SSH material references: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `DEPLOY_PATH`, and optional full `DEPLOY_CMD` in `.env.deploy.example:7-14`.
+- HEAD intentionally relaxed ownership failure to a warning in `scripts/deploy-remote.sh:61-63`, so the permission predicate is now the remaining hard local guard.
+
+Concrete failure scenario:
+
+An operator copies `.env.deploy.example` to `.env.deploy` and leaves the file at a common default mode such as `0644`. `npm run deploy` accepts and sources it. On a shared workstation, mounted checkout, backup agent, or compromised low-privilege local account, another user can read deploy host/user/key path or a full custom `DEPLOY_CMD`, weakening the deploy boundary. The script says `chmod 600` is required, but the code does not enforce it.
+
+Suggested fix:
+
+Reject any group/world permission bits before sourcing, for example by checking `((env_perms & 77) != 0)` after parsing the octal mode, or equivalently rejecting group/world read/write/execute. Keep the non-owner warning only if mounted env files are required, but make readability strict. Add tests proving `0600` passes and `0644`, `0640`, `0660`, and `0755` fail.
+
+### CRIT24-02 - Deploy helper tests do not cover the credential-file permission contract
 
 Severity: Medium  
 Confidence: High  
-Status: Confirmed operational risk
+Area: testing adequacy, operational regression prevention  
+
+Evidence:
+
+- `apps/web/src/__tests__/deploy-script-contract.test.ts:47-54` verifies that the deploy target is config-driven and does not hardcode an SSH target.
+- The same test file covers Docker prune ordering, mutable mounts, build args, and native dependency pinning in `apps/web/src/__tests__/deploy-script-contract.test.ts:20-89`.
+- There is no test in that file for the permission-mode behavior around `scripts/deploy-remote.sh:65-72`.
+- The targeted test still passes on current HEAD: `npm test --workspace=apps/web -- deploy-script-contract.test.ts` -> 8/8 tests passed, despite CRIT24-01.
+
+Concrete failure scenario:
+
+A future change again weakens the deploy env guard, or preserves the current read-bit gap, and CI remains green because the contract test only checks script text for config-driven deployment. The regression is found only at operation time or by manual review.
+
+Suggested fix:
+
+Refactor the permission decision into a small shell-testable function or add a lightweight shell harness that creates temp env files at specific modes and invokes the helper with a harmless `DEPLOY_CMD='true'`. Assert `0600` succeeds and group/world readable/writable/executable modes fail before `source`.
+
+### CRIT24-03 - Foreground image queue can starve the shared MySQL pool when concurrency is raised
+
+Severity: Medium  
+Confidence: High  
+Area: failure modes, operational risk  
 
 Evidence:
 
 - The shared MySQL pool is fixed at 10 connections with queue limit 20 in `apps/web/src/db/index.ts:23-33`.
 - `QUEUE_CONCURRENCY` is operator-configurable up to 8 in `apps/web/src/lib/image-queue.ts:87-90`.
 - Each image job acquires a MySQL advisory-lock connection and returns the connection as the claim handle in `apps/web/src/lib/image-queue.ts:446-455`.
-- That lock connection remains held while the job checks DB state, resolves the original, runs `processImageFormats`, verifies files, and updates the row in `apps/web/src/lib/image-queue.ts:554-657`.
-- The claim is released only in final cleanup at `apps/web/src/lib/image-queue.ts:812-815`.
-- The admin backfill path already has the missing pool-budget pattern: it documents the same pinned-connection arithmetic at `apps/web/src/lib/admin-backfill-runner.ts:108-127`, computes a cap at `apps/web/src/lib/admin-backfill-runner.ts:129-141`, and clamps runtime concurrency at `apps/web/src/lib/admin-backfill-runner.ts:667-678`.
+- That lock connection remains held while the job checks DB state, resolves the original, runs Sharp processing, verifies derivatives, and updates the row in `apps/web/src/lib/image-queue.ts:554-657`.
+- The lock is released only in final cleanup at `apps/web/src/lib/image-queue.ts:812-815`.
+- The admin backfill path already contains the missing pool-budget pattern: it documents the pinned-connection arithmetic in `apps/web/src/lib/admin-backfill-runner.ts:108-127` and clamps requested concurrency in `apps/web/src/lib/admin-backfill-runner.ts:667-678`.
 
-Failure scenario:
+Concrete failure scenario:
 
-An operator raises `QUEUE_CONCURRENCY=8` during a large import. Eight foreground jobs can hold eight of ten shared pool connections across long Sharp AVIF/WebP/JPEG work. Live page renders, session checks, public search, admin pages, and queue writes then compete for two connections and a 20-item wait queue, causing request failures even though the DB and encoder are individually healthy.
+An operator raises `QUEUE_CONCURRENCY=8` during a large upload/import. Eight foreground queue jobs can pin eight of ten shared DB connections across long image processing work. Page renders, session checks, admin actions, public search, and queue state writes then compete for two connections and a 20-item wait queue, causing avoidable 500s even while the DB itself is healthy.
 
-Concrete fix:
+Suggested fix:
 
-Either stop holding shared-pool advisory-lock connections across image encoding, or give the foreground queue the same pool-budget cap as admin backfill. A conservative first fix is `resolveImageQueueConcurrency(requested, POOL_CONNECTION_LIMIT)` with reserved live headroom and a regression test proving configured queue concurrency cannot consume the pool budget reserved for live traffic. A larger fix is a durable row-claim state or a dedicated small advisory-lock pool.
+Apply the same pool-budget cap used by admin backfill to the foreground queue, reserving live request headroom. A conservative fix is a `resolveImageQueueConcurrency(requested, POOL_CONNECTION_LIMIT)` helper plus a test proving configured queue concurrency cannot consume the live traffic budget. A stronger fix is to avoid holding shared-pool advisory-lock connections across Sharp work.
 
-### CRIT23-02 - Single-process topology is documented but not enforced at startup
+## Likely Issues / Risks Needing Manual Validation
+
+### CRIT24-04 - Single-process topology is documented but not enforced
 
 Severity: Medium  
-Confidence: High  
-Status: Confirmed architecture risk
+Confidence: High for architecture state, Medium for likelihood  
+Area: product correctness, failure modes, operational risk  
 
 Evidence:
 
-- `CLAUDE.md:233-236` says the shipped deployment is single web-instance/single-writer and warns against horizontal scaling because restore maintenance, upload tracking, queues, and rate limits are process-local.
+- `CLAUDE.md:233-236` states the shipped deployment is single web-instance/single-writer and warns that restore maintenance, upload quota tracking, image queue state, and several rate-limit buckets are process-local.
 - Restore maintenance is a `globalThis` flag in `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- Upload tracking is a `globalThis` `Map` in `apps/web/src/lib/upload-tracker-state.ts:7-20`, with active-claim checks also process-local at `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- Image queue state is also `globalThis`/module-local in `apps/web/src/lib/image-queue.ts:76-90` and `apps/web/src/lib/image-queue.ts:276-316`.
-- Compose currently declares one `web` service and `container_name: gallerykit-web` in `apps/web/docker-compose.yml:3-28`, but there is no DB lease or process-count assertion that fails if another web process joins the same DB/uploads tree.
+- Upload quota tracking is a `globalThis` `Map` in `apps/web/src/lib/upload-tracker-state.ts:7-20`, and active-claim checks are process-local in `apps/web/src/lib/upload-tracker-state.ts:70-78`.
+- Image queue state is also process-local around `apps/web/src/lib/image-queue.ts:76-90`.
+- The shipped compose file declares one service/container in `apps/web/docker-compose.yml:1-28`, but there is no startup lease or DB-backed process-count assertion that fails if a second web process points at the same DB/uploads tree.
 
-Failure scenario:
+Concrete failure scenario:
 
-A future operator starts a second web process for availability. Process A begins a restore and sets only its local maintenance flag. Process B still accepts uploads, maintains its own quota and public-rate-limit maps, bootstraps its own queue, and buffers analytics. The system violates the documented single-writer restore and upload-integrity assumptions without a loud startup failure.
+A future operator or deploy script starts a second web process for availability. Process A begins a restore and sets only its own maintenance flag. Process B continues to accept uploads, maintains separate upload/rate-limit maps, and runs its own queue bootstrap. The product silently violates the documented single-writer assumptions.
 
-Concrete fix:
+Suggested fix:
 
-Make the topology executable. If single-writer remains the product contract, acquire a startup MySQL advisory lease such as `gallerykit_web_writer:<instance>` and fail fast when another writer is active. If multi-process support is desired, move restore state, upload quota tracking, public rate-limit buckets, queue ownership, and buffered analytics to shared durable coordination.
+If single-writer remains the contract, make it executable: acquire a startup MySQL advisory lease for the web writer and fail fast if another writer is active. If scale-out is desired, move restore state, upload quota tracking, queue ownership, and public rate-limit buckets to shared durable coordination first.
 
-### CRIT23-03 - Upload ingest still has two implementation owners
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed maintainability/product-correctness risk
-
-Evidence:
-
-- Browser upload owns its own auth/config/tracker setup at `apps/web/src/app/actions/images.ts:175-210`, post-claim preflight at `apps/web/src/app/actions/images.ts:238-292`, per-file GPS/HDR/restore/insert path at `apps/web/src/app/actions/images.ts:340-474`, and queue payload at `apps/web/src/app/actions/images.ts:499-531`.
-- Lightroom/PAT upload independently mirrors the same lifecycle: tracker and idempotent settlement at `apps/web/src/app/api/admin/lr/upload/route.ts:114-151`, upload-contract/config snapshot at `apps/web/src/app/api/admin/lr/upload/route.ts:243-275`, HDR/GPS/restore gates at `apps/web/src/app/api/admin/lr/upload/route.ts:347-402`, and queue payload at `apps/web/src/app/api/admin/lr/upload/route.ts:479-516`.
-- The Lightroom path carries multiple comments documenting parity fixes for settings, captions, HDR, GPS, restore, and EXIF/color propagation at `apps/web/src/app/api/admin/lr/upload/route.ts:348-356`, `apps/web/src/app/api/admin/lr/upload/route.ts:371-376`, `apps/web/src/app/api/admin/lr/upload/route.ts:388-394`, and `apps/web/src/app/api/admin/lr/upload/route.ts:489-515`.
-
-Failure scenario:
-
-A new upload-time privacy gate, metadata column, processing setting, or audit field is added to the browser dashboard path and tested there. Lightroom publishes then diverge in GPS stripping, HDR rejection, captions, semantic embedding mode, processing settings, or audit payloads. The defect is likely to be noticed only after comparing browser and external-client uploads.
-
-Concrete fix:
-
-Extract a server-only ingest service that owns config snapshotting, quota settlement, original save, GPS/HDR/restore gates, insert DTO construction, tag hooks, audit shape, and queue job construction. Keep browser actions and Lightroom route code as request adapters. Add parity tests that construct one canonical ingest DTO and assert both adapters call it with equivalent inputs.
-
-### CRIT23-04 - Browser upload quota settlement remains structurally fragile
-
-Severity: Medium  
-Confidence: Medium-High  
-Status: Likely future-regression risk
-
-Evidence:
-
-- Browser upload pre-claims quota synchronously at `apps/web/src/app/actions/images.ts:238-242`.
-- Known post-claim preflights settle manually on disk and topic failures at `apps/web/src/app/actions/images.ts:247-264` and `apps/web/src/app/actions/images.ts:280-292`.
-- The code comment explicitly says any future await between claim and final settle must roll the claim back on throw at `apps/web/src/app/actions/images.ts:271-279`.
-- A post-claim cleanup await is safe only because `deleteOriginalUploadFile` currently swallows unlink failures, documented at `apps/web/src/app/actions/images.ts:540-548` and implemented at `apps/web/src/lib/upload-paths.ts:71-77`.
-- Final reconciliation is manual at `apps/web/src/app/actions/images.ts:570-596`.
-- The Lightroom route uses the sturdier pattern: one idempotent `settleTrackerToActual` closure at `apps/web/src/app/api/admin/lr/upload/route.ts:139-151`.
-- The cycle-22 regression added source-shape coverage, but it is still static string coverage around the known span at `apps/web/src/__tests__/cycle-22-source-contracts.test.ts:96-108`, not a scoped lifecycle helper.
-
-Failure scenario:
-
-A future validation, cleanup, or metadata-enrichment await is inserted after the browser claim and before the final settle, or `deleteOriginalUploadFile` is changed to surface filesystem errors. A transient failure escapes to the outer finally-only area and leaves the admin/IP upload tracker charged for up to the one-hour window, rejecting legitimate follow-up uploads.
-
-Concrete fix:
-
-Adopt the Lightroom route's idempotent settlement closure in `uploadImages`, wrapping the full post-claim span in a `try/finally`. Preserve the current success/all-failed semantics, but have the finally settle `(0, 0)` if no earlier settlement ran. Add a behavior test that injects a throw from a post-claim await and asserts the tracker is reconciled.
-
-### CRIT23-05 - Audit retention deletes all expired rows in one statement
-
-Severity: Low  
-Confidence: High  
-Status: Likely operational risk
-
-Evidence:
-
-- `purgeOldAuditLog` validates retention inputs, computes a cutoff, and then runs one unbounded `db.delete(auditLog).where(lt(auditLog.created_at, cutoff))` in `apps/web/src/lib/audit.ts:97-122`.
-- The analogous analytics retention path uses chunked deletes with a per-statement cap and per-run iteration cap in `apps/web/src/lib/view-retention.ts:31-37` and `apps/web/src/lib/view-retention.ts:64-87`.
-- Current audit tests focus on retention-window parsing, not delete boundedness, in `apps/web/src/__tests__/audit-retention.test.ts`.
-
-Failure scenario:
-
-On a long-lived install or after a temporary retention misconfiguration, expired audit rows accumulate. The hourly queue maintenance job then issues one large delete transaction, creating avoidable lock/undo/redo pressure and delaying admin actions that write audit rows.
-
-Concrete fix:
-
-Mirror `purgeOldViewEvents`: delete expired audit rows in conservative batches, cap batches per sweep, return/log the total deleted, and add a test that the audit retention path calls `.limit(...)` or otherwise proves bounded deletes.
-
-### CRIT23-06 - Upload fallback serving validates one path and streams a later path by name
-
-Severity: Low  
-Confidence: Medium  
-Status: Manual-validation / same-host trust risk
-
-Evidence:
-
-- `serveUploadFile` validates path segments, allowed directories, extension, `lstat`, symlink status, and `realpath` containment in `apps/web/src/lib/serve-upload.ts:137-184`.
-- It builds `Content-Length` and ETag from the earlier `lstat` result at `apps/web/src/lib/serve-upload.ts:216-257`.
-- It later opens the body with `createReadStream(resolvedPath)` in `apps/web/src/lib/serve-upload.ts:263-269`; the comment states this is not descriptor-backed validation.
-- The authenticated backup download route already uses the safer descriptor pattern: `open`, `fileHandle.stat`, and `fileHandle.createReadStream()` in `apps/web/src/app/api/admin/db/download/route.ts:42-90`.
-
-Failure scenario:
-
-A same-host process with write access to `public/uploads` swaps the file after validation but before `createReadStream`. The response can stream bytes from an inode different from the one used for ETag and length calculation. Under the documented trust model this is not a remote-only exploit, but it keeps public file serving dependent on same-host trust rather than descriptor-backed invariants.
-
-Concrete fix:
-
-Open the file once after containment resolution, run `fh.stat()` on that descriptor, validate `isFile`, build headers from the descriptor stat, and stream via `fh.createReadStream({ autoClose: true })`. Keep realpath containment for traversal defense, but serve the same descriptor that was validated.
-
-### CRIT23-07 - Mutable topic slugs remain structural debt despite current guards
+### CRIT24-05 - Nav visual e2e tests save screenshots but do not assert visual regressions
 
 Severity: Low-Medium  
 Confidence: High  
-Status: Confirmed structural debt, currently guarded
+Area: UX consistency, testing adequacy  
 
 Evidence:
 
-- `topics.slug` is the primary key at `apps/web/src/db/schema.ts:4-12`.
-- Slug FKs exist in `topic_aliases.topic_slug`, `images.topic`, and `topic_views.topic` at `apps/web/src/db/schema.ts:14-17`, `apps/web/src/db/schema.ts:19-33`, and `apps/web/src/db/schema.ts:239-249`.
-- Smart collections store topic predicates in JSON at `apps/web/src/db/schema.ts:297-310`.
-- Rename is implemented as insert-new-topic, manually update FK children and JSON predicates, then delete old topic at `apps/web/src/app/actions/topics.ts:255-340`.
-- The repo has a good current guard for schema FK siblings in `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1-83`, but that test explicitly calls the surrogate-ID or `ON UPDATE CASCADE` fix deferred at `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:20-22`.
+- `apps/web/e2e/nav-visual-check.spec.ts:40-79` is named `Nav visual checks` and has screenshot-oriented test names.
+- The tests assert visibility, touch target dimensions, and non-overlap via `expectVisibleNavTargetsAreStable` in `apps/web/e2e/nav-visual-check.spec.ts:6-38`.
+- The screenshot calls at `apps/web/e2e/nav-visual-check.spec.ts:51`, `:65`, and `:78` only write PNG artifacts under `test-results`; they do not use `expect(page).toHaveScreenshot(...)` or compare against a baseline.
+- Repo-wide search found no `toHaveScreenshot` assertions in `apps/web/e2e` or `apps/web/src/__tests__`.
 
-Failure scenario:
+Concrete failure scenario:
 
-A new non-FK slug store, external integration payload, cache key, or JSON predicate shape starts referencing topic slugs outside the test's schema-FK parser. A later rename leaves stale references or empty collections. The current guard catches many FK additions, but the data model still requires every future contributor to remember slug fan-out.
+Nav spacing, color contrast, wrapping, z-index, or theme styling regresses while basic visibility/touch-target/non-overlap checks still pass. CI produces screenshot artifacts, but it does not fail unless a human manually inspects them every run.
 
-Concrete fix:
+Suggested fix:
 
-Plan a migration to immutable surrogate topic IDs for relational ownership, keeping slug as a unique route attribute plus optional slug history. If that remains too large, expand the registry beyond schema FKs to include every JSON/cache/integration slug referrer and require rename-path tests for each registered owner.
-
-### CRIT23-08 - Production CLIP activation still depends on opt-in manual smoke coverage
-
-Severity: Medium  
-Confidence: Medium  
-Status: Manual-validation risk
-
-Evidence:
-
-- The real CLIP encoder loads weights offline from `CLIP_MODELS_ROOT` and disables remote model fetches at `apps/web/src/lib/clip-model.ts:167-204`.
-- The public docs say weights are not baked into the image and must be seeded into a host bind mount before going live in `CLAUDE.md:496-545` and `apps/web/README.md:59-80`.
-- The strongest real-load tests are deliberately gated: `clip-semantic-integration.test.ts` runs only when `CLIP_INTEGRATION=1` at `apps/web/src/__tests__/clip-semantic-integration.test.ts:4-31`, and `clip-offline-load.test.ts` runs only when `CLIP_OFFLINE_LOAD=1` plus a seeded `CLIP_MODELS_ROOT` at `apps/web/src/__tests__/clip-offline-load.test.ts:2-41`.
-- The default `clip-model-contract.test.ts` relies on source-shape assertions for queue bounds and lazy loading at `apps/web/src/__tests__/clip-model-contract.test.ts:20-54`.
-
-Failure scenario:
-
-Default gates pass while production model weights are missing, mis-seeded, incompatible with the pinned revision, or fail to load on the target CPU/Node platform. Semantic search is documented as active in production, so this becomes a runtime 503 or degraded search issue that default CI cannot catch.
-
-Concrete fix:
-
-Keep default gates weight-free, but add an operator/release gate that runs `CLIP_OFFLINE_LOAD=1 CLIP_MODELS_ROOT=/app/data/models/clip npm test --workspace=apps/web -- clip-offline-load.test.ts` on seeded hosts before enabling or changing production semantic search. For model/revision upgrades, make that opt-in smoke part of the plan checklist and persist the output in `.context/gate-logs/`.
+Either convert these to real visual regression tests with `toHaveScreenshot` and controlled fixtures/viewports, or rename/document them as artifact-capture smoke tests and add explicit assertions for the visual properties the product cares about, such as no horizontal overflow, active theme state, collapsed/expanded density, and contrast-sensitive states.
 
 ## Cleared Checks And Non-Findings
 
-- Cycle-22 high findings were rechecked at current HEAD and not reopened:
-  - advisory lock acquisition now routes through `isAdvisoryLockAcquired`; targeted advisory tests passed.
-  - smart-collection numeric tag predicates are rejected; targeted smart-collection tests passed.
-  - re-encode now has a confirmation dialog; source contract passed.
-  - public P3 badge accessibility and route-error escape hatch are source-locked.
-  - README/CLAUDE deploy and analytics wording was updated and source-locked.
-- Public semantic and similar search routes have same-origin, rate-limit, mode, scan-limit, and body/ID bounds in the inspected current code; no new public API abuse path was found there.
-- Migration journal non-monotonicity is known historical state, not a new finding. Current tests explicitly allow only the documented idx-7 inversion and require future entries to exceed prior/global max; targeted migration tests passed.
-- Privacy guards are aligned after the `processing_settings_json` sensitive-field addition. Targeted privacy tests passed.
-- Storage abstraction remains quarantined; no live pipeline import was found outside the storage module/tests.
+- Current public share pages avoid the earlier enumeration class: metadata is generic and intentionally avoids share-key DB lookup in `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:36-79` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:41-84`; the body rate-limits lookup before DB access in `s/[key]/page.tsx:81-103` and `g/[key]/page.tsx:86-111`.
+- Public semantic search and similar routes have same-origin, maintenance, rate-limit, mode, scan-limit, and ID/body gates in inspected current code. The security lint gates also passed.
+- Docs and package versions are aligned for the major stack claims checked in this pass: `.nvmrc` is `24`; `apps/web/package.json` declares Node `>=24`, Next `^16.2.9`, React `^19.2.5`, TypeScript `^6`, and `CLAUDE.md`/`README.md` describe Node 24+, Next 16, React 19, and TypeScript 6.
+- Migration/journal guidance was inspected; no new schema migration is present in HEAD, and the current deploy change does not touch Drizzle artifacts.
+- Docker deploy pruning still runs after `up -d --build`, and the automatic volume prune remains `docker volume prune -f` without `-a` in `apps/web/deploy.sh:27-63`.
 
-## Final Sweep / Skipped Files
+## Final Sweep
 
-Final sweep covered product correctness, operational safety, data integrity, maintainability, UX/accessibility regressions from cycle-22 fixes, implicit deployment assumptions, docs drift, migrations, and cross-file source contracts.
+Commonly missed issue sweep:
 
-Skipped or not line-read exhaustively:
+- Secrets: found one confirmed local-readable deploy env gap (CRIT24-01); no plaintext deploy secret values were printed by commands.
+- Auth/origin/rate limits: focused project lint gates passed; no unwrapped admin API route or mutating server action origin omission was found.
+- Privacy fields: public selectors and search enrichment were inspected; no new admin-only field exposure found in the reviewed current code.
+- Migration drift: no HEAD migration change; no new journal/schema drift found.
+- Production operations: single-writer and foreground queue pool-budget risks remain the highest non-HEAD operational risks.
+- UX/a11y: touch target and overlap checks exist for nav, but true visual regression coverage is not enforced.
+- Documentation drift: stack-version docs are current; deploy permission message says `chmod 600` but the code does not enforce that exact safety posture.
 
-- Binary/photo/font assets, generated screenshots, runtime logs, `.git`, `.omx` runtime state, dependency directories, and gitignored local env files.
-- Historical review/archive markdown and `.context/plans/` older than the current cycle were searched or sampled for carried risks rather than read line-by-line.
-- The full 267-file unit-test tree was not line-read end-to-end; tests were targeted around reviewed invariants and source contracts.
-- Full lint/typecheck/build/Vitest/Playwright and live deploy were not run in this pass because this was a review artifact edit only. The relevant source-contract and security lint subset did run and passed.
+Skipped-file confirmation:
 
-No critical or high-severity current source bug was confirmed at HEAD `45208b21`. The highest-signal residuals are Medium architectural/operational risks around foreground queue pool budgeting, enforceable single-writer topology, ingest ownership, browser upload quota structure, and production CLIP smoke validation.
+- I did not intentionally skip any live review-relevant source/config/test/docs area in the inventory above.
+- I did not line-review every historical `.context/` and `plan/` archive because those are prior review/plan history, not current executable product surface.
+- I did not inspect generated/runtime outputs such as `.next`, `node_modules`, or `test-results` as source.

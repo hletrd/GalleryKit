@@ -9,7 +9,7 @@
  * copies of these values.
  */
 
-/** Prefix prepended to every AI-generated alt-text stub. */
+/** Prefix prepended to every EXIF-derived alt-text placeholder. */
 export const ALT_TEXT_STUB_PREFIX = '[AUTO] ';
 
 /**

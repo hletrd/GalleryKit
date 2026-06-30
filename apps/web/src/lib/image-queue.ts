@@ -84,10 +84,26 @@ const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
 const MAX_PERMANENTLY_FAILED_IDS = 1000;
-const QUEUE_CONCURRENCY = parseBoundedPositiveInteger(
+const DEFAULT_DB_POOL_CONNECTION_LIMIT = 10;
+export const IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS = (poolLimit: number): number =>
+    Math.max(3, Math.ceil(poolLimit / 2));
+
+export function resolveImageQueueConcurrency(
+    requested: number,
+    poolLimit: number = DEFAULT_DB_POOL_CONNECTION_LIMIT,
+): number {
+    const limit = Number.isFinite(poolLimit) ? poolLimit : DEFAULT_DB_POOL_CONNECTION_LIMIT;
+    const reserved = IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS(limit);
+    const cap = Math.max(1, limit - reserved);
+    const req = Math.max(1, Math.floor(requested) || 1);
+    return Math.min(req, cap);
+}
+
+const REQUESTED_QUEUE_CONCURRENCY = parseBoundedPositiveInteger(
     process.env.QUEUE_CONCURRENCY,
     { fallback: 1, max: 8 },
 );
+const QUEUE_CONCURRENCY = resolveImageQueueConcurrency(REQUESTED_QUEUE_CONCURRENCY);
 
 export type ProcessingSettingsSnapshot = {
     quality: ImageQualitySettings;
@@ -303,8 +319,9 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
     const newState: ProcessingQueueState = {
         // One image-processing job can already encode AVIF/WebP/JPEG and
         // use multiple libvips workers. Default to one foreground-friendly
-        // job per web process; operators can raise QUEUE_CONCURRENCY after
-        // sizing it together with SHARP_CONCURRENCY.
+        // job per web process; operators can raise QUEUE_CONCURRENCY, but the
+        // effective value is clamped against the shared DB pool so foreground
+        // processing cannot consume the live request reserve.
         // R16C16 CR-16-03: `|| 1` deliberately coerces 0, NaN, and unset to 1 —
         // a 0-concurrency PQueue would never drain (every upload would hang
         // unprocessed), so there is no valid 0 value to honor here.

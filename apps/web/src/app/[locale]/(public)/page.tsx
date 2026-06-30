@@ -148,12 +148,13 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
-  const [locale, seo, config, allTags, allTopics] = await Promise.all([
+  const [locale, seo, config, allTags, allTopics, tCommon] = await Promise.all([
     getLocale(),
     getSeoSettings(),
     getGalleryConfig(),
     getTagsCached(),
     getTopicsCached(),
+    getTranslations('common'),
   ]);
   const baseUrl = seo.url;
   const nonce = await getCspNonce();
@@ -194,7 +195,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
       // the base filename is guaranteed by the encoder atomic-rename
       // contract.
       thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
-      name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+      name: getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`),
     })),
   } : null;
 

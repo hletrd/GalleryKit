@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -65,6 +65,15 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
     // null = not yet fetched; [] = fetched, empty; [...] = fetched with results; 'error' = fetched with failure feedback
     const [results, setResults] = useState<SimilarResult[] | null | 'error'>(null);
     const fetchedRef = useRef(false);
+    const mountedRef = useRef(true);
+    const abortRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        return () => {
+            mountedRef.current = false;
+            abortRef.current?.abort();
+        };
+    }, []);
 
     async function handleToggle() {
         const nextOpen = !open;
@@ -73,20 +82,29 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
         if (nextOpen && !fetchedRef.current) {
             fetchedRef.current = true;
             setLoading(true);
+            const controller = new AbortController();
+            abortRef.current = controller;
             try {
-                const res = await fetch(`/api/search/similar/${imageId}`);
+                const res = await fetch(`/api/search/similar/${imageId}`, { signal: controller.signal });
                 if (!res.ok) {
                     // 503 (setup/backfill), 404 (no embedding), 429, etc.
-                    setResults('error');
+                    if (mountedRef.current) setResults('error');
                     return;
                 }
                 const json = await res.json() as { results?: SimilarResult[] };
-                setResults(json.results ?? []);
+                if (mountedRef.current) setResults(json.results ?? []);
             } catch {
+                if (controller.signal.aborted) {
+                    fetchedRef.current = false;
+                    return;
+                }
                 // Network error — keep panel visible with localized feedback.
-                setResults('error');
+                if (mountedRef.current) setResults('error');
             } finally {
-                setLoading(false);
+                if (abortRef.current === controller) {
+                    abortRef.current = null;
+                }
+                if (mountedRef.current) setLoading(false);
             }
         }
     }

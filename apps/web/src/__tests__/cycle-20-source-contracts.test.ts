@@ -62,7 +62,7 @@ describe('cycle 20 source contracts', () => {
         expect(en.privacy.analyticsDisabled).toContain('first-party photo, topic, and shared-gallery view events');
         expect(en.privacy.analyticsEnabled).toContain('client fingerprints are not stored');
         expect(en.privacy.analyticsEnabled).not.toContain('short client fingerprint');
-        expect(ko.privacy.analyticsDisabled).toContain('사진, 토픽, 공유 갤러리 조회 이벤트');
+        expect(ko.privacy.analyticsDisabled).toContain('사진, 카테고리, 공유 갤러리 조회 이벤트');
         expect(ko.privacy.analyticsEnabled).not.toContain('짧은 클라이언트 지문');
     });
 });

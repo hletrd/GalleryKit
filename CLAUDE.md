@@ -107,6 +107,7 @@ git values must be treated as compromised and must not be reused.
 | `VIEW_RETENTION_DAYS` | `395` | Analytics view-event retention (default 13 months / 395 days) |
 | `ADMIN_BACKFILL_CONCURRENCY` | `1` | In-app color-pipeline backfill concurrency (capped by pool budget; see Operational Playbook) |
 | `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (default 2, max 8; separate MySQL pool, not capped by the live web pool-budget formula) |
+| `IMAGE_CLEANUP_CONCURRENCY` | `5` | Post-DB image-file cleanup concurrency for deletes (max 32); tune for NAS/high-latency storage, not upload processing |
 | `UPLOAD_ORIGINAL_ROOT` | — | Override path for private original uploads (used by sidecar scripts) |
 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION` | — | Operator-only opt-in for production CLIP semantic search (requires model weights) |
 | `CLIP_MODELS_ROOT` | cwd-relative `data/models/clip` in code; `/app/data/models/clip` in production env | CLIP model weights root. Absolute paths are honored verbatim; relative/unset values resolve against cwd. Production should set the absolute bind-mount path so the seed script and runtime encoder agree |
@@ -267,7 +268,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 ## Color & HDR Pipeline (photographer-intent surface)
 
-The product premise: photos arrive AFTER the photographer's editing. The encoder + viewer must deliver the photographer's intent — gamut, tonality, dynamic range — accurately to every viewer's display, on every supported browser. **No edit / culling / scoring features ship in product.**
+The product premise: photos arrive AFTER the photographer's editing. The encoder + viewer must preserve the photographer's intent — gamut, tonality, dynamic range — as accurately as the deployed browser, display, and codec stack allow. **No edit / culling / scoring features ship in product.**
 
 ### Source detection (precedence)
 

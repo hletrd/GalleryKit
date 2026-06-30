@@ -450,15 +450,17 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                 <div className="col-span-2">
                                     <dt className="text-muted-foreground text-xs">{t('viewer.location')}</dt>
                                     <dd>
-                                             <a
-                                        href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    >
-	                                        <MapPin className="h-3 w-3" />
-	                                        {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
-	                                    </a>
+                                        <a
+                                            href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            aria-label={`${image.latitude.toFixed(4)}, ${image.longitude.toFixed(4)} ${t('common.opensInNewWindow')}`}
+                                            className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        >
+                                            <MapPin className="h-3 w-3" />
+                                            {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
+                                            <span className="sr-only"> ({t('common.opensInNewWindow')})</span>
+                                        </a>
                                     </dd>
 	                                </div>
                             )}

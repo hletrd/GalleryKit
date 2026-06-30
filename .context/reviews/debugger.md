@@ -1,251 +1,140 @@
-# Debugger Review - Cycle 23
+# Debugger Review - Cycle 24
 
 Review role: debugger  
 Repository: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `a6efd6fd584fe44138be3729d90743ceb76dbfad`  
 Date: 2026-06-30 KST  
-Mode: review-only. Intended change scope is this report file only.
+Mode: review-only. I modified only this report file.
 
-## Inventory
+## Bug-Prone Inventory First
 
-Read first, per instruction:
+Read before findings:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `AGENTS.md` instructions from the prompt, plus project rules embedded there.
+- `CLAUDE.md` for architecture, security, deployment, migration, color/HDR, upload, and semantic-search contracts.
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md` for the review output contract.
 
-Reviewed active surfaces by inventory and targeted source sweeps, not by sampling one feature only:
+Inventoried and reviewed current HEAD source/docs across these high-risk surfaces:
 
-- 571 review-relevant TS/TSX/JS/MJS/JSON/SQL files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`.
-- 508 files under `apps/web/src`.
-- 244 active implementation/config files under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/src/db`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, and `apps/web/nginx`.
-- App routes/actions/API handlers, auth/origin/rate-limit gates, upload/LR ingest, image queue/backfill, restore/backup, public data projections, migrations/journal, Docker/deploy/nginx config, i18n, public workers, and tests were included in static sweeps and deep reads around failure-prone seams.
+- Ingest and image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/storage/*`, `apps/web/src/lib/serve-upload.ts`.
+- Auth, origin, abuse, and privacy gates: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, public/admin API routes, public server actions, share/group pages, privacy-sensitive data projections.
+- Data, search, and schema behavior: `apps/web/src/lib/data.ts`, `apps/web/src/lib/smart-collections.ts`, `apps/web/src/app/actions/collections.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/tags.ts`, semantic search/similar routes, embeddings, migrations, `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`.
+- Operational/destructive workflows: admin DB backup/restore, SQL restore scanning, migration reconciliation, deploy documented contracts, queue shutdown/bootstrap, retention/GC.
+- Client async/interaction failure modes: search, similar photos, photo navigation, photo viewer, lightbox, image zoom, upload dropzone, histogram, settings backfill UI, load-more, home scroll restoration, map rendering.
+- Static sweeps included raw SQL, file operations, spawns, unhandled promises/catches, timers/listeners, auth wrappers, same-origin guards, public mutating route rate limits, `dangerouslySetInnerHTML`, CSP, TODO/FIXME/unsafe/exempt comments.
 
 ## Findings Summary
 
 - Critical: 0
 - High: 0
-- Medium: 5
-- Low: 4
+- Medium: 0
+- Low: 2 confirmed issues
+- Risks needing manual validation: 1
 
-## Findings
+## Confirmed Issues
 
-### DBG23-01 - Foreground image queue can pin most of the shared DB pool
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed operational/runtime risk
-
-Evidence:
-
-- Shared MySQL pool is fixed at 10 connections with queue limit 20: `apps/web/src/db/index.ts:23-33`.
-- `QUEUE_CONCURRENCY` can be raised to 8: `apps/web/src/lib/image-queue.ts:87-90`.
-- Each job acquires a pooled advisory-lock connection before processing: `apps/web/src/lib/image-queue.ts:513-520`.
-- That same job then performs DB checks, original-file resolution, Sharp fan-out, output verification, and DB update while the lock connection remains held: `apps/web/src/lib/image-queue.ts:554-657`.
-- The lock connection is released only in `finally`: `apps/web/src/lib/image-queue.ts:812-815`.
-- The in-app backfill runner already documents this same pool-starvation class and clamps concurrency against pool budget: `apps/web/src/lib/admin-backfill-runner.ts:96-141`, `apps/web/src/lib/admin-backfill-runner.ts:667-678`.
-
-Failure scenario:
-
-An operator raises `QUEUE_CONCURRENCY=8` during a large upload. Eight encode jobs can hold eight of ten pooled DB connections for encode-duration work, leaving two connections for public pages, auth/session checks, admin actions, semantic search, and the queue's own follow-up queries. With `queueLimit: 20`, this can become 500/503 behavior rather than mere latency.
-
-Concrete fix:
-
-Apply the same pool-budget cap used by `resolveBackfillConcurrency` to foreground queue concurrency, or move encode-duration advisory locks to a dedicated tiny pool/non-pooled connections. Longer term, replace the long-held advisory lock with a short DB lease/claim that releases shared connections before CPU-heavy Sharp work.
-
-### DBG23-02 - Single-writer topology is documented but not enforced
-
-Severity: Medium  
-Confidence: High  
-Status: Likely architecture/runtime risk; manual deployment validation required
-
-Evidence:
-
-- `CLAUDE.md` says the shipped deployment is single web-instance/single-writer and warns that restore maintenance, upload quotas, queue state, rate-limit buckets, and view buffers are process-local: `CLAUDE.md:233-236`.
-- Restore maintenance is `globalThis` state local to one Node process: `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- Upload quota tracking is a process-local `globalThis` map: `apps/web/src/lib/upload-tracker-state.ts:7-20`, `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- Queue bootstrap runs in each Node process: `apps/web/src/instrumentation.ts:1-6`.
-- Shared-group view counts are buffered in module-local memory: `apps/web/src/lib/data.ts:13-55`.
-
-Failure scenario:
-
-If an operator starts a second web process against the same DB/upload tree, process A can enter restore maintenance while process B continues accepting uploads, bootstrapping queue work, or buffering analytics because it cannot see A's process-local flags. That can race restore with new originals/rows and violate the single-writer integrity assumptions without a startup failure.
-
-Concrete fix:
-
-Make the topology invariant executable. If single-writer remains the product contract, acquire a startup DB advisory lease and fail fast when another writer is active. If multi-process support is desired, move restore state, upload quota tracking, queue ownership, rate limits that matter for abuse, and analytics buffers into shared durable coordination.
-
-### DBG23-03 - Dynamic public first pages still force grouped exact-count queries
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed runtime scalability risk
-
-Evidence:
-
-- `getImagesLitePage` joins tags, groups by image id, sorts the full filtered set, and projects `COUNT(*) OVER()` before returning one page: `apps/web/src/lib/data.ts:878-907`.
-- Smart-collection first-page offset mode has the same grouped/window-count shape: `apps/web/src/lib/data.ts:1446-1461`.
-- Homepage, topic pages, and collection pages are dynamic (`revalidate = 0`) and call those helpers for first render: `apps/web/src/app/[locale]/(public)/page.tsx:14-16`, `apps/web/src/app/[locale]/(public)/page.tsx:164-166`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:174-176`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`.
-
-Failure scenario:
-
-Crawler or visitor bursts hit the hottest unauthenticated pages on a larger gallery. Each render asks MySQL to evaluate grouped tag aggregation plus an exact window count even though only 30 rows are returned. That can burn DB CPU/temp memory and pool time, then cascade into slow or failed public requests.
-
-Concrete fix:
-
-Split first-page loading into a keyset ID page query plus tag lookup for returned IDs. Remove exact public totals from the hot path or source them from cached/rollup state; use `hasMore` for the browsing UI. Avoid the offset/window-count path for smart collections when the predicate can be expressed cursor-safely.
-
-### DBG23-04 - CSV export buffers the full export in server and browser memory
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed runtime memory risk
-
-Evidence:
-
-- The action explicitly materializes up to 50k rows as CSV: `apps/web/src/app/[locale]/admin/db-actions.ts:79-84`.
-- It loads the grouped DB result array in one query: `apps/web/src/app/[locale]/admin/db-actions.ts:102-117`.
-- It then builds a full `csvLines` array and joins it into one string: `apps/web/src/app/[locale]/admin/db-actions.ts:121-153`.
-- The client receives that full server-action string and creates a browser `Blob`: `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:103-124`.
-
-Failure scenario:
-
-An admin exports a large gallery with long filenames/descriptions/tags while public traffic or queue work is active. The server holds the DB result array, CSV line array, joined CSV string, and response payload; the browser duplicates the payload into a Blob. On the disk-constrained/small-host production profile, this can cause GC stalls, request failure, or process memory pressure.
-
-Concrete fix:
-
-Move image CSV export to an authenticated streaming route or background export file. Stream MySQL rows in batches with backpressure and write CSV rows incrementally to the response/file, keeping only a bounded buffer in memory.
-
-### DBG23-05 - Topic slug renames rely on manual fan-out across relational and JSON references
-
-Severity: Medium  
-Confidence: High  
-Status: Confirmed latent data-integrity risk
-
-Evidence:
-
-- `topics.slug` is the primary key: `apps/web/src/db/schema.ts:4-6`.
-- Slug references exist in `topic_aliases.topic_slug`, `images.topic`, and `topic_views.topic`: `apps/web/src/db/schema.ts:14-17`, `apps/web/src/db/schema.ts:19-34`, `apps/web/src/db/schema.ts:239-242`.
-- Smart collections store topic references inside JSON query rules: `apps/web/src/db/schema.ts:297-306`.
-- Rename is implemented as insert-new/update dependents/remap JSON/delete old: `apps/web/src/app/actions/topics.ts:255-340`.
-- The code comments document already-missed sibling failures for `topic_views` cascade deletion and smart-collection JSON remapping: `apps/web/src/app/actions/topics.ts:292-309`.
-
-Failure scenario:
-
-A future table, JSON predicate, cache payload, or integration starts storing topic slugs. The schema compiles, but the manual rename fan-out is not updated. A later slug rename can leave stale references, empty smart collections, analytics loss through cascade, or inconsistent public navigation.
-
-Concrete fix:
-
-Prefer immutable surrogate topic IDs for ownership and keep slug as a unique mutable route field. If that migration is too large, centralize slug referrers in a rename registry/remapper and add tests that fail when a schema/JSON slug reference is added without rename-path support.
-
-### DBG23-06 - Public map can render 10k Leaflet markers plus 10k list items
+### DBG24-01 - Photo swipe state is not reset when the browser cancels a touch
 
 Severity: Low  
 Confidence: High  
-Status: Confirmed bounded UI/runtime risk
+Status: Confirmed issue  
+File/region: `apps/web/src/components/photo-navigation.tsx:60-151`
 
 Evidence:
 
-- Server cap is 10,000 map markers: `apps/web/src/lib/data.ts:1649-1658`.
-- Public `/map` is dynamic and serializes all returned markers: `apps/web/src/app/[locale]/(public)/map/page.tsx:9-10`, `apps/web/src/app/[locale]/(public)/map/page.tsx:31-50`.
-- The page renders a normal list item for every marker: `apps/web/src/app/[locale]/(public)/map/page.tsx:77-89`.
-- The client computes bounds with spread arrays and renders a `<Marker>`/`<Popup>` subtree for every marker: `apps/web/src/components/map/map-client.tsx:80-90`, `apps/web/src/components/map/map-client.tsx:119-140`.
+- Touch start resets `isSwiping`/snap state: `apps/web/src/components/photo-navigation.tsx:60-65`.
+- Touch move can set `isSwiping.current = true` and a non-zero `swipeOffset`: `apps/web/src/components/photo-navigation.tsx:67-107`.
+- Touch end is the only path that navigates or snaps back: `apps/web/src/components/photo-navigation.tsx:109-142`.
+- The component registers `touchstart`, `touchmove`, and `touchend`, but no `touchcancel`: `apps/web/src/components/photo-navigation.tsx:144-151`.
 
-Failure scenario:
+Failure scenario / reproduction idea:
 
-A GPS-heavy gallery near the cap can ship and hydrate 10k markers plus 10k fallback list entries. Mobile browsers can freeze or reload the tab even though the server query is bounded.
+On a touch device, begin a horizontal swipe on the photo page and trigger a browser-level cancel before `touchend` fires, for example an interrupted gesture, page visibility interruption, or a synthetic `touchcancel` in a browser test after `touchmove`. The component can keep the photo container translated because `swipeOffset` and `isSwiping.current` are not reset until a future touch sequence or rerender.
 
 Concrete fix:
 
-Use viewport-bounded fetching or clustering/canvas rendering for the map layer, and virtualize or paginate the accessible fallback list. Compute bounds in one loop instead of spreading 10k-element arrays into `Math.min`/`Math.max`.
+Add a `handleTouchCancel` that sets `isSnapping(true)`, `setSwipeOffset(0)`, and `isSwiping.current = false`, then register/remove it alongside `touchend`. Add a focused interaction test that dispatches `touchstart`, horizontal `touchmove`, then `touchcancel` and asserts the transform snaps back.
 
-### DBG23-07 - Audit retention deletes all expired rows in one statement
+### DBG24-02 - Similar-photos fetch can update state after unmount and cannot be aborted
 
 Severity: Low  
 Confidence: High  
-Status: Confirmed operational boundedness issue
+Status: Confirmed issue  
+File/region: `apps/web/src/components/similar-photos.tsx:69-90`
 
 Evidence:
 
-- `purgeOldAuditLog` validates the cutoff but runs one unbounded delete: `apps/web/src/lib/audit.ts:97-122`.
-- Analytics retention uses bounded `DELETE ... LIMIT` batches with an iteration cap: `apps/web/src/lib/view-retention.ts:64-89`.
+- Expanding the panel starts an async fetch: `apps/web/src/components/similar-photos.tsx:69-77`.
+- After the awaited network/body work, every branch calls `setResults(...)` and the `finally` calls `setLoading(false)`: `apps/web/src/components/similar-photos.tsx:78-90`.
+- The component imports only `useState` and `useRef`, with no unmount cleanup or abort controller: `apps/web/src/components/similar-photos.tsx:3`, `apps/web/src/components/similar-photos.tsx:67`.
 
-Failure scenario:
+Failure scenario / reproduction idea:
 
-A long-lived site with a large audit backlog runs hourly GC. One large MySQL delete transaction can create avoidable lock, undo, redo, and replication pressure, delaying admin writes that also insert audit events.
+In production semantic-search mode, open a photo, expand "Similar photos", then navigate to another photo or close the viewer while `/api/search/similar/[id]` is still pending. When the response resolves, the old component attempts to set state after unmount and the request keeps running even though its UI owner is gone.
 
 Concrete fix:
 
-Mirror `purgeOldViewEvents`: delete audit rows in conservative batches with a per-run cap and return/log the deleted count. Add a test that the retention path emits bounded deletes.
+Track an `AbortController` and mounted flag in `useEffect` cleanup. Pass `signal` to `fetch`, abort on unmount, and guard all post-await state commits. Consider resetting `fetchedRef` on abort so a remounted panel can retry rather than caching an aborted attempt as fetched.
 
-### DBG23-08 - Browser upload quota settlement depends on manually paired cleanup paths
+## Likely Issues
 
-Severity: Low  
-Confidence: Medium  
-Status: Likely future-regression risk; no current leaking branch confirmed
+No additional likely source bugs survived this pass. Candidate issues in upload quota settlement, settings backfill timers, histogram worker cleanup, semantic search stale-response handling, CSP production sources, and DB restore stream cleanup were checked against current HEAD and had matching guards or compensating tests/comments.
+
+## Risks Needing Manual Validation
+
+### DBG24-RISK-01 - Reverse-proxy IP trust remains configuration-dependent
+
+Severity: Medium if misconfigured, otherwise none  
+Confidence: High  
+Status: Manual deployment validation risk, not a confirmed source bug  
+File/region: `apps/web/src/lib/rate-limit.ts:164-192`, `CLAUDE.md:97`, `CLAUDE.md:660`
 
 Evidence:
 
-- Browser uploads pre-claim quota synchronously: `apps/web/src/app/actions/images.ts:238-242`.
-- Some post-claim awaits manually roll back the claim on early return or throw: `apps/web/src/app/actions/images.ts:247-264`, `apps/web/src/app/actions/images.ts:280-292`.
-- The code relies on an invariant comment that future post-claim awaits must settle on throw: `apps/web/src/app/actions/images.ts:271-279`.
-- One post-claim cleanup await is safe only because `deleteOriginalUploadFile` currently never rejects: `apps/web/src/app/actions/images.ts:536-551`.
-- Lightroom upload uses an idempotent settlement closure across its post-claim region: `apps/web/src/app/api/admin/lr/upload/route.ts:139-151`.
+- `getClientIp` trusts forwarded headers only when `TRUST_PROXY === 'true'`: `apps/web/src/lib/rate-limit.ts:164-178`.
+- Without that flag, proxy traffic with forwarded headers falls back to the shared `"unknown"` bucket and logs once: `apps/web/src/lib/rate-limit.ts:190-192`.
+- The docs require `TRUST_PROXY=true` behind nginx/reverse proxy: `CLAUDE.md:97`, `CLAUDE.md:660`.
 
-Failure scenario:
+Failure scenario / reproduction idea:
 
-A future validation, DB read, or cleanup step is inserted after the browser claim and throws before the final settlement at `apps/web/src/app/actions/images.ts:595-597`. The upload-processing lock still releases, but the upload tracker keeps the failed files/bytes charged until the tracking window expires, causing false upload-limit rejections for that admin/IP.
+Deploy behind nginx without `TRUST_PROXY=true`. All public users share one rate-limit identity. A few failed logins or public search/load-more bursts from any client can rate-limit unrelated users until the window expires.
 
 Concrete fix:
 
-Port the Lightroom `trackerSettled`/`settleTrackerToActual` pattern into `uploadImages` and wrap the entire post-claim region in a `try/finally` that settles `(0, 0)` if no earlier path settled. Add behavior tests that inject failures after claim and assert tracker state is restored.
-
-### DBG23-09 - Upload fallback serving validates a path and later reopens by pathname
-
-Severity: Low  
-Confidence: Medium  
-Status: Manual-validation risk within the same-host trust boundary
-
-Evidence:
-
-- `serveUploadFile` validates path segments, `lstat`s, rejects symlinks/non-files, realpath-checks containment, and builds headers from that `lstat`: `apps/web/src/lib/serve-upload.ts:154-184`, `apps/web/src/lib/serve-upload.ts:216-257`.
-- It later streams via `createReadStream(resolvedPath)` and notes this is not descriptor-backed validation: `apps/web/src/lib/serve-upload.ts:263-269`.
-- The authenticated backup download route uses the stronger descriptor pattern: open once, `fileHandle.stat()`, stream from that handle: `apps/web/src/app/api/admin/db/download/route.ts:58-90`.
-
-Failure scenario:
-
-A same-host process with write access to the upload tree swaps the file after validation but before `createReadStream(resolvedPath)`. The response can stream bytes from a different inode than the one used for ETag/content-length. Under the documented deployment this requires same-host compromise or mispermissioning, so severity is low.
-
-Concrete fix:
-
-Open the validated file once with `fs.promises.open`, call `fileHandle.stat()` on the descriptor, build headers from descriptor stats, and stream with `fileHandle.createReadStream({ autoClose: true })`. Keep the realpath containment check, but ensure served bytes come from the same descriptor that was validated.
-
-## Validation Evidence
-
-Passed:
-
-- `npm run lint:api-auth --workspace=apps/web`
-- `npm run lint:action-origin --workspace=apps/web`
-- `npm run lint:public-route-rate-limit --workspace=apps/web`
-- `npm run typecheck --workspace=apps/web`
-- `npm test --workspace=apps/web -- cycle-22-source-contracts.test.ts audit-retention.test.ts serve-upload.test.ts image-queue-quiesce.test.ts upload-tracker.test.ts migrate-reconcile-coverage.test.ts` - 6 files / 92 tests passed
-
-Additional static sweeps:
-
-- Full active-source inventory under app/scripts/migrations/e2e.
-- Auth/origin/rate-limit invariant scanner outputs.
-- Grep sweeps for dynamic-code sinks, `dangerouslySetInnerHTML`, lint suppressions, raw SQL, advisory locks, file streaming, deletes, queue/concurrency, retention, and migration/schema interactions.
+Validate production deploy env explicitly: fail startup or health-check loudly when proxy headers are present but `TRUST_PROXY` is missing in a reverse-proxy deployment. At minimum, include this in deploy smoke checks.
 
 ## Confirmed Non-Findings / Revalidated Areas
 
-- Admin API exports pass the `withAdminAuth` scanner.
-- Mutating server actions pass same-origin scanner.
-- Public mutating API routes pass rate-limit scanner.
-- Typecheck passes for app, tests, and scripts.
-- Targeted tests around upload tracker, queue quiescence, serve-upload, audit retention, and migration reconcile coverage pass.
-- JSON-LD `dangerouslySetInnerHTML` usages were present in static sweep but are routed through the existing `safeJsonLd`/sanitization pattern in the reviewed public pages; no new XSS finding was confirmed.
+- Lightroom multipart upload quota settlement is correct: it preclaims declared bytes, then `settleUploadTrackerClaim` subtracts claimed bytes and adds actual successful file bytes (`apps/web/src/lib/upload-tracker.ts:19-32`; LR settlement region `apps/web/src/app/api/admin/lr/upload/route.ts:139-151`, `apps/web/src/app/api/admin/lr/upload/route.ts:477-485`).
+- Admin API auth scanner passed for current routes.
+- Mutating server-action same-origin scanner passed; read-only/public exemptions were explicit.
+- Public mutating route rate-limit scanner passed.
+- Production CSP does not include development `unsafe-eval`; dev relaxations are isolated to `isDev` (`apps/web/src/lib/content-security-policy.ts:87-123`).
+- Settings backfill post-trigger timers have unmount cleanup and a mounted guard (`apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:90-143`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:203-211`).
+- Search and histogram async paths already use request ids, abort controllers, or mounted/aborted guards (`apps/web/src/components/search.tsx:143-260`, `apps/web/src/components/histogram.tsx:549-590`).
+- Server-side upload, queue, restore, migration, privacy projection, semantic search, and smart-collection paths contain current guard logic for the prior classes I checked: quota rollback, advisory locks, restore SQL scanning, migration postconditions, public data omission, same-origin/rate-limit gates, and query validation.
 
-## Final Missed-Issues Sweep / Skipped Files
+## Validation Evidence
 
-Final sweep covered active app routes, API handlers, server actions, shared libraries, DB schema, queue/backfill, upload serving, restore/backup, migrations/journal, scripts, Docker/nginx/deploy config, i18n, public workers, and relevant tests. No active executable source category was intentionally skipped.
+Commands run:
 
-Skipped from manual line-by-line review: `node_modules`, `.next`, `.git`, local upload/data directories, cache folders, binary image/font fixtures, generated screenshots, and historical `.context` plan/review archives not tied to current source behavior. These were either excluded as generated/runtime artifacts or used only as context/inventory, not treated as active executable source.
+- `npm run lint:api-auth --workspace=apps/web` - passed.
+- `npm run lint:action-origin --workspace=apps/web` - passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
+- `git status --short` - showed pre-existing modified review files only before this report edit; no source files were changed.
+
+Static review sweeps:
+
+- `rg --files`, `git ls-files`, and targeted `nl -ba` reads over app source, scripts, migrations, config, docs, tests related to the inspected surfaces.
+- Grep sweeps for async cleanup, timers/listeners, fetches, file operations, child processes, raw SQL, dangerous HTML, auth wrappers, origin guards, public mutating API handlers, CSP, upload tracker settlement, `TRUST_PROXY`, and TODO/FIXME/unsafe/exempt markers.
+
+## Missed-Bug Sweep
+
+Final pass re-checked the newest HEAD for stale assumptions from earlier cycles. The two reported issues are current in HEAD. I intentionally did not repeat old findings already addressed by current code comments/tests unless current code still exhibited the failure mode.
+
+Skipped-file confirmation:
+
+- Skipped generated/build/dependency artifacts: `apps/web/.next/**`, `node_modules/**`, `*.tsbuildinfo`, Playwright/test output artifacts, and built static outputs.
+- Skipped binary media/screenshot fixtures except where filenames or routing behavior mattered.
+- Skipped historical archived review/plan files as evidence sources except for current project instructions; they are not runtime source.
+- Did not modify source files, tests, migrations, configs, or docs other than this review report.

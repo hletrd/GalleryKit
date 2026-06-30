@@ -163,11 +163,12 @@ export default async function TopicPage({
   // Fire-and-forget topic view recording (do not block render on analytics insert).
   void recordTopicView(topicData.slug);
 
-  const [seo, config, allTags, allTopics] = await Promise.all([
+  const [seo, config, allTags, allTopics, tCommon] = await Promise.all([
     getSeoSettings(),
     getGalleryConfig(),
     getTagsCached(topicData.slug),
     getTopicsCached(),
+    getTranslations('common'),
   ]);
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
@@ -196,7 +197,7 @@ export default async function TopicPage({
       // Image always gets a 200 response (sized derivative can 404 for
       // legacy / mid-backfill rows).
       thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
-      name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+      name: getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`),
     })),
   } : null;
 

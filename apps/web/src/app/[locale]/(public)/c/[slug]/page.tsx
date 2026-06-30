@@ -100,12 +100,13 @@ export default async function SmartCollectionPage({ params }: { params: Promise<
     const PAGE_SIZE = 30;
     const { images, totalCount, hasMore } = await getImagesForSmartCollection(compiledCondition, PAGE_SIZE, 0);
 
-    const [locale, seo, config, allTags, allTopics] = await Promise.all([
+    const [locale, seo, config, allTags, allTopics, tCommon] = await Promise.all([
         getLocale(),
         getSeoSettings(),
         getGalleryConfig(),
         getTagsCached(),
         getTopicsCached(),
+        getTranslations('common'),
     ]);
 
     const baseUrl = seo.url;
@@ -123,7 +124,7 @@ export default async function SmartCollectionPage({ params }: { params: Promise<
             // Googlebot Image always gets a 200 response (sized
             // derivative can 404 for legacy / mid-backfill rows).
             thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
-            name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+            name: getPhotoDisplayTitleFromTagNames(img, `${tCommon('photo')} ${img.id}`),
         })),
     } : null;
 

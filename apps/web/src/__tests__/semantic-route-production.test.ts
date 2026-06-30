@@ -7,8 +7,8 @@ vi.mock('@/lib/restore-maintenance', () => ({ isRestoreMaintenanceActive: () => 
 
 const whereSpy = vi.fn();
 vi.mock('@/db', () => {
-  const chain = { select: () => chain, from: () => chain, leftJoin: () => chain, orderBy: () => chain, limit: () => Promise.resolve([]), where: (...a: unknown[]) => { whereSpy(...a); return chain; } };
-  return { db: chain, imageEmbeddings: { imageId: 'image_id', embedding: 'embedding', modelVersion: 'model_version', updatedAt: 'updated_at' }, images: {}, topics: {} };
+  const chain = { select: () => chain, from: () => chain, innerJoin: () => chain, leftJoin: () => chain, orderBy: () => chain, limit: () => Promise.resolve([]), where: (...a: unknown[]) => { whereSpy(...a); return chain; } };
+  return { db: chain, imageEmbeddings: { imageId: 'image_id', embedding: 'embedding', modelVersion: 'model_version', updatedAt: 'updated_at' }, images: { id: 'id', processed: 'processed' }, topics: {} };
 });
 
 import { getGalleryConfig } from '@/lib/gallery-config';

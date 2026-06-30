@@ -1,14 +1,14 @@
 /**
- * Caption generator for US-P52 (Auto alt-text via local Florence-2).
+ * Caption generator for US-P52 (EXIF-derived auto alt-text hints).
  *
  * STUB IMPLEMENTATION: The full vision-captioning path is deferred because the
- * repo currently ships CLIP inference only; no Florence-2 model weights or
+ * repo currently ships CLIP inference only; no captioning model weights or
  * captioning runner are wired into the runtime image.
  *
  * When `auto_alt_text_enabled` is true, this stub generates a deterministic
  * EXIF-derived hint string (e.g. "Photo taken with Canon EOS R5") rather than
  * running actual vision inference. This satisfies the schema, hook integration,
- * fallback resolver, and admin bulk-editor surfaces while adding no Florence-2
+ * fallback resolver, and admin bulk-editor surfaces while adding no captioning
  * model weights or captioning-runner footprint.
  *
  * DEFERRED-FIX: Swap `generateCaptionStub` for real caption inference only after

@@ -75,11 +75,15 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             const deltaX = touch.clientX - touchStartX.current;
             const deltaY = touch.clientY - touchStartY.current;
 
-            // Cancel swipe if movement becomes predominantly vertical
-            if (isSwiping.current && Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > VERTICAL_LIMIT) {
+            const resetSwipe = () => {
                 setIsSnapping(true);
                 setSwipeOffset(0);
                 isSwiping.current = false;
+            };
+
+            // Cancel swipe if movement becomes predominantly vertical
+            if (isSwiping.current && Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > VERTICAL_LIMIT) {
+                resetSwipe();
                 return;
             }
 
@@ -141,14 +145,22 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             isSwiping.current = false;
         };
 
+        const handleTouchCancel = () => {
+            setIsSnapping(true);
+            setSwipeOffset(0);
+            isSwiping.current = false;
+        };
+
         swipeTarget.addEventListener('touchstart', handleTouchStart, { passive: true });
         swipeTarget.addEventListener('touchmove', handleTouchMove, { passive: false });
         swipeTarget.addEventListener('touchend', handleTouchEnd, { passive: true });
+        swipeTarget.addEventListener('touchcancel', handleTouchCancel, { passive: true });
 
         return () => {
             swipeTarget.removeEventListener('touchstart', handleTouchStart);
             swipeTarget.removeEventListener('touchmove', handleTouchMove);
             swipeTarget.removeEventListener('touchend', handleTouchEnd);
+            swipeTarget.removeEventListener('touchcancel', handleTouchCancel);
         };
     }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef]);
 

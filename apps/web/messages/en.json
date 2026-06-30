@@ -353,6 +353,7 @@
     "downloadP3Jpeg": "Download (8-bit Display P3 JPEG)",
     "downloadP3Avif": "Download (Display P3 AVIF)",
     "downloadP3AvifDesc": "Smaller file, wider gamut — modern browsers only",
+    "viewerDescription": "Photo viewer. Use the buttons to open fullscreen, share, and view information.",
     "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram. Space toggles slideshow in lightbox.",
     "slideshowOn": "Slideshow started",
     "slideshowOff": "Slideshow stopped",
@@ -471,10 +472,10 @@
     "locale": "OG Locale",
     "localeHint": "Open Graph locale code (e.g. en_US, ko_KR). Leave empty for default.",
     "ogTitle": "Open Graph Image",
-    "ogDesc": "Default image for social media link previews. Individual photo pages use the photo itself.",
+    "ogDesc": "Default image for social media link previews. Public photo pages use generated photo cards; private share links use generic noindex metadata.",
     "ogImageUrl": "OG Image URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "Same-origin URL or path. Individual photo and share pages use the photo itself.",
+    "ogImageUrlHint": "Same-origin URL or path. Used as the fallback/default preview image; private share links do not look up shared photos for previews.",
     "loadFailed": "Could not load SEO settings. Please try again before saving changes."
   },
   "serverActions": {
@@ -678,7 +679,8 @@
     "loading": "Loading…",
     "imageUnavailable": "Image unavailable",
     "skipToContent": "Skip to content",
-    "close": "Close"
+    "close": "Close",
+    "opensInNewWindow": "opens in a new window"
   },
   "photo": {
     "notFoundTitle": "Photo Not Found",
@@ -791,7 +793,8 @@
   },
   "footer": {
     "admin": "Admin",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "opensInNewWindow": "opens in a new window"
   },
   "privacy": {
     "title": "Privacy",

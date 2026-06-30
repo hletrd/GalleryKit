@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const seedSource = readFileSync(path.join(process.cwd(), 'scripts/seed-e2e.ts'), 'utf8');
 const mainSource = seedSource.slice(seedSource.indexOf('async function main()'));
+const workflowSource = readFileSync(path.join(process.cwd(), '..', '..', '.github/workflows/quality.yml'), 'utf8');
 
 describe('seed-e2e destructive safety guard', () => {
     it('requires explicit opt-in or a disposable DB name before destructive cleanup', () => {
@@ -17,5 +18,12 @@ describe('seed-e2e destructive safety guard', () => {
         expect(mainSource).toContain('CI=true alone is not sufficient');
         expect(guardIdx).toBeLessThan(firstDbDeleteIdx);
         expect(guardIdx).toBeLessThan(firstFileRemoveIdx);
+    });
+
+    it('keeps the CI E2E database name disposable', () => {
+        expect(workflowSource).toContain('MYSQL_DATABASE: gallery_ci');
+        expect(workflowSource).toContain('DB_NAME: gallery_ci');
+        expect(workflowSource).not.toContain('MYSQL_DATABASE: gallery\n');
+        expect(workflowSource).not.toContain('DB_NAME: gallery\n');
     });
 });

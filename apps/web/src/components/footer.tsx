@@ -45,11 +45,13 @@ export async function Footer() {
                     <Link
                         href="https://github.com/hletrd/gallerykit"
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
+                        aria-label={`GitHub ${t('opensInNewWindow')}`}
                         className="flex min-h-11 items-center gap-2 rounded hover:underline outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                         <GithubIcon className="h-4 w-4" />
                         GitHub
+                        <span className="sr-only"> ({t('opensInNewWindow')})</span>
                     </Link>
                     <Link href={localizePath(locale, '/admin')} rel="nofollow" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         {t('admin')}

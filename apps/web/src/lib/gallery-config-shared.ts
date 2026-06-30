@@ -36,7 +36,7 @@ export const GALLERY_SETTING_KEYS = [
     // Slideshow
     'slideshow_interval_seconds',
 
-    // US-P52: Auto alt-text via local Florence-2 (ONNX stub, default off)
+    // US-P52: EXIF-derived auto alt-text hints (default off)
     'auto_alt_text_enabled',
 
     // US-P51: CLIP semantic search mode (disabled | stub | production)
@@ -97,7 +97,7 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     strip_gps_on_upload: 'false',
     slideshow_interval_seconds: String(SLIDESHOW_INTERVAL_DEFAULT),
 
-    // US-P52: auto alt-text disabled by default (heavy ONNX model, opt-in)
+    // US-P52: EXIF-derived auto alt-text hints disabled by default
     auto_alt_text_enabled: 'false',
 
     // US-P51: semantic search disabled by default until backfill completes

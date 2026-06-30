@@ -522,7 +522,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     return (
         <>
-        <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")} aria-describedby="photo-viewer-shortcuts">
+        <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")} aria-describedby="photo-viewer-description">
             {/* Accessible H1 for heading-based SR navigation.
                 Keeping visually hidden because the viewer surfaces the title
                 in the toolbar/info sidebar already; the goal is to ensure
@@ -531,16 +531,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             {showDocumentHeading && (
                 <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
             )}
-            {/* F-9: the keyboard-shortcut hint is irrelevant on touch
-                devices (no arrow keys, no `F`, no `I`); hide it below the `md`
-                breakpoint to stop wasting precious vertical space above
-                the photo on phones. AGG-R13-03 / DES-13-01: use `sr-only`
-                (not `hidden`) on mobile so this element — the target of the
-                container's `aria-describedby="photo-viewer-shortcuts"` — stays
-                in the accessibility tree. `hidden md:block` set display:none on
-                mobile, which dropped it from the a11y tree and made the
-                aria-describedby reference resolve to an empty string. */}
-            <p className="mb-2 text-xs text-muted-foreground sr-only md:not-sr-only" id="photo-viewer-shortcuts">
+            <p className="sr-only" id="photo-viewer-description">{t('viewer.viewerDescription')}</p>
+            {/* F-9 / P24-14: keyboard shortcuts are desktop-oriented, so keep
+                the hint visible only at keyboard-capable layout widths instead
+                of using it as the root viewer accessibility description. */}
+            <p className="mb-2 hidden text-xs text-muted-foreground md:block" id="photo-viewer-shortcuts">
                 {t('viewer.shortcutsHint')}
             </p>
             <div className="flex min-w-0 items-center justify-between gap-2 mb-4 photo-viewer-toolbar">
@@ -872,15 +867,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         <div className="col-span-2">
                                              <dt className="text-muted-foreground text-xs">{t('viewer.location')}</dt>
                                              <dd>
-                                             <a
-                                                href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                             >
-	                                                <MapPin className="h-3 w-3" />
-	                                                {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
-	                                             </a>
+                                                <a
+                                                    href={`https://www.google.com/maps/search/?api=1&query=${image.latitude},${image.longitude}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    aria-label={`${image.latitude.toFixed(4)}, ${image.longitude.toFixed(4)} ${t('common.opensInNewWindow')}`}
+                                                    className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                                >
+                                                    <MapPin className="h-3 w-3" />
+                                                    {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
+                                                    <span className="sr-only"> ({t('common.opensInNewWindow')})</span>
+                                                </a>
                                              </dd>
 	                                        </div>
                                     )}

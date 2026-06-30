@@ -1,164 +1,162 @@
-# Architect Review - Cycle 23
+# Architect Review - Cycle 24/100
 
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `45208b2181add5db64395e4dac30134cfd1fcf35`
+HEAD reviewed: `a6efd6fd584fe44138be3729d90743ceb76dbfad`
 Review date: 2026-06-30
+Role: architect
 
 ## Scope And Method
 
-I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the review-relevant repository surfaces across docs, source, tests, scripts, migrations, deployment config, and prior review/planning context.
+I reviewed current HEAD, not prior-cycle assumptions. I read `AGENTS.md` and `CLAUDE.md`, then inventoried the live architecture surfaces before selecting files for detailed review.
 
 Inventory evidence:
-- `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`: 579 files.
-- `apps/web/src`: 513 files.
-- `apps/web/src/__tests__`: 273 files.
-- Main architectural surfaces reviewed included auth/action guards, admin API wrappers, public route rate-limit linting, data selectors/privacy guards, schema and migration reconciliation, upload and image queue lifecycle, restore/backup topology, semantic search, smart collections, public map access, deployment config, and source-contract tests.
+- Live app/source/config/migration/test inventory: 572 files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`.
+- TypeScript app source: 505 files under `apps/web/src`.
+- Route/action layer: 76 files under `apps/web/src/app`.
+- Shared library/domain layer: 97 files under `apps/web/src/lib`.
+- Contract/unit test layer: 268 files under `apps/web/src/__tests__`.
 
-Validation was static architecture review only. I did not run lint/typecheck/build/tests because this task only writes a review report and makes no runtime code changes.
+Architecture-relevant files and regions reviewed:
+- Project rules/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `.context/plans/*`, and current `.context/reviews/*` for live design intent and repeated review concerns.
+- Package/build/runtime config: root `package.json`, `apps/web/package.json`, `next.config.ts`, `tsconfig*.json`, ESLint config, Vitest config, Playwright config, Dockerfile, Compose, nginx config, deploy scripts, and `scripts/entrypoint.sh`.
+- Persistence and migration ownership: `apps/web/src/db/*`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, restore/export/backfill scripts, and schema reconciliation code.
+- App Router and API boundaries: all `apps/web/src/app/**` route handlers, server actions, public pages, admin pages, auth wrappers, origin guards, public rate-limit gates, and semantic-search endpoints.
+- Shared runtime/domain modules: `data.ts`, image queue, image processing, CLIP model/embedding helpers, smart collections, restore maintenance, upload tracker state, rate limiting, request origin, admin tokens, audit, storage quarantine, image URL/path helpers, SEO/config/cache helpers, and localization utilities.
+- Client and UI state surfaces: components under `apps/web/src/components/**`, admin components, map/search/lightbox/photo viewer flows, upload manager, and client/server import contract tests.
+- Verification scaffolding: unit/source-contract tests, custom lint scripts, public route rate-limit lint, action-origin lint, API auth lint, touch-target audit, and e2e specs.
 
-## Findings
+Skipped as non-architecture/generated/runtime artifacts:
+- `.git`, `node_modules`, `.next`, build output, coverage/test output, `apps/web/public/uploads`, `apps/web/public/resources`, `apps/web/data`, root and app `test-results`, `.omx`/`.omc` runtime state, `.claude/worktrees`, and archived historical review screenshots/artifacts under `.context/reviews/archive`.
+- I used prior plans/reviews as design history, not as source of truth for current code.
 
-### ARCH23-01 - Duplicate Upload Ingest Orchestration Is Still A High-Drift Boundary
+Validation was static architecture review only. I did not run lint/typecheck/build/tests because this task only writes this review file and makes no runtime/source-code changes.
 
-Severity: Medium
-Confidence: High
-Risk type: Confirmed
+## Confirmed Issues
 
-Evidence:
-- Browser upload owns auth, quota, config snapshot, filesystem save, GPS stripping, DB insert, and queue payload construction in one action: `apps/web/src/app/actions/images.ts:114-190`, `apps/web/src/app/actions/images.ts:177-242`, `apps/web/src/app/actions/images.ts:340-531`.
-- Lightroom/PAT upload independently repeats the same lifecycle: `apps/web/src/app/api/admin/lr/upload/route.ts:68-151`, `apps/web/src/app/api/admin/lr/upload/route.ts:243-275`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-516`.
-- The queue has a shared `ProcessingSettingsSnapshot`, but the upload adapters still manually assemble and thread it: `apps/web/src/lib/image-queue.ts:92-120`.
-- Upload-processing settings are contract-locked separately from each adapter, so the invariant is distributed across settings, upload actions, and queue code: `apps/web/src/app/actions/settings.ts:40-100`, `apps/web/src/lib/upload-processing-contract-lock.ts:1-74`.
+### ARCH24-01 - Embedding Schema Has Two Sources Of Truth
 
-Failure scenario:
-A future image-processing setting, metadata field, privacy decision, or queue payload field is added to one ingest path but not the other. Browser uploads and Lightroom uploads then process the same kind of image under different GPS, HDR, derivative, caption, or audit behavior. The code already relies on comments and mirrored field lists rather than a single executable ingest contract, so the next change must remember two separate orchestration owners.
-
-Concrete fix:
-Extract a server-only ingest service, for example `createImageIngestSession(input)`, that owns the shared lifecycle: maintenance/contract lock interaction, upload tracker/quota claim and settlement, metadata extraction, optional GPS stripping, DB insert, queue job construction, and cleanup on failure. Keep the browser action and LR route as thin adapters that translate transport/auth input into the shared DTO. Add an exhaustiveness/source-contract test that proves both adapters pass through the same required processing snapshot fields.
-
-### ARCH23-02 - Image Processing Jobs Can Pin Most Of The Shared MySQL Pool During Sharp Work
-
-Severity: Medium
-Confidence: High
-Risk type: Confirmed
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
 Evidence:
-- The global MySQL pool is fixed at 10 connections with a queue limit of 20: `apps/web/src/db/index.ts:23-33`.
-- The image queue allows `QUEUE_CONCURRENCY` up to 8: `apps/web/src/lib/image-queue.ts:87-90`.
-- Each job acquires a DB advisory-lock connection and keeps that connection as the claim token: `apps/web/src/lib/image-queue.ts:446-463`.
-- The lock is acquired at job start and released only in the final cleanup: `apps/web/src/lib/image-queue.ts:513-520`, `apps/web/src/lib/image-queue.ts:812-815`.
-- While that lock connection is held, the job performs filesystem checks, optional config reads, Sharp derivative generation, file verification, and DB updates: `apps/web/src/lib/image-queue.ts:554-657`.
+- The Drizzle schema says the physical column is `MEDIUMBLOB`, but declares it as `text("embedding")`: `apps/web/src/db/schema.ts:266-286`.
+- The executable reconciler/migration creates `embedding mediumblob NOT NULL`: `apps/web/scripts/migrate.js:643-651`.
+- Runtime decode code compensates for the mismatch by accepting both raw `Buffer` values and legacy base64 strings: `apps/web/src/lib/clip-embeddings.ts:115-153`.
 
-Failure scenario:
-An operator increases `QUEUE_CONCURRENCY` to 8 to catch up after a large import. Eight queue workers can hold eight of ten shared pool connections for the full duration of CPU and filesystem image processing. Foreground admin/public queries, restore maintenance, upload inserts, and semantic/search operations then contend for the two remaining connections plus the small pool wait queue. Under burst load, user-facing requests can time out even though the bottleneck is queue claim topology, not database query cost.
+Design failure scenario:
+The schema contract is split between comments, migration SQL, and runtime conversion helpers. A future Drizzle schema diff, migration generator, refactor, or developer reading only `schema.ts` can treat `image_embeddings.embedding` as text and accidentally alter, collate, serialize, or validate it as string data. That can silently corrupt CLIP embeddings or force defensive decode branches to become permanent architecture.
 
 Concrete fix:
-Stop holding a shared pool connection across Sharp work. Prefer a durable DB row claim such as `processing_started_at`/`processing_owner` with timeout recovery, or use a dedicated tiny lock pool isolated from foreground traffic. If advisory locks remain, cap queue concurrency from pool-budget arithmetic the same way backfill work does, and add a source-contract/stress test that proves image queue workers cannot consume more than the reserved background connection budget.
+Make the DB schema express the real type. Add a MySQL custom Drizzle type or narrow schema helper for `MEDIUMBLOB` embeddings so `schema.ts`, migrations, `reconcileLegacySchema`, and runtime reads agree. Keep the legacy base64 decode path only as an explicit migration fallback. Add a source-contract test that fails if the declared embedding column no longer maps to binary `MEDIUMBLOB` storage.
 
-### ARCH23-03 - Single-Process Operational Topology Is Documented But Not Enforced At Startup
+### ARCH24-02 - Client Action Imports And Auth Reuse Cross The App/Lib Boundary
 
-Severity: Medium
-Confidence: High
-Risk type: Likely
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
 Evidence:
-- `CLAUDE.md` states the accepted topology: a single web instance, shared MySQL, local filesystem, and process-local queues/guards: `CLAUDE.md:233-236`.
-- Docker Compose currently declares one `web` service but has no executable startup lease that prevents a second app process or a scaled service from running: `apps/web/docker-compose.yml:1-28`.
-- Restore maintenance is process-local global state: `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- Upload tracking is process-local global state: `apps/web/src/lib/upload-tracker-state.ts:7-20`, `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- Image queue bootstrap and shutdown are process-local runtime hooks: `apps/web/src/instrumentation.ts:1-6`, `apps/web/src/instrumentation.ts:18-65`.
-- Image queue state is also process-local and keyed off `globalThis`: `apps/web/src/lib/image-queue.ts:76-90`.
-- Shared group view-count buffering lives in module-local process memory: `apps/web/src/lib/data.ts:13-18`.
+- The broad action barrel re-exports unrelated action groups from one `@/app/actions` surface: `apps/web/src/app/actions.ts:1-34`.
+- Multiple client components import server actions through that broad barrel, including upload, listing, image management, and photo viewer flows: `apps/web/src/components/upload-dropzone.tsx:1-8`, `apps/web/src/components/load-more.tsx:1-5`, `apps/web/src/components/image-manager.tsx:1-5`, `apps/web/src/components/photo-viewer.tsx:1-23`.
+- The client/server boundary test only follows `@/lib` and `@/db` runtime imports, so it does not protect the `@/app/actions` barrel surface: `apps/web/src/__tests__/client-server-only-boundary.test.ts:115-143`.
+- A narrower source contract exists only for visitor keyword search, proving the issue is known locally but not generalized: `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:19-23`.
+- The API auth layer imports `isAdmin` from a server-action module: `apps/web/src/lib/api-auth.ts:1`. That action module owns cookies, redirects, translation, login rate limits, audit logging, restore maintenance messaging, and mutation logic in the same file: `apps/web/src/app/actions/auth.ts:1-21`.
 
-Failure scenario:
-A future deployment change starts two Node processes, two containers, or a platform-managed multi-instance rollout. Each process gets its own restore-maintenance flag, upload tracker, queue bootstrap state, permanently-failed queue set, and view-count buffer. One process can accept uploads while another is restoring the database, rate limits and upload quotas can split by process, duplicate queue bootstraps can race, and buffered view counts can be lost independently on shutdown.
+Design failure scenario:
+The `@/app/actions` barrel becomes a high-coupling boundary between client components, server actions, admin actions, public actions, and auth state. A future export added for convenience can pull server-only dependencies into a client import closure or make a route/API layer depend on action-module behavior. The existing boundary scanner can still pass because it does not traverse `@/app/actions`. Separately, low-level API auth depending on `app/actions/auth` makes auth state ownership live in the App Router action layer instead of a server-only auth domain module.
 
 Concrete fix:
-Make the single-writer topology executable. Add a startup DB advisory lease or durable `runtime_instances` claim that fails fast when another web process is active. Alternatively, before supporting horizontal scaling, move restore state, upload claims, rate limits, queue claims, and view-count buffers to shared durable storage. Add a boot-time invariant test or startup source-contract test that documents which process-local modules require the single-instance lease.
+Remove broad barrel imports from client components. Import from the exact action module, as `search.tsx` already does for `@/app/actions/public`. Add a source-contract test that forbids value imports from `@/app/actions` in `'use client'` files and follows `@/app/actions/*` when checking server-only import closures. Move `getSession`, `getCurrentUser`, and `isAdmin` into a server-only `lib/auth-context` or `lib/current-user` module; then make both API wrappers and server actions depend on that module instead of routing auth through `app/actions/auth`.
 
-### ARCH23-04 - `data.ts` Still Combines Privacy Contracts, Public Queries, Admin Queries, SEO, Search, Shares, Maps, And Side-Effect Buffers
+### ARCH24-03 - Public Analytics Writes Are Fire-And-Forget But Not Owned By Shutdown
 
-Severity: Medium
-Confidence: High
-Risk type: Confirmed
+Severity: Low  
+Confidence: High  
+Status: Confirmed
 
 Evidence:
-- `apps/web/src/lib/data.ts` is 1,753 lines.
-- It imports broad schema ownership and defines process-local view-count buffering at module load: `apps/web/src/lib/data.ts:1-18`.
-- It owns the central admin/public selector and privacy guard contract: `apps/web/src/lib/data.ts:251-507`.
-- It also owns public gallery listing, feeds, OG image lookup, admin image listing, image detail, shares, smart collections, search, sitemap IDs, map images, caches, and view updates: `apps/web/src/lib/data.ts:785-1705`.
-- The public map selector intentionally diverges from the public privacy selector by adding coordinates under a topic gate: `apps/web/src/lib/data.ts:410-488`, `apps/web/src/lib/data.ts:1667-1697`.
+- Photo view recording intentionally starts the insert and does not await it: `apps/web/src/app/actions/public.ts:362-390`.
+- Topic and shared-group analytics use the same untracked insert pattern: `apps/web/src/app/actions/public.ts:397-421`, `apps/web/src/app/actions/public.ts:428-456`.
+- Shutdown drains image processing and the shared-group aggregate buffer, but it does not track or drain these analytics insert promises: `apps/web/src/instrumentation.ts:33-40`.
 
-Failure scenario:
-A change meant for one route or behavior plane forces modification in the same file that owns privacy-sensitive field selection and process-local side effects. For example, adding a public search field, map field, or SEO field risks touching the same module-level selector contract that protects admin-only fields. The current compile-time guards reduce leakage risk, but the file remains an architectural choke point that makes ownership, review scope, and future decomposition harder.
+Design failure scenario:
+Analytics events are durable database rows by schema, but the runtime treats them as best-effort side effects with no queue, no bounded drain, and no loss counter. A deploy, SIGTERM, process crash, or DB pool stall immediately after a view can drop events silently. That may be acceptable for approximate analytics, but the architecture does not make that ownership explicit the way the shared-group aggregate buffer does.
 
 Concrete fix:
-Split the module by boundary rather than by convenience. Move selector/privacy contracts into a narrow `image-select-fields` module; move gallery/feed/search/map/share/sitemap queries into separate route-facing query modules; move the shared-group view-count buffer into its own runtime/state module. Keep the current `_PrivacySensitiveKeys` and public-map exceptions as central exported types/tests so decomposition strengthens, rather than weakens, the public/admin data boundary.
+Pick one contract and encode it. If these events are best-effort, document admin analytics as approximate and add a drop/loss counter for observability. If they are intended to be durable, route them through a small bounded analytics queue with shutdown drain, timeout, and backpressure/drop metrics.
 
-### ARCH23-05 - All Admins Remain Root Admins Across Restore, User Management, Settings, And Upload Tokens
+## Likely Issues
 
-Severity: Medium
-Confidence: High
-Risk type: Manual-validation risk
+### ARCH24-04 - First-Page Public Listing Queries Keep Exact Window Counts On Expensive Dynamic Predicates
+
+Severity: Medium  
+Confidence: Medium  
+Status: Likely issue
 
 Evidence:
-- The documented product assumption is that there are multiple root admins and no role/capability separation: `CLAUDE.md:5`, `CLAUDE.md:235`.
-- Database restore is guarded by same-origin plus `isAdmin()`, not a narrower restore capability: `apps/web/src/app/[locale]/admin/db-actions.ts:363-370`.
-- Database restore then acquires restore/backfill/upload locks and can import a dump that rewrites the persistence contract: `apps/web/src/app/[locale]/admin/db-actions.ts:372-548`.
-- Admin user creation and deletion require only `isAdmin()` plus self/last-admin safeguards: `apps/web/src/app/actions/admin-users.ts:77-84`, `apps/web/src/app/actions/admin-users.ts:186-230`.
-- Settings mutation similarly gates on root admin status only: `apps/web/src/app/actions/settings.ts:40-47`.
-- The LR upload route supports token-scoped upload auth, but that scoping is at the upload route edge, not an admin capability model for broader control-plane actions: `apps/web/src/app/api/admin/lr/upload/route.ts:68-151`.
+- The generic listing first page selects `COUNT(*) OVER()` while grouping tags and ordering by image date: `apps/web/src/lib/data.ts:878-907`.
+- Smart collection cursor pages avoid the count, but the initial/offset path still selects `COUNT(*) OVER()` over the compiled predicate and tag joins: `apps/web/src/lib/data.ts:1417-1465`.
+- Public smart-collection pages are dynamic (`revalidate = 0`) and call the initial counted query on every first render: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:78-101`.
+- Smart collection predicates allow fields and `contains` operations that are not covered by the main image listing indexes, such as camera/lens/exposure/tag contains: `apps/web/src/lib/smart-collections.ts:21-30`, `apps/web/src/lib/smart-collections.ts:221-238`, `apps/web/src/lib/smart-collections.ts:250-267`. The image table indexes are mostly processed/date/topic/filename/uploader oriented: `apps/web/src/db/schema.ts:115-121`.
 
-Failure scenario:
-This is acceptable for the documented personal-gallery threat model, but it becomes a design risk as soon as "admin" means assistant, contractor, Lightroom-only operator, second photographer, or family curator. A compromised or less-trusted admin account can create other admins, delete admins, change image-processing settings, manage upload tokens, or run database restore. Audit logs help after the fact but do not constrain blast radius.
+Design failure scenario:
+An admin can create a public smart collection with a broad `contains` predicate over camera, lens, exposure, or tag text. Every visitor to the first page then forces the database to evaluate a dynamic predicate, join/group tags, order results, and compute an exact total count. Cursor-based load-more is cheaper, but the first page remains the route-level choke point. On a larger gallery or crawler traffic, this becomes a DB-bound public endpoint and pushes maintainers toward ad hoc per-route caching.
 
 Concrete fix:
-Before expanding multi-admin/studio use, introduce explicit admin capabilities such as `restore_database`, `manage_admins`, `manage_settings`, `manage_upload_tokens`, and `upload_images`. Keep the current root-admin role as a migration default, but make high-impact actions declare the capability they require. At minimum, add admin UI/docs warnings that every admin is currently a full control-plane operator.
+Remove exact count from hot public first pages unless the UI truly requires it. Fetch `pageSize + 1` rows for `hasMore` and compute totals asynchronously, cached per smart collection, or behind an admin-only/low-priority path. For public smart collections, consider materialized membership rows or a constrained/indexed predicate set. Add an EXPLAIN/performance budget test for representative smart-collection predicates before expanding the query language.
 
-### ARCH23-06 - Topic Slugs Are Still A Mutable Natural-Key Boundary, Though Current Tests Reduce Regression Risk
+## Risks Needing Manual Validation
 
-Severity: Low
-Confidence: Medium
-Risk type: Confirmed, currently mitigated
+### ARCH24-05 - Semantic Search Recall Is Bounded By Recency, Not Similarity
+
+Severity: Medium  
+Confidence: High  
+Status: Risk needing manual validation
 
 Evidence:
-- Topics use slug as the primary key: `apps/web/src/db/schema.ts:4-17`.
-- Images and topic views reference topic slug text: `apps/web/src/db/schema.ts:19-34`, `apps/web/src/db/schema.ts:239-242`.
-- Smart collection rules can also reference topic slugs in JSON-like rule payloads: `apps/web/src/db/schema.ts:297-306`.
-- Topic update logic performs coordinated slug retargeting across children: `apps/web/src/app/actions/topics.ts:255-339`.
-- The registry test explicitly requires new topic-slug foreign-key children to be registered: `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1-83`.
+- Semantic search scans only the most recently updated embeddings for the active model, capped by `SEMANTIC_SCAN_LIMIT`: `apps/web/src/app/api/search/semantic/route.ts:263-275`.
+- Similar-photo search has the same most-recent scan cap: `apps/web/src/app/api/search/similar/[id]/route.ts:164-177`.
+- The cap defaults to 2,000 rows and is clamped to 25,000 by env parsing: `apps/web/src/lib/clip-embeddings.ts:22-44`.
 
-Failure scenario:
-The current registry test is valuable, but slug remains both display URL identity and relational identity. A future feature can add a topic-like reference outside the registered children, inside JSON rules, or outside Drizzle schema introspection. A slug rename then partially updates the graph, leaving smart collections, cached links, or analytics rows pointing at the old slug.
+Design failure scenario:
+This is operationally reasonable for the current documented corpus size, but it is not a semantic-search architecture. Once the gallery grows beyond the scan cap, older images are invisible to a query no matter how relevant they are. Raising the cap increases DB transfer and CPU cost linearly per public request. Similar search has the same failure mode: relevant older neighbors can never be considered if they fall outside the recency window.
 
 Concrete fix:
-Long term, introduce immutable numeric topic IDs and treat slug as a mutable unique display attribute. Short term, keep the registry test blocking and add a route/source-contract test for every non-FK topic-slug reference, especially JSON rule payloads and URL-generation helpers.
+Before relying on CLIP search as a long-term feature, validate expected corpus size and recall requirements. If recall matters beyond the cap, introduce an actual vector/ANN index or materialized nearest-neighbor service/table. Short term, expose scanned row count versus total embedding count in logs/metrics and make the UI/admin docs clear that results are bounded by the configured scan window.
 
-## Confirmed Strengths / Non-Findings
+### ARCH24-06 - Current Topology Still Depends On Single-Instance Process Ownership
 
-- Public/admin image field separation is much stronger than in many gallery apps. `publicSelectFields` is derived from `adminSelectFields` with explicit omissions and compile-time privacy guards: `apps/web/src/lib/data.ts:251-507`.
-- Search enrichment has a separate allowlist and type guard, reducing accidental leakage through semantic/search APIs: `apps/web/src/lib/search-enrichment-fields.ts:1-47`.
-- Public map coordinate exposure is intentionally narrower than full admin exposure and is gated by `topics.map_visible`: `apps/web/src/lib/data.ts:410-488`, `apps/web/src/lib/data.ts:1667-1697`.
-- Migration ordering and legacy reconciliation have explicit tests and post-conditions. The journal is ordered and non-duplicated: `apps/web/drizzle/meta/_journal.json:1-170`, `apps/web/src/__tests__/migration-journal.test.ts:1-121`, `apps/web/scripts/migrate.js:1-920`.
-- Admin API and mutating action auth boundaries are backed by lint gates: `apps/web/scripts/check-api-auth.ts:1-170`, `apps/web/scripts/check-action-origin.ts:1-190`, `apps/web/scripts/check-public-route-rate-limit.ts:1-220`.
-- The cycle-22 deploy-doc drift around `.env.deploy` appears fixed in current docs and source-contract tests: `CLAUDE.md:68`, `CLAUDE.md:658`, `apps/web/src/__tests__/cycle-22-source-contracts.test.ts:1-120`.
-- Storage backend abstraction is intentionally quarantined rather than prematurely generalized: `apps/web/src/lib/storage/index.ts:1-120`, `apps/web/src/__tests__/storage-quarantine.test.ts:1-143`.
+Severity: Medium  
+Confidence: Medium  
+Status: Risk needing manual validation
 
-## Final Missed-Issues Sweep
+Evidence:
+- `CLAUDE.md` documents a single web instance with local filesystem and process-local runtime ownership.
+- The runtime state reviewed includes process-local restore maintenance state, upload tracker state, queue bootstrap/shutdown state, and shared view-count buffering in `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/upload-tracker-state.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/instrumentation.ts`, and `apps/web/src/lib/data.ts`.
+- Deployment config currently runs one web service behind nginx, so the design is internally consistent for the documented topology.
 
-I performed a final sweep over:
-- docs and operational contracts: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/`, `.context/plans/`;
-- auth/control-plane surfaces: server actions, API routes, middleware/proxy, lint scripts;
-- data boundaries: selectors, privacy tests, search enrichment, public map, smart collections;
-- persistence contracts: Drizzle schema, journal, migration reconciler, migration tests;
-- image pipeline: upload actions, LR upload route, processing queue, process-image helpers, restore maintenance;
-- deployment/runtime topology: Docker Compose, NGINX, instrumentation, deploy scripts;
-- test surfaces relevant to the above contracts.
+Design failure scenario:
+The architecture remains correct only while deployment stays single-instance. A future scale-out, second Node process, platform migration, or accidental duplicate container would split restore flags, upload tracking, queue runtime state, and buffered counts across processes. Prior cycles flagged this class of risk; current HEAD still relies on docs and deployment shape rather than an executable startup lease.
 
-Skipped files:
-- No live review-relevant source, schema, migration, script, e2e, or contract-test file was intentionally skipped.
-- I did not line-review binary/static assets, generated build artifacts, dependency folders, test output directories, or historical archive artifacts except where they informed prior finding context. These are not architectural source-of-truth surfaces for this review.
+Concrete fix:
+If single-instance is a product invariant, enforce it with a startup DB advisory lease or durable runtime instance claim that fails fast when another writer is active. If horizontal scaling is on the roadmap, move restore state, upload claims, queue ownership, rate-limit buckets, and analytics buffers to shared durable storage before adding the second process.
 
-## Verification Notes
+## Positive Architecture Confirmations
 
-No code changes were made. This review updates only `.context/reviews/architect.md`.
+- Storage remains quarantined: the compatibility storage module is covered by quarantine tests and is not part of live image path ownership.
+- Restore and migration paths have explicit advisory locks, maintenance gates, journal post-condition checks, and schema reconciliation. I did not find a new persistence-boundary issue beyond the embedding type mismatch.
+- Public mutation surfaces have dedicated lint gates for admin auth, same-origin action guards, and public route rate limiting.
+- Deployment topology is consistently documented and reflected in Compose/nginx/deploy scripts for the current single-host model.
+
+## Final Sweep
+
+Final architecture sweeps covered:
+- `process.env` and runtime config ownership.
+- `globalThis`, module-local maps/sets/timers, queues, and shutdown hooks.
+- Raw SQL, advisory locks, migration journal entries, and schema reconciliation.
+- Public API mutating handlers, admin API wrappers, action-origin exemptions, and rate-limit helpers.
+- Client/server import boundaries, `server-only` usage, action barrels, and route/action layering.
+- Image storage, upload, processing queue, restore/backup, semantic search, smart collections, shares, maps, and analytics.
+
+No additional architecture/design findings met the severity bar after that sweep. Skipped files were limited to generated, dependency, build, runtime data, upload/resource, test-output, worktree, and archived historical artifacts listed in the scope section above.

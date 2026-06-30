@@ -1,168 +1,168 @@
-# Cycle 23 Test-Engineer Deep Review
+# Cycle 24 Test-Engineer Review
 
-Review target: current `HEAD` (`45208b21`, branch `master`) in `/Users/hletrd/flash-shared/gallery`.
+Review target: current `HEAD` (`0cc094dd76d51e88fe163c0b7075e3f0b341f74c`, branch `master`) in `/Users/hletrd/flash-shared/gallery`.
 
-Role: test-engineer. Scope: full-repository test strategy, regression coverage, flaky patterns, TDD gaps, test/source mismatches, migration/script/package gates, and docs-to-test alignment. I kept changes limited to this review file.
+Role: test-engineer. Scope: whole-repo test coverage, flaky tests, TDD opportunities, regression-lock quality, fixture realism, and gate adequacy. This is a review-only pass; the only intended edit is this review file.
 
 ## Inventory Examined
 
 Instruction and architecture docs:
 
-- `AGENTS.md:1-49` and the prompt-provided AGENTS overlay for repo rules, quality gates, deploy expectations, and review artifact output.
-- `CLAUDE.md:1-671`, including stack overview, runtime/security model, color/HDR contracts, race protections, migration runbook, deploy runbook, CLIP production activation, lint gates, E2E notes, and touch-target audit.
-- `README.md`, `apps/web/README.md`, `docs/superpowers/**`, and active `.context/reviews/test-engineer.md` history for prior coverage gaps and current docs contracts.
+- Prompt-provided `AGENTS.md` overlay and project rules, including quality gates, review output, destructive-action boundaries, and commit/deploy expectations.
+- `CLAUDE.md` current HEAD architecture, security model, color/HDR pipeline, CLIP production notes, migration/runbook guidance, E2E/deploy notes, and lint/test gate descriptions.
+- `README.md`, `apps/web/README.md`, `docs/superpowers/**`, `.github/workflows/quality.yml`, and active `.context/reviews/**` history for current/prior test-risk context.
 
-Test/gate inventory:
+Test and gate inventory:
 
-- Package scripts and configs: `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/tsconfig*.json`, `apps/web/eslint.config.mjs`.
-- Unit tests: all files under `apps/web/src/__tests__/` were inventoried (`267` active `.test.ts/.test.tsx` files plus fixtures/stubs).
-- E2E tests: all files under `apps/web/e2e/`.
-- Custom gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/scripts/check-js-scripts.mjs`, `apps/web/src/__tests__/tracked-secrets.test.ts`, migration/reconcile tests, deploy contract tests, touch-target/focus scans, client/server boundary scan, i18n parity.
-
-Implementation inventory:
-
-- Active TypeScript/TSX source under `apps/web/src/` (`237` non-test TS/TSX files), app routes/actions, components, lib modules, DB schema, proxy, instrumentation, site config.
-- Scripts under `apps/web/scripts/`, root `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, Dockerfile, compose, nginx config.
-- Drizzle SQL and journal files under `apps/web/drizzle/`.
-- Active docs/plans/reviews were inventoried; line-level review focused on executable/product surfaces and prior-cycle test-risk hot spots.
+- Package/config gates: `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/tsconfig*.json`, `apps/web/eslint.config.mjs`, and `.github/workflows/quality.yml`.
+- Unit tests: all tracked files under `apps/web/src/__tests__/` were inventoried (`272` files total, `267` active `.test.ts/.test.tsx` files).
+- E2E tests: all `8` files under `apps/web/e2e/`, including `admin.spec.ts`, `origin-guard.spec.ts`, `public.spec.ts`, `test-fixes.spec.ts`, `nav-visual-check.spec.ts`, helpers, and image fixtures.
+- Custom gates/scripts: all `27` files under `apps/web/scripts/`, including auth/origin/rate-limit scanners, migration/init/seed scripts, CLIP/backfill scripts, deploy/build helpers, and PWA/icon generation.
+- Implementation surface mapped for test relevance: route files under `apps/web/src/app/**/route.ts`, server actions in `apps/web/src/app/actions.ts` and `apps/web/src/app/[locale]/admin/db-actions.ts`, top-level `apps/web/src/lib/*` modules, components, DB schema, migrations, Docker/deploy files, and site config.
 
 Repository-wide scans used:
 
-- Active file inventory excluding `node_modules`, `.git`, build outputs, test result outputs, and nested generated `.claude/worktrees`.
-- Full test list, route/action/script/migration lists, source-contract scan, skip/mock/flakiness scan, package-script review, and targeted line reads for every finding below.
+- `git ls-files` inventory, targeted `rg` scans for `describe.skip`/`test.skip`, source-contract tests, screenshot-only checks, waits/sleeps, route/action coverage, seed/deploy gates, and CLIP production toggles.
+- Line reads for every file cited below. Excluded from source review: `node_modules`, `.git`, generated build/test outputs, binary fixtures/screenshots/fonts, and nested `.claude/worktrees` duplicate worktrees.
 
-## Findings
+## Confirmed Issues
 
-### T23-01 - Lightroom upload route is still protected by source-text contracts instead of route behavior tests
+### C24-TE-01 - CI E2E gate is currently broken by a seed guard / workflow DB-name mismatch
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed issue
+- Evidence:
+  - CI exports `DB_NAME: gallery` and does not set `E2E_ALLOW_DESTRUCTIVE_SEED` in `.github/workflows/quality.yml:27-37`.
+  - The E2E job runs `npm run test:e2e` at `.github/workflows/quality.yml:76-77`.
+  - Playwright's local web server runs `npm run init` and then `npm run e2e:seed` before build at `apps/web/scripts/run-e2e-server.mjs:75-78`.
+  - Current seed safety correctly refuses any DB name that is neither explicitly allowed nor disposable at `apps/web/scripts/seed-e2e.ts:157-170`; `gallery` does not match the disposable pattern defined at `apps/web/scripts/seed-e2e.ts:44`.
+  - The updated safety test locks the stronger rule and explicitly rejects `process.env.CI === 'true'` as a bypass at `apps/web/src/__tests__/seed-e2e-safety.test.ts:8-20`.
+- Concrete failure scenario:
+  - On every push/PR quality run, Playwright starts the configured web server. `run-e2e-server.mjs` calls `e2e:seed`; `seed-e2e.ts` sees `DB_NAME=gallery`, no explicit opt-in, prints "CI=true alone is not sufficient", exits `1`, and the entire E2E gate fails before browser tests run.
+- Test/fix recommendation:
+  - Prefer changing CI `DB_NAME` to a disposable name such as `gallery_e2e` or `gallery_ci`. Alternatively set `E2E_ALLOW_DESTRUCTIVE_SEED=true` only in this isolated MySQL service job.
+  - Add a workflow/source contract test that parses `.github/workflows/quality.yml` and fails unless the E2E DB name matches `DISPOSABLE_DB_NAME_PATTERN` or the explicit seed opt-in is present. That locks the gate wiring, not just the script guard.
+
+### C24-TE-02 - Lightroom upload remains protected mainly by source-text contracts rather than route behavior tests
 
 - Severity: Medium
 - Confidence: High
 - Status: Confirmed coverage gap
 - Evidence:
-  - The route performs many production-critical side effects in one handler: token/user resolution and quota preclaim at `apps/web/src/app/api/admin/lr/upload/route.ts:68-151`; multipart/filename/title/topic validation at `apps/web/src/app/api/admin/lr/upload/route.ts:153-240`; upload-contract locking, config snapshotting, disk checks, save, GPS/HDR/restore guards, insert, and quota settlement at `apps/web/src/app/api/admin/lr/upload/route.ts:252-477`; queue/audit/revalidation at `apps/web/src/app/api/admin/lr/upload/route.ts:479-547`.
-  - The test explicitly describes itself as a source-text guard because the route is "heavy to exercise" at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15`.
-  - Critical assertions inspect strings and ordering, not behavior: enqueue payload fields at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-395`, post-save containment at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:407-450`, and quota settlement/source ordering at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:275-293`.
-- Failure scenario:
-  - A refactor keeps the same tokens in `route.ts` but changes runtime data flow: quota is not settled after a thrown parse/save/insert branch, the persisted snapshot differs from the queue payload, `actorUserId` is lost, or a late restore/GPS failure leaks an original. The source tests still pass because the strings remain present.
-- Concrete fix/test:
-  - Add a behavior-level route harness that imports `POST`, builds a synthetic `Request`/`FormData` upload, and mocks auth context, DB chains, config, upload tracker, filesystem checks, original save, GPS strip, queue, audit, and revalidation.
-  - Cover success plus at least: invalid multipart, missing/invalid filename, topic lookup throw, topic missing, lock unavailable, config read failure, disk low/throw, save failure, HDR reject, GPS strip failure, late restore, insert failure.
-  - Assert observable behavior: HTTP status/body, `settleUploadTrackerClaim` arguments, original cleanup, lock release, DB insert shape, and exact queue payload.
+  - The route performs auth/user attribution and quota preclaim at `apps/web/src/app/api/admin/lr/upload/route.ts:68-151`.
+  - It parses multipart data and validates filename/topic/title/description at `apps/web/src/app/api/admin/lr/upload/route.ts:153-240`.
+  - It then handles upload-contract locking, config snapshotting, disk checks, original save, HDR/GPS/restore guards, insert, and quota settlement at `apps/web/src/app/api/admin/lr/upload/route.ts:252-477`.
+  - Queue/audit/revalidation/response are separate side effects at `apps/web/src/app/api/admin/lr/upload/route.ts:479-547`.
+  - The coverage file explicitly calls itself a source-text/source-contract guard because the route is heavy to exercise at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15`.
+  - Critical invariants are string/order checks: tracker settlement at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:275-293`, enqueue payload settings at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:384-395`, and post-save containment at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:407-450`.
+- Concrete failure scenario:
+  - A refactor keeps the same identifiers in source but changes runtime behavior: quota settlement is skipped on a thrown branch, insert shape differs from the queue payload, lock release is missed after a late return, or a cleanup function is never awaited. Source-contract tests still pass because the strings remain present.
+- Test/fix recommendation:
+  - Add a behavior-level route harness importing `POST`, constructing synthetic `NextRequest`/`FormData`, and mocking auth context, DB chains, gallery config, upload tracker, filesystem checks, original save, GPS strip, queue, audit, revalidation, and lock release.
+  - Cover success plus invalid multipart, missing file, invalid filename, invalid/missing topic, topic lookup throw, topic missing, lock unavailable, config failure, disk low/throw, save failure, HDR reject, GPS strip failure, late restore, and insert failure.
+  - Assert observable outputs: HTTP status/body, `settleUploadTrackerClaim` arguments, original cleanup, lock release, DB insert values, and exact queue payload.
 
-### T23-02 - Browser upload quota rollback has behavior coverage for success, but failure-path rollback is still source-topology tested
-
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed regression-lock gap
-- Evidence:
-  - `uploadImages` preclaims upload quota after synchronous checks at `apps/web/src/app/actions/images.ts:238-242`.
-  - The claim must be rolled back for awaited validation failures: disk low/throw at `apps/web/src/app/actions/images.ts:247-264`, topic lookup throw/not-found at `apps/web/src/app/actions/images.ts:280-292`, and all-files-failed settlement at `apps/web/src/app/actions/images.ts:569-596`.
-  - The dedicated invariant test is source-order/count based: `apps/web/src/__tests__/images-action-toctou-claim.test.ts:18-57`.
-  - The behavior test exercises a successful upload and queue snapshot at `apps/web/src/__tests__/images-actions.test.ts:239-277`, but does not drive the post-claim failure branches that can leak quota.
-- Failure scenario:
-  - A future awaited validation is inserted after the claim, or an existing post-claim branch starts throwing before `settleUploadTrackerClaim`. The regex test can still pass while the in-memory upload window remains inflated for the admin/IP, causing false "upload limit reached" failures for up to the reset window.
-- Concrete fix/test:
-  - Add behavior tests in `images-actions.test.ts` that execute `uploadImages` with mocks for each post-claim failure path: low disk, `statfs` throw, topic select throw, topic not found, save failure, insert failure, all files rejected, GPS strip failure, and late restore.
-  - Assert `settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, 0, 0)` or the correct partial-success reconciliation, plus no queue enqueue on rejected paths.
-  - Prefer a small idempotent claim-settlement helper so tests assert one cleanup path rather than counting source snippets.
-
-### T23-03 - CLIP inference queue correctness is string-matched, not concurrency-tested
+### C24-TE-03 - Browser upload failure-path quota settlement is behavior-adjacent but not behavior-asserted
 
 - Severity: Medium
 - Confidence: High
 - Status: Confirmed regression-lock gap
 - Evidence:
-  - Queue limits, active count, waiter storage, timeout, abort, and release are implemented at `apps/web/src/lib/clip-model.ts:53-160`.
-  - Real text inference threads the request signal into the slot wrapper at `apps/web/src/lib/clip-model.ts:228-249`; image inference uses the same slot wrapper at `apps/web/src/lib/clip-model.ts:261-312`.
-  - The current test only scans source text for queue constants/errors/removal/abort threading at `apps/web/src/__tests__/clip-model-contract.test.ts:32-50`.
-- Failure scenario:
-  - An aborted or timed-out waiter remains in `inferenceWaiters`, a failed inference leaves `activeInferenceCount` elevated, release resolves an already-aborted waiter, or max-pending enforcement drifts. The source test passes if the same identifiers remain, while production semantic search can hang, overrun concurrency, or process disconnected requests.
-- Concrete fix/test:
-  - Extract the slot scheduler into a tiny resettable helper or expose a test-only factory.
-  - Add fake-timer tests for: max pending rejection, timeout removal, abort removal, release after success, release after throw, FIFO release, and "aborted queued task never executes after a slot frees."
-  - Add a semantic route abort test that uses a pending mocked `embedTextReal`, aborts the request signal, and asserts a 499 path without later DB scan.
+  - `uploadImages` preclaims quota synchronously at `apps/web/src/app/actions/images.ts:238-248`.
+  - The post-claim disk low/throw branches settle and return at `apps/web/src/app/actions/images.ts:250-271`.
+  - The post-claim topic select throw/not-found branches settle at `apps/web/src/app/actions/images.ts:286-299`.
+  - All-failed and final success/partial success settle at `apps/web/src/app/actions/images.ts:575-602`.
+  - The dedicated invariant test is source topology/count based at `apps/web/src/__tests__/images-action-toctou-claim.test.ts:18-57`.
+  - Behavior tests drive disk low, disk inspection throw, and topic missing at `apps/web/src/__tests__/images-actions.test.ts:358-403`, but they assert only returned errors plus no save/insert; they do not assert `settleUploadTrackerClaimMock`, which is available in the same test file at `apps/web/src/__tests__/images-actions.test.ts:17-39` and wired at `apps/web/src/__tests__/images-actions.test.ts:155-156`.
+- Concrete failure scenario:
+  - A branch keeps `settleClaim(0, 0)` somewhere in source, satisfying the source-count test, but the actual disk/topic failure path stops calling it or passes wrong arguments. The user receives the right error, no image is saved, and existing tests pass, but the in-memory upload window remains inflated for that admin/IP until reset.
+- Test/fix recommendation:
+  - In `images-actions.test.ts`, assert `settleUploadTrackerClaimMock` arguments for disk low, statfs throw, topic select throw, topic missing, HDR-all-failed, GPS-strip-all-failed, save failure, insert failure, and partial success.
+  - Prefer a small shared settlement helper boundary so tests assert one behavior surface rather than source snippet counts.
 
-### T23-04 - Real CLIP/offline production smoke tests skip in the default gate while production route tests mock the encoder
+### C24-TE-04 - CLIP inference queue correctness is source-string locked, not concurrency-tested
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed regression-lock gap
+- Evidence:
+  - Queue configuration and mutable state live at `apps/web/src/lib/clip-model.ts:53-72`.
+  - Waiter removal, abort checks, pending wait, timeout, and slot release are implemented at `apps/web/src/lib/clip-model.ts:99-160`.
+  - The test only checks source strings for queue limits, timeout, removal, and abort threading at `apps/web/src/__tests__/clip-model-contract.test.ts:32-50`.
+  - The semantic route test mocks `embedTextReal` and only asserts that an `AbortSignal` object is passed at `apps/web/src/__tests__/semantic-search-route.test.ts:53-55` and `apps/web/src/__tests__/semantic-search-route.test.ts:287-304`.
+- Concrete failure scenario:
+  - Timeout removal, abort removal, FIFO release, max-pending rejection, active-count decrement on throw, or "aborted queued task never executes" breaks while the same symbol names remain in source. Production semantic search can hang, overrun concurrency, or retain dead waiters, and the current string tests still pass.
+- Test/fix recommendation:
+  - Extract the scheduler into a resettable helper or expose a test-only factory.
+  - Add fake-timer tests for max pending rejection, timeout removal, abort removal, release after success, release after throw, FIFO ordering, active count recovery, and an aborted queued task not running after a slot frees.
+  - Add one route-level abort test with a pending mocked encoder promise to prove request abort maps to the expected 499 path without later DB scan.
+
+### C24-TE-05 - Real production CLIP validation skips in the default gate while route tests mock the encoder
 
 - Severity: Low-Medium
 - Confidence: High
-- Status: Confirmed conditional-gate blind spot / manual-validation risk
+- Status: Confirmed conditional-gate blind spot
 - Evidence:
-  - Production semantic search is live per `CLAUDE.md:158` and depends on offline weights plus inference queue limits documented at `CLAUDE.md:496-500`.
-  - `apps/web/package.json:13` runs plain `vitest run`; it does not enable real CLIP lanes.
-  - The real semantic ranking test skips unless `CLIP_INTEGRATION=1` at `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`.
-  - The offline loader test skips unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist at `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`.
-  - The production route test mocks `embedTextReal` at `apps/web/src/__tests__/semantic-route-production.test.ts:3-4` and asserts the mock call at `apps/web/src/__tests__/semantic-route-production.test.ts:33-41`.
-- Failure scenario:
-  - A dependency, Docker packaging, model path, pinned revision, ONNX native binding, or offline-cache layout change breaks real production inference. Unit tests pass because the route uses mocks and the real smoke tests silently skip by default; the first hard failure appears after production mode receives traffic.
-- Concrete fix/test:
-  - Add a named CI/deploy preflight lane, for example `npm run test:clip-production`, that runs the offline load and semantic integration tests with seeded model assets.
-  - If full weights are too heavy for every CI run, add a fast production-readiness script that fails when `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and `CLIP_MODELS_ROOT` lacks the pinned revision files or loader bootstrap cannot initialize.
-  - Make skipped CLIP production validation visible in normal gate output or deployment logs so operators do not mistake mocked production-route coverage for real inference coverage.
+  - The default app test script is plain `vitest run` at `apps/web/package.json:13`; the GitHub workflow runs `npm test` without CLIP production env at `.github/workflows/quality.yml:66-67`.
+  - Offline real-model load skips unless `CLIP_OFFLINE_LOAD=1`, `CLIP_MODELS_ROOT` is set, and a seeded pinned model file exists at `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`.
+  - Semantic ranking integration skips unless `CLIP_INTEGRATION=1` at `apps/web/src/__tests__/clip-semantic-integration.test.ts:27-31`.
+  - Production route tests mock `embedTextReal` at `apps/web/src/__tests__/semantic-search-route.test.ts:49-55`.
+- Concrete failure scenario:
+  - A model revision, on-disk cache layout, Docker volume mount, ONNX native binding, or offline bootstrap change breaks production inference. Default CI remains green because real CLIP tests are skipped and route tests mock the encoder; the first failure appears in deploy/backfill/production traffic.
+- Test/fix recommendation:
+  - Add a named `test:clip-production` or deploy preflight lane that runs the offline load and semantic integration tests with seeded weights.
+  - If full weights are too heavy for per-push CI, add a lightweight readiness script that fails when production semantic search is enabled but pinned files or loader bootstrap are unavailable.
+  - Print an explicit skipped-validation warning in normal gates/deploy logs so mocked route coverage is not mistaken for real encoder coverage.
 
-### T23-05 - The E2E seed safety test blesses `CI=true` as sufficient for destructive cleanup
+## Risks Needing Manual Validation
 
-- Severity: Medium-High
+### C24-TE-06 - E2E visual/color coverage is Chromium-only and captures screenshots without comparing them
+
+- Severity: Low
 - Confidence: High
-- Status: Confirmed test/code mismatch
+- Status: Risk needing manual validation
 - Evidence:
-  - `seed-e2e.ts` allows destructive seeding when any of three conditions is true: explicit opt-in, `CI === 'true'`, or disposable DB name at `apps/web/scripts/seed-e2e.ts:162-166`.
-  - The script then mutates persistent state: deletes topic aliases at `apps/web/scripts/seed-e2e.ts:185`, deletes existing E2E-topic image/tag/share rows at `apps/web/scripts/seed-e2e.ts:199-203`, removes upload files and variants at `apps/web/scripts/seed-e2e.ts:205-215`, and rewrites the shared group at `apps/web/scripts/seed-e2e.ts:262-266`.
-  - The safety test asserts this weak condition as the expected contract, including `process.env.CI === 'true'`, at `apps/web/src/__tests__/seed-e2e-safety.test.ts:8-18`.
-- Failure scenario:
-  - A CI job or local shell with `CI=true` accidentally points `DB_HOST`/`DB_NAME` at a non-disposable database. `npm run test:e2e` starts `scripts/run-e2e-server.mjs`, which runs `npm run e2e:seed` at `apps/web/scripts/run-e2e-server.mjs:75-78`; the seed script is allowed to delete/rewrite any rows/files under the `e2e-smoke` topic and shared-group keys.
-- Concrete fix/test:
-  - Tighten the guard so `CI=true` alone is not enough. Require a disposable DB name or explicit `E2E_ALLOW_DESTRUCTIVE_SEED=true`; for CI, require both `CI=true` and a disposable DB name unless explicitly overridden.
-  - Replace the source-string test with table-driven guard tests around a pure `shouldAllowE2ESeed(env)` helper: production env rejects, empty DB rejects, `CI=true` + `gallery` rejects, disposable DB allows, explicit override allows.
-  - Add a run-e2e-server contract test that refuses to call `e2e:seed` unless the same guard passes.
+  - Playwright is intentionally serial and defines only one browser project, `chromium`, at `apps/web/playwright.config.ts:48-77`.
+  - `nav-visual-check.spec.ts` asserts nav visibility, touch target size, and non-overlap at `apps/web/e2e/nav-visual-check.spec.ts:6-37`.
+  - The same spec writes screenshots to `test-results/*.png` at `apps/web/e2e/nav-visual-check.spec.ts:51`, `apps/web/e2e/nav-visual-check.spec.ts:65`, and `apps/web/e2e/nav-visual-check.spec.ts:78`, but there is no `toHaveScreenshot` baseline comparison in the spec.
+- Concrete failure scenario:
+  - A Safari/WebKit or Firefox-only layout/color/HDR presentation regression ships while Chromium E2E stays green. Or a visual drift is captured as an artifact but never fails the gate because screenshots are not compared.
+- Test/fix recommendation:
+  - Keep the current single-worker Chromium lane as the fast gate if admin login rate limits require it, but add a scheduled/manual WebKit and Firefox smoke lane for public gallery/nav/lightbox flows.
+  - Either convert the nav screenshots to `expect(page).toHaveScreenshot(...)` for stable critical layouts or document them as diagnostic artifacts rather than visual regression gates.
 
-### T23-06 - `retryFailedImage` has source/auth tests but no behavior test for stale rows or queue-reject state restoration
+## Likely Issues
 
-- Severity: Medium
-- Confidence: Medium
-- Status: Likely bug plus confirmed coverage gap
-- Evidence:
-  - `retryFailedImage` selects a failed image at `apps/web/src/app/actions/images.ts:1202-1223`.
-  - It updates the row to clear failure state at `apps/web/src/app/actions/images.ts:1239-1242`, but does not inspect `affectedRows` before clearing in-memory failure state at `apps/web/src/app/actions/images.ts:1244-1250` and re-enqueueing at `apps/web/src/app/actions/images.ts:1252-1282`.
-  - If enqueue rejects, it restores DB/in-memory failed state at `apps/web/src/app/actions/images.ts:1283-1294`.
-  - The broad retry-flow test is source-text only at `apps/web/src/__tests__/failed-image-retry.test.ts:71-126`.
-  - The behavior test covers only auth short-circuit cases at `apps/web/src/__tests__/retry-failed-image-auth.test.ts:138-160`.
-- Failure scenario:
-  - The row is deleted or concurrently processed after the initial select but before the clear-failure update. The update affects zero rows, yet the action clears in-memory failure maps, enqueues a job for a stale row, and can return success. Conversely, if queue rejection restoration fails or updates the wrong state, current tests can miss it because the non-auth behavior is not executed.
-- Concrete fix/test:
-  - Add behavior tests for `retryFailedImage` with mocked DB chains and queue state:
-    - `affectedRows === 0` after the clear update returns `imageNotInFailedState` or `imageNotFound`, does not clear in-memory state, and does not enqueue.
-    - Successful clear update enqueues with the full snapshot and clears `permanentlyFailedIds`, `retryCounts`, `claimRetryCounts`, and `lastErrors`.
-    - `enqueueImageProcessing` returning `false` restores `processing_error`, `failed_at`, and `processing_settings_json: null`, re-adds `permanentlyFailedIds`, and returns `failedToRetryImage`.
-  - In implementation, check the update result before mutating in-memory state or enqueueing.
+No additional likely runtime bugs are filed beyond the confirmed coverage/gate gaps above. The current cycle's strongest newly confirmed bug is the CI E2E seed mismatch in C24-TE-01. Prior cycle seed-safety and retry-state findings were rechecked against current HEAD and are not carried forward as open findings.
 
 ## Coverage Strengths Observed
 
-- Migration safety is well covered: journal order, global max `when`, tag-to-file mapping, hash post-condition source lock, schema/table/column/index reconcile tripwires, and DROP tripwires are present in `migration-journal*.test.ts` and `migrate-reconcile-coverage.test.ts`.
-- Security lint gates are explicit and fixture-tested: admin API auth, mutating server action origin checks, and public mutating route rate limits.
-- Client/server boundary, privacy-field symmetry, tracked secret hygiene, upload path safety, deploy script contracts, service-worker drift, touch targets, focus visibility, i18n parity, and several race contracts have dedicated regression tests.
-- Playwright runs single-worker (`apps/web/playwright.config.ts:45-54`) to avoid admin-login rate-limit flakiness, and public/admin flows have meaningful assertions rather than only screenshots.
+- Security lint gates are broad and fixture-tested: admin API auth, mutating server action origin checks, and public mutating route rate limits are all wired into package/workflow gates.
+- Migration coverage is strong: journal order/hash checks, reconcile coverage, schema guards, and deploy-time post-condition assertions are represented in tests and scripts.
+- Many high-risk photographer/domain contracts have explicit regression locks: privacy-field symmetry, upload path safety, color/HDR metadata, touch targets, focus visibility, i18n parity, service worker drift, tracked secrets, and deploy script contracts.
+- Flake mitigations are visible: Vitest excludes `.next` copies and sets a 15s timeout in `apps/web/vitest.config.ts`; Playwright is single-worker with retained traces/screenshots/videos in `apps/web/playwright.config.ts:48-68`; admin E2E has credential skips at `apps/web/e2e/admin.spec.ts:6-13`; long image processing polling is bounded in `apps/web/e2e/helpers.ts:151-172`.
 
-## Flakiness / Strategy Notes
+## TDD Opportunities
 
-- Confirmed flaky-pattern mitigations already exist: Vitest excludes `.next` build copies and has a 15s timeout (`apps/web/vitest.config.ts:17-39`); Playwright is serial/single-worker (`apps/web/playwright.config.ts:45-54`); admin E2E has credential guards (`apps/web/e2e/admin.spec.ts:6-13`); long image-processing E2E polling uses bounded DB polling (`apps/web/e2e/helpers.ts:151-172`).
-- Remaining manual-validation risk is mainly production CLIP, because the real model lanes are intentionally gated and skipped by default.
-- The largest strategic gap is not lack of test volume; it is several high-risk source-contract tests standing in for behavior around multipart uploads, queue scheduling, and retry state transitions.
+- For future upload/action fixes, write failing behavior tests first around observable side effects (`settleUploadTrackerClaim`, DB insert shape, cleanup, queue payload, lock release) before touching source. This would replace several fragile source-text tests with executable regression locks.
+- For CLIP scheduler changes, extract the scheduling primitive first, then TDD the queue with fake timers and synthetic abort signals before changing route behavior.
+- For gate wiring, add lightweight contract tests that parse workflow/package scripts. These catch CI-only breakage without requiring the full E2E job to run locally.
 
-## Final Missed-Issues Sweep
+## Final Missed-Gap Sweep
 
-Sweep performed after drafting:
+Rechecks performed after drafting:
 
-- Rechecked prior cycle 22 findings against current files. The stale deploy-doc command from cycle 22 is fixed in current `CLAUDE.md:67` and `CLAUDE.md:658`, so it is not re-filed.
-- Re-scanned for skips, sleeps, source-contract patterns, route/action coverage, scripts, migrations, and package gates.
-- Rechecked migration and deploy contract tests for obvious current gaps; no additional high-confidence findings found there.
-- Checked git state before writing: other review files were already modified/untracked by other agents/users; I did not touch them.
+- Re-read current HEAD for all findings, especially areas changed since cycle 23: `seed-e2e.ts`, `seed-e2e-safety.test.ts`, workflow E2E env, Lightroom upload source contracts, browser upload quota settlement, CLIP queue tests, CLIP skip gates, and Playwright visual config.
+- Re-scanned for `describe.skip`/`test.skip`, source-contract tests, screenshots without comparisons, waits/sleeps, route/action coverage, scripts, migrations, and package/workflow gates.
+- Rechecked prior-cycle findings against current HEAD. The old seed-safety bug is fixed by `seed-e2e.ts:157-170` and locked by `seed-e2e-safety.test.ts:8-20`; the remaining issue is now the workflow/env mismatch. The prior retry stale-row/queue-reject concern was not re-filed because current HEAD appears to have addressed it and this pass did not find a new high-confidence gap there.
 
-Skipped or not line-reviewed:
+Skipped-file confirmation:
 
-- `node_modules`, `.git`, `.next`/build outputs, Playwright/Vitest output folders, binary image/font fixtures, generated screenshots, and nested `.claude/worktrees` duplicate worktrees.
-- Historical `.context` review/plan artifacts beyond active/prior-cycle context were inventoried but not exhaustively line-reviewed; they are review history, not executable product/test surface.
+- Not line-reviewed: `node_modules`, `.git`, `.next`/build outputs, Playwright/Vitest output folders, binary image/font fixtures, generated screenshots, and nested `.claude/worktrees` duplicate worktrees.
+- Historical `.context` plan/review archives were inventoried for context but not exhaustively line-reviewed as executable product/test surface.
+- No source implementation files were modified by this review pass.
 
 Validation:
 
-- Review-only pass. I did not run the full lint/typecheck/build/test/e2e gates because no source/test implementation was changed and the requested deliverable was the written review.
+- Review-only pass. I did not run full lint/typecheck/build/unit/E2E gates because no implementation/test source changed and the requested deliverable was this written review. Diff validation should be limited to `.context/reviews/test-engineer.md`.

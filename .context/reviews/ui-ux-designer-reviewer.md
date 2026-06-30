@@ -1,161 +1,120 @@
-# Cycle 23 UI/UX Designer Reviewer - GalleryKit
+# Cycle 24 UI/UX Designer Reviewer - GalleryKit
 
 Date: 2026-06-30
-Reviewer surface: globally registered `ui-ux-designer-reviewer`
+Reviewer surface: `ui-ux-designer-reviewer`
 Repo: `/Users/hletrd/flash-shared/gallery`
+Reviewed HEAD: `7ff1eeec`
 
-## Prompt Fit
+## Scope And Inventory
 
-The installed `ui-ux-designer-reviewer` prompt body is tailored to a different SwiftUI product, BurstPick, and references non-existent BurstPick/SwiftUI paths. I treated that as a surface-name mismatch only and reviewed the actual GalleryKit repo: Next.js TSX routes/components, Tailwind/CSS, `messages/en.json`, `messages/ko.json`, public and admin flows, e2e/unit tests, and design/touch-target guardrails.
+I loaded `AGENTS.md`, `CLAUDE.md`, the repo-local Gallery rules, the installed role prompt at `~/.codex/agents/ui-ux-designer-reviewer.md`, and the code-review skill guidance. The installed reviewer prompt is still product-specific to a different SwiftUI app, so I used it only as role posture and reviewed the actual GalleryKit web UI.
+
+Inventory was completed before findings. Candidate files covered:
+
+- Public routes: `apps/web/src/app/[locale]/(public)/**`, including home, topic, photo, shared links, smart collections, map, timeline, year, privacy, loading, error, and not-found surfaces.
+- Admin routes: `apps/web/src/app/[locale]/admin/**`, including login, dashboard, categories, tags, SEO, settings, tokens, password, users, DB, analytics, layouts, and protected wrappers.
+- Components and styles: `apps/web/src/components/**`, shadcn primitives, navigation, search, home grid, photo viewer, lightbox, info sheet, image manager, upload dropzone, map, histogram, color details, global CSS/theme tokens.
+- Localization: `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
+- Browser/e2e/static UI evidence: `apps/web/e2e/*.ts` and UI/a11y tests under `apps/web/src/__tests__`, especially touch target, focus-visible, i18n parity, lightbox, info-sheet, and source-contract tests.
+
+Skipped-file confirmation: no UI-relevant route, component, style, message, or e2e group from the inventory was skipped. I did not line-review backend-only tests or non-UI library internals except where they directly explained a UI failure path.
 
 ## Evidence And Constraints
 
-- Read `AGENTS.md` and `CLAUDE.md` before reviewing.
-- Source inventory covered public gallery/home/search/photo viewer/lightbox/map/timeline/year/topic/shared flows, admin dashboard/upload/image manager/settings/tokens/db/categories/tags/users/SEO flows, UI primitives, global CSS/theme tokens, locale messages, and UI/a11y tests.
-- Browser/DOM evidence was partially feasible. `http://127.0.0.1:3000/` was occupied by a different app (`ccusage | Usage Dashboard`), so local GalleryKit DOM/admin auth validation was blocked. Production `https://gallery.atik.kr/en` rendered GalleryKit and confirmed the public demo shell on mobile, but production may not match this checkout exactly; I used it as supporting evidence only. Screenshot artifact: `/tmp/gallery-ui-review-demo-mobile.png`.
-- No application source files were changed. This report file is the only persistent edit from this reviewer pass; other review files were already dirty in the workspace.
+- Agent-browser was feasible for the unauthenticated admin login surface. `http://localhost:3001/en/admin` rendered `Skip to content`, `Admin`, username/password fields, and sign-in. Screenshot: `/tmp/gallery-admin-login-1280.png`.
+- Public DB-backed pages could not be visually exercised past the loading shell on the existing dev server. `agent-browser` at `http://127.0.0.1:3001/en` returned body text `Skip to content\nLoading...`, no `<main>`, and `document.readyState === "complete"`. The dev log showed repeated database `ECONNREFUSED` and failed `topics` / `images` queries.
+- Starting a separate dev server on port 3100 was blocked by Next's running-server lock: another dev server was already active for this repo on `localhost:3001` (PID 33356). I did not stop or kill it.
+- Focused validation passed: `npm run test --workspace=apps/web -- touch-target-audit.test.ts focus-visible-links-scan.test.ts focus-visible-rings-cycle20.test.ts i18n-key-parity.test.ts lightbox-controls-contract.test.ts info-bottom-sheet-ia.test.ts` -> 6 files, 48 tests passed.
+- Existing unrelated review files were already dirty before this pass. This report is the only file I changed.
 
-## Current Strengths
+## Confirmed Issues
 
-- Touch target policy is unusually strong: `Button` defaults enforce 44 px+ targets across sizes in `apps/web/src/components/ui/button.tsx:23-29`, and `touch-target-audit.test.ts` recursively scans components/admin/public/root route files in `apps/web/src/__tests__/touch-target-audit.test.ts:42-83`.
-- Search has solid keyboard and assistive-tech treatment: trigger focus restore, body scroll lock, focus trap, combobox semantics, IME guards, and live status are in `apps/web/src/components/search.tsx:320-446`.
-- Theme and contrast work is explicit for light/dark/OLED, including documented muted/destructive contrast choices in `apps/web/src/app/[locale]/globals.css:18-101`.
-- Locale key parity is guarded at the leaf-key level for English/Korean in `apps/web/src/__tests__/i18n-key-parity.test.ts:43-66`.
-- The token plaintext modal has been fixed since prior reviews: it suppresses the default close affordance with `showCloseButton={false}` and gates completion on acknowledgement in `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-237`.
+### 1. Public DB outage leaves visitors on an indefinite loading shell
 
-## Findings
+Severity: High
+Confidence: High
+Area: availability UX, accessibility, recovery IA
 
-### 1. [Confirmed] Route error fallback still drops the full public shell
+Evidence:
+- Browser evidence on current HEAD/server: `/en` completed document load with body text only `Skip to content\nLoading...`, no `main`, and no visible localized error or recovery action.
+- Server log evidence: repeated `ECONNREFUSED`, failed `select ... from topics`, and failed `select id, title from images`.
+- `apps/web/src/app/[locale]/(public)/page.tsx:151-166` awaits `getSeoSettings()`, `getGalleryConfig()`, `getTagsCached()`, `getTopicsCached()`, then `getImagesLitePage(...)` without a degraded public fallback.
+- `apps/web/src/lib/data.ts:509-529` and `apps/web/src/lib/data.ts:878-906` show the DB-backed topic/image queries that fail in this state.
+- `apps/web/src/app/[locale]/loading.tsx:7-10` provides only a spinner/status label while the failed route never reaches a usable shell.
+
+User failure scenario:
+A visitor, client, or screen-reader user reaches the gallery during a DB outage or local misconfiguration and hears/sees only "Loading..." indefinitely. The skip link points to no rendered `main`, there is no retry/back-to-gallery action, and no explanation that the gallery is temporarily unavailable.
+
+Fix:
+Add a public degraded state for DB-backed listing failures. Either catch expected DB-unavailable failures around the home/listing data loads and render a localized maintenance/error section inside `main#main-content`, or make sure the route reliably transitions into the localized error boundary with retry and navigation. Keep `Nav`'s existing defensive fallbacks, but do not let the page body stay as a perpetual loading status.
+
+### 2. Mobile screen-reader users get desktop keyboard shortcut instructions in the photo viewer
 
 Severity: Medium
 Confidence: High
-Area: IA, recovery, locale/theme continuity
+Area: accessibility, mobile ergonomics, photographer viewer fit
 
 Evidence:
-- `apps/web/src/app/[locale]/error.tsx:22-61` renders a standalone `main` with a small home nav, retry button, and back-to-gallery link.
-- `apps/web/src/app/[locale]/not-found.tsx:18-48` already reproduces the public shell with `<Nav />`, `<main>`, and `<Footer />`; its comment at `not-found.tsx:7-11` names the exact wayfinding problem this route error still has.
+- `apps/web/src/components/photo-viewer.tsx:525` attaches `aria-describedby="photo-viewer-shortcuts"` to the viewer container.
+- `apps/web/src/components/photo-viewer.tsx:534-545` explicitly says the shortcut hint is irrelevant on touch devices but keeps it in the accessibility tree with `sr-only md:not-sr-only`.
+- The described text in `apps/web/messages/en.json:356` and `apps/web/messages/ko.json:356` is desktop-keyboard-specific: arrows, `F`, `I`, `C`, `H`, and Space.
 
-Failure scenario:
-If a data fetch or route segment throws on a public photo/topic page, visitors land on a stripped recovery surface without the normal topic navigation, search, theme switcher, locale switcher, or footer wayfinding. A client trying to recover from a broken shared gallery or photo link can only retry or jump home, losing the same orientation aids available on 404.
+User failure scenario:
+On a phone, a screen-reader user opens a photo detail page and gets announced keyboard-only controls that are not available in the touch workflow. That adds cognitive noise before the actual viewer controls and is especially awkward for the photographer audience, where the viewer should foreground image inspection and metadata access.
 
-Concrete fix:
-Bring `error.tsx` to parity with `not-found.tsx`: render `<Nav />` and `<Footer />`, keep `main#main-content`, retain the retry action, and expose stable fallback links for home/search/topics. Preserve the existing focus ring and 44 px controls.
+Fix:
+Split the descriptions. Use a concise always-available SR description for the viewer, such as "Photo viewer. Use the buttons to open fullscreen, share, and view info." Keep the desktop shortcut hint visible and described only for keyboard-capable layouts, or attach it to a desktop-only help element rather than the root viewer on mobile.
 
-### 2. [Confirmed] Admin image management is table-only on narrow screens
+### 3. Admin settings copy exposes operator/runbook detail directly in the form
 
 Severity: Medium
-Confidence: High
-Area: Responsive admin workflow, touch ergonomics, professional batch management
+Confidence: High for source/rendered copy, Medium for protected-browser impact
+Area: information architecture, localization, photographer audience fit
 
 Evidence:
-- The image manager renders a nine-column table in `apps/web/src/components/image-manager.tsx:424-595`.
-- Each row includes a 128 px preview, title, filename, topic, a `min-w-[200px]` tag editor, gamut/date, and action buttons in `apps/web/src/components/image-manager.tsx:466-582`.
-- The table primitive adds horizontal overflow in `apps/web/src/components/ui/table.tsx:7-18`, but there is no alternate mobile layout.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:307-329` renders backfill warnings and trigger hints inline in a status/banner block.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:557-560` renders a Firefox display-detection note inline.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:741-789` renders the semantic-search card and warnings.
+- English strings such as `settings.semanticSearchDesc`, `settings.backfillRequiredHint`, `settings.backfillTriggerHint`, and `settings.backfillConfirmDesc` in `apps/web/messages/en.json:745-779` include implementation terms like stub embeddings, operator-gated production, env flags, sidecar backfill, `--force-reencode`, live host, pipeline version, and CPU/disk-heavy processing.
+- Korean equivalents in `apps/web/messages/ko.json:745-779` preserve the same dense operator terminology, making the localized UI long and difficult to scan.
 
-Failure scenario:
-A photographer or admin checking uploads from a phone must pan horizontally across preview, metadata, tags, gamut/date, and destructive actions. The controls meet touch-size rules, but the workflow is still slow and error-prone because selection state, preview identity, tags, and delete/edit actions are not visible together.
+User failure scenario:
+A photographer-admin trying to make a practical choice about color/HDR derivatives or semantic search has to parse deployment/runbook concepts in the main form before understanding the action. On mobile or in Korean, the long explanatory blocks become dense paragraphs and push the actual controls farther down the page.
 
-Concrete fix:
-Keep the table for desktop, but add a card/list layout below `lg`: preview + title/filename, topic/gamut/date badges, tag editor, select checkbox, and edit/delete buttons in one vertical unit. Use the existing table as the large-screen path and the same `ImageForManager` data model to avoid behavior drift.
+Fix:
+Separate task copy from operator copy. Keep the form labels and help text outcome-oriented, for example "Existing photos need re-encoding before this change appears publicly." Move sidecar/env/force-reencode details into a collapsible "operator details" section or linked runbook. For Korean, rewrite as shorter native UI text rather than a direct technical translation.
 
-### 3. [Confirmed] Upload staging cards start at two columns on phones
+## Likely Issues
 
-Severity: Low-Medium
-Confidence: High
-Area: Responsive upload workflow, batch tagging
+### 4. Protected admin navigation is likely too heavy on small screens
 
-Evidence:
-- Accepted files are rendered with `grid grid-cols-2 md:grid-cols-3 gap-4` in `apps/web/src/components/upload-dropzone.tsx:458-466`.
-- Each card contains a square preview, filename/size, inherited global tag chips, and a per-file `TagInput` in `apps/web/src/components/upload-dropzone.tsx:490-532`.
-- The remove button is correctly 44 px in `apps/web/src/components/upload-dropzone.tsx:479-488`; the issue is available card width, not target size.
-
-Failure scenario:
-On a 360-390 px phone, two columns leave roughly half-width cards for long camera filenames and a tag combobox. That makes per-file classification during a real shoot upload cramped, with truncation hiding identity cues that matter before committing a batch.
-
-Concrete fix:
-Change the staging grid to `grid-cols-1 sm:grid-cols-2 md:grid-cols-3`. If batch size makes the single-column mobile list long, add a sticky bottom upload summary/action bar instead of compressing each file card.
-
-### 4. [Confirmed] Accepted upload files can be silently skipped with only a generic limit toast
-
-Severity: Low-Medium
-Confidence: High
-Area: State visibility, error recovery, batch upload trust
-
-Evidence:
-- `onDrop` filters accepted files for per-file, count, and total-byte limits in `apps/web/src/components/upload-dropzone.tsx:143-161`.
-- Skipped files are counted, but their names and specific reasons are discarded; the UI only shows a generic `upload.limitExceeded` toast in `apps/web/src/components/upload-dropzone.tsx:163-170`.
-- `onDropRejected` does name rejected files in `apps/web/src/components/upload-dropzone.tsx:184-190`, so this omission is specific to accepted files that exceed GalleryKit's aggregate limits.
-
-Failure scenario:
-An admin drops a large wedding/event batch and sees fewer files staged than selected. The toast says limits were exceeded, but it does not identify which files were omitted or whether the count limit, total size, or individual file size caused each skip. That erodes confidence before upload and can lead to missed deliverables.
-
-Concrete fix:
-Track skipped accepted files as structured `{ name, reason }` entries and render them below the dropzone with per-file reasons and a dismiss action. Keep the toast as a summary, but make the persistent UI the source of truth for what was not staged.
-
-### 5. [Confirmed] Desktop photo info toggling animates the photo canvas layout
-
-Severity: Low-Medium
-Confidence: High
-Area: Motion, visual stability, photographer review workflow
-
-Evidence:
-- The `I` shortcut toggles the pinned info/sidebar state in `apps/web/src/components/photo-viewer.tsx:355-386`.
-- The viewer grid uses `transition-all duration-500 ease-in-out` and switches between `grid-cols-1` and `lg:grid-cols-[1fr_350px]` in `apps/web/src/components/photo-viewer.tsx:630-633`.
-
-Failure scenario:
-When a photographer toggles EXIF/color details while evaluating composition, sharpness, gamut, or HDR intent, the image area resizes and animates for 500 ms. That movement can interrupt visual comparison and makes the photo canvas feel less stable than the underlying "display photographer intent accurately" product constraint.
-
-Concrete fix:
-Avoid animating the photo canvas dimensions. Prefer a desktop overlay/drawer for info, or snap the grid column change instantly and animate only sidebar opacity/transform. If layout must change, gate the transition through a reduced-motion hook and keep the image viewport dimensions stable where possible.
-
-### 6. [Confirmed] Swipe snap animation bypasses the reduced-motion design intent
-
-Severity: Low
-Confidence: Medium-High
-Area: Motion accessibility, responsive touch interaction
-
-Evidence:
-- Global reduced-motion CSS clamps animation/transition duration and suppresses hover scale in `apps/web/src/app/[locale]/globals.css:253-279`.
-- `PhotoNavigation` applies an inline transition when snapping swipe feedback back to rest in `apps/web/src/components/photo-navigation.tsx:153-155`.
-
-Failure scenario:
-Users with `prefers-reduced-motion: reduce` can still get a touch-driven snap animation because inline `style.transition` has higher precedence than normal class rules. The motion is short, but it contradicts the repo's explicit reduced-motion policy and affects the mobile photo browsing path.
-
-Concrete fix:
-Add a reduced-motion check in `PhotoNavigation` using `matchMedia('(prefers-reduced-motion: reduce)')` or a shared hook. When reduced motion is active, set `transitionStyle` to `{}` and immediately reset opacity/transform.
-
-### 7. [Likely] Admin IA is a flat ten-link wrap with no task grouping
-
-Severity: Low-Medium
+Severity: Medium
 Confidence: Medium
-Area: Information architecture, admin wayfinding
+Area: responsive layout, admin IA, keyboard/touch ergonomics
 
 Evidence:
-- `AdminNav` defines ten peer links in one array in `apps/web/src/components/admin-nav.tsx:15-26`.
-- The render is a single wrapping nav row in `apps/web/src/components/admin-nav.tsx:28-49`.
+- `apps/web/src/components/admin-header.tsx:13-27` renders the admin header as a wrapping flex row.
+- `apps/web/src/components/admin-nav.tsx:15-29` always renders ten top-level admin links: dashboard, categories, tags, SEO, settings, tokens, password, users, DB, analytics.
+- `apps/web/src/app/[locale]/admin/layout.tsx:17-27` puts this header above an overflowed `main`.
+- Admin e2e is opt-in behind credentials in `apps/web/e2e/admin.spec.ts:11-12` and exercises navigation clicks, but not responsive header density.
 
-Failure scenario:
-On smaller screens or high zoom, admin navigation wraps into multiple lines with no grouping between content operations, taxonomy, system settings, access/tokens/users, database, and analytics. A photographer/admin switching between upload, image management, settings, and tokens has to scan every link each time.
+User failure scenario:
+On a phone or narrow tablet, an authenticated admin likely sees a multi-row header before every page and must tab through ten nav links plus logout before content. That slows repeated upload/settings work and makes the operational admin feel less like a focused photographer tool.
 
-Concrete fix:
-Group admin navigation by workflow: content (`Dashboard`, upload/images where applicable, categories, tags, SEO), operations (`Settings`, analytics, DB), and access (`Tokens`, password, users). Use a responsive segmented/sidebar or disclosure menu while preserving `aria-current` and 44 px link targets.
+Fix:
+Use a responsive admin navigation pattern: keep the full link strip on desktop, but collapse to a menu/sheet or segmented high-level groups on small screens. Preserve `aria-current`, 44 px targets, and keyboard focus order. Consider grouping less-frequent operational pages such as tokens, password, users, DB, and analytics under an "Admin" or "System" menu.
 
-## Manual-Validation Risks
+## Risks Needing Manual Validation
 
-- Leaflet map controls and tile attribution need a real browser pass under light/dark/OLED themes. Source provides a fallback list in the map route, but third-party control contrast/focus should be manually checked with actual map tiles.
-- Authenticated admin browser flows were not validated because the local port was not GalleryKit and no seeded authenticated GalleryKit dev server was available in this session.
-- Production public DOM was spot-checked only as supporting evidence; it should not be treated as proof that this checkout's local build matches production.
+- Public gallery, photo, topic, map, timeline, search, and shared-link visual behavior could not be manually validated with agent-browser because the current dev server lacked a reachable DB and stayed on the loading shell. Source and tests were reviewed instead.
+- Protected admin pages beyond login could not be browser-validated because no admin credentials were available and the prompt did not authorize credential use. Source and opt-in e2e coverage were reviewed instead.
+- Visual polish of real photo color/HDR presentation still needs a seeded browser pass on a machine with a working DB and representative images. The source has strong color/HDR intent, but this cycle could not inspect actual rendered imagery.
 
-## Non-Findings From Final Sweep
+## Missed-Issue Sweep
 
-- Prior token plaintext close-affordance concern is no longer current: the modal disables the default close button and requires explicit acknowledgement in `tokens-client.tsx:187-237`.
-- Prior site-wide re-encode one-click concern appears addressed by a confirmation dialog in settings; I did not re-raise it.
-- P3/HDR public badge accessibility appears improved: the public photo card P3 badge carries an accessible label rather than being only hidden decorative text.
-
-## Recommended Fix Order
-
-1. Fix the public route error shell first; it is a small parity change with clear IA benefit.
-2. Add the mobile image-manager card layout; it has the largest day-to-day admin workflow impact.
-3. Adjust upload staging density and skipped-file visibility together; both improve batch trust.
-4. Remove photo-canvas layout animation and reduced-motion swipe snap; both are focused motion/stability fixes.
-5. Rework admin nav grouping after confirming desired admin workflow clusters.
+- Touch targets: focused audit passed; reviewed button/link target patterns in nav, search, photo viewer, lightbox, info sheet, upload, admin nav, and table actions.
+- Focus-visible and keyboard: focused focus-visible scans passed; source shows focus traps/restoration in search/lightbox/info sheet and IME guards in search.
+- Localization: `i18n-key-parity.test.ts` passed; the remaining localization concern is quality/density of specific admin technical strings, not missing keys.
+- Responsive layout: reviewed public nav, masonry home, photo viewer, bottom sheet, lightbox, admin header/nav, image manager, upload staging, and settings form. Manual responsive validation remains blocked for DB-backed pages.
+- Information architecture: reviewed public navigation/search/topic flows, photo detail metadata hierarchy, admin workflow grouping, settings copy, and recovery routes.
+- Prior-cycle assumptions were not reused as findings without current source evidence.

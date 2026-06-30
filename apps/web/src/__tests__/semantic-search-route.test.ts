@@ -122,9 +122,11 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         // The imageEmbeddings scan now has a .where() before .orderBy().
         const emptyChain = {
             from: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                    orderBy: vi.fn().mockReturnValue({
-                        limit: vi.fn().mockResolvedValue([]),
+                innerJoin: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({
+                        orderBy: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
                     }),
                 }),
                 leftJoin: vi.fn().mockReturnValue({
@@ -351,11 +353,13 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             from: (table: Record<string, unknown>) => {
                 const isEmbeddingQuery = 'embedding' in table;
                 if (isEmbeddingQuery) {
-                    // db.select(...).from(imageEmbeddings).where(...).orderBy(...).limit(...)
+                    // db.select(...).from(imageEmbeddings).innerJoin(images, ...).where(...).orderBy(...).limit(...)
                     return {
-                        where: vi.fn().mockReturnValue({
-                            orderBy: vi.fn().mockReturnValue({
-                                limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                        innerJoin: vi.fn().mockReturnValue({
+                            where: vi.fn().mockReturnValue({
+                                orderBy: vi.fn().mockReturnValue({
+                                    limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                                }),
                             }),
                         }),
                     };
@@ -411,9 +415,11 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
                 const isEmbeddingQuery = 'embedding' in table;
                 if (isEmbeddingQuery) {
                     return {
-                        where: vi.fn().mockReturnValue({
-                            orderBy: vi.fn().mockReturnValue({
-                                limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                        innerJoin: vi.fn().mockReturnValue({
+                            where: vi.fn().mockReturnValue({
+                                orderBy: vi.fn().mockReturnValue({
+                                    limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                                }),
                             }),
                         }),
                     };
@@ -455,8 +461,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
     it('filters scanned embeddings by the active model version', () => {
         expect(semanticRouteSource).toContain('const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION');
-        expect(semanticRouteSource).toContain('.where(eq(imageEmbeddings.modelVersion, activeModelVersion))');
+        expect(semanticRouteSource).toContain('.innerJoin(images, eq(imageEmbeddings.imageId, images.id))');
+        expect(semanticRouteSource).toContain('eq(imageEmbeddings.modelVersion, activeModelVersion)');
+        expect(semanticRouteSource).toContain('eq(images.processed, true)');
         expect(semanticRouteSource.indexOf('const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION'))
-            .toBeLessThan(semanticRouteSource.indexOf('.where(eq(imageEmbeddings.modelVersion, activeModelVersion))'));
+            .toBeLessThan(semanticRouteSource.indexOf('eq(imageEmbeddings.modelVersion, activeModelVersion)'));
     });
 });

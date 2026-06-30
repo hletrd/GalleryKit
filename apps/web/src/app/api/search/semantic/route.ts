@@ -270,7 +270,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         rows = await db
             .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })
             .from(imageEmbeddings)
-            .where(eq(imageEmbeddings.modelVersion, activeModelVersion))
+            .innerJoin(images, eq(imageEmbeddings.imageId, images.id))
+            .where(and(
+                eq(imageEmbeddings.modelVersion, activeModelVersion),
+                eq(images.processed, true),
+            ))
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {

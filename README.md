@@ -5,7 +5,7 @@
 <h1 align="center">GalleryKit</h1>
 
 <p align="center">
-  A self-hosted gallery for publishing finished photography with accurate color, private originals, and operator-controlled search
+  A self-hosted gallery for publishing finished photography with color-managed delivery, private originals, and operator-controlled search
 </p>
 
 <p align="center">
@@ -26,9 +26,9 @@
 
 ---
 
-GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
+GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions as far as browser color management allows, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
 
-**For:** finished-photo publishing, private original storage, self-hosted sharing, color-faithful delivery, and operator-controlled search.  
+**For:** finished-photo publishing, private original storage, self-hosted sharing, browser-managed color-faithful delivery, and operator-controlled search.  
 **Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
 
 ## Features

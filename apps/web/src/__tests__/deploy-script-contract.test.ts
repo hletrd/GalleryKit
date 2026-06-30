@@ -53,6 +53,18 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).not.toMatch(/ssh\s+[-\w\s]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
     });
 
+    it('refuses group/world-readable deploy env files before sourcing', () => {
+        const checkIndex = remoteDeployScript.indexOf('if (( env_group_perms != 0 || env_world_perms != 0 )); then');
+        const sourceIndex = remoteDeployScript.indexOf('source "$ENV_FILE"');
+
+        expect(remoteDeployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
+        expect(remoteDeployScript).toContain('env_world_perms=$((env_perms % 10))');
+        expect(checkIndex).toBeGreaterThan(-1);
+        expect(sourceIndex).toBeGreaterThan(-1);
+        expect(checkIndex).toBeLessThan(sourceIndex);
+        expect(remoteDeployScript).toContain('Run: chmod 600 \\"$ENV_FILE\\"');
+    });
+
     it('feeds Docker Compose the runtime env file and forwards build-time upload limits', () => {
         expect(deployScript).toContain('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
         expect(composeConfig).toContain('NEXT_UPLOAD_BODY_MAX_BYTES: ${NEXT_UPLOAD_BODY_MAX_BYTES:-}');

@@ -66,7 +66,7 @@ env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
 env_perms=$((10#$env_mode))
 env_group_perms=$(((env_perms / 10) % 10))
 env_world_perms=$((env_perms % 10))
-if (( (env_group_perms & 3) != 0 || (env_world_perms & 3) != 0 )); then
+if (( env_group_perms != 0 || env_world_perms != 0 )); then
   echo "Refusing to source deploy env file with unsafe permissions ($env_mode): $ENV_FILE" >&2
   echo "Run: chmod 600 \"$ENV_FILE\"" >&2
   exit 1
