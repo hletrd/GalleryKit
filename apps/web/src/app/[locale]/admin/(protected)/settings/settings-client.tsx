@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
-import type { GallerySettingKey } from '@/lib/gallery-config-shared';
+import type { GallerySettingKey, SemanticSearchMode } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
 import {
     AlertDialog,
@@ -37,6 +37,7 @@ import { triggerBackfill, getBackfillStatus, type BackfillStatusResult } from '@
 interface SettingsClientProps {
     initialSettings: Record<string, string>;
     hasExistingImages: boolean;
+    resolvedSemanticSearchMode: SemanticSearchMode;
 }
 
 // R10-M14: settings keys whose change actually requires re-running the
@@ -71,7 +72,7 @@ const SETTINGS_FIELD_IDS: Record<string, string> = {
     slideshow_interval_seconds: 'slideshow-interval',
 };
 
-export function SettingsClient({ initialSettings, hasExistingImages }: SettingsClientProps) {
+export function SettingsClient({ initialSettings, hasExistingImages, resolvedSemanticSearchMode }: SettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     // R27-UX-HIGH-1: backfill trigger state. `isBackfilling` covers both the
@@ -294,6 +295,19 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     };
 
     const getPlaceholder = (key: string) => defaults[key as GallerySettingKey] || '';
+    const hasStoredSemanticProduction = settings.semantic_search_mode === 'production';
+    const isSemanticProductionActive = hasStoredSemanticProduction && resolvedSemanticSearchMode === 'production';
+    const semanticSearchSelectValue = (() => {
+        if (isSemanticProductionActive) return 'production';
+        if (settings.semantic_search_mode === 'stub') return 'stub';
+        return 'disabled';
+    })();
+    const semanticSearchModeDescribedBy = [
+        'semantic-search-mode-help',
+        isSemanticProductionActive
+            ? 'semantic-search-production-active'
+            : hasStoredSemanticProduction ? 'semantic-search-production-warning' : null,
+    ].filter(Boolean).join(' ');
 
     return (
         <div className="space-y-6">
@@ -787,33 +801,39 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Select
                             // AGG-R5C3-13 (COR-R5C3-04): coerce the controlled value to a
-                            // valid SelectItem. A 'production' DB row has no matching item,
-                            // so binding it raw renders a BLANK trigger. Show it as Disabled
-                            // (the resolver heals 'production' to 'disabled' by default —
-                            // AGG-C10-02); the amber warning below still reads the RAW map.
-                            value={['disabled', 'stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}
+                            // valid SelectItem. When production is operator-enabled, show a
+                            // disabled read-only production item instead of implying Disabled.
+                            // When the resolver heals production to disabled, the warning below
+                            // still reads the RAW map.
+                            value={semanticSearchSelectValue}
                             onValueChange={(value) => handleChange('semantic_search_mode', value)}
                         >
-                            <SelectTrigger id="semantic-search-mode" className="w-full sm:w-[200px]" aria-describedby="semantic-search-mode-help">
+                            <SelectTrigger id="semantic-search-mode" className="w-full sm:w-[240px]" aria-describedby={semanticSearchModeDescribedBy}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
                                 <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
-                                {/* AGG-C10-02 / AGG-C9-05: no 'production' item BY DESIGN. The
-                                    real ONNX encoder is LIVE in the demo deployment, but production
-                                    is OPERATOR-GATED — activatable only by an operator
+                                {/* AGG-C10-02 / AGG-C9-05: no user-selectable production
+                                    item BY DESIGN. The real ONNX encoder is live only when
+                                    OPERATOR-GATED — activatable only by an operator
                                     (SEMANTIC_SEARCH_ALLOW_PRODUCTION=true env + DB row + weights +
                                     backfill), never via this UI. The resolver heals a stored
                                     'production' to 'disabled' unless that env flag is set. */}
+                                {isSemanticProductionActive && (
+                                    <SelectItem value="production" disabled>
+                                        {t('settings.semanticSearchModeProductionActive')}
+                                    </SelectItem>
+                                )}
                             </SelectContent>
                         </Select>
                     </div>
-                    {/* AGG-C10-02 / BUG-R5C2-03: a stored 'production' value is treated as
-                        Disabled by the resolver on any normal deploy. Tell the admin truthfully
-                        instead of implying production search is running. */}
-                    {settings.semantic_search_mode === 'production' && (
-                        <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                    {isSemanticProductionActive ? (
+                        <p id="semantic-search-production-active" className="text-xs text-emerald-700 dark:text-emerald-400 font-medium" role="status">
+                            {t('settings.semanticSearchProductionActive')}
+                        </p>
+                    ) : hasStoredSemanticProduction && (
+                        <p id="semantic-search-production-warning" className="text-xs text-amber-700 dark:text-amber-400 font-medium">
                             {t('settings.semanticSearchProductionWarning')}
                         </p>
                     )}

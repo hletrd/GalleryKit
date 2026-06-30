@@ -3,6 +3,7 @@ import { SettingsClient } from './settings-client';
 import { getTranslations } from 'next-intl/server';
 import { getImageCount } from '@/lib/data';
 import { adminRouteMetadata } from '../../admin-metadata';
+import { resolveSemanticSearchMode } from '@/lib/gallery-config-shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,5 +24,14 @@ export default async function SettingsPage() {
         );
     }
 
-    return <SettingsClient initialSettings={result.settings} hasExistingImages={imageCount > 0} />;
+    return (
+        <SettingsClient
+            initialSettings={result.settings}
+            hasExistingImages={imageCount > 0}
+            resolvedSemanticSearchMode={resolveSemanticSearchMode(
+                result.settings.semantic_search_mode,
+                process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] === 'true',
+            )}
+        />
+    );
 }

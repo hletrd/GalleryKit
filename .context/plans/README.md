@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 51/100 Implementation Plan — active; Cycle 50 ledger disposition fix scheduled (`cycle-51-2026-07-01-plan.md`)
-- Cycle 51/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-51-2026-07-01-deferred.md`)
+- Cycle 52/100 Implementation Plan — active; Cycle 51 ledger disposition and semantic-production Settings affordance fixes scheduled (`cycle-52-2026-07-01-plan.md`)
+- Cycle 52/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-52-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 51/100 Implementation Plan — active; Cycle 50 ledger disposition fix scheduled (`cycle-51-2026-07-01-plan.md`)
+- Cycle 52/100 Implementation Plan — active; Cycle 51 ledger disposition and semantic-production Settings affordance fixes scheduled (`cycle-52-2026-07-01-plan.md`)
+- Cycle 52/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-52-2026-07-01-deferred.md`)
+- Cycle 51/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 52 started from deployed `d7326789` (`cycle-51-2026-07-01-plan.md`)
 - Cycle 51/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-51-2026-07-01-deferred.md`)
 - Cycle 50/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 51 started from deployed `11c4337f` (`cycle-50-2026-07-01-plan.md`)
 - Cycle 50/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-50-2026-07-01-deferred.md`)
