@@ -1,66 +1,132 @@
-# Cycle 26 Debugger Review
+# Cycle 27 Debugger Review
 
 Review target: `/Users/hletrd/flash-shared/gallery`
-Review role: `cycle-26 debugger`
-HEAD reviewed: `d13d6637`
-Mode: review-only. Source code was not changed.
+Review role: `cycle-27 debugger`
+HEAD reviewed: `1e8bba02`
+Mode: review-only. App source was not edited. This file is the only intended write.
 
 ## Inventory
 
 Required context read first:
 
-- `AGENTS.md`
+- AGENTS.md instructions provided in the user prompt
 - `CLAUDE.md`
 - `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- Current and prior review state: `.context/reviews/_aggregate.md`, `.context/reviews/debugger.md`, `.context/reviews/code-reviewer.md`, `.context/reviews/security-reviewer.md`
+- Deferred history: `.context/plans/cycle-26-2026-06-30-deferred.md`
 
-Inventory evidence before review:
+Inventory evidence:
 
-- `git ls-files`: 2,588 tracked files.
-- Main runtime tree: `apps/` with 617 tracked files.
-- Review/history tree: `.context/` with 1,773 tracked files; `plan/` with 180 tracked files.
-- Focused runtime/script/migration source: 85,385 lines across `apps/web/src`, `apps/web/scripts`, and `apps/web/drizzle`.
+- Focused tracked runtime/deploy/migration files inventoried with `rg --files`: 580 files across `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, deploy/Docker/nginx configs, and related tests.
+- Working tree already had unrelated review-file changes before this write: `.context/reviews/perf-reviewer.md` and `.context/reviews/security-reviewer.md`. I did not modify those.
+- Current delta since cycle-26 review start (`d13d6637..HEAD`) includes restore recovery, modal tree isolation, SQL scanner changes, route tests, deploy documentation, and review artifacts.
 
 Reviewed debugger surfaces:
 
-- Restore lifecycle: DB restore action, durable maintenance marker, auth/login behavior, queue quiesce/resume, advisory locks, migration post-restore handling.
-- Public analytics: fire-and-forget view recording, restore gates, rate-limit rollback, shared-group counters.
-- Upload/process: browser and Lightroom upload paths, GPS stripping, original cleanup, image queue claim/update/delete races.
-- Background work: image queue, admin color backfill, semantic embedding backfill, CLIP inference gates, shutdown drains.
-- Deploy/runtime: deploy health gate, Docker health check, startup instrumentation.
+- Restore/import lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.ts`.
+- SQL scanning: `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/__tests__/sql-restore-scan.test.ts`, restore scan/import call sites.
+- Migration/deploy: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`.
+- Auth/session/rate limits: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`, admin API wrappers through related current review context.
+- Upload/image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`.
+- Analytics/rate limits: `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/analytics.ts`, `apps/web/src/lib/analytics-data.ts`, view-retention/queue interactions.
+- UI modal/focus: `apps/web/src/components/use-modal-tree-isolation.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/info-bottom-sheet.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/ui/dropdown-menu.tsx`.
 
-Current HEAD already fixed several cycle-25 debugger findings: deploy now waits for health before pruning; CLIP embedding generation checks restore maintenance before expensive inference; analytics view recorders have late maintenance checks after validation. The findings below are current remaining failure modes.
+Validation evidence:
 
-## Findings
+- Direct scanner probe with `npx tsx` showed `containsDangerousSql(...) === false` for:
+  - `INSERT HIGH_PRIORITY INTO otherdb.images VALUES (1);`
+  - `INSERT LOW_PRIORITY INTO otherdb.images VALUES (1);`
+  - `INSERT DELAYED INTO otherdb.images VALUES (1);`
+  - `INSERT otherdb.images VALUES (1);`
+  - `CREATE TEMPORARY TABLE images (id int);`
+  - `DROP TEMPORARY TABLE images;`
+- `npm test --workspace=apps/web -- sql-restore-scan restore-maintenance cycle-26-source-contracts`: passed, 3 files / 30 tests. Existing tests do not catch the confirmed scanner gaps.
 
-### DBG26-01 - Failed restore can persist a durable maintenance lock with no in-app recovery path
+## Confirmed Issues
 
-Severity: High
-Confidence: High
-File/region: `apps/web/src/app/[locale]/admin/db-actions.ts:492-499`, `apps/web/src/app/[locale]/admin/db-actions.ts:671-680`, `apps/web/src/app/[locale]/admin/db-actions.ts:716-731`, `apps/web/src/lib/restore-maintenance-durable.ts:37-44`, `apps/web/src/lib/restore-maintenance-durable.ts:60-78`, `apps/web/src/app/actions/auth.ts:74-78`
-
-Failure scenario: `beginDurableRestoreMaintenance()` writes `data/restore-maintenance.json`. If mysql import times out/fails or post-restore migrations fail, `runRestore()` resolves with `keepMaintenance: true`, and the outer finally intentionally does not call `endDurableRestoreMaintenance()`. On restart, instrumentation syncs the durable marker back into process state. Login then returns `restoreInProgress`, so an operator whose session is invalidated by the partial restore cannot use the app to upload a good dump, inspect state, or clear maintenance. Recovery requires out-of-band shell access to the marker/DB, which is fragile during the exact incident this mode is meant to handle.
-
-Concrete fix: add a narrow durable restore recovery surface. Options: a recovery-token-authenticated endpoint or CLI command that can upload another dump, re-run post-restore migrations, or explicitly clear the marker after verification. Keep normal admin mutations blocked, but allow recovery even when maintenance is active. Add tests for failed mysql import, failed post-restore migration, restart with marker present, login behavior, and the recovery-only clear path.
-
-### DBG26-02 - Fire-and-forget analytics inserts can still cross the restore boundary
+### DBG27-01 - Restore SQL scanner misses legal MySQL INSERT target forms
 
 Severity: Medium
+Confidence: High
+Regions: `apps/web/src/lib/sql-restore-scan.ts:39-55`, `apps/web/src/lib/sql-restore-scan.ts:190-221`, `apps/web/src/app/[locale]/admin/db-actions.ts:618-647`, `apps/web/src/app/[locale]/admin/db-actions.ts:672-678`, `apps/web/src/__tests__/sql-restore-scan.test.ts:53-95`
+
+Failure scenario:
+The restore path streams the uploaded dump to disk, scans chunks with `containsDangerousSql()`, and only then pipes the file to `mysql --one-database` (`db-actions.ts:618-647`, `672-678`). The scanner's write-target regex only recognizes `INSERT` when it appears as `INSERT [IGNORE] INTO target` (`sql-restore-scan.ts:40-53`). MySQL accepts other forms, including `INSERT HIGH_PRIORITY INTO ...`, `INSERT LOW_PRIORITY INTO ...`, `INSERT DELAYED INTO ...`, and `INSERT tbl_name ...` without `INTO`. Those statements do not match the target allowlist and are not caught by the dangerous SQL denylist (`sql-restore-scan.ts:57-123`, `212-221`).
+
+An admin or compromised admin session can upload a dump containing `INSERT HIGH_PRIORITY INTO otherdb.images VALUES (...)`. The scanner returns false, and on an overprivileged/co-hosted MySQL account the import can write outside the GalleryKit schema. The security reviewer correctly notes least-privilege DB grants reduce blast radius, but the application scanner is intended to be an independent gate.
+
+Suggested fix:
+Replace the broad regex with a small statement-head tokenizer, or explicitly cover MySQL's legal grammar:
+
+- `INSERT [LOW_PRIORITY | DELAYED | HIGH_PRIORITY] [IGNORE] [INTO] target`
+- `REPLACE [LOW_PRIORITY | DELAYED] [INTO] target`
+- Any schema-qualified target should remain rejected.
+
+Add regression tests for schema-qualified INSERTs with each modifier and for the no-`INTO` form.
+
+### DBG27-02 - Restore scanner accepts temporary app-table DDL
+
+Severity: Medium
+Confidence: Medium-High
+Regions: `apps/web/src/lib/sql-restore-scan.ts:42-47`, `apps/web/src/lib/sql-restore-scan.ts:190-206`, `apps/web/src/__tests__/sql-restore-scan.test.ts:31-51`
+
+Failure scenario:
+`SQL_WRITE_TARGET_PATTERN` explicitly allows `CREATE TEMPORARY TABLE`, and the target allowlist accepts it when the target name is an app table (`sql-restore-scan.ts:42-47`, `190-206`). The tests also currently assert `DROP TEMPORARY TABLE images` is allowed (`sql-restore-scan.test.ts:43-50`). The app's own `mysqldump` restore shape does not need temporary app tables.
+
+A crafted restore can create a temporary `images` table in the same MySQL session, route later inserts to the temporary object, and lose those rows when the session exits. Depending on statement order, the restore may appear to run and then leave missing/empty permanent data, or fail in post-restore reconciliation while durable maintenance remains active. The scanner should reject this non-backup shape before import.
+
+Suggested fix:
+Reject `CREATE TEMPORARY TABLE` and `DROP TEMPORARY TABLE` unless a future app-generated backup deliberately emits them. Keep the allowed restore profile narrow: `DROP TABLE IF EXISTS` for known app tables, permanent `CREATE TABLE`, app-table `ALTER`, and app-table row writes. Add tests asserting temporary app-table creates/drops are dangerous.
+
+## Likely Issues
+
+None beyond the confirmed scanner defects met the bar for likely new debugger findings after checking the current fixes and deferred list.
+
+## Risks / Manual Validation
+
+### DBG27-RISK-01 - Portaled dropdown content inside custom modals may escape modal isolation
+
+Severity: Low-Medium
 Confidence: Medium
-File/region: `apps/web/src/app/actions/public.ts:416-437`, `apps/web/src/app/actions/public.ts:443-469`, `apps/web/src/app/actions/public.ts:475-505`, `apps/web/src/app/[locale]/admin/db-actions.ts:482-489`
+Regions: `apps/web/src/components/use-modal-tree-isolation.ts:19-65`, `apps/web/src/components/info-bottom-sheet.tsx:52-58`, `apps/web/src/components/info-bottom-sheet.tsx:178-240`, `apps/web/src/components/info-bottom-sheet.tsx:509-530`, `apps/web/src/components/ui/dropdown-menu.tsx:34-50`, `apps/web/src/components/photo-viewer.tsx:934-972`
 
-Failure scenario: the view recorders check maintenance at entry and again immediately before starting `db.insert(...)`, which closes the large pre-validation window. But the insert promise is still fire-and-forget and untracked. Restore preparation flushes shared-group count buffers and quiesces the image queue, but it does not wait for in-flight `imageViews`, `topicViews`, or `sharedGroupViews` insert promises. A view action can pass the late gate, enqueue its insert, and then restore can begin importing a different database before that insert obtains a connection or commits. The insert may fail on FK errors, or worse, commit against restored IDs and pollute post-restore analytics with a pre-restore event.
+Manual validation scenario:
+The cycle-26 custom modal isolation fix hides/inerts siblings that exist when the modal opens (`use-modal-tree-isolation.ts:19-65`). Radix dropdown content portals later to `document.body` by default (`dropdown-menu.tsx:34-50`). The mobile info bottom sheet uses the isolation hook and `FocusTrap` (`info-bottom-sheet.tsx:52-58`, `178-240`) and contains the same wide-gamut download dropdown pattern used in the photo viewer (`info-bottom-sheet.tsx:509-530`, `photo-viewer.tsx:934-972`). If the dropdown portal is added after the isolation walk, it may sit outside both the modal root and the focus trap.
 
-Concrete fix: route analytics writes through a small tracked queue with pause/drain semantics and have restore wait for it, mirroring image side-effect drains. A minimal improvement is to await these inserts after the late gate so the action lifetime tracks the write, but the robust fix is `trackAnalyticsWrite()` plus `quiesceAnalyticsWritesForRestore()` before import.
+Validate on a mobile viewport with a wide-gamut image that has JPEG and AVIF downloads: open the info sheet, expand it, open the download dropdown, then test keyboard traversal and screen-reader accessibility tree. Confirm dropdown items are reachable and background content remains inert/hidden.
+
+Suggested fix if reproduced:
+Render dropdown portals into a container inside the modal root, or move the custom bottom sheet/lightbox/search surfaces to Radix modal primitives that coordinate portals and aria isolation. Add a browser/a11y regression for the bottom-sheet download dropdown.
+
+### DBG27-RISK-02 - Restore recovery CLI is local-only and should be operationally rehearsed
+
+Severity: Low-Medium
+Confidence: Medium
+Regions: `apps/web/src/lib/restore-maintenance-durable.ts:80-103`, `apps/web/scripts/restore-maintenance-recovery.ts:7-41`, `apps/web/src/app/actions/auth.ts:74-79`, `apps/web/src/app/[locale]/admin/db-actions.ts:684-744`
+
+Manual validation scenario:
+Cycle 26's "no recovery path" issue is materially improved: marker write failure now unwinds process state (`restore-maintenance-durable.ts:80-90`), marker clear runs process cleanup in `finally` (`restore-maintenance-durable.ts:93-99`), and `npm run restore:maintenance -- clear --confirm-clear-restore-maintenance` exists (`restore-maintenance-recovery.ts:7-41`). However, failed import/post-restore migration still intentionally keeps maintenance active (`db-actions.ts:684-744`), and login remains blocked during maintenance (`auth.ts:74-79`).
+
+This is acceptable only if operators can reach the host/container and know the recovery command during an incident. Rehearse the documented command in a non-production clone: force a failed import, verify login is blocked, run `status`, run confirmed `clear`, and verify uploads/queue resume behavior. If operators need browser-only recovery, add a narrow recovery endpoint with a separate credential.
+
+## Known Deferred / Not Re-Filed As New
+
+- Fire-and-forget analytics writes can cross the restore boundary: still visible in `apps/web/src/app/actions/public.ts:416-437`, `443-469`, `475-505`; restore drains shared-group count buffers and the image queue but not these insert promises at `apps/web/src/app/[locale]/admin/db-actions.ts:491-504`. This is already carried as `.context/plans/cycle-26-2026-06-30-deferred.md:D26-02`, with the project accepting approximate analytics unless row-level analytics become audit-grade.
+- Upload-processing contract lock spans slow upload I/O/CPU: still intentionally conservative in `apps/web/src/app/actions/images.ts:175-182` and `apps/web/src/app/api/admin/lr/upload/route.ts:243-259`; carried as deferred throughput work in `D26-06`.
+- GPS stripping buffers originals into memory in `apps/web/src/lib/process-image.ts:1737-1763`; carried as deferred memory/format-parser work in `D26-05`.
+- 2FA/WebAuthn and paid-download/Stripe were not reviewed as defects because `CLAUDE.md` marks them permanently deferred/non-goals.
 
 ## Refuted / Fixed Current-HEAD Hypotheses
 
-- Image queue worker pool starvation from `QUEUE_CONCURRENCY=5`: refuted in current HEAD. `resolveImageQueueConcurrency()` now caps workers with `(poolLimit - reserved) / 2`.
-- CLIP inference after restore begins: refuted in current HEAD. `storeImageEmbeddingForMode()` returns before `embedImageReal()` when maintenance is active.
-- Deploy success without health evidence: refuted in current HEAD. `deploy.sh` waits for Docker health or `/api/live`, prints logs, and exits non-zero before prune on failure.
-- Duplicate image processing after bootstrap/enqueue races: refuted by per-image advisory locks, `processed=false` row checks, and conditional updates.
-- Upload/restore save/insert interleaving: mostly refuted by the upload-processing contract lock and late post-save maintenance cleanup in both browser and Lightroom upload paths. The remaining upload issue is performance/lock scope, reported by the perf role.
-- Serve-upload path traversal/symlink race: refuted by path segment validation, whitelist checks, `lstat` symlink rejection, realpath containment, and fd-based stat/streaming.
+- Restore durable marker lifecycle wedge from cycle 26: fixed enough not to re-file. `beginDurableRestoreMaintenance()` now calls `endRestoreMaintenance()` if marker write fails (`restore-maintenance-durable.ts:80-88`), and `endDurableRestoreMaintenance()` clears process state even if marker unlink throws (`restore-maintenance-durable.ts:93-99`).
+- No restore recovery path: improved by `apps/web/scripts/restore-maintenance-recovery.ts:7-41` and `apps/web/package.json:20`. It remains an operational/manual-validation risk, not the same confirmed app-code blocker.
+- Deploy prune-before-health incident: current `apps/web/deploy.sh:34-54` waits for Docker health or `/api/live` and exits before prune on failure; prune runs after health at `deploy.sh:76-80`.
+- Migration silent-skip class: current `apps/web/scripts/migrate.js:748-808` reconciles/baselines by journal hash and asserts every committed migration hash is recorded; source tripwires cover reconcile table/column/index mirrors in `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:76-173`.
+- Upload/restore interleaving: browser and Lightroom upload paths hold the upload-processing contract lock (`images.ts:175-182`, `route.ts:243-259`) and late-clean originals if restore maintenance begins after save (`images.ts:404-416`, `route.ts:388-402`).
+- Image queue side effects crossing restore: queue caption/embedding side effects are tracked (`image-queue.ts:346-357`, `702-770`) and drained by restore/shutdown (`image-queue.ts:453-457`), unlike the known-deferred analytics writes.
 
 ## Final Sweep
 
-Final missed-issues sweep covered restore failure states, all `isRestoreMaintenanceActive()` call sites, `GET_LOCK`/`RELEASE_LOCK` paths, fire-and-forget promises, upload cleanup, queue side effects, deployment health contracts, non-sargable/archive queries, and prior cycle reports. No source tests were run because this was a static review-only artifact change. Evidence is exact source inspection above.
+Final missed-issues sweep covered restore failure states, durable marker recovery, SQL scan grammar, import handoff to `mysql --one-database`, migration baselining/reconcile postconditions, deploy health/prune sequencing, auth/session maintenance gates, upload/LR upload cleanup and quota claims, image queue side effects, analytics view recording and rate-limit rollback, public/admin rate-limit helpers, custom modal isolation, focus traps, Radix dropdown portals, and prior/current review/deferred artifacts.
+
+No app code was edited. No commit was made. Existing focused tests pass but do not cover the confirmed scanner bypasses.

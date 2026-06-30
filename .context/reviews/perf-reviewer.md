@@ -1,9 +1,9 @@
-# Cycle 26 Performance Reviewer Report
+# Cycle 27 Performance Reviewer Report
 
 Review target: `/Users/hletrd/flash-shared/gallery`
-Review role: `cycle-26 perf-reviewer`
-HEAD reviewed: `d13d6637`
-Mode: review-only. Source code was not changed.
+Review role: `cycle-27 perf-reviewer`
+HEAD reviewed: `50dfcda0`
+Mode: review-only. Source code was not changed; this report is the only intended edit.
 
 ## Inventory
 
@@ -11,118 +11,160 @@ Required context read first:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `.context/reviews/_aggregate.md`
+- `.context/plans/cycle-26-2026-06-30-plan.md`
+- `.context/plans/cycle-26-2026-06-30-deferred.md`
+- Prior `.context/reviews/perf-reviewer.md`
 
 Inventory evidence before review:
 
-- `git ls-files`: 2,588 tracked files.
-- Main runtime tree: `apps/` with 617 tracked files.
-- Review/history tree: `.context/` with 1,773 tracked files; `plan/` with 180 tracked files.
-- Dominant tracked file types: 1,827 Markdown, 434 TypeScript, 104 TSX, 81 PNG, 28 SQL, 22 JSON, 6 JS, 6 MJS.
-- Focused runtime/script/migration source: 85,385 lines across `apps/web/src`, `apps/web/scripts`, and `apps/web/drizzle`.
-- Excluded from runtime review: `.git`, `node_modules`, generated `.next` output, upload/data directories, binary fixtures/screenshots except where route contracts depended on them.
+- `git ls-files`: 2,594 tracked files.
+- Focused runtime/config/test inventory: 582 tracked files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/public/sw*`, and root package/config files.
+- Files changed since the cycle-26 reviewed commit are concentrated in review/plan history, restore maintenance, SQL restore scanning, modal isolation, search/lightbox/bottom-sheet consumers, and tests:
+  - `apps/web/src/app/[locale]/admin/db-actions.ts`
+  - `apps/web/src/lib/restore-maintenance-durable.ts`
+  - `apps/web/src/lib/sql-restore-scan.ts`
+  - `apps/web/scripts/restore-maintenance-recovery.ts`
+  - `apps/web/src/components/use-modal-tree-isolation.ts`
+  - `apps/web/src/components/search.tsx`
+  - `apps/web/src/components/lightbox.tsx`
+  - `apps/web/src/components/info-bottom-sheet.tsx`
+  - cycle-26 tests under `apps/web/src/__tests__/`
+- Review-relevant areas examined: data access, schema indexes, public pages, timeline/year routes, semantic/similar search, rate limiting, analytics/view buffering, upload actions, Lightroom upload, image queue/backfill, Sharp image pipeline, CLIP inference queueing, restore/backup flow, service worker image cache, map UI, masonry/infinite scroll, modal UI responsiveness, and prior review/deferred registers.
 
-Areas inspected: public data access, first-page gallery rendering, infinite scroll, map route/client, timeline/year routes, CSV export, upload/GPS strip path, upload-processing contract lock, image queue/backfill concurrency, service worker image cache, deploy/runtime cache headers, schema indexes, and prior cycle perf reports. Current HEAD has fixed the cycle-25 image-queue pool-budget finding: `resolveImageQueueConcurrency()` now divides remaining pool budget by two.
+## Findings Summary
 
-## Findings
+New confirmed performance issues: 0.
 
-### PERF26-01 - Public first-page gallery queries still compute exact grouped totals
+New likely performance issues: 0.
 
-Severity: Medium
-Confidence: High
-File/region: `apps/web/src/lib/data.ts:878-907`, `apps/web/src/lib/data.ts:1446-1461`, `apps/web/src/app/[locale]/(public)/page.tsx:165-168`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:175-178`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:100-101`
+New risks needing manual validation: 0.
 
-Failure scenario: home/topic/tag/smart-collection first paint needs about 30 cards, but the query joins tags, groups by image, sorts, and computes `COUNT(*) OVER()` for the whole matching set. On a large gallery, repeated dynamic public hits and crawlers force temp-table/window-count work before sending the first page, raising DB CPU and TTFB.
+Cycle 27 did not introduce a new performance/concurrency regression in the changed runtime surfaces I reviewed. The substantial open performance debt from cycle 26 is already tracked in `.context/plans/cycle-26-2026-06-30-deferred.md` and `.context/reviews/_aggregate.md`; I did not duplicate those as new findings.
 
-Concrete fix: split first paint from exact totals. Use `limit + 1` keyset listing for `hasMore`, fetch tags only for returned IDs, and move exact totals to cached/async counts, approximate copy, or an explicit secondary endpoint. For smart collections, use the cursor path on the first page unless an exact total is required.
+## Confirmed Issues
 
-### PERF26-02 - GPS stripping buffers full originals after streaming upload to disk
+None newly reportable for cycle 27.
 
-Severity: Medium
-Confidence: High
-File/region: `apps/web/src/lib/process-image.ts:905-910`, `apps/web/src/lib/process-image.ts:1737-1763`, `apps/web/src/app/actions/images.ts:388-395`, `apps/web/src/app/api/admin/lr/upload/route.ts:367-378`
+The review found confirmed performance debt, but every confirmed item had an existing deferred owner/exit criterion from cycle 26 or earlier. Those are listed in "Known Deferred Items Not Re-filed" below.
 
-Failure scenario: upload saving correctly streams up to 200 MB to disk, but `stripGpsFromOriginal()` then calls `fs.readFile(filePath)` and writes a scrubbed buffer. With `strip_gps_on_upload=true`, one or more 150-200 MB originals can allocate full-file buffers plus scrubber copies while image processing/backfill/CLIP are active, causing GC pressure or OOM on the constrained host.
+## Likely Issues
 
-Concrete fix: implement streaming or bounded-segment scrub paths for JPEG APP1/XMP and ISOBMFF metadata where possible. If whole-file buffering remains necessary, enforce a lower `GPS_STRIP_MAX_BUFFER_BYTES` and reject/quarantine oversized originals with a clear admin error.
+None newly reportable for cycle 27.
 
-### PERF26-03 - Upload-processing contract lock spans slow I/O and CPU work
+Potential pressure points in the current code are either bounded by explicit caps or already tracked as deferred debt. I did not find a new high-confidence "likely issue" outside those registers.
 
-Severity: Low-Medium
-Confidence: High
-File/region: `apps/web/src/app/actions/images.ts:175-190`, `apps/web/src/app/actions/images.ts:346-418`, `apps/web/src/app/actions/images.ts:628-630`, `apps/web/src/app/api/admin/lr/upload/route.ts:243-275`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-461`, `apps/web/src/app/api/admin/lr/upload/route.ts:548-551`
+## Risks Needing Manual Validation
 
-Failure scenario: the MySQL advisory lock protects upload-setting consistency, but it is held while saving originals, decoding metadata, extracting EXIF, optionally stripping GPS, and doing file cleanup. A large browser batch or Lightroom upload over slow storage can hold one pool connection and block concurrent uploads/settings changes for seconds to minutes.
+None newly reportable for cycle 27.
 
-Concrete fix: shrink the critical section to settings snapshot, quota reservation, lock-once checks, and DB row creation. Move file streaming, metadata extraction, and GPS stripping outside the advisory lock using the immutable settings snapshot. If full-span serialization is intentional, move it to a dedicated non-pooled connection and document the contention budget.
+Manual validation still matters for deferred large-gallery scenarios, but the scenarios are already named in the deferred plan. I did not identify a fresh manual-validation-only risk in the cycle-27 changes.
 
-### PERF26-04 - Infinite masonry keeps every loaded photo mounted
+## Cycle 27 Cross-File Review Notes
 
-Severity: Medium
-Confidence: High
-File/region: `apps/web/src/components/home-client.tsx:124-130`, `apps/web/src/components/home-client.tsx:286-424`, `apps/web/src/components/load-more.tsx:41-61`, `apps/web/src/components/load-more.tsx:116-132`
+### Restore maintenance and SQL restore path
 
-Failure scenario: each load-more page is appended into `allImages`, and every accumulated card remains live DOM/React state. A visitor scrolling thousands of photos on mobile accumulates image elements, layout work, and reconciliation cost until scrolling/taps become janky or the tab is evicted.
+- `apps/web/src/lib/restore-maintenance-durable.ts:16-29` resolves the marker path from runtime environment, not request data.
+- `apps/web/src/lib/restore-maintenance-durable.ts:35-42` reads the durable marker with synchronous `fs.existsSync`, but this is used for startup/recovery state, not public hot-path rendering.
+- `apps/web/src/lib/restore-maintenance-durable.ts:49-56` and `apps/web/src/lib/restore-maintenance-durable.ts:58-70` use synchronous marker write/unlink around restore lifecycle only.
+- `apps/web/src/lib/restore-maintenance-durable.ts:80-99` begins/ends process maintenance with durable marker rollback/cleanup; failures do not leave the image queue resumed before marker handling.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:451-504` enters durable restore maintenance, flushes view buffers, quiesces image processing, and runs restore before post-restore cleanup.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:506-538` releases restore/image/backfill/semantic/upload locks and resumes queue after verified cleanup conditions.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:585-647` streams the uploaded restore SQL file to a temp path and scans bounded chunks instead of buffering the whole file in application memory.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:665-745` delegates restore execution to `mysql --one-database`, then runs migrations after a zero exit.
+- `apps/web/src/lib/sql-restore-scan.ts:33-55` keeps allowed write/drop target regexes narrow.
+- `apps/web/src/lib/sql-restore-scan.ts:57-123` blocks dangerous statements and schema qualifiers.
+- `apps/web/src/lib/sql-restore-scan.ts:125-234` keeps only a 1 MiB tail plus the current chunk for boundary-aware scanning. This is bounded memory for the 250 MiB restore cap.
 
-Concrete fix: virtualize/window the masonry grid, or cap automatic loading after a fixed number of pages and switch to explicit pagination. Preserve cursor anchors and scroll restoration while recycling offscreen cards.
+Assessment: no new performance finding. The sync filesystem calls are admin restore/recovery operations, not public request work; restore scanning is bounded and streamed.
 
-### PERF26-05 - Public map can serialize and mount 10,000 markers plus 10,000 list rows
+### Modal isolation and UI responsiveness
 
-Severity: Medium
-Confidence: High
-File/region: `apps/web/src/lib/data.ts:1649-1685`, `apps/web/src/app/[locale]/(public)/map/page.tsx:31-50`, `apps/web/src/app/[locale]/(public)/map/page.tsx:68-89`, `apps/web/src/components/map/map-client.tsx:86-90`, `apps/web/src/components/map/map-client.tsx:119-140`
+- `apps/web/src/components/use-modal-tree-isolation.ts:19-65` walks modal ancestors/siblings once per active modal, applies `aria-hidden`/`inert`, blurs focus if needed, and restores attributes on cleanup.
+- `apps/web/src/components/search.tsx:143-149` wires the hook to the search modal root.
+- `apps/web/src/components/search.tsx:366-536` portals the modal rather than nesting it in the main page tree.
+- `apps/web/src/components/lightbox.tsx:99-101` wires the hook only while the lightbox component is mounted/open.
+- `apps/web/src/components/lightbox.tsx:434-451` handles body scroll/focus cleanup separately from tree isolation.
+- `apps/web/src/components/info-bottom-sheet.tsx:52-58` wires the hook to the bottom-sheet modal root.
+- `apps/web/src/components/info-bottom-sheet.tsx:177-214` renders the modal subtree through a root wrapper.
 
-Failure scenario: the cap is finite but too high for one initial route payload and hydration pass. Ten thousand React-Leaflet markers, popups, coordinate array spreads, and accessible list rows can freeze the main thread on mobile or lower-end laptops.
+Assessment: no new performance finding. The hook iterates DOM siblings/ancestors, not every card/image descendant, and it runs on open/close rather than scroll/render loops.
 
-Concrete fix: move to viewport-bounded marker fetches with clustering/canvas rendering. Virtualize or paginate the accessible list. Compute bounds in a single loop rather than allocating latitude/longitude arrays and spreading them into `Math.min`/`Math.max`.
+### Upload and image pipeline
 
-### PERF26-06 - CSV export still duplicates large data in memory
+- Browser upload still claims quota and settings lock before per-file processing at `apps/web/src/app/actions/images.ts:175-242`, validates disk/topic at `apps/web/src/app/actions/images.ts:250-299`, and processes each file at `apps/web/src/app/actions/images.ts:346-506`.
+- Lightroom upload checks declared content length before multipart parse at `apps/web/src/app/api/admin/lr/upload/route.ts:100-112`, then calls `request.formData()` at `apps/web/src/app/api/admin/lr/upload/route.ts:153-173`.
+- Lightroom upload holds the upload-processing lock across save/metadata/insert work at `apps/web/src/app/api/admin/lr/upload/route.ts:243-461`.
+- Original save streams file contents to disk before metadata extraction at `apps/web/src/lib/process-image.ts:900-923`.
+- Sharp process concurrency is capped by `apps/web/src/lib/process-image.ts:36-57`.
+- Format generation still fans out per format/size at `apps/web/src/lib/process-image.ts:1220-1431`.
+- GPS stripping still buffers the original at `apps/web/src/lib/process-image.ts:1737-1764`.
+- Image queue concurrency defaults/caps are resolved at `apps/web/src/lib/image-queue.ts:87-108`.
+- Queue retry maps are bounded and pruned at `apps/web/src/lib/image-queue.ts:198-220`.
+- Queue bootstrap scans in batches and excludes permanent failures at `apps/web/src/lib/image-queue.ts:901-1058`.
 
-Severity: Medium
-Confidence: High
-File/region: `apps/web/src/app/[locale]/admin/db-actions.ts:80-160`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:103-124`
+Assessment: no new cycle-27 issue. The costly parts are known deferred items: GPS full-buffer stripping, long upload-processing lock scope, multipart materialization, and per-size Sharp re-decodes.
 
-Failure scenario: exporting up to 50,000 rows materializes DB rows, a `csvLines` array, a joined CSV string, a server-action response payload, and then a browser `Blob`. A large gallery with long filenames/titles/tags can trigger large Node and browser allocations and GC pauses during admin work.
+### DB query and memory surfaces
 
-Concrete fix: move CSV export to an authenticated streaming route or background export file. Stream MySQL rows in batches and write CSV chunks with backpressure instead of returning one server-action string.
+- View-count buffers are chunked/capped at `apps/web/src/lib/data.ts:13-35`, `apps/web/src/lib/data.ts:73-154`, and `apps/web/src/lib/data.ts:156-210`.
+- Public first-page listing still uses grouped/window-count shapes at `apps/web/src/lib/data.ts:878-914` and smart collection initial offset path at `apps/web/src/lib/data.ts:1417-1468`.
+- Topic/nav data still includes sitemap-oriented latest timestamp work at `apps/web/src/lib/data.ts:509-529`, while `Nav` consumes `getTopicsCached()` at `apps/web/src/components/nav.tsx:8-20`.
+- Timeline date functions remain at `apps/web/src/lib/data-timeline.ts:97-116`, `apps/web/src/lib/data-timeline.ts:129-142`, and `apps/web/src/lib/data-timeline.ts:186-207`.
+- Public map data remains capped at 10,000 rows at `apps/web/src/lib/data.ts:1649-1685`.
+- Admin CSV export still materializes up to 50,000 rows and a single response string at `apps/web/src/app/[locale]/admin/db-actions.ts:80-160`.
+- Rate-limit bucket purge still deletes by `bucketStart` at `apps/web/src/lib/rate-limit.ts:515-518` while the table primary key is `(ip, type, bucket_start)` at `apps/web/src/db/schema.ts:212-219`.
+- View-retention deletes now align with indexed `(viewed_at, id)` access at `apps/web/src/lib/view-retention.ts:64-90` and schema indexes at `apps/web/src/db/schema.ts:225-264`.
 
-### PERF26-07 - Timeline and year routes use non-sargable date predicates on dynamic pages
+Assessment: no new DB finding. The expensive public counts, timeline function predicates, nav topic timestamp, map cap, CSV memory, and rate-limit purge index shape were all already in prior registers or deferred plans.
 
-Severity: Low-Medium
-Confidence: High
-File/region: `apps/web/src/lib/data-timeline.ts:97-116`, `apps/web/src/lib/data-timeline.ts:129-142`, `apps/web/src/lib/data-timeline.ts:186-207`, `apps/web/src/db/schema.ts:116-120`
+### Semantic search, CLIP, and CPU concurrency
 
-Failure scenario: public timeline/year pages use `MONTH(capture_date)`, `DAY(capture_date)`, and `YEAR(capture_date)` while only `(processed, capture_date, created_at)` exists. MySQL can use `processed` but must evaluate date functions per row, so crawler traffic over archive pages grows with the processed image slice.
+- Semantic search rejects oversized/missing/chunked request bodies before reading text at `apps/web/src/app/api/search/semantic/route.ts:136-167`.
+- Semantic search rate-limits before config/body-dependent protected work at `apps/web/src/app/api/search/semantic/route.ts:173-184`.
+- Semantic text search embeds and scans bounded rows at `apps/web/src/app/api/search/semantic/route.ts:238-311`, then enriches only result IDs at `apps/web/src/app/api/search/semantic/route.ts:321-352`.
+- Similar search validates/rate-limits before expensive work at `apps/web/src/app/api/search/similar/[id]/route.ts:86-126`.
+- Similar search scans `SEMANTIC_SCAN_LIMIT` embeddings and computes dot products in-process at `apps/web/src/app/api/search/similar/[id]/route.ts:164-201`.
+- CLIP inference slots and queue limits are defined at `apps/web/src/lib/clip-model.ts:53-160`.
+- Text embedding uses bounded input length before model execution at `apps/web/src/lib/clip-model.ts:228-249`.
+- Image embedding keeps Sharp decode/resize/raw conversion and model execution inside the inference slot at `apps/web/src/lib/clip-model.ts:261-312`.
 
-Concrete fix: rewrite year/month filters as range predicates (`capture_date >= start AND capture_date < end`). For On This Day and distinct years, add generated month/day/year columns with indexes or maintain a small archive rollup. Consider short TTL caching for archive pages if immediate freshness is not required.
+Assessment: no new cycle-27 finding. The scan-based semantic routes remain bounded by configured limits; production scale-out to ANN/indexed vector search remains future work, not a newly introduced regression.
 
-### PERF26-08 - Public nav pays for sitemap-only topic timestamps
+### Public UI, map, and service worker
 
-Severity: Low
-Confidence: Medium
-File/region: `apps/web/src/lib/data.ts:509-529`, `apps/web/src/components/nav.tsx:8-20`, `apps/web/src/app/sitemap.ts:40-72`, `apps/web/src/db/schema.ts:116-120`
+- Home page first paint fetches 30 images through `getImagesLitePage()` at `apps/web/src/app/[locale]/(public)/page.tsx:149-168`.
+- Infinite masonry keeps appending all loaded images at `apps/web/src/components/home-client.tsx:124-130` and renders accumulated cards at `apps/web/src/components/home-client.tsx:286-412`.
+- Load-more observes and appends pages at `apps/web/src/components/load-more.tsx:23-161`.
+- Map page serializes marker/list props from capped rows at `apps/web/src/app/[locale]/(public)/map/page.tsx:27-89`.
+- Map client computes bounds and mounts all markers at `apps/web/src/components/map/map-client.tsx:76-140`.
+- Service worker image cache still performs a bounded HEAD probe before serving cached images at `apps/web/public/sw.template.js:31-38` and `apps/web/public/sw.template.js:224-286`.
 
-Failure scenario: `getTopics()` computes a correlated `MAX(images.updated_at)` per topic for sitemap `<lastmod>`, but `Nav` calls `getTopicsCached()` on public page layouts where nav only needs slug/label/order/resource fields. More topics and a larger image table make normal public renders pay for sitemap metadata.
+Assessment: no new UI responsiveness finding. The masonry, map, and SW behaviors are known deferred cycle-26 items.
 
-Concrete fix: split `getTopicsForNav()` from `getTopicsForSitemap()`. Keep nav lean. For sitemap freshness, add `(topic, processed, updated_at)` or denormalize per-topic latest timestamps if the correlated max becomes measurable.
+## Known Deferred Items Not Re-filed
 
-### PERF26-09 - Cached image display waits on a synchronous HEAD probe per tile
+These remain real performance debts, but they have existing deferred ownership/exit criteria and are not duplicated as cycle-27 findings.
 
-Severity: Low-Medium
-Confidence: Medium
-File/region: `apps/web/public/sw.template.js:34-38`, `apps/web/public/sw.template.js:250-286`, `apps/web/public/sw.js:34-38`, `apps/web/public/sw.js:250-286`
+- Public first-page exact grouped/window totals: `apps/web/src/lib/data.ts:878-914`, `apps/web/src/lib/data.ts:1417-1468`, `apps/web/src/app/[locale]/(public)/page.tsx:165-168`.
+- GPS stripping full-original buffering: `apps/web/src/lib/process-image.ts:1737-1764`, `apps/web/src/app/actions/images.ts:388-395`, `apps/web/src/app/api/admin/lr/upload/route.ts:367-378`.
+- Upload-processing lock spans slow I/O/CPU: `apps/web/src/app/actions/images.ts:175-190`, `apps/web/src/app/actions/images.ts:346-418`, `apps/web/src/app/api/admin/lr/upload/route.ts:243-461`.
+- Infinite masonry retains all loaded cards: `apps/web/src/components/home-client.tsx:124-130`, `apps/web/src/components/home-client.tsx:286-412`, `apps/web/src/components/load-more.tsx:116-132`.
+- Public map serializes/mounts up to 10,000 markers/list rows: `apps/web/src/lib/data.ts:1649-1685`, `apps/web/src/app/[locale]/(public)/map/page.tsx:27-89`, `apps/web/src/components/map/map-client.tsx:76-140`.
+- CSV export duplicates large payloads in memory: `apps/web/src/app/[locale]/admin/db-actions.ts:80-160`.
+- Timeline/year non-sargable date predicates: `apps/web/src/lib/data-timeline.ts:97-116`, `apps/web/src/lib/data-timeline.ts:129-142`, `apps/web/src/lib/data-timeline.ts:186-207`.
+- Nav pays for sitemap-only topic timestamps: `apps/web/src/lib/data.ts:509-529`, `apps/web/src/components/nav.tsx:8-20`.
+- Cached image display waits on per-tile HEAD probes: `apps/web/public/sw.template.js:31-38`, `apps/web/public/sw.template.js:224-286`.
+- Lightroom multipart body materialization before per-file size check: `apps/web/src/app/api/admin/lr/upload/route.ts:153-173`.
+- Rate-limit bucket purge lacks a leading `bucketStart` index: `apps/web/src/lib/rate-limit.ts:515-518`, `apps/web/src/db/schema.ts:212-219`.
+- Sharp derivative generation re-decodes per format/size for correctness-preserving output isolation: `apps/web/src/lib/process-image.ts:1220-1431`.
 
-Failure scenario: the probe is bounded at 300 ms, but a warm masonry page with many cached derivatives still issues one HEAD request per cached tile and waits for that probe before serving the cached response. On high-latency mobile networks, this adds visible placeholder time and origin request load.
+## Final Sweep Confirmation
 
-Concrete fix: serve stale immediately for normal image loads and revalidate in the background. If immediate post-backfill freshness is mandatory, gate synchronous validation behind one manifest/version endpoint or a per-page freshness token rather than N per-image HEAD probes.
+Final sweep performed across:
 
-## Final Sweep
+- Docs and review history: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/_aggregate.md`, cycle-26 plan/deferred files, prior perf report.
+- Changed cycle-27 runtime files: restore maintenance durable marker, restore DB action, SQL restore scanner, restore recovery script, modal isolation hook and its search/lightbox/bottom-sheet consumers.
+- Performance categories: public DB queries, schema/index coverage, admin CSV, upload/browser/LR ingest, Sharp processing, image queue/backfill, CLIP/semantic CPU queues, service worker cache behavior, public map, masonry/infinite scroll, analytics/view buffering, rate limiting, restore concurrency.
 
-Refuted or already fixed in current HEAD:
-
-- Cycle-25 image-queue pool exhaustion: fixed by `resolveImageQueueConcurrency()` budgeting one lock plus one transient DB connection per worker.
-- Deploy false-green: fixed by bounded health check before Docker pruning.
-- CLIP inference during restore: fixed by an early restore-maintenance check before `embedImageReal()`.
-- Unbounded module Maps: reviewed current caps/evictions for queue, upload tracker, rate limits, and shared-group view buffers; no new unbounded map finding.
-
-No tests were run because this was a static review-only artifact change. Evidence is source inspection with exact line references above.
+I found no new cycle-27 performance findings outside already deferred items. No tests were run because this was a static review artifact request; validation evidence is source inspection with the exact citations above.

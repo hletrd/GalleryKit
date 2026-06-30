@@ -2,6 +2,8 @@
 
 ## Active Plans
 
+- Cycle 27/100 Implementation Plan — validating gates (`cycle-27-2026-06-30-plan.md`)
+- Cycle 27/100 Deferred Findings — TODO / deferred (`cycle-27-2026-06-30-deferred.md`)
 - Cycle 26/100 Implementation Plan — TODO (`cycle-26-2026-06-30-plan.md`)
 - Cycle 26/100 Deferred Findings — TODO / deferred (`cycle-26-2026-06-30-deferred.md`)
 - Cycle 23/100 Implementation Plan — TODO (`cycle-23-2026-06-30-plan.md`)
