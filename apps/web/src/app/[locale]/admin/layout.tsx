@@ -11,7 +11,12 @@ export default async function AdminLayout({
     // enumerate admin sub-routes or render a logout form. `getCurrentUser`
     // is React cache()-wrapped so this does not duplicate DB work for the
     // protected sub-layout.
-    const currentUser = await getCurrentUser();
+    let currentUser = null;
+    try {
+        currentUser = await getCurrentUser();
+    } catch (err) {
+        console.error('Admin layout: failed to resolve current user', err);
+    }
 
     return (
         <div className="flex flex-col h-screen overflow-hidden">

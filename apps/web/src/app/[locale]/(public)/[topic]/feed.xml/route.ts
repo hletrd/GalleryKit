@@ -38,6 +38,7 @@ function isEtagMatch(ifNoneMatch: string | null, etag: string): boolean {
     });
 }
 
+// @public-no-rate-limit-required: bounded topic Atom feed is read-only, capped at FEED_LIMIT, and served with public cache headers for syndication clients.
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ locale: string; topic: string }> },

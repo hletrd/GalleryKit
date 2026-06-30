@@ -1,141 +1,152 @@
-# Cycle 32 Code Reviewer Review
+# Cycle 33 Code Reviewer Review
 
 Reviewer: code-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `3d174c96`
+HEAD reviewed: `168c3837`
 Date: 2026-06-30 KST
-Scope: full-repository review lane. Report artifact only; no product code or other review files were edited.
+Scope: full-repository review lane. Report artifact only; no app/source files were edited by this lane.
 
 ## Inventory And Method
 
-I read `AGENTS.md` and `CLAUDE.md` before inspecting implementation files. I then built the repository inventory with `rg --files` and `find`, and used targeted `rg` sweeps to map the app, tests, scripts, migrations, and docs before line-level review.
+I read the workspace instructions from `AGENTS.md` and `CLAUDE.md`, then built a repository inventory before line-level review.
 
-Inventory counts from this checkout:
+Inventory from this checkout:
 
 - `rg --files -g '!node_modules' -g '!.next' -g '!dist' -g '!coverage'`: 816 tracked/unignored workspace files.
-- `find apps/web/src apps/web/scripts apps/web/drizzle apps/web/e2e .context -type f`: 2952 files across app, tests, scripts, migrations, e2e, and committed context.
 - `apps/web/src` TypeScript/TSX files: 519.
 - `apps/web/src/__tests__` plus `apps/web/e2e` TypeScript/TSX files: 283.
+- App route/page/action/db-action entry files under `apps/web/src/app`: 35.
+- Library/component/db/script TypeScript/JavaScript files under `apps/web/src/lib`, `apps/web/src/components`, `apps/web/src/db`, and `apps/web/scripts`: 190.
 - `apps/web/scripts` top-level scripts: 29.
 - `apps/web/drizzle` migration/meta files: 32.
-- `.context` markdown files: 2182.
 
-Primary surfaces inspected in detail:
+Primary surfaces examined:
 
-- App routes: public pages, admin pages, `api/admin/*`, `api/search/*`, `api/og/*`, health/live, feeds, upload serving.
-- Server actions: auth, public load-more/search/analytics, images, tags, topics, settings, SEO, sharing, collections, users, embeddings, Lightroom tokens, admin backfill.
-- Libraries: data access, privacy field selections, rate limits, API auth, session auth, image processing, upload paths/storage, restore maintenance, smart collections, CLIP/semantic search, SQL restore scanning, CSP/SEO helpers.
-- Tests: privacy guards, action/API route lint contracts, public rate-limit scanner, upload locks, semantic search, smart collection pagination, map privacy, migration journal monotonicity, restore/upload locks, source-contract tests.
-- Scripts/migrations: deploy helper contracts, migration/reconcile flow, DB backup/restore, admin seed/migrate scripts, semantic/color backfills, service-worker build, e2e seed/server.
-- Docs/context: `CLAUDE.md`, `AGENTS.md`, `.context/plans`, `.context/reviews`, and cycle history relevant to current invariants.
+- Admin and public routes: auth/session flows, `api/admin/*`, Lightroom upload, semantic/similar search, OG routes, health/live, public collection and photo pages.
+- Server actions: images, tags, topics, collections, sharing, users, settings, SEO, embeddings, public analytics/load-more/search, database backup/restore.
+- Core libraries: data access/privacy selections, rate limits, API auth, request-origin checks, session signing, image queue, Sharp processing, upload/storage paths, caption/alt-text flow, smart collections, CLIP/semantic search, SQL restore scanner, restore maintenance, config/env helpers.
+- Scripts and migrations: `migrate.js`, Drizzle journal/meta, backup/restore helpers, semantic/color backfills, deploy/build/e2e helpers.
+- Tests and contracts: action/API lint scanners, privacy guards, upload/restore locks, smart collection pagination, migration journal, alt-text fallback/stub-prefix behavior, sanitize/validation tests, source-contract tests.
 
 Validation commands run:
 
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Final sweeps covered raw SQL/filesystem boundaries, env/config usage, exemptions, TODO/FIXME markers, pagination limits, migrations, and auth/rate-limit surfaces.
 
-Full lint/typecheck/build/Vitest/e2e were not run in this read-only review lane.
+Full lint/typecheck/build/Vitest/e2e were not run in this review-only lane.
 
 ## Summary
 
-No critical or high-severity confirmed issue was found. The repo has strong guardrails around admin API auth, server-action origin checks, public route rate limits, privacy field omissions, restore maintenance, upload-processing locks, migration journal coverage, and semantic-search operator gating.
-
-I found one low-severity confirmed helper-contract issue. I also noted two risks that need live/manual validation because their correctness depends on deployment configuration or external operator state.
+No critical or high-severity confirmed issue was found. The strongest confirmed issue is a medium-severity persistence-path gap where machine-derived `alt_text_suggested` can be copied into admin-managed title/description without the same sanitization and length checks used by normal admin metadata writes.
 
 ## Confirmed Issues
 
-### C32-CODE-01 - Listing page-size helpers can fetch 102 rows despite a documented 100-row cap
+### C33-CODE-01 - Bulk applying suggested alt text bypasses admin string sanitization and field-length validation
+
+Severity: Medium
+Confidence: High
+
+Exact citations:
+
+- `apps/web/src/app/actions/images.ts:1102-1135`
+- `apps/web/src/app/actions/images.ts:1138-1147`
+- `apps/web/src/app/actions/images.ts:928-929`
+- `apps/web/src/lib/sanitize.ts:161-190`
+- `apps/web/src/lib/validation.ts:103-106`
+- `apps/web/src/db/schema.ts:82-86`
+- `apps/web/src/__tests__/bulk-update-images.test.ts:471-518`
+
+Issue:
+
+`bulkUpdateImages()` has a special path for `applyAltSuggested === 'title' || 'description'`. It reads `images.alt_text_suggested`, strips the `[AUTO]` prefix plus Unicode formatting characters, trims, and then writes the result directly to `images.title` or `images.description`.
+
+That path does not use `sanitizeAdminString()` and does not enforce the normal title/description limits before persistence. The manual metadata paths in the same action sanitize admin strings before storing them (`images.ts:928-929`), and `sanitizeAdminString()` rejects C0/C1 controls plus Unicode formatting by returning `{ value: null, rejected: true }` (`sanitize.ts:161-190`). The apply-suggestion path only calls `stripUnicodeFormatting()` (`validation.ts:103-106`), which removes bidi/zero-width formatting but does not reject or strip control characters.
+
+The length mismatch is also real: `alt_text_suggested` is a `text` column, while `title` is `varchar(255)` (`schema.ts:82-86`). Existing tests cover prefix stripping and empty suggestions, but not control-character rejection or overlong suggestion handling (`bulk-update-images.test.ts:471-518`).
+
+Concrete failure scenario:
+
+1. A legacy/restored row, future real caption producer, or producer bug leaves `alt_text_suggested` containing a C0/C1 control character, newlines/tabs, or more than 255 code points after prefix stripping.
+2. An admin uses bulk edit to apply suggested alt text to `title` or `description`.
+3. For `title`, MySQL may reject/truncate the value or fail the transaction because the source is `TEXT` and the destination is `varchar(255)`. For either field, control characters can be persisted into admin-managed metadata even though direct admin entry rejects them.
+
+Suggested fix:
+
+Run the stripped suggestion through the same admin metadata contract before copying it. For example, apply `sanitizeAdminString(stripped)` and skip or return a field-specific validation error when `rejected` is true. Enforce `countCodePoints(caption) <= 255` for `title` and the existing description limit for `description` before queuing the per-row update, or define an explicit safe-truncation policy for machine suggestions. Add focused Vitest coverage for C0 controls, overlong title suggestions, and one bad suggestion not rolling back unrelated valid rows unless that all-or-nothing behavior is intentional.
+
+### C33-CODE-02 - Caption stub truncates by UTF-16 code units, which can split surrogate pairs
+
+Severity: Low
+Confidence: Medium
+
+Exact citations:
+
+- `apps/web/src/lib/caption-generator.ts:29-38`
+- `apps/web/src/db/schema.ts:82-86`
+
+Issue:
+
+`generateCaptionStub()` limits generated suggestions with `raw.length <= ALT_TEXT_MAX_CHARS ? raw : raw.slice(0, ALT_TEXT_MAX_CHARS)`. JavaScript string length and `slice()` operate on UTF-16 code units, not Unicode code points. If a camera model contains supplementary characters near the 140-character boundary, this can split a surrogate pair and persist a malformed string into `alt_text_suggested`.
+
+This is lower severity because the current stub is deterministic, short, and sourced from cleaned EXIF camera metadata. It is still inconsistent with the repo's broader Unicode handling, where field limits and validation usually reason in code points.
+
+Concrete failure scenario:
+
+1. EXIF `camera_model` contains an emoji or other supplementary-plane character at the truncation boundary.
+2. The stub slices midway through the surrogate pair.
+3. The persisted suggestion contains a lone surrogate, causing replacement-character rendering, mojibake, or driver/database encoding surprises in downstream alt text and bulk-copy flows.
+
+Suggested fix:
+
+Use a code-point-safe truncation helper, for example `Array.from(raw).slice(0, ALT_TEXT_MAX_CHARS).join('')`, or centralize truncation alongside the existing code-point counting helpers. Add a unit test with `139` ASCII characters plus an emoji to assert no lone surrogate is produced.
+
+### C33-CODE-03 - Bulk image update rejects duplicated ID payloads before de-duplicating
 
 Severity: Low
 Confidence: High
 
 Exact citations:
 
-- `apps/web/src/lib/data.ts:664-670`
-- `apps/web/src/lib/data.ts:898-927`
-- `apps/web/src/lib/data.ts:1437-1480`
-- `apps/web/src/app/actions/public.ts:121-157`
-- `apps/web/src/app/actions/public.ts:170-222`
-- `apps/web/src/__tests__/smart-collection-pagination.test.ts:257-260`
+- `apps/web/src/app/actions/images.ts:997-1008`
 
 Issue:
 
-`LISTING_QUERY_LIMIT` is documented as the maximum number of image rows a listing query may return, and `LISTING_QUERY_LIMIT_PLUS_ONE` is intended only for has-more lookahead. `getImagesLitePage()` and `getImagesForSmartCollection()` clamp `pageSize` to `LISTING_QUERY_LIMIT_PLUS_ONE` at `data.ts:910` and `data.ts:1442`, then apply another lookahead with `.limit(normalizedPageSize + 1)` at `data.ts:926`, `data.ts:1458`, and `data.ts:1479`.
+`bulkUpdateImages()` validates `ids.length > 100` before creating `requestedIds = [...new Set(ids)]`. A payload containing 101 entries but only one unique image ID is rejected as `tooManyImages`, even though the effective mutation scope is one row.
 
-That means a direct caller passing `pageSize = 101` produces a SQL limit of 102, exceeding the documented listing cap by one row. Current public server-action callers clamp user input to 100 before reaching these helpers (`public.ts:126` and `public.ts:179`), and initial public pages pass `PAGE_SIZE = 30`, so this is not a current public DoS. The defect is in the exported helper contract and could become user-facing if a future route or admin surface calls these helpers directly with the advertised upper bound.
+This is not currently a security issue, and the UI likely sends unique IDs. It is a brittle API edge case that can surface from client replay, stale selection state, or a future caller that appends selected IDs without de-duplicating first.
 
-The source-contract test for smart collections currently locks in the two internal `normalizedPageSize + 1` lookaheads (`smart-collection-pagination.test.ts:257-260`) but does not assert that `normalizedPageSize` itself is capped to the visible row maximum before the lookahead is added.
+Concrete failure scenario:
 
-Recommended fix:
+1. The client sends a bulk-edit request with repeated selected IDs, such as 101 copies of the same image ID.
+2. The server rejects the request before normalizing to the actual unique mutation set.
+3. The user sees a misleading "too many images" failure even though the requested mutation would touch one row.
 
-Clamp visible page size to `LISTING_QUERY_LIMIT`, not `LISTING_QUERY_LIMIT_PLUS_ONE`, in `getImagesLitePage()` and `getImagesForSmartCollection()`. Keep the SQL lookahead as `normalizedPageSize + 1`. Add a targeted test/source contract asserting the visible cap is 100 and the SQL limit cannot exceed 101.
+Suggested fix:
 
-## Likely Issues
-
-None confirmed enough to classify as likely code defects after cross-file inspection.
-
-One investigated path was the settings upload-contract lock: `SettingsClient` sends only changed fields at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:238-253`, so `updateGallerySettings()` does not normally acquire the upload-processing contract lock for no-op or unrelated saves. That suspected issue is not present in the standard UI path.
-
-## Risks Needing Manual Validation
-
-### C32-RISK-01 - Production reverse-proxy rate limiting depends on `TRUST_PROXY=true`
-
-Severity: Medium
-Confidence: Medium
-
-Exact citations:
-
-- `apps/web/src/lib/rate-limit.ts:166-196`
-- `apps/web/scripts/run-e2e-server.mjs:35-36`
-
-Risk:
-
-`getClientIp()` intentionally ignores `x-forwarded-for` and `x-real-ip` unless `TRUST_PROXY === 'true'`. If production is behind nginx or another reverse proxy and `TRUST_PROXY` is missing, all users collapse into the `"unknown"` bucket. The code logs a security warning at `rate-limit.ts:192-194`, but login/public-action rate limits can still globally throttle legitimate users until configuration is fixed.
-
-This is the correct secure default against spoofed proxy headers, so it is not a code bug by itself. It needs live environment validation: confirm the deployed app has `TRUST_PROXY=true` and an appropriate `TRUSTED_PROXY_HOPS` value for the actual proxy chain.
-
-### C32-RISK-02 - Semantic-search production mode remains operator-state dependent
-
-Severity: Medium
-Confidence: Medium
-
-Exact citations:
-
-- `apps/web/src/lib/gallery-config.ts:125-129`
-- `apps/web/src/app/api/search/semantic/route.ts:107-168`
-- `apps/web/src/app/api/search/similar/[id]/route.ts:68-122`
-- `apps/web/scripts/backfill-clip-embeddings.ts:95-116`
-- `apps/web/src/lib/clip-paths.ts:62-93`
-
-Risk:
-
-The repo correctly gates production semantic search behind config/env/model/backfill state: production mode is healed unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, routes check mode before expensive work, backfill refuses production without the env gate, and model paths are validated. The remaining correctness risk is live operator state: DB mode, env flag, CLIP weights/manifests, and image embeddings must agree on the deployed host.
-
-Manual validation should confirm production semantic search is either intentionally disabled or fully activated with weights present and embeddings backfilled. This cannot be proven from the repository alone.
+Normalize and validate numeric IDs first, de-duplicate second, then apply the 100-image cap to the unique ID set. If raw payload size needs its own anti-abuse cap, enforce it separately with a distinct error message.
 
 ## Positive Cross-File Checks
 
 - Admin API route exports are covered by `withAdminAuth(...)`; the auth lint gate passed.
-- Mutating server actions return early on `requireSameOriginAdmin()`; the action-origin lint gate passed.
+- Mutating server actions return early on `requireSameOriginAdmin()` or carry explicit exemptions; the action-origin lint gate passed.
 - Public mutating/expensive routes are rate-limited or explicitly exempted; the public-route rate-limit lint gate passed.
-- Public image select fields omit admin/private fields, and the symmetric privacy guard is locked by `apps/web/src/__tests__/privacy-fields.test.ts`.
-- Migration journal and reconcile rules are present: migrations live in `apps/web/drizzle`, journal metadata is in `apps/web/drizzle/meta/_journal.json`, and legacy reconciliation is centralized in `apps/web/scripts/migrate.js`.
-- Upload, restore, and backfill flows use advisory/maintenance locks across server actions, API routes, and scripts; I did not find an unguarded cross-flow mutation path in the inspected surfaces.
-- OG image fetching uses the configured canonical origin and bounded fetch behavior, avoiding user-controlled SSRF surfaces.
-- The settings client only submits changed fields, limiting transaction size and avoiding unnecessary upload-contract lock contention.
+- Public image select fields and privacy guards are centralized in `apps/web/src/lib/data.ts` and backed by the symmetric privacy test fixture.
+- Upload, restore, image-processing, and backfill flows share maintenance/advisory lock boundaries; I did not find an unguarded restore/upload race in the inspected surfaces.
+- Smart collection public pages check publication state at both metadata and render paths, and the query compiler validates depth, operators, fields, and budget before SQL generation.
+- SQL restore scanning uses an app-table allowlist and blocks dangerous statements outside the allowed restore envelope.
+- The Lightroom upload route has layered validation for auth, content length, extension/MIME, filename/topic/title input, disk budget, contract locking, and cleanup/maintenance restoration.
 
 ## Final Missed-Issues Sweep
 
 Final sweeps covered:
 
-- Raw SQL and database execution calls.
-- Filesystem read/write/unlink/rename/copy boundaries.
-- Auth, token, session, password, env, and proxy configuration usage.
-- Public-route exemptions and server-action origin exemptions.
-- Pagination limit/cursor paths.
-- TODO/FIXME/HACK markers and explicit error/log paths.
-- Migration/reconcile files and tests around migration journal monotonicity.
+- Raw SQL, restore scanner, migration/reconcile, and journal paths.
+- Filesystem boundaries around upload, processing, delete, backup, restore, and generated public assets.
+- Auth/session/token/env/proxy/rate-limit code paths.
+- Public-route and server-action exemption scanners.
+- Privacy-sensitive field selection and map/search/public listing surfaces.
+- Caption/alt-text generation, fallback, bulk-copy, and tests.
+- TODO/FIXME/HACK markers, catch/log paths, and pagination/cursor guards.
 
-No additional confirmed medium/high issues were found in that sweep. The only product-code change I would recommend from this review is the low-risk pagination cap adjustment in `apps/web/src/lib/data.ts` plus its focused test.
+No additional confirmed critical or high-severity issues were found in that sweep. The primary fix I recommend for the next implementation lane is C33-CODE-01, with C33-CODE-02 and C33-CODE-03 as small hardening follow-ups.

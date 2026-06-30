@@ -24,6 +24,7 @@ function getAuthErrorLogDetail(err: unknown) {
     return { errorName: err instanceof Error ? err.name : typeof err };
 }
 
+/** @action-origin-exempt: read-only session lookup used by auth guard callers */
 export async function getSession() {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
@@ -55,6 +56,7 @@ async function getAdminUserWithHash(userId: number) {
     return user || null;
 }
 
+/** @action-origin-exempt: read-only admin status lookup used by page/layout guards */
 export async function isAdmin() {
     return !!(await getCurrentUser());
 }

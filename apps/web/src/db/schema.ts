@@ -80,9 +80,11 @@ export const images = mysqlTable("images", {
     blur_data_url: text('blur_data_url'),
 
     // US-P52: EXIF-derived alt text suggestion with a future AI-caption hook.
-    // NULL until a caption producer runs.
-    // PUBLIC field — used as <img alt> fallback when image.title is empty (SEO + a11y).
-    // Admin-set alt (title/description) always takes precedence; this is never auto-applied.
+    // NULL until a caption producer runs. PUBLIC field — used as <img alt>
+    // fallback only when no meaningful title or tags exist (SEO + a11y).
+    // GalleryKit has no separate public alt-text column: title/tags take
+    // precedence; description is visible metadata, not part of the alt chain.
+    // Suggestions are never auto-applied to admin metadata.
     alt_text_suggested: text('alt_text_suggested'),
 
     // R17-L2: admin user that performed the upload. NULL for legacy rows

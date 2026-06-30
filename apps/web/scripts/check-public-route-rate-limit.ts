@@ -1,5 +1,5 @@
 /* SECURITY-CRITICAL: this lint gate enforces that every PUBLIC API
- * route file (i.e. NOT under /api/admin/) which exports a mutating
+ * route file (i.e. NOT an admin API/private admin route) which exports a mutating
  * HTTP handler (POST/PUT/PATCH/DELETE) either:
  *   (a) carries an explicit `@public-no-rate-limit-required: <reason>`
  *       comment, OR
@@ -22,8 +22,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
 
-const API_DIR = path.resolve(__dirname, '../src/app/api');
+const APP_DIR = path.resolve(__dirname, '../src/app');
 const ADMIN_PREFIX = path.resolve(__dirname, '../src/app/api/admin') + path.sep;
+const ADMIN_ROUTE_SEGMENT = `${path.sep}admin${path.sep}`;
 
 const ROUTE_FILE_NAMES = new Set([
     'route.ts',
@@ -83,6 +84,13 @@ function findRouteFiles(dir: string): string[] {
         }
     }
     return results;
+}
+
+function isPublicRouteFile(file: string): boolean {
+    const resolved = path.resolve(file);
+    if (resolved.startsWith(ADMIN_PREFIX)) return false;
+    if (resolved.includes(ADMIN_ROUTE_SEGMENT)) return false;
+    return true;
 }
 
 type CheckReport = {
@@ -610,9 +618,9 @@ function checkRouteFile(file: string): boolean {
 
 const isCliEntry = (typeof require !== 'undefined' && require.main === module) || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
 if (isCliEntry) {
-    const allRoutes = findRouteFiles(API_DIR).filter((f) => !f.startsWith(ADMIN_PREFIX));
+    const allRoutes = findRouteFiles(APP_DIR).filter(isPublicRouteFile);
     if (allRoutes.length === 0) {
-        console.error(`No public API route files found under ${API_DIR}; route discovery likely broke.`);
+        console.error(`No public route files found under ${APP_DIR}; route discovery likely broke.`);
         process.exit(1);
     }
     let failed = false;

@@ -490,7 +490,7 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
         expect(found).toEqual(['keep-js.js', 'keep.ts']);
     });
 
-    it('excludes auth.* but keeps public.* covered by public-action checks', () => {
+    it('includes auth.* and keeps public.* covered by public-action checks', () => {
         fs.writeFileSync(path.join(tempRoot, 'auth.ts'), '// top auth');
         fs.writeFileSync(path.join(tempRoot, 'public.tsx'), '// top public');
         fs.mkdirSync(path.join(tempRoot, 'sub'));
@@ -499,8 +499,48 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
 
         const found = walkForActionFiles(tempRoot).map((p) => path.relative(tempRoot, p));
         expect(found).toContain(path.join('sub', 'keep.ts'));
-        expect(found.find((p) => p.endsWith('auth.ts'))).toBeUndefined();
+        expect(found.find((p) => p === 'auth.ts')).toBeDefined();
+        expect(found.find((p) => p === path.join('sub', 'auth.ts'))).toBeDefined();
         expect(found.find((p) => p.endsWith('public.tsx'))).toBeDefined();
+    });
+});
+
+describe('checkActionSource — auth action origin guard', () => {
+    const withApprovedAuthGuard = (body: string) => `
+        import { hasTrustedSameOrigin } from '@/lib/request-origin';
+        import { headers } from 'next/headers';
+        ${body}
+    `;
+
+    it('passes auth mutators that exit on hasTrustedSameOrigin before mutation', () => {
+        const src = withApprovedAuthGuard(`
+            export async function logout() {
+                const requestHeaders = await headers();
+                if (!hasTrustedSameOrigin(requestHeaders)) {
+                    redirect('/admin');
+                }
+                await db.delete(sessions).where(eq(sessions.id, 'x'));
+            }
+        `);
+        const report = checkActionSource(src, 'app/actions/auth.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: app/actions/auth.ts::logout']);
+    });
+
+    it('fails auth mutators that read the current user before the auth origin guard', () => {
+        const src = withApprovedAuthGuard(`
+            export async function updatePassword() {
+                const user = await getCurrentUser();
+                const requestHeaders = await headers();
+                if (!hasTrustedSameOrigin(requestHeaders)) {
+                    return { error: 'unauthorized' };
+                }
+                await db.update(adminUsers).set({ ok: true });
+            }
+        `);
+        const report = checkActionSource(src, 'app/actions/auth.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 });
 
@@ -617,7 +657,7 @@ describe('walkForActionFiles — extension coverage', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('discovers TS/TSX/JS action files while excluding auth by basename', () => {
+    it('discovers TS/TSX/JS action files including auth by basename', () => {
         fs.writeFileSync(path.join(tempDir, 'images.ts'), '');
         fs.writeFileSync(path.join(tempDir, 'albums.tsx'), '');
         fs.writeFileSync(path.join(tempDir, 'legacy.js'), '');
@@ -626,7 +666,7 @@ describe('walkForActionFiles — extension coverage', () => {
         fs.writeFileSync(path.join(tempDir, 'notes.md'), '');
 
         const discovered = walkForActionFiles(tempDir).map((file) => path.basename(file)).sort();
-        expect(discovered).toEqual(['albums.tsx', 'images.ts', 'legacy.js', 'public.tsx']);
+        expect(discovered).toEqual(['albums.tsx', 'auth.js', 'images.ts', 'legacy.js', 'public.tsx']);
     });
 });
 

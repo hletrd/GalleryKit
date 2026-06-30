@@ -210,6 +210,12 @@ describe('bulkUpdateImages — input validation', () => {
         expect(res).toEqual({ error: 'tooManyImages' });
     });
 
+    it('applies the 100-image cap after de-duplicating valid ids', async () => {
+        const res = await bulkUpdateImages(makeInput({ ids: Array.from({ length: 101 }, () => 1) }));
+        expect(res).toEqual({ success: true, count: 3 });
+        expect(transactionMock).toHaveBeenCalledOnce();
+    });
+
     it('rejects non-positive integer id', async () => {
         const res = await bulkUpdateImages(makeInput({ ids: [1, -1] }));
         expect(res).toEqual({ error: 'invalidImageId' });
@@ -540,6 +546,123 @@ describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', ()
         expect(res).toEqual({ success: true, count: 3 });
         // No per-row title update should have been called because the stripped value is empty
         expect(updateCalled).toBe(false);
+    });
+
+    it('skips copied suggested alt text that fails admin-string sanitization', async () => {
+        let updateCalled = false;
+
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const selectMock = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ id: 1 }]))
+                .mockReturnValueOnce({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                alt_text_suggested: '[AUTO] Bad\x01caption',
+                            },
+                        ])),
+                    })),
+                });
+            const tx = {
+                update: vi.fn(() => ({
+                    set: vi.fn(() => ({
+                        where: vi.fn(() => {
+                            updateCalled = true;
+                            return Promise.resolve([{ affectedRows: 1 }]);
+                        }),
+                    })),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: selectMock,
+            };
+            return await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ ids: [1], applyAltSuggested: 'title' }));
+        expect(res).toEqual({ success: true, count: 1 });
+        expect(updateCalled).toBe(false);
+    });
+
+    it('skips copied suggested alt text that is too long for title', async () => {
+        let updateCalled = false;
+
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const selectMock = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ id: 1 }]))
+                .mockReturnValueOnce({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                alt_text_suggested: `[AUTO] ${'a'.repeat(256)}`,
+                            },
+                        ])),
+                    })),
+                });
+            const tx = {
+                update: vi.fn(() => ({
+                    set: vi.fn(() => ({
+                        where: vi.fn(() => {
+                            updateCalled = true;
+                            return Promise.resolve([{ affectedRows: 1 }]);
+                        }),
+                    })),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: selectMock,
+            };
+            return await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ ids: [1], applyAltSuggested: 'title' }));
+        expect(res).toEqual({ success: true, count: 1 });
+        expect(updateCalled).toBe(false);
+    });
+
+    it('allows copied suggested alt text up to the description limit', async () => {
+        const captions: string[] = [];
+
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const selectMock = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ id: 1 }]))
+                .mockReturnValueOnce({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                alt_text_suggested: `[AUTO] ${'a'.repeat(300)}`,
+                            },
+                        ])),
+                    })),
+                });
+            const tx = {
+                update: vi.fn(() => ({
+                    set: vi.fn((clause: Record<string, unknown>) => ({
+                        where: vi.fn(() => {
+                            if (typeof clause.description === 'string') captions.push(clause.description);
+                            return Promise.resolve([{ affectedRows: 1 }]);
+                        }),
+                    })),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: selectMock,
+            };
+            return await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ ids: [1], applyAltSuggested: 'description' }));
+        expect(res).toEqual({ success: true, count: 1 });
+        expect(captions).toEqual(['a'.repeat(300)]);
     });
 });
 

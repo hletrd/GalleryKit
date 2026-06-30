@@ -62,6 +62,15 @@ const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
     'image_quality_jpeg',
 ]);
 
+const SETTINGS_FIELD_IDS: Record<string, string> = {
+    image_quality_webp: 'image-quality-webp',
+    image_quality_avif: 'image-quality-avif',
+    image_quality_jpeg: 'image-quality-jpeg',
+    image_sizes: 'image-sizes',
+    wide_gamut_max_source_pixels: 'wide-gamut-max-source-pixels',
+    slideshow_interval_seconds: 'slideshow-interval',
+};
+
 export function SettingsClient({ initialSettings, hasExistingImages }: SettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
@@ -173,6 +182,19 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
         return nextErrors;
     }, [hasExistingImages, settings.image_quality_avif, settings.image_quality_jpeg, settings.image_quality_webp, settings.image_sizes, settings.slideshow_interval_seconds, settings.wide_gamut_max_source_pixels, t]);
 
+    const focusFirstInvalidSetting = (validationErrors: Record<string, string>) => {
+        const firstKey = Object.keys(validationErrors)[0];
+        const id = firstKey ? SETTINGS_FIELD_IDS[firstKey] : undefined;
+        if (!id) return;
+        requestAnimationFrame(() => {
+            const field = document.getElementById(id);
+            field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            if (field instanceof HTMLElement) {
+                field.focus({ preventScroll: true });
+            }
+        });
+    };
+
     // R10-M14: track whether any backfill-relevant field is dirty (current
     // value differs from the last committed baseline snapshot). The
     // amber warning above the image-processing fields surfaces only when
@@ -231,6 +253,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
         const validationErrors = validateSettings();
         if (Object.keys(validationErrors).length > 0) {
             toast.error(t('settings.validationFailed'));
+            focusFirstInvalidSetting(validationErrors);
             return;
         }
         startTransition(async () => {

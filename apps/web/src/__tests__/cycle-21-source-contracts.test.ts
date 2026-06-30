@@ -18,6 +18,9 @@ describe('cycle 21 source contracts', () => {
         expect(src).toContain('aria-invalid={!!fieldErrors.image_quality_webp}');
         expect(src).toContain('role="alert"');
         expect(src).toContain("toast.error(t('settings.validationFailed'))");
+        expect(src).toContain('const SETTINGS_FIELD_IDS');
+        expect(src).toContain('focusFirstInvalidSetting(validationErrors)');
+        expect(src).toContain("field?.scrollIntoView({ block: 'center', behavior: 'smooth' })");
     });
 
     it('admin users page has one card chrome instead of nesting the manager in another Card', () => {

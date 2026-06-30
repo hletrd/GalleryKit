@@ -1,89 +1,98 @@
-# Cycle 32 Document Specialist Review
+# Cycle 33 Document Specialist Review
 
 Reviewer: document-specialist
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `3d174c96`
 Date: 2026-06-30 KST
-Scope: documentation, runbook, comment, package metadata, migration/deploy, and `.context` consistency against authoritative repo sources. Product code and sibling review files were not edited.
+Scope: documentation, source comments, runbooks, package scripts, deployment notes, migration/schema guidance, `.context` planning/review artifacts, `docs/superpowers` CLIP records, and current source behavior. Product source and sibling review files were not edited.
 
 ## Inventory
 
-Read first: `AGENTS.md`, `CLAUDE.md`.
+Authoritative docs read first:
 
-Then inspected:
+- `AGENTS.md`
+- `CLAUDE.md`
 
-- Root/app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`, `.env.deploy.example`, `apps/web/.env.local.example`.
-- Runtime/deploy sources those docs cite: `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`.
-- Schema/migration sources: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/drizzle/meta/_journal.json`, representative migration comments, `apps/web/scripts/migrate.js`.
-- Feature-state sources: semantic search routes/scripts, LR upload route, storage quarantine, auto-alt-text helpers, public image components, paid/removal guards, HDR/WI-09 comments.
-- Context artifacts: current top-level cycle-32 sibling reviews, `.context/plans/README.md`, active cycle plan files, and recent plan/review history where it affected current documentation.
+Documentation and runbook surfaces inspected:
+
+- Root/app docs: `README.md`, `apps/web/README.md`, `apps/web/__test_fixtures__/color/README.md`
+- Package/script metadata: `package.json`, `apps/web/package.json`
+- Deploy/runtime docs and sources: `.env.deploy.example`, `scripts/deploy-remote.sh`, `apps/web/.env.local.example`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`
+- Schema/migration docs and sources: `apps/web/src/db/schema.ts`, `apps/web/drizzle/meta/_journal.json`, migration SQL files, `apps/web/scripts/migrate.js`
+- Feature/runbook sources cited by docs: semantic search routes/scripts/libs, LR upload route, upload limits, rate limit helpers, SEO/site config, storage quarantine, auto-alt-text helpers, public image title/alt helpers, privacy-field guards
+- Context artifacts: `.context/plans/README.md`, active `.context/plans/**`, recent `.context/reviews/**`, archived cycle-33 aggregate/review files, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
 
 ## Findings
 
-### C32-DOC-01 - Auto-alt-text runbook describes a fallback chain the core public UI does not implement
-
-Severity: Medium
-Confidence: High
-Consequence: accessibility/operator documentation drift
-
-Exact regions:
-
-- `CLAUDE.md:561-563`
-- `apps/web/src/lib/photo-title.ts:85-125`
-- `apps/web/src/__tests__/alt-text-fallback.test.ts:1-6`, `apps/web/src/__tests__/alt-text-fallback.test.ts:13-89`
-- `apps/web/src/components/home-client.tsx:293-355`
-- `apps/web/src/components/lightbox.tsx:500-503`
-- `apps/web/src/app/actions/images.ts:1080-1126`
-
-Mismatch:
-
-`CLAUDE.md` says public display falls back through "explicit alt text, title/description, suggested text, and localized photo labels." The current core helper and tests define a different chain: `title > tag-derived > alt_text_suggested > fallback`. There is no explicit `alt_text` field in the schema surface, and `description` is not part of `getConcisePhotoAltText()`. Home cards and the lightbox use that helper directly for `<img alt>`, so a photo with only `description` gets the generic localized fallback unless it has tags or `alt_text_suggested`. The source comment at `photo-title.ts:90-91` also says "Admin-set alt always takes precedence", but the only admin copy action copies `alt_text_suggested` into `title` or `description`, not a distinct alt field.
-
-Concrete failure scenario:
-
-An operator follows the runbook and puts accessibility-facing text in `image.description`, expecting it to be used as public alt text. On the home grid and lightbox, screen-reader users still hear the generic fallback or generated suggestion instead of that description. This is not a data leak, but it is a trust and accessibility mismatch in the docs' stated behavior.
-
-Fix:
-
-Either update `CLAUDE.md` and the source comment to the implemented contract (`title > tags > alt_text_suggested > localized fallback` for core gallery/lightbox alt text; descriptions are visible metadata and are used by some adjacent labels such as similar/search cards), or deliberately add description/explicit-alt support to `getConcisePhotoAltText()` with tests and schema/UI docs. The smaller safe fix is documentation/comment correction.
-
-### C32-DOC-02 - `.context/plans/README.md` is stale and contains broken plan links
+### C33-DOC-01 - Schema comment still says description participates in public alt-text precedence
 
 Severity: Low
 Confidence: High
-Consequence: planning/navigation drift for agents and contributors
+Consequence: source-comment/accessibility contract drift
 
 Exact regions:
 
-- `.context/plans/README.md:3-16`
-- `.context/plans/README.md:61-62`
-- `.context/plans/cycle-30-2026-06-30-plan.md:1-6`
-- `.context/plans/cycle-31-2026-06-30-plan.md:1-6`
+- `apps/web/src/db/schema.ts:82-86`
+- `apps/web/src/lib/photo-title.ts:85-127`
+- `apps/web/src/__tests__/alt-text-fallback.test.ts:1-90`
+- `CLAUDE.md:561-563`
+- `apps/web/README.md:83-85`
 
 Mismatch:
 
-The plans index lists active work through cycle 29 and older deferred entries, but current committed plan files include cycle 30 and cycle 31 artifacts. Cycle 30 is marked "implementation complete; gates green; commit/deploy pending"; cycle 31 is a current review/implementation plan. The index also links cycle 18/19 plan entries as `../../plan/...` from inside `.context/plans/README.md`; those paths resolve outside `.context` and do not exist in this checkout. The nearby actual legacy plan directory is `.context/plan/`, and it does not contain the cited `plan-377` / `plan-375` files either.
+The current user-facing docs now describe the implemented auto-alt-text behavior correctly: generated suggestions are stored as `alt_text_suggested`, existing rows are not rewritten, and operators may copy suggestions into empty title/description fields. The current helper and tests define the actual public `<img alt>` fallback as `title > tag-derived > alt_text_suggested > generic fallback`.
+
+`schema.ts` still documents `alt_text_suggested` as "used as `<img alt>` fallback when `image.title` is empty" and says "Admin-set alt (title/description) always takes precedence." That is not the implemented contract: `getConcisePhotoAltText()` does not accept or inspect `description`, and there is no distinct admin-set alt-text column.
 
 Concrete failure scenario:
 
-An agent uses `.context/plans/README.md` as the authoritative planning index, misses cycle 30/31 state, and either re-triages already completed work or follows a broken link while trying to preserve deferred findings. This is low severity because the individual plan files still exist and current sibling reviews cite direct files, but it makes the committed plan index unreliable.
+A future developer reads the schema comment while changing image metadata or accessibility behavior and assumes `description` already overrides generated alt text. They may skip adding a description path to `getConcisePhotoAltText()` or write tests against the wrong precedence. Public gallery/lightbox alt text would continue to ignore `description` even though the schema comment implies otherwise.
 
-Fix:
+Suggested fix:
 
-Refresh the active/completed/deferred index for cycles 30 and 31, correct or remove the broken `../../plan/...` references, and consider making the index generated or explicitly "best effort / may lag" if it is not maintained every cycle.
+Update the schema comment to match the implemented contract, e.g. "Used as public `<img alt>` fallback when no meaningful title or tags exist. GalleryKit has no separate public alt-text column; title/tags take precedence, while description is visible metadata and is not part of this helper's fallback chain." If description should intentionally become alt text, change `getConcisePhotoAltText()` and its tests instead.
+
+### C33-DOC-02 - `.context/plans/README.md` remains a stale and partially broken plan index
+
+Severity: Low
+Confidence: High
+Consequence: agent navigation/planning drift
+
+Exact regions:
+
+- `.context/plans/README.md:3-29`
+- `.context/plans/README.md:51-80`
+- Existing current files: `.context/plans/cycle-30-2026-06-30-plan.md`, `.context/plans/cycle-30-2026-06-30-deferred.md`, `.context/plans/cycle-31-2026-06-30-plan.md`, `.context/plans/cycle-32-2026-06-30-plan.md`, `.context/plans/cycle-32-2026-06-30-deferred.md`
+- Missing linked paths verified absent: `.context/plan/plan-377-cycle19-deferred.md`, `.context/plan/plan-375-cycle18-deferred.md`, `.context/plan/plan-376-cycle19-fixes.md`, `.context/plan/plan-374-cycle18-fixes.md`
+
+Mismatch:
+
+The plans index still lists cycle 32 deferred work as active and cycles 30-32 implementation/deferred files as if some were archived or "push/deploy pending", while the files are present directly under `.context/plans/`. It also links cycle 18/19 items through `../../plan/...` from inside `.context/plans/README.md`; those resolve outside the actual `.context/plan` directory and the cited target files are absent in this checkout.
+
+Concrete failure scenario:
+
+An agent uses `.context/plans/README.md` as the entry point for current planning state, follows a broken cycle 18/19 link, or treats completed/present cycle 30-32 files as archived/pending in the wrong location. That can lead to redundant triage or missed current deferred work.
+
+Suggested fix:
+
+Refresh the index against actual files, correct/remove the broken cycle 18/19 links, and either keep the index generated or mark it explicitly as non-authoritative if it is not maintained every cycle. This was also reported in cycle 32 and remains present.
 
 ## Confirmed Matches / Non-Findings
 
-- Package/version docs align with `apps/web/package.json`: Node `>=24`, Next `^16.2.9`, React `^19.2.5`, TypeScript `^6`.
-- Deploy docs align with scripts: `.env.deploy` fallback behavior, derived SSH command, health check before Docker pruning, bind-mounted mutable data, and no automatic `docker volume prune -a`.
-- `/api/live` and `/api/health` docs match Dockerfile and deploy script behavior.
-- Semantic search docs match source on disabled default, production env gate, offline CLIP weights, model-version separation, scan/topK caps, and operator-only production activation.
-- Storage docs match current quarantine: `@/lib/storage` is local-only and not wired into live upload/serve paths.
-- Paid download/Stripe removal docs match current source; remaining references are historical migrations/tests/archive context or explicit removal guards.
-- LR upload docs match the current route: it consumes `file`, `topic`, optional `title`, optional `description`; other submitted metadata override fields are not consumed.
+- Root/app package scripts match the documented gates: root scripts forward to `apps/web`, and app scripts define lint, typecheck, build, Vitest, Playwright, and the three custom lint gates.
+- Version docs match package metadata: Node `>=24`, Next `^16.2.9`, React `^19.2.5`, TypeScript `^6`, MySQL 8.0+ docs, and current dependency stack.
+- Deploy docs match sources: root `npm run deploy` uses `scripts/deploy-remote.sh`; deploy env fallback and permission checks are implemented; host deploy runs `apps/web/deploy.sh`.
+- Docker disk-hygiene docs match `apps/web/deploy.sh`: prune runs after health, uses bind-mounted mutable stores, and automatic `docker volume prune` omits `-a`.
+- Compose/deploy topology docs match `apps/web/docker-compose.yml`: host networking, `HOSTNAME=127.0.0.1`, `TRUST_PROXY=true`, and bind mounts for `data`, `public/uploads`, `public/resources`, and read-only `site-config.json`.
+- Nginx body-cap docs match `apps/web/nginx/default.conf`: 2 MiB default/admin API, 64 KiB login, 250 MiB DB restore, 216 MiB dashboard upload, and 216 MiB `/api/admin/lr/upload`.
+- Semantic search docs match current source on disabled default, production env gate, offline CLIP weight loading, `jina-clip-v2-d512-q8`, model-version filtering, `SEMANTIC_SCAN_LIMIT`, `SEMANTIC_TOP_K_MAX`, same-origin checks, and process-local semantic limiter.
+- CLIP spec/plan files correctly mark themselves as historical records and point readers to `CLAUDE.md`, `apps/web/README.md`, and runtime/DB checks for current state.
+- LR upload docs match the current API route: `file`, `topic`, optional `title`, optional `description`; submitted tags/camera/lens/date/exposure overrides are not consumed.
+- Storage docs match current source: `@/lib/storage` remains an internal local-only abstraction and is not exposed as a supported S3/MinIO feature.
+- Paid downloads/Stripe removal docs match current source; remaining references are historical migration/archive context or removal guards.
+- Cycle-32 auto-alt-text runbook mismatch in `CLAUDE.md` has been corrected; the remaining drift is only the schema comment called out above.
 
 ## Final Sweep
 
-Final sweep covered: README/CLAUDE/AGENTS, package metadata, env examples, Docker/Compose/nginx/deploy scripts, migration journal and schema comments, privacy/public field docs, CLIP/semantic search runbooks, LR upload wording, unsupported storage, removed payment/reaction surfaces, HDR/WI-09 placeholders, auto-alt-text, `.context/plans`, and current cycle-32 sibling reports.
+Final sweep covered README/CLAUDE/AGENTS, package metadata, env examples, Docker/Compose/nginx/deploy scripts, migration journal and schema/reconcile guidance, privacy/public field docs, CLIP/semantic-search specs and runbooks, LR upload wording, unsupported storage, removed payment/reaction surfaces, HDR/WI-09 placeholders, auto-alt-text comments, `.context/plans`, and current cycle/recent archived review artifacts.
 
-This was a static documentation lane. I did not run the full lint/typecheck/build/test suite because no product behavior was changed. I wrote only `.context/reviews/document-specialist.md`.
+This was a static documentation lane. I did not run lint/typecheck/build/test because no product behavior was changed. I wrote only `.context/reviews/document-specialist.md`.

@@ -739,7 +739,15 @@ describe('checkPublicRouteSource', () => {
 describe('check-public-route-rate-limit CLI discovery guard', () => {
     it('fails closed when public route discovery finds zero files', () => {
         const source = readFileSync(path.join(process.cwd(), 'scripts/check-public-route-rate-limit.ts'), 'utf8');
-        expect(source).toContain('No public API route files found under');
+        expect(source).toContain("path.resolve(__dirname, '../src/app')");
+        expect(source).toContain('No public route files found under');
         expect(source).toContain('process.exit(1)');
+    });
+
+    it('discovers public route handlers outside src/app/api', () => {
+        const source = readFileSync(path.join(process.cwd(), 'scripts/check-public-route-rate-limit.ts'), 'utf8');
+        expect(source).toContain('findRouteFiles(APP_DIR)');
+        expect(source).toContain('filter(isPublicRouteFile)');
+        expect(source).not.toContain('findRouteFiles(API_DIR)');
     });
 });

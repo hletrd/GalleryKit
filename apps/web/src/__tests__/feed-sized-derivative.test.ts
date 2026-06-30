@@ -69,6 +69,26 @@ for (const [label, source] of SUITES) {
             expect(source).not.toContain('getFeedUpdatedAt');
         });
 
+        it('returns 304 only from the live ETag branch and 200 with the same ETag otherwise', () => {
+            const etagIndex = source.indexOf('const etag = createAtomFeedEtag(xml)');
+            const matchIndex = source.indexOf('if (isEtagMatch(ifNoneMatch, etag))');
+            const notModifiedIndex = source.indexOf('status: 304', matchIndex);
+            const okIndex = source.indexOf('status: 200', notModifiedIndex);
+            expect(etagIndex).toBeGreaterThan(-1);
+            expect(matchIndex).toBeGreaterThan(etagIndex);
+            expect(notModifiedIndex).toBeGreaterThan(matchIndex);
+            expect(okIndex).toBeGreaterThan(notModifiedIndex);
+
+            const notModifiedBranch = source.slice(matchIndex, okIndex);
+            expect(notModifiedBranch).toContain('new NextResponse(null');
+            expect(notModifiedBranch).toContain("'ETag': etag");
+            const okResponseIndex = source.lastIndexOf('new NextResponse(xml', okIndex);
+            expect(okResponseIndex).toBeGreaterThan(notModifiedIndex);
+            const okBranch = source.slice(okResponseIndex, okIndex + 500);
+            expect(okBranch).toContain('new NextResponse(xml');
+            expect(okBranch).toContain("'ETag': etag");
+        });
+
         it('picks the nearest configured size via findNearestImageSize(config.imageSizes, 1536)', () => {
             expect(source).toContain('findNearestImageSize(config.imageSizes, 1536)');
         });

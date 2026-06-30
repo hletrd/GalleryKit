@@ -57,6 +57,22 @@ const NO_CACHE = {
     'X-Content-Type-Options': 'nosniff',
 };
 
+const LR_MULTIPART_PARSE_MAX_IN_FLIGHT = 1;
+let lrMultipartParseInFlight = 0;
+
+function tryAcquireLrMultipartParseSlot() {
+    if (lrMultipartParseInFlight >= LR_MULTIPART_PARSE_MAX_IN_FLIGHT) {
+        return null;
+    }
+    lrMultipartParseInFlight += 1;
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        lrMultipartParseInFlight = Math.max(0, lrMultipartParseInFlight - 1);
+    };
+}
+
 // R21-L1: pin to Node runtime explicitly. The route uses `db` (mysql2),
 // the Sharp-backed image-processing pipeline (libvips bindings), and
 // the in-process upload queue — all Node-only. A future Next.js
@@ -111,6 +127,14 @@ export const POST = withAdminAuth(
             );
         }
 
+        const releaseMultipartParseSlot = tryAcquireLrMultipartParseSlot();
+        if (!releaseMultipartParseSlot) {
+            return NextResponse.json(
+                { error: 'Another Lightroom upload is being parsed; retry shortly' },
+                { status: 429, headers: NO_CACHE },
+            );
+        }
+
         const trackerKey = `lr:${actorUserId ?? ip}`;
         const uploadTracker = getUploadTracker();
         pruneUploadTracker();
@@ -156,6 +180,8 @@ export const POST = withAdminAuth(
         } catch {
             settleTrackerToActual(false);
             return NextResponse.json({ error: 'Invalid multipart body' }, { status: 400, headers: NO_CACHE });
+        } finally {
+            releaseMultipartParseSlot();
         }
 
         const fileEntry = formData.get('file');

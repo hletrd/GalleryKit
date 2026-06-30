@@ -59,6 +59,17 @@ describe('generateCaption — stub behavior', () => {
         expect(result!.length).toBeLessThanOrEqual(140);
     });
 
+    it('does not split supplementary characters when truncating', async () => {
+        const prefix = `${ALT_TEXT_STUB_PREFIX}Photo taken with `;
+        const model = 'A'.repeat(140 - prefix.length - 1) + '😀' + 'B'.repeat(10);
+        const result = await generateCaption({ ...BASE_INPUT, camera_model: model }, true);
+        expect(result).not.toBeNull();
+        expect([...result!]).toHaveLength(140);
+        expect(result).toContain('😀');
+        expect(result).not.toContain('\uFFFD');
+        expect([...result!].at(-1)).toBe('😀');
+    });
+
     it('emitted caption is prefixed by the canonical caption-constants prefix', async () => {
         // ARCH-R5C2-02 (AGG-R5C3-02): behavioral cross-module pin. The prefix
         // baked into generateCaptionStub's output MUST be the canonical

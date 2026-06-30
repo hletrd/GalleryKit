@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 import { isImeComposingReactEvent } from '@/lib/ime';
+import { copyToClipboard } from '@/lib/clipboard';
 import { createLrToken, revokeLrToken, listLrTokens, type LrTokenListItem } from '@/app/actions/lr-tokens';
 import { Loader2, Plus, Trash2, Copy, Key } from 'lucide-react';
 import {
@@ -86,11 +87,13 @@ export function TokensClient() {
     };
 
     const handleCopy = (text: string) => {
-        navigator.clipboard.writeText(text).then(() => {
+        copyToClipboard(text).then((copied) => {
+            if (!copied) {
+                toast.error(t('lrToken.copyFailed'));
+                return;
+            }
             setPlaintextAcknowledged(true);
             toast.success(t('lrToken.copied'));
-        }).catch(() => {
-            toast.error(t('lrToken.copyFailed'));
         });
     };
     const formatTokenDate = (value: string | Date) => new Date(value).toLocaleDateString(locale, {

@@ -51,10 +51,23 @@ describe('cycle 22 source contracts', () => {
         const createDialog = source.slice(source.indexOf('{/* Create dialog */'), source.indexOf('{/* Show plaintext once */'));
         const plaintextDialog = source.slice(source.indexOf('{/* Show plaintext once */'), source.indexOf('{/* Revoke confirm dialog */'));
 
+        expect(source).toContain("import { copyToClipboard } from '@/lib/clipboard'");
+        expect(source).toContain('copyToClipboard(text).then((copied)');
         expect(createDialog).toContain('<DialogContent>');
         expect(createDialog).not.toContain('showCloseButton={false}');
         expect(plaintextDialog).toContain('<DialogContent showCloseButton={false}>');
         expect(plaintextDialog).toContain('disabled={!plaintextAcknowledged}');
+    });
+
+    it('keeps admin login renderable if the pre-login session probe fails', () => {
+        const layout = readSrc('app/[locale]/admin/layout.tsx');
+        const page = readSrc('app/[locale]/admin/page.tsx');
+        expect(layout).toContain('try {');
+        expect(layout).toContain('currentUser = await getCurrentUser()');
+        expect(layout).toContain("console.error('Admin layout: failed to resolve current user', err)");
+        expect(page).toContain('alreadyAdmin = await isAdmin()');
+        expect(page).toContain("console.error('Admin login: failed to check current admin session', err)");
+        expect(page).toContain('return <LoginForm />');
     });
 
     it('exposes the P3 gamut badge and route-error escape hatch to assistive tech', () => {

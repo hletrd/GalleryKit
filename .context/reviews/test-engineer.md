@@ -1,67 +1,67 @@
-# Cycle 32 Test-Engineer Review
+# Cycle 33 Test-Engineer Review
 
 Role: test-engineer
 Workspace: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `3d174c96`
+Reviewed HEAD: `168c3837`
 Date: 2026-06-30
-Scope: repo-wide review for missing, weak, flaky, overfitted, or misleading tests. No product code changed.
+Scope: repo-wide review for test adequacy, flaky-test risk, missing regression locks, lint/test gate blind spots, TDD opportunities, and behavior coverage. No app/source files changed.
 
 ## Inventory
 
-Read first: `AGENTS.md`, `CLAUDE.md`.
+Read first: `AGENTS.md`, `CLAUDE.md`, root/app `package.json`, `vitest.config.ts`, `playwright.config.ts`, custom lint scripts, App Router route/action inventory, E2E specs, and targeted source/test pairs for candidate gaps.
 
-Built file inventory before source inspection:
+Inventory evidence:
 
-- Total tracked files from `rg --files`: 816.
-- Main app files under `apps/web`: 627.
-- Vitest files under `apps/web/src/__tests__`: 276.
-- Playwright specs under `apps/web/e2e`: 5.
-- Critical surfaces inventoried: `apps/web/src/app/api/**/route.*`, `apps/web/src/app/actions/**`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/**`, `apps/web/src/db/schema.ts`, `apps/web/scripts/**`, `apps/web/drizzle/**`, Docker/deploy/nginx config, `.github/workflows/quality.yml`, and existing `.context/reviews` / `.context/plans` history.
+- Vitest files: 276 under `apps/web/src/__tests__`.
+- Playwright specs: 5 under `apps/web/e2e`.
+- Route handlers: 12 under `apps/web/src/app`; 8 are under `apps/web/src/app/api`.
+- Source-contract-heavy tests: 117 test files contain source-file reads or source-contract assertions.
+- Custom gates sampled: `npm run lint:public-route-rate-limit --workspace=apps/web` and `npm run lint:action-origin --workspace=apps/web` both passed.
 
 ## Findings
 
-### TE32-01 - Schema reconcile is still protected by source tripwires, not a structural database diff
-
-- Severity: High
-- Confidence: High
-- Source/test regions: `apps/web/scripts/migrate.js:317-713`, `apps/web/scripts/migrate.js:759-819`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-102`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:124-172`; `.github/workflows/quality.yml:69-80`.
-- Evidence: `prepareLegacyDatabaseIfNeeded()` makes `reconcileLegacySchema()` the fresh/legacy bootstrap path and then baselines every journal hash before Drizzle runs. The tests explicitly describe themselves as a source tripwire and say they cannot verify types/defaults; they mostly assert that table, column, and index names appear in `migrate.js`.
-- Untested failure scenario: a migration adds or changes a column/index/FK and `migrate.js` mentions the name but uses the wrong type, nullability, default, index column order, or FK action. Vitest passes, `npm run init` can pass, and `__drizzle_migrations` can be fully baselined, while the real MySQL schema diverges from `src/db/schema.ts`. The next production-only write or query can fail later with `ER_BAD_FIELD_ERROR`, wrong defaults, missing cascade behavior, or a silent performance regression.
-- Recommended test: after CI `npm run init --workspace=apps/web`, run an information_schema comparison against the Drizzle schema/migration expectations for tables, columns, nullability/defaults, indexes, and FKs. Keep the current source tripwires as fast preflight checks.
-
-### TE32-02 - Restore/backup state machine is mostly asserted by source-order tests
-
-- Severity: High
-- Confidence: Medium
-- Source/test regions: `apps/web/src/app/[locale]/admin/db-actions.ts:365-565`, `apps/web/src/app/[locale]/admin/db-actions.ts:570-761`, `apps/web/src/app/[locale]/admin/db-actions.ts:781-820`; `apps/web/src/__tests__/db-restore.test.ts:42-77`; `apps/web/src/__tests__/restore-upload-lock.test.ts:8-120`.
-- Evidence: restore holds multiple advisory locks, enters durable maintenance, quiesces queues, streams an uploaded SQL file into `mysql`, then runs `node scripts/migrate.js`. Current tests mainly read the source and assert string ordering, not the behavior of `restoreDatabase()` under child-process close/error/stdin/error/migration-failure paths.
-- Untested failure scenario: a refactor preserves the searched strings but changes control flow so a `mysql` nonzero exit, post-restore migration failure, stream error, or partial maintenance-prep failure clears maintenance too early, forgets to resume the image queue, leaves an upload/backfill/restore lock held, or reports success after a failed import. These are exactly the destructive admin paths where source-order checks are easiest to overfit.
-- Recommended test: add executable unit tests with mocked `connection.getConnection()`, `spawn`, file streams, restore-maintenance helpers, queue quiesce/resume, and upload-contract locks. Assert returned result, `keepMaintenance`, release calls, temp cleanup, audit/revalidation, and queue resume for each failure branch.
-
-### TE32-03 - Production CLIP activation is still outside default CI
+### TE33-01 - Public route rate-limit lint misses non-`/api` route handlers
 
 - Severity: Medium
 - Confidence: High
-- Source/test regions: `apps/web/src/lib/clip-model.ts:197-258`, `apps/web/src/app/api/search/semantic/route.ts:247-365`; `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-10`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`; `apps/web/src/__tests__/clip-offline-load.test.ts:15-18`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`; `apps/web/src/__tests__/semantic-route-production.test.ts:3-16`; `.github/workflows/quality.yml:66-80`.
-- Evidence: real CLIP tests skip unless `CLIP_INTEGRATION=1` or `CLIP_OFFLINE_LOAD=1` plus seeded weights are present. The production semantic route test mocks both `getGalleryConfig()` and `embedTextReal()`. The cycle-29 deferred plan already tracks this as `D29-09`.
-- Untested failure scenario: a Transformers.js, ONNX runtime, model revision, seeded directory layout, or Korean semantic-ranking drift breaks the real offline encoder while CI remains green. Production mode can then return 503, fail first inference, or serve low-quality rankings even though mocked route tests pass.
-- Recommended test: add a scheduled/manual CI job with cached seeded weights that runs `clip-offline-load.test.ts` and `clip-semantic-integration.test.ts`, at least before dependency/model upgrades and before production semantic-search activation.
+- Source/test regions: `apps/web/scripts/check-public-route-rate-limit.ts:1-11`, `apps/web/scripts/check-public-route-rate-limit.ts:25`, `apps/web/scripts/check-public-route-rate-limit.ts:74-85`; `apps/web/src/app/feed.xml/route.ts:41-53`; `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:41-78`; `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:739-744`.
+- Evidence: the lint contract says expensive public GET handlers must use a rate-limit helper or explicit exemption, but discovery starts at `../src/app/api` only. The passing lint output listed only `src/app/api/...` routes, while public route handlers such as `/feed.xml` and `/{locale}/{topic}/feed.xml` do SEO/config/topic/feed DB work outside that tree.
+- Escaping bug: a future expensive or mutating route handler under `src/app` but outside `src/app/api` can ship without rate limiting or a conscious exemption. Feed-like endpoints are especially easy to abuse because they are anonymous, cacheable but still rebuild XML after cache misses, and route handlers bypass page-level guards.
+- Suggested fix/tests: expand discovery to all `src/app/**/route.{ts,tsx,js,mjs,cjs}` and explicitly exclude or exempt intended static/operational surfaces. Add scanner tests that prove `app/feed.xml/route.ts`-style paths are discovered, and add route-level exemptions where rate limiting is intentionally not required.
 
-### TE32-04 - Deploy/nginx safety checks are string contracts, not parser/runtime checks
+### TE33-02 - `auth.ts` is intentionally excluded from the server-action origin gate
+
+- Severity: High
+- Confidence: High
+- Source/test regions: `apps/web/scripts/check-action-origin.ts:13-19`, `apps/web/scripts/check-action-origin.ts:49`, `apps/web/scripts/check-action-origin.ts:70-73`; `apps/web/src/__tests__/check-action-origin.test.ts:493-503`; `apps/web/src/app/actions/auth.ts:95-99`, `apps/web/src/app/actions/auth.ts:215-227`, `apps/web/src/app/actions/auth.ts:271-280`, `apps/web/src/app/actions/auth.ts:291-299`, `apps/web/src/app/actions/auth.ts:396-407`.
+- Evidence: the scanner recursively covers `app/actions/**` but excludes any basename `auth`. The current `login`, `logout`, and `updatePassword` functions do hand-coded `hasTrustedSameOrigin` checks, yet the lint gate would not fail if a future mutating auth export omitted the check.
+- Escaping bug: a future auth mutation such as email change, session revocation, recovery-token rotation, or a refactor of `logout`/`updatePassword` could read the session and mutate `sessions` or `admin_users` without same-origin provenance. `npm run lint:action-origin` would still report all mutating server actions as protected because `auth.ts` is outside the scanned set.
+- Suggested fix/tests: either include `auth.ts` in the scanner with a second approved guard shape for `hasTrustedSameOrigin(headers)` plus early return/redirect, or add a dedicated auth-action scanner that enumerates exported auth mutators and verifies origin-before-session-read ordering. Keep the current behavior tests, but make the lint gate fail on new unguarded auth exports.
+
+### TE33-03 - Lightroom upload route is still mostly source-locked, not behavior-locked
 
 - Severity: Medium
 - Confidence: High
-- Source/test regions: `apps/web/deploy.sh:1-85`, `apps/web/nginx/default.conf:21-203`; `apps/web/src/__tests__/deploy-script-contract.test.ts:21-127`, `apps/web/src/__tests__/nginx-config.test.ts:12-70`; `.github/workflows/quality.yml:54-80`.
-- Evidence: the deploy and nginx tests assert substrings/order for prune-after-health, no `volume prune -a`, bind mounts, body caps, and proxy headers. CI does not run `bash -n apps/web/deploy.sh`, `docker compose config`, or `nginx -t` against the checked-in template.
-- Untested failure scenario: a shell syntax error, invalid compose interpolation, or invalid nginx directive/regex can pass the substring tests and fail only at deploy time. For this repo, deploy failure is high-cost because `npm run deploy` is per-iteration policy and the auto-prune/health ordering is an operational invariant.
-- Recommended test: add cheap syntax/config gates: `bash -n apps/web/deploy.sh scripts/deploy-remote.sh`, `docker compose --env-file apps/web/.env.local.example -f apps/web/docker-compose.yml config` with safe placeholder env, and `nginx -t` in a container mounting `apps/web/nginx/default.conf`.
+- Source/test regions: `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-16`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:27-66`; `apps/web/src/app/api/admin/lr/upload/route.ts:114-158`, `apps/web/src/app/api/admin/lr/upload/route.ts:225-240`, `apps/web/src/app/api/admin/lr/upload/route.ts:357-365`, `apps/web/src/app/api/admin/lr/upload/route.ts:395-477`, `apps/web/src/app/api/admin/lr/upload/route.ts:479-547`.
+- Evidence: the test file explicitly chooses source-text contracts because the route is multipart/token/DB/queue heavy. The route itself has quota preclaims and settlement, topic validation, contract locks, disk checks, original save, HDR/GPS/restore cleanup branches, insert, enqueue, audit, and revalidation. Most of those branch outcomes are asserted by substrings/order rather than invoking `POST`.
+- Escaping bug: a refactor can preserve the searched strings while changing runtime behavior: fail to settle tracker quota on malformed multipart/topic-missing/HDR reject, orphan an original after a post-save throw, enqueue with incomplete processing settings, or return a non-JSON 500 to external clients. The source tests would still pass if the strings remain in the file.
+- Suggested fix/tests: add mocked route-level tests that import `POST` and exercise at least malformed multipart, missing file, topic missing, HDR reject with original deletion, GPS strip failure, late restore maintenance, post-save throw cleanup, and successful insert/enqueue/audit. Mock `withAdminAuth` or present a valid token-path wrapper, and mock DB/Sharp/queue boundaries so these stay fast.
+
+### TE33-04 - Feed conditional coverage tests dead code while the live route behavior is source-greped
+
+- Severity: Low
+- Confidence: High
+- Source/test regions: `apps/web/src/lib/feed-conditional.ts:1-16`; `apps/web/src/__tests__/feed-conditional.test.ts:1-66`; `apps/web/src/__tests__/feed-sized-derivative.test.ts:63-69`; `apps/web/src/app/feed.xml/route.ts:151-180`; `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:158-187`.
+- Evidence: `feed-conditional.ts` still claims it is shared by both feed routes, but `rg` found only the dead helper test and a source test that explicitly asserts the routes do not contain `isFeedNotModified`. The live 304 logic is inline ETag handling in the two route files; current tests mainly check for source strings.
+- Escaping bug: the helper tests can stay green while the live feed routes regress conditional request behavior, for example by dropping `ETag`, mishandling comma-separated `If-None-Match`, returning a stale 304 after SEO/settings changes, or omitting cache headers on the 304 branch. Source-grep tests are easy to satisfy without proving the response semantics.
+- Suggested fix/tests: delete the dead helper/test or repurpose it only if the routes actually call it. Add executable route tests with mocked `getSeoSettings`, `getGalleryConfig`, `getImagesForFeed`, and `getTopicBySlug` to assert 200 headers/body, matching `If-None-Match` 304, nonmatching ETag 200, and invalid locale/topic 404 behavior.
 
 ## Non-Findings
 
-- The admin API, server-action origin, and public-route rate-limit gates are stronger than plain grep: their scanner tests cover aliases, spoofed imports, dead branches, ordering, local helper hiding, and catch/finally expensive work in the public route scanner.
-- Map GPS privacy is not just source-only now: `apps/web/src/__tests__/map-get-images-behavior.test.ts` exercises `getMapImages()` with a mocked Drizzle chain and asserts the map-visible/GPS predicates plus runtime guard.
-- CI does run authenticated admin E2E: `.github/workflows/quality.yml` provides `E2E_ADMIN_PASSWORD`, initializes MySQL, and then runs Playwright. Local runs may skip admin specs, but the CI gate does not.
+- The custom scanner internals are stronger than plain grep for the files they discover: the action-origin and public-route tests cover aliases, spoofed imports, dead branches, ignored results, local helper hiding, nested callbacks, and mutation-before-gate ordering.
+- Admin E2E is CI-enforced when credentials are expected: `admin.spec.ts` and `origin-guard.spec.ts` skip locally, but both have CI guard tests that require admin coverage when `CI=true`.
+- Upload serving has behavior tests for `serveUploadFile` plus route wiring tests for GET/HEAD method propagation; I did not count those static upload route handlers as a rate-limit finding without a product decision that image serving should be metered.
 
 ## Final Sweep
 
-Final sweep covered test inventory, route/action scanner fixtures, privacy selectors, map behavior tests, migration/journal/reconcile tests, restore/backup tests, deploy/nginx tests, CLIP tests, Playwright gating, CI workflow, existing review/plan history, and focused/skipped markers. I did not run the full gate suite because this was a review-only lane; no source code was edited.
+Final sweep covered route/action discovery, scanner fixtures, auth action exceptions, feed route/source tests, LR upload route/source tests, Playwright skip/CI behavior, route-handler inventory, source-contract density, and the two relevant custom lint gates. I did not run the full lint/typecheck/build/test/e2e suite because this was a review-only lane; targeted lint gates passed as evidence above.

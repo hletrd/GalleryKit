@@ -1,88 +1,116 @@
-# Cycle 32 Performance Review
+# Cycle 33 Performance Review
 
-Scope: current HEAD `3d174c96` on `master`. Product code was not edited.
+Scope: current workspace in `/Users/hletrd/flash-shared/gallery`. Product code was not edited.
 
 ## Inventory
 
 - Project guidance read first: `AGENTS.md`, `CLAUDE.md`.
-- Runtime and concurrency paths: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/instrumentation.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/backfill-color-pipeline.ts`.
-- Image and file pipeline: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/gps-exif-strip.ts`, `apps/web/src/lib/og-photo-fetch.ts`, upload actions/routes under `apps/web/src/app/actions/images.ts` and `apps/web/src/app/api/admin/lr/upload/route.ts`.
-- Public rendering and cache behavior: public pages under `apps/web/src/app/[locale]/(public)/`, API routes under `apps/web/src/app/api/`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, `apps/web/deploy.sh`.
-- Database query surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/smart-collections.ts`, `apps/web/src/db/schema.ts`, analytics/rate-limit modules.
-- UI responsiveness surfaces: `apps/web/src/components/home-client.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/image-zoom.tsx`, `apps/web/src/components/histogram.tsx`, `apps/web/src/components/map/*`, `apps/web/src/components/similar-photos.tsx`.
-- Tests inspected for performance contracts: queue/backfill concurrency tests, semantic route/rate-limit/scan-limit tests, `clip-model-contract.test.ts`, timeline truncation tests, smart-collection pagination tests, touch-target audit, service-worker cache contract tests.
+- Runtime, queueing, and concurrency paths: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/instrumentation.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/backfill-color-pipeline.ts`.
+- Image and upload pipeline: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/gps-exif-strip.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`.
+- Public rendering and cache behavior: public pages under `apps/web/src/app/[locale]/(public)/`, API routes under `apps/web/src/app/api/`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/public/sw.js`, `apps/web/src/lib/sw-cache.ts`, `apps/web/src/lib/og-photo-fetch.ts`.
+- Database query surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/analytics-data.ts`, `apps/web/src/lib/tag-records.ts`, `apps/web/src/lib/smart-collections.ts`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/**`.
+- UI responsiveness surfaces: `apps/web/src/components/home-client.tsx`, `apps/web/src/components/grid-picture.tsx`, `apps/web/src/components/grid-picture-fallback-boundary.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/image-zoom.tsx`, `apps/web/src/components/histogram.tsx`, `apps/web/src/components/map/*`, `apps/web/src/components/similar-photos.tsx`.
+- Deployment/resource surfaces: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/entrypoint.sh`, `apps/web/nginx/default.conf`.
+- Tests and contracts inspected where relevant: queue/backfill concurrency tests, upload contract tests, semantic route/rate-limit tests, `clip-model-contract.test.ts`, timeline truncation tests, smart-collection pagination tests, service-worker cache tests, touch-target audit.
 
 ## Findings
 
-### HIGH - Aborted queued CLIP request can permanently leak an inference slot
+### HIGH - PAT upload route materializes full multipart bodies before serialization or disk streaming
 
-- Location: `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:117-170`.
-- Callers affected: `apps/web/src/app/api/search/semantic/route.ts:247-260`, `apps/web/src/lib/image-queue.ts:353-392`, `apps/web/src/lib/image-queue.ts:395-451`, `apps/web/src/lib/image-queue.ts:744-770`.
-- Client trigger: `apps/web/src/components/search.tsx:184-193`, `apps/web/src/components/search.tsx:272-275`.
-- Current tests are source-shape only here: `apps/web/src/__tests__/clip-model-contract.test.ts:32-58`.
+- Location: `apps/web/src/app/api/admin/lr/upload/route.ts:153-167`, `apps/web/src/app/api/admin/lr/upload/route.ts:252-259`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-310`.
+- Shared helper only streams after the `File` object already exists: `apps/web/src/lib/process-image.ts:905-914`.
+- Edge/container envelope: `apps/web/nginx/default.conf:124-145`, `apps/web/docker-compose.yml:12-28`.
 - Severity: High.
 - Confidence: High.
 
-The handoff path now preserves the active count while resolving the next waiter, which fixed the previous over-admission race. The remaining abort path can strand that reserved slot. `releaseInferenceSlot()` shifts and resolves `nextWaiter` without decrementing `activeInferenceCount` (`clip-model.ts:148-155`). The waiter then resumes and immediately checks `throwIfInferenceAborted(signal)` (`clip-model.ts:145`) before `withInferenceSlot()` has entered its `try/finally` (`clip-model.ts:157-170`). If the request aborts in that handoff window, `waitForInferenceSlot()` throws, and no `releaseInferenceSlot()` runs for the slot that was reserved for that waiter.
+The Lightroom/PAT upload route calls `await request.formData()` before it validates the parsed file size, before it acquires the upload-processing contract lock, and before it reaches the streaming `saveOriginalAndGetMetadata()` helper. That means the route can materialize a complete multipart body in the Next.js process for every concurrent request. The edge explicitly permits this route to receive 216 MiB bodies and allows an admin burst of 10 (`nginx/default.conf:133-136`), while the compose file does not set a container memory limit (`docker-compose.yml:12-28`).
 
-Concrete failure scenario:
+Concrete production scenario: a legitimate LR client retries several 200 MiB exports, or a compromised PAT sends parallel near-limit uploads. Ten admitted requests can pin roughly 2 GiB of multipart body/file data before application-level serialization starts. The advisory upload contract lock at `route.ts:252-259` then serializes only the save/insert/enqueue window; it does not protect the process from pre-lock body buffering. On the disk-constrained single-host deployment this can drive GC stalls or an OOM restart, interrupt background image/embedding work, and temporarily take down the public gallery.
 
-1. `CLIP_INFERENCE_CONCURRENCY=1`.
-2. Request A is running real CLIP inference.
-3. Request B queues in `waitForInferenceSlot()` with a request `AbortSignal`.
-4. A completes; `releaseInferenceSlot()` resolves B and keeps `activeInferenceCount === 1` reserved for B.
-5. B's HTTP request is aborted before line 145 completes. The public search UI intentionally aborts stale semantic requests when a newer query starts and on unmount (`search.tsx:184-193`, `search.tsx:272-275`).
-6. `waitForInferenceSlot()` throws before `withInferenceSlot()` reaches its `try/finally`, so the reserved active slot is never released.
+Suggested fixes:
 
-After that, future production text/image embeddings see `activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY`, queue behind a slot that no running inference owns, and eventually time out. The user-visible symptoms are semantic search returning abort/503/timeout behavior and production image/backfill embedding side effects stalling until the Node process restarts.
+- Replace `request.formData()` with a streaming multipart parser that validates fields and streams the file directly to a temp/original path under the existing byte caps.
+- Acquire a lightweight upload body semaphore, or the same upload-processing contract if acceptable, before any large body parse so excess LR uploads fail or wait before memory allocation.
+- Tighten route-specific `limit_req`/connection limits for `/api/admin/lr/upload` if streaming cannot land immediately, and consider a container memory limit so failure is bounded and observable.
 
-Fix direction: make queued acquisition return through a path that always owns a release responsibility once a slot has been reserved, including abort-after-handoff. One minimal shape is to catch errors after `await waitForInferenceSlot(...)`, call `releaseInferenceSlot()` if the waiter had already been handed a slot, then rethrow. Add a behavioral regression test with a deferred running inference, one queued waiter, handoff, abort before the queued function body starts, then a third request proving the slot is available.
-
-### MEDIUM - Initial public listing renders pay a full grouped window count on dynamic pages
+### MEDIUM - Initial public listing renders still pay a full grouped window count
 
 - Query shape: `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1466-1481`.
 - Dynamic callers: `apps/web/src/app/[locale]/(public)/page.tsx:17-19`, `apps/web/src/app/[locale]/(public)/page.tsx:175-178`; `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:20`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:185-188`; `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:110-112`.
+- UI use of the exact count: `apps/web/src/app/[locale]/(public)/page.tsx:232-234`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:225`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:152-159`.
 - Severity: Medium.
 - Confidence: High.
 
-The first page of the home, topic, and smart-collection galleries is rendered with `revalidate = 0`, so each request goes back to the database. The listing helpers select public image fields, left-join tags, group by image, order by the masonry sort key, and add `COUNT(*) OVER()` (`data.ts:910-927`, `data.ts:1466-1481`). In MySQL this window count is evaluated over the grouped result before `LIMIT`, so a request that displays 30 cards still counts the full filtered gallery and performs the tag aggregation shape needed for every candidate row.
+The home, topic, and smart-collection first pages are all dynamic (`revalidate = 0`). Their initial card queries left-join tags, group by image, sort, and add `COUNT(*) OVER()` before applying `LIMIT pageSize + 1`. In MySQL, that window count is evaluated over the grouped result, so a request that displays 30 cards still counts and aggregates the full matching gallery. The cursor path for smart collections avoids this cost after the first page (`data.ts:1447-1464`), but the public landing path still pays it.
 
-Concrete failure scenario: a gallery grows to tens of thousands of processed photos with tags. Every anonymous home-page hit runs the grouped count over all processed images even though the UI only needs 31 rows for `hasMore` and uses `totalCount` only as display metadata. Topic and smart-collection landing pages have the same dynamic first-page shape. Under crawler traffic or a cold CDN, this becomes an O(total matching photos + tag join rows) database cost per request.
+Concrete production scenario: after the gallery grows to tens of thousands of processed photos and tags, every anonymous home hit runs a grouped full-gallery count even when the browser only needs 31 rows for `hasMore`. Topic and collection pages multiply the same shape. Smart collections are riskier because their compiled predicates can include `%LIKE%` text conditions on EXIF/text fields, so the count can become the dominant DB cost under crawler traffic or a cold CDN.
 
-Fix direction: split first-page rendering from exact total counting. Use `LIMIT pageSize + 1` for the card query, compute `hasMore` from the lookahead, and either omit/defer `totalCount`, cache it separately, or use a narrower count query that does not join and aggregate tags when no tag filter requires it. The cursor/load-more path already avoids `COUNT(*) OVER()` for smart collections (`data.ts:1428-1458`); the first-page path should follow the same cost profile unless the exact count is required.
+Suggested fixes:
 
-### LOW - Timeline and On This Day queries are dynamic and intentionally non-sargable
+- Make first-page listing queries match the cursor path: fetch `pageSize + 1`, derive `hasMore`, and omit exact `totalCount` from the critical SSR query.
+- If the UI still needs totals, compute them in a separate cached path with invalidation on upload/delete/tag changes, or use a narrow count that avoids tag joins when no tag predicate requires them.
+- For smart collections, avoid exact public counts for dynamic predicates unless the collection is materialized or the predicate is known index-friendly.
 
-- Query shape: `apps/web/src/lib/data-timeline.ts:88-117`, `apps/web/src/lib/data-timeline.ts:125-145`, `apps/web/src/lib/data-timeline.ts:172-207`.
-- Dynamic callers: `apps/web/src/components/on-this-day-widget.tsx:10-22`, `apps/web/src/app/[locale]/(public)/page.tsx:232-235`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-94`.
-- Existing coverage documents behavior, not query scalability: `apps/web/src/__tests__/data-timeline-truncation.test.ts:67-94`.
+### LOW - Timeline and On This Day queries remain non-sargable on dynamic pages
+
+- Query shape: `apps/web/src/lib/data-timeline.ts:97-117`, `apps/web/src/lib/data-timeline.ts:129-145`, `apps/web/src/lib/data-timeline.ts:186-207`.
+- Dynamic callers: `apps/web/src/app/[locale]/(public)/page.tsx:232-234`, `apps/web/src/components/on-this-day-widget.tsx:15-22`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-94`.
+- Related index envelope: `apps/web/src/db/schema.ts:115-121`.
 - Severity: Low.
 - Confidence: High.
 
-This is acknowledged in comments, but it remains the main timeline scale limit. `getOnThisDayImages()` filters with `MONTH(capture_date)` and `DAY(capture_date)` (`data-timeline.ts:97-117`), and `getTimelineYears()` / `getTimelineImages()` use `YEAR(capture_date)` and optional `MONTH(capture_date)` (`data-timeline.ts:129-145`, `data-timeline.ts:186-207`). Those functions prevent the `capture_date` portion of `idx_images_processed_capture_date` from being used for range narrowing. The home page includes the On This Day server component in the same dynamic SSR pass (`page.tsx:232-235`, `on-this-day-widget.tsx:18-22`), and `/timeline` is also dynamic (`timeline/page.tsx:19`).
+The code comments correctly call out the scale tradeoff, but this remains a real DB CPU limit. `getOnThisDayImages()` filters with `MONTH(capture_date)` and `DAY(capture_date)`, while `getTimelineYears()` and `getTimelineImages()` use `YEAR(capture_date)` and optional `MONTH(capture_date)`. These functions prevent the existing processed/capture-date index from narrowing by date range. The home page includes On This Day in the same dynamic render pass, and `/timeline` does the year list plus selected-year image query on every request.
 
-Concrete failure scenario: as the processed image table grows, every home render evaluates the current month/day function predicates over the processed-image prefix to return up to six rows. The timeline page similarly scans the processed prefix to derive years and then scans again for the selected year. This is acceptable for the documented personal-gallery envelope, but it will become CPU-bound DB work before the main keyset listing paths do.
+Concrete production scenario: once the processed image table grows much larger than the current personal-gallery envelope, each home render scans the processed image prefix to find at most six On This Day rows. Timeline requests scan that prefix to derive years and again to fetch the selected year. This will become DB CPU work before the keyset listing paths do.
 
-Fix direction: add generated/stored `capture_month`, `capture_day`, and `capture_year` columns with indexes, or rewrite year pages to use date ranges such as `capture_date >= '2024-01-01' AND capture_date < '2025-01-01'`. For On This Day, generated month/day columns are the cleaner fit.
+Suggested fixes:
 
-### LOW - Grid JPEG fallback path can download the base JPEG instead of a sized derivative
+- Add generated/stored `capture_year`, `capture_month`, and `capture_day` columns with composite indexes that include `processed`.
+- Rewrite year pages to date ranges, for example `capture_date >= '2024-01-01' AND capture_date < '2025-01-01'`.
+- Keep the current comments, but promote the generated-column migration into the scale plan before larger public imports.
+
+### LOW - GPS stripping reads the full original into memory after upload
+
+- Location: `apps/web/src/lib/process-image.ts:1737-1816`.
+- Browser caller: `apps/web/src/app/actions/images.ts:402-416`.
+- PAT caller: `apps/web/src/app/api/admin/lr/upload/route.ts:367-385`.
+- Streaming save path it follows: `apps/web/src/lib/process-image.ts:905-914`.
+- Severity: Low.
+- Confidence: High.
+
+The upload path streams the original file to disk, but if `strip_gps_on_upload` is enabled, `stripGpsFromOriginal()` immediately reads the entire saved file with `fs.readFile(filePath)`. For lossless scrubs it may then hold a second output buffer before writing the temp file. This is sequential on the browser path and one file per PAT request, so it is not as dangerous as the multipart buffering issue, but it defeats the memory advantage of the streaming save for the privacy-enabled branch.
+
+Concrete production scenario: an admin enables GPS stripping and uploads near-limit 200 MiB JPEG/HEIC exports while background Sharp/CLIP work is active. Each upload can add a large JS buffer, plus any scrubbed output buffer and native Sharp memory for fallback re-encode, increasing RSS spikes and GC pressure on the single web container.
+
+Suggested fixes:
+
+- Move lossless GPS stripping to a streaming or file-descriptor/range-based implementation where possible, writing to a temp file without retaining the whole original.
+- For formats that still require whole-buffer parsing, enforce a smaller privacy-mode upload cap or explicit single-flight semaphore around GPS stripping.
+- Treat malformed HEIC/unsupported fallback cases as early validation failures before expensive work when possible.
+
+### LOW - Grid JPEG fallback can download the base JPEG instead of a sized derivative
 
 - Component: `apps/web/src/components/grid-picture.tsx:30-50`.
 - Home caller: `apps/web/src/components/home-client.tsx:334-361`.
-- Timeline caller: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:225-274`.
-- Error fallback: `apps/web/src/components/grid-picture-fallback-boundary.tsx:14-27`.
+- Timeline caller: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:253-274`.
+- Error fallback: `apps/web/src/components/grid-picture-fallback-boundary.tsx:14-26`.
 - Severity: Low.
 - Confidence: Medium.
 
-The primary masonry path emits AVIF and WebP `srcSet`s for the two smallest configured sizes, but the `<img src>` fallback is the base JPEG filename (`home-client.tsx:340-354`, `timeline/page.tsx:253-267`). `GridPictureFallbackBoundary` also removes failed `<source>` elements and leaves the same fallback source (`grid-picture-fallback-boundary.tsx:14-27`). The project documentation notes the base JPEG can be the largest configured derivative, defaulting to a multi-megabyte file.
+The masonry grid emits AVIF and WebP `srcSet`s for the two smallest configured sizes, but the `<img src>` fallback is the base JPEG. The error boundary also removes failed `<source>` elements and leaves that same fallback. If a browser skips the typed sources or a row has missing AVIF/WebP derivatives during a backfill edge case, an above-the-fold tile can eagerly fetch the large base JPEG.
 
-Concrete failure scenario: a client that does not use either typed source, or a photo whose AVIF/WebP sized variants 404 while the base JPEG exists, downloads the largest JPEG for a masonry tile. Above-the-fold cards can mark that fallback as eager/high priority (`home-client.tsx:358-360`, `timeline/page.tsx:271-273`), which increases LCP and mobile bandwidth cost for that edge path.
+Concrete production scenario: a legacy or constrained browser lands on the home or timeline page. The first grid items use eager loading and high fetch priority, but the fallback path points to `/uploads/jpeg/${filename_jpeg}` rather than a small/medium JPEG derivative. A multi-megabyte JPEG can become LCP-critical for what should be a masonry thumbnail.
 
-Fix direction: include a JPEG `srcSet` with the same small/medium sizes, or set the fallback `src` to the nearest small JPEG derivative when derivative existence is guaranteed for processed rows. Keep the base JPEG only as the final error fallback if the project still needs legacy-row safety.
+Suggested fixes:
+
+- Add a JPEG `srcSet` using the same small and medium configured sizes.
+- Set the fallback `src` to the nearest small JPEG derivative for processed rows, keeping the base JPEG only as the final error fallback.
+- Keep the current AVIF/WebP ordering, but make the last-resort path thumbnail-sized for normal processed images.
 
 ## Final Sweep
 
-- Image queue, admin backfill, restore, and upload paths have bounded queue admission, connection-budget caps, per-image advisory locks, restore/shutdown drains, upload byte preclaims, streaming original writes, Sharp cache/concurrency caps, and delete-mid-processing cleanup. No additional high-confidence performance defect was found there beyond the shared CLIP limiter.
-- Semantic and similar-photo search have same-origin checks, rate limits, request-abort checks, scan caps, model-version filtering, and normalized dot-product optimization. The remaining blocking risk is the shared inference-slot leak.
-- Public listing, timeline, map, feed, sitemap, OG, and upload-serving routes were checked for query shape, cache behavior, body/file buffering, and descriptor cleanup. Findings above are the only issues that met the reporting bar.
-- Client search, load-more, masonry, lightbox/zoom, histogram, map, and similar-photo UI paths were checked for runaway effects, unbounded timers, expensive synchronous work, and layout responsiveness. The only UI/network issue reported is the JPEG fallback path.
+- Rechecked the previous CLIP slot-leak finding. The current `apps/web/src/lib/clip-model.ts:156-172` moves ownership into a `try/finally` path after acquisition, so I did not carry that issue forward.
+- Image queue, admin backfill, restore, and shutdown paths have bounded PQueue admission, DB pool-budget caps, advisory locks, bootstrap/retry maps, side-effect tracking, and cleanup on delete-mid-processing. No additional high-confidence queueing defect met the reporting bar.
+- Semantic and similar-photo search have request body caps, same-origin/rate-limit checks, production model gates, scan caps, abort handling, and bounded enrichment. The remaining cost is explicit through `SEMANTIC_SCAN_LIMIT`, not an unbounded path.
+- Upload serving, service-worker caching, Next headers, and nginx upload cache paths were checked. The main deployment resource issue is the LR route's pre-streaming body materialization under a large route body cap.
+- Client search, load-more, masonry, lightbox/zoom, histogram, map, and similar-photo UI paths were checked for runaway effects, unbounded timers, expensive synchronous work, and layout responsiveness. The only UI/network issue reported is the grid JPEG fallback path.

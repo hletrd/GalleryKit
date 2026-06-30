@@ -11,7 +11,13 @@ export const generateMetadata = () => adminRouteMetadata('admin');
 export default async function AdminPage({ params }: { params: Promise<{ locale: string }> }) {
     const { locale } = await params;
     // If already logged in, redirect to dashboard
-    if (await isAdmin()) {
+    let alreadyAdmin = false;
+    try {
+        alreadyAdmin = await isAdmin();
+    } catch (err) {
+        console.error('Admin login: failed to check current admin session', err);
+    }
+    if (alreadyAdmin) {
         redirect(localizePath(locale, '/admin/dashboard'));
     }
 

@@ -264,6 +264,19 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(trackerIndex).toBeLessThan(formDataIndex);
     });
 
+    it('bounds concurrent multipart body parsing before request.formData()', () => {
+        expect(LR_SRC).toMatch(/LR_MULTIPART_PARSE_MAX_IN_FLIGHT\s*=\s*1/);
+        expect(LR_SRC).toMatch(/let\s+lrMultipartParseInFlight\s*=\s*0/);
+        expect(LR_SRC).toMatch(/function\s+tryAcquireLrMultipartParseSlot\(/);
+        const acquireIndex = LR_SRC.indexOf('const releaseMultipartParseSlot = tryAcquireLrMultipartParseSlot()');
+        const formDataIndex = LR_SRC.indexOf('request.formData()');
+        expect(acquireIndex).toBeGreaterThan(-1);
+        expect(formDataIndex).toBeGreaterThan(-1);
+        expect(acquireIndex).toBeLessThan(formDataIndex);
+        expect(LR_SRC).toMatch(/status:\s*429/);
+        expect(LR_SRC).toMatch(/finally\s*\{[\s\S]*?releaseMultipartParseSlot\(\)/);
+    });
+
     it('rejects parsed Lightroom files above MAX_UPLOAD_FILE_BYTES before saving', () => {
         const sizeCheckIndex = LR_SRC.search(/fileSize\s*>\s*MAX_UPLOAD_FILE_BYTES/);
         const saveIndex = LR_SRC.indexOf('saveOriginalAndGetMetadata(fileEntry)');

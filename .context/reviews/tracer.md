@@ -1,52 +1,69 @@
-# Cycle 32 Tracer Review
+# Cycle 33 Tracer Review
 
-Scope: causal tracing only. Product code and other review files were not edited.
+Scope: causal source tracing only. I edited only this review artifact and did not use comments or tests as proof of behavior.
 
 ## Relevant File Inventory
 
-- Upload/process/delete races: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-tracker-state.ts`, `apps/web/src/lib/process-image.ts`.
-- Restore maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/db-restore.ts`.
-- Auth/session/rate-limit paths: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/proxy.ts`.
-- Search and semantic state: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/image-queue.ts`.
-- Pagination/filter state: `apps/web/src/lib/data.ts`, `apps/web/src/lib/pagination.ts`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/tag-filter.tsx`.
-- Feed/OG generation: `apps/web/src/app/feed.xml/route.ts`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`, `apps/web/src/lib/feed-conditional.ts`, `apps/web/src/lib/atom-feed.ts`, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/lib/og-photo-fetch.ts`, `apps/web/src/lib/seo-og-url.ts`, `apps/web/src/lib/image-url.ts`.
-- Deployment scripts: `package.json`, `apps/web/package.json`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/scripts/entrypoint.sh`, `apps/web/scripts/migrate.js`.
+- Upload -> processing -> persistence -> display: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/components/photo-viewer.tsx`, public photo/share/topic pages under `apps/web/src/app/[locale]/(public)/`.
+- Auth -> mutation -> audit: `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/admin-users.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/audit.ts`, `apps/web/src/proxy.ts`.
+- Route -> cache/rate limit: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/serve-upload.ts`.
+- Settings -> derivative bytes: `apps/web/src/app/actions/settings.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/admin-backfill-runner.ts`.
+- Backup/restore: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/backup-filename.ts`.
+- Semantic search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/db/schema.ts`.
 
 ## Findings
 
-### TRC-32-01 - MEDIUM - Atom feed 304 freshness ignores feed-shaping SEO settings
+### TRC-33-01 - MEDIUM - Byte-impacting setting changes can leave public derivatives stale and mixed
 
-- Location: `apps/web/src/app/feed.xml/route.ts:29-44`, `apps/web/src/app/feed.xml/route.ts:46-141`, `apps/web/src/app/feed.xml/route.ts:160-182`; `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50-72`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:74-153`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:165-186`.
-- Related state: `apps/web/src/lib/data.ts:856-874`, `apps/web/src/lib/data.ts:1749-1769`, `apps/web/src/app/actions/seo.ts:54-61`, `apps/web/src/app/actions/seo.ts:136-157`, `apps/web/src/db/schema.ts:137-140`.
+- Location: `apps/web/src/app/actions/settings.ts:68-79`, `apps/web/src/app/actions/settings.ts:82-134`, `apps/web/src/lib/settings-hash.ts:47-59`, `apps/web/src/lib/image-queue.ts:122-137`, `apps/web/src/lib/image-queue.ts:646-661`, `apps/web/src/lib/serve-upload.ts:197-223`, `apps/web/scripts/backfill-color-pipeline.ts:332-341`.
 - Severity: Medium.
 - Confidence: High.
 
 Causal chain:
 
-1. Both feed routes answer conditional requests from `getFeedUpdatedAt()` before they load the SEO/config state used to compose the feed body. The root route can return 304 at `feed.xml/route.ts:29-44`; the topic route can return 304 at `[topic]/feed.xml/route.ts:50-72`.
-2. `getFeedUpdatedAt()` only consults processed image rows and orders by `images.updated_at`, `images.created_at`, and `images.id` (`data.ts:856-874`).
-3. The XML body also depends on SEO settings: root `feedTitle`, author, rights fallback, self URL, alternate URL, and entry author fallback are composed after the early 304 branch (`feed.xml/route.ts:46-141`); the topic feed does the same (`[topic]/feed.xml/route.ts:74-153`).
-4. Admins can change those SEO fields through `updateSeoSettings()`, which writes `admin_settings` and revalidates app data (`seo.ts:54-61`, `seo.ts:136-157`), but `admin_settings` has only `key` and `value` columns and no timestamp/revision usable by feed conditionals (`schema.ts:137-140`).
-5. A reader that previously cached the feed with `Last-Modified` equal to the newest image update can send `If-Modified-Since`; the feed route compares that timestamp only to image freshness and returns 304, even though the feed title/author/rights/body would now be different.
+1. The settings mutation path treats only `image_sizes` and `strip_gps_on_upload` as upload-processing-contract changes (`settings.ts:68-79`).
+2. Once any image exists, the same action blocks changes to `image_sizes` and `strip_gps_on_upload` (`settings.ts:82-134`), but it still accepts other byte-impacting settings such as `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `force_srgb_derivatives`, `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, and `wide_gamut_max_source_pixels`.
+3. The serving hash considers all of those settings byte-impacting (`settings-hash.ts:47-59`), and the upload queue snapshots/applies them when encoding new derivatives (`image-queue.ts:122-137`, `image-queue.ts:646-661`).
+4. Existing derivative files are not rewritten by `updateGallerySettings()`. The fallback route ETag includes the settings hash (`serve-upload.ts:197-223`), but its body is still the already-written file. Static-served files likewise keep their old bytes until a re-encode happens.
+5. The operator script can force a re-encode of all processed rows (`backfill-color-pipeline.ts:332-341`), but the settings action does not enqueue it, mark derivatives stale, or block the setting change until it runs.
 
 Failure scenario:
 
-- The site owner changes SEO title, author, locale, or OG-related copy from the admin UI after the latest published image remains unchanged. RSS readers such as Feedly/Miniflux/FreshRSS poll with `If-Modified-Since` from the last photo update. The route returns 304 and the reader keeps stale feed-level metadata indefinitely until an image row is uploaded or edited. This is visible public output, and it bypasses the intended `revalidateAllAppData()` invalidation because the route handler's HTTP conditional path is independent of the Next cache tree.
+- An admin changes `force_srgb_derivatives=true` or lowers `image_quality_jpeg` after the gallery already contains processed images. New uploads immediately use the new encoder settings, while existing `/uploads/{avif,webp,jpeg}/...` files remain encoded with the prior settings. Public pages, share pages, OG image fetches, and downloads now present a mixed derivative corpus under one admin configuration. Clients that revalidate through the fallback route may get a new ETag with unchanged old bytes, which makes the stale-byte state look freshly validated.
 
 Suggested fix:
 
-- Give feed-shaping settings a freshness source and include it in the feed validator. Options: add `updated_at` to `admin_settings`, add a dedicated feed/settings revision row, or compute a monotonic feed revision during `updateSeoSettings()`. Then set `Last-Modified` and both 304 comparisons to the max of image freshness and relevant feed settings freshness. Add route tests that change `seo_title` or `seo_author`, send a matching `If-Modified-Since`, and assert the route returns 200 with the new XML.
+- On `updateGallerySettings()`, diff all `COLOR_IMPACTING_KEYS`, not only `image_sizes`. For changed derivative-byte keys, either block with an explicit "run re-encode" flow, enqueue/trigger the existing all-row re-encode path, or persist a `derivatives_stale_since`/settings revision flag that admin UI and serving paths can surface. Treat clearing a setting back to default the same as setting a new value. Add a targeted regression that changes `force_srgb_derivatives` or a quality key after a processed image exists and asserts the app either blocks, marks stale, or schedules re-encoding instead of silently accepting mixed bytes.
+
+### TRC-33-02 - LOW - Invalid public view-recording calls consume the analytics limiter
+
+- Location: `apps/web/src/app/actions/public.ts:341-395`, `apps/web/src/app/actions/public.ts:417-442`, `apps/web/src/app/actions/public.ts:444-474`, `apps/web/src/app/actions/public.ts:477-510`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:164-166`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:173-174`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`.
+- Severity: Low.
+- Confidence: Medium.
+
+Causal chain:
+
+1. Public pages fire-and-forget server actions to record image, topic, and shared-group views (`p/[id]/page.tsx:164-166`, `[topic]/page.tsx:173-174`, `g/[key]/page.tsx:137-142`).
+2. Each recorder validates only cheap shape first, then calls `checkViewRecordRateLimit()` before the target existence/visibility query (`public.ts:417-428`, `public.ts:444-461`, `public.ts:477-497`).
+3. `checkViewRecordRateLimit()` increments the in-memory and durable `view_record` bucket before returning `ok` (`public.ts:341-395`).
+4. If the later existence/visibility query returns no image, topic, or group, the recorder returns without using `rollbackViewRecordAttempt()` (`public.ts:424-429`, `public.ts:457-462`, `public.ts:486-498`).
+
+Failure scenario:
+
+- A bot posts repeated public server-action calls with syntactically valid but nonexistent positive image IDs, valid-looking topic slugs, or random base56 group keys. Those calls do not insert analytics rows, but they consume the same per-IP `view_record` budget used by legitimate page views. Once the 120/minute bucket is exhausted, real users behind the same IP/NAT can have valid view events dropped for the rest of the window. The impact is analytics accuracy, not authorization or stored photo data.
+
+Suggested fix:
+
+- Decide whether invalid target calls should be charged. If not, keep the cheap syntactic precheck but either validate target existence before the durable increment, or store the returned `{ bucketStart, dbIncremented }` and call `rollbackViewRecordAttempt()` on the `!visibleImage`, `!visibleTopic`, and `!visibleGroup` exits. If charging invalid targets is intentional to protect DB reads, make that policy explicit and consider a separate low-cost invalid-target limiter so legitimate analytics cannot be suppressed by nonexistent IDs.
 
 ## Traced But No New Finding
 
-- Upload/process/delete races: upload actions acquire the upload-processing contract lock before config-sensitive ingest (`images.ts:175-180`), do a late restore maintenance cleanup before DB insert (`images.ts:404-416`), delete queue bookkeeping before row removal (`images.ts:680-698`), and queue processing conditionally updates `processed=false` rows before cleaning derivatives on delete-mid-processing (`image-queue.ts:677-699`).
-- Restore maintenance: restore holds the DB restore lock, upload-processing lock, color backfill lock, and semantic backfill lock before entering durable maintenance (`db-actions.ts:390-490`), then quiesces queue side effects and resumes/bootstrap after verified restore (`db-actions.ts:492-519`, `image-queue.ts:1060-1113`).
-- Auth/session/rate-limit: mutating auth actions perform same-origin checks before credential work, pre-increment rate limits before password verification, roll back only on expected auth failures, and rely on HMAC-backed session verification for privileged routes.
-- Search/semantic state: public search and semantic routes rate-limit before expensive work, bound query sizes and embedding scans, and keep stub/production embedding provenance separated.
-- Pagination/filter state: cursor state, tag URL mutation, and load-more query reset paths were traced without finding a stale-cursor scenario that survives the current query-key reset.
-- OG generation: the suspected photo-OG origin mismatch was rejected because `BASE_URL` falls back to `site-config.json`; generated OG routes validate/rate-limit before render and use bounded photo fetches.
-- Deployment scripts: deploy still follows pull, compose up, health gate, then prune. No causal script issue met the finding bar in this pass.
+- Upload -> processing -> persistence -> display: the upload action validates admin/origin/maintenance, writes originals before DB insert, inserts `processed=false`, snapshots processing settings, and queues work. The queue encodes all formats, verifies output files, updates `processed=true` conditionally, and cleans derivatives if the row disappeared mid-processing. Public data selection uses explicit public fields before rendering.
+- Auth -> mutation -> audit: password login/change and admin-user mutations perform same-origin/admin checks before writes, use session verification or token scopes for privileged API access, and record audit events around successful mutations and relevant auth failures.
+- Route -> cache/rate limit: semantic and similar-search routes pre-increment public rate limits before model/scanning work, bound input size and scan size, and gate production CLIP mode. Backup download validates filename shape, realpath containment, and streams from the already-opened file handle.
+- Backup/restore: restore obtains DB restore, upload-processing, color-backfill, and semantic-backfill locks before durable maintenance, drains queue/background DB writes, scans restore SQL, runs `mysql --one-database`, and keeps maintenance active on partial restore failure.
+- Semantic search: upload processing writes embeddings after the row is marked processed, bootstrap covers processed rows missing the active embedding version, search routes filter by target model version, and the manual backfill script re-embeds rows missing the target model version.
 
 ## Final Sweep
 
-Final sweep rechecked the feed conditional helpers, both feed routes, SEO persistence, settings schema, upload/restore interlocks, queue delete cleanup, semantic endpoints, client pagination state, OG routes, and deploy scripts. I found one medium-confidence-to-high-confidence feed freshness defect and no critical or high-severity causal break in the other traced flows.
+Final sweep rechecked schema shape, backup download containment, SQL restore scanning, semantic backfill selection, public view-recording call sites, byte-impacting settings membership, serving ETags, queue encoding inputs, and color backfill force-reencode behavior. I found two actionable issues above and no critical/high causal break in upload processing, auth/audit, restore, or semantic search from the code paths traced.

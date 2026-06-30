@@ -1,175 +1,359 @@
-# Cycle 32 Aggregate Review
+# Cycle 33 Aggregate Review
 
-Reviewed HEAD at fan-out start: `3d174c96` (two review-artifact commits landed during fan-out: `7143d826`, `8849f5b1`).
+Cycle: 33/100
 Date: 2026-06-30 KST
+Reviewed HEAD: `a21d053e`
 
 ## Agent Coverage
 
 Completed review artifacts:
 
-- `.context/reviews/code-reviewer.md`
-- `.context/reviews/perf-reviewer.md`
-- `.context/reviews/security-reviewer.md`
-- `.context/reviews/critic.md`
-- `.context/reviews/verifier.md`
-- `.context/reviews/test-engineer.md`
-- `.context/reviews/tracer.md`
-- `.context/reviews/architect.md`
-- `.context/reviews/debugger.md`
-- `.context/reviews/document-specialist.md`
-- `.context/reviews/designer.md`
-- `.context/reviews/ui-ux-designer-reviewer.md`
-- `.context/reviews/product-marketer-reviewer.md`
+- `code-reviewer.md`
+- `perf-reviewer.md`
+- `security-reviewer.md`
+- `test-engineer.md`
+- `architect-debugger.md`
+- `designer.md`
+- `document-specialist.md`
+- `critic-verifier.md`
+- `tracer.md`
 
-Agent failures: none. Two subagents committed/pushed review artifacts despite Prompt 1 being review-only; history was preserved and this aggregate accounts for those commits.
+No agent failures were recorded. The locally installed reviewer prompt files `product-marketer-reviewer.md` and `ui-ux-designer-reviewer.md` are BurstPick-specific and were not treated as GalleryKit reviewer roles; the GalleryKit UI review was covered by `designer.md`.
 
-## High Signal Findings
+## Merged Findings
 
-### AGG32-01 - Aborted queued CLIP request can leak an inference slot
+### AGG-C33-01 - Bulk apply-suggested-alt bypasses metadata sanitization and length checks
+
+Severity: Medium
+Confidence: High
+Agents: code-reviewer, critic/verifier
+
+Regions: `apps/web/src/app/actions/images.ts:1102-1147`, `apps/web/src/lib/sanitize.ts:161-190`, `apps/web/src/db/schema.ts:82-86`, `apps/web/src/__tests__/bulk-update-images.test.ts:471-518`
+
+Applying `alt_text_suggested` into `title` or `description` only strips the stub prefix and Unicode formatting, then writes the value directly. It does not run `sanitizeAdminString()` or enforce the target field limits. A restored or future-produced suggestion with C0/C1 controls or an overlong title can violate the admin metadata invariant or fail/truncate at MySQL write time.
+
+Fix: sanitize copied suggestions with the same target-field contract as manual metadata updates and add tests for controls, Unicode formatting, overlong title/description, and valid-row behavior.
+
+### AGG-C33-02 - Lightroom/PAT upload buffers full multipart bodies before serialization
 
 Severity: High
 Confidence: High
-Sources: perf-reviewer
+Agents: perf-reviewer, critic/verifier
 
-Citations: `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:117-170`, `apps/web/src/app/api/search/semantic/route.ts:247-260`, `apps/web/src/components/search.tsx:184-193`.
+Regions: `apps/web/src/app/api/admin/lr/upload/route.ts:153-167`, `apps/web/src/app/api/admin/lr/upload/route.ts:225-259`, `apps/web/nginx/default.conf:124-145`, `apps/web/docker-compose.yml:12-28`
 
-`releaseInferenceSlot()` reserves an active slot while handing it to a queued waiter. If that waiter aborts after the handoff but before `withInferenceSlot()` enters its `try/finally`, the reserved slot is never released. With concurrency 1, production semantic search and image embedding can stall until restart.
+The LR/PAT upload route calls `request.formData()` for up to 216 MiB bodies before app-level serialization and before the existing disk/processing lock. Several concurrent authenticated uploads can therefore materialize large bodies in the Next.js process before any single-flight protection applies.
 
-Fix: make slot acquisition release-safe for abort-after-handoff and add a behavioral regression test.
+Fix: stream multipart uploads or add a pre-parse semaphore/lock that bounds concurrent body materialization, then add tests/source contracts around the bounded path.
 
-### AGG32-02 - Bulk edit can silently ignore invalid tag mutations while reporting success
-
-Severity: Medium
-Confidence: High
-Sources: critic
-
-Citations: `apps/web/src/components/bulk-edit-dialog.tsx:112-153`, `apps/web/src/app/actions/images.ts:995-1003`, `apps/web/src/app/actions/images.ts:1132-1155`, `apps/web/src/app/actions/images.ts:1169-1184`, `apps/web/src/__tests__/bulk-update-images.test.ts:202-278`.
-
-`bulkUpdateImages()` skips invalid add/remove tag names with `continue`, then can still return success and audit the requested tag names. Operators can believe a batch tag correction applied when the server ignored it.
-
-Fix: validate all add/remove tag candidates before transaction start and fail the batch on any rejected tag; add mixed valid/invalid tests.
-
-### AGG32-03 - Lightbox color pip exposes admin-only transfer metadata outside the `isAdmin` gate
+### AGG-C33-03 - Public route rate-limit scanner misses non-`/api` route handlers
 
 Severity: Medium
 Confidence: High
-Sources: verifier
+Agents: test-engineer, critic/verifier
 
-Citations: `apps/web/src/components/lightbox-color-pip.tsx:44-84`, `apps/web/src/components/lightbox-color-pip.tsx:161-185`, `apps/web/src/__tests__/lightbox-color-pip-hdr.test.ts:208-220`.
+Regions: `apps/web/scripts/check-public-route-rate-limit.ts:25-85`, `apps/web/src/app/feed.xml/route.ts:41-53`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:41-78`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:739-744`
 
-The public canonical data path omits `transfer_function`, but the component computes and renders it in collapsed text/aria labels whenever an admin-shaped image is passed with `isAdmin={false}`. This violates the component's own privacy boundary.
+The scanner only discovers `src/app/api/**/route.*`, while public route handlers outside `/api` can do expensive GET work. Future route handlers outside `/api` can ship without a limiter or explicit exemption.
 
-Fix: gate collapsed transfer text and aria label on `isAdmin`; add a regression test with admin-shaped data rendered as non-admin.
+Fix: discover all `src/app/**/route.*` files, classify/exclude private/admin surfaces explicitly, and add fixture tests for root and localized feed route shapes.
 
-### AGG32-04 - Atom feed conditional 304 ignores feed-shaping SEO settings
+### AGG-C33-04 - `auth.ts` mutating server actions are excluded from origin-gate linting
+
+Severity: High
+Confidence: High
+Agents: test-engineer, critic/verifier
+
+Regions: `apps/web/scripts/check-action-origin.ts:13-19`, `apps/web/scripts/check-action-origin.ts:49-73`, `apps/web/src/__tests__/check-action-origin.test.ts:493-503`, `apps/web/src/app/actions/auth.ts:95-99`, `apps/web/src/app/actions/auth.ts:264-299`
+
+Current auth mutators are manually same-origin guarded, but the lint gate intentionally skips `auth.ts`. A future auth mutation could omit the manual guard and still pass `lint:action-origin`.
+
+Fix: include `auth.ts` with an auth-specific approved guard detector or add a dedicated auth-action scanner.
+
+### AGG-C33-05 - Lightroom upload route parity is mostly source-locked, not behavior-locked
 
 Severity: Medium
 Confidence: High
-Sources: tracer
+Agents: test-engineer, critic/verifier
 
-Citations: `apps/web/src/app/feed.xml/route.ts:29-44`, `apps/web/src/app/feed.xml/route.ts:46-141`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50-72`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:74-153`, `apps/web/src/app/actions/seo.ts:136-157`.
+Regions: `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-172`, `apps/web/src/app/api/admin/lr/upload/route.ts:194-547`
 
-The feed routes return 304 based only on image freshness before loading SEO/feed settings. Changing feed title, author, rights, or related SEO copy can leave feed readers with stale metadata until an image changes.
+The LR upload tests mainly verify imports and source strings. They do not execute representative `POST` branches, so cleanup ordering, tracker settlement, status codes, and browser-upload parity can regress while source-grep tests remain green.
 
-Fix: include feed-shaping settings freshness/revision in the feed validator or remove early 304 for settings-dependent feeds; add tests for SEO changes plus conditional requests.
+Fix: add mocked route-level tests for representative validation, cleanup, quota, lock, and success branches.
 
-### AGG32-05 - Load-more sentinel can repeat server actions indefinitely on transient failures
-
-Severity: Medium
-Confidence: High
-Sources: debugger
-
-Citations: `apps/web/src/components/load-more.tsx:41-50`, `apps/web/src/components/load-more.tsx:72-95`, `apps/web/src/components/load-more.tsx:122-132`, `apps/web/src/app/actions/public.ts:24-27`.
-
-Transient `maintenance`, `rateLimited`, and `error` results keep `hasMore: true`; the observed sentinel remains mounted and can immediately call the server action again after `loadingRef` clears.
-
-Fix: add a retry/cooldown gate or explicit retry affordance for non-ok transient responses; add a component/source test.
-
-### AGG32-06 - Lightbox auto-hide removes essential modal controls from AT/keyboard
-
-Severity: Medium
-Confidence: High
-Sources: designer, ui-ux-designer-reviewer
-
-Citations: `apps/web/src/components/lightbox.tsx:270`, `apps/web/src/components/lightbox.tsx:371-373`, `apps/web/src/components/lightbox.tsx:546-687`.
-
-After idle, lightbox controls receive `tabIndex=-1` and `aria-hidden=true`. Browser evidence showed the dialog accessibility tree reduced to the image, removing close/navigation discoverability for screen-reader, switch-control, and voice-control users.
-
-Fix: keep essential controls accessible while visually faded, or add a persistent accessible command group.
-
-### AGG32-07 - Dependabot watches `/apps/web` instead of the root workspace lockfile
-
-Severity: Medium
-Confidence: High
-Sources: architect
-
-Citations: `.github/dependabot.yml:1-18`, `package.json:1-10`, `package-lock.json:1-14`.
-
-The canonical npm lockfile and root overrides live at repository root, but Dependabot is configured for `/apps/web`. Dependency automation can miss the actual workspace dependency graph.
-
-Fix: point the npm Dependabot entry at `/`, or add root coverage while preserving any app-specific entry that is proven useful.
-
-### AGG32-08 - Listing helpers can request 102 rows despite a documented 100-row visible cap
+### AGG-C33-06 - Feed conditional tests cover dead helper behavior instead of live route ETag semantics
 
 Severity: Low
 Confidence: High
-Sources: code-reviewer
+Agents: test-engineer, critic/verifier
 
-Citations: `apps/web/src/lib/data.ts:664-670`, `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1437-1480`, `apps/web/src/app/actions/public.ts:121-157`.
+Regions: `apps/web/src/lib/feed-conditional.ts:1-42`, `apps/web/src/__tests__/feed-conditional.test.ts:1-66`, `apps/web/src/app/feed.xml/route.ts:151-180`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:158-187`
 
-Helpers clamp page size to `LISTING_QUERY_LIMIT_PLUS_ONE`, then add one more lookahead. Public callers clamp to 100 today, but the exported helper contract can exceed its intended cap.
+`feed-conditional.ts` remains tested, but live feed routes use inline content ETags and no longer call the helper. The tests can pass while live 200/304 behavior regresses.
 
-Fix: clamp visible page size to `LISTING_QUERY_LIMIT`, keep one-row lookahead, add a source/behavior test.
+Fix: delete the dead helper/test or replace with executable route tests for matching and stale `If-None-Match` behavior.
 
-## Additional Findings And Risks
+### AGG-C33-07 - Caption stub truncates by UTF-16 code units
 
-### Performance and Scale
+Severity: Low
+Confidence: Medium
+Agents: code-reviewer, critic/verifier
 
-- AGG32-09: Initial dynamic gallery pages use grouped `COUNT(*) OVER()` over all matching rows before limit. Severity Medium, confidence High. Source: perf-reviewer. Citations: `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1466-1481`.
-- AGG32-10: Semantic/similar search scans newest embeddings only; relevant older photos beyond `SEMANTIC_SCAN_LIMIT` are unsearchable. Severity Medium, confidence High. Sources: architect, debugger. Citations: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:164-201`.
-- AGG32-11: Timeline and On This Day predicates use `YEAR()`, `MONTH()`, and `DAY()` functions on `capture_date`, limiting index use. Severity Low, confidence High. Source: perf-reviewer. Citations: `apps/web/src/lib/data-timeline.ts:88-117`, `apps/web/src/lib/data-timeline.ts:125-145`.
-- AGG32-12: Masonry JPEG fallback can load the base JPEG rather than a sized derivative. Severity Low, confidence Medium. Source: perf-reviewer. Citations: `apps/web/src/components/grid-picture.tsx:30-50`, `apps/web/src/components/home-client.tsx:334-361`.
-- AGG32-13: Optional DB health check is unauthenticated and unthrottled when `HEALTH_CHECK_DB=true`. Severity Low, confidence Medium. Source: debugger. Citation: `apps/web/src/app/api/health/route.ts:6-40`.
+Regions: `apps/web/src/lib/caption-generator.ts:29-38`, `apps/web/src/__tests__/caption-generator.test.ts:1-65`
 
-### Security and Operational Boundaries
+The stub uses `.slice(0, ALT_TEXT_MAX_CHARS)`, which can split surrogate pairs and persist malformed suggestion text.
 
-- AGG32-14: Every admin is root-equivalent, including backup, restore, and user management. Severity Medium, confidence High. Source: security-reviewer. Citations: `CLAUDE.md:5`, `CLAUDE.md:234-236`, `apps/web/src/app/actions/admin-users.ts:77-84`, `apps/web/src/app/[locale]/admin/db-actions.ts:365-371`.
-- AGG32-15: DB restore treats scanner-allowed app tables, including auth tables, as trusted full-state input. Severity Medium, confidence High. Source: security-reviewer. Citations: `apps/web/src/lib/sql-restore-scan.ts:12-31`, `apps/web/src/app/[locale]/admin/db-actions.ts:570-680`.
-- AGG32-16: Public/token-spray limits are process-local under the single-instance deployment assumption. Severity Low, confidence High. Sources: security-reviewer, code-reviewer. Citations: `CLAUDE.md:234-236`, `apps/web/src/lib/rate-limit.ts:74-99`, `apps/web/src/lib/rate-limit.ts:318-375`.
-- AGG32-17: Plaintext SQL backups are an operator storage boundary. Severity Low, confidence High. Source: security-reviewer. Citations: `CLAUDE.md:213-218`, `apps/web/src/app/[locale]/admin/db-actions.ts:185-230`, `apps/web/src/app/api/admin/db/download/route.ts:45-90`.
-- AGG32-18: Production reverse-proxy rate limiting depends on live `TRUST_PROXY=true` configuration. Severity Medium, confidence Medium. Source: code-reviewer. Citation: `apps/web/src/lib/rate-limit.ts:166-196`.
-- AGG32-19: Advisory lock names are global across a MySQL server, so multiple GalleryKit DBs on one server can block each other. Severity Low, confidence High. Source: architect. Citations: `apps/web/src/lib/advisory-locks.ts:8-47`, `CLAUDE.md:234-237`.
+Fix: truncate by code points and test a boundary supplementary character.
 
-### Tests and Delivery Automation
+### AGG-C33-08 - Bulk image update caps raw IDs before de-duplicating
 
-- AGG32-20: Schema reconcile is tested by source tripwires, not a structural MySQL/information_schema diff. Severity High, confidence High. Source: test-engineer. Citations: `apps/web/scripts/migrate.js:317-819`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-172`.
-- AGG32-21: Restore/backup state-machine tests are mostly source-order checks. Severity High, confidence Medium. Source: test-engineer. Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:365-820`, `apps/web/src/__tests__/db-restore.test.ts:42-77`.
-- AGG32-22: Production CLIP activation/integration is outside default CI. Severity Medium, confidence High. Sources: test-engineer, code-reviewer. Citations: `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`, `.github/workflows/quality.yml:66-80`.
-- AGG32-23: Deploy/nginx safety tests are string contracts, not parser/runtime checks. Severity Medium, confidence High. Source: test-engineer. Citations: `apps/web/deploy.sh:1-85`, `apps/web/nginx/default.conf:21-203`, `apps/web/src/__tests__/deploy-script-contract.test.ts:21-127`.
-- AGG32-24: Docker production image is not built in CI while native package pins are manually synchronized. Severity Medium, confidence High. Source: architect. Citations: `apps/web/Dockerfile:49-61`, `.github/workflows/quality.yml:48-80`.
+Severity: Low
+Confidence: High
+Agents: code-reviewer, critic/verifier
 
-### UI/UX and Documentation
+Regions: `apps/web/src/app/actions/images.ts:997-1008`
 
-- AGG32-25: Mobile gallery hierarchy puts the tag wall before the first photo. Severity Medium, confidence High. Sources: designer, ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:255-286`, `apps/web/src/components/tag-filter.tsx:63-120`.
-- AGG32-26: Live search for visible tag `jihoon` returned a generic outage message. Severity Medium, confidence High for live symptom; root cause unconfirmed. Source: designer. Citations: `apps/web/src/components/search.tsx:160-245`, `apps/web/src/app/actions/public.ts:305`.
-- AGG32-27: Admin image management is table-first and awkward on small screens. Severity Medium, confidence High. Source: ui-ux-designer-reviewer. Citations: `apps/web/src/components/image-manager.tsx:424-594`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`.
-- AGG32-28: Photo card accessible names are repetitive. Severity Low, confidence Medium. Sources: designer, ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:323-355`, `apps/web/src/components/home-client.tsx:395-405`.
-- AGG32-29: Routine UI transitions use 500 ms durations in repeated browsing surfaces. Severity Low, confidence High. Source: ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:357-371`, `apps/web/src/components/photo-viewer.tsx:716-724`.
-- AGG32-30: Generic route error is usable but not operator-informative. Severity Low, confidence High. Source: ui-ux-designer-reviewer. Citation: `apps/web/src/app/[locale]/error.tsx:22-57`.
-- AGG32-31: Auto-alt-text docs describe a fallback chain the core public UI does not implement. Severity Medium, confidence High. Source: document-specialist. Citations: `CLAUDE.md:561-563`, `apps/web/src/lib/photo-title.ts:85-125`, `apps/web/src/components/home-client.tsx:293-355`.
-- AGG32-32: `.context/plans/README.md` is stale and contains broken links. Severity Low, confidence High. Source: document-specialist. Citations: `.context/plans/README.md:3-16`, `.context/plans/README.md:61-62`.
-- AGG32-33: README "private originals" positioning does not front-load that GPS stripping is off by default. Severity Medium, confidence High. Source: product-marketer-reviewer. Citations: `README.md:8`, `README.md:29`, `README.md:40`, `apps/web/src/lib/gallery-config-shared.ts:93-105`.
-- AGG32-34: Legacy `lr` upload namespace can imply broader Lightroom parity. Severity Low, confidence High. Source: product-marketer-reviewer. Citations: `README.md:207-216`, `apps/web/src/app/api/admin/lr/upload/route.ts:1-19`, `apps/web/src/lib/admin-tokens.ts:25-29`.
-- AGG32-35: README feature list has duplicate sharing/polish debt. Severity Low, confidence High. Source: product-marketer-reviewer. Citations: `README.md:39-49`.
-- AGG32-36: Gallery scroll restoration keys only by pathname, so tag-filtered states collide. Severity Low, confidence High. Source: critic. Citations: `apps/web/src/components/home-client.tsx:124-170`, `apps/web/src/components/tag-filter.tsx:23-45`.
+Payloads with more than 100 entries but no more than 100 unique IDs are rejected as `tooManyImages`.
 
-## Cross-Agent Agreement
+Fix: validate ID shape, de-duplicate, then apply the mutation-count cap to unique IDs.
 
-- Lightbox accessibility is high signal: both designer lanes independently found the controls are removed from AT/keyboard on idle.
-- Semantic search scan-window limitations were independently flagged by architect and debugger; perf also found a separate CLIP inference concurrency defect.
-- UI mobile filter hierarchy was independently flagged by both designer lanes.
-- The strongest immediately actionable correctness/security fixes are AGG32-01 through AGG32-08.
+### AGG-C33-09 - Initial public listings still pay full grouped window counts
 
-## Verification Performed During Review
+Severity: Medium
+Confidence: High
+Agents: perf-reviewer
 
-Subagents ran targeted gates including `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `npm audit`, focused Vitest suites, and browser/Playwright checks. Full cycle gates remain required in Prompt 3 after implementation.
+Regions: `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1466-1481`, public home/topic/smart collection pages
+
+Dynamic public listing pages fetch `pageSize + 1` but also compute `COUNT(*) OVER()` across the grouped result. Large galleries and smart collections can make first-page SSR expensive.
+
+Fix: remove exact total counts from critical first-page queries or compute counts separately behind cache/invalidation.
+
+### AGG-C33-10 - Timeline and On This Day queries are non-sargable
+
+Severity: Low
+Confidence: High
+Agents: perf-reviewer
+
+Regions: `apps/web/src/lib/data-timeline.ts:97-117`, `apps/web/src/lib/data-timeline.ts:129-145`, `apps/web/src/lib/data-timeline.ts:186-207`
+
+`MONTH()`, `DAY()`, and `YEAR()` filters prevent efficient use of capture-date indexes.
+
+Fix: use range predicates where possible and plan generated/indexed date-part columns for larger galleries.
+
+### AGG-C33-11 - GPS stripping reads full originals into memory
+
+Severity: Low
+Confidence: High
+Agents: perf-reviewer
+
+Regions: `apps/web/src/lib/process-image.ts:1737-1816`, browser and PAT upload callers
+
+The upload path streams originals to disk, then privacy-mode GPS stripping reads the full saved file and may hold another output buffer.
+
+Fix: move stripping toward streaming/range-based processing or bound the privacy-mode branch with a smaller cap/semaphore.
+
+### AGG-C33-12 - Grid JPEG fallback can fetch base JPEGs for thumbnails
+
+Severity: Low
+Confidence: Medium
+Agents: perf-reviewer
+
+Regions: `apps/web/src/components/grid-picture.tsx:30-50`, `apps/web/src/components/grid-picture-fallback-boundary.tsx:14-26`
+
+The masonry grid has AVIF/WebP `srcSet`s but the fallback `img src` is the base JPEG, so constrained or fallback browsers can pull large base JPEGs for tiles.
+
+Fix: add a JPEG `srcSet` and make the fallback `src` a small derivative for processed rows.
+
+### AGG-C33-13 - CI does not build the production Docker image
+
+Severity: Medium
+Confidence: High
+Agents: architect/debugger
+
+Regions: `.github/workflows/quality.yml:48-80`, `apps/web/Dockerfile:49-61`, `package-lock.json`
+
+CI runs app build/tests but not the Dockerfile production build that manually installs native package pins. Dependency updates can pass CI and fail at deploy image build/runtime.
+
+Fix: add a CI Docker build or lockfile assertion for Dockerfile native pins.
+
+### AGG-C33-14 - Semantic/similar search silently misses older photos beyond the scan window
+
+Severity: Medium
+Confidence: High
+Agents: architect/debugger
+
+Regions: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:164-201`
+
+Semantic routes scan only newest embeddings up to `SEMANTIC_SCAN_LIMIT`; older relevant photos cannot rank when the corpus exceeds the cap.
+
+Fix: add operator-visible saturation warning/metrics now, and plan a vector index/ANN boundary before presenting search as corpus-wide at scale.
+
+### AGG-C33-15 - Advisory lock names are globally scoped to a MySQL server
+
+Severity: Low
+Confidence: High
+Agents: architect/debugger
+
+Regions: `apps/web/src/lib/advisory-locks.ts:8-47`
+
+Fixed lock names can serialize independent GalleryKit databases on the same MySQL server.
+
+Fix: namespace through an instance identifier or assert the documented one-GalleryKit-per-MySQL-server topology.
+
+### AGG-C33-16 - Optional DB health probe is unauthenticated and unthrottled
+
+Severity: Low
+Confidence: Medium
+Agents: architect/debugger
+
+Regions: `apps/web/src/app/api/health/route.ts:7-31`, `apps/web/src/__tests__/health-route.test.ts:42-69`
+
+When `HEALTH_CHECK_DB=true`, public `/api/health` does a DB probe on every request.
+
+Fix: keep it network-restricted, add a tiny TTL cache, or rate-limit the DB-aware branch.
+
+### AGG-C33-17 - Root-equivalent admins widen compromise blast radius
+
+Severity: Medium
+Confidence: High
+Agents: security-reviewer
+
+Regions: `apps/web/src/app/actions/admin-users.ts:77-204`, `apps/web/src/app/[locale]/admin/db-actions.ts:164-372`, `apps/web/src/app/api/admin/db/download/route.ts:21-29`
+
+Any admin can manage other admins, backup/restore, and download SQL backups.
+
+Fix: add capability-scoped roles or fresh re-auth for highly sensitive operations, plus audit visibility/notifications.
+
+### AGG-C33-18 - Restore accepts sensitive auth/session/token table state
+
+Severity: Medium
+Confidence: High
+Agents: security-reviewer
+
+Regions: `apps/web/src/lib/sql-restore-scan.ts:12-251`, `apps/web/src/app/[locale]/admin/db-actions.ts:570-744`
+
+Scanner-compliant SQL can rewrite `admin_users`, `sessions`, and `admin_tokens`.
+
+Fix: treat restore as a separate recovery privilege, sign backups, preview sensitive-table changes, and invalidate sessions/PATs after restore by default.
+
+### AGG-C33-19 - Process-local limits depend on single-instance deployment
+
+Severity: Low
+Confidence: High
+Agents: security-reviewer
+
+Regions: `apps/web/src/lib/rate-limit.ts:74-375`, `apps/web/docker-compose.yml:3-22`
+
+Several public/PAT rate limits are in-memory and reset or multiply under multi-instance deployment.
+
+Fix: keep the single-instance invariant explicit or move those counters to shared storage before horizontal scaling.
+
+### AGG-C33-20 - Plaintext SQL backups rely on host/operator controls
+
+Severity: Low
+Confidence: High
+Agents: security-reviewer
+
+Regions: `apps/web/src/app/[locale]/admin/db-actions.ts:185-332`, `apps/web/src/app/api/admin/db/download/route.ts:21-90`
+
+Backup files are permissioned and admin-gated but remain plaintext SQL at rest.
+
+Fix: encrypt dumps at rest or immediately after creation and add retention/pruning guidance.
+
+### AGG-C33-21 - Admin login falls to generic error shell during auth DB outages
+
+Severity: Medium
+Confidence: High
+Agents: designer
+
+Regions: `apps/web/src/app/[locale]/admin/layout.tsx:14`, `apps/web/src/app/[locale]/admin/page.tsx:14`, `apps/web/src/app/actions/auth.ts:37-46`
+
+The admin layout probes the current user before rendering login, so a DB outage shows a generic route error instead of an intelligible auth-unavailable login state.
+
+Fix: keep login renderable when pre-login session probing fails or catch infrastructure errors and show a blocking unavailable alert.
+
+### AGG-C33-22 - Settings validation does not focus or summarize invalid fields
+
+Severity: Low
+Confidence: High
+Agents: designer
+
+Regions: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:230-235`, field validation sections
+
+Save returns after a toast; focus remains on Save while the invalid field can be far below.
+
+Fix: focus/scroll the first invalid input or render a persistent error summary with links.
+
+### AGG-C33-23 - One-time upload-token copy lacks clipboard fallback
+
+Severity: Low
+Confidence: High
+Agents: designer
+
+Regions: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:88-95`, `apps/web/src/lib/clipboard.ts:1-43`
+
+The one-time plaintext token dialog uses `navigator.clipboard.writeText()` directly instead of the existing fallback helper.
+
+Fix: use `copyToClipboard()` and gate acknowledgement behavior around successful copy or explicit manual acknowledgement.
+
+### AGG-C33-24 - Mobile home tag filter can consume the first viewport
+
+Severity: Medium
+Confidence: Medium
+Agents: designer
+
+Regions: `apps/web/src/components/home-client.tsx:257-287`, `apps/web/src/components/tag-filter.tsx:63-88`
+
+Large tag sets render before the photo grid and can make the first mobile viewport feel like taxonomy instead of photography.
+
+Fix: collapse/cap/scroll tag chips on small screens while keeping active filters visible.
+
+### AGG-C33-25 - Schema comment misstates alt-text precedence
+
+Severity: Low
+Confidence: High
+Agents: document-specialist
+
+Regions: `apps/web/src/db/schema.ts:82-86`, `apps/web/src/lib/photo-title.ts:85-127`, `apps/web/src/__tests__/alt-text-fallback.test.ts:1-90`
+
+`schema.ts` says title/description take precedence over suggestions, but the actual public alt helper uses title, tags, suggestion, then generic fallback. Description is not in the chain.
+
+Fix: update the schema comment or change the helper/tests if description should intentionally participate.
+
+### AGG-C33-26 - `.context/plans/README.md` is stale with broken links
+
+Severity: Low
+Confidence: High
+Agents: document-specialist
+
+Regions: `.context/plans/README.md:3-80`
+
+The plan index lists stale active/completed states and broken links to absent cycle 18/19 files.
+
+Fix: refresh the index from actual files or mark it non-authoritative.
+
+### AGG-C33-27 - Byte-impacting settings can leave derivative bytes mixed/stale
+
+Severity: Medium
+Confidence: High
+Agents: tracer
+
+Regions: `apps/web/src/app/actions/settings.ts:68-134`, `apps/web/src/lib/settings-hash.ts:47-59`, `apps/web/src/lib/image-queue.ts:122-137`, `apps/web/src/lib/serve-upload.ts:197-223`, `apps/web/scripts/backfill-color-pipeline.ts:332-341`
+
+Changing byte-impacting settings such as quality/chroma/force-sRGB is accepted after images exist, but existing derivatives are not rewritten or marked stale.
+
+Fix: diff all byte-impacting settings and either block until re-encode, schedule re-encode, or persist/surface a derivative-stale state.
+
+### AGG-C33-28 - Invalid public view-recording calls consume analytics limiter budget
+
+Severity: Low
+Confidence: Medium
+Agents: tracer
+
+Regions: `apps/web/src/app/actions/public.ts:341-395`, `apps/web/src/app/actions/public.ts:417-510`
+
+View recorders charge the limiter before existence/visibility checks and do not roll back nonexistent-target exits.
+
+Fix: roll back invalid-target attempts if they should not count, or document and separate the invalid-target limiter policy.

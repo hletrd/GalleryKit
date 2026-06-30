@@ -11,12 +11,11 @@
  * `// @action-origin-exempt: <reason>`.
  *
  * Scanned files (C5R-RPL-06 / AGG5R-05 + C6R-RPL-02 / AGG6R-01):
- * - Auto-discovered RECURSIVELY via app/actions/ (all server-action-capable script descendants),
- *   EXCLUDING files whose basename is `auth`. `auth.ts` owns its own
- *   `hasTrustedSameOrigin` invocations directly at the call sites that
- *   the scanner cannot generically detect. Public actions are scanned with a
- *   narrower public-rate-limit contract for intentionally unauthenticated
- *   analytics writes.
+ * - Auto-discovered RECURSIVELY via app/actions/ (all server-action-capable script descendants).
+ *   `auth.ts` is scanned with an auth-specific approved `hasTrustedSameOrigin`
+ *   guard shape because it owns login/logout/password-change flows directly.
+ *   Public actions are scanned with a narrower public-rate-limit contract for
+ *   intentionally unauthenticated analytics writes.
  * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
  *   it lives outside the `actions/` directory).
  *
@@ -46,12 +45,11 @@ const REPO_SRC = path.resolve(__dirname, '../src');
  */
 const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']);
 
-const EXCLUDED_ACTION_BASENAMES = new Set(['auth']);
 const APPROVED_ACTION_GUARD_MODULE = '@/lib/action-guards';
+const APPROVED_AUTH_GUARD_MODULE = '@/lib/request-origin';
 
 /**
- * Recursively walk a directory collecting action source files, excluding
- * basenames in `EXCLUDED_ACTION_BASENAMES`. Throws if the root cannot be
+ * Recursively walk a directory collecting action source files. Throws if the root cannot be
  * read — failing loudly is correct because a missing root indicates a
  * repository layout change that breaks the security lint gate.
  */
@@ -69,7 +67,6 @@ export function walkForActionFiles(root: string): string[] {
             if (!entry.isFile()) continue;
             const parsed = path.parse(entry.name);
             if (!ACTION_FILE_EXTENSIONS.has(parsed.ext)) continue;
-            if (EXCLUDED_ACTION_BASENAMES.has(parsed.name)) continue;
             out.push(full);
         }
     }
@@ -128,6 +125,28 @@ function collectApprovedRequireSameOriginImports(sourceFile: ts.SourceFile): Set
         for (const element of statement.importClause.namedBindings.elements) {
             const importedName = element.propertyName?.text ?? element.name.text;
             if (importedName === 'requireSameOriginAdmin') {
+                approved.add(element.name.text);
+            }
+        }
+    }
+    return approved;
+}
+
+function collectApprovedHasTrustedSameOriginImports(sourceFile: ts.SourceFile): Set<string> {
+    const approved = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || statement.moduleSpecifier.text !== APPROVED_AUTH_GUARD_MODULE
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === 'hasTrustedSameOrigin') {
                 approved.add(element.name.text);
             }
         }
@@ -199,6 +218,18 @@ function statementReturnsOnGuard(statement: ts.Statement, guardName: string): bo
         return statement.thenStatement.statements.some(ts.isReturnStatement);
     }
 
+    return false;
+}
+
+function statementExitsEarly(statement: ts.Statement): boolean {
+    if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) return true;
+    if (ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression)) {
+        const callee = statement.expression.expression;
+        return ts.isIdentifier(callee) && callee.text === 'redirect';
+    }
+    if (ts.isBlock(statement)) {
+        return statement.statements.some(statementExitsEarly);
+    }
     return false;
 }
 
@@ -458,6 +489,47 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node, approvedImports: Set
     return false;
 }
 
+function functionCallsAuthSameOriginGuard(
+    body: ts.Node,
+    approvedHasTrustedSameOriginImports: Set<string>,
+    localMutatingFunctions: Set<string>,
+): boolean {
+    if (!ts.isBlock(body)) {
+        return false;
+    }
+
+    const expressionIsTrustedOriginCheck = (expression: ts.Expression): boolean => {
+        const unwrapped = unwrapExpression(expression);
+        const target = ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken
+            ? unwrapExpression(unwrapped.operand)
+            : unwrapped;
+        return (
+            ts.isCallExpression(target)
+            && ts.isIdentifier(target.expression)
+            && approvedHasTrustedSameOriginImports.has(target.expression.text)
+        );
+    };
+
+    for (let index = 0; index < body.statements.length; index++) {
+        const statement = body.statements[index];
+        if (!ts.isIfStatement(statement) || !expressionIsTrustedOriginCheck(statement.expression)) {
+            continue;
+        }
+
+        const preGuardStatements = body.statements.slice(0, index);
+        if (
+            preGuardStatements.some((preGuardStatement) => statementContainsPreGuardMutation(preGuardStatement, localMutatingFunctions))
+            || preGuardStatements.some(statementContainsPreOriginAuthRead)
+        ) {
+            return false;
+        }
+
+        return statementExitsEarly(statement.thenStatement);
+    }
+
+    return false;
+}
+
 type CheckReport = {
     passed: string[];
     failed: string[];
@@ -490,6 +562,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     }
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
+    const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
+    const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
     const localMutatingFunctions = new Set<string>();
 
     for (const statement of sourceFile.statements) {
@@ -546,7 +620,10 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             return;
         }
 
-        if (!functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports, localMutatingFunctions)) {
+        const hasStandardGuard = functionCallsRequireSameOriginAdmin(body, approvedRequireSameOriginImports, localMutatingFunctions);
+        const hasAuthGuard = isAuthActionsFile
+            && functionCallsAuthSameOriginGuard(body, approvedHasTrustedSameOriginImports, localMutatingFunctions);
+        if (!hasStandardGuard && !hasAuthGuard) {
             report.failed.push(
                 `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
             );

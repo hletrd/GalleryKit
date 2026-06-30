@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId, stripUnicodeFormatting } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
 import { countCodePoints } from '@/lib/utils';
 import {
     createProcessingSettingsSnapshot,
@@ -997,15 +997,15 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     if (!Array.isArray(ids) || ids.length === 0) {
         return { error: t('noImagesSelected') };
     }
-    if (ids.length > 100) {
-        return { error: t('tooManyImages') };
-    }
     for (const id of ids) {
         if (!Number.isInteger(id) || id <= 0) {
             return { error: t('invalidImageId') };
         }
     }
     const requestedIds = [...new Set(ids)];
+    if (requestedIds.length > 100) {
+        return { error: t('tooManyImages') };
+    }
     if (!Array.isArray(addTagNames) || !Array.isArray(removeTagNames)) {
         return { error: t('invalidInput') };
     }
@@ -1123,16 +1123,17 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                     if (applyAltSuggested === 'description' && row.description != null && row.description !== '') continue;
                     // CRT-R5C2-02: strip the [AUTO] stub prefix before copying into
                     // title/description so the prefix never persists in stored metadata.
-                    // AGG-R5C3-12 (belt-and-braces): also strip Unicode bidi/zero-width
-                    // formatting from the copied caption. The source (alt_text_suggested)
-                    // derives from EXIF, now scrubbed at the cleanMetadataString source,
-                    // but defense-in-depth on the persist path catches any pre-fix rows
-                    // or future producer drift before the value lands in title/description.
-                    // If stripping produces an empty/whitespace-only value, skip the row
-                    // (leave title/description unchanged rather than storing empty string).
-                    const stripped = (stripUnicodeFormatting(stripStubPrefix(row.alt_text_suggested)) ?? '').trim();
+                    // C33-P1: apply the same persistent admin metadata contract as
+                    // manual title/description updates. Suggestions are machine- or
+                    // import-derived TEXT values; skip invalid rows instead of letting
+                    // one stale caption fail the whole bulk operation.
+                    const stripped = stripStubPrefix(row.alt_text_suggested).trim();
                     if (!stripped) continue;
-                    toUpdate.push({ id: row.id, caption: stripped });
+                    const { value: sanitizedCaption, rejected } = sanitizeAdminString(stripped);
+                    if (rejected || !sanitizedCaption) continue;
+                    if (applyAltSuggested === 'title' && countCodePoints(sanitizedCaption) > 255) continue;
+                    if (applyAltSuggested === 'description' && countCodePoints(sanitizedCaption) > 5000) continue;
+                    toUpdate.push({ id: row.id, caption: sanitizedCaption });
                 }
 
                 for (const { id, caption } of toUpdate) {
