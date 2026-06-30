@@ -17,7 +17,7 @@ import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStar
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
-import { LOCK_ADMIN_DELETE } from '@/lib/advisory-locks';
+import { LOCK_ADMIN_DELETE, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
@@ -227,7 +227,7 @@ export async function deleteAdminUser(id: number) {
             'SELECT GET_LOCK(?, 5) AS acquired',
             [lockName]
         );
-        lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
+        lockAcquired = isAdvisoryLockAcquired(lockRows[0]?.acquired);
         if (!lockAcquired) {
             throw new Error('DELETE_LOCK_TIMEOUT');
         }

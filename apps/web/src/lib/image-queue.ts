@@ -17,7 +17,7 @@ import { purgeOldViewEvents } from '@/lib/view-retention';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename } from '@/lib/validation';
-import { getImageProcessingLockName } from '@/lib/advisory-locks';
+import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
@@ -446,11 +446,11 @@ function hasValidJobFilenames(job: ImageProcessingJob) {
 async function acquireImageProcessingClaim(jobId: number): Promise<PoolConnection | null> {
     const lockConnection = await connection.getConnection();
     try {
-        const [rows] = await lockConnection.query<(RowDataPacket & { acquired: number | null })[]>(
+        const [rows] = await lockConnection.query<(RowDataPacket & { acquired: unknown })[]>(
             'SELECT GET_LOCK(?, 0) AS acquired',
             [getProcessingLockName(jobId)],
         );
-        if (rows[0]?.acquired === 1) {
+        if (isAdvisoryLockAcquired(rows[0]?.acquired)) {
             return lockConnection;
         }
     } catch (err) {

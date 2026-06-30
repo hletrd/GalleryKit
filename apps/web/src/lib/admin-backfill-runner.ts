@@ -61,7 +61,7 @@ import { sql } from 'drizzle-orm';
 import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '@/lib/process-image';
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
-import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName } from '@/lib/advisory-locks';
+import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
@@ -319,11 +319,11 @@ async function acquireBackfillLock(): Promise<PoolConnection | null> {
         // Non-blocking: 0-second timeout. If the lock is held, return null
         // immediately so the caller can surface "already running" without
         // queueing a hidden second invocation that would block for hours.
-        const [rows] = await lockConn.query<(RowDataPacket & { acquired: number | null })[]>(
+        const [rows] = await lockConn.query<(RowDataPacket & { acquired: unknown })[]>(
             'SELECT GET_LOCK(?, 0) AS acquired',
             [LOCK_COLOR_PIPELINE_BACKFILL],
         );
-        if (rows[0]?.acquired === 1) {
+        if (isAdvisoryLockAcquired(rows[0]?.acquired)) {
             return lockConn;
         }
         lockConn.release();
@@ -356,11 +356,11 @@ async function releaseBackfillLock(lockConn: PoolConnection | null) {
 async function acquireImageProcessingClaim(imageId: number): Promise<PoolConnection | null> {
     const lockConn = await connection.getConnection();
     try {
-        const [rows] = await lockConn.query<(RowDataPacket & { acquired: number | null })[]>(
+        const [rows] = await lockConn.query<(RowDataPacket & { acquired: unknown })[]>(
             'SELECT GET_LOCK(?, 0) AS acquired',
             [getImageProcessingLockName(imageId)],
         );
-        if (rows[0]?.acquired === 1) {
+        if (isAdvisoryLockAcquired(rows[0]?.acquired)) {
             return lockConn;
         }
     } catch (err) {

@@ -23,7 +23,7 @@ import { resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
-import { LOCK_SEMANTIC_EMBEDDING_BACKFILL } from '@/lib/advisory-locks';
+import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
@@ -109,8 +109,7 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
             'SELECT GET_LOCK(?, 0) AS acquired',
             [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
         );
-        const acquired = lockRows[0]?.acquired;
-        if (acquired !== 1 && acquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(lockRows[0]?.acquired)) {
             return { status: 'error', message: t('restoreInProgress') };
         }
         semanticBackfillLockHeld = true;

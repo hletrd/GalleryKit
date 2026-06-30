@@ -26,7 +26,7 @@ import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SI
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
-import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL } from "@/lib/advisory-locks";
+import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
@@ -205,7 +205,7 @@ export async function dumpDatabase() {
             [LOCK_DB_RESTORE],
         );
         const acquired = lockRows[0]?.acquired;
-        if (acquired !== 1 && acquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(acquired)) {
             return { success: false as const, error: t('restoreInProgress') };
         }
         dbRestoreLockHeld = true;
@@ -390,7 +390,7 @@ export async function restoreDatabase(formData: FormData) {
             [LOCK_DB_RESTORE]
         );
         const acquired = lockRows[0]?.acquired;
-        if (acquired !== 1 && acquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(acquired)) {
             return { success: false, error: t('restoreInProgress') };
         }
         dbRestoreLockHeld = true;
@@ -413,7 +413,7 @@ export async function restoreDatabase(formData: FormData) {
             [LOCK_COLOR_PIPELINE_BACKFILL]
         );
         const backfillLockAcquired = backfillLockRows[0]?.acquired;
-        if (backfillLockAcquired !== 1 && backfillLockAcquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(backfillLockAcquired)) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (backfill-lock early-return) failed:', err);
             });
@@ -429,7 +429,7 @@ export async function restoreDatabase(formData: FormData) {
             [LOCK_SEMANTIC_EMBEDDING_BACKFILL]
         );
         const semanticBackfillLockAcquired = semanticBackfillLockRows[0]?.acquired;
-        if (semanticBackfillLockAcquired !== 1 && semanticBackfillLockAcquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(semanticBackfillLockAcquired)) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
                 console.debug('RELEASE_LOCK (semantic-backfill early-return color-lock) failed:', err);
             });

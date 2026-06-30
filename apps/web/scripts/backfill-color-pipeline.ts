@@ -49,7 +49,7 @@ import sharp from 'sharp';
 import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
-import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
+import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
 import { parseBoundedPositiveInteger } from '../src/lib/env';
 import { getGalleryConfig } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
@@ -309,11 +309,11 @@ async function main() {
     const lockConn = await connection.getConnection();
     let lockAcquired = false;
     try {
-        const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number })[]>(
+        const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: unknown })[]>(
             'SELECT GET_LOCK(?, 10) AS acquired',
             [LOCK_COLOR_PIPELINE_BACKFILL],
         );
-        lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
+        lockAcquired = isAdvisoryLockAcquired(lockRows[0]?.acquired);
     } catch (err) {
         console.error('[backfill-color-pipeline] Advisory lock query failed:', err);
         lockConn.release();

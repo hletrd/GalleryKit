@@ -33,7 +33,7 @@ import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
-import { LOCK_TOPIC_ROUTE_SEGMENTS } from '@/lib/advisory-locks';
+import { LOCK_TOPIC_ROUTE_SEGMENTS, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     // C3L-CR-02: combined single query with UNION instead of two sequential
@@ -68,7 +68,7 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
             "SELECT GET_LOCK(?, 5) AS acquired",
             [LOCK_TOPIC_ROUTE_SEGMENTS]
         );
-        lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
+        lockAcquired = isAdvisoryLockAcquired(lockRows[0]?.acquired);
         if (!lockAcquired) {
             throw new TopicRouteLockTimeoutError();
         }

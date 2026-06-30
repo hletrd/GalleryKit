@@ -45,3 +45,12 @@ export const LOCK_COLOR_PIPELINE_BACKFILL = 'gallerykit_color_pipeline_backfill'
 
 /** Lock serializes CLIP embedding backfill operations against database restore. */
 export const LOCK_SEMANTIC_EMBEDDING_BACKFILL = 'gallerykit_semantic_embedding_backfill';
+
+/**
+ * mysql2 can surface MySQL integer scalar results as number, bigint, or string
+ * depending on connection flags and server metadata. Treat only the exact
+ * advisory-lock success value as acquired.
+ */
+export function isAdvisoryLockAcquired(value: unknown): boolean {
+    return value === 1 || value === BigInt(1) || value === '1';
+}

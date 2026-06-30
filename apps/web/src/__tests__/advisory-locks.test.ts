@@ -26,6 +26,7 @@ import {
     LOCK_COLOR_PIPELINE_BACKFILL,
     LOCK_SEMANTIC_EMBEDDING_BACKFILL,
     getImageProcessingLockName,
+    isAdvisoryLockAcquired,
 } from '@/lib/advisory-locks';
 
 describe('advisory lock name contract', () => {
@@ -67,5 +68,15 @@ describe('advisory lock name contract', () => {
             LOCK_SEMANTIC_EMBEDDING_BACKFILL,
         ];
         expect(globals).not.toContain(perImage);
+    });
+
+    it('normalizes MySQL advisory lock acquired values across driver scalar shapes', () => {
+        expect(isAdvisoryLockAcquired(1)).toBe(true);
+        expect(isAdvisoryLockAcquired(BigInt(1))).toBe(true);
+        expect(isAdvisoryLockAcquired('1')).toBe(true);
+        expect(isAdvisoryLockAcquired(0)).toBe(false);
+        expect(isAdvisoryLockAcquired(BigInt(0))).toBe(false);
+        expect(isAdvisoryLockAcquired('0')).toBe(false);
+        expect(isAdvisoryLockAcquired(null)).toBe(false);
     });
 });

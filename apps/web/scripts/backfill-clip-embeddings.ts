@@ -74,7 +74,7 @@ import { embedImageStub } from '../src/lib/clip-inference';
 import { embedImageReal } from '../src/lib/clip-model';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
-import { LOCK_SEMANTIC_EMBEDDING_BACKFILL } from '../src/lib/advisory-locks';
+import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
 
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 2;
@@ -103,8 +103,7 @@ async function main(): Promise<number> {
             'SELECT GET_LOCK(?, 0) AS acquired',
             [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
         );
-        const acquired = lockRows[0]?.acquired;
-        if (acquired !== 1 && acquired !== BigInt(1)) {
+        if (!isAdvisoryLockAcquired(lockRows[0]?.acquired)) {
             console.error('[backfill-clip-embeddings] Another semantic embedding backfill or database restore is active; retry later.');
             return 1;
         }

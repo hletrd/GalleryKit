@@ -1,6 +1,6 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { connection } from '@/db';
-import { LOCK_UPLOAD_PROCESSING_CONTRACT } from '@/lib/advisory-locks';
+import { LOCK_UPLOAD_PROCESSING_CONTRACT, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 
 type UploadProcessingContractLock = {
     release: () => Promise<void>;
@@ -29,7 +29,7 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
             [LOCK_UPLOAD_PROCESSING_CONTRACT, timeoutSeconds],
         );
         const acquired = lockRows[0]?.acquired;
-        lockAcquired = acquired === 1 || acquired === BigInt(1);
+        lockAcquired = isAdvisoryLockAcquired(acquired);
         if (!lockAcquired) {
             // C2L2-07: log the failed acquisition at debug so an operator can
             // distinguish "another writer holds the lock" (acquired === 0)
