@@ -180,14 +180,24 @@ describe('loadMoreSmartCollectionImages (R4C5 COR-R4C5-01)', () => {
         expect(getImagesForSmartCollectionMock).toHaveBeenCalledWith(expect.anything(), 30, 60);
     });
 
-    it('rolls back the rate-limit claim and returns invalid for a private collection', async () => {
+    it('keeps the rate-limit claim and returns invalid for a private collection after lookup work', async () => {
         getSmartCollectionBySlugCachedMock.mockResolvedValue({ ...PUBLIC_COLLECTION, is_public: false });
 
         const result = await loadMoreSmartCollectionImages('street', 0, 30);
 
         expect(result).toEqual({ status: 'invalid', images: [], hasMore: false });
         expect(getImagesForSmartCollectionMock).not.toHaveBeenCalled();
-        expect(decrementRateLimitMock).toHaveBeenCalled();
+        expect(decrementRateLimitMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps the rate-limit claim and returns invalid for a missing collection after lookup work', async () => {
+        getSmartCollectionBySlugCachedMock.mockResolvedValue(null);
+
+        const result = await loadMoreSmartCollectionImages('missing', 0, 30);
+
+        expect(result).toEqual({ status: 'invalid', images: [], hasMore: false });
+        expect(getImagesForSmartCollectionMock).not.toHaveBeenCalled();
+        expect(decrementRateLimitMock).not.toHaveBeenCalled();
     });
 });
 

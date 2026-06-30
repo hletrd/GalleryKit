@@ -18,7 +18,7 @@
  *     -v .../data/models/clip:/app/data/models/clip:ro \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \
- *     sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production --force"
+ *     sh -c "npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
  *
  * CLIP_INFERENCE_CONCURRENCY defaults to 1 and is capped by lib/clip-model.ts.
  * Raise it only after measuring CPU and RSS headroom on the deploy host.
@@ -42,7 +42,9 @@
  * is the migration mechanism that upgrades every throwaway stub row to a real
  * embedding after the real-CLIP rollout.
  *
- * Idempotent: a second run at the same target version selects nothing.
+ * Idempotent: a second run at the same target version selects nothing. If the
+ * script logs that it reached SEMANTIC_SCAN_LIMIT, repeat the same command
+ * until it finishes without that message.
  *
  * Concurrency is capped at BATCH_CONCURRENCY=2 as specified in US-P51.
  * Operators can raise this once the real ONNX inference ships.

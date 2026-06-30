@@ -6,6 +6,7 @@ const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
 const remoteDeployScript = readFileSync(resolve(repoRoot, 'scripts/deploy-remote.sh'), 'utf8');
 const dockerfile = readFileSync(resolve(repoRoot, 'apps/web/Dockerfile'), 'utf8');
+const composeConfig = readFileSync(resolve(repoRoot, 'apps/web/docker-compose.yml'), 'utf8');
 const rootDockerignore = readFileSync(resolve(repoRoot, '.dockerignore'), 'utf8');
 const appDockerignore = readFileSync(resolve(repoRoot, 'apps/web/.dockerignore'), 'utf8');
 const deploymentDocs = [
@@ -18,7 +19,7 @@ const deploymentDocs = [
 
 describe('deploy script safety contract', () => {
     it('starts the stack before pruning Docker artifacts', () => {
-        const upIndex = deployScript.indexOf('docker compose -f apps/web/docker-compose.yml up -d --build');
+        const upIndex = deployScript.indexOf('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
         expect(upIndex).toBeGreaterThan(-1);
         for (const command of [
             'docker container prune -f',
@@ -50,6 +51,13 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).toContain('DEPLOY_USER');
         expect(remoteDeployScript).toContain('DEPLOY_PATH');
         expect(remoteDeployScript).not.toMatch(/ssh\s+[-\w\s]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
+    });
+
+    it('feeds Docker Compose the runtime env file and forwards build-time upload limits', () => {
+        expect(deployScript).toContain('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
+        expect(composeConfig).toContain('NEXT_UPLOAD_BODY_MAX_BYTES: ${NEXT_UPLOAD_BODY_MAX_BYTES:-}');
+        expect(dockerfile).toContain('ARG NEXT_UPLOAD_BODY_MAX_BYTES');
+        expect(dockerfile).toContain('ENV NEXT_UPLOAD_BODY_MAX_BYTES=${NEXT_UPLOAD_BODY_MAX_BYTES}');
     });
 
     it('packages immutable public assets while runtime public data stays mounted narrowly', () => {

@@ -65,9 +65,11 @@ FROM build-base AS builder
 ARG BASE_URL
 ARG IMAGE_BASE_URL
 ARG UPLOAD_MAX_TOTAL_BYTES
+ARG NEXT_UPLOAD_BODY_MAX_BYTES
 ENV BASE_URL=${BASE_URL}
 ENV IMAGE_BASE_URL=${IMAGE_BASE_URL}
 ENV UPLOAD_MAX_TOTAL_BYTES=${UPLOAD_MAX_TOTAL_BYTES}
+ENV NEXT_UPLOAD_BODY_MAX_BYTES=${NEXT_UPLOAD_BODY_MAX_BYTES}
 WORKDIR /app
 # Full node_modules for build step (includes devDependencies needed by next build)
 COPY --from=deps /app/node_modules ./node_modules

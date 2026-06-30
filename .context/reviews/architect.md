@@ -1,161 +1,170 @@
-# Architect Review - Cycle 19
+# Architect Review - Cycle 20
 
-Repo: `/Users/hletrd/flash-shared/gallery`
-Scope: repository-wide architectural/design risk review: module boundaries, coupling, layering, deployment/runtime topology, data model evolution, migration/reconcile contracts, cache/queue/backfill designs, and frontend architecture.
-Mode: read-only source review except for writing this report artifact. No source files modified.
-
-## Inventory Reviewed
-
-- Governing docs and prior context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `.context/plans/archive/129-cycle19-fixes.md`, `.context/plans/archive/378-deferred-cycle19.md`, current `.context/reviews/*` inventory.
-- Deployment/runtime topology: `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/next.config.ts`, `apps/web/src/instrumentation.ts`, `apps/web/src/db/index.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/restore-maintenance.ts`.
-- Data model and migrations: `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`, `apps/web/src/__tests__/migration-journal*.test.ts`.
-- Data/cache/revalidation: `apps/web/src/lib/data.ts`, `apps/web/src/lib/revalidation.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/settings-hash.ts`, public/admin pages under `apps/web/src/app/[locale]/`.
-- Upload, queue, backfill, and storage boundaries: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/lib/storage/*`, `apps/web/src/__tests__/storage-quarantine.test.ts`.
-- Frontend architecture and client/server boundaries: `apps/web/src/components/**`, route pages/layouts under `apps/web/src/app/[locale]/`, `apps/web/src/__tests__/client-server-only-boundary.test.ts`, touch target and i18n guard tests.
-- Security/layering guardrails relevant to architecture: admin API auth lint, action-origin lint, public route rate-limit lint, privacy field guard tests, search enrichment guards, storage quarantine guard.
+Review role: architect  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `24c82c71` on `master`  
+Implementation files edited: none
 
 ## Summary
 
-Findings: 3 total.
+- Confirmed issues: 2
+- Likely issues: 1
+- Risks needing validation: 1
+- Severity mix: 0 critical, 0 high, 4 medium, 0 low
 
-- High: 1
-- Medium: 2
-- Low: 0
+## Inventory Reviewed
 
-The strongest architectural guardrails remain migration/reconcile tripwires, privacy field separation, client/server import scanning, storage quarantine, public route rate-limit linting, and dynamic-public-page freshness policy. The remaining risks are concentrated in ownership boundaries that are still prose-or-convention enforced: two upload adapters own the same ingest transaction, build-time and runtime environment sources can diverge, and several correctness preconditions depend on a single Node process without a runtime invariant.
+Read first: `AGENTS.md` and `CLAUDE.md`.
 
-## Findings
+Architecture-relevant inventory reviewed:
 
-### 1. Browser upload and Lightroom upload still duplicate one ingest contract
+- Routing and boundary layer: 76 files under `apps/web/src/app`, including public pages, admin actions, API routes, localized routing, and server action boundaries.
+- Domain/service layer: 97 files under `apps/web/src/lib`, including ingest, image processing, queueing, upload limits, settings, privacy, analytics, auth, rate limiting, and data access.
+- UI layer and navigation behavior: 57 files under `apps/web/src/components`.
+- Schema and migration contracts: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`.
+- Build/runtime/deploy contracts: `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/.env.local.example`, `apps/web/nginx/default.conf`.
+- Verification assets: 278 test/e2e files under `apps/web/src/__tests__` and `apps/web/e2e`.
 
-Severity: High
-Confidence: High
+Validation evidence:
 
-Files/regions:
+- Static inventory and grep sweeps covered route/action/config env reads, ingest/queue ownership, render-time analytics writes, process-local state, migration/reconcile logic, privacy select guards, API auth/rate-limit wrappers, storage/topology notes, and TODO/FIXME markers.
+- `npm test --workspace=apps/web -- migration-journal.test.ts migration-journal-monotonicity.test.ts migrate-reconcile-coverage.test.ts privacy-fields.test.ts search-route-privacy.test.ts deploy-script-contract.test.ts next-config.test.ts`: 7 files, 95 tests passed.
+- Full lint/typecheck/build/e2e were not run because this was a read-only architecture review artifact, not an implementation change.
 
-- `apps/web/src/app/actions/images.ts:114-190` validates browser-upload auth/input, acquires the upload contract lock, and snapshots gallery processing settings.
-- `apps/web/src/app/actions/images.ts:244-292` performs browser-upload disk and topic preconditions after the quota claim.
-- `apps/web/src/app/actions/images.ts:350-461` saves the original, applies HDR/GPS/restore gates, extracts EXIF/color fields, and builds the `images` insert value.
-- `apps/web/src/app/actions/images.ts:499-531` builds the browser queue job.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:15-18` says the Lightroom route reuses upload infrastructure.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:225-275` independently verifies topic, acquires the same lock, and snapshots settings.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:307-452` independently saves the original, applies HDR/GPS/restore gates, extracts EXIF/color fields, and builds the `images` insert value.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:479-516` independently builds the Lightroom queue job.
+## Confirmed Issues
 
-Problem:
+### ARCH20-01 - One upload contract has multiple implementation owners
 
-The route-level comment says the Lightroom endpoint reuses upload infrastructure, but the actual orchestration has two owners. Lower-level helpers are shared, yet the state transition itself is duplicated: upload quota settlement, filename policy, disk precheck, topic validation, settings snapshot, HDR rejection, GPS stripping, restore-maintenance cleanup, `images` insert shape, processing-settings persistence, queue job shape, audit, and revalidation.
+Severity: Medium  
+Confidence: High  
+Category: Confirmed architecture/layering issue
+Status: Open
 
-The code comments show repeated drift repairs in the Lightroom path: filename parity, upload lock, disk precheck, RAW message parity, HDR gate, GPS original stripping, color/HDR column persistence, caption inputs, and the six non-quality processing settings. That is a strong signal that this is not healthy adapter-specific variation; it is one ingest contract with two hand-maintained implementations.
+Evidence:
 
-Failure scenario:
+- Browser upload owns the primary ingest lifecycle in `apps/web/src/app/actions/images.ts:114-190`, `apps/web/src/app/actions/images.ts:244-292`, `apps/web/src/app/actions/images.ts:350-461`, and `apps/web/src/app/actions/images.ts:499-531`.
+- The Lightroom upload route declares it reuses browser upload infrastructure in `apps/web/src/app/api/admin/lr/upload/route.ts:15-18`, but independently implements the same lifecycle in `apps/web/src/app/api/admin/lr/upload/route.ts:225-275`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-452`, and `apps/web/src/app/api/admin/lr/upload/route.ts:479-516`.
+- Retry processing constructs another queue job manually in `apps/web/src/app/actions/images.ts:1227-1280`.
+- `ProcessingSettingsSnapshot` is centralized in `apps/web/src/lib/image-queue.ts:92-120`, but each adapter still has to remember which fields to forward.
+- Tests record previous contract drift in this exact area: upload settings wiring in `apps/web/src/__tests__/image-queue-settings-wiring.test.ts:1-21`, and Lightroom source-contract parity for HDR/GPS in `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15` and `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:69-76`.
 
-A future pipeline change adds a new upload-time field, for example `source_profile_hash`, `rendering_intent`, or another byte-impacting processing setting. The implementer updates `uploadImages()` and its browser tests, but misses `/api/admin/lr/upload` because it is a separate API route with its own cleanup and response flow. Browser uploads then persist complete metadata and enqueue correct derivatives, while Lightroom publishes silently omit the field or enqueue stale settings. The defect only appears after external uploads: color audit rows differ by ingest client, fresh LR uploads require backfill repair, or a new privacy/processing invariant is bypassed on the integration path.
+Architectural impact:
 
-Fix:
+The upload boundary looks layered, but the domain operation is owned by route/action adapters. The result is a "parallel controller implementation" architecture: every new ingest invariant must be patched into browser upload, Lightroom upload, retry, and tests. The repo history already shows this causes parity fixes to arrive as source-contract tests rather than as one shared behavior.
 
-Extract a server-only ingest service, for example `apps/web/src/lib/upload-ingest.ts`, that owns the shared transaction:
+Concrete failure scenario:
 
-- Input: actor id, file-like object, topic, optional title/description/tags, sanitized user filename, gallery config snapshot, and adapter-specific response hooks.
-- Responsibilities: save original, enforce HDR/GPS/restore gates, extract EXIF/color fields, build the `images` insert value, persist `processing_settings_json`, construct the queue job, coordinate quota settlement, and clean up on pre-insert failure.
-- Browser action and Lightroom route should become thin adapters that validate transport-specific input and map shared results to UI/API responses.
-- Add source/fixture tests that assert both adapters call the shared insert builder and shared queue-job builder, so future columns/settings fail in one place.
+An admin-only processing setting is added to `GalleryConfig` and used by the queue worker. The browser action forwards it, but the Lightroom route misses it. External client uploads then keep stale/default processing behavior while browser uploads honor the new setting. Because both paths persist normal rows and enqueue normal jobs, the difference appears only after photographers compare output or after a later backfill rewrites derivatives differently.
 
-### 2. Docker deployment can split build-time Next config from runtime `.env.local`
+Suggested fix:
 
-Severity: Medium
-Confidence: High
+Create a single ingest application service with stable DTOs for `UploadActor`, `UploadSource`, `UploadFile`, `UploadMetadata`, and `UploadPolicySnapshot`. It should return a domain result consumed by browser and API adapters. Route/action files should not construct `images` insert objects or `ImageProcessingJob` objects directly. Add an exhaustiveness test that fails when `ProcessingSettingsSnapshot` or the image insert contract changes without updating the single ingest builder.
 
-Files/regions:
+### ARCH20-02 - Docker deploy can build with different environment than the runtime container
 
-- `apps/web/docker-compose.yml:7-10` forwards build args only from the shell/Compose environment.
-- `apps/web/docker-compose.yml:17-21` loads `.env.local` only as runtime container env.
-- `apps/web/deploy.sh:15-31` checks that `.env.local` exists, then runs `docker compose -f apps/web/docker-compose.yml up -d --build` without `--env-file` or sourcing the file.
-- `apps/web/Dockerfile:65-70` turns only `BASE_URL`, `IMAGE_BASE_URL`, and `UPLOAD_MAX_TOTAL_BYTES` build args into build-time env.
-- `apps/web/next.config.ts:28` reads `IMAGE_BASE_URL` while loading Next config.
-- `apps/web/next.config.ts:92-105` bakes server-action body and image remote-pattern config into the build.
-- `apps/web/src/lib/upload-limits.ts:19-33` reads `UPLOAD_MAX_TOTAL_BYTES` and `NEXT_UPLOAD_BODY_MAX_BYTES`; the latter affects `NEXT_SERVER_ACTION_BODY_SIZE_LIMIT`, which `next.config.ts` imports.
-- `apps/web/.env.local.example:9-16` presents `BASE_URL` and `IMAGE_BASE_URL` as `.env.local` settings and notes `IMAGE_BASE_URL` must be set before build.
-- `apps/web/.env.local.example:41-47` documents `UPLOAD_MAX_TOTAL_BYTES` and `NEXT_UPLOAD_BODY_MAX_BYTES` in `.env.local`.
-- `README.md:148-149` says build-time values must be exported before `docker compose ... --build` and that compose forwards them when present in the shell.
+Severity: Medium  
+Confidence: High  
+Category: Confirmed deploy architecture issue
+Status: Open
 
-Problem:
+Evidence:
 
-The operational path has two environment channels: `.env.local` for runtime and shell variables for Docker build args. The deploy helper validates `.env.local`, but does not pass it to Compose as the build env source. An operator can follow the checked-in example file, set public URL/CDN/upload values in `.env.local`, and still build with empty or default build-time values unless those variables were also exported in the shell that invoked deploy.
+- Compose build args are read from Compose interpolation environment only: `BASE_URL`, `IMAGE_BASE_URL`, and `UPLOAD_MAX_TOTAL_BYTES` in `apps/web/docker-compose.yml:4-10`.
+- The runtime container separately receives `apps/web/.env.local` through `env_file` in `apps/web/docker-compose.yml:17-21`.
+- The deploy script validates that `apps/web/.env.local` exists, then runs `docker compose -f apps/web/docker-compose.yml up -d --build` without `--env-file` and without sourcing that file in `apps/web/deploy.sh:15-31`.
+- The Docker build context deliberately excludes env files with `**/.env*` in `.dockerignore:14`, so `apps/web/.env.local` is not available to the image build via `COPY . .`.
+- The Docker build stage only promotes `BASE_URL`, `IMAGE_BASE_URL`, and `UPLOAD_MAX_TOTAL_BYTES` into the build environment in `apps/web/Dockerfile:64-70`.
+- Build-time Next config reads `IMAGE_BASE_URL` for remote image patterns and CSP input in `apps/web/next.config.ts:28` and `apps/web/next.config.ts:51-105`.
+- Build-time server-action body size comes from `NEXT_UPLOAD_BODY_MAX_BYTES` through `apps/web/src/lib/upload-limits.ts:19-33`, but `NEXT_UPLOAD_BODY_MAX_BYTES` is documented only in `.env.local` in `apps/web/.env.local.example:41-47` and is not a Docker build arg.
 
-This is a build/runtime split-brain. Runtime server code sees `.env.local`, while `next.config.ts` and build guards see only Docker build args. `NEXT_UPLOAD_BODY_MAX_BYTES` is also documented as a build-affecting `.env.local` value but is not forwarded as a Docker build arg at all.
+Architectural impact:
 
-Failure scenario:
+There are two authoritative environment surfaces: the deploy/runtime `.env.local` contract and the Compose shell interpolation/build-arg contract. Operators are told to configure `.env.local`, but several settings that shape the built Next.js app are not reliably loaded from that file at image build time.
 
-An operator sets `IMAGE_BASE_URL=https://cdn.example.com/gallery` only in `apps/web/.env.local`, which the service already consumes at runtime. Runtime URL helpers can emit CDN URLs, but the Docker build ran with `IMAGE_BASE_URL=''`, so `next.config.ts` creates no remote image pattern. Any path that uses Next image optimization or future image config derived from that value can reject or mishandle production CDN URLs even though the runtime env appears correct.
+Concrete failure scenario:
 
-A second variant: the operator raises `NEXT_UPLOAD_BODY_MAX_BYTES` in `.env.local` to match a customized reverse proxy/restore size. Runtime checks see the env, but the Next server-action body limit was baked at the default during build because Dockerfile never forwards that variable. Large restore or upload requests then fail at the framework parser before the app-level checks and localized errors run.
+An operator sets `IMAGE_BASE_URL=https://cdn.example.com` and `NEXT_UPLOAD_BODY_MAX_BYTES=536870912` in `apps/web/.env.local`, then runs the documented deploy. The container starts with those runtime values, but the image may have been built without the CDN host in `images.remotePatterns` and without the larger server-action body limit. Result: CDN-hosted uploaded images fail Next image validation or large restores/uploads fail at the framework parser despite runtime config suggesting they should pass.
 
-Fix:
+Suggested fix:
 
-Make build and runtime use one authoritative env source:
+Make one deploy environment source authoritative. Options:
 
-- Prefer `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build`, or source a whitelisted subset from `.env.local` before invoking Compose.
-- Add a Docker build arg and builder `ENV` for `NEXT_UPLOAD_BODY_MAX_BYTES`, or make it explicitly runtime-only by removing it from build-time Next config.
-- Add a deploy-contract test that scans `next.config.ts`, `scripts/ensure-site-config.mjs`, and `src/lib/upload-limits.ts` for build-time env reads and asserts each one is forwarded from the same env source.
-- Update README/CLAUDE wording so operators do not need a second shell-export step outside the shipped deploy command.
+- Run Compose with `--env-file apps/web/.env.local` and document that build-time-public settings must be there.
+- Add every build-time setting used by `next.config.ts`, including `NEXT_UPLOAD_BODY_MAX_BYTES`, to `docker-compose.yml` build args and `Dockerfile` `ARG`/`ENV`.
+- Add a deploy contract test or script check that compares `.env.local` keys consumed at build time with Compose/Docker build args, failing when a new build-time env is documented but not wired.
 
-### 3. Single-process coordination is documented but not enforced by a runtime invariant
+## Likely Issues
 
-Severity: Medium
-Confidence: High
+### ARCH20-03 - Analytics side effects are coupled to page rendering instead of committed views
 
-Files/regions:
+Severity: Medium  
+Confidence: Medium  
+Category: Likely issue needing runtime validation
+Status: Open
 
-- `CLAUDE.md:227-230` documents the shipped single web-instance/single-writer topology and process-local restore flags, upload quotas, queue state, backfill status, rate-limit fast paths, and shared-group view buffer.
-- `CLAUDE.md:390-397` documents advisory locks for restore, upload-processing contract changes, per-image processing, backfill, and their MySQL-server-wide lock namespace.
-- `apps/web/src/lib/restore-maintenance.ts:1-22` stores restore-maintenance state in `globalThis`.
-- `apps/web/src/lib/upload-tracker-state.ts:7-20` stores upload quota claims in a `globalThis` Map.
-- `apps/web/src/lib/upload-tracker-state.ts:70-78` decides whether active upload claims exist by scanning only that local Map.
-- `apps/web/src/app/actions/settings.ts:68-79` uses that local active-upload check before acquiring the upload-processing contract lock.
-- `apps/web/src/lib/image-queue.ts:76-90` defines process-local queue/bootstrap state and `QUEUE_CONCURRENCY`.
-- `apps/web/src/lib/admin-backfill-runner.ts:144-250` stores admin backfill status in `globalThis`.
-- `apps/web/src/lib/rate-limit.ts:77-121` defines in-memory OG/share/search/admin-token/login fast-path buckets.
-- `apps/web/src/app/actions/public.ts:46-63` and `apps/web/src/app/actions/public.ts:335-348` define additional process-local public load-more and view-record limiter buckets.
-- `apps/web/src/lib/data.ts:1-38` defines the process-local shared-group view-count buffer and retry map.
-- `apps/web/src/instrumentation.ts:1-7` bootstraps the image queue once per Node process, and `apps/web/src/instrumentation.ts:18-65` drains process-local queue/buffer state on process signal.
+Evidence:
 
-Problem:
+- Photo page rendering records a photo view in `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156`.
+- Topic page rendering records a topic view in `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164`.
+- Shared-group rendering records a group view in `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127-132`.
+- The durable insert functions consume the per-IP view-record limiter and write analytics rows in `apps/web/src/app/actions/public.ts:335-348`, `apps/web/src/app/actions/public.ts:371-391`, `apps/web/src/app/actions/public.ts:398-421`, and `apps/web/src/app/actions/public.ts:429-456`.
+- The photo UI actively prefetches adjacent photo pages through idle `router.prefetch(...)` in `apps/web/src/components/photo-viewer.tsx:238-264`.
+- Navigation hover also prefetches photo pages in `apps/web/src/components/photo-navigation.tsx:220-242`.
+- Hidden adjacent-photo links with `prefetch={true}` are rendered in `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:284-292`.
 
-The docs correctly state that the product is single-process, and the current Compose service shape makes ordinary `docker compose up` single-instance. But the invariant is not encoded in the app. Several correctness checks assume "the process that checks is the process that owns the state." Advisory locks protect some critical sections, but they do not make the surrounding preconditions shared.
+Architectural impact:
 
-The upload settings path is the sharpest example. `updateGallerySettings()` checks `hasActiveUploadClaims()` before changing `image_sizes` or `strip_gps_on_upload`, then acquires the DB advisory lock. In a second web process, an upload claim held by process A is invisible to process B. The advisory lock serializes writers that acquire it, but it cannot see the local upload-tracker precondition that was already evaluated in another process.
+Analytics is a domain side effect, but it is currently attached to render evaluation. That boundary is fragile in App Router because render evaluation can happen for navigation preparation, cache fill, RSC payload generation, or bot/access probes that are not equivalent to a user-visible view.
 
-Failure scenario:
+Concrete failure scenario:
 
-A maintainer starts a second GalleryKit web process during a blue/green test, an emergency manual `node server.js`, or a future container/orchestrator change. A large upload enters process A and claims quota in A's `globalThis` upload tracker. An admin settings request lands on process B; B sees no active local claims, acquires the upload-processing lock, and changes `strip_gps_on_upload` or `image_sizes` while process A is mid-upload. The first committed image can then race the setting that was meant to be locked, public rate-limit budgets are multiplied per process, and in-app backfill status becomes misleading because only the process that started it reports `running`.
+Opening one photo causes adjacent routes to be prefetched. If the current Next.js runtime evaluates those server components, rows are inserted for photos the user never opened. The same path spends the in-memory view-record budget, so aggressive prefetching can also suppress later real view records from the same IP for up to a minute.
 
-Fix:
+Suggested fix:
 
-Choose and enforce one topology direction:
+Move view recording to a client-side committed-view boundary or to a tiny public analytics route called from a visibility-aware client effect. If server-side recording remains, make prefetch detection an explicit guard before rate-limit increments and DB writes, backed by a regression that proves prefetching a route does not mutate analytics tables.
 
-- If single-process remains the product contract, add a startup DB lease/instance guard keyed by DB name and app identity. A second live web process for the same DB should fail loudly before queue bootstrap and request handling. Keep the current `container_name`/host-network shape as deployment friction, but do not rely on Compose shape as the only invariant.
-- If multi-process is a roadmap goal, move upload claims, restore maintenance, rate-limit buckets, queue ownership, shared-group view buffers, and admin backfill status into durable/shared storage. The existing MySQL advisory locks can remain, but their preconditions need shared state.
-- Add a topology contract test/startup assertion so accidental scale-out fails before traffic reaches these process-local assumptions.
+## Risks Needing Validation
 
-## Non-Finding Coverage Notes
+### ARCH20-RISK-01 - Single-process topology is documented but not runtime-enforced
 
-- Migration/reconcile contracts are unusually well guarded. `CLAUDE.md:416-438` documents the non-monotonic Drizzle journal hazard and the runbook; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:76-103` checks table/column mirror coverage, `:124-173` checks index mirrors, and `:190-244` pins known DROP/definition convergence cases. I did not find a current architecture issue beyond the normal "source tripwire, not full information_schema diff" limitation the test itself documents.
-- Privacy field layering is guarded in both code and tests. `apps/web/src/lib/data.ts:251-327` defines the admin field set, `:368-408` derives public fields by omission, `:459-489` carries compile-time sensitive-key guards, and `apps/web/src/__tests__/privacy-fields.test.ts:47-93` asserts the symmetric public/admin contract.
-- Storage abstraction remains quarantined as intended. `CLAUDE.md:142` says local filesystem is the only supported product storage; `apps/web/src/__tests__/storage-quarantine.test.ts:111-143` fails source imports outside `lib/storage`. I did not count the dormant storage module as a finding because there is now a CI guard against accidental wiring.
-- Client/server frontend boundaries are actively scanned. Client components use shared/client-safe config imports or type-only data imports, while server components own DB-backed data fetches. `apps/web/src/__tests__/client-server-only-boundary.test.ts:12-47` documents the closure scan and `mysql2` server-only detection. Spot checks of component/page imports found no value import of `@/lib/data` or `@/db` from `'use client'` modules.
-- Public freshness/caching is intentional. `CLAUDE.md:401-414` documents React `cache()` use, `revalidate = 0` for dynamic gallery/photo/share surfaces, and the service-worker offline-only HTML exception. `apps/web/src/lib/revalidation.ts:59-65` centralizes full-tree invalidation through layout revalidation.
-- Search and public API boundaries have dedicated lint/test surfaces. The grep sweep confirmed mutating public routes/actions are either rate-limited or explicitly exempted, and admin API routes use `withAdminAuth`.
+Severity: Medium  
+Confidence: High that the coupling exists; validation needed before changing topology  
+Category: Architecture risk
+Status: Open
 
-## Final Missed-Issue Sweep
+Evidence:
 
-Final sweep covered:
+- The shipped Compose file runs one `gallerykit-web` container with host networking in `apps/web/docker-compose.yml:3-21`, but the code has several process-local coordination points.
+- Restore maintenance is a `globalThis` flag in `apps/web/src/lib/restore-maintenance.ts:1-56`.
+- Upload quota and active-upload checks are a `globalThis` `Map` in `apps/web/src/lib/upload-tracker-state.ts:7-20` and `apps/web/src/lib/upload-tracker-state.ts:70-78`; settings changes consult this local state in `apps/web/src/app/actions/settings.ts:68-79`.
+- Admin backfill status is a `globalThis` singleton in `apps/web/src/lib/admin-backfill-runner.ts:144-250`.
+- Public share/search/OG and view record limiters include in-memory maps in `apps/web/src/lib/rate-limit.ts:77-121` and `apps/web/src/app/actions/public.ts:46-63`, `apps/web/src/app/actions/public.ts:330-348`.
+- Shared-group view count buffering is module-local in `apps/web/src/lib/data.ts:13-41`.
+- Queue bootstrap and shutdown draining are process-local lifecycle hooks in `apps/web/src/instrumentation.ts:1-89`.
 
-- Module boundaries: server/client import graph, `@/lib/storage` quarantine, data-layer privacy field sets, search enrichment select sharing.
-- Coupling/layering: upload adapters, data access, gallery config, revalidation, route/action ownership.
-- Deployment/runtime topology: Compose, Dockerfile, deploy helper, build args, env files, instrumentation startup/shutdown, process-local state.
-- Data model evolution: Drizzle schema, migration journal, reconcile mirror tests, privacy/admin-only-column checklist.
-- Cache/queue/backfill: React `cache()`, static derivative cache policy, service-worker notes, image PQueue bootstrap, admin backfill runner, sidecar backfill contracts, shared view-count buffer.
-- Frontend architecture: route dynamic policy, client-safe shared config imports, client/server closure tests, admin/public route split.
+Why this is a risk, not a confirmed production bug:
 
-No additional reportable architectural/design issues were found beyond the three findings above. No source files were modified.
+The documented deployment appears to run a single web process/container, so these local coordination mechanisms are consistent with the current topology. The risk is that nothing in startup appears to assert that topology. A future scale-out, PM2 cluster, Docker replica, or second app process would silently split restore flags, upload claims, rate-limit budgets, queue ownership, backfill status, and buffered counters across processes.
+
+Concrete failure scenario:
+
+Two app processes are started behind the same reverse proxy. Process A begins a DB restore and sets its local restore-maintenance flag. Process B does not know that flag is active and accepts an upload or runs queue work during the restore window. Similar split-brain behavior can let settings changes pass because `hasActiveUploadClaims()` only sees claims in one process.
+
+Suggested fix:
+
+Choose and enforce one architecture:
+
+- If single-process remains the product contract, add a startup guard such as a DB advisory lease or deployment assertion that fails fast when a second writer process starts. Document the invariant near `instrumentation.ts` and deploy scripts.
+- If multi-process support is desired, move these process-local coordination points to shared durable storage or DB advisory locks, and make the queue/backfill workers explicitly lease-owned.
+
+## Non-Findings And Architecture Guardrails Checked
+
+- Migration journal, hash, and reconcile-baseline tests passed, giving evidence that schema migration contracts are not currently drifting.
+- Privacy-sensitive read guards are covered by both type and fixture tests.
+- Source sweeps of admin API routes, public mutating routes, and server-action files did not surface an obvious wrapper/rate-limit ownership gap; the dedicated lint gates were not run in this turn.
+- The current Docker deploy preserves bind-mounted persistence and post-up prune ordering; this review did not find a data-loss issue in the prune policy.
+
+## Missed-Issues Sweep
+
+Final sweep covered routing boundaries, server actions, public API routes, auth/rate-limit source surfaces, ingest/queue/settings contracts, analytics side effects, schema/migration/reconcile, privacy redaction, image processing contracts, and deploy/runtime configuration. I did not intentionally skip any relevant files for the requested code quality, maintainability, layering, architecture, or cross-file contract review angles. Implementation files were not edited.

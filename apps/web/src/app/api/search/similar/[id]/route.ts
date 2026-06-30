@@ -57,6 +57,14 @@ const NO_STORE_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
 };
 
+function abortResponse() {
+    return NextResponse.json({ error: 'Request aborted' }, { status: 499, headers: NO_STORE_HEADERS });
+}
+
+function isRequestAborted(request: NextRequest) {
+    return request.signal?.aborted === true;
+}
+
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
@@ -71,12 +79,20 @@ export async function GET(
         return NextResponse.json({ error: 'Maintenance' }, { status: 503, headers: NO_STORE_HEADERS });
     }
 
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
     // Gate 3: validate the id param as a positive integer.
     // Next.js 15/16 passes route params as a Promise.
     const { id: idStr } = await params;
     const id = parseSafePositiveInteger(idStr);
     if (id === null) {
         return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+
+    if (isRequestAborted(request)) {
+        return abortResponse();
     }
 
     // Gate 4: rate-limit pre-increment (Pattern 2 — rollback on all subsequent
@@ -109,6 +125,10 @@ export async function GET(
         );
     }
 
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
     // Gate 6: load the target image's production embedding.
     let targetEmbedding: Float32Array;
     try {
@@ -137,6 +157,10 @@ export async function GET(
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
     // Step 7: scan up to SEMANTIC_SCAN_LIMIT most-recent production embeddings,
     // compute cosine vs target, exclude self, rank with topK.
     let rows: { imageId: number; embedding: string | null }[];
@@ -155,6 +179,10 @@ export async function GET(
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
+
     // AGG-C8-09 (run-6 cycle-8): this route is production-only (Gate 5 returns 503 for
     // any non-production mode), so every scanned vector AND the target are L2-normalized
     // (truncateAndNormalize). dotProduct === cosine for unit vectors but skips the two
@@ -171,6 +199,10 @@ export async function GET(
         .filter((m): m is { imageId: number; score: number } => m !== null);
 
     const results = topK(scored, SEMANTIC_TOP_K_DEFAULT, PRODUCTION_COSINE_THRESHOLD);
+
+    if (isRequestAborted(request)) {
+        return abortResponse();
+    }
 
     // Step 8: enrich results with image metadata using the same SELECT/JOIN
     // shape as the semantic route so result cards render consistently.

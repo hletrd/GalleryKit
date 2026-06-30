@@ -1,174 +1,199 @@
-# Cycle 19 Test-Engineer Review
+# Test-Engineer Review - Cycle 20
 
 Date: 2026-06-30 KST
-HEAD: `26f1a66d`
-Scope: current HEAD of `/Users/hletrd/flash-shared/gallery`
-Lane: test-engineer, cycle 19
+HEAD reviewed: `24c82c71` (`docs(reviews): 📝 add cycle 20 perf review`)
+Scope: repository-wide review of tests, lint scripts, build/type gates, invariants, fixtures, flaky/weak assertions, missing regression locks, TDD opportunities, gate blind spots, and source-contract test quality. No implementation files were modified.
 
-## Inventory Summary
+## Inventory
 
-Read the in-session `AGENTS.md` instructions and `CLAUDE.md`, then inventoried the repository before selecting findings.
+Required docs and context read first:
 
-- Source/test scale: 499 TS/TSX source files under `apps/web/src`; 262 Vitest files under `apps/web/src/__tests__`; 5 Playwright specs under `apps/web/e2e`.
-- Unit gate: `apps/web/vitest.config.ts` includes `src/__tests__/**/*.test.{ts,tsx}`, excludes `.next`, and uses a 15s timeout.
-- E2E gate: `apps/web/playwright.config.ts` runs Chromium single-worker; local runs start `scripts/run-e2e-server.mjs`, which runs init, e2e seed, build, then standalone server.
-- Custom gates inspected: `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, plus their fixture tests.
-- High-risk paths inspected: semantic/similar search, CLIP model queueing, bulk edit client/server flow, public timeline/on-this-day surfaces, Lightroom upload route, analytics/view-count paths, migration/reconcile tests, service worker/PWA, and Playwright smoke/visual specs.
+- `AGENTS.md`
+- `CLAUDE.md`
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `.context/reviews/run4-cycle20/*`
+- `plan/plan-311-run4-cycle20-fixes.md`
+- `plan/plan-312-run4-cycle20-deferred.md`
+- `.context/gate-logs/cycle-20/baseline.log`
+
+Test and gate surface inventoried:
+
+- Unit/integration: 264 Vitest files under `apps/web/src/__tests__`.
+- Browser E2E: 5 Playwright specs under `apps/web/e2e`.
+- Public API routes: 8 route handlers under `apps/web/src/app/api`.
+- Server actions: 13 files under `apps/web/src/app/actions`.
+- Non-API route handlers: 4 files (`uploads` GET/HEAD and feed GET routes).
+- Blocking gates: ESLint, api-auth scanner, action-origin scanner, public-route-rate-limit scanner, typecheck, build, Vitest, Playwright E2E.
+- Structural test patterns: source-contract tests, custom scanner fixtures, privacy `SENSITIVE_KEYS`, migration journal monotonicity, service-worker generated/template contracts, touch-target audit, deployment script contracts, and E2E admin/public/origin/nav specs.
 
 Validation performed:
 
-- Read-only inventory/search and line-number inspection.
-- Did not run full `lint`, `typecheck`, `build`, `npm test`, or Playwright. This is a review-only artifact; no source files were changed.
-- Unrelated worktree changes in other review files were observed during the pass. This report only edits `.context/reviews/test-engineer.md`.
+- `npm test --workspace=apps/web -- --run src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/clip-model-contract.test.ts src/__tests__/og-photo-fallback.test.ts src/__tests__/cycle-19-source-contracts.test.ts src/__tests__/seo-actions.test.ts`: passed, 6 files / 78 tests.
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+
+Full lint/typecheck/build/all-unit/E2E were not run during this review pass.
 
 ## Confirmed Findings
 
-### TE19-01. CLIP production inference queue is bounded but abort-insensitive and lacks a behavioral test
+### TE20-01 - CLIP queue abort/concurrency behavior is still source-contract tested, not behavior-tested
 
 Severity: Medium
 Confidence: High
+Status: Confirmed weak assertion
 
-Evidence:
+Exact file+region:
 
-- `apps/web/src/lib/clip-model.ts:53-71` defines bounded concurrency, max pending waiters, timeout, and the waiter array.
-- `apps/web/src/lib/clip-model.ts:94-127` queues waiters with a timeout but accepts no `AbortSignal`; queued waiters are removed only by timeout or slot release.
-- `apps/web/src/lib/clip-model.ts:194-202` exposes `embedTextReal(query)` with no cancellation parameter and wraps the model call in `withInferenceSlot`.
-- `apps/web/src/app/api/search/semantic/route.ts:249-253` checks `request.signal` only before calling `embedTextReal`, then awaits the encoder.
-- `apps/web/src/app/api/search/semantic/route.ts:263-265` checks abort again only after the encoder returns, before the DB scan.
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-39` source-checks queue bound/timeout strings but does not execute the queue.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:264-279` covers only an already-aborted request before charging; it does not cover abort while waiting for or running production CLIP inference.
+- `apps/web/src/lib/clip-model.ts:65-160` implements shared queue state, waiter removal, timeout rejection, abort listener cleanup, and slot release.
+- `apps/web/src/lib/clip-model.ts:228-236` passes `InferenceSlotOptions` through `embedTextReal`.
+- `apps/web/src/app/api/search/semantic/route.ts:247-260` passes `request.signal` to production text embedding and maps abort errors to 499.
+- `apps/web/src/__tests__/clip-model-contract.test.ts:32-50` only asserts source strings such as `ClipInferenceQueueAbortError`, `signal.addEventListener('abort'`, and `}), options)`.
 
-Failure scenario:
+Missing/weak test scenario:
 
-Production semantic search runs with `CLIP_INFERENCE_CONCURRENCY=1`. Several clients issue searches and disconnect after their requests enter the CLIP queue. The queue is bounded, so memory cannot grow indefinitely, but disconnected waiters remain until timeout or until a slot opens. If a slot opens first, the server still runs ONNX text inference for a request whose client is gone.
+No test drives actual queue behavior. A refactor can preserve the strings while breaking the invariant: aborted waiters may remain queued, timed-out waiters may still be woken by `inferenceWaiters.shift()?.resolve()`, `activeInferenceCount` may be decremented too early, or an aborted request may still reach `model(...)`.
 
-Fix:
+Suggested test/fix:
 
-Thread `request.signal` through `embedTextReal(query, { signal })` and `withInferenceSlot`. Remove queued waiters immediately on abort, reject with an abort-specific error, and re-check the signal after acquiring a slot but before model execution. Add a focused test with fake timers or injected queue hooks proving an aborted queued waiter is removed/rejected and never invokes the model.
+Extract a small queue helper or expose a test-only model/tokenizer injection seam. Add fake-timer tests that saturate `CLIP_INFERENCE_CONCURRENCY`, enqueue and abort a second request, assert the model callback is not invoked for that request, assert `CLIP_INFERENCE_MAX_PENDING` throws `ClipInferenceQueueFullError`, and advance timers past `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` to prove timed-out waiters are removed and never woken later.
 
 TDD opportunity:
 
-Write the aborting-waiter test first around a small exported/internal queue helper, then implement signal-aware slot acquisition. Keep the existing source contract as a fast guard, but make the behavior test authoritative.
+Write the aborting-waiter test first against a narrow queue helper, watch it fail against the current source-only coverage, then move the current implementation behind that helper without changing route semantics.
 
-### TE19-02. Bulk edit dialog state can survive a successful close; tests cover only the server action
+### TE20-02 - Recent dialog/swipe/accessibility fixes are locked by source text instead of runtime UI tests
 
 Severity: Medium
 Confidence: High
+Status: Confirmed coverage gap
 
-Evidence:
+Exact file+region:
 
-- `apps/web/src/components/bulk-edit-dialog.tsx:81-90` stores field modes, values, tag lists, and `applyAltSuggested` in component state.
-- `apps/web/src/components/bulk-edit-dialog.tsx:92-103` defines `resetState()`.
-- `apps/web/src/components/bulk-edit-dialog.tsx:105-109` calls `resetState()` only through `handleClose(false)`, i.e. when the dialog itself receives a close event.
-- `apps/web/src/components/bulk-edit-dialog.tsx:155-160` awaits `onSubmit(input)` but does not reset local state after a successful submit.
-- `apps/web/src/components/image-manager.tsx:225-232` closes the dialog externally after a successful server action via `setIsBulkEditDialogOpen(false)`.
-- `apps/web/src/components/image-manager.tsx:594-600` passes the parent open state and `handleBulkEdit` into `BulkEditDialog`.
-- Existing bulk coverage is concentrated on `bulkUpdateImages` server behavior, e.g. auth/validation and diff applier tests in `apps/web/src/__tests__/bulk-update-images.test.ts:175-360`. Repo search found no component or E2E test that opens the bulk edit dialog, submits, reopens it, and asserts the form reset.
+- `apps/web/src/components/bulk-edit-dialog.tsx:81-103` stores and resets stateful draft modes/values.
+- `apps/web/src/components/bulk-edit-dialog.tsx:155-160` resets after successful submit.
+- `apps/web/src/components/photo-navigation.tsx:47-48` reads `swipeTargetRef.current`; `apps/web/src/components/photo-navigation.tsx:134-142` binds/removes touch listeners on that element.
+- `apps/web/src/components/photo-viewer.tsx:689-697` wires the media container ref into `PhotoNavigation`.
+- `apps/web/src/components/image-zoom.tsx:343-365` builds and renders the zoom accessible name; `apps/web/src/components/photo-viewer.tsx:554` and `apps/web/src/components/photo-viewer.tsx:724` pass the current photo identity into it.
+- `apps/web/src/__tests__/cycle-19-source-contracts.test.ts:27-54` checks these contracts by reading source text.
+- `apps/web/e2e/test-fixes.spec.ts:49-75` and `apps/web/e2e/public.spec.ts:61-83` cover adjacent UI paths but not these exact regressions.
 
-Failure scenario:
+Missing/weak test scenario:
 
-An admin bulk-edits selected photos with `titleMode = clear` or a destructive tag-removal set. The server action succeeds, the parent closes the dialog, and selection is cleared. Later the admin selects different photos and opens bulk edit again. Because the child state was not reset by the parent-driven close, the previous modes/values can still be selected and can be submitted unintentionally.
+The current tests do not render the dialog, dispatch real touch events, or inspect the browser accessibility tree. The source strings can remain while behavior regresses: a parent-driven close might preserve hidden destructive draft modes, a ref change might attach swipe handlers to the wrong element, or the zoom control might render as only "Zoom in" while `accessibleName` still appears in source.
 
-Fix:
+Suggested test/fix:
 
-Reset dialog state whenever `open` transitions to `false`, not only inside `handleClose`, or reset explicitly after `onSubmit` resolves successfully. Add a component-level regression test, or extract a pure `buildBulkUpdateInput` plus a small client test harness, covering submit-success close -> reopen -> defaults restored.
+Add Playwright coverage for the browser-native behaviors:
 
-TDD opportunity:
+- Open bulk edit, set a non-default mode, submit successfully, reopen, and assert defaults are restored.
+- On mobile, swipe over page chrome/metadata and assert the photo ID does not change; swipe over the media container and assert it does.
+- Open a seeded photo, focus the main zoom control, and assert its accessible name includes the photo identity plus zoom action.
 
-Start with a failing reopen test: render the dialog with selected IDs, choose `clear` for title, submit successfully, rerender with `open=false`, rerender with `open=true`, and assert all modes are `leave` and tag lists are empty.
-
-### TE19-03. Semantic-search rate-limit posture has contradictory docs and incomplete assertions
-
-Severity: Medium
-Confidence: High
-
-Evidence:
-
-- `apps/web/src/app/api/search/semantic/route.ts:12-16` says disabled mode returns before body reads or rate-limit charging.
-- The implementation charges before the DB-backed mode lookup at `apps/web/src/app/api/search/semantic/route.ts:172-183`, then returns disabled-mode 503 at `apps/web/src/app/api/search/semantic/route.ts:185-200`.
-- `apps/web/src/lib/rate-limit.ts:24-30` says semantic text search refunds only pre-work short-query rejections.
-- `apps/web/src/lib/rate-limit.ts:374-377` says rollback is used for exits before protected work and gives disabled mode as an example.
-- The route imports only `preIncrementSemanticAttempt`, not `rollbackSemanticAttempt`, so short/long query validation at `apps/web/src/app/api/search/semantic/route.ts:237-244` stays charged.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:230-242` asserts 400 responses for short and overlong queries but does not assert whether the semantic limiter was charged or refunded.
-- `apps/web/src/__tests__/semantic-search-route.test.ts:244-262` now asserts disabled mode is charged and not rolled back, contradicting the stale route/header prose.
-
-Failure scenario:
-
-A future maintainer follows the stale header and moves disabled-mode lookup before charging, reintroducing unmetered DB-backed config probes. Another maintainer could follow the central Pattern 2b prose and add rollbacks for short-query validation, changing current budget semantics without a test failure because those tests assert only status/body.
-
-Fix:
-
-Choose one semantic rate-limit policy and make comments plus tests match it. If current behavior is intended, update the route header and `rate-limit.ts` comments to say disabled-mode config lookup and post-read query-length validation remain charged. Add test assertions to the short-query and overlong-query cases that `preIncrementSemanticAttempt` is called once and `rollbackSemanticAttempt` is not called. If refunds are intended instead, implement the rollback and update the disabled-mode test.
+If Playwright is too slow for the dialog case, add `@testing-library/react` with jsdom/happy-dom for `BulkEditDialog` only.
 
 TDD opportunity:
 
-Add a table-driven test for each early-return branch: origin, maintenance, content-type, missing length, already-aborted, disabled mode, invalid JSON, short query, overlong query, over-limit. Assert status and exact charge/rollback calls.
+Start with the bulk-edit reopen regression because it is deterministic and low-cost: make the test fail by selecting `clear`, submitting, toggling `open` false/true, and asserting all modes return to `leave`.
 
-### TE19-04. On-this-day date behavior is source-pinned but not behavior-tested against a clock
+### TE20-03 - Per-photo OG route behavior is under-tested at the route boundary
 
 Severity: Low-Medium
 Confidence: High
+Status: Confirmed weak assertion
 
-Evidence:
+Exact file+region:
 
-- `apps/web/src/components/on-this-day-widget.tsx:14-23` computes month/day from `new Date()` inside the server component, then calls `getOnThisDayImages(month, day)`.
-- `apps/web/src/__tests__/data-timeline.test.ts:49-87` source-checks the data query predicate shape.
-- `apps/web/src/__tests__/data-timeline.test.ts:117-200` tests inline copies of grouping and MM-DD matching logic, not the exported server component or an injected clock.
-- Repo search found no test that mocks the current date and asserts `OnThisDayWidget` calls `getOnThisDayImages` with the expected month/day.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:45-56` charges the OG limiter and rolls back only invalid IDs.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:58-129` performs DB/config lookup, canonical-origin fetch, missing-photo fallback, and all-derivatives-missing fallback.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:223-240` converts ImageResponse output through Sharp and handles catch fallback.
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:249-295` builds canonical fallback redirects.
+- `apps/web/src/__tests__/og-photo-fallback.test.ts:40-87` route-level assertions are source-grep contracts.
+- `apps/web/src/__tests__/og-photo-fallback.test.ts:111-203` runtime tests cover only `pickFirstAvailablePhotoBuffer`.
+- `apps/web/src/__tests__/og-route-source-contracts.test.ts:5-11` source-checks the sibling topic OG route.
 
-Failure scenario:
+Missing/weak test scenario:
 
-The server runs in UTC while the product/operator expectation is local calendar day. Around local midnight, the widget can query yesterday/tomorrow relative to the gallery's intended timezone. A future refactor can also change `new Date()` handling in the component and still pass the current source-level data query tests because they never render the widget or control the clock.
+The helper can be correct while the route glues it incorrectly. The current tests would miss wrong helper arguments, a request-origin fallback redirect, limiter refund drift after DB work, catch-path cache-control drift, or a successful route returning the wrong content type after Sharp post-processing.
 
-Fix:
+Suggested test/fix:
 
-Extract a tiny `getTodayMonthDay(now = new Date())` helper or inject a clock into the widget's date resolver. Add unit tests for normal dates, local-midnight boundaries, and February 29. If the product expects a specific timezone, make that explicit in config/docs and test it.
+Add mocked route tests that call `GET()` directly. Mock `getImageCached`, `getSeoSettings`, `getGalleryConfig`, `pickFirstAvailablePhotoBuffer`, `next/og`, and `sharp`. Assert status, `Cache-Control`, `Content-Type`, limiter/rollback calls, canonical `Location`, and helper args for invalid ID, missing photo, canonical URL parse failure, all-derivatives-missing, success, and catch fallback.
 
 TDD opportunity:
 
-Write a failing test that freezes the clock to a boundary instant and asserts the exact `(month, day)` passed into a mocked `getOnThisDayImages`. Then implement the smallest clock abstraction needed to make the behavior deterministic.
+Write the invalid-ID and missing-photo route tests first because they need the fewest mocks and prove the charged/rollback policy at runtime instead of through string counts.
 
-### TE19-05. Nav "visual" Playwright checks save screenshots but do not compare them
+### TE20-04 - Nav visual checks create screenshots but do not compare them
 
 Severity: Low
 Confidence: High
+Status: Confirmed false-confidence risk
 
-Evidence:
+Exact file+region:
 
-- `apps/web/e2e/nav-visual-check.spec.ts:6-38` checks visible nav targets for 44 px minimum size and pairwise overlap.
-- `apps/web/e2e/nav-visual-check.spec.ts:41-52` saves `test-results/nav-collapsed-mobile.png`.
-- `apps/web/e2e/nav-visual-check.spec.ts:54-66` saves `test-results/nav-expanded-mobile.png`.
-- `apps/web/e2e/nav-visual-check.spec.ts:68-79` saves `test-results/nav-desktop.png`.
-- None of these tests call `expect(page).toHaveScreenshot(...)` or compare against a baseline. The screenshots are diagnostic artifacts only.
+- `apps/web/e2e/nav-visual-check.spec.ts:6-38` checks visible nav targets for 44 px size and pairwise non-overlap.
+- `apps/web/e2e/nav-visual-check.spec.ts:41-52` writes `test-results/nav-collapsed-mobile.png`.
+- `apps/web/e2e/nav-visual-check.spec.ts:54-66` writes `test-results/nav-expanded-mobile.png`.
+- `apps/web/e2e/nav-visual-check.spec.ts:68-79` writes `test-results/nav-desktop.png`.
 
-Failure scenario:
+Missing/weak test scenario:
 
-A regression changes nav colors, spacing, active state, clipping, z-index, or a non-overlapping but visibly broken layout. The test still passes as long as controls remain visible, non-overlapping, and at least 44 px. The file name "visual checks" can give reviewers false confidence that screenshot regression is enforced.
+No `expect(page).toHaveScreenshot(...)` or baseline comparison runs. Color, spacing, typography, active states, clipping, z-index, or a visually broken but non-overlapping layout can regress while the "visual checks" pass. The screenshots are diagnostic artifacts, not a regression gate.
 
-Fix:
+Suggested test/fix:
 
-Either convert these to real visual regression tests with Playwright `toHaveScreenshot` baselines and stable masks, or rename/comment them as layout-smoke tests. If snapshot churn is too high, keep the metric assertions and add targeted checks for the specific visual invariants the repo cares about.
+Either convert one or more states to real Playwright visual snapshots with stable masks and `toHaveScreenshot`, or rename/comment the spec as a nav layout-smoke test. If snapshot churn is too high, add targeted metric assertions for the visual invariants the repo actually needs.
 
 TDD opportunity:
 
-Add one baseline-backed mobile-expanded nav screenshot first. Tune masks/timeouts until it is stable, then decide whether collapsed and desktop states should join the visual gate or remain diagnostic.
+Start with one stable mobile-expanded screenshot baseline. If that proves noisy, keep the metric checks but stop presenting this file as visual-regression coverage.
+
+## Likely Issues
+
+### TE20-05 - Rate-limit policy comments contradict current source-contract tests
+
+Severity: Low
+Confidence: High
+Status: Likely future-test risk
+
+Exact file+region:
+
+- `apps/web/src/lib/rate-limit.ts:24-30` says semantic text search refunds only pre-work short-query rejections, but current semantic route tests assert short/long query and disabled mode stay charged.
+- `apps/web/src/lib/rate-limit.ts:53-55` says `og-photo-fallback.test.ts` enforces "exactly two" pre-DB rollbacks.
+- `apps/web/src/lib/rate-limit.ts:287-300` repeats that the photo route has "exactly two" pre-DB rollbacks.
+- `apps/web/src/__tests__/og-photo-fallback.test.ts:53-75` currently asserts exactly one `rollbackOgAttempt(ip)` occurrence in the photo route.
+- `apps/web/src/__tests__/semantic-search-route.test.ts:232-267` asserts no rollback for short/long query and disabled mode.
+- `apps/web/src/__tests__/similar-route.test.ts:167-184` asserts disabled/stub mode stays charged for similar search.
+
+Missing/weak test scenario:
+
+The behavior tests are stronger than the prose today, but the stale comments are likely to seed incorrect future tests. A future maintainer could "fix" tests or implementation toward the old comments, reintroducing free config probes or changing the OG refund policy while believing they are following the documented contract.
+
+Suggested test/fix:
+
+Align the comments with current tested behavior. For semantic search, state that route-level tests intentionally keep disabled mode and query-length rejections charged after the config lookup. For the OG photo route, change "exactly two" to "exactly one" or describe the actual invalid-ID-only rollback. A small source-contract test for these comments is optional; removing contradictory examples is enough if behavior tests remain authoritative.
 
 ## Coverage Notes
 
-- The repository has strong coverage for server actions, privacy select guards, color/HDR parsing, upload processing, custom lint fixtures, and many historical regression contracts.
-- The main false-confidence pattern is source-contract testing over runtime-heavy surfaces. Source contracts are useful here, but they should not be the only gate for stateful runtime behavior such as CLIP queueing, dialog state, multipart route cleanup, or migration/schema equivalence.
-- Cycle 18 test-engineer deferred items remain tracked in `plan/plan-375-cycle18-deferred.md` (`AGG-C18-25` through `AGG-C18-30`). I did not re-count those as new Cycle 19 findings, but they remain relevant coverage debt.
+- Strong areas: server-action scanner fixtures, admin API wrapper scanner, semantic/similar route behavior, privacy select guards, migration journal monotonicity, SQL restore scanner, upload processing, color/HDR parsing, service-worker cache helper, tracked-secret hygiene, and touch-target/focus source scans.
+- Recurring weak pattern: source-contract tests are used for client UI and route glue where a real DOM or mocked route invocation would be more reliable. Source contracts are useful as cheap tripwires, but they should not be the only gate for stateful React behavior, DOM event scoping, accessible names, or multi-branch route glue.
+- E2E suite is intentionally small and single-worker. It covers public smoke, search, lightbox open/close, shared navigation, nav layout smoke, admin login/navigation/topic create/delete/upload when admin credentials are enabled, and origin guard. It does not yet cover semantic search UI, similar-photo UI, OG route responses, bulk edit dialog behavior, or mobile swipe scoping.
+- Local Playwright admin coverage can still skip when plaintext admin credentials are unavailable: `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:27-31`, and `apps/web/e2e/helpers.ts:28-45`. The CI sentinel mitigates this when `CI=true`; local `npm run test:e2e` can pass with those admin branches skipped.
+- The cycle-20 SEO OG backslash regression is now locked by behavior-level validator tests at `apps/web/src/__tests__/seo-actions.test.ts:14-28`; I did not re-report the fixed implementation issue.
 
 ## Final Missed-Issue Sweep
 
 Final sweep covered:
 
-- Prior Cycle 18 test-engineer report and current deferred plan, to avoid duplicating already-tracked debt as new findings.
-- Current HEAD diff and tests touched by `26f1a66d`.
-- Semantic and similar search route tests, CLIP queue source contracts, and abort handling.
-- Bulk edit client/server integration path and existing bulk server-action tests.
-- Public timeline/on-this-day tests and date handling.
-- Playwright admin/public/origin/nav specs and e2e server/seed setup.
-- Public analytics/view-count tests, migration/reconcile source tripwires, Lightroom source contracts, service worker/PWA contracts, and custom lint scanner fixtures.
+- Test config, Playwright config, typecheck config, root/app package scripts.
+- All API route files under `apps/web/src/app/api`.
+- Non-API route handlers under `apps/web/src/app/**/route.ts`.
+- Custom lint scanner scripts and their fixture tests.
+- Current semantic/similar route tests and CLIP queue source contracts.
+- OG route/helper tests and the fixed SEO OG validator tests.
+- Recent cycle-19 source contracts and adjacent E2E specs.
+- Cycle-20 historical reviews, fixes, deferred ledger, and baseline gate log.
+- Source-contract-heavy tests, skipped tests, timeout/fake-timer usage, and Playwright screenshot usage.
 
-No critical coverage gaps were confirmed in this pass. Confirmed findings: 5.
+No critical or high-severity test gaps were found. Confirmed test-engineering findings: 4. Likely future-test risk: 1.

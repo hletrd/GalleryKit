@@ -24,12 +24,13 @@
  * 2b. **No rollback after semantic body admission** (/api/search/semantic
  *    and /api/search/similar/[id]):
  *    The routes perform cheap origin/header/config/param checks first, then
- *    pre-increment before admitting protected work. Semantic text search
- *    refunds only pre-work short-query rejections; malformed bodies, aborts,
- *    encoder failures, DB failures, empty production embeddings, and similar
- *    target/scan lookups stay charged. Rationale: once request-body memory,
- *    embedding CPU, or bounded embedding scans are admitted, refunding lets a
- *    client amplify the protected cost.
+ *    pre-increment before admitting protected work. After the DB-backed mode
+ *    lookup is reached, disabled-mode responses, invalid query lengths,
+ *    malformed bodies, encoder failures, DB failures, empty production
+ *    embeddings, and similar target/scan lookups stay charged. Rationale:
+ *    once request-body memory, config DB work, embedding CPU, or bounded
+ *    embedding scans are admitted, refunding lets a client amplify the
+ *    protected cost.
  *    Use for: public read paths whose protected resource is expensive
  *    per admitted request.
  *

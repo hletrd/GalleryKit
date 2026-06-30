@@ -42,6 +42,17 @@ function armDbChildProcessWatchdog(
     onTimeout: (err: Error) => void,
 ): () => void {
     let fired = false;
+    let childSettled = false;
+    let forceKill: ReturnType<typeof setTimeout> | null = null;
+    const markSettled = () => {
+        childSettled = true;
+        if (forceKill) {
+            clearTimeout(forceKill);
+            forceKill = null;
+        }
+    };
+    child.once('exit', markSettled);
+    child.once('close', markSettled);
     const timeout = setTimeout(() => {
         fired = true;
         const err = new Error(`${label} timed out after ${DB_CHILD_PROCESS_TIMEOUT_MS}ms`);
@@ -50,8 +61,8 @@ function armDbChildProcessWatchdog(
         child.stdout.destroy(err);
         child.stderr.destroy(err);
         child.kill('SIGTERM');
-        const forceKill = setTimeout(() => {
-            if (!child.killed) child.kill('SIGKILL');
+        forceKill = setTimeout(() => {
+            if (!childSettled) child.kill('SIGKILL');
         }, DB_CHILD_PROCESS_KILL_GRACE_MS);
         forceKill.unref?.();
     }, DB_CHILD_PROCESS_TIMEOUT_MS);
@@ -59,6 +70,9 @@ function armDbChildProcessWatchdog(
 
     return () => {
         if (!fired) clearTimeout(timeout);
+        markSettled();
+        child.off('exit', markSettled);
+        child.off('close', markSettled);
     };
 }
 

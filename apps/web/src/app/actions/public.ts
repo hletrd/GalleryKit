@@ -207,7 +207,6 @@ export async function loadMoreSmartCollectionImages(
     try {
         const collection = await getSmartCollectionBySlugCached(slug);
         if (!collection || !collection.is_public) {
-            rollbackLoadMoreAttempt(ip, rateLimitResult.bucketStart, rateLimitResult.dbIncremented);
             return { status: 'invalid', images: [], hasMore: false };
         }
 

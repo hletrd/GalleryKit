@@ -94,7 +94,7 @@ git values must be treated as compromised and must not be reused.
 | `BASE_URL` | — | Public URL for sitemap, OpenGraph, and RSS feeds (e.g., `https://gallery.example.com`) |
 | `IMAGE_BASE_URL` | — | Optional CDN origin/prefix for uploaded assets; must be absolute HTTPS without credentials |
 | `TRUST_PROXY` | — | Set to `true` behind nginx/reverse proxy so per-IP rate limiting sees the real client IP |
-| `TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops from the right of `X-Forwarded-For`; keep `1` for nginx-only |
+| `TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops from the right of `X-Forwarded-For`; keep `1` for shipped nginx-only, where nginx overwrites incoming XFF with `$remote_addr` |
 | `HEALTH_CHECK_DB` | — | Set to `true` to make `/api/health` probe DB readiness (default is liveness-only) |
 | `QUEUE_CONCURRENCY` | `1` | Background image-processing jobs concurrency in this web process |
 | `SHARP_CONCURRENCY` | `max(1, floor((cpuCount-1)/3))` | Upper bound for Sharp/libvips threads. When unset, defaults to `max(1, floor((cpuCount-1)/3))` (the `/3` accounts for the AVIF/WebP/JPEG format fan-out so one image stays near `cores-1` total threads). An explicit value is capped at `cpuCount-1` |
@@ -113,7 +113,7 @@ git values must be treated as compromised and must not be reused.
 | `CLIP_INFERENCE_MAX_PENDING` | `32` | Max queued real CLIP inference requests before returning queue-full |
 | `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` | `30000` | Max wait for a real CLIP inference slot, capped at 300000 ms |
 | `SEMANTIC_SCAN_LIMIT` | `2000` | Max recent embeddings scanned per semantic/similar query |
-| `SEMANTIC_TOP_K_MAX` | `24` | Upper bound for semantic search result count |
+| `SEMANTIC_TOP_K_MAX` | `50` | Upper bound for semantic search result count |
 | `NEXT_UPLOAD_BODY_MAX_BYTES` | `278921216` | Next.js server action body size limit (default 266 MiB = max(200 MiB upload, 250 MiB restore) + 16 MiB multipart overhead; see `upload-limits.ts`) |
 
 ## Key Files & Patterns
@@ -533,6 +533,8 @@ docker run --rm \
 ```
 
 The `--force` flag is required in the documented pre-enable flow because a fresh DB still stores `semantic_search_mode='disabled'`; without `--force`, the backfill exits successfully without processing. After the DB mode is already set to `stub` or `production`, `--force` is only needed when intentionally re-embedding existing rows.
+
+The backfill processes at most `SEMANTIC_SCAN_LIMIT` candidate rows per run and logs `Reached SEMANTIC_SCAN_LIMIT (...)` when more rows may remain. For galleries larger than that limit, repeat the same sidecar command until it finishes without that message and reports no remaining rows to process.
 
 **Activating production (operator-only, deliberate):** the resolver heals a stored
 `semantic_search_mode='production'` to `'disabled'` UNLESS the app environment sets

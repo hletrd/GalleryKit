@@ -11,6 +11,9 @@ import { countCodePoints } from '@/lib/utils';
 export const runtime = 'nodejs';
 
 const MAX_TOPIC_LABEL_LENGTH = 100;
+const MAX_OG_TAGS = 20;
+const MAX_OG_TAG_DISPLAY_LENGTH = 30;
+const MAX_OG_TAG_SOURCE_LENGTH = 2000;
 // AGG8F-01 / plan-233: success-path cache control. The OG image is
 // derived from validated topic + tag list — there is no per-user content
 // to leak. `public, max-age=3600` lets CDNs and crawlers cache an hour;
@@ -28,6 +31,31 @@ function clampDisplayText(value: string, maxLength: number) {
   if (countCodePoints(trimmed) <= maxLength) return trimmed;
   const chars = Array.from(trimmed);
   return `${chars.slice(0, maxLength - 1).join('').trimEnd()}…`;
+}
+
+function parseOgTags(tags: string | null): string[] {
+  if (!tags) return [];
+  const tagList: string[] = [];
+  let current = '';
+  const source = tags.slice(0, MAX_OG_TAG_SOURCE_LENGTH);
+
+  const pushCurrent = () => {
+    const trimmed = current.trim();
+    current = '';
+    if (!trimmed || !isValidTagName(trimmed)) return;
+    tagList.push(sanitizeForOg(clampDisplayText(trimmed, MAX_OG_TAG_DISPLAY_LENGTH)));
+  };
+
+  for (const char of source) {
+    if (char === ',') {
+      pushCurrent();
+      if (tagList.length >= MAX_OG_TAGS) break;
+    } else {
+      current += char;
+    }
+  }
+  if (tagList.length < MAX_OG_TAGS) pushCurrent();
+  return tagList;
 }
 
 export async function GET(req: NextRequest) {
@@ -83,9 +111,9 @@ export async function GET(req: NextRequest) {
     const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
     // C2-AGG-03 / plan-257: clamp each tag name for display to prevent
     // layout distortion in the OG image when a tag hits the 100-char
-    // isValidTagName ceiling. 30 chars is comfortable for the pill layout.
-    const MAX_OG_TAG_DISPLAY_LENGTH = 30;
-    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)).map(t => sanitizeForOg(clampDisplayText(t, MAX_OG_TAG_DISPLAY_LENGTH))) : [];
+    // isValidTagName ceiling. Cycle 20 bounds parsing before splitting so
+    // an oversized `tags` query cannot allocate an unbounded array.
+    const tagList = parseOgTags(tags);
 
     // AGG8F-01 / plan-233: ETag covers the inputs that drive the
     // rendered image. If a crawler revisits with `If-None-Match`,

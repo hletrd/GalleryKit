@@ -30,15 +30,15 @@ describe('nginx production edge hardening', () => {
         expect(nginxConfig).toMatch(/location \^~ \/api\/admin\/ \{[\s\S]*limit_req zone=admin/);
     });
 
-    it('preserves the forwarded client chain for the app trusted-hop parser', () => {
-        expect(nginxConfig).not.toContain('proxy_set_header X-Forwarded-For $remote_addr;');
-        const forwardedForHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/g) ?? [];
+    it('overwrites forwarded client IP headers at the shipped nginx edge', () => {
+        expect(nginxConfig).not.toContain('proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;');
+        const forwardedForHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) ?? [];
         expect(forwardedForHeaders.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('documents the checked-in nginx template as the trusted edge chain forwarder', () => {
+    it('documents the checked-in nginx template as the forwarded-chain normalizer', () => {
         for (const source of [rootReadme, webReadme, envExample]) {
-            expect(source).toMatch(/preserves the trusted\s+forwarded chain/);
+            expect(source).toMatch(/overwrites incoming[\s#`]+X-Forwarded-For`?/);
             expect(source).toContain('X-Forwarded-For');
             expect(source).toContain('TRUSTED_PROXY_HOPS=1');
         }

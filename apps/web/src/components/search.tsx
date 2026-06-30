@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { searchImagesAction } from '@/app/actions';
+import { searchImagesAction } from '@/app/actions/public';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useTranslation } from '@/components/i18n-provider';

@@ -136,6 +136,12 @@ function req(id: string): Request {
     return new Request(`http://localhost/api/search/similar/${id}`) as never;
 }
 
+function abortedReq(id: string): Request {
+    const controller = new AbortController();
+    controller.abort();
+    return new Request(`http://localhost/api/search/similar/${id}`, { signal: controller.signal }) as never;
+}
+
 // Helper: the Next.js 15/16 params are a Promise.
 function params(id: string): { params: Promise<{ id: string }> } {
     return { params: Promise.resolve({ id }) };
@@ -194,6 +200,13 @@ describe('GET /api/search/similar/[id]', () => {
         const res = await GET(req('0') as never, params('0'));
         expect(res.status).toBe(400);
         expect(preIncrementSemanticAttempt).not.toHaveBeenCalled();
+    });
+
+    it('returns 499 for an already-aborted request before charging the semantic limiter', async () => {
+        const res = await GET(abortedReq('42') as never, params('42'));
+        expect(res.status).toBe(499);
+        expect(preIncrementSemanticAttempt).not.toHaveBeenCalled();
+        expect(rollbackSemanticAttempt).not.toHaveBeenCalled();
     });
 
     it('returns 404 when the target image has no production embedding', async () => {

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAdminAuth } from '@/lib/api-auth';
 import path from 'path';
-import { createReadStream } from 'fs';
-import { lstat, realpath } from 'fs/promises';
+import { open, realpath } from 'fs/promises';
 import { Readable } from 'stream';
 import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
@@ -47,16 +46,17 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
             }
             throw err;
         });
-        const stats = await lstat(filePath);
-        if (stats.isSymbolicLink() || !stats.isFile()) {
+        const resolvedFilePath = await realpath(filePath);
+        if (!resolvedFilePath.startsWith(`${resolvedBackupsDir}${path.sep}`)) {
             return new NextResponse('Access denied', {
                 status: 403,
                 headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
             });
         }
-
-        const resolvedFilePath = await realpath(filePath);
-        if (!resolvedFilePath.startsWith(`${resolvedBackupsDir}${path.sep}`)) {
+        const fileHandle = await open(resolvedFilePath, 'r');
+        const stats = await fileHandle.stat();
+        if (!stats.isFile()) {
+            await fileHandle.close();
             return new NextResponse('Access denied', {
                 status: 403,
                 headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
@@ -69,12 +69,9 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
             size: stats.size,
         }).catch(console.debug);
 
-        // Stream from the resolved (realpath) path, not the original path, to
-        // reduce the path-replacement race where the original segment could
-        // be swapped before createReadStream(). This is not descriptor-backed
-        // validation; backup storage is still a same-host filesystem trust
-        // boundary.
-        const stream = createReadStream(resolvedFilePath);
+        // Stream from the already-validated file handle so Content-Length and
+        // bytes come from the same descriptor instead of a later path reopen.
+        const stream = fileHandle.createReadStream();
         const webStream = Readable.toWeb(stream) as ReadableStream;
 
         return new NextResponse(webStream, {

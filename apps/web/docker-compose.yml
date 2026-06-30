@@ -8,6 +8,7 @@ services:
         BASE_URL: ${BASE_URL:-}
         IMAGE_BASE_URL: ${IMAGE_BASE_URL:-}
         UPLOAD_MAX_TOTAL_BYTES: ${UPLOAD_MAX_TOTAL_BYTES:-}
+        NEXT_UPLOAD_BODY_MAX_BYTES: ${NEXT_UPLOAD_BODY_MAX_BYTES:-}
     container_name: gallerykit-web
     restart: always
     stop_grace_period: 30s

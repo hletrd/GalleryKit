@@ -1,139 +1,125 @@
-# Cycle 19 Document-Specialist Review
+# Document Specialist Review - Cycle 20
 
 Date: 2026-06-30 KST
-HEAD reviewed: `d4aea50f3e82f97077db2001dfec8fcccf7f1de8`
-Scope: repository-wide documentation/code mismatch review. Review-only except for writing this report.
+HEAD reviewed: `24c82c71c0f8efb457b37498a29d9f3ecc8a7fbd`
+Scope: documentation, operations policy, schema/migration docs, deployment docs, comments, tests-as-docs, and i18n user-facing copy. Implementation files were not edited. No commit or push was performed per user instruction.
 
-## Inventory
+Worktree note: multiple `.context/reviews/*.md` files were already modified before this pass. This report only updates `.context/reviews/document-specialist.md`.
 
-Read first: `AGENTS.md`, then `CLAUDE.md`.
+## Documentation Inventory
 
-Inventoried and inspected:
+- Primary project guidance:
+  - `AGENTS.md` - short-form contributor/agent rules, deploy policy, schema checklist, quality gates.
+  - `CLAUDE.md` - detailed architecture, security model, color/HDR pipeline, CLIP operations, migration runbook, deploy helper, lint gates.
+  - `README.md` and `apps/web/README.md` - user/operator setup, deployment, environment, semantic-search activation.
+- `.context`:
+  - `.context/plans/README.md` - plan index and status catalog.
+  - `.context/plans/**` - active, done, and archived implementation plans.
+  - `.context/reviews/**` - current and historical role reviews, aggregate reports, photographer-perspective audits, screenshots/log artifacts.
+- `docs/`:
+  - `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md` - shipped CLIP design/status record.
+  - `docs/superpowers/plans/2026-06-15-clip-semantic-search.md` - historical complete implementation plan.
+- Operational/deployment docs in code:
+  - `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`.
+- Schema/migration docs:
+  - `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
+- Authoritative comments and doc-like tests:
+  - Security scanners in `apps/web/scripts/check-*.ts`.
+  - Privacy field guards in `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, and `apps/web/src/__tests__/privacy-fields.test.ts`.
+  - CLIP path/cache, downloader, backfill, route, and env-limit tests.
+  - Touch-target audit policy in `apps/web/src/__tests__/touch-target-audit.test.ts`.
 
-- Canonical docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`.
-- Deploy/config surfaces: `.env.deploy.example`, `apps/web/.env.local.example`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json`.
-- `.context` history: `.context/plans/README.md`, `.context/plans/cycle-19-plan.md`, `.context/plans/cycle-19-deferred.md`, relevant cycle-19 archive plans, current `.context/reviews/*.md`, recent document-specialist reports, and run/cycle aggregates used for provenance.
-- Inline documentation and tests-as-docs: CLIP/semantic-search comments and tests, service-worker template/build tests, deploy-script contract tests, env parsing tests, action/auth/rate-limit source-contract tests, privacy/search/semantic tests, and i18n/user-facing messages.
-- User-facing messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, especially semantic-search/settings/privacy/color copy.
+## Confirmed Issues
 
-Current worktree note: several other `.context/reviews/*.md` files were already modified before this report. I did not touch them.
+### C20-DOC-01 - `SEMANTIC_TOP_K_MAX` default is stale in env reference docs
 
-## Findings
+- Severity: LOW
+- Confidence: High
+- Status: Open
+- Region: `CLAUDE.md:115-116`, `CLAUDE.md:545-548`, `apps/web/.env.local.example:78-79`, `apps/web/src/lib/clip-embeddings.ts:22-44`, `apps/web/src/__tests__/clip-semantic-limits-env.test.ts:33-40`
+- Mismatch:
+  - `CLAUDE.md` optional env table says `SEMANTIC_TOP_K_MAX` default is `24`: `CLAUDE.md:115-116`.
+  - `.env.local.example` shows `SEMANTIC_TOP_K_MAX=24`: `apps/web/.env.local.example:78-79`.
+  - The runtime section says default `50`: `CLAUDE.md:545-548`.
+  - Code and tests confirm fallback `50`: `apps/web/src/lib/clip-embeddings.ts:43`, `apps/web/src/__tests__/clip-semantic-limits-env.test.ts:33-40`.
+- User/operator failure scenario: Operators copy the example expecting a 24-result cap, while the default production route permits 50. Future agents may "fix" the wrong side because both values appear authoritative.
+- Suggested fix: Update the optional-env table and `.env.local.example` to `50`, or intentionally lower the code/test default to `24`.
 
-### DS19-01 - `CLIP_MODELS_ROOT` default is documented as the production bind mount, but code defaults to a cwd-relative path
+### C20-DOC-02 - CLIP activation docs omit the per-run backfill cap and repeat-until-done stop condition
 
-Severity: Medium
-Confidence: High
+- Severity: MEDIUM
+- Confidence: High
+- Status: Open
+- Region: `apps/web/README.md:68-77`, `CLAUDE.md:520-535`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:43-47`, `apps/web/scripts/backfill-clip-embeddings.ts:116-120`
+- Mismatch:
+  - `apps/web/README.md` instructs operators to backfill existing photos, then set env and DB mode: `apps/web/README.md:68-77`.
+  - `CLAUDE.md` says the forced production backfill generates embeddings "for all existing photos": `CLAUDE.md:520-535`.
+  - The CLIP spec says backfill re-embeds every row whose model version differs: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:43-47`.
+  - The script stops at `SEMANTIC_SCAN_LIMIT` per run and logs "Stop here and re-run to continue": `apps/web/scripts/backfill-clip-embeddings.ts:116-120`.
+- User/operator failure scenario: A large-gallery production activation follows the docs exactly once, then flips production mode with only the first capped batch embedded. Search behaves like it has poor recall, not like an obvious setup failure.
+- Suggested fix: Add a runbook stop condition: rerun `scripts/backfill-clip-embeddings.ts --production --force` until it reports no selected rows / `processed=0 failed=0`, or add script support for a looped `--all` mode and document that.
 
-Files and regions:
-- `CLAUDE.md:110-112`
-- `CLAUDE.md:152`
-- `CLAUDE.md:492-510`
-- `apps/web/src/lib/clip-paths.ts:48-65`
-- `apps/web/src/__tests__/clip-paths.test.ts:75-87`
-- `apps/web/.env.local.example:70-75`
+## Likely Issues
 
-Mismatch:
-The optional env table lists `CLIP_MODELS_ROOT` with default `/app/data/models/clip`. The implementation default is `DEFAULT_CLIP_MODELS_ROOT = 'data/models/clip'`, resolved against `cwd` when the env var is unset. The regression test explicitly pins the unset-env behavior as `/app/apps/web/data/models/clip` for a production-like cwd, while a separate test pins that only an explicit env value of `/app/data/models/clip` hits the production bind mount.
+### C20-DOC-03 - Code comments still say "Lightroom Classic publish plugin" where docs say server API only
 
-This also conflicts with the more precise CLAUDE text at `CLAUDE.md:152`, which says production `.env.local` MUST set the absolute `CLIP_MODELS_ROOT`.
+- Severity: LOW
+- Confidence: Medium
+- Status: Open
+- Region: `README.md:40`, `CLAUDE.md:158`, `CLAUDE.md:572`, `apps/web/src/db/schema.ts:192-197`, `apps/web/drizzle/0006_admin_tokens.sql:1-6`, `apps/web/nginx/default.conf:123-131`, `apps/web/messages/en.json:816`
+- Mismatch:
+  - Product docs say no Lightroom Classic plugin is bundled: `README.md:40`, `CLAUDE.md:158`.
+  - User-facing token copy also says GalleryKit exposes the endpoint but does not bundle or distribute a Lightroom Classic plugin: `apps/web/messages/en.json:816`.
+  - Schema/migration/nginx comments and one CLAUDE deployment note call the surface a publish-plugin route: `apps/web/src/db/schema.ts:192-197`, `apps/web/drizzle/0006_admin_tokens.sql:1-6`, `apps/web/nginx/default.conf:123-131`, `CLAUDE.md:572`.
+- User/operator failure scenario: Future documentation or UI copy revives a plugin promise because authoritative code comments imply the route exists for a plugin rather than for a generic Lightroom-compatible API.
+- Suggested fix: Normalize comments to "Lightroom-compatible publish API / external publish clients" and keep the body-size rationale.
 
-Failure scenario:
-An operator reads the env table, leaves `CLIP_MODELS_ROOT` unset because `/app/data/models/clip` appears to be the default, seeds weights into the bind mount, and enables production semantic search. The runtime loader resolves the unset env to the cwd-relative cache path instead, cannot find the seeded weights offline, and semantic/similar requests fail at runtime.
+### C20-DOC-04 - CLIP script-local sidecar example is stale relative to the main runbook
 
-Fix:
-Update the env table default to `data/models/clip` or `cwd/data/models/clip`, and say production must set `CLIP_MODELS_ROOT=/app/data/models/clip`. Consider uncommenting or marking it required in `.env.local.example` for production semantic search. Alternatively, change the resolver default to the production bind mount and update `clip-paths.test.ts`.
+- Severity: LOW
+- Confidence: Medium
+- Status: Open
+- Region: `apps/web/scripts/backfill-clip-embeddings.ts:9-21`, `CLAUDE.md:520-532`
+- Mismatch:
+  - The script comment uses `npx --yes tsx@4.21.0` and mounts both `/app/data` and a separate `/app/data/models/clip:ro`: `apps/web/scripts/backfill-clip-embeddings.ts:14-21`.
+  - `CLAUDE.md` uses `tsx@4.22.4` and only mounts `/app/data`, with `CLIP_MODELS_ROOT=/app/data/models/clip`: `CLAUDE.md:520-532`.
+- User/operator failure scenario: An operator follows the script-local comment instead of `CLAUDE.md`, tests a different tsx version than the locked runbook, or accidentally makes the model cache read-only in a maintenance flow that needs to verify or refresh files.
+- Suggested fix: Make the script comment refer to `CLAUDE.md` for the authoritative sidecar command, or update it to the same version/mount set.
 
-### DS19-02 - Semantic/CLIP operational env inventory is incomplete
+## Risks Needing Validation
 
-Severity: Low
-Confidence: High
+### C20-DOC-R01 - Plan index status may need curation before it is used as an execution source
 
-Files and regions:
-- `CLAUDE.md:88-112`
-- `CLAUDE.md:540-544`
-- `apps/web/README.md:62-64`
-- `apps/web/.env.local.example:70-75`
-- `apps/web/src/lib/clip-model.ts:53-64`, `apps/web/src/lib/clip-model.ts:94-110`
-- `apps/web/src/lib/clip-embeddings.ts:22-44`
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-38`
-- `apps/web/src/__tests__/clip-semantic-limits-env.test.ts:30-87`
+- Severity: LOW
+- Confidence: Medium
+- Status: Needs validation
+- Region: `.context/plans/README.md:3-40`, `.context/plans/README.md:41-57`
+- Mismatch:
+  - The plan index has a large active/deferred section: `.context/plans/README.md:3-40`.
+  - Completed cycles immediately follow: `.context/plans/README.md:41-57`.
+  - Several entries are old deferred review coverage items with no per-entry superseded/closed-by marker visible in the index itself.
+- User/operator failure scenario: A future agent uses the index as a current backlog and reopens superseded deferred findings without checking the latest aggregate/review context.
+- Suggested validation: Add status tags such as `active`, `superseded`, `closed-by`, or `needs-revalidation` for older deferred items that are no longer actionable as written.
 
-Mismatch:
-The code exposes and tests four semantic/CLIP runtime knobs beyond the documented `CLIP_INFERENCE_CONCURRENCY`:
+## No-Finding Areas
 
-- `CLIP_INFERENCE_MAX_PENDING` default 32, max 1000.
-- `CLIP_INFERENCE_QUEUE_TIMEOUT_MS` default 30000, max 300000.
-- `SEMANTIC_SCAN_LIMIT` default 2000, hard clamp 25000.
-- `SEMANTIC_TOP_K_MAX` default 50, hard clamp 25000.
+- Deployment prune docs matched `apps/web/deploy.sh`: prune runs after `docker compose up -d --build`, uses bind mounts for mutable data, and uses `docker volume prune -f` without `-a`.
+- Schema docs matched the reviewed migration/reconcile contract: every `_journal.json` tag has a SQL file, and the known non-monotonic `when` history is documented in `migrate.js`.
+- Storage-backend policy was consistent at reviewed points: docs warn local filesystem only; S3/MinIO is not exposed as a supported admin feature.
+- Paid-download removal was consistently documented in `CLAUDE.md`, migration comments, and reconcile drop logic.
+- Privacy docs and compile-time/test guards were present for public/admin field separation.
+- i18n user-facing copy had key parity coverage in `apps/web/src/__tests__/i18n-key-parity.test.ts`, and the reviewed Lightroom-token copy matched the no-bundled-plugin product stance.
+- Prior cycle SEO OG-image URL comment mismatch was rechecked and not carried forward: `apps/web/src/lib/seo-og-url.ts:9-23` now rejects the documented backslash bypass, with coverage in `apps/web/src/__tests__/seo-actions.test.ts`.
 
-CLAUDE documents `SEMANTIC_SCAN_LIMIT` and `SEMANTIC_TOP_K_MAX` only in the prose runtime-limits section, not in the optional env table or `.env.local.example`. The CLIP queue pending/timeout knobs are not documented in the README/env examples/CLAUDE env table at all, despite a source-contract test pinning their presence.
+## Missed-Issues Sweep
 
-Failure scenario:
-During a production semantic-search spike, an operator can discover `CLIP_INFERENCE_CONCURRENCY` from docs and raise model parallelism, but misses the hidden queue depth and timeout controls. The public semantic endpoint catches model-load/inference errors as 503 responses, so the deployment can look "configured but flaky" instead of obviously queue-budgeted. Separately, operators tuning large galleries may not find `SEMANTIC_SCAN_LIMIT` / `SEMANTIC_TOP_K_MAX` where all other operational env vars are listed.
+- Ran repository-wide searches for documentation-policy terms and stale feature names: `SEMANTIC_TOP_K_MAX`, `SEMANTIC_SCAN_LIMIT`, `CLIP_MODELS_ROOT`, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, `S3`, `MinIO`, `Stripe`, `paid`, `entitlements`, `license_tier`, `Lightroom`, `plugin`, `publicSelectFields`, `PrivacySensitive`, `reconcileLegacySchema`, `docker volume prune`, `TRUST_PROXY`, upload/body-limit terms, smart-collection route terms, and lint exemption tags.
+- Inventoried `.context`, `docs/`, README files, env examples, deploy scripts/config, migration/schema files, comments, tests-as-docs, and message files before writing findings. Generated/binary artifacts were not line-cited.
+- No relevant documentation areas from the requested scope were intentionally skipped. I did not run the full test suite because this was a review-only documentation pass with no implementation changes.
 
-Fix:
-Add all four variables to CLAUDE's optional env table and `.env.local.example`, with defaults, caps, and short warnings. Keep the runtime-limits prose, but make it cross-reference the env table.
+## Totals
 
-### DS19-03 - Sidecar runbook pins stale `tsx@4.21.0` while the repo has moved to `tsx` 4.22.x
-
-Severity: Low
-Confidence: High
-
-Files and regions:
-- `CLAUDE.md:340-353`
-- `CLAUDE.md:503-527`
-- `apps/web/package.json:80-84`
-- `apps/web/package.json:8-10`
-
-Mismatch:
-The sidecar backfill/model-seed commands in CLAUDE hardcode `npx --yes tsx@4.21.0`, but the current app devDependency is `tsx` `^4.22.4`, and the local build scripts run the workspace `tsx`. Earlier review history treated `4.21.0` as matching the package baseline; that is no longer true.
-
-Failure scenario:
-A future script edit uses behavior covered by the checked-in `tsx` version and local gates, but the documented sidecar command runs an older one-off `tsx` binary. The sidecar path can fail in production while local `npm run build` / script typecheck remains green, or maintainers waste time debugging a version split that the runbook introduced.
-
-Fix:
-Update the three sidecar commands to the current tested `tsx` version, or document a deliberate policy such as "use the exact `tsx` version from `apps/web/package.json` when copying this command." If reproducibility is preferred, pin the same version as the workspace dependency rather than an older one.
-
-### DS19-04 - Generated `sw.js` comment becomes false after version stamping
-
-Severity: Low
-Confidence: High
-
-Files and regions:
-- `apps/web/public/sw.template.js:21-26`
-- `apps/web/public/sw.js:21-26`
-- `apps/web/scripts/build-sw.ts:36-43`
-- `CLAUDE.md:411`
-- `apps/web/src/__tests__/sw-template-contract.test.ts:28-35`, `apps/web/src/__tests__/sw-template-contract.test.ts:194-198`
-
-Mismatch:
-The template correctly says `__SW_VERSION__ is replaced at build time by scripts/build-sw.ts`. The committed generated file now says `72f85842-p7 is replaced at build time by scripts/build-sw.ts`. The literal generated version is not what the build script searches for; `build-sw.ts` replaces `__SW_VERSION__` in the template and writes the resulting file.
-
-Failure scenario:
-A maintainer inspecting the shipped service worker reads the generated comment as if `72f85842-p7` is the replacement token. That can lead to direct edits in generated `sw.js`, incorrect search/replace assumptions, or confusion when the next prebuild overwrites the file from `sw.template.js`.
-
-Fix:
-Change the template comment to wording that remains true after stamping, for example: `SW_VERSION is stamped at build time by scripts/build-sw.ts from the template hash and IMAGE_PIPELINE_VERSION.` Then regenerate `public/sw.js`.
-
-## Missed-Issue Sweep
-
-Final sweep rechecked canonical docs, README files, package scripts, env examples, deploy helpers, Docker/nginx config, site config examples, migration/schema/index docs, source comments for cache/ETag/TOCTOU/color/HDR/semantic-search behavior, i18n messages, current cycle-19 `.context` plans/reviews, recent archived document-specialist reports, and tests that encode documentation contracts.
-
-Not refiled because they matched current repo behavior or were intentionally historical:
-
-- Next/React/TypeScript/Node version claims align with `apps/web/package.json`.
-- README deploy docs align with host-network compose, bind mounts, auto-prune behavior, liveness/readiness split, upload caps, and trusted-proxy warnings.
-- Semantic endpoint same-origin/rate-limit claims match `api/search/semantic/route.ts`; similar-photo endpoint is production-only as documented in its route comment.
-- CLIP activation docs correctly describe operator-only production mode, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, forced pre-enable backfill, model-version filtering, and offline loading once `CLIP_MODELS_ROOT` is set correctly.
-- Analytics CSP/script/privacy copy is aligned: production middleware and layout use `siteConfig.google_analytics_id`, and tests pass the site-config value into the CSP builder.
-- Service-worker generation itself is implemented and tested; only the generated comment wording drifts.
-- Prior cycle findings around LR upload setting forwarding, settings-hash scope, HDR SDR delivery copy, deploy helper fallback, and cache/TOCTOU wording were not duplicated.
-
-Known limits: this pass did not run the full test suite, inspect live production/remote host state, inspect gitignored real `.env` files, or independently revalidate external browser/platform support claims. The findings above are repo-internal documentation/comment/runbook mismatches with direct source evidence.
-
-Total findings: 4
-- Critical: 0
-- High: 0
-- Medium: 1
-- Low: 3
+- Confirmed: 2
+- Likely: 2
+- Needs validation: 1
+- Highest severity: MEDIUM

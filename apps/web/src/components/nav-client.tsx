@@ -87,9 +87,9 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 isExpanded ? "h-auto py-3 flex-wrap items-start" : "h-16 overflow-hidden"
             )}>
                 {/* Title */}
-                <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1")}>
-                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0 min-h-[44px] rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                        <span className="font-bold text-xl tracking-tight">{navTitle}</span>
+                <div className={cn("flex items-center mr-3 md:mr-6 gap-4 min-w-0 shrink", isExpanded && "pt-1")}>
+                    <Link href={localizedHomeHref} className="flex items-center space-x-2 min-w-0 min-h-[44px] rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                        <span className="font-bold text-xl tracking-tight truncate">{navTitle}</span>
                     </Link>
                 </div>
 
@@ -99,8 +99,8 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
                     className={cn(
-                        "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                        isExpanded && "mt-1"
+                        "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                        isExpanded ? "ml-auto mt-1" : "order-last ml-1"
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
                     aria-expanded={isExpanded}
@@ -118,8 +118,8 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     "flex items-center gap-2 text-sm font-medium min-w-0 transition-all duration-300",
                     isExpanded
                         ? "flex-wrap content-start w-full mt-1"
-                        : "flex-1 overflow-x-auto scrollbar-hide mask-gradient-right pr-4",
-                    "md:flex-1 md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap md:w-auto md:mt-0"
+                        : "hidden",
+                    "md:flex md:flex-1 md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap md:w-auto md:mt-0"
                 )}>
                     {topics.map((topic) => {
                         const href = localizePath(locale, `/${topic.slug}`);
@@ -152,10 +152,10 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     })}
                 </div>
 
-                {/* Controls: hidden on mobile when collapsed, shown when expanded; always rightmost on desktop */}
+                {/* Controls: visible in the collapsed mobile bar; topic chips move into the expanded mobile panel. */}
                 <div id="primary-nav-controls" className={cn(
                     "items-center gap-1 shrink-0",
-                    isExpanded ? "flex w-full mt-2" : "hidden md:flex"
+                    isExpanded ? "flex w-full mt-2" : "flex ml-auto"
                 )}>
                     <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
                     <button

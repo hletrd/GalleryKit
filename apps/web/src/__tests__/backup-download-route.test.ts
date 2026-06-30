@@ -11,12 +11,14 @@ const {
     logAuditEventMock,
     getClientIpMock,
     createReadStreamMock,
+    openMock,
 } = vi.hoisted(() => ({
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
     logAuditEventMock: vi.fn(),
     getClientIpMock: vi.fn(),
     createReadStreamMock: vi.fn(),
+    openMock: vi.fn(),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
@@ -51,6 +53,19 @@ vi.mock('fs', async () => {
     };
 });
 
+vi.mock('fs/promises', async () => {
+    const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+    openMock.mockImplementation(actual.open);
+    return {
+        ...actual,
+        default: {
+            ...actual,
+            open: openMock,
+        },
+        open: openMock,
+    };
+});
+
 import { GET } from '@/app/api/admin/db/download/route';
 
 const originalCwd = process.cwd();
@@ -69,6 +84,7 @@ describe('backup download route', () => {
         logAuditEventMock.mockReset();
         getClientIpMock.mockReset();
         createReadStreamMock.mockClear();
+        openMock.mockClear();
 
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 7 });
@@ -154,9 +170,7 @@ describe('backup download route', () => {
     it('returns a 500 for unexpected filesystem failures instead of masking them as 404', async () => {
         const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
         await fsp.writeFile(filePath, 'backup-data');
-        createReadStreamMock.mockImplementationOnce(() => {
-            throw Object.assign(new Error('deterministic stream failure'), { code: 'EACCES' });
-        });
+        openMock.mockRejectedValueOnce(Object.assign(new Error('deterministic open failure'), { code: 'EACCES' }));
 
         const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
             headers: {

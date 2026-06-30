@@ -1,132 +1,124 @@
-# Code Reviewer Report - Cycle 19
+# Code Reviewer Report - Cycle 20
 
-HEAD reviewed: `26f1a66d fix(review): 🐛 close cycle 18 findings`
-Branch: `master`
-Scope: comprehensive repository-wide static review focused on code quality, logic, maintainability, and cross-file correctness. No source files were modified.
+Review role: code-reviewer  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `24c82c71` on `master`  
+Implementation files edited: none
 
-Outcome: 1 confirmed issue. No critical or high-severity issue was confirmed in this pass.
+## Summary
 
-## Review Inventory
+- Confirmed issues: 1
+- Likely issues: 1
+- Risks needing validation: 0
+- Severity mix: 0 critical, 0 high, 2 medium, 0 low
+- Recommendation: COMMENT / non-blocking maintainability and analytics-correctness fixes
 
-Instruction and context files read:
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.context/reviews/code-reviewer.md` from cycle 18
-- `.context/plans/archive/392-cycle19-fixes.md`
-- `.context/plans/archive/378-deferred-cycle19.md`
+## Inventory Reviewed
 
-Repository inventory built before detailed review:
-- Workspace/package/config: `package.json`, `apps/web/package.json`, Next/Vitest/Playwright/ESLint/TypeScript config, deploy and migration scripts.
-- Static enforcement gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, and their focused tests.
-- Public and admin API routes: every `route.ts` / `route.tsx` under `apps/web/src/app/api`, plus upload and feed route handlers outside `/api`.
-- Server actions: all files under `apps/web/src/app/actions`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-- Data/privacy surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, schema definitions, public map/feed/share helpers.
-- Upload/image-processing surfaces: browser upload action, Lightroom upload route, image queue, upload path resolution, image serving, color/HDR/GPS processing, admin backfill.
-- Auth/origin/rate-limit surfaces: session/auth actions, `api-auth`, `request-origin`, `action-guards`, `rate-limit`, `auth-rate-limit`, PAT token creation/verification.
-- Restore/backup operations: DB dump/restore actions, restore scanner, restore maintenance, migration runner.
-- Semantic search surfaces: semantic text route, similar-photo route, CLIP model loading/embedding helpers, embedding backfill.
+Read first: `AGENTS.md`, `CLAUDE.md`, and the existing `.context/reviews/code-reviewer.md` cycle-20 artifact.
 
-Representative files examined in detail:
-- `apps/web/scripts/check-public-route-rate-limit.ts`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
-- `apps/web/scripts/check-api-auth.ts`
-- `apps/web/scripts/check-action-origin.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/actions/auth.ts`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/app/api/og/route.tsx`
-- `apps/web/src/app/api/og/photo/[id]/route.tsx`
-- `apps/web/src/app/uploads/[...path]/route.ts`
-- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
-- `apps/web/src/app/feed.xml/route.ts`
-- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/lib/request-origin.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/search-enrichment-fields.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/serve-upload.ts`
-- `apps/web/src/lib/upload-paths.ts`
-- `apps/web/src/lib/db-restore.ts`
-- `apps/web/src/lib/sql-restore-scan.ts`
-- `apps/web/src/lib/gallery-config.ts`
-- `apps/web/src/lib/clip-model.ts`
+Relevant inventory built before the review:
 
-Validation and evidence:
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npx vitest run src/__tests__/check-public-route-rate-limit.test.ts --config vitest.config.ts` passed: 38 tests.
-- A direct `checkPublicRouteSource()` probe reproduced the scanner false negative described below.
+- App/router/server actions/API: 76 TypeScript/TSX files under `apps/web/src/app`.
+- Shared library layer: 97 files under `apps/web/src/lib`.
+- UI/component layer: 57 files under `apps/web/src/components`.
+- Tests and e2e coverage: 271 TypeScript/TSX files under `apps/web/src/__tests__` and `apps/web/e2e`.
+- Largest/high-risk implementation files examined directly: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/migrate.js`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/app/api/admin/lr/upload/route.ts`.
+- Schema/migrations/contracts: `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration/reconcile tests.
+- Build/deploy/runtime/docs: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, root `README.md`, `apps/web/README.md`, `CLAUDE.md`.
+- Privacy/security/static contract surfaces: auth/origin/rate-limit scanners, public select fields, semantic/similar route enrichment selects, service-worker template, OG routes, upload-path and storage helpers.
 
-## Confirmed Issue
+Validation evidence:
 
-### CR19-CR-01 - Public route rate-limit scanner accepts aliased non-limiter imports
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+- `npm run lint --workspace=apps/web`: passed.
+- `npm test --workspace=apps/web -- migration-journal.test.ts migration-journal-monotonicity.test.ts migrate-reconcile-coverage.test.ts privacy-fields.test.ts search-route-privacy.test.ts lr-upload-hdr-gate.test.ts image-queue-settings-wiring.test.ts`: 7 files, 125 tests passed.
+- External behavior reference checked for finding CR20-CR-02: official Next.js docs say `router.prefetch()` warms routes and that prefetch flows use `next-router-prefetch` / `_rsc` RSC payload requests: <https://nextjs.org/docs/app/guides/prefetching>, <https://nextjs.org/docs/app/guides/cdn-caching>.
 
-Severity: MEDIUM
-Confidence: High
+## Confirmed Issues
 
-Code regions:
-- `apps/web/scripts/check-public-route-rate-limit.ts:38-42`
-- `apps/web/scripts/check-public-route-rate-limit.ts:96-115`
-- `apps/web/scripts/check-public-route-rate-limit.ts:118-122`
-- `apps/web/scripts/check-public-route-rate-limit.ts:188-207`
-- `apps/web/scripts/check-public-route-rate-limit.ts:366-370`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:458-484`
-- `apps/web/src/lib/rate-limit.ts:301-308`
-- `apps/web/src/lib/rate-limit.ts:378-385`
+### CR20-CR-01 - Upload ingest orchestration is duplicated across browser, Lightroom, and retry paths
+
+Severity: Medium  
+Confidence: High  
+Status: Confirmed  
+Category: Maintainability / cross-file contract drift
+
+Evidence:
+
+- Browser upload validates auth/input, acquires the upload-processing contract lock, snapshots gallery config, and builds quota state in `apps/web/src/app/actions/images.ts:114-190`.
+- Browser upload repeats disk/topic preconditions and quota rollback handling in `apps/web/src/app/actions/images.ts:244-292`.
+- Browser upload saves originals, gates HDR, strips GPS, handles restore maintenance, assembles DB insert values, stores `processing_settings_json`, and manually builds the queue job in `apps/web/src/app/actions/images.ts:340-531`.
+- Retry processing builds a parallel queue-job payload in `apps/web/src/app/actions/images.ts:1227-1280`.
+- The Lightroom route explicitly promises identical upload infrastructure reuse in `apps/web/src/app/api/admin/lr/upload/route.ts:15-18`, but implements its own parallel topic check, contract lock, config snapshot, disk check, save-original, HDR/GPS/restore gates, insert values, and queue job in `apps/web/src/app/api/admin/lr/upload/route.ts:225-275`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-452`, and `apps/web/src/app/api/admin/lr/upload/route.ts:479-516`.
+- The shared source of truth for processing settings is narrower than the ingest workflow: `ProcessingSettingsSnapshot` and `createProcessingSettingsSnapshot` live in `apps/web/src/lib/image-queue.ts:92-120`, but every adapter manually forwards the fields into `ImageProcessingJob`.
+- Existing regression tests show this drift class has already happened: `apps/web/src/__tests__/image-queue-settings-wiring.test.ts` locks processing-settings forwarding, and `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts` locks Lightroom parity for HDR/GPS/settings behavior.
 
 Problem:
-The public mutating-route scanner verifies that a rate-limit-looking local identifier is imported from an approved module, but it decides approval from the local alias name instead of the actual exported symbol. In `collectApprovedRateLimitImports`, `localName = element.name.text` is accepted when it starts with `preIncrement` or `checkAndIncrement`; `element.propertyName` is ignored. `isRateLimitHelperCall` then treats calls to that local alias as a valid gate.
 
-This means any export from `@/lib/rate-limit` or `@/lib/auth-rate-limit` can be imported under a `preIncrement*` alias and satisfy the lint gate. The risk is not that current routes are unmetered; the current public mutating route inventory is clean. The risk is that the repo's security lint can be bypassed by a future route while still reporting green.
+The product has at least three upload-entry orchestration copies. They share helpers for selected substeps, but the actual save -> policy gates -> insert -> enqueue transaction shape is duplicated. This violates the route comment's "identical" contract and makes future settings/privacy/metadata changes rely on remembering every adapter and retry path.
 
 Concrete failure scenario:
 
-```ts
-import { rollbackSemanticAttempt as preIncrementSemanticAttempt } from '@/lib/rate-limit';
-
-export async function POST(request) {
-  if (preIncrementSemanticAttempt('1.2.3.4')) return { status: 429 };
-  await db.insert(rows).values({ ok: true });
-  return { status: 200 };
-}
-```
-
-Validated result from `checkPublicRouteSource()`:
-
-```json
-{
-  "passed": ["OK: route.ts (uses rate-limit helper)"],
-  "failed": []
-}
-```
-
-At runtime that call is a rollback helper, not a pre-increment limiter. It returns `undefined`, so the over-limit branch never runs and the subsequent mutation is admitted without charging a public rate-limit budget. A similar alias could target any approved-module helper whose behavior is not a pre-increment/check gate.
-
-Why existing tests miss it:
-The current spoofing tests cover a local fake helper and an import from an unapproved module at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:458-484`. They do not cover an alias of a non-limiter export from an approved module, which is the exact fail-open path here.
+A future change adds a new upload-time setting, metadata column, privacy gate, or queue-job field. The browser action gets updated, but the Lightroom PAT route or retry path misses the field. Browser uploads, Lightroom uploads, and retried failed images then encode different bytes or persist different admin-only metadata for the same input. This is not hypothetical; the repo already carries tests and comments for prior drift in processing settings, Lightroom HDR gating, GPS stripping, and caption inputs.
 
 Suggested fix:
-Approve imports by actual exported name, not local alias. Use `const importedName = element.propertyName?.text ?? element.name.text` for prefix or, better, explicit allow-list matching, then record `element.name.text` as the callable local binding only after the imported symbol is approved. Add a regression test with `rollbackSemanticAttempt as preIncrementSemanticAttempt` and assert `MISSING RATE LIMIT`.
+
+Extract a server-only ingest service, for example `apps/web/src/lib/upload-ingest.ts`, that owns the shared workflow:
+
+- Contract lock acquisition and release.
+- Strict gallery-config snapshot creation plus serialization.
+- Save-original, HDR, GPS-strip, restore-maintenance, and disk-space gates.
+- DB insert-value construction for image rows.
+- Queue-job construction through one typed builder from `ProcessingSettingsSnapshot`.
+
+Keep `uploadImages` and `/api/admin/lr/upload` as thin adapters for auth, body parsing, localized response shape, tag handling, audit, and revalidation. Add a compile-time or unit-test guard that fails when `ProcessingSettingsSnapshot` gains a field not forwarded to `ImageProcessingJob`, and route-level tests proving both adapters call the same ingest builder.
+
+## Likely Issues
+
+### CR20-CR-02 - View analytics writes can be triggered by server-rendered prefetches
+
+Severity: Medium  
+Confidence: Medium  
+Status: Likely  
+Category: Logic / analytics correctness / cross-file interaction
+
+Evidence:
+
+- Photo views are recorded during the server page render, before client navigation is committed, in `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156`.
+- Topic views are recorded during server render in `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164`.
+- Shared-group views are recorded during server render in `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127-132`.
+- The recorders read request headers, rate-limit by IP, validate visibility, and insert durable analytics rows in `apps/web/src/app/actions/public.ts:371-391`, `apps/web/src/app/actions/public.ts:398-421`, and `apps/web/src/app/actions/public.ts:429-456`.
+- The photo UI intentionally prefetches adjacent photo routes via idle `router.prefetch(...)` in `apps/web/src/components/photo-viewer.tsx:238-264`.
+- The photo navigation also prefetches on hover in `apps/web/src/components/photo-navigation.tsx:220-242`.
+- The server photo page renders hidden adjacent-photo links with `prefetch={true}` in `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:284-292`.
+- A repo search found no recorder guard for `next-router-prefetch`, RSC, or prefetch-specific headers before consuming the view-record rate budget and writing analytics rows.
+- Official Next.js docs describe manual prefetch as warming routes and CDN guidance documents `next-router-prefetch` / `_rsc` RSC payload requests for prefetch flows.
+
+Problem:
+
+Analytics writes are tied to server component evaluation instead of a client-side "this page/photo was actually viewed" commitment. In App Router, prefetching can fetch the RSC payload for a target route. If that evaluates the page module containing `void recordPhotoView(...)`, the analytics side effect can happen even when the visitor never navigates to that photo.
+
+Concrete failure scenario:
+
+A visitor opens photo 10. The page's hidden `Link prefetch={true}`, the `PhotoViewer` idle prefetch, or a hover over the next/previous control warms photo 9 and photo 11. If the current Next.js prefetch path evaluates the photo page server component, `recordPhotoView` inserts rows for photos 9 and 11. The analytics tables inflate, and those phantom requests consume the shared `VIEW_RECORD_MAX_REQUESTS` budget in `apps/web/src/app/actions/public.ts:330-348`. The same pattern can affect topics or shared groups if links to those pages become prefetched later.
+
+Suggested fix:
+
+Move durable view recording behind an actual client-side commitment: for example, a small public analytics route or server action called from a client effect after hydration and after the current image/page is visible. If server-side recording is retained, add an explicit prefetch/RSC request guard before the rate-limit increment and DB visibility query, then add regression coverage that `router.prefetch('/p/<id>')` does not insert into `imageViews`. Add analogous tests for topic and shared-group pages if those routes are prefetchable.
+
+## Non-Findings And Guardrails Checked
+
+- Admin API auth wrapping is enforced for the current admin routes.
+- Mutating server actions enforce same-origin provenance or carry explicit read-only/public exemptions; public analytics actions are recognized as rate-limited by the scanner.
+- Public mutating API routes pass the rate-limit scanner; expensive public GET routes `/api/og`, `/api/og/photo/[id]`, `/api/search/semantic`, and `/api/search/similar/[id]` have explicit origin/rate-limit/cache handling.
+- Migration journal integrity, monotonicity, migration hash coverage, and reconcile-baseline coverage are guarded by tests and passed in the focused run.
+- Public image field selection omits the sensitive contract keys; semantic/similar enrichment uses the shared compile-guarded select.
+- Deploy/runtime docs and scripts consistently describe the single-instance topology, bind-mounted persistent stores, no `volume prune -a` auto-prune policy, host-network MySQL, and sidecar patterns for backfills/model seeding.
+- Standard ESLint passed.
 
 ## Missed-Issue Sweep
 
-Areas rechecked after the finding:
-- Admin API route auth wrappers: both admin API route files are directly wrapped with `withAdminAuth(...)`; token-scope and same-origin behavior in `api-auth.ts` matched route intent.
-- Mutating server actions: origin guard ordering and exemptions were checked by the lint gate and spot-reviewed in actions that write DB state or trigger revalidation.
-- Public routes: semantic POST is rate-limited before DB/vector work; similar-photo GET is same-origin and rate-limited; OG GET routes retain explicit CPU/DB rate limits despite not being covered by the mutating-route scanner.
-- Privacy selectors: public selectors, map selector exception, search enrichment fields, and privacy-sensitive type guards were checked for GPS/original filename/internal processing fields.
-- Upload and restore lifecycles: browser upload, Lightroom upload, queue quiesce/resume, backup/restore locks, SQL scan, and original-file path handling were reviewed for cleanup and race conditions.
-- Cycle 18 closure: the prior scanner transitive-local-mutator issue, bulk tag timestamp issue, semantic enrichment privacy issue, and CLI/import drift fixes appear present.
-
-No additional real issue met the reporting bar after this sweep.
+Final sweep covered repository inventory, docs and plans/review history, high-risk large files, auth/session/origin/rate-limit flows, upload/queue/settings contracts, public analytics side effects, public search/OG routes, data privacy select shapes, migrations/reconcile, schema/journal files, service-worker generation, Docker/compose/nginx/deploy scripts, package scripts, and targeted tests. I did not intentionally skip any relevant app/routes/actions/lib/components/db/scripts/tests/config/deploy/docs files for the requested code quality, logic, maintainability, SOLID, or cross-file interaction angles. Implementation code was not edited.

@@ -27,8 +27,9 @@ fi
 
 echo "Building and Starting Containers..."
 
-# Build and start detached (docker-compose.yml references Dockerfile via relative paths from repo root)
-docker compose -f apps/web/docker-compose.yml up -d --build
+# Build and start detached. The explicit env file keeps build args and runtime
+# env in sync even when Docker Compose is launched from the repo root.
+docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build
 
 # --- Docker disk hygiene (run on EVERY deploy) -------------------------------
 # The deploy host has 124 G total; repeated rebuilds accumulate stale images +

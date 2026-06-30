@@ -322,6 +322,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         >
                             <Link
                                 href={localizePath(locale, `/p/${image.id}`)}
+                                prefetch={false}
                                 aria-label={t('aria.viewPhoto', { title: displayTitle })}
                                 onClick={saveScrollPosition}
                             >

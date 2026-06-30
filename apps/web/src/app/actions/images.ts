@@ -690,11 +690,13 @@ export async function deleteImage(id: number) {
         deletedRows = delResult.affectedRows;
     });
 
+    if (deletedRows === 0) {
+        return { error: t('imageNotFound') };
+    }
+
     // Log audit event only when the image was actually deleted — avoids duplicate
     // entries when concurrent deletion causes the transaction to delete 0 rows.
-    if (deletedRows > 0) {
-        logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
-    }
+    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
 
     // Delete files best-effort, all in parallel. Use prefix scanning for
     // derivatives so variants generated under older image-size settings are

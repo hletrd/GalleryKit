@@ -13,10 +13,13 @@ describe('resolved-path streaming contracts', () => {
         expect(serveUploadSource).not.toContain('createReadStream(absolutePath)');
     });
 
-    it('downloads backups from the validated realpath, not the pre-validation path', () => {
+    it('downloads backups from a validated file handle, not a path reopen', () => {
         expect(backupDownloadSource).toContain('const resolvedFilePath = await realpath(filePath)');
-        expect(backupDownloadSource).toContain('createReadStream(resolvedFilePath)');
-        expect(backupDownloadSource).toContain('not descriptor-backed');
+        expect(backupDownloadSource).toContain("const fileHandle = await open(resolvedFilePath, 'r')");
+        expect(backupDownloadSource).toContain('const stats = await fileHandle.stat();');
+        expect(backupDownloadSource).toContain('const stream = fileHandle.createReadStream();');
+        expect(backupDownloadSource).toContain('same descriptor');
+        expect(backupDownloadSource).not.toContain('createReadStream(resolvedFilePath)');
         expect(backupDownloadSource).not.toContain('createReadStream(filePath)');
     });
 });

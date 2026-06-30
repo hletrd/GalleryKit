@@ -1,381 +1,262 @@
-# Designer Review - Cycle 19
+# Designer Review - Cycle 20
 
-Role: designer for cycle 19. Scope: comprehensive UI/UX/accessibility review of
-the GalleryKit Next.js web UI at `/Users/hletrd/flash-shared/gallery`.
-Write scope: this review artifact only. No source code changes, commits, pushes,
-or deploys were performed.
+Role: cycle-20 designer / ui-ux-designer-reviewer for
+`/Users/hletrd/flash-shared/gallery`. Scope: UI/UX/accessibility review of the
+GalleryKit web UI. Write scope: this artifact only. No implementation code,
+commits, pushes, or deploys were performed.
 
 ## Method
 
-Read and followed `AGENTS.md` and `CLAUDE.md`. Loaded the required
-`agent-browser` skills/CLI instructions and used `agent-browser 0.22.2` against
-the local app where feasible.
+Followed `AGENTS.md` and `CLAUDE.md`. Loaded the local `agent-browser` skill
+instructions for core navigation, config, wait, query, interact, visual, debug,
+network, and state before browser work.
 
-Started the app from `apps/web`:
-
-```text
-npm run dev -- --hostname 127.0.0.1 --port 3100
-```
-
-The app booted at `http://127.0.0.1:3100`, but public gallery pages could not
-render real data because local MySQL was unavailable:
+Local boot:
 
 ```text
-connect ECONNREFUSED 127.0.0.1:3306
+npm run dev
+Next.js 16.2.9 ready at http://localhost:3001
+Could not connect to database to bootstrap queue (ECONNREFUSED).
 ```
 
-Runtime browser evidence collected:
+Local public data routes were DB-blocked, so browser evidence for public gallery
+flows used `https://gallery.atik.kr` as requested. Local evidence was still used
+for the admin login and route error shell.
 
-- `agent-browser` rendered `/en/admin` and `/ko/admin`; both exposed localized
-  login landmarks, visible labels, password reveal, and 44 px visible controls.
-- `agent-browser` rendered `/en` as the route error boundary because DB-backed
-  topic/latest-image queries failed. The route error UI exposed `main`, h1
-  `Error`, button `Try again` 143 x 44, and link `Return to Gallery` 143 x 44.
-  Screenshot saved to `/tmp/gallery-cycle19-public-error.png`.
-- Mobile 390 x 844 `/ko/admin` rendered `lang="ko"` and `dir="ltr"`, with
-  visible controls measured at 308 x 44 or 44 x 44.
-- Manual dark-class probe showed dark tokens apply (`bodyBg rgb(9,9,11)`,
-  foreground `rgb(250,250,250)`). `agent-browser set media dark` did not flip
-  `matchMedia('(prefers-color-scheme: dark)')` in this environment, so I did not
-  treat media-emulation output as product evidence.
-- Browser console/page errors on public pages were DB failures only; no separate
-  hydration or blank-screen failure was observed.
+Browser evidence collected with `agent-browser`:
 
-Targeted validation:
+- Local `/en`: rendered route error boundary because MySQL was unavailable.
+  Accessibility tree exposed `main`, region `Error`, button `Try again`, and link
+  `Return to Gallery`.
+- Local `/en/admin` at 390 x 844: accessible login form with `Username`,
+  `Password`, password reveal, and 44 px controls.
+- Live `/en` at 1440 x 1000: main nav, tag filter, photo grid, load-more, footer;
+  screenshot `/tmp/gallery-cycle20-home-desktop.png`.
+- Live `/en` at 390 x 844: collapsed and expanded mobile nav metrics;
+  screenshots `/tmp/gallery-cycle20-home-mobile-collapsed.png` and
+  `/tmp/gallery-cycle20-home-mobile-expanded-clean.png`.
+- Live `/en/p/348` at 1440 x 1000 and 390 x 844: photo viewer controls,
+  accessibility snapshot, no default download/info panel on desktop;
+  screenshot `/tmp/gallery-cycle20-photo-mobile.png`.
+- Live search dialog: keyword query `JIHOON` produced a generic error; semantic
+  query `concert stage` posted to `/api/search/semantic`, stayed in loading for
+  ~14 s, then returned 20 listbox options.
+- Live `/en/map`: empty geotagged map state rendered `Map` plus "No geotagged
+  photos are available on the map."
 
-```text
-npm test --workspace=apps/web -- touch-target-audit.test.ts focus-visible-rings-cycle19.test.ts focus-visible-rings-cycle20.test.ts info-bottom-sheet-ia.test.ts a11y-us-p15.test.ts hdr-badge-contrast.test.ts i18n-key-parity.test.ts
-```
+Source/tests/docs inspected:
 
-Result: 7 test files passed, 57 tests passed.
-
-## Inventory
-
-Reviewed UI/docs/source surfaces:
-
-- Docs/contracts: `AGENTS.md`, `CLAUDE.md`, existing `.context/reviews/*`,
-  `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Public routes: `/[locale]`, `/[locale]/[topic]`, `/[locale]/p/[id]`,
-  `/[locale]/g/[key]`, `/[locale]/s/[key]`, `/[locale]/c/[slug]`,
-  `/[locale]/map`, `/[locale]/timeline`, `/[locale]/year/[year]`,
-  `/[locale]/privacy`, loading/error/not-found shells.
-- Admin routes: login, dashboard, categories, tags, SEO, settings, password,
-  users, tokens, DB, analytics, protected loading/error.
-- Shared components: `nav-client`, `search`, masonry/home grid, `load-more`,
-  `photo-viewer`, `photo-navigation`, `image-zoom`, `lightbox`,
-  `info-bottom-sheet`, `lightbox-color-pip`, `color-details-section`,
-  `wide-gamut-hint`, `histogram`, map components, `upload-dropzone`,
-  `image-manager`, `tag-input`, `bulk-edit-dialog`, admin nav/header, and
-  Radix/shadcn primitives.
-- Style/system contracts: `globals.css`, `button.tsx`, focus-visible tests,
-  touch-target audit, i18n key parity, reduced-motion and forced-colors CSS.
-
-Coverage by requested dimension:
-
-- Information architecture: public nav/topics/search, photo detail IA, timeline,
-  map, admin dashboard/settings/categories/tokens.
-- Affordances: icon buttons, password reveal, search trigger/dialog, info panel,
-  lightbox, map popups, upload/dropzone, destructive dialogs.
-- Focus/keyboard: browser snapshots for login/error; source review for focus
-  traps, Esc, shortcuts, IME guards, focus-visible tests.
-- WCAG 2.2: target size, focus appearance, labels, live regions, dialog naming,
-  reduced motion, forced colors, error/empty states.
-- Contrast/dark/light: token source, HDR badge contrast test, manual dark class
-  probe, forced-colors CSS.
-- ARIA/focus traps: Search, lightbox, bottom sheet, route shells, load-more,
-  map list fallback.
-- Responsive breakpoints: mobile nav/login/photo bottom sheet, masonry columns,
-  admin table behavior, timeline sticky headers.
-- Loading/empty/error: route loading/error/not-found, photo loading, load-more,
-  home empty/filter empty, map empty, tokens empty/loading, upload no-topic.
-- Forms/validation UX: login, upload, tag input, settings, token creation/revoke,
-  admin user/image dialogs.
-- i18n/RTL: en/ko browser evidence, key parity test, `getLocaleDirection`.
-- Perceived performance: masonry `content-visibility`, image sizing/fetch
-  priority, lazy map CSS, load-more live status, blur placeholders, reduced
-  motion.
+- Docs/contracts: `CLAUDE.md`, `package.json`, prior `.context/reviews/designer.md`.
+- Public IA: localized public routes under `apps/web/src/app/[locale]/(public)`,
+  `NavClient`, `HomeClient`, `GridPicture`, `Search`, `PhotoViewer`,
+  `PhotoNavigation`, `ImageZoom`, `InfoBottomSheet`, `Lightbox`, map components.
+- Admin IA/forms: login, dashboard/upload/image manager, categories/tags,
+  settings, SEO, tokens, users, DB, analytics.
+- Styling/a11y: `globals.css`, shadcn/Radix primitives, focus-visible tests,
+  touch-target audit, i18n messages, route loading/error/not-found shells.
 
 ## Findings
 
-### DES19-01 - Photo-page swipe navigation is attached to `window`, so horizontal gestures outside the media surface can change photos
+### DES20-01 - Keyword search fails on live gallery for normal tag/person queries
+
+Severity: High
+Confidence: High for user-visible failure, Medium for root cause
+Status: Open
+
+Route/selector/evidence:
+
+- Route: `https://gallery.atik.kr/en`
+- Interaction: expand mobile nav, open `button[aria-label="Search photos"]`,
+  type `JIHOON` into `#search-input`.
+- DOM result: `#search-input[aria-expanded="false"]`, no `#search-results`, live
+  region text `Search failed. Please try again.`
+- Network evidence: one `POST https://gallery.atik.kr/en` server-action request
+  returned `200`; the UI still rendered the structured error state.
+- Control comparison: enabling `#semantic-search-toggle` and querying
+  `concert stage` hit `POST /api/search/semantic` and eventually returned
+  `20 results`, so the search dialog itself is interactive.
+
+Source region:
+
+- `apps/web/src/components/search.tsx:237-245` maps `searchImagesAction(...)`
+  non-ok statuses into the dialog state.
+- `apps/web/src/components/search.tsx:464-467` renders the generic visible error.
+- `apps/web/src/app/actions/public.ts:305-317` catches `searchImages(...)`
+  failures and returns `{ status: 'error', results: [] }`.
+- `apps/web/src/lib/data.ts:1490-1632` performs the keyword/tag/alias search SQL.
+
+Failure scenario:
+
+A visitor tries the obvious public search path for a visible tag/person name.
+Instead of results or a recoverable "no matches" state, they get a generic error
+with no explanation and no alternate path except manually toggling semantic
+search.
+
+Suggested fix:
+
+Reproduce against production-like MySQL and inspect the `searchImagesAction
+failed` server log for the failing query. Add an e2e/search regression that
+searches a known tag/person and asserts a listbox result. Keep the generic
+fallback, but add a more actionable visitor-facing state if the keyword backend is
+temporarily unavailable while semantic search is configured.
+
+### DES20-02 - Mobile collapsed nav shows clipped topic links while hiding search/theme/language
 
 Severity: Medium
 Confidence: High
-Route/selector: `/[locale]/p/[id]`, global `window` touch listeners while
-`PhotoNavigation` is visually mounted inside the media box.
+Status: Open
 
-Evidence:
+Route/selector/evidence:
 
-- `apps/web/src/components/photo-navigation.tsx:47-60` records every
-  `window` touch start/move and calls `preventDefault()` once horizontal
-  movement exceeds 10 px.
-- `apps/web/src/components/photo-navigation.tsx:96-133` completes navigation
-  from the same global gesture and registers `touchstart`, `touchmove`, and
-  `touchend` on `window`.
-- `apps/web/src/components/photo-viewer.tsx:687-694` mounts
-  `PhotoNavigation` inside the image container, but the event scope is not
-  limited to that container.
+- Route: `https://gallery.atik.kr/en`, viewport 390 x 844.
+- Collapsed DOM metrics:
+  - `button[aria-controls="primary-nav-topics primary-nav-controls"]`
+    `aria-expanded="false"`, box `x=180 w=44`.
+  - Topic link `TWS`, box `x=224 w=55`.
+  - Topic link `TOMORROW X TOGETHER`, box `x=288 w=200 right=488`, clipped past
+    the 390 px viewport.
+  - Search/theme/language controls all measured `w=0 h=0`.
+- Expanded metrics after the same selector click: `aria-expanded="true"`,
+  nav height `172`, controls visible at `y=116`.
+- Screenshot evidence: `/tmp/gallery-cycle20-home-mobile-collapsed.png`,
+  `/tmp/gallery-cycle20-home-mobile-expanded-clean.png`.
+
+Source region:
+
+- `apps/web/src/components/nav-client.tsx:84-88` makes the nav row `h-16
+  overflow-hidden` when collapsed.
+- `apps/web/src/components/nav-client.tsx:99-108` renders the mobile expand
+  toggle before topics.
+- `apps/web/src/components/nav-client.tsx:117-123` keeps topics in the collapsed
+  row with horizontal overflow.
+- `apps/web/src/components/nav-client.tsx:155-159` hides search/theme/language
+  controls on collapsed mobile.
 
 Failure scenario:
 
-A phone user opens a photo, starts a horizontal pan while reading metadata,
-interacting with page chrome, or beginning a browser-edge gesture. The gallery
-can prevent default scrolling and navigate to the previous/next photo even
-though the gesture did not start on the photo.
+On a phone, the header visually advertises two partially competing navigation
+models: a chevron menu plus clipped topic pills. The primary utility actions
+including search and language are hidden until expansion, but the collapsed row
+does not clearly communicate that the chevron reveals those utilities rather than
+more topics.
 
-Fix:
+Suggested fix:
 
-Scope swipe listeners to a media-container ref, or record the touch-start target
-and ignore gestures that begin outside the image/navigation surface. Add a
-mobile touch regression that swipes metadata/bottom-sheet/page chrome and
-asserts the current photo does not change.
+Use a dedicated collapsed mobile header: brand + search + menu, or brand + menu
+only with topics hidden until expanded. If topic preview is intentional, make it a
+separate horizontally scrollable row below the header and keep utility controls
+discoverable.
 
-### DES19-02 - The main photo is exposed as a generic zoom button, hiding the photo identity from the focused control name
+### DES20-03 - Home masonry auto-prefetches every visible photo detail route
 
 Severity: Medium
 Confidence: High
-Route/selector: `/[locale]/p/[id]`, `.photo-viewer-image` inside `ImageZoom`.
+Status: Open
 
-Evidence:
+Route/selector/evidence:
 
-- `apps/web/src/components/image-zoom.tsx:343-362` wraps the photo content in a
-  focusable `div role="button"` named only by `aria-label={Zoom in|Zoom out}`.
-- `apps/web/src/components/photo-viewer.tsx:720-723` uses that wrapper around
-  the primary image surface.
-- The page has a hidden h1 at `apps/web/src/components/photo-viewer.tsx:562-564`
-  and the underlying image path carries alt text, but the tabbable object at the
-  center of the page announces the action, not the photo title/subject.
+- Route: `https://gallery.atik.kr/en`, desktop viewport.
+- Browser network after initial render, before clicking any card, showed RSC
+  prefetches for many visible photo links, including:
+  `/en/p/324?_rsc=...`, `/en/p/325?_rsc=...`, `/en/p/326?_rsc=...`,
+  `/en/p/327?_rsc=...`, `/en/p/332?_rsc=...`, `/en/p/333?_rsc=...`,
+  `/en/p/337?_rsc=...`, `/en/p/338?_rsc=...`, `/en/p/339?_rsc=...`,
+  `/en/p/340?_rsc=...`, `/en/p/345?_rsc=...`, `/en/p/346?_rsc=...`,
+  `/en/p/347?_rsc=...`, `/en/p/348?_rsc=...`.
+- Same capture also showed topic route prefetches for `/en/tws` and
+  `/en/tomorrow-x-together`.
 
-Failure scenario:
+Source region:
 
-A keyboard or screen-reader user tabs to the main visual object on a shared
-photo page and hears only "Zoom in button." They cannot confirm which photo is
-focused without moving to surrounding metadata or heading navigation.
-
-Fix:
-
-Preserve the photo identity in the accessible name or separate the zoom action
-from the image semantic. Options: make zoom a distinct adjacent button; render
-the image as a `figure`/`img` and attach zoom to a named control; or include the
-photo title/alt in the wrapper name and move shortcut/action details to
-`aria-describedby`.
-
-### DES19-03 - First-time desktop photo pages hide metadata, color/HDR explanation, similar photos, and download behind a non-default info panel
-
-Severity: Medium
-Confidence: Medium
-Route/selector: `/[locale]/p/[id]`, desktop info sidebar.
-
-Evidence:
-
-- `apps/web/src/components/photo-viewer.tsx:103-108` initializes `isPinned`
-  from `sessionStorage`, defaulting to `false`.
-- `apps/web/src/components/photo-viewer.tsx:174-175` maps `showInfo` directly
-  from `isPinned`.
-- `apps/web/src/components/photo-viewer.tsx:736-747` hides the desktop sidebar
-  unless `showInfo` is true.
-- The hidden sidebar contains color details, wide-gamut hint, similar photos,
-  EXIF, histogram, capture date, and download controls at
-  `apps/web/src/components/photo-viewer.tsx:787-999`.
+- `apps/web/src/components/home-client.tsx:323-327` renders each masonry card as
+  a default Next `<Link>` with no `prefetch={false}`.
+- Similar archive/shared masonry links exist in
+  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:196-201`,
+  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:238-243`, and
+  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:189-203`.
 
 Failure scenario:
 
-A client receives a direct photo link, inspects the image, and leaves without
-finding download, title/caption, color/HDR delivery notes, or similar photos
-because the only desktop entry point is the toolbar Info button.
+A visitor opening the home page on mobile data or a low-power device pays for a
+burst of route/data prefetches for many photos they may never open. On the server,
+each prefetch can also add DB and RSC rendering work exactly when the first image
+grid is trying to feel fast.
 
-Fix:
+Suggested fix:
 
-Default the desktop sidebar open on direct photo pages, or add a compact
-persistent summary/download strip outside the panel. If keeping the immersive
-default, make the first-run desktop affordance more explicit and surface
-download/color status outside the hidden panel.
+Disable automatic prefetch on dense photo-grid links and replace it with bounded
+intent prefetching: hover/focus for pointer/keyboard, or only the first N visible
+cards after idle on non-metered connections. Keep explicit prev/next prefetches
+on photo pages where user intent is clearer.
 
-### DES19-04 - Admin image management remains a wide table in a scroll container, so mobile/event-day management is not first-class
+### DES20-04 - Desktop photo pages default to hiding metadata, color details, similar photos, and downloads
 
 Severity: Medium
 Confidence: High
-Route/selector: `/[locale]/admin/dashboard`, Recent Uploads image manager.
+Status: Open
 
-Evidence:
+Route/selector/evidence:
 
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`
-  places `ImageManager` in `max-w-full ... overflow-auto`.
-- `apps/web/src/components/image-manager.tsx:421-445` renders a 9-column table:
-  select, preview, title, filename, topic, tags, gamut, date, actions.
-- `apps/web/src/components/image-manager.tsx:463-492` includes a 128 px preview
-  and a `min-w-[200px]` tag editor column.
-- Row actions are far right at `apps/web/src/components/image-manager.tsx:544-579`.
+- Route: `https://gallery.atik.kr/en/p/348`, viewport 1440 x 1000.
+- Accessibility snapshot exposed only `Back to TWS`, `Open fullscreen view`,
+  `Info`, `Next photo`, and the zoomable photo button in `main`.
+- DOM probe: `hasDownload=false`; `mainText` contained the title, shortcuts,
+  back link, info button, and photo navigation status only.
 
-Failure scenario:
+Source region:
 
-A photographer uploads from a phone or small tablet and then needs to fix tags,
-title, or sharing. They must horizontally pan a dense table while selection,
-thumbnail, editable metadata, and actions are separated across columns, making
-wrong-row edits more likely.
-
-Fix:
-
-Add a card/list layout below `lg`: thumbnail, title/filename, topic/date/gamut,
-tags, and edit/delete/share actions in one vertical unit. Keep the table for
-desktop. Put bulk selection/actions in a sticky bottom bar on narrow screens.
-
-### DES19-05 - Timeline sticky month headings use `top-0`, so they can slide under the sticky global nav
-
-Severity: Low-Medium
-Confidence: Medium
-Route/selector: `/[locale]/timeline`, month section headings.
-
-Evidence:
-
-- The global nav is sticky at `top-0` with `z-50` in
-  `apps/web/src/components/nav-client.tsx:84-88`.
-- Timeline month headings are also sticky at `top-0`, with a lower `z-10`, in
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:204-208`.
+- `apps/web/src/components/photo-viewer.tsx:104-114` initializes and persists
+  `isPinned` from `sessionStorage`, defaulting to `false`.
+- `apps/web/src/components/photo-viewer.tsx:175` maps `showInfo` directly from
+  `isPinned`.
+- `apps/web/src/components/photo-viewer.tsx:739-750` hides the sidebar unless
+  `showInfo` is true.
+- The hidden sidebar body beginning at `apps/web/src/components/photo-viewer.tsx:750`
+  contains tags, description, color/HDR details, wide-gamut hint, similar photos,
+  histogram/EXIF, and download links.
 
 Failure scenario:
 
-While scrolling the timeline, the month heading sticks to the viewport top under
-the already-sticky nav. On desktop it can be visually obscured by the nav; on
-mobile it competes with the nav's 64 px fixed-height region, reducing
-wayfinding exactly when the month label should orient the user.
+A desktop visitor follows a direct photo or shared link, views the image, and
+misses download, caption, capture/color context, and similar-photo discovery
+because the page opens in an immersive state with only a generic `Info` button as
+the entry point.
 
-Fix:
+Suggested fix:
 
-Offset month headings by the nav height, for example `top-16`, or expose a CSS
-custom property for the sticky nav block size and use it on internal sticky
-subheaders. Verify at mobile, tablet, and desktop breakpoints with long year
-data.
+Default the desktop sidebar open for direct photo pages, or surface a compact
+always-visible summary/download strip outside the collapsible panel. If the
+immersive default remains, make the first-run desktop affordance more explicit
+and expose download/color status without requiring the panel.
 
-### DES19-06 - Token revoke can still be hidden mid-request via the Cancel button
+## Positive Evidence
 
-Severity: Medium
-Confidence: Medium
-Route/selector: `/[locale]/admin/tokens`, revoke confirmation dialog.
+- Touch targets measured at 44 px or larger for the tested nav, tag chips, login
+  fields, admin login actions, photo toolbar buttons, and footer links.
+- Search dialog uses a named modal dialog, focus starts on `#search-input`, body
+  scroll locks while open, and `Escape`/close affordances are present.
+- Semantic search has an explanatory production hint and returns a proper
+  combobox/listbox/options pattern after the long server request resolves.
+- Reduced-motion and forced-colors CSS are present in `globals.css`, and source
+  review found reduced-motion checks in photo viewer, lightbox, and zoom surfaces.
+- Korean/English message files have matching search/map/nav keys in the reviewed
+  regions; Korean text is natural enough for the surfaced controls inspected.
+- Empty/error states exist for route errors, no geotagged map photos, no topics
+  before upload, upload failures, load-more failures, and search statuses.
 
-Evidence:
+## Missed-Issue Sweep
 
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:75-85`
-  starts the revoke transition and clears the confirmation only on success.
-- The dialog `onOpenChange` guards backdrop/Esc close while pending at
-  `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:240-241`.
-- The visible Cancel button still calls `setConfirmRevokeId(null)` regardless
-  of `isPending` at
-  `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:247-249`.
-- The destructive action button is disabled during pending at
-  `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:251-258`,
-  but the dialog can disappear if Cancel is clicked after revoke starts.
+Rechecked prior cycle-19 items against current source:
 
-Failure scenario:
+- Photo swipe navigation is now scoped to `swipeTargetRef` in
+  `photo-navigation.tsx:47-143`; not carried forward.
+- Image zoom now includes `accessibleName` in the zoom button name at
+  `image-zoom.tsx:343-365`; not carried forward.
+- Timeline sticky headings now use `top-16` at
+  `timeline/page.tsx:205-208`; not carried forward.
+- Admin image manager remains table-based on narrow screens, but I could not
+  gather authenticated browser evidence this pass; left as residual risk rather
+  than a current finding.
 
-An admin clicks Revoke, then clicks Cancel while the request is in flight. The
-dialog disappears even though the server action is still pending, hiding which
-credential is being revoked and whether the action completed.
-
-Fix:
-
-Disable Cancel while `isPending`, or convert this flow to the same
-settle-before-close `AlertDialog` pattern used by image/user deletion. Keep the
-dialog open with a localized "Revoking..." label until the request resolves.
-
-### DES19-07 - Touch-target governance still carries documented admin compact-control budgets
-
-Severity: Low
-Confidence: High
-Route/selector: admin protected routes and `ImageManager`.
-
-Evidence:
-
-- Runtime Button variants are currently safe: `apps/web/src/components/ui/button.tsx:23-30`
-  floors `default`/`sm` to `min-h-11` and icon variants to `size-11`.
-- The source audit intentionally retains known admin compact-pattern budgets at
-  `apps/web/src/__tests__/touch-target-audit.test.ts:151-245`.
-- One remaining `ImageManager` compact pattern is documented at
-  `apps/web/src/components/image-manager.tsx:335-338`, relying on the Button
-  primitive floor rather than an explicit local `h-11`.
-
-Failure scenario:
-
-A future Button primitive change or one-off admin control can turn historically
-accepted compact patterns into real sub-44 px targets. The audit will catch some
-changes, but reviewers must reason from exception budgets rather than a simple
-"all controls declare or measure 44 px" rule.
-
-Fix:
-
-Retire the remaining budgets over time. Add explicit `h-11`/`min-h-11` to
-remaining admin compact controls or replace the source-pattern budget with a
-layout-aware measured target-size test.
-
-## Positive Observations
-
-- Login is strong in rendered evidence: visible labels, autofocus, required
-  fields, password reveal with `aria-pressed`, alert placement, and 44 px
-  visible controls in both English and Korean.
-- Route error UI is not a blank failure: `apps/web/src/app/[locale]/error.tsx:22-53`
-  provides a main landmark, h1, retry button, and return link; browser-measured
-  controls were 44 px high.
-- Reduced motion is broadly covered: global CSS clamps animations/transitions
-  and suppresses hover scale in `apps/web/src/app/[locale]/globals.css:253-279`;
-  photo viewer motion also uses `useReducedMotion`.
-- Forced-colors support exists for key photo surfaces in
-  `apps/web/src/app/[locale]/globals.css:164-181` and card overlays at
-  `apps/web/src/app/[locale]/globals.css:281-300`.
-- Search has clear dialog/combobox/listbox semantics, an IME guard, focus trap,
-  close control, and live status at `apps/web/src/components/search.tsx:363-524`.
-- Mobile photo bottom-sheet IA is intentionally tested; `info-bottom-sheet` now
-  orders color details, wide-gamut hint, histogram, EXIF, capture, and download
-  consistently, locked by `info-bottom-sheet-ia.test.ts`.
-- Map accessibility has a non-map fallback path: skip link and accessible photo
-  list in `apps/web/src/app/[locale]/(public)/map/page.tsx:59-89`.
-- i18n key parity is enforced by `apps/web/src/__tests__/i18n-key-parity.test.ts:43-67`.
-  Current shipped locales are en/ko LTR; `getLocaleDirection` is explicit at
-  `apps/web/src/lib/locale-path.ts:37-40`.
-- Perceived performance is considered: masonry `content-visibility`,
-  responsive image size selection/fetch priority, blur placeholders, lazy
-  load-more with live status, and map CSS isolated to the map chunk.
-
-## Validation Limits
-
-The local app server ran, but DB-backed public and protected flows could not be
-fully exercised in-browser because MySQL on `127.0.0.1:3306` was unavailable.
-This prevented live interaction with real masonry photos, photo detail/lightbox
-state, search results, map markers, upload, authenticated settings/tokens
-mutations, analytics tables, and e2e seeded flows. Those surfaces were reviewed
-statically with exact file evidence.
-
-`agent-browser` color-scheme emulation did not flip `matchMedia` in this
-environment, so dark-mode evidence is from source plus manual `html.dark`
-computed-style probing, not from OS media emulation.
-
-## Final Missed-Issue Sweep
-
-- Rechecked prior designer issues. The cycle-18 one-time token plaintext
-  dismissal issue is improved in current source by
-  `plaintextAcknowledged` gating at
-  `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-238`,
-  so it is not re-filed.
-- Reviewed likely focus-trap hotspots: search, lightbox, info bottom sheet,
-  Radix dialogs, token dialogs, admin user/image destructive dialogs. No new
-  high-confidence trap escape or trapped-background issue beyond DES19-06.
-- Reviewed loading/empty/error states: route loading/error/not-found, photo
-  loading, load-more status, home empty/filter empty, map empty/list fallback,
-  tokens empty/loading, upload no-topic. No additional high-confidence issue
-  beyond the DB-limited runtime validation noted above.
-- Reviewed WCAG 2.2 target size and focus appearance through source plus tests:
-  targeted tests passed 57/57; no measured login/error control failed 44 px.
-- Reviewed contrast/dark/light/reduced-motion/forced-colors surfaces. No new
-  high-confidence contrast failure found in the inspected code.
-- Reviewed i18n/RTL: en/ko browser strings rendered, parity test passed, and
-  there are no shipped RTL locales. Future RTL support still requires layout QA
-  because many controls use physical left/right positioning.
-
-## Summary
-
-Findings: 7 total.
-
-- Medium: 5
-- Low-Medium: 1
-- Low: 1
-
-No source files were modified. No commit, push, or deploy was performed.
+No critical UI/UX issue was found. The highest-impact current gap is the live
+keyword-search failure because it breaks a primary public discovery affordance.

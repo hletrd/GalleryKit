@@ -104,7 +104,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     // Persist info sidebar pin state across photo navigation
     const [isPinned, setIsPinned] = useState(() => {
         try {
-            return sessionStorage.getItem('gallery_info_pinned') === 'true';
+            const stored = sessionStorage.getItem('gallery_info_pinned');
+            if (stored !== null) return stored === 'true';
+            return typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
         } catch { return false; }
     });
     useEffect(() => {
@@ -234,41 +236,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch { console.debug('sessionStorage remove failed') }
     }, []);
-
-    // Idle prefetch of prev/next photo pages (1.5 s delay via requestIdleCallback)
-    useEffect(() => {
-        const ids = [prevId, nextId].filter((id): id is number => id != null);
-        if (ids.length === 0) return;
-
-        // AGG-R11C11-L11: gate prefetch on connection type and data-saver mode
-        // so users on slow or metered connections don't pay the bandwidth cost.
-        interface ConnInfo { saveData?: boolean; effectiveType?: string }
-        const conn = (navigator as Navigator & { connection?: ConnInfo }).connection;
-        if (conn?.saveData) return;
-        if (conn?.effectiveType === '2g' || conn?.effectiveType === 'slow-2g') return;
-
-        const cancelFns: (() => void)[] = [];
-
-        const scheduleIdle = (fn: () => void): (() => void) => {
-            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-                const id = window.requestIdleCallback(fn, { timeout: 3000 });
-                return () => window.cancelIdleCallback(id);
-            }
-            const id = setTimeout(fn, 1500);
-            return () => clearTimeout(id);
-        };
-
-        for (const id of ids) {
-            const cancel = scheduleIdle(() => {
-                router.prefetch(buildPhotoPath(id));
-            });
-            cancelFns.push(cancel);
-        }
-
-        return () => {
-            for (const cancel of cancelFns) cancel();
-        };
-    }, [prevId, nextId, buildPhotoPath, router]);
 
     // Preload prev/next image files so they appear instantly on navigation.
     //

@@ -11,6 +11,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 import { isBase56 } from '@/lib/base56';
+import { recordPhotoView } from '@/app/actions/public';
 
 export const revalidate = 0;
 
@@ -100,6 +101,10 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     if (!image) {
         return notFound();
     }
+
+    // Match `/p/[id]`: analytics recording is fire-and-forget and swallowed
+    // internally so a share render never waits on the insert.
+    void recordPhotoView(image.id);
 
     const displayTitle = getPhotoDisplayTitle(image, t('sharedPhoto'));
     const subtitle = image.description || `${seo.nav_title || seo.title} · ${t('sharedPhoto')}`;

@@ -1,137 +1,265 @@
-# Verifier Review - Cycle 19/100
+# Verifier Review - Cycle 20
 
 Date: 2026-06-30 KST
-HEAD reviewed: `26f1a66d` (`fix(review): close cycle 18 findings`)
-Scope: evidence-based correctness review of the cycle-18 closure as the baseline for cycle 19. Checked repo policy claims in `AGENTS.md` / `CLAUDE.md`, current plans/reviews, implementation, tests, and route/tooling interactions. No source files were modified.
+HEAD reviewed: `5c55b68c` (`docs(clip): clarify semantic search operations`)
+Scope: verifier review of correctness evidence, repository gates, and behavior-critical invariants at current HEAD. No implementation files were modified.
 
 ## Inventory
 
-Read first:
+Required docs read first:
 
-- `AGENTS.md` instructions provided in-session.
-- `CLAUDE.md`.
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
+- `AGENTS.md`
+- `CLAUDE.md`
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-Repo state and cycle surface:
+Cycle-20 review artifacts inspected for cross-checking:
 
-- `git status --short --branch`: clean `master...origin/master`.
-- `git log --oneline --max-count=40`: current HEAD is the cycle-18 closure commit.
-- `git show --stat --name-status HEAD`: inventoried all changed files in `26f1a66d`.
-- `.context/reviews/_aggregate.md`, `plan/plan-374-cycle18-fixes.md`, `plan/plan-375-cycle18-deferred.md`, `.context/plans/README.md`.
+- `.context/reviews/architect.md`
+- `.context/reviews/code-reviewer.md`
+- `.context/reviews/critic.md`
+- `.context/reviews/debugger.md`
+- `.context/reviews/document-specialist.md`
+- `.context/reviews/perf-reviewer.md`
+- `.context/reviews/security-reviewer.md`
+- `.context/reviews/test-engineer.md`
+- `.context/reviews/tracer.md`
 
-Implementation/test files examined with line numbers:
+Blocking gates inventoried:
 
-- Semantic/similar search and rate limiting: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/clip-model.ts`.
-- Public route scanner: `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
-- Restore/backup/serving: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/__tests__/db-restore.test.ts`, `apps/web/src/__tests__/resolved-stream-source.test.ts`.
-- Bulk edit/upload/admin UI: `apps/web/src/app/actions/images.ts`, `apps/web/src/__tests__/bulk-update-images.test.ts`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`.
-- CLIP and route tests: `apps/web/src/__tests__/clip-model-contract.test.ts`, `apps/web/src/__tests__/semantic-search-route.test.ts`, `apps/web/src/__tests__/similar-route.test.ts`.
+- Root scripts: `package.json` exposes `build`, `lint`, `typecheck`, `test`, `test:e2e`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, and `deploy`.
+- App scripts: `apps/web/package.json` defines `prebuild` (`ensure-site-config`, icon generation, service-worker build), `build` (`typecheck` then `next build`), `typecheck:app`, `typecheck:scripts`, Vitest, Playwright, and the three custom lint scanners.
+- Vitest config: `apps/web/vitest.config.ts:16-39` includes only `src/__tests__/**/*.test.{ts,tsx}`, excludes `.next`, and sets a 15s timeout.
+- Playwright config: `apps/web/playwright.config.ts:48-87` runs single-worker Chromium, starts `scripts/run-e2e-server.mjs` for local E2E, and gates remote admin tests.
+- Type gate: `apps/web/tsconfig.typecheck.json:3-14` includes app/test TS/TSX plus generated Next types and excludes `scripts` from the app pass.
 
-Validation evidence:
+Test and fixture inventory:
 
-- `npm test --workspace=apps/web -- --run src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/clip-model-contract.test.ts src/__tests__/db-restore.test.ts src/__tests__/resolved-stream-source.test.ts src/__tests__/bulk-update-images.test.ts`: passed, 7 files / 115 tests.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed; semantic POST reported as using a rate-limit helper, GET routes reported non-mutating.
+- 264 Vitest files under `apps/web/src/__tests__`.
+- 5 Playwright specs under `apps/web/e2e`.
+- Fixture families checked: color/CLIP fixtures, upload fixtures, E2E JPEG fixtures, scanner fixtures embedded in custom lint tests, migration journal fixtures, service-worker template contracts, privacy field fixtures, and touch-target known-violation fixtures.
 
-Full lint/typecheck/build/all-tests were not rerun for this verifier-only report. The review below does not claim those gates are green at cycle-19 HEAD.
+Behavior-critical app files inspected:
 
-## Findings
+- Public semantic/similar search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/rate-limit.ts`.
+- OG and fetch fallback: `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/lib/og-photo-fetch.ts`.
+- Admin/API/action gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, admin API route files, and `apps/web/src/app/actions/**`.
+- Upload/ingest parity: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, and `apps/web/src/lib/image-queue.ts`.
+- Deploy/build/runtime config: `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/next.config.ts`, `apps/web/src/lib/upload-limits.ts`, and `apps/web/.env.local.example`.
+- Analytics side effects: public photo/topic/share pages, `apps/web/src/app/actions/public.ts`, `apps/web/src/components/photo-viewer.tsx`, and `apps/web/src/components/photo-navigation.tsx`.
+- Recent cycle-19 fixes: `apps/web/src/components/bulk-edit-dialog.tsx`, `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/components/image-zoom.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/__tests__/cycle-19-source-contracts.test.ts`.
+- Restore/migration/deploy invariants: `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/__tests__/migration-journal*.test.ts`, `apps/web/src/__tests__/deploy-script-contract.test.ts`.
 
-### V19-01 - CLIP inference queue is bounded but still abort-insensitive
+Validation run:
+
+- `npm test --workspace=apps/web -- --run src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/clip-model-contract.test.ts src/__tests__/og-photo-fallback.test.ts src/__tests__/cycle-19-source-contracts.test.ts`: passed, 5 files / 66 tests.
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+
+Full `npm run lint`, `npm run typecheck`, `npm run build`, full `npm test`, and `npm run test:e2e` were not run in this verifier-only pass.
+
+## Confirmed Issues
+
+### V20-01 - Central semantic rollback documentation contradicts current route behavior
+
+Severity: Low-Medium
+Confidence: High
+Status: Confirmed
+
+Evidence:
+
+- Current semantic route posture says all requests that reach DB-backed semantic-mode lookup stay charged, including disabled-mode responses and invalid query lengths: `apps/web/src/app/api/search/semantic/route.ts:12-17`.
+- The text route implements that by importing only `preIncrementSemanticAttempt` and charging before `getGalleryConfig()`: `apps/web/src/app/api/search/semantic/route.ts:38`, `apps/web/src/app/api/search/semantic/route.ts:173-200`.
+- Tests assert short-query, long-query, and disabled-mode branches stay charged and do not roll back: `apps/web/src/__tests__/semantic-search-route.test.ts:232-267`.
+- The similar route does the same for disabled/stub mode: `apps/web/src/app/api/search/similar/[id]/route.ts:24-29`, `apps/web/src/app/api/search/similar/[id]/route.ts:82-109`; tests assert no rollback at `apps/web/src/__tests__/similar-route.test.ts:167-184`.
+- But the central convention still says semantic text search "refunds only pre-work short-query rejections" and says `rollbackSemanticAttempt` is used for exits "for example disabled mode": `apps/web/src/lib/rate-limit.ts:24-30`, `apps/web/src/lib/rate-limit.ts:374-377`.
+
+Failure scenario:
+
+A future verifier or implementer follows the central `rate-limit.ts` contract instead of the route-local contract and adds rollback for disabled mode or short-query validation. That would reopen the already-closed DB-config probe and malformed-body budget bypass that current tests are trying to prevent.
+
+Suggested fix/test:
+
+Update `rate-limit.ts` Pattern 2b and the `rollbackSemanticAttempt` comment to match current behavior: semantic text and similar routes do not use rollback after semantic-mode lookup or body admission; rollback is a helper retained for direct bucket tests or future pre-work branches only. Add a source-contract assertion that the central comments do not mention disabled mode or short-query refunds unless a route actually imports and calls `rollbackSemanticAttempt`.
+
+### V20-02 - Docker deploy can build with a different env surface than the runtime container
 
 Severity: Medium
 Confidence: High
+Status: Confirmed
 
-Files and regions:
+Evidence:
 
-- `apps/web/src/lib/clip-model.ts:53-71`
-- `apps/web/src/lib/clip-model.ts:94-127`
-- `apps/web/src/lib/clip-model.ts:194-202`
-- `apps/web/src/app/api/search/semantic/route.ts:246-264`
-- `apps/web/src/__tests__/clip-model-contract.test.ts:32-39`
-- `apps/web/src/__tests__/semantic-search-route.test.ts:264-279`
-
-Issue:
-
-Cycle 18 correctly added `CLIP_INFERENCE_MAX_PENDING`, `CLIP_INFERENCE_QUEUE_TIMEOUT_MS`, and full/timeout errors, so the queue is no longer unbounded. But the original finding included abort-insensitive pending callers, and that part remains open. `waitForInferenceSlot()` accepts no `AbortSignal` and stores waiters until timeout or slot release. `embedTextReal(query)` accepts only the query string, and the semantic route calls `await embedTextReal(query)` after a one-time pre-call abort check. If the request aborts while waiting or while the model call is pending, the waiter is not removed by abort and may still run ONNX inference; the route only notices the abort afterward, before the embedding scan.
+- Compose build args come only from Compose interpolation environment: `BASE_URL`, `IMAGE_BASE_URL`, and `UPLOAD_MAX_TOTAL_BYTES` at `apps/web/docker-compose.yml:4-10`.
+- The runtime container separately reads `apps/web/.env.local` through `env_file`: `apps/web/docker-compose.yml:17-21`.
+- The deploy script checks that `.env.local` exists, but then runs `docker compose -f apps/web/docker-compose.yml up -d --build` without `--env-file` and without sourcing `.env.local`: `apps/web/deploy.sh:15-31`.
+- The Docker builder stage only promotes `BASE_URL`, `IMAGE_BASE_URL`, and `UPLOAD_MAX_TOTAL_BYTES`: `apps/web/Dockerfile:64-70`.
+- Build-time Next config reads `IMAGE_BASE_URL` for image remote patterns and CSP: `apps/web/next.config.ts:28`, `apps/web/next.config.ts:51-105`.
+- Build-time server action body size reads `NEXT_UPLOAD_BODY_MAX_BYTES`: `apps/web/src/lib/upload-limits.ts:19-33`, and `.env.local.example` documents that variable: `apps/web/.env.local.example:45-47`.
 
 Failure scenario:
 
-Production semantic search runs with `CLIP_INFERENCE_CONCURRENCY=1`. A client sends many production-mode searches and disconnects after each request enters `embedTextReal()`. Up to `CLIP_INFERENCE_MAX_PENDING` waiters remain until timeout, and if the active inference drains before the timeout, disconnected requests still run the text encoder. The bound prevents unbounded memory growth, but it does not fully close the prior "disconnected request waiters eventually consume ONNX CPU" scenario.
+An operator sets `IMAGE_BASE_URL=https://cdn.example.com` or `NEXT_UPLOAD_BODY_MAX_BYTES=536870912` only in `apps/web/.env.local`, which the deploy docs and script make look authoritative. The runtime container receives those values, but the image may be built without the CDN remote pattern or larger server-action parser cap. The app then fails CDN image validation or rejects large restore/upload bodies despite runtime env showing the intended value.
 
-Fix:
+Suggested fix/test:
 
-Thread `request.signal` into `embedTextReal(query, { signal })` / `withInferenceSlot(..., signal)`. Remove a queued waiter immediately on abort, reject with an abort-specific error, and re-check the signal after acquiring a slot but before calling the model. Add a behavior or source-contract test showing an in-queue waiter is removed/rejected on abort, not just on timeout.
+Make one deploy env source authoritative. Either run Compose with `--env-file apps/web/.env.local`, or wire every build-time env consumed by `next.config.ts`/`upload-limits.ts` through Compose build args and Dockerfile `ARG`/`ENV`. Add a contract test that every documented build-time env key is present in the Compose/Docker build surface.
 
-### V19-02 - Semantic rate-limit documentation contradicts code and tests
+### V20-03 - Upload ingest has multiple implementation owners despite a parity contract
 
 Severity: Medium
 Confidence: High
+Status: Confirmed maintainability/correctness risk
 
-Files and regions:
+Evidence:
 
-- `apps/web/src/app/api/search/semantic/route.ts:12-16`
-- `apps/web/src/app/api/search/semantic/route.ts:172-183`
-- `apps/web/src/app/api/search/semantic/route.ts:237-244`
-- `apps/web/src/lib/rate-limit.ts:24-34`
-- `apps/web/src/__tests__/semantic-search-route.test.ts:230-262`
-
-Issue:
-
-The semantic route header still says disabled mode returns before rate-limit charging. The implementation now deliberately charges before `getGalleryConfig()` so disabled mode is charged, and the disabled-mode test asserts `preIncrementSemanticAttempt` was called with no rollback. The central `rate-limit.ts` convention header also says semantic text search refunds "pre-work short-query rejections", but the route imports only `preIncrementSemanticAttempt`, not `rollbackSemanticAttempt`, and short/long query validation returns 400 after the retained charge. The short/long query tests assert only status/body, so this specific budget behavior is not locked by tests.
+- Browser upload owns auth/input/config/quota setup and the upload contract lock at `apps/web/src/app/actions/images.ts:114-190`.
+- Browser upload separately owns disk/topic preconditions at `apps/web/src/app/actions/images.ts:244-292`, save/HDR/GPS/insert state at `apps/web/src/app/actions/images.ts:350-461`, and queue job construction at `apps/web/src/app/actions/images.ts:499-531`.
+- The Lightroom route states it reuses upload infrastructure so processing and EXIF behavior are identical to browser upload: `apps/web/src/app/api/admin/lr/upload/route.ts:15-18`.
+- The Lightroom route still independently implements topic/config/lock/save/HDR/GPS/insert/enqueue flow at `apps/web/src/app/api/admin/lr/upload/route.ts:225-275`, `apps/web/src/app/api/admin/lr/upload/route.ts:307-452`, and `apps/web/src/app/api/admin/lr/upload/route.ts:479-516`.
+- Retry processing constructs another queue job manually at `apps/web/src/app/actions/images.ts:1227-1280`.
+- The central `ProcessingSettingsSnapshot` exists at `apps/web/src/lib/image-queue.ts:92-120`, but enqueue sites still copy each field manually.
+- Tests document prior drift in this exact contract class: upload settings wiring at `apps/web/src/__tests__/image-queue-settings-wiring.test.ts:1-21`, and Lightroom HDR/GPS source-contract drift at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-15` and `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:69-76`.
 
 Failure scenario:
 
-A future change follows the route header and moves disabled-mode lookup before charging, reintroducing the cycle-18 DB-config-read pressure. Or a future maintainer follows the central header and adds rollbacks for short-query validation while the current route policy is "post-read malformed/invalid bodies stay charged." Either direction makes rate-limit behavior depend on stale prose instead of the implemented security posture.
+A new upload-time processing, privacy, or metadata setting is added. The browser action forwards it, but Lightroom upload or retry misses one field. Browser uploads, Lightroom uploads, and retried images then persist different metadata or produce different derivatives for the same input, with differences only surfacing after photographer comparison or a later backfill.
 
-Fix:
+Suggested fix/test:
 
-Choose and document one policy. If current behavior is intended, update the route header and `rate-limit.ts` Pattern 2b to say disabled/stub config checks and post-read query-length validation remain charged. Add assertions for short and long query cases: `preIncrementSemanticAttempt` called once and `rollbackSemanticAttempt` not called. If refunds are intended instead, wire the rollback explicitly and update the disabled-mode test.
+Extract a server-only ingest service that owns config snapshot creation, save-original gates, image insert value construction, and queue job construction. Keep browser and Lightroom routes as auth/body/response adapters. Add an exhaustiveness test that fails when `ProcessingSettingsSnapshot` or the queue job contract gains a field not handled by the shared builder.
 
-### V19-03 - Cycle 18 plan status is stale after all scheduled items were checked off
+## Likely Issues
 
-Severity: Low
+### V20-04 - Route-level OG correctness is mostly source-greped rather than behavior-verified
+
+Severity: Low-Medium
+Confidence: Medium
+Status: Likely verification gap
+
+Evidence:
+
+- The per-photo OG route's critical behavior includes rate-limit charge/rollback placement, canonical fallback redirects, DB lookup, configured-size derivative fetch, Satori rendering, and Sharp JPEG post-processing: `apps/web/src/app/api/og/photo/[id]/route.tsx:45-129`, `apps/web/src/app/api/og/photo/[id]/route.tsx:223-240`, `apps/web/src/app/api/og/photo/[id]/route.tsx:249-295`.
+- The route tests assert most route-level properties by reading source strings: `apps/web/src/__tests__/og-photo-fallback.test.ts:40-87`.
+- The same file has real runtime tests for `pickFirstAvailablePhotoBuffer`, but those validate only the helper, not the route's response behavior: `apps/web/src/__tests__/og-photo-fallback.test.ts:111-203`.
+- The sibling topic OG route has only a minimal source contract for rollback policy: `apps/web/src/__tests__/og-route-source-contracts.test.ts:5-11`.
+
+Failure scenario:
+
+A route refactor can keep the strings `pickFirstAvailablePhotoBuffer`, `rollbackOgAttempt(ip)`, or `canonicalOrigin` present while changing the runtime order or returned response. For example, the route could call the helper but ignore its result, return a request-origin fallback from a new helper, or move a rollback into an alias that the current string count does not catch.
+
+Suggested fix/test:
+
+Add route-level Vitest tests with mocked `getImageCached`, `getSeoSettings`, `getGalleryConfig`, `pickFirstAvailablePhotoBuffer`, `ImageResponse`, and `sharp`. Assert concrete responses for invalid ID rollback, missing image charged fallback, all-derivatives-missing charged fallback, canonical same-origin `Location`, and a successful JPEG response. Keep the source contracts as cheap tripwires, but make behavior tests authoritative.
+
+## Risks Needing Validation
+
+### V20-R01 - Recent UI correctness fixes are source-pinned, not DOM-verified
+
+Severity: Medium
 Confidence: High
+Status: Risk needing validation
 
-Files and regions:
+Evidence:
 
-- `plan/plan-374-cycle18-fixes.md:1-8`
-- `plan/plan-374-cycle18-fixes.md:12-59`
-- `.context/plans/README.md:3-6`
-- `git show --name-status HEAD`
-
-Issue:
-
-`plan/plan-374-cycle18-fixes.md` says `Status: TODO`, but every scheduled finding in that same file is marked `[x] Implemented`. `.context/plans/README.md` still lists the Cycle 18 implementation plan under Active Plans as TODO. The current HEAD commit is `fix(review): close cycle 18 findings`, and it added/modified the exact files named by the plan, so the plan index no longer matches the repo's own completion evidence.
+- The fixes exist in implementation: bulk edit resets on successful submit at `apps/web/src/components/bulk-edit-dialog.tsx:155-160`; photo swipe listeners bind to `swipeTarget` at `apps/web/src/components/photo-navigation.tsx:47-48` and `apps/web/src/components/photo-navigation.tsx:134-136`; `ImageZoom` composes the photo identity into its accessible name at `apps/web/src/components/image-zoom.tsx:343-365`, passed from `photo-viewer.tsx:554` and `photo-viewer.tsx:724`.
+- The regression lock is a source contract: `apps/web/src/__tests__/cycle-19-source-contracts.test.ts:27-54`.
+- The E2E suite exercises some adjacent photo behavior, but not these exact runtime contracts: `apps/web/e2e/test-fixes.spec.ts:49-75` opens info sheet and checks keyboard focus visibility; `apps/web/e2e/public.spec.ts:61-83` opens/closes lightbox.
 
 Failure scenario:
 
-Cycle 19+ planning treats Cycle 18 implementation as still active, reopens already-implemented work, or misses the true residual items in `plan/plan-375-cycle18-deferred.md` because the completed implementation plan is mixed with active work.
+A later refactor can preserve the source strings while breaking runtime behavior: a parent-driven dialog close stops resetting state, `swipeTargetRef.current` becomes null during hydration, or the rendered zoom button accessible name regresses despite `accessibleName` still appearing in source.
 
-Fix:
+Suggested fix/test:
 
-Change `plan/plan-374-cycle18-fixes.md` to DONE, move or list it under completed plans in `.context/plans/README.md`, and leave `plan/plan-375-cycle18-deferred.md` active/deferred.
+Add Playwright or a real component harness for: bulk edit submit -> close -> reopen -> default modes; mobile swipe starting outside the media container does not navigate; and the focused main photo zoom control has an accessible name containing the photo title/tag-derived alt text.
 
-## Verified Closures
+### V20-R02 - View analytics writes can be triggered by render/prefetch instead of committed views
 
-These cycle-18 scheduled fixes matched code and tests in the files inspected:
+Severity: Medium
+Confidence: Medium
+Status: Risk needing runtime validation
 
-- Public route scanner fixed-point mutator detection exists in `apps/web/scripts/check-public-route-rate-limit.ts:269-297`, and the two-hop negative fixture exists at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:383-401`.
-- Semantic and similar routes now charge before DB-backed config lookup: semantic at `apps/web/src/app/api/search/semantic/route.ts:172-195`, similar at `apps/web/src/app/api/search/similar/[id]/route.ts:84-112`.
-- Bulk tag mutations bump freshness even when scalar updates are also present: `apps/web/src/app/actions/images.ts:1152-1155`, locked by `apps/web/src/__tests__/bulk-update-images.test.ts:572-598`.
-- Backup creation serializes on `LOCK_DB_RESTORE` and validates dump header before returning a filename: `apps/web/src/app/[locale]/admin/db-actions.ts:157-170`, `apps/web/src/app/[locale]/admin/db-actions.ts:233-260`, with source contracts in `apps/web/src/__tests__/db-restore.test.ts:52-77`.
-- Resolved-path streaming comments were weakened to "not descriptor-backed" in both upload serving and backup download: `apps/web/src/lib/serve-upload.ts:263-268`, `apps/web/src/app/api/admin/db/download/route.ts:72-76`, locked by `apps/web/src/__tests__/resolved-stream-source.test.ts:8-21`.
-- Token one-time secret flow now requires acknowledgement before normal dialog dismissal and guards duplicate creates: `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:46-73`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-235`.
-- Category empty state and delete pending states exist in `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:231-240`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:281-307`, and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:388-412`.
+Evidence:
+
+- Photo page render fires `recordPhotoView(image.id)`: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:154-156`.
+- Topic page render fires `recordTopicView(topicData.slug)`: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:163-164`.
+- Shared group page render fires `recordSharedGroupView(group.id, key)` for initial group views: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:127-132`.
+- The recorders rate-limit and insert durable analytics rows from server actions: `apps/web/src/app/actions/public.ts:371-391`, `apps/web/src/app/actions/public.ts:398-421`, and `apps/web/src/app/actions/public.ts:429-456`.
+- The photo page renders hidden adjacent-photo links with `prefetch={true}`: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:284-292`.
+- The photo viewer also prefetches adjacent routes on idle, and navigation buttons prefetch on hover: `apps/web/src/components/photo-viewer.tsx:238-264`, `apps/web/src/components/photo-navigation.tsx:220-242`.
+
+Failure scenario:
+
+Opening one photo can cause adjacent photo routes to be prefetched. If the current Next.js runtime evaluates those server components for prefetch, the server-render side effect inserts view rows for photos the visitor never committed to viewing and spends the per-IP analytics budget before real views happen.
+
+Suggested fix/test:
+
+Move analytics recording to a committed-view client boundary or a tiny public analytics route called from a visibility-aware client effect. If server-side recording remains, add a prefetch guard and a regression proving that route prefetch does not mutate `image_views`, `topic_views`, or `shared_group_views`.
+
+### V20-R03 - Similar-photo route does not observe client aborts during bounded embedding work
+
+Severity: Low-Medium
+Confidence: Medium-High
+Status: Risk needing validation
+
+Evidence:
+
+- The semantic text route checks `request.signal` before production embedding, before DB scan continuation, and before enrichment: `apps/web/src/app/api/search/semantic/route.ts:247-260`, `apps/web/src/app/api/search/semantic/route.ts:267-279`.
+- The similar-photo route scans up to `SEMANTIC_SCAN_LIMIT`, decodes rows, scores, sorts, and enriches results at `apps/web/src/app/api/search/similar/[id]/route.ts:140-178`.
+- `SEMANTIC_SCAN_LIMIT` defaults to 2000 and can be configured up to 25000: `apps/web/src/lib/clip-embeddings.ts:36-44`.
+- A direct search found no `request.signal`, `isRequestAborted`, or abort handling in `apps/web/src/app/api/search/similar/[id]/route.ts` or its test file.
+
+Failure scenario:
+
+A visitor quickly navigates through photos while similar-photo requests are in flight. The browser aborts prior requests, but the server continues target lookup, scan, decode/score/sort, and enrichment for each admitted request. The shared rate limit bounds abuse, but legitimate rapid navigation can still burn avoidable CPU/DB work.
+
+Suggested fix/test:
+
+Mirror the semantic route's lightweight abort helper in the similar route. Check before charging when possible, then before/after target lookup, after the scan before CPU scoring, and before enrichment. Add a route test for an already-aborted request that returns 499 before `preIncrementSemanticAttempt()`.
+
+### V20-R04 - CLIP queue abort/concurrency behavior is locked by source contracts, not behavior tests
+
+Severity: Medium
+Confidence: High
+Status: Risk needing validation
+
+Evidence:
+
+- Queue state, waiters, timeout, abort listener cleanup, and slot release live in `apps/web/src/lib/clip-model.ts:65-160`.
+- `embedTextReal` accepts queue options and passes them to `withInferenceSlot`: `apps/web/src/lib/clip-model.ts:228-236`.
+- The current test checks source strings such as `ClipInferenceQueueAbortError`, `signal.addEventListener('abort'`, and `}), options)`: `apps/web/src/__tests__/clip-model-contract.test.ts:32-50`.
+
+Failure scenario:
+
+A refactor can keep those strings while breaking behavior: timed-out waiters could still be woken, an abort listener could remain but not reject the queued call, or `activeInferenceCount` could be decremented too early. The source contract stays green while disconnected production text searches again consume ONNX inference work.
+
+Suggested fix/test:
+
+Extract a testable queue helper or add a test-only injection seam for model/tokenizer loading. Use fake timers to test saturated concurrency, queued abort, queue-full rejection, timeout removal, and no model invocation for an aborted queued request.
+
+## Verified Closures Since Cycle 19
+
+- CLIP text inference now threads `AbortSignal` through the queue and removes aborted waiters: `apps/web/src/lib/clip-model.ts:74-160`, `apps/web/src/lib/clip-model.ts:228-236`; the route passes `request.signal` at `apps/web/src/app/api/search/semantic/route.ts:247-260`.
+- Semantic route body admission now rejects missing `Content-Length`, mixed-case chunked transfer, and post-read multibyte byte overages with tests: `apps/web/src/app/api/search/semantic/route.ts:136-218`, `apps/web/src/__tests__/semantic-search-route.test.ts:178-210`.
+- SQL restore comment-separated dangerous statements are covered by scanning both comment-stripped forms: `apps/web/src/lib/sql-restore-scan.ts:113-155`.
+- Lightroom enqueue now source-pins `semanticSearchMode` parity in `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:382-394`.
+- Bulk edit reset, photo swipe scoping, and zoom accessible-name fixes are present, with the source-contract caveat above.
 
 ## Final Missed-Issue Sweep
 
-Final sweeps covered:
+Final sweep covered:
 
-- All files changed by `26f1a66d` plus their tests and relevant docs.
-- Current implementation vs cycle-18 aggregate claims and plan statuses.
-- Stale semantic-rate-limit comments across route-local and central policy docs.
-- CLIP queue bounds, timeout behavior, and abort-signal propagation.
-- Backup/restore lock, temp-file cleanup ownership, and realpath streaming claims.
-- Public route scanner import-origin checks, star re-export fail-closed behavior, and transitive mutator fixtures.
+- Other cycle-20 review artifacts and their promoted findings.
+- All API route files under `apps/web/src/app/api`.
+- All mutating server-action scanner outputs.
+- Public semantic/similar route behavior and rate-limit charge/rollback tests.
+- OG route fallback, rate-limit, and helper tests.
+- CLIP queue bounds and abort source contracts.
+- Recent UI fix source contracts and adjacent Playwright coverage.
+- Upload/browser/Lightroom/retry ingest parity surfaces.
+- Deploy/runtime/build env wiring.
+- Analytics view-recording render side effects and photo-route prefetch callers.
+- Migration journal, deploy safety, privacy-field, service-worker, touch-target, and scanner fixture surfaces at inventory level.
 
-No critical or high-severity correctness issues were found. The remaining confirmed risk is concentrated in one incomplete abort/cancellation behavior, one security-policy documentation drift, and one plan-status provenance drift.
+No critical or high-severity confirmed correctness bugs were found in this pass. Confirmed verifier findings are medium or lower and center on contract drift or maintainability hazards: semantic rate-limit prose, deploy env split-brain, upload ingest ownership, and source-heavy route/UI/queue tests. Remaining items need runtime validation before they should be treated as production bugs.

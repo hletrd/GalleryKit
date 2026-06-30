@@ -281,14 +281,14 @@ export default async function PhotoPage({ params }: {
                 forceSrgbDerivatives={config.forceSrgbDerivatives}
                 semanticSearchMode={config.semanticSearchMode}
             />
-            {/* Prefetch adjacent photos for instant navigation */}
+            {/* Keep adjacency links out of the tab order without render-time prefetch. */}
             {image.prevId && (
-                <Link href={localizePath(locale, `/p/${image.prevId}`)} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={localizePath(locale, `/p/${image.prevId}`)} prefetch={false} className="hidden" aria-hidden="true" tabIndex={-1}>
                     prev
                 </Link>
             )}
             {image.nextId && (
-                <Link href={localizePath(locale, `/p/${image.nextId}`)} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={localizePath(locale, `/p/${image.nextId}`)} prefetch={false} className="hidden" aria-hidden="true" tabIndex={-1}>
                     next
                 </Link>
             )}
