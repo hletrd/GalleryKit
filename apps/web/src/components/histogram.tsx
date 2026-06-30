@@ -703,7 +703,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                                 <TooltipTrigger asChild>
                                     <button
                                         type="button"
-                                        className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        className="inline-flex min-h-11 min-w-11 items-center rounded px-2 text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     >
                                         {t(`viewer.keyType${keyType}`)}
                                     </button>

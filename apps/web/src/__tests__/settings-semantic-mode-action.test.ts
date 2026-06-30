@@ -211,10 +211,13 @@ describe('updateGallerySettings semantic_search_mode', () => {
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 
-    it('keeps changed strip-gps locked once any image row exists', async () => {
-        selectLimitResults.push([{ value: 'false' }], [{ id: 42 }]);
+    it.each([
+        { current: 'false', requested: 'true' },
+        { current: 'true', requested: 'false' },
+    ])('keeps changed strip-gps locked once any image row exists ($current -> $requested)', async ({ current, requested }) => {
+        selectLimitResults.push([{ value: current }], [{ id: 42 }]);
 
-        await expect(updateGallerySettings({ strip_gps_on_upload: 'true' })).resolves.toEqual({
+        await expect(updateGallerySettings({ strip_gps_on_upload: requested })).resolves.toEqual({
             error: 'uploadSettingsLocked',
         });
 
