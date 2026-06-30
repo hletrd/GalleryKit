@@ -1,53 +1,92 @@
-# Cycle 26 Critic Review
+# Cycle 27 Critic Review
 
-Reviewer: cycle-26 critic
+Reviewer: cycle-27 critic
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `d13d66377e6952ae974a6ee3d29ce52f0aa77640` on `master`
-Scope: whole-repository critique from product, operational, maintainability, and hidden-assumption angles.
+HEAD reviewed: `4a51d345d2aa5f7de7e791adbaf3d4868c62bf46`
+Mode: read-only repository critique; no product code edits.
 
 ## Inventory First
 
-I read `AGENTS.md` and `CLAUDE.md` first, then built a fresh file inventory before reviewing.
+I read the workspace instructions and project context first, then inventoried the review surface before tracing implementation paths. Fresh inventory:
 
-Inventory evidence:
+- Git-tracked files: 2,594.
+- Top tracked areas: `.context` 1,775, `apps` 621, `plan` 180, plus root docs/manifests/deploy files.
+- Tracked app TypeScript/TSX/e2e files: 509.
+- Tracked review/plan markdown files under `.context`: 1,591.
 
-- Git-tracked files: 2588 total.
-- Top tracked areas: `.context` 1773, `apps` 617, `plan` 180, `docs` 2, plus root docs/manifests/deploy files.
-- Raw workspace files excluding `.git`, `node_modules`, `apps/web/.next`, `dist`, and `coverage`: 6743 total.
-- App TypeScript/TSX/e2e tracked files: 518.
-- Review-relevant anchors inspected: `AGENTS.md`, `CLAUDE.md`, root/app READMEs, root/app package scripts, `.env.deploy.example`, `apps/web/.env.local.example`, Dockerfile, compose, nginx, deploy helpers, migration journal, migration runner, schema, quality-gate scripts/tests, semantic-search implementation, CLIP scripts, deployment docs, and `docs/superpowers`.
-- `git status --short`, `git diff --stat`, and `git diff --name-only` produced no pre-existing unstaged change output before this report rewrite.
+Review-relevant files and categories examined:
 
-## Findings
+- Governance and product constraints: `AGENTS.md`, `CLAUDE.md`, `apps/web/README.md`, latest `.context/reviews/run9-cycle8/*`, `.context/plans/archive/73-deferred-cycle27.md`, `plan/user-injected/pending-next-cycle.md`.
+- Build/deploy/ops: root `package.json`, `apps/web/package.json`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/scripts/entrypoint.sh`, `apps/web/deploy.sh`, `apps/web/next.config.ts`.
+- Schema/migration/data safety: `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance*.ts`, `apps/web/src/lib/advisory-locks.ts`.
+- Upload/color/photographer intent: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/gallery-config*.ts`.
+- Public serving/search/privacy: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/lib/serve-upload.ts`, public upload routes, public photo/topic/share pages, `apps/web/src/app/actions/public.ts`, semantic/similar search routes.
+- Auth/origin/rate-limit gates: `apps/web/src/proxy.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, lint-gate scripts.
+- Regression locks: privacy/search/migration/upload/restore/action-origin/API-auth/public-route-rate-limit tests, plus targeted fresh test run noted below.
 
-### C26-CRIT-01 - Historical superpowers CLIP docs still assert live production activation
+Targeted validation run:
+
+- `npm test --workspace=apps/web -- migrate-legacy-originals privacy-fields search-route-privacy` -> 3 files passed, 15 tests passed.
+
+## Confirmed Issues
+
+### C27-CRIT-01 - Legacy original migration moves private originals without tightening filesystem permissions
 
 Severity: Medium
 Confidence: High
-Region: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:4`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md:17`, compared with `CLAUDE.md:159` and `CLAUDE.md:541-545`
+Perspective: data safety, photographer intent, operational deployment
 
-Failure scenario:
+Evidence:
 
-A future agent or operator starts from `docs/superpowers` because the task names that directory or because it looks like the latest CLIP design record. The spec says semantic search is "SHIPPED & ACTIVATED in production" and serving over a specific embedding count, while the current authoritative repo docs say production is operator-enabled, fresh installs default to disabled, the repo proves gates/runbooks rather than current live row count, and operators must verify the deployed host before treating production semantic search as active. That stale certainty can make a reviewer skip the actual env/DB/weights checks or report a disabled deployment as regressed when it is merely not opted in.
+- `apps/web/scripts/migrate.js:71-80` creates the private original root and iterates legacy public originals, but `fs.mkdirSync(privateOriginalRoot, { recursive: true })` does not request a private mode or follow with `chmod`.
+- `apps/web/scripts/migrate.js:99-110` migrates files by `renameSync` or `copyFileSync`/`unlinkSync`; neither branch explicitly sets the target file mode after the file lands in the private store.
+- New uploads are deliberately stricter: `apps/web/src/lib/process-image.ts:910` writes originals with `mode: 0o600`, and the GPS-strip rewrite path documents the same 0600 contract at `apps/web/src/lib/process-image.ts:1729-1731`, then writes/chmods temp files at `apps/web/src/lib/process-image.ts:1762` and `apps/web/src/lib/process-image.ts:1803-1808`.
+- The production container does create the intended private mount path (`apps/web/Dockerfile:97-102`, `apps/web/Dockerfile:131-134`) and the entrypoint ensures it is writable (`apps/web/scripts/entrypoint.sh:16-19`), but the entrypoint also does not tighten mode.
+- Existing regression tests cover duplicate-byte safety, conflict fail-closed behavior, and EXDEV copy verification (`apps/web/src/__tests__/migrate-legacy-originals.test.ts:46-85`), but no test asserts private directory/file modes.
 
-Concrete fix:
+Concrete failure scenario:
 
-Demote the live-production statements in `docs/superpowers` to historical activation notes. Add a banner matching the plan file's historical-record language to the spec, remove the current row-count claim, and link to `CLAUDE.md` plus `apps/web/README.md` as the live activation/runbook source. Keep implementation decisions like model id, threshold, and cache layout, but make current runtime state explicitly non-authoritative there.
+A production site that previously stored originals under `public/uploads/original` has legacy files with common web-server or copy defaults such as `0644`. On deploy, `migrateLegacyOriginalUploads()` moves them out of the HTTP public tree, which is correct, but migrated-by-rename files keep their legacy filesystem mode and copied files have no explicit mode normalization. On a shared deploy host, backup sidecar, support shell, or accidental broad bind mount, files now documented as private originals can remain readable by users/processes that should not inspect full-resolution originals or embedded metadata. The HTTP original-streaming vector remains closed; this is a host/filesystem privacy gap.
 
-## No-New-Findings Areas
+Suggested fix:
 
-No additional critic findings rose to reportable confidence after the final sweep.
+After creating `privateOriginalRoot`, set it to a private directory mode where the platform supports it, and normalize every migrated target file to `0600` after either `renameSync` or `copyFileSync`. Add a regression test that creates a legacy file with permissive mode, runs `migrateLegacyOriginalUploads()`, and asserts the migrated target is not group/world-readable. Keep the duplicate/conflict safeguards unchanged.
 
-Evidence checked:
+## Likely Issues
 
-- Deployment: `apps/web/deploy.sh` still runs `git pull --ff-only`, builds with compose, waits for health, then prunes containers/images/builder cache/dangling volumes after the live container is healthy. The bind-mount guarantees in `AGENTS.md`/`CLAUDE.md` align with compose and deploy script.
-- Migrations: journal entries, monotonicity tests, hash postcondition, and `reconcileLegacySchema` coverage were inspected; no new schema/runbook contradiction was found.
-- Runtime env docs: upload/body caps, proxy trust, DB TLS, health/live split, CLIP weights root, and semantic-search limits matched source at the level reviewed.
-- Quality gates: package scripts expose the blocking lint/typecheck/build/test gates described in `AGENTS.md` and `CLAUDE.md`.
-- Product posture: no active docs or source reviewed reintroduced payment, editing/culling/scoring, or unsupported object-storage switching as a shipped feature.
+No likely-but-unconfirmed issue rose above the reporting bar. The main suspicious areas I traced either had current code fixes or explicit deferred policy:
 
-## Final Missed-Issues Sweep
+- Public semantic/similar enrichment now shares `searchEnrichmentSelectFields` with a compile-time privacy guard (`apps/web/src/lib/search-enrichment-fields.ts:29-47`), and both routes use it (`apps/web/src/app/api/search/semantic/route.ts:324-335`, `apps/web/src/app/api/search/similar/[id]/route.ts:228-240`).
+- Public image/map field exposure is guarded by derived public selects and GPS-only map select rules (`apps/web/src/lib/data.ts:368-489`, `apps/web/src/lib/data.ts:1660-1697`).
+- Share-key metadata avoids unthrottled lookup and returns generic noindex metadata (`apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:36-102`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:41-110`).
 
-Final targeted sweep covered stale terms and contracts for `production`, `semantic_search_mode`, `CLIP`, `--force`, `SEMANTIC_SCAN_LIMIT`, deploy pruning, `volume prune`, migrations, `when`, `reconcileLegacySchema`, upload body caps, `TRUST_PROXY`, S3/MinIO/storage, Stripe/payment, Lightroom/PAT upload docs, and `docs/superpowers`.
+## Risks Needing Manual Validation
 
-Validation note: this was a review-artifact pass. I did not run the full app test suite because no product code was changed.
+### RISK-C27-01 - Existing host private-original modes need one-time inspection after the migration fix
+
+Severity: Medium if permissive modes are present; otherwise none
+Confidence: Medium
+
+Code proves the migration does not normalize modes today, but actual exposure depends on historical file modes, host umask, bind-mount ownership, and which local users/sidecars can read the deploy volume. After fixing C27-CRIT-01, inspect the live `data/uploads/original` tree once and normalize existing files/directories. This is a manual production validation step, not a separate code defect.
+
+### RISK-C27-02 - Production semantic search remains operator-state-dependent
+
+Severity: Low-Medium
+Confidence: High
+
+The code and docs correctly gate real CLIP search behind DB setting, env opt-in, and seeded offline weights (`CLAUDE.md:159`, `CLAUDE.md:500-533`; `apps/web/Dockerfile:97-102`; `apps/web/src/lib/gallery-config.ts:1-203`). I did not validate the live host's DB row, embedding row count, or seeded model files in this read-only repo pass. Treat production semantic availability as needing host verification before any release claim.
+
+## Checked Clean / Not Re-filed
+
+- Payment/product scope: paid downloads and Stripe remain removed and explicitly forbidden by product policy (`CLAUDE.md:570`); I did not find an active source path reintroducing payment, culling, scoring, or photo editing.
+- Deployment persistence: compose mounts `./data`, `public/uploads`, and `public/resources` (`apps/web/docker-compose.yml:23-27`); Dockerfile sets `UPLOAD_ORIGINAL_ROOT=/app/data/uploads/original` and `CLIP_MODELS_ROOT=/app/data/models/clip` (`apps/web/Dockerfile:97-102`); deploy prunes only after health succeeds (`apps/web/deploy.sh:55-85`).
+- Restore/import safety: restore enters maintenance, quiesces the queue, scans SQL, imports with `--one-database`, and runs migrate postconditions (`apps/web/src/app/[locale]/admin/db-actions.ts:427-506`, `apps/web/src/lib/sql-restore-scan.ts:1-234`, `apps/web/scripts/migrate.js:835-866`).
+- Public derivative serving: upload routes delegate to `serveUploadFile`, which allowlists derivative directories and handles HEAD without opening a stream on the primary unlocalized route (`apps/web/src/app/uploads/[...path]/route.ts:6-30`, `apps/web/src/lib/serve-upload.ts:1-320`).
+- Privacy-field split: public/public-map/search/timeline/enrichment guards are aligned; targeted tests passed (`privacy-fields`, `search-route-privacy`).
+- Known deferred policy items were not duplicated: process-local scale-out assumptions, data.ts size, CSP polish, CLIP heavy integration/weights CI, storage abstraction quarantine, and previously deferred UI polish remain historical/deferred unless their documented reopen criteria are met.
+
+## Final Sweep Confirmation
+
+Final sweep covered governance docs, current review history, root/app package scripts, Docker/compose/entrypoint/deploy, Next config, schema and journal, migration/reconcile, backup/restore, upload and Lightroom paths, queue and image processing, color/HDR/GPS handling, derivative serving, public photo/topic/share/map/search routes, admin auth/origin/rate-limit gates, privacy guards/tests, semantic-search CLIP gating, and operational docs.
+
+I found one confirmed issue, no likely issues, and two manual-validation risks. No code was edited beyond this review artifact.
