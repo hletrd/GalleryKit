@@ -60,7 +60,7 @@
     "p-queue": "^9.1.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-dropzone": "^14.3.8",
+    "react-dropzone": "^15.0.0",
     "react-leaflet": "^5.0.0",
     "server-only": "^0.0.1",
     "sharp": "^0.34.5",
