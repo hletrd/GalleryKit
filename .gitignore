@@ -19,6 +19,11 @@ test
 .context/*
 !.context/reviews/
 !.context/reviews/**
+!.context/plans/
+.context/plans/*
+!.context/plans/README.md
+!.context/plans/cycle-29-2026-06-30-plan.md
+!.context/plans/cycle-29-2026-06-30-deferred.md
 # Re-ignore transient gate/run logs under reviews — the `!.context/reviews/**`
 # negation above otherwise overrides the global `*.log` rule and tracks them.
 .context/reviews/**/*.log

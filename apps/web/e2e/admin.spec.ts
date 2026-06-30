@@ -23,15 +23,15 @@ test.describe('admin workflows (opt-in)', () => {
 
     await page.locator('a[href$="/admin/categories"]').first().click();
     await expect(page).toHaveURL(/\/admin\/categories/);
-    await expect(page.locator('#admin-content table')).toBeVisible();
+    await expect(page.locator('#main-content table')).toBeVisible();
 
     await page.locator('a[href$="/admin/tags"]').first().click();
     await expect(page).toHaveURL(/\/admin\/tags/);
-    await expect(page.locator('#admin-content table')).toBeVisible();
+    await expect(page.locator('#main-content table')).toBeVisible();
 
     await page.locator('a[href$="/admin/users"]').first().click();
     await expect(page).toHaveURL(/\/admin\/users/);
-    await expect(page.locator('#admin-content table')).toBeVisible();
+    await expect(page.locator('#main-content table')).toBeVisible();
 
     await page.locator('a[href$="/admin/password"]').first().click();
     await expect(page).toHaveURL(/\/admin\/password/);
@@ -137,7 +137,7 @@ test.describe('admin workflows (opt-in)', () => {
 
     await page.locator('#upload-topic').selectOption('e2e-smoke');
     const uploadName = `playwright-upload-${Date.now()}.jpg`;
-    await page.locator('#admin-content input[type="file"]').setInputFiles({
+    await page.locator('#main-content input[type="file"]').setInputFiles({
       name: uploadName,
       mimeType: 'image/jpeg',
       buffer: jpegBuffer,

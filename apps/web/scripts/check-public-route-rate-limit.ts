@@ -6,9 +6,9 @@
  *   (b) calls one of the documented rate-limit pre-increment helpers
  *       from `@/lib/rate-limit`.
  *
- * IMPORTANT: GET handlers are NOT scanned by this gate. Expensive GET
- * routes (e.g., ImageResponse, file generation) must be audited separately
- * or opt out with `@public-no-rate-limit-required: <reason>`.
+ * Expensive GET handlers are also scanned. A public GET route that imports or
+ * calls DB/image/filesystem/embedding work must either call an approved
+ * rate-limit helper or opt out with `@public-no-rate-limit-required: <reason>`.
  *
  * Cycle 3 / D-101-15: closes the cycle 2 RPF C2RPF-CROSS-LOW-03 gap —
  * a future PR that adds a fourth public-mutating route must consciously
@@ -34,6 +34,7 @@ const ROUTE_FILE_NAMES = new Set([
 ]);
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const EXPENSIVE_GET_METHOD = 'GET';
 
 // Recognized rate-limit invocation shapes. The helper must be imported from an
 // approved rate-limit module; a local/noop function with the same prefix does
@@ -52,6 +53,23 @@ const MUTATING_CALL_METHOD_NAMES = new Set([
     'query',
     'execute',
 ]);
+
+const EXPENSIVE_GET_MARKERS = [
+    'ImageResponse',
+    'pickFirstAvailablePhotoBuffer',
+    'embedText',
+    'embedImage',
+    'imageEmbeddings',
+    'getGalleryConfig',
+    'getSeoSettings',
+    'getImage',
+    'getMapImages',
+    'getTimeline',
+    'db.',
+    'readFile',
+    'createReadStream',
+    'sharp',
+];
 
 function findRouteFiles(dir: string): string[] {
     const results: string[] = [];
@@ -242,6 +260,28 @@ function bodyCallsRateLimitBeforeMutation(
     return sawRateLimitGate && !sawMutation;
 }
 
+function bodyCallsApprovedRateLimit(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
+    if (!body) return false;
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionLike(node) && node !== body) return;
+        if (ts.isCallExpression(node) && isRateLimitHelperCall(node, approvedRateLimitImports)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
+function bodyContainsExpensiveGetWork(body: ts.Node | undefined, sourceFile: ts.SourceFile): boolean {
+    if (!body) return false;
+    const text = body.getText(sourceFile);
+    return EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker));
+}
+
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {
     const report: CheckReport = { passed: [], failed: [] };
 
@@ -298,6 +338,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     }
 
     const mutatingHandlers: HandlerBody[] = [];
+    const getHandlers: HandlerBody[] = [];
     for (const statement of sourceFile.statements) {
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
         const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -315,8 +356,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             );
             return report;
         }
-        if (ts.isFunctionDeclaration(statement) && statement.name && MUTATING_METHODS.has(statement.name.text)) {
-            mutatingHandlers.push({ method: statement.name.text, body: statement.body });
+        if (ts.isFunctionDeclaration(statement) && statement.name) {
+            if (MUTATING_METHODS.has(statement.name.text)) {
+                mutatingHandlers.push({ method: statement.name.text, body: statement.body });
+            } else if (statement.name.text === EXPENSIVE_GET_METHOD) {
+                getHandlers.push({ method: statement.name.text, body: statement.body });
+            }
         }
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
@@ -327,6 +372,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                     if (isFunctionLikeInitializer(init)) {
                         mutatingHandlers.push({ method: decl.name.text, body: expressionBody(init) });
                     }
+                } else if (
+                    ts.isIdentifier(decl.name)
+                    && decl.name.text === EXPENSIVE_GET_METHOD
+                    && isFunctionLikeInitializer(decl.initializer)
+                ) {
+                    getHandlers.push({ method: decl.name.text, body: expressionBody(decl.initializer) });
                 }
             }
         }
@@ -336,14 +387,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                 if (ts.isIdentifier(element.name) && MUTATING_METHODS.has(element.name.text)) {
                     const localName = element.propertyName?.text ?? element.name.text;
                     mutatingHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
+                } else if (ts.isIdentifier(element.name) && element.name.text === EXPENSIVE_GET_METHOD) {
+                    const localName = element.propertyName?.text ?? element.name.text;
+                    getHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
                 }
             }
         }
-    }
-
-    if (mutatingHandlers.length === 0) {
-        report.passed.push(`OK: ${relative} (no mutating handlers)`);
-        return report;
     }
 
     // Check for explicit reasoned exempt comment.
@@ -353,7 +402,8 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         .replace(/`[^`]*`/g, '')
         .replace(/"[^"]*"/g, '')
         .replace(/'[^']*'/g, '');
-    if (EXEMPT_COMMENT_RE.test(withoutStrings)) {
+    const hasExemption = EXEMPT_COMMENT_RE.test(withoutStrings);
+    if (hasExemption) {
         if (mutatingHandlers.length > 1) {
             report.failed.push(
                 `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports mutating handlers ${mutatingHandlers.map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt mutating handler.`,
@@ -361,15 +411,34 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             return report;
         }
         report.passed.push(`OK: ${relative} (carries ${EXEMPT_TAG})`);
+    }
+
+    if (mutatingHandlers.length > 0 && hasExemption) {
         return report;
     }
 
-    if (mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localMutatingFunctions))) {
+    if (mutatingHandlers.length > 0 && mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(handler.body, approvedRateLimitImports, localMutatingFunctions))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
-    } else {
+    } else if (mutatingHandlers.length > 0) {
         report.failed.push(
             `MISSING RATE LIMIT: ${relative} exports mutating handler(s) ${mutatingHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before mutation (preIncrement* / checkAndIncrement*).`
         );
+    }
+
+    const expensiveGetHandlers = getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile));
+    if (expensiveGetHandlers.length > 0 && !hasExemption) {
+        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsApprovedRateLimit(handler.body, approvedRateLimitImports));
+        if (unmeteredGetHandlers.length > 0) {
+            report.failed.push(
+                `MISSING RATE LIMIT: ${relative} exports expensive GET handler(s) ${unmeteredGetHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper.`
+            );
+        } else {
+            report.passed.push(`OK: ${relative} (expensive GET uses rate-limit helper)`);
+        }
+    }
+
+    if (mutatingHandlers.length === 0 && expensiveGetHandlers.length === 0 && !hasExemption) {
+        report.passed.push(`OK: ${relative} (no mutating or expensive GET handlers)`);
     }
 
     return report;

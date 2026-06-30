@@ -22,6 +22,7 @@ const {
     transactionMock,
     txUpdateMock,
     txDeleteMock,
+    executeMock,
     sqlMock,
 } = vi.hoisted(() => {
     const onDuplicateKeyUpdateMock = vi.fn(async () => undefined);
@@ -41,6 +42,8 @@ const {
         await cb({ update: txUpdateMock, delete: txDeleteMock });
     });
 
+    const executeMock = vi.fn(async () => ({ affectedRows: 0 }));
+
     // sql`...` tag — return a marker that records the raw template so we can
     // assert GREATEST() / <= 0 appear in the right places.
     const sqlMock = vi.fn((strings: TemplateStringsArray) => ({ __sql: strings.join('?') }));
@@ -49,7 +52,7 @@ const {
         insertMock, valuesMock, onDuplicateKeyUpdateMock,
         deleteMock, deleteWhereMock,
         transactionMock, txUpdateMock, txDeleteMock,
-        sqlMock,
+        executeMock, sqlMock,
     };
 });
 
@@ -60,6 +63,7 @@ vi.mock('@/db', () => ({
         insert: insertMock,
         delete: deleteMock,
         transaction: transactionMock,
+        execute: executeMock,
     },
     rateLimitBuckets: {
         ip: 'rate_limit_buckets.ip',
@@ -75,7 +79,7 @@ vi.mock('drizzle-orm', () => ({
     sql: sqlMock,
 }));
 
-import { incrementRateLimit, decrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
+import { incrementRateLimit, decrementRateLimit, resetRateLimit, purgeOldBuckets, RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE } from '@/lib/rate-limit';
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -133,5 +137,21 @@ describe('resetRateLimit (AGG-T1)', () => {
         expect(deleteWhereMock).toHaveBeenCalledTimes(1);
         // It must be a plain delete (no transaction needed — full-row removal).
         expect(transactionMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('purgeOldBuckets (C29 AGG-C29-01)', () => {
+    it('deletes expired buckets with bounded raw DELETE batches', async () => {
+        executeMock
+            .mockResolvedValueOnce({ affectedRows: RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE })
+            .mockResolvedValueOnce({ affectedRows: 3 });
+
+        const deleted = await purgeOldBuckets(60_000);
+
+        expect(deleted).toBe(RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE + 3);
+        expect(deleteMock).not.toHaveBeenCalled();
+        expect(executeMock).toHaveBeenCalledTimes(2);
+        const templates = sqlMock.mock.calls.map((c) => c[0].join(''));
+        expect(templates.some((s) => s.includes('DELETE FROM') && s.includes('LIMIT'))).toBe(true);
     });
 });

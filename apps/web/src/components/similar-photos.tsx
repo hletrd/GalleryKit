@@ -88,6 +88,7 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                 const res = await fetch(`/api/search/similar/${imageId}`, { signal: controller.signal });
                 if (!res.ok) {
                     // 503 (setup/backfill), 404 (no embedding), 429, etc.
+                    fetchedRef.current = false;
                     if (mountedRef.current) setResults('error');
                     return;
                 }
@@ -99,6 +100,7 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                     return;
                 }
                 // Network error — keep panel visible with localized feedback.
+                fetchedRef.current = false;
                 if (mountedRef.current) setResults('error');
             } finally {
                 if (abortRef.current === controller) {

@@ -14,6 +14,7 @@ import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 
 export const revalidate = 0;
@@ -40,6 +41,9 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       robots: { index: false, follow: false },
     };
   }
+  const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+  if (maintenanceMetadata) return maintenanceMetadata;
+
   const { tags: tagsParam } = await searchParams;
   const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const topicDataPromise = getTopicBySlugCached(topic);

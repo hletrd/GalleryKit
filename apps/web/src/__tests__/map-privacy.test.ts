@@ -8,6 +8,8 @@
  * 3. GPS-leak guard: publicSelectFields still excludes GPS (regression guard).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { publicSelectFieldKeys, publicMapSelectFieldKeys, adminSelectFieldKeys } from '@/lib/data';
 
 const GPS_KEYS = ['latitude', 'longitude'] as const;
@@ -78,6 +80,26 @@ describe('publicMapSelectFields privacy contract', () => {
 });
 
 describe('getMapImages topic-filtering predicate (unit)', () => {
+    const dataSource = readFileSync(resolve(__dirname, '../lib/data.ts'), 'utf8');
+    const getMapImagesSource = dataSource.slice(
+        dataSource.indexOf('export async function getMapImages'),
+        dataSource.indexOf('export const getImageCached'),
+    );
+
+    it('production query joins topics and enforces map_visible plus GPS predicates', () => {
+        expect(getMapImagesSource).toContain('.innerJoin(topics, eq(images.topic, topics.slug))');
+        expect(getMapImagesSource).toContain('eq(topics.map_visible, true)');
+        expect(getMapImagesSource).toContain('isNotNull(images.latitude)');
+        expect(getMapImagesSource).toContain('isNotNull(images.longitude)');
+        expect(getMapImagesSource).toContain('.limit(MAP_MAX_MARKERS)');
+    });
+
+    it('production query keeps the runtime GPS leak guard', () => {
+        expect(getMapImagesSource).toContain('if (!row.topic_map_visible)');
+        expect(getMapImagesSource).toContain('GPS leak guard');
+        expect(getMapImagesSource).toContain('throw new Error');
+    });
+
     /**
      * The SQL predicate for getMapImages enforces:
      *   topics.map_visible = true

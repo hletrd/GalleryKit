@@ -63,7 +63,7 @@ describe('checkPublicRouteSource', () => {
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
         expect(result.failed).toHaveLength(0);
-        expect(result.passed.some(p => p.includes('no mutating handlers'))).toBe(true);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
     });
 
     it('fails export with call-wrapper but no rate-limit helper', () => {
@@ -83,6 +83,59 @@ describe('checkPublicRouteSource', () => {
             // @public-no-rate-limit-required: webhook is gated by signature
             export async function POST(request) {
                 return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
+    });
+
+    it('passes cheap GET handlers without a limiter', () => {
+        const source = `
+            export async function GET() {
+                return Response.json({ status: 'ok' });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
+    });
+
+    it('fails expensive public GET handlers without a limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            export async function GET() {
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes expensive public GET handlers with a rate-limit helper', () => {
+        const source = `
+            import { db } from '@/db';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
+    it('passes expensive public GET handlers with a reasoned exemption', () => {
+        const source = `
+            import { db } from '@/db';
+            // @public-no-rate-limit-required: health check is sampled by infrastructure only
+            export async function GET() {
+                await db.execute('SELECT 1');
+                return Response.json({ status: 'ok' });
             }
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
@@ -434,7 +487,7 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
-    it('passes when no mutating handlers exist', () => {
+    it('passes when no mutating or expensive GET handlers exist', () => {
         const source = `
             export async function GET(request) {
                 return { status: 200 };
@@ -442,7 +495,7 @@ describe('checkPublicRouteSource', () => {
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
         expect(result.failed).toHaveLength(0);
-        expect(result.passed.some(p => p.includes('no mutating handlers'))).toBe(true);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
     });
 
     it('fails mutating handler without rate limit or exempt tag', () => {
@@ -534,7 +587,7 @@ describe('checkPublicRouteSource', () => {
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
         expect(result.failed).toHaveLength(0);
-        expect(result.passed.some(p => p.includes('no mutating handlers'))).toBe(true);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
     });
 });
 

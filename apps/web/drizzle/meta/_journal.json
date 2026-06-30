@@ -197,6 +197,13 @@
       "when": 1782400000000,
       "tag": "0027_analytics_retention_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1782812037323,
+      "tag": "0028_rate_limit_bucket_start_idx",
+      "breakpoints": true
     }
   ]
 }

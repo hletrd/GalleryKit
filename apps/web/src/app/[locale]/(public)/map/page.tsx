@@ -7,11 +7,15 @@ import Link from 'next/link';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 // Public map pages must reflect GPS data immediately as topics are toggled.
 export const revalidate = 0;
 
 export async function generateMetadata(): Promise<Metadata> {
+    const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+    if (maintenanceMetadata) return maintenanceMetadata;
+
     const [locale, t, seo] = await Promise.all([
         getLocale(),
         getTranslations('map'),

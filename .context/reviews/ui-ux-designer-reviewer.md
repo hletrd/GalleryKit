@@ -1,251 +1,220 @@
-# UI/UX Designer Reviewer - Cycle 28
+# UI/UX Designer Reviewer - Cycle 29
 
 Date: 2026-06-30
 Repo: `/Users/hletrd/flash-shared/gallery`
-Mode: Prompt 1 review only. No fixes implemented.
-Reviewer surface: local `ui-ux-designer-reviewer` prompt applied under `AGENTS.md` and `CLAUDE.md` authority.
+Mode: Prompt 1 review only. No product-code changes implemented.
+Reviewer note: adapted only the UI/UX critique style; no BurstPick-specific paths or assumptions were used.
 
-## Inventory First
+## Process And Evidence
 
-### Instructions and Project Context Examined
+Read first:
 
-- `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`
-- `AGENTS.md` instructions supplied in the prompt
-- `CLAUDE.md` architecture, UI, i18n, privacy, color/HDR, and operational guidance
-- `.context/reviews/ui-ux-designer-reviewer.md` existing cycle 27 report
-- `.context/reviews/photographer-r27/` and `.context/reviews/photographer-r28/` review history inventory
-- `.context/plans/README.md` and current `.context/plans/photographer-*` plan inventory
+- `AGENTS.md`
+- `CLAUDE.md`
 
-### Current UI Source Examined
+Inventory and review covered:
 
-I inventoried and reviewed the current route/component/style/message/test surfaces that affect UI behavior: 16,713 lines across public pages, admin pages, shared components, UI primitives, translations, styles, and UI-focused tests.
+- Public routes under `apps/web/src/app/[locale]/(public)/`: home, topic, photo, shared link/group, smart collection, map, timeline/year, privacy, loading/error.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected shell, dashboard/upload/image management, categories, tags, settings, SEO, password, users, DB, tokens, analytics.
+- Shared UI: `nav-client.tsx`, `search.tsx`, `home-client.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `map/*`, `upload-dropzone.tsx`, `image-manager.tsx`, `admin-*`, `tag-*`, `ui/*`.
+- Styling/themes: `apps/web/src/app/[locale]/globals.css`, `tailwind.config.ts`, theme provider and theme helpers.
+- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Tests/docs: touch target audit, focus-visible scan, US-P15 a11y contracts, i18n parity, theme token/resolve tests, E2E public/admin/nav specs, current `.context/reviews/designer.md`, prior `ui-ux-designer-reviewer.md`, and existing screenshot/browser artifact inventories.
 
-Public app route files examined:
+Browser evidence reused from the main cycle 29 designer pass:
 
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/globals.css`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- Local app was run at `http://localhost:3001`; `localhost:3000` was occupied by another app.
+- `/en/privacy` loaded and exposed coherent `lang`, `dir`, nav, main, footer, search/theme/locale controls.
+- Search dialog focus/inert/scroll-lock behavior was verified live.
+- `/en` hit the app error boundary because local MySQL was unavailable: `connect ECONNREFUSED 127.0.0.1:3306`.
+- Populated gallery/admin DB-backed runtime traversal was blocked by the unavailable DB.
 
-Admin route files examined:
+Focused validation I ran:
 
-- `apps/web/src/app/[locale]/admin/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/images/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx`
+```text
+npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/theme-resolve.test.ts
+Test Files 6 passed; Tests 53 passed.
+```
 
-Shared UI and interaction components examined:
+## Confirmed Issues
 
-- `apps/web/src/components/admin-header.tsx`
-- `apps/web/src/components/admin-nav.tsx`
-- `apps/web/src/components/admin-user-manager.tsx`
-- `apps/web/src/components/bulk-edit-dialog.tsx`
-- `apps/web/src/components/color-details-section.tsx`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/grid-picture.tsx`
-- `apps/web/src/components/grid-picture-fallback.tsx`
-- `apps/web/src/components/histogram.tsx`
-- `apps/web/src/components/home-client.tsx`
-- `apps/web/src/components/image-manager.tsx`
-- `apps/web/src/components/image-zoom.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
-- `apps/web/src/components/lazy-focus-trap.tsx`
-- `apps/web/src/components/lightbox.tsx`
-- `apps/web/src/components/lightbox-color-pip.tsx`
-- `apps/web/src/components/load-more.tsx`
-- `apps/web/src/components/nav.tsx`
-- `apps/web/src/components/nav-client.tsx`
-- `apps/web/src/components/photo-navigation.tsx`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/photo-viewer-color-pip.tsx`
-- `apps/web/src/components/photo-viewer-shell.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/similar-photos.tsx`
-- `apps/web/src/components/tag-filter.tsx`
-- `apps/web/src/components/tag-input.tsx`
-- `apps/web/src/components/theme-provider.tsx`
-- `apps/web/src/components/topic-empty-state.tsx`
-- `apps/web/src/components/upload-dropzone.tsx`
-- `apps/web/src/components/wide-gamut-hint.tsx`
-- `apps/web/src/components/map/*`
-- `apps/web/src/components/ui/*`
-
-Localization and UI test surfaces examined:
-
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-- `apps/web/src/__tests__/touch-target-audit.test.ts`
-- `apps/web/src/__tests__/focus-visible-links-scan.test.ts`
-- `apps/web/src/__tests__/a11y-us-p15.test.ts`
-- `apps/web/src/__tests__/privacy-page-landmark.test.ts`
-- `apps/web/src/__tests__/lightbox-controls-contract.test.ts`
-- `apps/web/src/__tests__/i18n-key-parity.test.ts`
-- `apps/web/src/__tests__/theme-token-contract.test.ts`
-- `apps/web/src/__tests__/hdr-badge-contrast.test.ts`
-
-## Runtime and Validation Evidence
-
-Browser/runtime inspection was feasible against an already-running local dev server on `http://localhost:3001`.
-
-Validated in browser:
-
-- `/en/privacy` loaded successfully with title `Privacy | GalleryKit`.
-- Privacy page exposed `html lang="en" dir="ltr"`, a `main` landmark with `id="main-content"`, a `Main navigation` landmark, and a footer landmark.
-- `/en/admin` loaded the login UI with labeled username and password fields.
-- Search dialog on `/en/privacy` moved focus to the combobox after open and restored focus to the Search trigger after Escape.
-
-Runtime blocker:
-
-- `/en` rendered the app error boundary because the local DB was unavailable. Console/server evidence showed failed queries against `admin_settings` and `topics`. This blocked populated home/gallery/admin-protected runtime evaluation, so those flows were reviewed through source, DOM-capable static evidence, and focused tests.
-
-Focused validation run:
-
-- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/lightbox-controls-contract.test.ts`
-  - 5 files passed, 48 tests passed.
-- `npm test --workspace=apps/web -- --run src/__tests__/i18n-key-parity.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/hdr-badge-contrast.test.ts`
-  - 3 files passed, 15 tests passed.
-
-Total focused validation: 8 UI/a11y/i18n/theme test files passed, 63 tests passed.
-
-## Confirmed Findings
-
-### C28-UX-01 - Admin image table lacks a contained horizontal overflow strategy
+### C29-UXR-01 - Theme control hydrates with a different label/icon than the server rendered
 
 Severity: Medium
 Confidence: High
+Type: Confirmed issue
 
-File and region:
+Sources:
 
-- `apps/web/src/components/image-manager.tsx:424-595`
-- Comparison pattern: `apps/web/src/components/admin-user-manager.tsx:135-136`
+- `apps/web/src/components/nav-client.tsx:39-47` reads `useTheme()`, falls back to `system`, and builds the accessible label.
+- `apps/web/src/components/nav-client.tsx:166-176` renders theme-specific icon branches and button label/title.
+- `apps/web/src/app/[locale]/layout.tsx:130-138` configures `next-themes` with `storageKey="gallery_theme"`.
+- `apps/web/src/lib/theme.ts:39-46` defines the system -> light -> dark -> oled cycle.
+- Runtime evidence in `.context/reviews/designer.md`: stored `gallery_theme=dark` produced server label/icon for System/Monitor and hydrated client label/icon for Dark/Moon with a React hydration mismatch.
 
-Problem:
+Failure scenario:
 
-The admin image manager renders a dense 9-column table inside `<div className="min-w-0 rounded-md border">` with a plain `<Table>`, but the table has no horizontal scroll container, no explicit minimum width, and no responsive card fallback. The columns include checkbox, preview, title, filename, topic, tags, gamut, date, and actions. Several cells have fixed or minimum width pressure, including preview media, a `min-w-[200px]` tags area, and edit/delete action buttons.
+A returning visitor with `gallery_theme=dark` or `oled` opens any public page. The server HTML exposes the theme button as "Theme: System. Switch to Light." with a Monitor icon; hydration then swaps to the stored theme label/icon. In development this logs a hydration mismatch and regenerates the subtree. For keyboard and screen-reader users, the first nav pass can announce the wrong current theme and next action.
 
-Concrete failure scenario:
+Fix:
 
-On a phone, tablet, split-screen laptop, or narrow admin sidebar viewport, the table either compresses controls into unreadable cells or creates page-level horizontal overflow. Keyboard users tabbing through the row actions can land on controls outside the visible viewport without a contained scroll context. Touch users may not reliably reach the date/actions side of the table, and screen magnifier users lose row context while panning.
+Render a stable theme button until the client has mounted and `useTheme()` has resolved from storage. Keep the 44 px dimensions stable during the swap. Add a component/source test or Playwright check that seeds `gallery_theme=dark`/`oled` before navigation and asserts there is no hydration error and no accessible-name mismatch.
 
-Why this is a repo-consistency issue:
-
-`admin-user-manager.tsx` already uses the safer project pattern at `135-136`: `overflow-x-auto rounded-md border` plus `Table className="min-w-[520px]"`. The image manager is wider and riskier, but does not apply that pattern.
-
-Suggested fix:
-
-Wrap the image table in a contained horizontal scroller, for example `overflow-x-auto rounded-md border`, and give the table an explicit minimum width sized for its actual columns. For smaller admin breakpoints, consider a responsive card/list layout that preserves preview, title, status, topic/tags, and primary actions without horizontal panning. Add a regression test or source contract so dense admin tables keep a contained overflow strategy.
-
-### C28-UX-02 - Slideshow interval validation is not surfaced at field level
+### C29-UXR-02 - Public GPS map publishing is exposed as a one-click table switch
 
 Severity: Medium
 Confidence: High
+Type: Confirmed issue
 
-File and region:
+Sources:
 
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:154-173`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:695-707`
-- `apps/web/src/app/actions/settings.ts:60-65`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:263-265`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:64-78` immediately calls `setTopicMapVisible(slug, !currentValue)`.
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:259-265` renders the switch with only an aria-label and disabled in-flight state.
+- `apps/web/src/app/actions/topics.ts:600-625` persists `topics.map_visible` and revalidates app data.
+- `apps/web/src/lib/data.ts:1660-1685` documents `getMapImages()` as the only public latitude/longitude surface and filters by `topics.map_visible = true`.
+- `apps/web/messages/en.json:107-109`, `apps/web/messages/ko.json:107-109` label the column/toggle as public GPS map visibility.
 
-Problem:
+Failure scenario:
 
-The settings page defines a numeric slideshow interval input with `min={SLIDESHOW_INTERVAL_MIN}` and `max={SLIDESHOW_INTERVAL_MAX}`, but the custom client-side `validateSettings` function does not validate `slideshow_interval_seconds`. The Save action is driven by a custom button handler, not native form submission, so browser constraint validation is not enough to reliably block invalid values or announce the problem. If the server rejects the value, the client shows only a generic toast from `result.error`, with no `aria-invalid`, no field-specific error message, and no error text associated through `aria-describedby`.
+An admin scanning the Categories table accidentally toggles a private or client category on a trackpad. The app shows only a success toast, while every processed GPS-bearing photo in that category becomes available on `/map` after revalidation. The data flow is intentional, but the affordance treats a privacy-impacting publication action like a harmless display preference.
 
-Concrete failure scenario:
+Fix:
 
-An admin enters `0`, `999`, or another out-of-range slideshow interval and presses Save. The page attempts to save, receives a generic invalid-value failure, and leaves the field visually and programmatically unchanged. A screen reader user hears the toast but is not told which field needs correction. A sighted keyboard user must infer the offending field by scanning the settings page.
+Gate only the false -> true transition with an `AlertDialog` using explicit copy such as "Publish GPS". Include the category label, explain that geotagged photos in the category become public on `/map`, and show an affected-photo count if cheap to query. Keep true -> false fast. During the request, either apply an optimistic switch state or expose a row-level `aria-live` status so the disabled switch does not look stuck.
 
-WCAG impact:
+### C29-UXR-03 - Public map can render 10,000 markers and 10,000 accessible list links in one page
 
-This weakens WCAG 2.2 error identification and correction support, especially 3.3.1 Error Identification and 3.3.3 Error Suggestion, because the invalid control is not marked or described when the app already knows the accepted range.
+Severity: Medium
+Confidence: High
+Type: Confirmed issue
 
-Suggested fix:
+Sources:
 
-Add `slideshow_interval_seconds` to the same client-side range validation path used for image quality and wide-gamut pixel settings. When invalid, render a field-level message with an `id`, set `aria-invalid="true"` on the input, and include both the help text and error id in `aria-describedby`. Consider moving the settings save interaction into a real `<form onSubmit>` so native number validation and custom validation reinforce each other.
+- `apps/web/src/lib/data.ts:1649-1658` sets `MAP_MAX_MARKERS = 10000` and notes clustering/viewport loading would be needed beyond the cap.
+- `apps/web/src/lib/data.ts:1667-1685` returns up to 10,000 public GPS rows, request-fresh.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:37-56` maps every row into client markers.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:83-95` renders every marker again as a fallback `<Link>` in `#map-photo-list`.
+- `apps/web/src/components/map/map-client.tsx:76-93` computes full-array bounds.
+- `apps/web/src/components/map/map-client.tsx:118-140` renders every marker as a Leaflet `<Marker>`/`<Popup>`.
 
-## Coverage Notes by Review Area
+Failure scenario:
+
+A travel or event archive enables public GPS for several dense categories. A mobile visitor opens `/map` and receives thousands of markers plus thousands of fallback links. Leaflet mounts a large marker set, `FitBounds` scans all points, and assistive-tech users are presented with a very long link list. The page can feel frozen and the accessible fallback becomes hard to navigate at the same moment the map needs more structure.
+
+Fix:
+
+Use clustering or viewport-bounded marker loading, and page or virtualize the accessible list. If a server cap remains, expose a localized truncation notice and filtering affordance so visitors know whether they are seeing all public GPS photos or only the most recent subset.
+
+### C29-UXR-04 - Public DB failures collapse to a generic localized route error shell
+
+Severity: Medium
+Confidence: High
+Type: Confirmed issue
+
+Sources:
+
+- `apps/web/src/app/[locale]/error.tsx:22-57` renders a standalone generic error shell with a minimal nav, Try again, and Return to Gallery.
+- `apps/web/src/app/[locale]/(public)/layout.tsx:1-17` normally provides full public nav/main/footer.
+- `apps/web/src/app/[locale]/(public)/page.tsx:151-173` checks restore maintenance, then awaits DB-backed SEO/config/tag/topic/gallery reads without a route-local unavailable state.
+- `apps/web/messages/en.json:706-710`, `apps/web/messages/ko.json:706-710` use generic "Something went wrong loading this page" copy.
+- Runtime evidence in `.context/reviews/designer.md`: `/en` with local DB down rendered the generic error boundary and lost the normal public shell controls.
+
+Failure scenario:
+
+A visitor hits the gallery during a MySQL restart, migration problem, or first-run DB setup issue. Instead of a gallery-specific unavailable/maintenance state inside the normal public IA, they see a generic "Error" page with minimal navigation. They cannot tell whether the gallery is empty, temporarily unavailable, or broken.
+
+Fix:
+
+For expected public DB-read failures on home/topic/photo/map routes, catch and render a localized `PublicDataUnavailable` or maintenance-like shell inside the normal public layout where possible. Preserve public nav/footer/search/theme/locale affordances when they can be resolved safely. Add a test that mocks a `getTopicsCached()` or `getImagesLitePage()` failure and asserts product-specific recovery copy.
+
+## Risks Needing Manual Validation
+
+### C29-UXR-R1 - Opt-in admin E2E selectors are stale after the admin main-content rename
+
+Severity: Low
+Confidence: High
+Type: Validation risk, not a product UI defect
+
+Sources:
+
+- `apps/web/src/app/[locale]/admin/layout.tsx:19-27` states the old `#admin-content` target was replaced by the global `#main-content` target.
+- `apps/web/e2e/helpers.ts:195` still waits for `#admin-content`.
+- `apps/web/e2e/admin.spec.ts:24-34` still expects `#admin-content table`.
+- `apps/web/e2e/admin.spec.ts:138-140` still scopes upload file input lookup to `#admin-content`.
+
+Failure scenario:
+
+When `E2E_ADMIN_ENABLED=true`, admin browser coverage can fail on stale selectors before it exercises category, tag, user, password, DB, and upload flows. That weakens future UI regression evidence for the exact protected admin surfaces that were blocked in this local runtime pass by missing MySQL.
+
+Fix:
+
+Update the E2E helpers/specs to use `#main-content`, role-based landmarks, or more specific page-level selectors. Then run the admin E2E lane against a seeded local DB/admin session.
+
+### C29-UXR-R2 - Populated gallery/admin runtime review remains DB-blocked
+
+Severity: Low
+Confidence: High
+Type: Manual validation gap
+
+Sources:
+
+- `.context/reviews/designer.md` records the local runtime blocker: `connect ECONNREFUSED 127.0.0.1:3306`.
+- DB-backed public home data begins at `apps/web/src/app/[locale]/(public)/page.tsx:157-173`.
+- Protected dashboard data begins at `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`.
+
+Failure scenario:
+
+Static review and focused tests can miss visual density, scrolling, responsive table/card behavior, and real upload/image-management states that only appear with seeded photos, tags, topics, GPS data, and admin auth.
+
+Fix:
+
+Run a seeded local DB or known-safe review environment and capture desktop/mobile passes through populated home, photo, map, admin dashboard/upload, categories, settings, and DB pages. Include dark/light/OLED and Korean locale snapshots.
+
+## Rechecked Previous Findings
+
+- Prior image-manager horizontal overflow issue is fixed in current source: `apps/web/src/components/image-manager.tsx:424-425` now uses `min-w-0 overflow-x-auto rounded-md border`; wide columns remain contained.
+- Prior slideshow interval field-level validation issue is fixed: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:154-174` validates the field; `settings-client.tsx:698-714` marks `aria-invalid`, associates help/error text, and renders `role="alert"`.
+- Public/admin skip-link targets are covered: `apps/web/src/app/[locale]/layout.tsx:123-128`, public layout `apps/web/src/app/[locale]/(public)/layout.tsx:8-16`, admin layout `apps/web/src/app/[locale]/admin/layout.tsx:19-27`, and error boundary `apps/web/src/app/[locale]/error.tsx:34-56`.
+- Touch target and focus-visible policies have broad source gates: `apps/web/src/__tests__/touch-target-audit.test.ts:42-83` and `apps/web/src/__tests__/focus-visible-links-scan.test.ts:52-88`.
+- Korean/English key parity and theme-token contracts passed in the focused validation run.
+
+## Covered Area Summary
 
 Information architecture:
 
-- Public navigation, topic navigation, map/timeline/year/detail routes, privacy, and admin route grouping were reviewed. The current structure is understandable and avoids exposing admin-only data in public components. The main source-backed IA issue found is the responsive handling of dense admin image management.
+- Reviewed localized public shell, topic/tag filters, public map/timeline/year/privacy pages, shared routes, smart collections, admin grouping, and admin nav. Main IA issue is the generic public DB-error fallback; main privacy-affordance issue is the one-click GPS map switch.
 
-Affordances:
+Interaction design:
 
-- Public cards, search, lightbox controls, bottom sheet, zoom controls, upload dropzone, admin buttons, and table actions were reviewed. Button labels and icon-only controls generally have accessible names. The image manager table density issue remains the main affordance risk at narrow widths.
+- Reviewed search dialog, nav expansion, theme cycling, locale switching, lightbox/photo viewer controls, upload dropzone, tags, category map toggle, settings validation, DB restore confirmation, and admin tables. Confirmed issues are theme hydration and GPS-publication confirmation.
 
-Focus and keyboard navigation:
+Accessibility:
 
-- Skip link, privacy landmarks, search modal open/close focus behavior, lightbox keyboard shortcuts, bottom sheet focus trap, upload controls, and admin login were reviewed. Existing focused tests passed for touch targets, focus-visible links, and lightbox control contracts. No new focus trap defect was confirmed in the feasible runtime paths.
+- Reviewed landmarks, skip links, labels, aria-live regions, combobox/listbox patterns, dialog/focus-trap behavior, touch targets, focus-visible rings, field validation, and map fallback list. Focused a11y/touch/focus tests passed. Map scale remains an accessibility risk because the fallback can become thousands of links.
 
-WCAG 2.2 accessibility:
+Responsive behavior:
 
-- Landmarks, focus visibility, touch target tests, dialog semantics, input labels, live regions, and validation flows were reviewed. The confirmed WCAG concern is field-level validation for slideshow interval settings.
+- Reviewed nav wrapping, public masonry, photo viewer, map loader, admin layout, image manager overflow, and table/card patterns. No new source-backed responsive defect was found besides map scale.
 
-Contrast and color:
+Loading/empty/error states:
 
-- Theme tokens, HDR badge contrast tests, forced-colors CSS, dark/light/OLED theme support, and color-gamut labels were reviewed. Focused contrast/token tests passed. No new source-backed contrast failure was found.
+- Reviewed global/public/admin loading and error files, topic empty state, search states, upload states, map empty/loading, and restore-maintenance copy. Confirmed issue is generic DB failure UX.
 
-ARIA:
+Themes/color:
 
-- Search combobox/dialog, bottom sheet dialog, upload progress, tag combobox/listbox, lightbox controls, navigation labels, and settings inputs were reviewed. The confirmed ARIA gap is missing invalid/error association for the slideshow interval field.
+- Reviewed light/dark/OLED tokens, forced-colors CSS, reduced-motion CSS, HDR/P3 badge display rules, and tests. No contrast regression found; theme hydration remains an interaction/accessibility mismatch.
 
-Reduced motion:
+i18n:
 
-- Global reduced-motion CSS, home image hover suppression, photo viewer transition duration handling, photo navigation animation handling, and lightbox motion behavior were reviewed. No new reduced-motion failure was confirmed.
-
-Responsive breakpoints:
-
-- Public masonry/grid behavior, nav wrapping, photo viewer responsive layout, bottom sheet mobile behavior, admin shell, user table, and image manager table were reviewed. The confirmed responsive defect is the image manager table overflow strategy.
-
-Loading, empty, and error states:
-
-- Public loading for photo detail, protected admin loading/error, topic empty state, search empty/results, upload selected/progress/error states, and DB-triggered error boundary were reviewed. The DB blocker prevented populated gallery runtime validation, but source coverage did not reveal a new loading/empty/error-state defect beyond the settings validation UX issue.
-
-Form validation UX:
-
-- Admin login, upload form, tag input, user manager, password/settings forms, and settings save flow were reviewed. The confirmed defect is the missing field-level slideshow interval validation.
-
-Dark/light mode:
-
-- Theme provider, token contract tests, forced colors, dark/OLED selectors, and representative component classes were reviewed. No new dark/light mode issue was confirmed.
-
-i18n and RTL:
-
-- `en` and `ko` message parity tests passed. Root layout sets `lang` and `dir` from locale direction. No RTL locale is currently shipped, so RTL-specific visual behavior remains a future manual validation area rather than a confirmed current bug.
-
-Perceived performance:
-
-- Public masonry uses lazy loading and `content-visibility` support, search uses debouncing, image detail uses blur/priority handling, and reduced-motion paths are present. No new perceived-performance defect was confirmed in source. DB-backed runtime performance could not be assessed due to local DB unavailability.
-
-## Previously Reported Issues Rechecked
-
-- Cycle 27 desktop nav clipping issue was rechecked and is no longer present in current source. `apps/web/src/components/nav-client.tsx:84-91` now includes desktop auto height, min height, visible overflow, wrapping, and padding for expanded topic links.
-- Cycle 27 create-user password hint association was rechecked and is no longer present in current source. `apps/web/src/components/admin-user-manager.tsx:113-119` now associates the create password and confirmation inputs with `create-password-help`.
+- Reviewed `en.json`/`ko.json`, plural convention from `CLAUDE.md`, map/category/error/theme/search keys, and parity tests. No new translation-key gap found.
 
 ## Final Missed-Issues Sweep
 
-No current review-relevant UI source category was intentionally skipped in the source pass: public routes, admin routes, shared interaction components, UI primitives, global styles, messages, and UI-focused tests were inventoried and reviewed. Runtime inspection of populated DB-backed gallery flows was blocked by the unavailable local database, and that is the only material validation gap. The final sweep did not identify additional source-backed findings with enough confidence to report.
+Final sweep covered `aria-*`, `role`, `tabIndex`, `aria-live`, `focus-visible`, `sr-only`, dialog/focus-trap code, search/listbox semantics, map/list fallback, admin table overflow, touch-target tests, reduced-motion CSS, forced-colors CSS, dark/light/OLED tokens, loading/empty/error states, validation flows, privacy/GPS copy, Korean/English messages, and E2E selectors.
 
-Finding count: 2
+Reported findings:
+
+- Confirmed product UI/UX issues: 4
+- Validation risks needing manual follow-up: 2
+
+No product code was modified.

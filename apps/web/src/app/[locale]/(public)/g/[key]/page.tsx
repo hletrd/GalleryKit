@@ -19,6 +19,7 @@ import { isBase56 } from '@/lib/base56';
 import { parseSafePositiveInteger } from '@/lib/validation';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 export const revalidate = 0;
 
@@ -42,6 +43,9 @@ async function isShareLookupRateLimited() {
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
+    const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+    if (maintenanceMetadata) return maintenanceMetadata;
+
     // C4-AGG-01: Rate limit is NOT checked here — it is enforced once in the
     // page body. Both generateMetadata and the page body run in separate React
     // render contexts, so calling preIncrementShareAttempt in both would

@@ -192,7 +192,7 @@ export async function loginAsAdmin(page: Page) {
   await page.getByPlaceholder('Password').fill(adminPassword);
   await page.getByRole('button', { name: /sign in/i }).click();
   await expect(page).toHaveURL(/\/admin\/dashboard/);
-  await expect(page.locator('#admin-content')).toBeVisible();
+  await expect(page.locator('#main-content')).toBeVisible();
 }
 
 export async function expectNoNextError(page: Page) {

@@ -21,7 +21,7 @@ npm run init
 npm run dev
 ```
 
-After the dev server starts, log in at `/en/admin`, create a category, upload one photo, and confirm the public homepage renders it.
+After the dev server starts, log in at `/en/admin`, review Settings before any real upload, and decide whether originals should strip GPS metadata. Then create a category, upload one photo, and confirm the public homepage renders it. GPS stripping is locked once photos exist so the first upload cannot be treated as a throwaway setup step.
 
 ## Scripts
 
@@ -53,6 +53,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 - The checked-in `docker-compose.yml` assumes a Linux host with `network_mode: host`, a host-managed MySQL instance, and a host-side `src/site-config.json` bind mount. Build/deploy flows now fail fast if `src/site-config.json` is missing.
 - The checked-in nginx proxies `/uploads/{jpeg,webp,avif}` to the app, which is the documented host-side reverse-proxy topology. It is meant to sit behind a TLS-terminating edge; if nginx is your public edge, add a real 443 server and redirect cleartext 80 traffic. If a custom host-side nginx serves `/uploads` statically, point it at the host bind mount (`apps/web/public/uploads`) and keep originals private. Runtime topic cover resources are separately persisted at `apps/web/public/resources`.
 - Admin database backups are plaintext SQL dumps in `data/backups/` until you move or encrypt them. The app keeps them non-public and authenticated, but host/storage encryption is an operator responsibility.
+- Database backups cover rows only. They do not include private originals in `data/uploads/original`, public derivatives in `public/uploads`, or topic/resource files in `public/resources`; use host-level filesystem backups for complete rollback.
 - If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` and `E2E_ADMIN_ENABLED=true` for local Playwright admin login flows.
 - Remote admin Playwright runs are blocked by default; set both `E2E_ADMIN_ENABLED=true` and `E2E_ALLOW_REMOTE_ADMIN=true` only when you intentionally want to exercise a non-local target with a dedicated `E2E_ADMIN_PASSWORD`.
 
@@ -78,6 +79,10 @@ The resolver heals a stored `semantic_search_mode='production'` back to `disable
 4. Set the DB row `admin_settings.semantic_search_mode='production'`.
 
 New uploads are embedded automatically (fire-and-forget, lower priority than derivative generation). See `CLAUDE.md` → **"CLIP semantic search — seeding model weights on the deploy host"** for the exact `--rm` sidecar commands (the prod runtime container has no `tsx`/source, so model ops run from a sidecar off `web-web:latest` with read-only source mounts).
+
+## Auto alt-text hints
+
+Auto alt-text is default-off. When enabled, the current implementation derives suggestions from local EXIF/metadata context and stores them as suggested text; it is not a remote AI captioning service and it does not automatically rewrite existing rows. Use the admin bulk action to copy suggestions into empty alt-text fields, or run `scripts/backfill-alt-text.ts` when you intentionally want to populate suggestions for existing processed photos.
 
 ## Upload API contract
 

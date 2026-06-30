@@ -216,6 +216,7 @@ export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
     count: int("count").default(1).notNull(),
 }, (table) => ({
     pk: primaryKey({ columns: [table.ip, table.bucketType, table.bucketStart] }),
+    bucketStartIdx: index("idx_rate_limit_buckets_bucket_start").on(table.bucketStart),
 }));
 
 // US-P44 (Phase 4.4): Per-photo / per-topic / per-shared-group analytics views.

@@ -23,6 +23,7 @@ import { recordPhotoView } from '@/app/actions/public';
 import { parseSafePositiveInteger } from '@/lib/validation';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <PhotoViewerLoading />,
@@ -42,6 +43,9 @@ export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+    const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+    if (maintenanceMetadata) return maintenanceMetadata;
+
     const imageId = parseSafePositiveInteger(id);
     if (imageId === null) {
         const t = await getTranslations('photo');

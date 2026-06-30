@@ -1,258 +1,281 @@
-# Cycle 28 Tracer Review
+# Cycle 29 Tracer Review
 
 Date: 2026-06-30
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD inspected: `9d7f7f74`
-Mode: Prompt 1 review only. No fixes implemented.
+HEAD inspected: `b4fa1f64`
+Mode: Prompt 1 review only. No product-code fixes implemented.
 
-## Inventory Examined
+## Scope and Method
 
-Documentation and prior context:
+Read first, per instruction:
 - `AGENTS.md`
 - `CLAUDE.md`
-- `.context/reviews/tracer.md` prior cycle baseline
-- `.context/reviews/architect.md`, `.context/reviews/critic.md`, `.context/reviews/debugger.md`, `.context/reviews/document-specialist.md`, and `.context/reviews/perf-reviewer.md` were present as pre-existing/concurrent dirty files and were not modified
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
-- Review-relevant plan history under `plan/` and `plan/done/` was inventoried for migration/restore/queue/search context, not treated as current code
 
-Restore, backup, migrations, deploy:
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
+Inventory and tracing commands used:
+- `rg --files apps/web/src apps/web/scripts apps/web/drizzle apps/web/e2e apps/web`
+- targeted `rg -n` sweeps for upload, restore, maintenance, semantic/search, embeddings, auth, rate limits, migrations, deploy, backfill, and privacy field contracts
+- route inventory with `find apps/web/src/app/api -name route.ts -o -name route.tsx`
+- focused line-by-line reads with `nl -ba ... | sed -n ...`
+
+This review validates behavior from code paths, not comments. Comments were used only as hints and were checked against implementation.
+
+## Flow Traces
+
+### Uploads
+
+Browser upload enters `uploadImages` in `apps/web/src/app/actions/images.ts:114-632`. The causal chain is:
+- restore maintenance, same-origin, and admin checks at `images.ts:116-126`
+- upload tracker quota claim before file writes at `images.ts:191-247`, settled at `images.ts:601-603`
+- upload-processing contract lock at `images.ts:177-180`
+- strict config snapshot and disk precheck at `images.ts:183-270`
+- original write/metadata validation via `saveOriginalAndGetMetadata` in `apps/web/src/lib/process-image.ts:887-1037`
+- GPS-strip and HDR policy branches at `images.ts:361-401`
+- DB insert and tag insert at `images.ts:419-503`
+- queue enqueue with processing snapshot at `images.ts:505-537`
+
+Lightroom/PAT upload follows the same safety shape in `apps/web/src/app/api/admin/lr/upload/route.ts:182-486`, with `withAdminAuth` wrapping the route at `lr/upload/route.ts:548-554`, content-length checks, upload tracker claim, topic validation, upload-contract lock, strict config, disk precheck, original save, GPS/HDR gates, DB insert, and queue enqueue.
+
+Queue processing claims the per-image advisory lock in `apps/web/src/lib/image-queue.ts:470-497`, rejects work during restore maintenance at `image-queue.ts:513-518`, verifies the row remains unprocessed before encoding at `image-queue.ts:579-584`, and cleans variants if the row is deleted before the final processed update at `image-queue.ts:679-699`.
+
+No confirmed upload auth, quota, or original-path bypass found in this pass.
+
+### Restore Maintenance
+
+Restore enters `restoreDatabase` in `apps/web/src/app/[locale]/admin/db-actions.ts:365-566`. The main causal controls are:
+- same-origin/admin checks before body work at `db-actions.ts:366-374`
+- DB restore advisory lock at `db-actions.ts:390-398`
+- upload-processing contract lock for the restore window at `db-actions.ts:400-411`
+- color and semantic backfill locks at `db-actions.ts:413-447`
+- durable maintenance marker begin at `db-actions.ts:449-490`
+- view-buffer, image-queue, and tracked background DB-write drain at `db-actions.ts:492-497`
+- restore execution and post-restore migrations at `db-actions.ts:503-506` and `db-actions.ts:723-744`
+- marker clear, queue resume, and lock release in `db-actions.ts:507-541`
+
+The durable marker and fail-closed sync live in `apps/web/src/lib/restore-maintenance-durable.ts:1-104`; process-local checks live in `apps/web/src/lib/restore-maintenance.ts:1-60`. Background audit and analytics writes are now routed through `trackBackgroundDbWrite` (`apps/web/src/lib/background-db-writes.ts:5-31`, `apps/web/src/lib/audit.ts:86-93`, `apps/web/src/app/actions/public.ts:431-504`) and drained before import.
+
+No confirmed stale-write restore race found in the currently inspected restore path.
+
+### Public Privacy and Search
+
+The canonical public field contract is built by omission from `adminSelectFields` in `apps/web/src/lib/data.ts:368-408`; the map variant allows only latitude/longitude beyond the public set at `data.ts:410-489`. `PrivacySensitiveKeys` is defined at `data.ts:459-477`; the symmetric fixture contract is in `apps/web/src/__tests__/privacy-fields.test.ts:7-132`.
+
+Text search uses its own guarded `searchFields` in `data.ts:1490-1534`, then searches title/description/camera/lens/topic/labels/tags/aliases while requiring `images.processed = true` at `data.ts:1545-1621`.
+
+Semantic and similar result enrichment share `searchEnrichmentSelectFields` with a compile-time privacy guard in `apps/web/src/lib/search-enrichment-fields.ts:29-47`. Route-level denylist coverage is also present in `apps/web/src/__tests__/search-route-privacy.test.ts:1-65`.
+
+No confirmed public leakage of original filenames, GPS outside map-visible routes, processing errors, ICC descriptor, internal pipeline version, or upload user id found in the traced public search paths.
+
+### Semantic Search
+
+Public semantic POST resolves runtime mode through `getGalleryConfig()` in `apps/web/src/app/api/search/semantic/route.ts:189-203`, then scans only the active model version at `semantic/route.ts:263-279`. Similar search is production-only and reads only `PRODUCTION_MODEL_VERSION` rows in `apps/web/src/app/api/search/similar/[id]/route.ts:116-177`.
+
+The runtime production gate heals stored `semantic_search_mode = production` to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `apps/web/src/lib/gallery-config.ts:123-140`.
+
+One sidecar mismatch is listed below as TRC29-01.
+
+### Image Processing and Backfill
+
+Normal queue processing uses per-image advisory locks, row-state checks, output verification, affected-row cleanup, bounded queue concurrency, and restore quiescence in `apps/web/src/lib/image-queue.ts:91-108`, `image-queue.ts:470-699`, and `image-queue.ts:1060-1114`.
+
+The in-app color backfill runner takes the global color backfill lock and a per-image processing claim around the full re-encode/detect/update window (`apps/web/src/lib/admin-backfill-runner.ts:348-381`, `admin-backfill-runner.ts:485-630`).
+
+The operator color sidecar takes only the global color backfill lock in `apps/web/scripts/backfill-color-pipeline.ts:305-328`, then re-encodes candidates selected at `backfill-color-pipeline.ts:338-349` through `reprocessRow` at `backfill-color-pipeline.ts:198-274` and batched updates at `backfill-color-pipeline.ts:409-473`. The concurrency gap is listed as a manual-validation risk in TRC29-02.
+
+### Route Auth and Rate Limits
+
+Admin API route inventory found:
 - `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/lib/db-restore.ts`
-- `apps/web/src/lib/sql-restore-scan.ts`
-- `apps/web/src/lib/restore-maintenance.ts`
-- `apps/web/src/lib/restore-maintenance-durable.ts`
-- `apps/web/scripts/restore-maintenance-recovery.ts`
-- `apps/web/scripts/restore-maintenance-recovery.mjs`
-- `apps/web/scripts/migrate.js`
-- `apps/web/scripts/mysql-connection-options.js`
-- `apps/web/scripts/migration-add-column.ts`
-- `apps/web/scripts/migrate-admin-auth.ts`
-- `apps/web/scripts/migrate-capture-date.js`
-- `apps/web/scripts/migrate-titles.ts`
-- `apps/web/drizzle/meta/_journal.json`
-- `apps/web/drizzle/0000_nappy_madelyne_pryor.sql` through `apps/web/drizzle/0027_analytics_retention_indexes.sql`
-- `apps/web/src/db/schema.ts`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/deploy.sh`
-- `scripts/deploy-remote.sh`
-- `apps/web/scripts/entrypoint.sh`
-- `apps/web/nginx/default.conf`
-
-Upload, image processing, queue, backfill:
-- `apps/web/src/app/actions/images.ts`
 - `apps/web/src/app/api/admin/lr/upload/route.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/process-topic-image.ts`
-- `apps/web/src/lib/upload-processing-contract-lock.ts`
-- `apps/web/src/lib/upload-tracker.ts`
-- `apps/web/src/lib/upload-tracker-state.ts`
-- `apps/web/src/lib/upload-paths.ts`
-- `apps/web/src/lib/upload-filenames.ts`
-- `apps/web/src/lib/upload-limits.ts`
-- `apps/web/src/lib/admin-backfill-runner.ts`
-- `apps/web/src/app/actions/admin-backfill.ts`
-- `apps/web/scripts/backfill-color-pipeline.ts`
-- `apps/web/scripts/backfill-alt-text.ts`
-- `apps/web/scripts/backfill-cicp-recheck.ts`
-- `apps/web/scripts/backfill-clip-embeddings.ts`
 
-Analytics, public reads, data access:
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/analytics.ts`
-- `apps/web/src/lib/analytics-data.ts`
-- `apps/web/src/lib/view-retention.ts`
-- Public route files under `apps/web/src/app/[locale]/(public)/`, including home, topic, photo, share, shared group, map, timeline, year, collection, feed, uploads, layout, privacy, and loading pages
-- `apps/web/src/app/sitemap.ts`
-- `apps/web/src/app/feed.xml/route.ts`
-- `apps/web/src/app/robots.ts`
-- `apps/web/src/app/manifest.ts`
+Both are wrapped with `withAdminAuth` (`download/route.ts:105-109`, `lr/upload/route.ts:548-554`). The lint gate enforcing this pattern is `apps/web/scripts/check-api-auth.ts:1-199`.
 
-Auth, session, admin actions, API auth:
-- `apps/web/src/app/actions/auth.ts`
-- `apps/web/src/app/actions/admin-users.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/seo.ts`
-- `apps/web/src/app/actions/sharing.ts`
-- `apps/web/src/app/actions/tags.ts`
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/app/actions/collections.ts`
-- `apps/web/src/app/actions/embeddings.ts`
-- `apps/web/src/lib/session.ts`
-- `apps/web/src/lib/password-hashing.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/lib/admin-tokens.ts`
-- `apps/web/src/lib/audit.ts`
-- `apps/web/src/lib/action-guards.ts`
-- `apps/web/src/lib/request-origin.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/lib/auth-rate-limit.ts`
-- `apps/web/src/proxy.ts`
+Mutating public API routes are scanned by `apps/web/scripts/check-public-route-rate-limit.ts:1-260`. Public semantic POST and similar GET use same-origin checks and semantic-specific pre-increment helpers (`semantic/route.ts:107-184`, `similar/[id]/route.ts:80-113`). OG GET routes are not part of the mutating-route scanner by design, but both traced OG routes call rate-limit helpers before DB/CPU-heavy work.
 
-Search, semantic search, CLIP:
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/lib/clip-model.ts`
-- `apps/web/src/lib/clip-inference.ts`
-- `apps/web/src/lib/clip-embeddings.ts`
-- `apps/web/src/lib/clip-model-id.ts`
-- `apps/web/src/lib/clip-paths.ts`
-- `apps/web/src/lib/search-enrichment-fields.ts`
-- `apps/web/scripts/download-clip-models.ts`
-- `apps/web/scripts/clip-model-manifest.ts`
+The proxy/IP topology risk is listed as TRC29-03.
 
-Service worker and asset serving:
-- `apps/web/public/sw.template.js`
-- `apps/web/public/sw.js`
-- `apps/web/scripts/build-sw.ts`
-- `apps/web/src/lib/sw-cache.ts`
-- `apps/web/src/components/register-service-worker.tsx`
-- `apps/web/src/lib/serve-upload.ts`
-- `apps/web/src/app/uploads/[...path]/route.ts`
-- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+### Deploy and Migrations
 
-Focused tests/contracts checked:
-- `apps/web/src/__tests__/sql-restore-scan.test.ts`
-- `apps/web/src/__tests__/restore-upload-lock.test.ts`
-- `apps/web/src/__tests__/image-queue-quiesce.test.ts`
-- `apps/web/src/__tests__/image-queue-permanent-failure.test.ts`
-- `apps/web/src/__tests__/upload-processing-contract-lock.test.ts`
-- `apps/web/src/__tests__/public-actions.test.ts`
-- `apps/web/src/__tests__/migration-journal.test.ts`
-- `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`
-- `apps/web/src/__tests__/sw-template-contract.test.ts`
-- `apps/web/src/__tests__/sw-cache.test.ts`
-- `apps/web/src/__tests__/nginx-config.test.ts`
-- `apps/web/src/__tests__/mysql-cli-ssl.test.ts`
-- `apps/web/src/__tests__/health-route.test.ts`
-- `apps/web/src/__tests__/semantic-scan-limit-source.test.ts`
-- `apps/web/src/__tests__/similar-route.test.ts`
-- `apps/web/src/__tests__/semantic-search-route.test.ts`
-- `apps/web/src/__tests__/privacy-fields.test.ts`
-- `apps/web/e2e/admin.spec.ts`
-- `apps/web/e2e/public.spec.ts`
+Container startup runs migrations before starting Next: `apps/web/Dockerfile:151-158`. The migrator baselines legacy/fresh schemas, runs Drizzle migrations, and asserts committed journal hashes are present in `apps/web/scripts/migrate.js:758-818`. Deploy starts the compose service and waits on Docker health or `/api/live` in `apps/web/deploy.sh:28-54`.
 
-Repository-wide sweeps:
-- Inventoried tracked source/config/test/docs with `find` and `rg --files`, excluding generated/vendor/runtime artifacts: `node_modules`, `.git`, `apps/web/.next`, `test-results`, `apps/web/test-results`, `.omx/logs`, `.omc`, and `apps/web/.omc`.
-- Ran targeted grep sweeps for restore/maintenance, upload/queue, analytics/views, auth/session, search/semantic/embedding, service worker, migration/journal, deploy/docker/nginx, write operations, fire-and-forget promises, timers, and queue side effects.
-- No review-relevant source/config/test/doc file in the active repository was intentionally skipped. Auxiliary `.claude/worktrees/**` files were inventoried but excluded from current findings because they are separate worktree/archive material, not the active app under review.
+The deploy health criterion remains liveness-only by code (`apps/web/Dockerfile:140-143`, `apps/web/src/app/api/live/route.ts:1-9`). A readiness validation gap is listed as TRC29-04.
 
 ## Findings
 
-### TRC28-01 - Likely - Public analytics insert promises can cross the restore boundary
+### TRC29-01 - Likely Issue - Semantic embedding sidecar bypasses the runtime mode resolver
 
-Severity: Medium
+Severity: Low
 Confidence: High
 Status: Likely issue
 
 Evidence:
-- `apps/web/src/app/actions/public.ts:416-441` (`recordPhotoView`)
-- `apps/web/src/app/actions/public.ts:444-473` (`recordTopicView`)
-- `apps/web/src/app/actions/public.ts:476-509` (`recordSharedGroupView`)
-- `apps/web/src/app/[locale]/admin/db-actions.ts:491-499` restore preparation drains only shared-group count buffer and image queue
-- `apps/web/src/lib/image-queue.ts:1060-1087` queue quiescence drains queue side effects only
-- `apps/web/src/__tests__/public-actions.test.ts:241-254` explicitly locks current behavior as "without blocking on the insert promise"
+- Runtime resolver heals stored production to disabled unless the operator env flag is set: `apps/web/src/lib/gallery-config.ts:123-140`
+- Public semantic route uses that resolver before serving search: `apps/web/src/app/api/search/semantic/route.ts:189-203`
+- Similar route also uses that resolver and serves only production mode: `apps/web/src/app/api/search/similar/[id]/route.ts:116-124`
+- In-app embedding action uses `getGalleryConfig()` before choosing model version: `apps/web/src/app/actions/embeddings.ts:85-103`
+- Sidecar instead reads raw `admin_settings.value` and treats any value other than `disabled` as enabled: `apps/web/scripts/backfill-clip-embeddings.ts:87-93`, `backfill-clip-embeddings.ts:116-124`
 
-Problem:
-The three public analytics recorders perform a restore-maintenance check before validation and again immediately before `db.insert(...).values(...)`, but the insert itself is launched as an untracked promise and not awaited. Restore preparation waits for `flushBufferedSharedGroupViewCounts()` and `quiesceImageProcessingQueueForRestore()`, but it has no registry/drain for these public analytics insert promises. Once the insert promise is created, a restore can begin, import a backup, and complete while the old request's insert is still pending.
+Failure scenario:
+1. The DB contains `semantic_search_mode = production`, but the deployment does not have `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
+2. Runtime search resolves that state to disabled, so `/api/search/semantic` returns `semantic_not_configured`.
+3. An operator runs `npx tsx scripts/backfill-clip-embeddings.ts` without `--force`.
+4. The sidecar sees raw `production !== disabled`, treats semantic search as enabled, and writes stub embeddings under `STUB_MODEL_VERSION`.
+5. The script reports useful work even though the served runtime is disabled. On a large gallery this wastes CPU/DB writes and can mislead the operator about readiness.
 
-Concrete failure scenario:
-1. A visitor opens `/p/123`, `/s/<key>`, `/g/<key>`, or a topic page.
-2. The server action validates that the target exists and reaches `db.insert(imageViews|topicViews|sharedGroupViews).values(...)`.
-3. Before MySQL executes that insert, an admin starts a DB restore.
-4. Restore enters maintenance, drains the image queue and shared-group buffer, imports the backup, and exits maintenance.
-5. The stale analytics promise resolves after the import and writes a view event into the restored database for an event from the pre-restore timeline. If the referenced row id now points to a different restored object, the analytics event is attached to the wrong object; if the FK no longer exists, the write fails and is silently swallowed.
+Fix:
+Use the same resolver as runtime (`getGalleryConfig()` or an extracted shared semantic-mode resolver) in the sidecar. Without `--force`, require the resolved mode to match the target mode: default/stub backfill should require resolved `stub`, and `--production` should require resolved `production` plus `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. Keep `--force` as the explicit pre-enable override.
 
-Suggested fix:
-Create a small tracked analytics side-effect registry, mirroring the queue side-effect pattern in `image-queue.ts`, and have restore preparation drain it before invoking `runRestore()`. Alternatively, make these recorders await the insert after the late maintenance check and keep the server-render fire-and-forget at the page call site only if it is registered and drainable. Add a regression test that starts a recorder, holds its insert promise, invokes restore quiescence, and asserts restore waits until the insert settles.
-
-Notes:
-The shared-group denormalized `view_count` buffer is explicitly drained by `flushBufferedSharedGroupViewCounts()`, but these normalized event tables are separate writers and are not covered by that drain.
-
-### TRC28-02 - Likely - Fire-and-forget audit writes are not part of restore quiescence
-
-Severity: Medium
-Confidence: Medium
-Status: Likely issue
-
-Evidence:
-- `apps/web/src/lib/audit.ts:39-92` documents `logAuditEvent` as fire-and-forget and writes `audit_log`
-- Representative call sites use `.catch(console.debug)` instead of awaiting:
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:157-158` CSV export
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:733-740` DB restore success audit
-  - `apps/web/src/app/actions/images.ts:604-610` upload audit
-  - `apps/web/src/app/actions/images.ts:703-705` delete audit
-- Restore preparation and finalization do not drain audit promises: `apps/web/src/app/[locale]/admin/db-actions.ts:491-537`
-
-Problem:
-Audit rows are ordinary DB writes, but the restore maintenance contract does not track or drain them. Most admin mutation paths correctly check restore maintenance before doing primary writes, yet their audit writes are intentionally non-blocking. A restore can therefore start after a primary mutation completes but before its audit insert has reached MySQL.
-
-Concrete failure scenario:
-1. An admin uploads or deletes an image, changes settings, creates a share, or exports CSV; the primary action commits.
-2. The action schedules `logAuditEvent(...).catch(console.debug)` and returns.
-3. Another admin/tab immediately starts DB restore.
-4. Restore imports the selected backup.
-5. The old audit insert resolves after the import, adding a forensic event from the discarded pre-restore timeline to the restored database. Conversely, the restore success audit at `db-actions.ts:737` is not awaited, so a transient DB error can also silently lose the one audit row that should prove the restore occurred.
-
-Suggested fix:
-Put audit writes behind the same restore-aware side-effect registry as public analytics, or make security-relevant audit calls awaited at least for DB restore, credential, token, user, and destructive admin actions. If preserving non-blocking UX is required, expose `trackAuditSideEffect()` plus `drainAuditSideEffectsForRestore()` and call the drain before `runRestore()`. Add tests proving restore waits on an in-flight audit insert and that `db_restore` audit failure is surfaced or retried.
-
-Notes:
-This is a causal consistency issue, not an authentication bypass. The impact is forensic/timeline pollution and possible loss of the restore audit event.
-
-### TRC28-03 - Risk - Public SSR routes can query the database during restore import
+### TRC29-02 - Risk Needing Manual Validation - Color sidecar lacks per-image processing claims
 
 Severity: Low
 Confidence: Medium
-Status: Risk
+Status: Risk needing manual validation
 
 Evidence:
-- Restore maintenance is exposed through `/api/health`: `apps/web/src/app/api/health/route.ts:7-16`
-- Docker liveness remains `/api/live`, which always returns ok: `apps/web/src/app/api/live/route.ts:1-9`
-- Proxy/middleware applies CSP/i18n/admin cookie-format checks but no restore-maintenance public-page gate: `apps/web/src/proxy.ts:65-121`
-- Public SSR pages fetch DB-backed data without a maintenance pre-check, examples:
-  - Home page: `apps/web/src/app/[locale]/(public)/page.tsx:149-167`
-  - Topic page: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:141-170`
-  - Photo page: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:133-156`
-  - Shared group page: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:101-131`
-  - Shared photo page: `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:93-107`
-- Public actions and search routes do have maintenance gates, for contrast: `apps/web/src/app/actions/public.ts:122`, `apps/web/src/app/actions/public.ts:238`, `apps/web/src/app/api/search/semantic/route.ts:113`, `apps/web/src/app/api/search/similar/[id]/route.ts:77-80`
+- Queue workers protect each encode/update with `gallerykit:image-processing:{id}`: `apps/web/src/lib/image-queue.ts:470-497`, `image-queue.ts:543-699`
+- In-app color backfill runner takes the same per-image claim around re-encode, detection, and DB update: `apps/web/src/lib/admin-backfill-runner.ts:348-381`, `admin-backfill-runner.ts:485-630`
+- Operator color sidecar only takes the global color backfill lock: `apps/web/scripts/backfill-color-pipeline.ts:305-328`
+- The sidecar re-encodes files before the DB update in `backfill-color-pipeline.ts:198-274`, then updates in batches at `backfill-color-pipeline.ts:409-473`
 
-Problem:
-The restore maintenance mechanism blocks uploads, admin mutations, search APIs, public load-more/search actions, and queue workers, but initial public page renders are still allowed to run DB queries while the MySQL import may be dropping/recreating tables or loading partially restored data. The service remains live because `/api/live` is liveness-only, and there is no repo-local nginx or proxy rule that converts public HTML requests into a maintenance response.
+Failure scenario:
+1. A future or operator-triggered flow reprocesses a row using the queue's per-image lock while the sidecar is running.
+2. The sidecar does not observe that per-image claim and can write the same derivative filenames concurrently.
+3. The final DB row may come from one process while derivative bytes come from another, especially if settings differ or one path fails after writing only part of the variant set.
 
-Concrete failure scenario:
-1. An admin starts a DB restore.
-2. The durable maintenance marker is active and `/api/health` returns 503, but the container stays live and nginx continues proxying public HTML.
-3. A visitor requests the home page, topic page, photo page, shared group, or map while `mysql --one-database` is mid-import.
-4. The SSR path runs DB queries against transient schema/data state and can return a 500, `notFound()` for content that will exist after import, or a page assembled from partially restored data. Because service-worker HTML caching only stores `networkResponse.ok`, 500 responses should not be cached, but users still see transient breakage.
+Current mitigating evidence:
+- The normal queue path rechecks `processed = false` before encoding (`image-queue.ts:579-584`), while the sidecar selects `processed = true` candidates (`backfill-color-pipeline.ts:338-349`).
+- `retryFailedImage` currently selects only `processed = false AND processing_error IS NOT NULL` at `apps/web/src/app/actions/images.ts:1209-1230`.
+- Delete races are handled by affected-row cleanup in the sidecar (`backfill-color-pipeline.ts:446-469`).
 
-Suggested fix:
-Add a public HTML maintenance gate that returns a `503` no-store maintenance shell before any DB-backed public SSR work when `isRestoreMaintenanceActive()` is true. Candidate placements: a small helper called at the top of DB-backed public pages, a public layout boundary that can safely check the marker without DB I/O, or edge/proxy logic if the marker is available there. Keep API/search behavior as-is and add tests that representative public pages short-circuit during restore without calling data loaders.
+Fix:
+Mirror the in-app runner's per-image claim in `backfill-color-pipeline.ts` before `reprocessRow`, holding it through the corresponding row update or derivative-only update. If the intended contract is "sidecar never overlaps any per-image queue work because all candidates are processed", lock that invariant with a source test so future retry/reprocess flows cannot accidentally widen the queue candidate set.
 
-Notes:
-This is an availability/consistency risk rather than data corruption. If production infrastructure intentionally removes the instance from rotation based on `/api/health`, this risk is mitigated externally, but the checked-in Docker/nginx path documents `/api/live` as liveness and does not itself stop public traffic.
+### TRC29-03 - Risk Needing Manual Validation - Proxy IP chain can collapse rate limits behind an upstream TLS/load balancer
 
-## Refuted Or Covered Hypotheses
+Severity: Medium
+Confidence: Medium
+Status: Risk needing manual validation
 
-- Restore SQL scanner comment-bypass from the previous tracer cycle is fixed in the current tree. `hasDisallowedRestoreWriteTarget()` now checks both compact and spacing-preserving sanitized forms in `apps/web/src/lib/sql-restore-scan.ts:210-214`, and tests cover schema-qualified/current-schema write targets.
-- Restore/upload/image-queue coordination is substantially fenced: restore holds DB restore, upload-processing contract, color backfill, and semantic backfill advisory locks before entering durable maintenance, then drains the shared-group buffer and image queue before import (`apps/web/src/app/[locale]/admin/db-actions.ts:377-499`).
-- The image queue has an explicit side-effect registry and restore drain for bootstrap embedding side effects (`apps/web/src/lib/image-queue.ts:338-457`, `apps/web/src/lib/image-queue.ts:1060-1087`).
-- Service worker stale revocable-page HTML caching is addressed. `sw.template.js` and generated `sw.js` bypass revocable public object pages before `networkFirstHtml()` (`apps/web/public/sw.template.js:42-64`, `apps/web/public/sw.template.js:380-384`).
-- Migration journal/baseline logic is intentionally non-monotonic only for grandfathered entries. `migration-journal.test.ts` documents and guards the live invariant from idx 18 forward, and `migrate.js` baselines per journal hash, then asserts every committed migration hash is recorded.
-- Semantic search and similar-image routes gate maintenance before expensive work and rate-limit/content checks before embedding or DB scans. Production CLIP is operator-gated by DB setting plus `SEMANTIC_SEARCH_ALLOW_PRODUCTION`.
-- Auth/session mutations gate restore maintenance for login and password change, use same-origin checks, HMAC session tokens, Argon2id password verification, and DB-backed rate-limit rollback semantics where required.
-- Deploy scripts preserve the documented disk hygiene ordering: `deploy.sh` updates containers first, then prunes unused Docker resources without `volume -a`; persistent upload/data/config mounts are declared in compose and Dockerfile/runtime comments.
+Evidence:
+- Docker enables `TRUST_PROXY=true`: `apps/web/docker-compose.yml:20-23`
+- App IP extraction trusts `x-forwarded-for` chains based on `TRUSTED_PROXY_HOPS`, then falls back to `x-real-ip`: `apps/web/src/lib/rate-limit.ts:164-187`
+- nginx sets both `X-Real-IP` and `X-Forwarded-For` to `$remote_addr` in every proxied location, for example `apps/web/nginx/default.conf:67-71`, `default.conf:84-88`, `default.conf:141-145`, `default.conf:192-197`
+- The nginx config explicitly describes this listener as an internal HTTP hop behind a TLS-terminating edge/load balancer: `apps/web/nginx/default.conf:25-30`
+
+Failure scenario:
+1. A TLS/load-balancer edge forwards all visitors to this nginx listener.
+2. nginx is not configured with `real_ip_header` / trusted upstream ranges, so `$remote_addr` is the load balancer address.
+3. nginx overwrites `X-Forwarded-For` with that same `$remote_addr` instead of preserving the true client chain.
+4. `getClientIp()` sees a one-hop chain, cannot select a client before the trusted suffix, falls back to `X-Real-IP`, and all users share the load-balancer IP for app-side login/search/semantic/OG/share buckets.
+5. Abuse by one client can throttle everyone, and security/audit metadata loses real client attribution.
+
+Fix:
+For deployments behind an upstream edge, configure nginx `real_ip_header X-Forwarded-For` and `set_real_ip_from <trusted edge ranges>`, then set `X-Forwarded-For` to a preserved/normalized client chain. Alternatively have the edge connect directly to the app with a verified header contract and set `TRUSTED_PROXY_HOPS` to the actual trusted suffix length. Add an nginx/source test for the intended forwarded-header contract.
+
+### TRC29-04 - Risk Needing Manual Validation - Deploy success uses liveness, not DB-backed readiness
+
+Severity: Low
+Confidence: High
+Status: Risk needing manual validation
+
+Evidence:
+- Docker healthcheck is `/api/live`, intentionally liveness-only: `apps/web/Dockerfile:140-143`
+- `/api/live` always returns `{ status: 'ok' }`: `apps/web/src/app/api/live/route.ts:1-9`
+- `/api/health` can check DB only when `HEALTH_CHECK_DB=true` and returns 503 during restore maintenance: `apps/web/src/app/api/health/route.ts:7-42`
+- Deploy accepts either Docker health or a direct `/api/live` curl as success: `apps/web/deploy.sh:34-54`
+- The app does run migrations before `server.js`, so migration failure prevents the liveness route from starting: `apps/web/Dockerfile:151-158`
+
+Failure scenario:
+1. `node apps/web/scripts/migrate.js` succeeds and Next starts.
+2. Immediately after startup, DB connectivity breaks, restore maintenance remains active, or a runtime-only DB credential/network issue appears.
+3. `/api/live` still returns 200 and Docker health becomes healthy.
+4. `npm run deploy` reports success and proceeds to prune Docker artifacts, while user-facing DB-backed pages and admin flows may be failing.
+
+Fix:
+Keep Docker's restart health liveness-only if desired, but make `deploy.sh` use a bounded readiness check such as `/api/health` with `HEALTH_CHECK_DB=true` or a dedicated deploy-readiness endpoint that verifies DB connectivity and not-in-restore-maintenance. If avoiding DB health in normal container health is intentional, split deploy readiness from Docker liveness explicitly.
+
+## Confirmed Issues
+
+No confirmed security bypass, privacy leak, restore stale-write race, upload quota bypass, or migration postcondition failure was found in the traced code paths.
+
+## Likely Issues
+
+- TRC29-01: semantic embedding sidecar uses raw DB mode instead of the runtime semantic-mode resolver.
+
+## Risks Requiring Manual Validation
+
+- TRC29-02: color sidecar lacks per-image processing claims; current candidate predicates mitigate it, but the sidecar is weaker than the in-app runner.
+- TRC29-03: deployed proxy topology must preserve real client IPs; current nginx template can collapse buckets behind an upstream edge unless real-IP handling is configured.
+- TRC29-04: deploy success is liveness-based, not DB/readiness-based.
 
 ## Missed-Issues Sweep
 
-Final sweep covered all named domains from the prompt: restore, upload/image queue, analytics, auth/session, search/semantic, service worker, migrations, and deploy scripts. Additional cross-cutting searches covered raw writes, fire-and-forget promises, timers, queue side effects, maintenance gates, advisory locks, health/liveness, and route auth wrappers.
+Final sweeps performed before writing:
+- `rg -n "uploadImages|saveOriginalAndGetMetadata|enqueueImageProcessing|retryFailedImage|restoreDatabase|runRestore|quiesceImageProcessingQueueForRestore|drainBackgroundDbWritesForRestore"`
+- `rg -n "semanticSearchMode|SEMANTIC_SEARCH_ALLOW_PRODUCTION|PRODUCTION_MODEL_VERSION|STUB_MODEL_VERSION|imageEmbeddings|SEMANTIC_SCAN_LIMIT"`
+- `rg -n "withAdminAuth|requireSameOriginAdmin|preIncrement|checkAndIncrement|rateLimit|TRUST_PROXY|X-Forwarded-For|X-Real-IP"`
+- `rg -n "migrate|__drizzle_migrations|_journal|reconcileLegacySchema|HEALTHCHECK|api/live|api/health|docker compose|deploy"`
+- API route inventory under `apps/web/src/app/api`
 
-No relevant active-repo source/config/test/doc file was intentionally skipped. Generated/vendor/runtime artifacts and archived auxiliary worktrees were excluded from findings because they are not the active application surface.
+I rechecked the previous-cycle stale background write hypothesis. Current code tracks public analytics and audit writes through `trackBackgroundDbWrite` and drains them before restore import, so that prior issue is not present in the inspected HEAD.
 
-Tests were not run because this was a review-only prompt with no code changes. Evidence is from static inspection and targeted source/test contract review.
+## Covered File Summary
+
+Documentation:
+- `AGENTS.md`
+- `CLAUDE.md`
+
+Upload and image pipeline:
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/api/admin/lr/upload/route.ts`
+- `apps/web/src/lib/upload-tracker.ts`
+- `apps/web/src/lib/upload-tracker-state.ts`
+- `apps/web/src/lib/upload-paths.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/upload-processing-contract-lock.ts`
+- `apps/web/src/lib/advisory-locks.ts`
+
+Restore, maintenance, deploy, migrations:
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/lib/db-restore.ts`
+- `apps/web/src/lib/sql-restore-scan.ts`
+- `apps/web/src/lib/restore-maintenance.ts`
+- `apps/web/src/lib/restore-maintenance-durable.ts`
+- `apps/web/src/lib/background-db-writes.ts`
+- `apps/web/scripts/migrate.js`
+- `apps/web/scripts/entrypoint.sh`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/deploy.sh`
+
+Public privacy/search/semantic:
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/search-enrichment-fields.ts`
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/search-route-privacy.test.ts`
+
+Backfill:
+- `apps/web/src/lib/admin-backfill-runner.ts`
+- `apps/web/src/app/actions/embeddings.ts`
+- `apps/web/scripts/backfill-color-pipeline.ts`
+- `apps/web/scripts/backfill-clip-embeddings.ts`
+
+Auth, route scanners, rate limits, proxy:
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/admin-tokens.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/request-origin.ts`
+- `apps/web/scripts/check-api-auth.ts`
+- `apps/web/scripts/check-public-route-rate-limit.ts`
+- `apps/web/scripts/check-action-origin.ts`
+- `apps/web/nginx/default.conf`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/app/api/health/route.ts`
+- `apps/web/src/app/api/live/route.ts`
+- `apps/web/src/app/api/og/route.tsx`
+- `apps/web/src/app/api/og/photo/[id]/route.tsx`

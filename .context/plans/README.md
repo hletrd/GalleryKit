@@ -2,6 +2,8 @@
 
 ## Active Plans
 
+- Cycle 29/100 Implementation Plan — DONE / commit-deploy pending (`cycle-29-2026-06-30-plan.md`)
+- Cycle 29/100 Deferred Findings — TODO / deferred (`cycle-29-2026-06-30-deferred.md`)
 - Cycle 28/100 Implementation Plan — TODO (`cycle-28-2026-06-30-plan.md`)
 - Cycle 28/100 Deferred Findings — TODO / deferred (`cycle-28-2026-06-30-deferred.md`)
 - Cycle 23/100 Implementation Plan — TODO (`cycle-23-2026-06-30-plan.md`)

@@ -15,6 +15,7 @@ import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-
 import type { Metadata } from 'next';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 export const revalidate = 0;
 
@@ -24,6 +25,9 @@ export async function generateMetadata({
     params: Promise<{ year: string }>;
 }): Promise<Metadata> {
     const { year: yearParam } = await params;
+    const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+    if (maintenanceMetadata) return maintenanceMetadata;
+
     const [locale, t, tTopic, seo] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),

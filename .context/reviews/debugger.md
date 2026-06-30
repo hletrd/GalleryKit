@@ -1,107 +1,69 @@
-# Cycle 28 Debugger Review
+# Cycle 29 Debugger Review
 
-Review target: `/Users/hletrd/flash-shared/gallery`
-Review role: `cycle-28 debugger`
-HEAD reviewed: `9d7f7f74`
-Mode: review-only. No fixes were implemented.
+Repo: `/Users/hletrd/flash-shared/gallery`  
+HEAD reviewed: `b4fa1f64` (`fix(cycle-28): 🐛 harden restore and privacy flows`)  
+Mode: Prompt 1 only, static latent-bug/failure-mode review. No product code modified.
 
-## Inventory
+## Process
 
-Required operating context examined first:
+- Read `AGENTS.md` and `CLAUDE.md` first.
+- Inventoried relevant files with `rg --files`, `find .context/reviews`, and focused `rg` sweeps for TODO/FIXME, timers, abort handling, rate-limit/origin gates, cache/revalidation, and embedding/backfill paths.
+- Reviewed cross-file interactions across public routes, admin actions, upload/queue/backfill flows, semantic search, share/view counters, restore maintenance, and client stale-state surfaces.
+- Did not run the full quality gate suite; this is a review artifact only.
 
-- AGENTS.md instructions provided in the prompt, including the project-doc rules for commits, deploy, schema, and quality gates.
-- `CLAUDE.md`, including architecture, upload/processing, restore, migration, CLIP semantic-search, privacy, testing, and deploy runbooks.
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- Existing local review state was checked via git status; unrelated review files were already modified before this write: `.context/reviews/architect.md`, `.context/reviews/critic.md`, `.context/reviews/perf-reviewer.md`.
+## Confirmed Issues
 
-Repository-wide inventory/scanning coverage:
+### DBG29-01 — Similar-photos panel permanently caches transient fetch failures
 
-- `apps/web/src`: all 515 TypeScript/TSX/JS/JSON source and test files were inventoried and searched, including App Router pages/routes/actions, DB/schema/data access, client components, service-worker registration/cache helpers, queue/upload/image-processing code, analytics/rate limits, and Vitest fixtures.
-- `apps/web/drizzle`: all 31 migration/meta files were inventoried, including every `NNNN_*.sql`, `meta/_journal.json`, and snapshot files.
-- `apps/web/scripts`: all 29 scripts were inventoried/scanned, including migrate, restore-maintenance recovery, deployment entrypoint, backfills, seed/init, and lint-gate scripts.
-- `apps/web/e2e`: all 8 Playwright files were inventoried.
-- `apps/web/public`: service worker files and manifest/favicon assets were inventoried; `sw.template.js` and built `sw.js` were inspected in detail.
-- Deployment/config surfaces examined: root `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, `.github/workflows/quality.yml`, `.env.deploy.example`.
-- Generated/vendor/runtime artifacts were intentionally excluded: `node_modules`, `.next`, coverage/test-results, `.git`, runtime upload/resource data, and binary/generated caches.
+- Severity: Low
+- Confidence: High
+- File/region: `apps/web/src/components/similar-photos.tsx:78-108`, render feedback at `apps/web/src/components/similar-photos.tsx:137-147`.
+- Failure scenario: In production semantic mode, the photographer expands "Similar photos" and `/api/search/similar/:id` returns a transient non-OK response: 429 rate limit, 503 setup/backfill hiccup, 404 temporarily missing embedding during backfill, or a network error. `handleToggle()` sets `fetchedRef.current = true` before the request. On any non-abort failure it sets `results` to `'error'`, but never resets `fetchedRef.current`. Closing and reopening the disclosure cannot retry; the inline error is pinned until the whole photo viewer remounts or the page reloads.
+- Why confirmed: The only reset to `fetchedRef.current = false` is in the abort branch (`apps/web/src/components/similar-photos.tsx:96-99`). The non-OK branch (`:89-92`) and non-abort catch branch (`:101-102`) leave the fetched guard true.
+- Fix: Reset `fetchedRef.current = false` on retryable failures, or add an explicit retry control that clears the guard and refetches. Keep successful empty/result responses cached.
+- Suggested regression test: A component test that mocks first fetch as 503 or rejected, toggles closed/open, and asserts a second fetch occurs. Existing source-contract tests only assert the error UI exists; they do not pin retryability.
 
-Opened/read in detail for the requested failure-mode areas:
+## Likely Issues
 
-- Restore/import lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.ts`, `apps/web/scripts/restore-maintenance-recovery.mjs`, restore/upload lock tests.
-- Upload and image queue: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, queue/quiesce tests.
-- DB/actions/routes: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, upload-serving routes.
-- Client state and service worker: `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/components/on-this-day-widget.tsx`, `apps/web/src/components/optimistic-image.tsx`, `apps/web/src/components/map/map-client.tsx`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/src/lib/sw-cache.ts`, `apps/web/scripts/build-sw.ts`.
-- Migrations/tests/deploy: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, migration SQL files, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/__tests__/migration-journal-monotonicity.test.ts`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`, `apps/web/src/__tests__/restore-upload-lock.test.ts`, `apps/web/src/__tests__/upload-processing-contract-lock.test.ts`, `apps/web/src/__tests__/grid-picture-fallback-boundary.test.ts`, `apps/web/src/__tests__/sw-template-contract.test.ts`, deploy/Docker/nginx files listed above.
+None promoted. The strongest likely candidates from prior cycles were rechecked and appear closed or intentionally constrained in the current tree:
 
-Validation evidence collected:
+- `scripts/backfill-clip-embeddings.ts` now rejects `--production` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`apps/web/scripts/backfill-clip-embeddings.ts:101-103`).
+- `OptimisticImage` now remounts on primary `src` changes (`apps/web/src/components/optimistic-image.tsx:13-16`), which addresses the stale retry/fallback state pattern noted previously.
+- Shared-group metadata no longer performs an unthrottled share lookup; the body enforces the rate limit before `getSharedGroupCached()` (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:43-56`, `:100-108`).
 
-- `npm run lint:api-auth --workspace=apps/web`: passed; both admin API route files reported OK.
-- `npm run lint:action-origin --workspace=apps/web`: passed; mutating server actions enforce same-origin or have explicit read/public exemptions.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed; public mutating route coverage gate OK.
-- `npm run test --workspace=apps/web -- --run src/__tests__/restore-upload-lock.test.ts src/__tests__/upload-processing-contract-lock.test.ts src/__tests__/grid-picture-fallback-boundary.test.ts src/__tests__/sw-template-contract.test.ts`: passed, 4 files / 39 tests.
+## Risks Needing Manual Validation
 
-## Findings
+### DBG29-R1 — Lightroom upload still materializes the multipart body before exact file-size rejection
 
-### DBG28-01 - Sidecar CLIP backfill ignores the runtime production-mode env gate
+- Severity: Medium if the route is exposed to untrusted PAT clients; Low if only trusted local Lightroom clients use it.
+- Confidence: Medium
+- File/region: `apps/web/src/app/api/admin/lr/upload/route.ts:85-112`, `:153-172`.
+- Failure scenario: The route rejects missing/chunked/oversized `Content-Length` before parsing and caps declared upload bytes at `MAX_UPLOAD_FILE_BYTES + SERVER_ACTION_BODY_OVERHEAD_BYTES`. However, the exact file-size check happens only after `await request.formData()`. A request with a file slightly over `MAX_UPLOAD_FILE_BYTES` but total body under the overhead allowance is fully materialized before the 413 response. On the disk-constrained/low-memory deploy host, repeated authenticated or PAT-backed oversized uploads can spike memory/temp storage before being rejected.
+- Validation needed: Confirm Next/Node multipart buffering behavior and any upstream reverse-proxy/body-size cap in production. Also confirm the real Lightroom multipart overhead required for a legitimate 200 MiB file.
+- Fix: Prefer streaming multipart parsing with a hard per-file byte cap, or enforce a tighter upstream cap for this single-file endpoint with a measured small metadata overhead. Add a route-level test around declared length near the cap and a deployment note for proxy `client_max_body_size`.
 
-Status: Confirmed
-Severity: Medium
-Confidence: High
-Region: `apps/web/scripts/backfill-clip-embeddings.ts:80-119`, compared with `apps/web/src/lib/gallery-config.ts:123-141` and `apps/web/src/app/actions/embeddings.ts:72-88`
+### DBG29-R2 — Unwired CLIP backfill server action reports per-row production failures as successful skips
 
-Problem:
-The runtime config resolver intentionally heals stored `semantic_search_mode='production'` to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` is set (`gallery-config.ts:123-141`). The in-app backfill action uses `getGalleryConfig()` and therefore obeys that operator gate (`actions/embeddings.ts:72-88`). The canonical sidecar script does not: `checkSemanticModeEnabled()` reads the raw `admin_settings` row directly and only checks that it is not `disabled` (`backfill-clip-embeddings.ts:87-93`), then proceeds in `--production` mode when `PRODUCTION_FLAG` is present (`backfill-clip-embeddings.ts:80-85`, `111-119`).
+- Severity: Low while unwired; Medium if surfaced in the admin UI.
+- Confidence: Medium
+- File/region: `apps/web/src/app/actions/embeddings.ts:53-55`, `:145-188`; no UI call sites found by `rg "backfillClipEmbeddings\\("`.
+- Failure scenario: `backfillClipEmbeddings()` is exported and admin-gated, but it is currently unwired. If a future UI or script starts using it, production embedding failures from missing originals, model load errors, path resolution misses, or DB upsert exceptions are counted as `skipped` and the action still returns `{ status: 'ok', processed, skipped }`. The inner catch at `:181-183` also drops the actual error. An operator could see a successful backfill with skipped rows and no failed IDs, then enable semantic search with partial embeddings.
+- Validation needed: Confirm this action is intentionally dead code and not reachable through generated server-action manifests or future settings UI work.
+- Fix: Remove the unwired action if the sidecar is canonical, or mirror the sidecar's failure semantics: log failed image IDs, return a non-OK status when failures occur, and distinguish missing-original skips from actual encoder/upsert failures.
 
-Concrete failure scenario:
-After a restore or manual DB edit leaves `semantic_search_mode='production'` in the DB but the deployment does not set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, the app itself serves semantic search as disabled. An operator running `npm run backfill:clip -- --production` without `--force` will still load the real CLIP path and write production embeddings. That can consume CPU/memory and mutate `image_embeddings` even though the effective runtime contract says production mode is disabled. It also makes the sidecar and the app action disagree on whether production backfill is allowed.
+## Covered Surface Summary
 
-Suggested fix:
-Make the sidecar use the same effective config gate as runtime code. Either import/call `getGalleryConfig()` before choosing the target mode, or explicitly require `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` when `--production` is used. Keep `--force` behavior explicit if it is intended to bypass only the DB setting check, not the production safety gate. Add a source or unit test that pins parity between the sidecar and `getGalleryConfig()` for stored `production` with the env flag absent.
-
-### DBG28-02 - CLIP sidecar advances past failed rows and cannot retry them in the same run
-
-Status: Likely
-Severity: Low
-Confidence: High
-Region: `apps/web/scripts/backfill-clip-embeddings.ts:132-167`, `apps/web/scripts/backfill-clip-embeddings.ts:171-215`
-
-Problem:
-The sidecar paginates by `images.id > cursor`, sets `cursor` to the last selected row before processing the batch (`backfill-clip-embeddings.ts:145-167`), then increments `failed` for per-image failures without inserting an embedding (`backfill-clip-embeddings.ts:171-207`). Failed rows still match the `notExists(...)` predicate, but they are now behind the cursor and will not be selected again until the operator starts a new process.
-
-Concrete failure scenario:
-A transient per-image failure occurs during production backfill, such as a temporary filesystem miss on an original file or a model inference error. The script continues processing later IDs, exits non-zero because `failed > 0` (`backfill-clip-embeddings.ts:214-215`), but the failed image is not retried in that run. In a large operator run, this can leave a small set of images without target-version embeddings until someone notices the non-zero exit and reruns. The behavior is recoverable, but it is a latent completeness failure for unattended/cron-style backfills.
-
-Suggested fix:
-Track failed IDs separately and retry them at the end of the run with a small bounded retry count, or move cursor advancement to after per-row processing while maintaining an explicit "already attempted this run" set to avoid infinite loops. At minimum, log the failed image IDs in the final summary so an operator can verify remediation.
-
-### DBG28-03 - OptimisticImage retry logic is stale-state/stale-source fragile when fallbackSrc is used
-
-Status: Risk
-Severity: Low
-Confidence: Medium
-Region: `apps/web/src/components/optimistic-image.tsx:18-54`; current call sites at `apps/web/src/components/home-client.tsx:365-380`, `apps/web/src/components/image-manager.tsx:467-475`, `apps/web/src/components/on-this-day-widget.tsx:65-74`
-
-Problem:
-`OptimisticImage` exposes a `fallbackSrc` prop, switches to it on the first error (`optimistic-image.tsx:30-37`), but subsequent retries are computed from the original `src` prop, not the currently failing `imgSrc` or the fallback URL (`optimistic-image.tsx:39-49`). The retry guard also checks React state `retryCount` (`optimistic-image.tsx:41-42`) while the authoritative mutable counter is `retryCountRef` (`optimistic-image.tsx:23-25`, `43-48`), leaving room for duplicate timers if multiple error events fire before state commits.
-
-Concrete failure scenario:
-Today the reviewed call sites do not pass `fallbackSrc`, so this is not a live production bug in the current UI. If a future thumbnail uses `fallbackSrc` for the same sized-derivative-to-base-JPEG pattern used elsewhere, a primary 404 will switch to fallback. If that fallback then has a transient network error, the scheduled retry points back to the original failed primary URL with `?retry=N`, not the fallback. The component can display "image unavailable" even though the fallback URL would have succeeded on retry.
-
-Suggested fix:
-Base retry URL and local-upload detection on the current failing source (`imgSrc`) rather than the original `src`, or maintain an explicit active-source state. Use `retryCountRef.current` for the retry limit check, clear any existing timer before scheduling a new one, and add a component test that passes `fallbackSrc` and verifies retries stay on the fallback after fallback activation.
-
-## Clean Areas / No Finding
-
-- Restore/upload coordination: restore holds DB restore, upload-processing contract, color backfill, and semantic backfill locks before durable maintenance; targeted restore lock tests passed.
-- Browser upload and LR token upload: both paths validate topic/metadata/file size, save originals before DB insert, clean originals on insert failure, snapshot processing settings, and enqueue image processing.
-- Image queue: retry maps are bounded/cleaned, permanent failures persist to DB, restore quiesce clears queued state and resumes pending rows, and side effects are tracked for drain/shutdown.
-- DB/action/route gates: admin API auth, mutating server-action same-origin, and public mutating route rate-limit lint gates all passed.
-- Service worker: admin/API bypass, revocable page bypass, derivative 404/410 eviction, ETag revalidation, cache caps, and template/built-worker contract tests were inspected; targeted SW contract tests passed.
-- Migrations: journal monotonicity tripwire, reconcile schema/index/drop coverage tests, and post-restore migration assertions were inspected. No new migration/journal issue was found.
-- Privacy/public data: public select-field omissions and search enrichment privacy guards were inspected; no sensitive field leak was found in the reviewed selectors/routes.
-- Deployment scripts: deploy helper, Dockerfile, compose, nginx headers/cache policy, and disk-prune policy were inspected; no new deploy failure mode was found.
+- Project instructions and operational context: `AGENTS.md`, `CLAUDE.md`.
+- Upload and processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/advisory-locks.ts`.
+- Restore and DB maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/db/schema.ts`.
+- Public data and counters: `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`.
+- Semantic/CLIP paths: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/gallery-config.ts`.
+- Backfill runner: `apps/web/src/app/actions/admin-backfill.ts`, `apps/web/src/lib/admin-backfill-runner.ts`.
+- Public/admin route guards: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/rate-limit.ts`, public/admin route exports under `apps/web/src/app/api`.
+- Client stale-state/timer surfaces: `apps/web/src/components/similar-photos.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/optimistic-image.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox-color-pip.tsx`.
 
 ## Final Missed-Issues Sweep
 
-I performed a final sweep over repository-wide file inventories, state/timer/fetch/localStorage usage, restore/upload/queue/advisory-lock terms, route/action guard coverage, service-worker code, migration tests, and deployment scripts. No review-relevant source, migration, test, service-worker, or deploy/config file was intentionally skipped. The only skipped paths were generated/vendor/runtime artifacts listed in the inventory.
-
-Finding count: 3 total. Severity split: 0 High, 1 Medium, 2 Low.
+- Re-ran targeted searches for stale refs, timers/listeners, abort controllers, fire-and-forget promises, route rate-limit/origin gates, restore-maintenance guards, and previous-cycle finding identifiers.
+- Checked existing tests around similar route, semantic route, backfill runner, privacy fields, queue quiescence, and source contracts to avoid duplicating pinned behavior as a finding.
+- No destructive operations performed. Only this review file was updated.

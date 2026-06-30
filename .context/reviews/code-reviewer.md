@@ -1,111 +1,165 @@
-# Cycle 28 Code Review
+# Cycle 29 Code Review
 
-Reviewer: cycle-28 code-reviewer  
+Reviewer: cycle-29 code-reviewer  
 Repo: `/Users/hletrd/flash-shared/gallery`  
-HEAD reviewed: `395de19bf474f729fac15f693f260c1190428842`  
+HEAD reviewed: `b4fa1f644acb0778fc4e1dd25bcf026f482d4226`  
 Date: 2026-06-30 KST
 
-## Inventory
+## Result
 
-Read first and treated as review constraints:
+No confirmed code-quality, correctness, logic, SOLID, maintainability, or cross-file interaction issues were found in the reviewed HEAD.
+
+Recommendation: **APPROVE** for this review angle.
+
+## Required Read-In
+
+Read first and treated as binding review context:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- `.context/reviews/_aggregate.md`
-- Prior `.context/reviews/code-reviewer.md`
-- `README.md`
-- `apps/web/README.md`
 
-Tracked review-relevant code/config/docs inventoried and included in the sweep:
+Key constraints applied from those files:
+
+- Do not modify product code during this prompt.
+- Preserve the GalleryKit privacy boundary: public DTOs must omit admin-only fields unless an explicit public contract allows them.
+- Preserve same-origin/admin-auth/rate-limit lint gates.
+- Treat migrations, Drizzle journal metadata, restore flows, deploy helper behavior, color/HDR handling, and touch-target tests as behavior-shaping code, not incidental files.
+
+## Inventory
+
+Review-relevant files were inventoried with `rg --files`, `find`, and line-count sweeps while excluding dependency/build/runtime directories such as `node_modules`, `.next`, public uploads, runtime data, and coverage output.
+
+Covered categories:
 
 | Area | Coverage |
-| --- | ---: |
-| `apps/web/src/**/*` source, tests, app routes, server actions, components, libraries | all tracked files |
-| `apps/web/scripts/**/*` operator/build/migration scripts | all tracked files |
-| `apps/web/drizzle/**/*` migrations and Drizzle metadata | all tracked files |
-| `apps/web/e2e/**/*` Playwright specs/helpers/fixtures | all tracked files |
-| Root and app configs (`package.json`, `next.config.ts`, TS configs, Vitest, Playwright, Docker, NGINX) | all tracked files |
-| PWA/service-worker sources (`apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `scripts/build-sw.ts`) | all tracked files |
-| Current review/plan history under `.context/reviews` and `.context/plans` | reviewed for stale/deferred issue dedupe |
+| --- | --- |
+| Root project docs/config | `AGENTS.md`, `CLAUDE.md`, `README.md`, package/workspace config, TypeScript/Vitest/Playwright config, Docker/NGINX/deploy files |
+| Next app routes/pages/layouts | `apps/web/src/app/**/*`, including locale pages, public pages, admin pages, API routes, OG routes, feed/sitemap/manifest routes |
+| Server actions | `apps/web/src/app/actions/**/*`, including images, topics, collections, public analytics/search/load-more, settings, auth, bulk operations |
+| Data/model layer | `apps/web/src/db/**/*`, `apps/web/src/lib/data.ts`, schema relations, cache wrappers, public/admin select projections |
+| Background/runtime code | image queue, restore maintenance, background DB writes, instrumentation, rate limits, sessions, search/semantic/CLIP helpers |
+| UI components | public viewer/lightbox/map/search components, admin components, upload/dropzone controls, form helpers |
+| Scripts and migrations | `apps/web/scripts/**/*`, `apps/web/drizzle/**/*`, migration journal metadata and reconcile helpers |
+| Tests | `apps/web/src/__tests__/**/*`, `apps/web/e2e/**/*`, fixtures/helpers, lint guard tests and custom lint scripts |
+| Static/generated behavior sources | PWA service worker template/generated file, icons pipeline, public resources referenced by app behavior |
+| Review/plan history | `.context/reviews/**/*`, `.context/plans/**/*` for stale finding dedupe and current-cycle context |
 
-Inventory commands produced 3,852 review-relevant filesystem entries after excluding `.git`, `node_modules`, `.next`, test reports, and `.claude/worktrees`. The tracked app/script/migration/e2e surface was 586 files; the TypeScript/JavaScript/SQL app surface under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e` was 574 files / 87,125 lines.
+Inventory evidence:
 
-Manual line-level inspection focused on the cross-file interactions most relevant to quality and logic risk:
-
-- Restore lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.{mjs,ts}`, `apps/web/src/instrumentation.ts`
-- Public analytics and data flushing: `apps/web/src/app/actions/public.ts`, public photo/topic/share pages, `apps/web/src/lib/data.ts`, `apps/web/src/__tests__/public-actions.test.ts`, `apps/web/src/__tests__/data-view-count-flush.test.ts`
-- Upload/image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, upload/dropzone component, upload and queue tests
-- Auth/action/API gates: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/proxy.ts`, lint scripts for API auth/action origin/public rate limits
-- Privacy/search/semantic surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, semantic API routes, CLIP model/embedding libraries, privacy and semantic tests
-- Service worker/offline cache: `apps/web/public/sw.template.js`, generated `sw.js`, SW contract tests, cache helpers
-- Migrations/schema/operator scripts: Drizzle SQL/meta, `apps/web/scripts/migrate.js`, reconcile/migration tests, backfill scripts and tests
-
-Generated/build/cache directories and binary fixture contents were not manually read byte-for-byte; their references, tracked metadata, and source contracts were included where relevant. No review-relevant source, config, migration, test, or documentation file in the current tracked surface was intentionally skipped.
+- `apps/web/src` contains 483 source/test files within the inspected max-depth sweep.
+- `apps/web/src/__tests__`, `apps/web/e2e`, `apps/web/scripts`, and `apps/web/drizzle` contain 348 files in the inspected test/script/migration sweep.
+- Non-test TypeScript/TSX source under `apps/web/src` totals 42,786 lines.
+- Large/high-risk files were explicitly line-read, including `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, semantic search routes, OG routes, restore helpers, smart collection helpers, validation/sanitization, and rate-limit code.
 
 ## Findings
 
-### C28-CODE-MED-01 - Public analytics inserts can still cross the restore-maintenance boundary
+### Confirmed Issues
 
-Classification: Likely issue  
-Severity: Medium  
+None.
+
+### Likely Issues
+
+None.
+
+### Risks Needing Manual Validation
+
+These are not actionable defects from the static review, but they remain runtime surfaces that local gates cannot fully prove.
+
+#### R29-CODE-RISK-01 - Production sitemap population depends on runtime DB-backed ISR refresh
+
+Classification: Risk needing manual validation  
+Severity: Low  
 Confidence: Medium
 
 Regions:
 
-- `apps/web/src/app/actions/public.ts:408-437`
-- `apps/web/src/app/actions/public.ts:443-469`
-- `apps/web/src/app/actions/public.ts:475-505`
-- `apps/web/src/app/[locale]/admin/db-actions.ts:491-495`
-- `apps/web/src/__tests__/public-actions.test.ts:241-253`
-- `apps/web/src/__tests__/public-actions.test.ts:327-342`
+- `apps/web/src/app/sitemap.ts:24-55`
+- `apps/web/src/app/sitemap.ts:57-120`
+- `apps/web/src/lib/data.ts:509-544`
 
-Problem:
-The public view recorders intentionally schedule direct analytics inserts without awaiting or tracking them. Each recorder checks `isRestoreMaintenanceActive()` before and after target validation, but the actual `db.insert(...).values(...).catch(...)` runs independently after that last check. Restore maintenance drains `flushBufferedSharedGroupViewCounts()` and `quiesceImageProcessingQueueForRestore()` before import, but there is no equivalent drain or pause for already-scheduled direct inserts into `image_views`, `topic_views`, or `shared_group_views`.
+Why this is a risk, not a finding:
+`npm run build --workspace=apps/web` succeeded, and `sitemap.ts` intentionally catches build-time DB unavailability at `sitemap.ts:39-55`, emitting a homepage-only fallback so Docker/Next builds do not fail when MySQL is absent. The surrounding comments state that ISR should replace the fallback on a runtime hit. Static review and the successful build show the fallback is intentional, but this local environment could not validate a production DB-backed `/sitemap.xml` response.
 
-Concrete failure scenario:
-A public photo/topic/share render starts just before an admin DB restore. The recorder passes the maintenance checks at `public.ts:418` and `public.ts:428` (or the sibling topic/group checks), then schedules the insert at `public.ts:430-437`. The admin restore then enters maintenance and proceeds after draining only the buffered shared-group counter and image queue at `db-actions.ts:491-495`. The detached analytics insert can land during the `mysql` import or just after the restored snapshot is loaded, creating analytics rows that belong to the pre-restore request rather than the restored DB state. The tests currently pin the non-blocking behavior and the pre-insert maintenance checks, but they do not prove a restore-start drain for inserts already handed to the DB promise chain.
+Manual validation scenario:
+After deploy, request `/sitemap.xml` in the production environment with MySQL reachable and confirm topic, image, feed, and localized entries are present, not only localized homepage entries.
 
-Suggested fix:
-Move public analytics writes behind a tiny tracked recorder similar to the image queue/shared counter drains: increment an in-flight counter before scheduling the insert, re-check the durable maintenance marker immediately before the write, and expose `quiescePublicAnalyticsForRestore()` for `db-actions.ts` to await after `beginDurableRestoreMaintenance()`. If strict non-blocking page rendering is still required, keep the render detached but make the detached work observable and drainable by restore maintenance. Add a regression test where maintenance begins after target validation but before the tracked insert resolves.
+Suggested validation/fix if validation fails:
+Check the deployed `BASE_URL`, DB connectivity, and ISR behavior for `sitemap.ts`; if runtime refresh still returns the fallback, make the DB failure observable in deploy smoke checks and adjust the sitemap generation path or deploy sequencing.
 
-### C28-CODE-LOW-01 - Browser upload audit metadata undercounts RAW rejects in multi-file server-action calls
+#### R29-CODE-RISK-02 - Browser-only flows were source-reviewed but not exercised with Playwright in this prompt
 
-Classification: Confirmed issue  
+Classification: Risk needing manual validation  
 Severity: Low  
-Confidence: High
+Confidence: Medium
 
 Regions:
 
-- `apps/web/src/app/actions/images.ts:558-575`
-- `apps/web/src/app/actions/images.ts:595-610`
-- `apps/web/src/app/actions/images.ts:615-626`
-- `apps/web/src/__tests__/images-actions.test.ts:299-306`
+- `apps/web/e2e/admin.spec.ts:1`
+- `apps/web/e2e/origin-guard.spec.ts:1`
+- `apps/web/e2e/public.spec.ts:1`
+- `apps/web/e2e/nav-visual-check.spec.ts:1`
+- `apps/web/e2e/test-fixes.spec.ts:1`
 
-Problem:
-`uploadImages()` tracks RAW rejections separately from generic failures. It correctly computes `totalFailures = failedFiles.length + rawRejectedCount` and returns `rawRejectedCount` / `rawRejectedFiles` to the caller, but the audit event records only `failed: failedFiles.length`. A mixed multi-file server-action call with at least one success and one RAW reject therefore writes an `image_upload` audit row that says zero failed files even though the action returned a RAW rejection warning.
+Why this is a risk, not a finding:
+The browser-flow specs and UI source were reviewed, and unit/type/build gates passed, but `npm run test:e2e --workspace=apps/web` was not run during this prompt. Some E2E tests are intentionally environment-gated or skipped without admin credentials/base URL, so local source review cannot fully prove the real browser/admin flows.
 
-Concrete failure scenario:
-An operator or future client submits one `FormData` containing `photo.jpg` and `raw.nef`. The JPEG succeeds, the RAW path increments `rawRejectedCount`, and the action returns success with a RAW warning. The audit row at `images.ts:605-610` records `{ count: 1, failed: 0 }`, so later incident/audit review cannot reconcile the UI warning or returned `rawRejectedFiles` with the audit log. The current browser dropzone sends one file per action call, which reduces normal UI exposure, but the server action itself still accepts multiple `files` entries and has multi-file accounting.
+Manual validation scenario:
+Run the Playwright suite against a configured local or staging-like instance when browser-flow coverage is required for release confidence.
 
-Suggested fix:
-Record a total failure count in audit metadata, for example `failed: failedFiles.length + rawRejectedCount`, and include `rawRejectedCount` / sanitized RAW filenames if the audit log is expected to explain rejection categories. Add a unit test for a mixed success-plus-RAW FormData call so the action return and audit metadata stay consistent.
+Suggested validation/fix if validation fails:
+Use the failing Playwright trace to isolate whether the issue is a browser interaction regression, test fixture drift, or environment setup gap.
+
+## Manual Review Focus
+
+Line-level review focused on cross-file contracts and historically fragile surfaces:
+
+- Public/admin data boundary: `apps/web/src/lib/data.ts:251-489`, `apps/web/src/__tests__/privacy-fields.test.ts`
+- Pagination/search/map/public DTOs: `apps/web/src/lib/data.ts:620-812`, `apps/web/src/lib/data.ts:878-947`, `apps/web/src/lib/data.ts:1490-1712`
+- Image upload, deletion, metadata, retries: `apps/web/src/app/actions/images.ts:1-1310`
+- Topic and smart collection mutations: `apps/web/src/app/actions/topics.ts:1-626`, `apps/web/src/app/actions/collections.ts:1-139`, `apps/web/src/lib/smart-collections.ts:1-550`
+- Public actions and analytics: `apps/web/src/app/actions/public.ts:1-510`
+- Semantic and similar-photo API routes: `apps/web/src/app/api/search/semantic/route.ts:1-366`, `apps/web/src/app/api/search/similar/[id]/route.ts:1-271`
+- OG image routes and fetch helper: `apps/web/src/app/api/og/route.tsx:1-252`, `apps/web/src/app/api/og/photo/[id]/route.tsx:1-295`, `apps/web/src/lib/og-photo-fetch.ts:1-118`
+- Rate limits and trust proxy handling: `apps/web/src/lib/rate-limit.ts:1-518`
+- Image queue and restore interactions: `apps/web/src/lib/image-queue.ts:1-1114`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`
+- Admin backup/restore and maintenance scripts: `apps/web/src/app/[locale]/admin/db-actions.ts:1-821`, `apps/web/scripts/migrate.js`, `apps/web/scripts/restore-maintenance-recovery.mjs`
+- Sanitization and validation helpers: `apps/web/src/lib/sanitize.ts:1-190`, `apps/web/src/lib/validation.ts:1-199`
+- Share pages and shared-group access paths: `apps/web/src/app/[locale]/g/[key]/page.tsx`, `apps/web/src/app/[locale]/s/[key]/page.tsx`
 
 ## Validation Evidence
 
-Commands run:
+Commands run and reviewed:
 
 - `npm run lint:api-auth --workspace=apps/web` - passed
 - `npm run lint:action-origin --workspace=apps/web` - passed
 - `npm run lint:public-route-rate-limit --workspace=apps/web` - passed
-- `npm run typecheck --workspace=apps/web` - passed
 - `npm run lint --workspace=apps/web` - passed
-- `npm test --workspace=apps/web` - passed: 270 test files, 2 skipped; 2,528 tests passed, 4 skipped
-- `find`/`git ls-files` inventory sweeps for tracked source, tests, scripts, migrations, docs, configs, and review history
-- `rg` sweeps for analytics recorders, unawaited writes, audit events, restore/backfill/runbook terms, TODO/FIXME/BUG markers, skipped/focused tests, and stale cycle-27 findings
-- `git diff`/source inspection confirmed the cycle-27 SQL restore scanner and maintenance recovery findings are fixed in the current source and were not refiled
+- `npm run typecheck --workspace=apps/web` - passed
+- `npm test --workspace=apps/web` - passed: 274 test files, 272 passed and 2 skipped; 2,543 tests total, 2,539 passed and 4 skipped
+- `npm run build --workspace=apps/web` - passed; build logged the intentional sitemap DB fallback because local MySQL at `127.0.0.1:3306` was unavailable
 
-`npm run test:e2e --workspace=apps/web` was not run because this was a code-quality review and the identified issues are server-action/race/accounting defects covered better by targeted unit/source-contract tests.
+Additional sweeps:
 
-## Final Sweep Confirmation
+- `rg` scan for TODO/FIXME/HACK, TypeScript suppression comments, raw SQL/query execution, `dangerouslySetInnerHTML`, eval-like patterns, environment-variable usage, redirects, and revalidation calls.
+- Secret-pattern scan for common API-token/private-key/password forms found no committed secret; matches were documentation text, lockfile substrings, CSS terms, or policy examples.
+- Focused-test scan found no `.only`; skipped tests were intentional offline/integration or environment-gated cases.
+- Guard-specific lint scripts passed for admin API auth, mutating server action same-origin checks, and public mutating route rate limits.
+- Build/typecheck/test output was read before claiming completion.
 
-Final sweep covered restore/backup, public analytics, upload/LR upload, image queue/backfill, auth/session/API gates, public route rate limits, data privacy selects, search/semantic routes, service worker cache behavior, migration/reconcile scripts, schema/journal metadata, tests, configs, and current `.context` review/plan history. No relevant file from the tracked code/config/test/migration/documentation surface was skipped. Stop condition met: report written with exact regions, concrete failure scenarios, fixes, severity, confidence, validation evidence, and stale prior-cycle findings deduplicated.
+## Final Missed-Issues Sweep
+
+The final sweep rechecked the highest-risk cross-file boundaries:
+
+- Public privacy projections versus schema/admin-only fields
+- Same-origin and admin-auth enforcement on server actions and API routes
+- Public mutating route rate limits
+- Upload path validation, disk-space checks, RAW handling, audit metadata, and image-queue enqueue/claim/finalize flows
+- Restore maintenance gates and background DB write draining
+- Smart collection AST validation, slug remapping, and query compilation
+- Search/semantic result enrichment and public field safety
+- OG generation cache/rate-limit/fallback paths
+- Drizzle migrations, journal metadata, and reconcile baseline behavior
+- PWA/service-worker generation and tested cache contracts
+- Test coverage, skipped/focused test markers, and custom lint guard coverage
+
+No confirmed or likely actionable issues remained after this sweep. Residual risk is limited to runtime-only validation that local unit/type/build gates cannot prove: production DB-backed sitemap refresh and configured Playwright browser flows.

@@ -74,6 +74,7 @@ import { embedImageReal } from '../src/lib/clip-model';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
+import { resolveSemanticSearchMode } from '../src/lib/gallery-config-shared';
 
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 2;
@@ -89,7 +90,11 @@ async function checkSemanticModeEnabled(): Promise<boolean> {
         .from(adminSettings)
         .where(eq(adminSettings.key, 'semantic_search_mode'))
         .limit(1);
-    return rows[0]?.value !== undefined && rows[0].value !== 'disabled';
+    const resolvedMode = resolveSemanticSearchMode(
+        rows[0]?.value,
+        process.env.SEMANTIC_SEARCH_ALLOW_PRODUCTION === 'true',
+    );
+    return resolvedMode !== 'disabled';
 }
 
 async function main(): Promise<number> {

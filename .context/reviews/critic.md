@@ -1,82 +1,191 @@
-# Cycle 28 Critic Review
+# Cycle 29 Critic Review
 
-Reviewer: cycle-28 critic
-Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `395de19b` (`docs(cycle-27): 📝 record deploy completion`)
-Mode: skeptical whole-repo critique focused on cross-system risks, product-policy mismatch, weak boundaries, and regression-prone workflows.
+Reviewer: critic subagent
+Repo: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `b4fa1f64`
+Date: 2026-06-30
+Mode: Prompt 1 review only; no product-code edits.
 
-## Inventory First
+## Process and Inventory
 
-I loaded the project operating contract before reviewing code: the in-session `AGENTS.md` instructions, `CLAUDE.md`, `README.md`, and `apps/web/README.md`. I also read the cycle-27 critic artifact and current `critic-verifier.md` to avoid re-filing already-fixed findings, then verified those findings against current HEAD.
+I read `AGENTS.md` and `CLAUDE.md` first, then inventoried review-relevant repository surface with `rg --files`, `git ls-files`, targeted `find`, and line-numbered reads. The active non-generated inventory was 812 files after excluding build/vendor output; `apps/web/src` contains 524 source/test files; tracked review history contains 1678 files and tracked plan history contains 101 files.
 
-Repository inventory used for this pass:
+Covered categories: project instructions (`AGENTS.md`, `CLAUDE.md`), root/app READMEs, package and lock files, Next.js/proxy/CSP config, Docker/compose/nginx/deploy scripts, public/admin routes, server actions, auth/origin/rate-limit helpers, data/privacy selectors, search/CLIP paths, upload/image/storage/queue paths, scripts/backfills, DB schema/migrations/journal, tests/e2e/lint scripts, `.context` review/plan history, and `.omc` history.
 
-- Git-tracked files at HEAD: 2,598.
-- Non-generated repository files excluding `.git`, `node_modules`, and `.next`: 6,755.
-- Tracked application source/tests under `apps/web/src`: 520 files.
-- Route/action surface under `apps/web/src/app`: 77 files.
-- Core library surface under `apps/web/src/lib`: 98 files.
-- Unit tests under `apps/web/src/__tests__`: 278 files.
-- Migrations under `apps/web/drizzle`: SQL files `0000` through `0027` plus `meta/_journal.json`.
+Validation commands run during review:
 
-Review-relevant files and documentation examined or inventory-scanned:
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- `npm run lint --workspace=apps/web` passed.
 
-- Governance/product/ops docs: `AGENTS.md` from the prompt, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/reviews/critic.md`, `.context/reviews/critic-verifier.md`, current `.context/plans/**` and review-history policy markers.
-- Root/app config: `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/deploy.sh`.
-- Schema/migration/restore: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, all current migration SQL, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/instrumentation.ts`, and restore tests.
-- Auth/origin/rate-limit/admin API: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/proxy.ts`, all `/api/admin/**` routes, and action-origin/API-auth/public-route lint scripts by source scan.
-- Upload/image/color/storage: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/app/actions/admin-backfill.ts`, `apps/web/src/lib/storage/**`, and related tests.
-- Public data/privacy/search/serving: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/lib/serve-upload.ts`, upload route handlers, public photo/topic/share/group/timeline/map/smart-collection pages, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, OG/feed/sitemap/robots routes, and privacy/search tests.
-- Product-policy drift scan: live source/docs searched for Stripe/payment/entitlements, reactions, culling/scoring/proofing/editing, unsupported S3/MinIO/storage switching, legacy public originals, semantic-stub honesty, and process-local scale-out assumptions.
+## Confirmed Issues
 
-Final missed-issues sweep covered all tracked source/config/docs/tests/migrations relevant to runtime behavior and product policy. Generated/vendor/build directories and binary assets were excluded as non-review-relevant; no relevant live source or documentation area was intentionally skipped.
+### C29-CRIT-01 - `.context/plans/` is documented as committed history but is still ignored
 
-## Findings
-
-### C28-CRIT-01 - Dormant storage backend still encodes the obsolete public-original layout
-
-Status: Risk
-Severity: Low now; Medium if `@/lib/storage` is integrated without fixing this first
+Severity: Medium
 Confidence: High
-Perspective: privacy boundary, future integration hazard, product-policy mismatch
+Perspectives: operations, maintainability, process reliability
 
 Evidence:
 
-- The product contract says the storage abstraction is not integrated and must not be exposed as a supported backend feature yet (`CLAUDE.md:149`). It also says originals live in the private upload store (`CLAUDE.md:184`) and that public serving excludes `original/` (`CLAUDE.md:210`).
-- The live upload path enforces that split: `UPLOAD_ROOT` is the public derivative root, `LEGACY_UPLOAD_DIR_ORIGINAL` is explicitly the old public-original location, and `UPLOAD_ORIGINAL_ROOT`/`UPLOAD_DIR_ORIGINAL` is the private original store (`apps/web/src/lib/upload-paths.ts:12-41`). Production startup fails if the legacy public original directory still contains files (`apps/web/src/lib/upload-paths.ts:163-184`), and nginx returns 404 for `/uploads/original/` (`apps/web/nginx/default.conf:165-167`).
-- The experimental local storage backend still imports only `UPLOAD_ROOT` (`apps/web/src/lib/storage/local.ts:15`), creates an `original` directory under that public root (`apps/web/src/lib/storage/local.ts:20`, `apps/web/src/lib/storage/local.ts:50-53`), and resolves every key, including `original/foo.jpg`, under `UPLOAD_ROOT` (`apps/web/src/lib/storage/local.ts:40-47`). Its type-level convention repeats that mapping: keys may be `original/abc.jpg`, and the current local backend maps keys to `UPLOAD_ROOT/<key>` (`apps/web/src/lib/storage/types.ts:11-14`).
-- The singleton comments correctly say this module is not wired into the live upload/processing/serving path (`apps/web/src/lib/storage/index.ts:4-12`), and CI quarantines imports from outside `lib/storage` (`apps/web/src/__tests__/storage-quarantine.test.ts:111-132`). That means this is not a live leak today; the risk is that the internal abstraction's behavior conflicts with the current privacy invariant the moment the quarantine is intentionally relaxed.
+- `AGENTS.md:40-42` says `.context/reviews/` and `.context/plans/` are committed review/plan history.
+- `.gitignore:19-21` ignores `.context/*` and only unignores `.context/reviews/` plus `.context/reviews/**`.
+- `git check-ignore -v .context/plans/new-cycle-plan.md` reports `.gitignore:19:.context/*`, while `git check-ignore -v .context/reviews/new-review.md` reports the review unignore at `.gitignore:21`.
 
-Problem:
+Concrete failure scenario: a future review-plan-fix cycle writes a new plan or deferred decision under `.context/plans/`, the local workflow appears successful, but the plan stays untracked by default. A later agent or human reviewing committed history sees an incomplete audit trail and may repeat already-rejected work or miss a deferred risk.
 
-The repository has two incompatible "originals" contracts. The live product has moved originals out of the public upload tree, but the dormant storage backend still models `original/` as a subdirectory of the public derivative root. The quarantine test prevents accidental imports, but it does not make the backend itself safe for the eventual integration path it is designed to support.
+Suggested fix: unignore `.context/plans/` and `.context/plans/**` the same way `.context/reviews/` is unignored. Add a small hygiene check that fails when expected review/plan artifacts are ignored.
 
-Concrete failure scenario:
+### C29-CRIT-02 - Runtime and transient artifacts remain tracked despite ignore policy
 
-A future storage-integration change deletes or relaxes `storage-quarantine.test.ts` as instructed when wiring the abstraction into uploads. The developer calls `getStorage().writeStream('original/<uuid>.jpg', ...)` because `StorageBackend` documents that key convention. The code writes the full-resolution original to `public/uploads/original`, recreating the legacy public-original layout that production startup and docs treat as forbidden. Depending on rollout order, this either makes production fail closed on restart, leaves originals under a web-served tree behind only nginx/routing blocks, or splits backup/deploy expectations because derivatives and private originals are no longer in the documented mounts.
+Severity: Low, rising to Medium if logs ever include environment or host-sensitive output
+Confidence: High
+Perspectives: operations, privacy, maintainability
 
-Suggested fix:
+Evidence:
 
-Make the quarantined backend obey the current invariant before anyone can integrate it. Either remove `original/` support from `StorageBackend` until the end-to-end design is decided, or route `original/*` keys through `UPLOAD_ORIGINAL_ROOT`/`UPLOAD_DIR_ORIGINAL` while derivative/resource keys stay under `UPLOAD_ROOT`. Update `REQUIRED_DIRS` so it does not create `UPLOAD_ROOT/original`, and add storage-local tests asserting that an `original/foo.jpg` write lands in the private original root and that `getUrl('original/foo.jpg')` still throws. Keep the quarantine test until the full upload/processing/serving migration happens.
+- `.gitignore:16` ignores `.omc`, but `git ls-files .omc` shows tracked `.omc/plans/plan-cycle12-fixes.md`.
+- `.gitignore:22-29` re-ignore transient logs and scratch files under `.context/reviews/`, yet `git ls-files .context/reviews | rg '\.(log|pid)$'` shows tracked examples such as `.context/reviews/archive/dev-server.log`, `.context/reviews/logs-cycle2-current/critic.pid`, `.context/reviews/logs-cycle2-current/debugger.log`, and `.context/reviews/logs-cycle4/architect.log`.
+- `.omc/plans/plan-cycle12-fixes.md:1-63` is a completed historical OMX plan under an otherwise ignored runtime directory.
+- `git ls-files .context/reviews | rg '\.(png|log|pid|json)$' | wc -l` reports 118 tracked review-side artifact files.
+
+Concrete failure scenario: stale PID/log files are treated as current runtime evidence during a later review, or logs accidentally capture host paths, environment-dependent output, or service details and remain in the permanent repository. The repository also grows with screenshots and logs that do not carry durable review value.
+
+Suggested fix: decide which historical screenshots or JSON artifacts are intentionally durable, then `git rm --cached` transient `.log`, `.pid`, scratch, and runtime `.omc` files. Add a CI or local hygiene script that checks `git ls-files` for forbidden runtime extensions/paths while allowing explicitly documented archival artifacts.
+
+### C29-CRIT-03 - App README still tells operators to upload before making the GPS retention decision
+
+Severity: Medium
+Confidence: High
+Perspectives: privacy, product, operations
+
+Evidence:
+
+- `README.md:118` now correctly tells operators to review Settings before first upload, especially GPS stripping and output sizes.
+- `apps/web/README.md:7-24` still says that after the dev server starts, the operator should create a category, upload one photo, and confirm the public homepage renders it.
+- `apps/web/src/lib/gallery-config-shared.ts:92-98` defaults `strip_gps_on_upload` to `'false'`.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:661-680` disables the GPS strip switch when images already exist and shows the upload contract as locked.
+- `apps/web/src/components/upload-dropzone.tsx:77` and `apps/web/src/components/upload-dropzone.tsx:386-390` show a warning only at upload time when GPS stripping is off and no images exist.
+- `apps/web/messages/en.json:172` warns that originals will retain location metadata if first uploads contain GPS.
+
+Concrete failure scenario: an operator starts from `apps/web/README.md`, uploads a geotagged first test photo, and only then reviews Settings. Because the setting is locked once images exist, the original file may retain GPS metadata until the operator deletes/reprocesses/reuploads or does manual host cleanup.
+
+Suggested fix: mirror the root README wording in `apps/web/README.md`: review Settings before first real upload, especially GPS stripping and output sizes. A stronger product fix would make the first-run privacy decision explicit before the upload UI accepts files, or default GPS stripping on unless deliberately disabled.
+
+### C29-CRIT-04 - Public map still renders up to 10,000 markers and a 10,000-item fallback list in one request
+
+Severity: Medium
+Confidence: High
+Perspectives: product, reliability, frontend performance
+
+Evidence:
+
+- `apps/web/src/lib/data.ts:1649-1658` documents `MAP_MAX_MARKERS = 10000` and says larger galleries need viewport filtering or clustering.
+- `apps/web/src/lib/data.ts:1667-1685` returns all opted-in GPS rows up to that cap for the public map.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:37-56` awaits `getMapImages()` and serializes all returned rows into client markers.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:83-95` renders a fallback list item for every marker.
+- `apps/web/src/components/map/map-client.tsx:86-90` computes bounds by mapping every latitude/longitude and spreading the arrays into `Math.min`/`Math.max`.
+- `apps/web/src/components/map/map-client.tsx:119-140` renders one Leaflet `<Marker>` per marker.
+
+Concrete failure scenario: a topic with several thousand map-visible GPS photos makes `/map` ship a large payload, allocate full lat/lng arrays, mount thousands of Leaflet markers, and render thousands of fallback links. On a mobile browser or low-memory device this can freeze the page or trigger tab reloads, even though the SQL query itself is capped.
+
+Suggested fix: lower the initial public cap and add progressive loading: clustering/canvas markers, server-side viewport bounding-box queries, or paginated/virtualized fallback list rendering. Keep the current privacy join, but avoid sending the whole marker set on first paint.
+
+### C29-CRIT-05 - Semantic and similar search perform synchronous vector scoring on the request thread
+
+Severity: Medium
+Confidence: High
+Perspectives: reliability, performance, operations
+
+Evidence:
+
+- `apps/web/src/lib/clip-embeddings.ts:36-44` allows `SEMANTIC_SCAN_LIMIT` to rise as high as 25,000 vectors.
+- `apps/web/src/app/api/search/semantic/route.ts:270-279` selects up to `SEMANTIC_SCAN_LIMIT` embeddings for a public semantic request.
+- `apps/web/src/app/api/search/semantic/route.ts:292-311` decodes and scores every scanned embedding synchronously, then runs `topK`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:168-177` selects up to the same scan limit for similar-search.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:186-201` synchronously filters, decodes, scores, and ranks the rows.
+
+Concrete failure scenario: an operator increases `SEMANTIC_SCAN_LIMIT` to improve recall on a large gallery. Several concurrent semantic or similar requests then spend long CPU spans decoding/scoring vectors on the Node event loop. Even with per-IP rate limits and model-inference queueing, unrelated SSR, admin actions, upload polling, and queue timers can be delayed.
+
+Suggested fix: bound request-thread CPU with smaller hard caps, chunked scoring that yields between batches, a worker-thread/vector-index path, or a global concurrency gate around vector scoring. Treat ANN/vector index adoption as a separate larger improvement, but add an event-loop-friendly cap first.
+
+### C29-CRIT-06 - Rate-limit bucket cleanup deletes by an unindexed suffix column in one statement
+
+Severity: Medium
+Confidence: High
+Perspectives: reliability, operations, database maintainability
+
+Evidence:
+
+- `apps/web/src/db/schema.ts:212-219` defines `rate_limit_buckets` with primary key `(ip, bucketType, bucketStart)` and no `bucketStart`-leading index.
+- `apps/web/src/lib/rate-limit.ts:515-517` purges old buckets with one `DELETE ... WHERE bucket_start < cutoff` statement.
+
+Concrete failure scenario: public traffic creates many distinct `(ip, bucketType, bucketStart)` rows. The hourly or periodic purge cannot use the primary key efficiently for `bucket_start < cutoff` because `bucketStart` is the third column, so cleanup can scan and lock a growing table. During the purge, public rate-limit checks may see avoidable DB latency.
+
+Suggested fix: add a migration for a `bucket_start`-leading index, likely `(bucket_start, bucket_type)` or at minimum `(bucket_start)`, and consider chunked deletes for large existing tables. Add a regression check that the schema contains a cleanup-supporting index.
+
+## Likely Issues
+
+No likely issue was promoted without enough repository evidence. Items that initially looked suspicious were either confirmed above or rejected in the clean-check section below.
+
+## Risks Needing Manual Validation
+
+### C29-CRIT-07 - Public GET rate-limit coverage depends on manual diligence
+
+Severity: Medium
+Confidence: High that the guardrail gap exists; current expensive GET routes have direct tests
+Perspectives: reliability, security, maintainability
+
+Evidence:
+
+- `apps/web/scripts/check-public-route-rate-limit.ts:1-11` explicitly scans only public mutating handlers and says GET handlers are not scanned.
+- `apps/web/scripts/check-public-route-rate-limit.ts:344-346` marks files with no mutating handlers as passing.
+- The gate output during this review passed and reported expensive GET-only routes such as OG and similar-search routes as "no mutating handlers".
+- Current coverage exists for known expensive GET routes: `apps/web/src/__tests__/og-route-rate-limit-behavior.test.ts:47-74` verifies OG GET rate limits before expensive work, and `apps/web/src/__tests__/similar-route.test.ts:236-244` verifies similar-search 429 behavior.
+
+Concrete failure scenario: a future public GET route that imports `ImageResponse`, `sharp`, DB-heavy search, or file generation can pass `lint:public-route-rate-limit` without calling a pre-increment helper or carrying a conscious exemption. Existing route-specific tests do not protect future files.
+
+Suggested fix: extend the lint gate with a GET audit for public routes that use expensive markers such as `ImageResponse`, image libraries, DB queries, semantic helpers, or filesystem access. Require either a rate-limit helper or an explicit `@public-no-rate-limit-required` rationale for those GET files.
+
+### Manual validation - operational restore and production secrets
+
+Severity: Low
+Confidence: Medium
+Perspectives: operations, privacy
+
+Evidence:
+
+- The review covered source and committed config, but intentionally did not inspect gitignored production files such as `.env.deploy`, `.env.local`, live upload data, or remote database state.
+- Restore and deploy safety depends partly on host grants, SSH config, MySQL permissions, Docker disk state, and gitignored environment values that are outside current HEAD.
+
+Concrete failure scenario: committed restore/deploy code is correct, but production grants or env values drift and cause restore downtime, leaked backups, or failed deploy cleanup.
+
+Suggested fix: keep this as an operator-runbook validation item: periodically run restore drills and deploy dry-run checks against a non-production clone using the gitignored environment shape, not committed sample files.
 
 ## Checked Clean / Not Re-filed
 
-- Cycle-27 legacy-original permissions are fixed at current HEAD: migration creates/chmods the private original root to non-world-readable mode and chmods migrated files (`apps/web/scripts/migrate.js:77-124`), with a regression test (`apps/web/src/__tests__/migrate-legacy-originals.test.ts:87-101`).
-- The critic-verifier semantic honesty finding is fixed: production semantic search now returns `503 semantic_no_embeddings` when there are no production embeddings (`apps/web/src/app/api/search/semantic/route.ts:285-290`), matching `apps/web/README.md:63-68`.
-- The checked-in nginx derivative path now proxies `/uploads/{jpeg,webp,avif}` to Next by default (`apps/web/nginx/default.conf:169-185`), matching the documented host-side reverse-proxy topology (`apps/web/README.md:53-54`).
-- The per-photo OG fallback now validates and redirects using a canonical base URL, not the inbound request origin (`apps/web/src/app/api/og/photo/[id]/route.tsx:249-294`).
-- Public smart collections check `is_public` in both metadata/render and load-more paths before compiling stored queries (`apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:29-34`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:80-101`, `apps/web/src/app/actions/public.ts:207-221`).
-- Public privacy selectors remain guarded: standard public selects omit sensitive/admin-only fields (`apps/web/src/lib/data.ts:368-489`), timeline mirrors the same privacy contract (`apps/web/src/lib/data-timeline.ts:20-67`), and semantic/similar enrichment uses the shared compile-time guarded selector.
-- Payment/Stripe, entitlements, reactions, culling, scoring, proofing, and photo-editing product surfaces were not reintroduced in live source. Remaining references are historical migrations/docs/removal guards.
-- Restore, upload, LR token, admin API, and public search routes have the expected same-origin/auth/rate-limit/maintenance gates in current source. The remaining process-local restore/queue/rate-limit constraints are explicitly documented as single-instance topology, not re-filed as a new defect.
+- Admin API auth wrapper gate passed.
+- Mutating server-action origin gate passed.
+- Public mutating route rate-limit gate passed.
+- Typecheck and ESLint passed.
+- The prior critic concern that original uploads might be publicly routable is not re-filed. Current storage code routes `original/*` to the private original upload directory and denies public URLs for originals.
+- The migration journal has historical non-monotonic timing that the project docs already call out through the migrator post-condition behavior; I did not find a new migration skip bug in this pass.
+- A suspected CSP/image-base mismatch was rejected after inspection: the CSP builder defaults to `process.env.IMAGE_BASE_URL` when no argument is supplied.
+- The public map topic toggle label is now explicit enough to avoid re-filing the old under-disclosure issue: `apps/web/messages/en.json` names "Publish GPS on public map" and has an aria label for public GPS map visibility.
 
-## Validation Evidence
+## Final Missed-Issues Sweep
 
-This was a review artifact pass, not a product-code patch. I used repo-wide inventory and source scans plus targeted line-level reads across the route/action/auth/privacy/restore/upload/semantic/deploy/storage surfaces above. I did not run the full blocking quality gates because the only change made by this turn is this Markdown review file.
+Final sweep covered:
 
-## Finding Count
+- Instructions and knowledge base: `AGENTS.md`, `CLAUDE.md`, root/app READMEs.
+- App source: public pages, admin pages, route handlers, server actions, UI components, lib helpers, upload/image/storage/search/queue modules.
+- Security and privacy surfaces: auth wrappers, origin checks, rate limiting, CSP, image URL handling, public data selectors, GPS exposure paths, privacy-sensitive omit lists.
+- Reliability/operations surfaces: Dockerfile, compose, nginx, deploy helper, migration scripts, DB schema, backup/restore actions, queue scripts, backfills.
+- Test and tooling surfaces: Vitest tests, Playwright e2e directory, lint/typecheck scripts, custom static-analysis scripts.
+- Repository history/process: `.context/reviews`, `.context/plans`, `.omc`, ignore rules, tracked transient artifacts.
 
-- Confirmed live defects: 0
-- Likely issues: 0
-- Risks: 1
-- Total findings reported: 1
+Excluded from source review: `node_modules`, build output, gitignored secrets, live production upload data, live databases, and remote host state.
+
+Stop condition: the review found and documented confirmed issues plus manually validated risks with exact file regions and current validation evidence. No product implementation or planning was performed.

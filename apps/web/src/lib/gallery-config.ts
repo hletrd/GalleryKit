@@ -23,8 +23,8 @@ export {
     parseSlideshowInterval,
 } from './gallery-config-shared';
 
-import { GALLERY_SETTING_KEYS, getSettingDefaults, isJpegChromaSubsampling, isValidSettingValue, parseImageSizes, parseSlideshowInterval } from './gallery-config-shared';
-import type { GallerySettingKey, JpegChromaSubsampling } from './gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults, isJpegChromaSubsampling, isValidSettingValue, parseImageSizes, parseSlideshowInterval, resolveSemanticSearchMode } from './gallery-config-shared';
+import type { GallerySettingKey, JpegChromaSubsampling, SemanticSearchMode } from './gallery-config-shared';
 
 // ── Defaults (imported from shared module to avoid duplication) ────────────────
 const DEFAULTS = getSettingDefaults();
@@ -66,7 +66,7 @@ export interface GalleryConfig {
     // unless SEMANTIC_SEARCH_ALLOW_PRODUCTION=true is set (operator-only, off by
     // default). The admin Settings UI offers only Disabled/Stub by design, so the
     // resolved value an unprivileged deploy ever sees is 'disabled' | 'stub'.
-    semanticSearchMode: 'disabled' | 'stub' | 'production';
+    semanticSearchMode: SemanticSearchMode;
 
     // US-CM02: force sRGB derivatives for legacy embedder compatibility
     forceSrgbDerivatives: boolean;
@@ -120,26 +120,10 @@ function buildGalleryConfig(map: Map<string, string>): GalleryConfig {
             if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
             return raw === 'true';
         })(),
-        semanticSearchMode: (() => {
-            const raw = getSetting(map, 'semantic_search_mode');
-            // An invalid/unknown raw value falls back to the default ('disabled').
-            if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
-            const value = raw as 'disabled' | 'stub' | 'production';
-            // AGG-C10-02 (run-6 cycle-1) / AGG-C9-05 (run-6 cycle-9): the CLIP
-            // 'production' mode is OPERATOR-GATED — it is a real, served mode (LIVE
-            // in the demo deployment) but it must NOT be activatable through the
-            // ordinary admin Settings UI (which intentionally offers only
-            // Disabled/Stub). So a stored 'production' value HEALS to 'disabled'
-            // unless an operator has set the explicit env opt-in
-            // SEMANTIC_SEARCH_ALLOW_PRODUCTION=true. This keeps the admin UI's
-            // documented invariant ("production is treated as Disabled") TRUE for
-            // every deploy that has not opted in, while preserving the deliberate,
-            // non-UI operator activation path (env flag + DB row + weights + backfill).
-            if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
-                return 'disabled';
-            }
-            return value;
-        })(),
+        semanticSearchMode: resolveSemanticSearchMode(
+            getSetting(map, 'semantic_search_mode'),
+            process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] === 'true',
+        ),
         forceSrgbDerivatives: (() => {
             const raw = getSetting(map, 'force_srgb_derivatives');
             if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';

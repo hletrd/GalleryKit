@@ -67,6 +67,7 @@ export const GALLERY_SETTING_KEYS = [
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
+export type SemanticSearchMode = 'disabled' | 'stub' | 'production';
 
 // ── SEO Setting Keys ──────────────────────────────────────────────────────────
 
@@ -200,6 +201,14 @@ export function isValidSettingValue(key: GallerySettingKey, value: string): bool
 /** Get all defaults (for UI display). */
 export function getSettingDefaults(): Record<GallerySettingKey, string> {
     return { ...DEFAULTS };
+}
+
+export function resolveSemanticSearchMode(raw: string | undefined, allowProduction: boolean): SemanticSearchMode {
+    const fallback = DEFAULTS.semantic_search_mode as SemanticSearchMode;
+    if (!raw || !isValidSettingValue('semantic_search_mode', raw)) return fallback;
+    const value = raw as SemanticSearchMode;
+    if (value === 'production' && !allowProduction) return 'disabled';
+    return value;
 }
 
 // ── Image Size Helpers ────────────────────────────────────────────────────────

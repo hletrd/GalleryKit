@@ -1,173 +1,201 @@
-# Cycle 28 Document Specialist Review
+# Cycle 29 Document Specialist Review
 
-Reviewer: cycle-28 document-specialist
-Repository: `/Users/hletrd/flash-shared/gallery`
-Scope: repository-wide documentation/code mismatch review against authoritative repo docs, runbooks, comments, env examples, README files, CLAUDE.md, AGENTS.md, docs, package scripts, deploy/migration instructions, and tests.
-Mode: Prompt 1 review only. No fixes implemented.
+Reviewer: cycle-29 document-specialist  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+Scope: documentation/code mismatch review against authoritative repo docs, current source, package/deploy scripts, migration/schema runbooks, policy comments, and current review/plan inventory.  
+Mode: Prompt 1 review only. No product-code fixes implemented.
 
-## Inventory First
+## Inventory
 
-I first inventoried the review-relevant text surfaces, then checked documentation claims against implementation and contract tests. Binary assets, build outputs, dependency directories, screenshots, generated session state, and historical logs were excluded from mismatch authority unless they explicitly carried current operator instructions.
-
-Authoritative root/project docs examined:
+Read first, per instruction:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- `README.md`
-- `.env.deploy.example`
-- `package.json`
-- `package-lock.json` metadata for workspace/dependency agreement
 
-App docs, env examples, and configuration examined:
+Then inventoried and checked:
 
-- `apps/web/README.md`
-- `apps/web/.env.local.example`
-- `apps/web/package.json`
-- `apps/web/next.config.ts`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/nginx/default.conf`
-- `apps/web/tsconfig.json`
-- `apps/web/tsconfig.typecheck.json`
-- `apps/web/tsconfig.scripts.json`
-- `apps/web/vitest.config.ts`
-- `apps/web/playwright.config.ts`
-- `apps/web/tailwind.config.ts`
-- `apps/web/components.json`
-- `apps/web/drizzle.config.ts`
+- Root docs/config: `README.md`, `.env.deploy.example`, `package.json`
+- App docs/config: `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/package.json`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`
+- Deploy/operator scripts: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, selected `apps/web/scripts/*` runbook-bearing scripts
+- Schema/migration surfaces: `apps/web/src/db/schema.ts`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`
+- Behavior source behind doc claims: gallery config, caption/alt-text, semantic search, upload API, route freshness, service worker, touch-target audit, privacy-field guards, lint-gate scripts, deploy/nginx scripts
+- Current review/plan context: `.context/reviews/`, `.context/plans/`, `plan/`, and `docs/superpowers/*`
 
-Deploy, migration, and operator scripts examined:
+Generated outputs, dependency/build folders, binary screenshots, and archived historical review prose were not treated as current authority unless a current doc points to them.
 
-- `scripts/deploy-remote.sh`
-- Every file under `apps/web/scripts/` was inventoried and scanned for operator/runbook claims.
-- Direct line review was performed for `apps/web/scripts/migrate.js`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/download-clip-models.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/scripts/run-e2e-server.mjs`, and lint/check scripts when they backed documented quality gates.
+## Confirmed Issues
 
-Schema and migration surfaces examined:
+### DOC-C29-01 — `CLAUDE.md` still says photographer-r4 is the current photographer surface
 
-- Every committed migration under `apps/web/drizzle/*.sql`
-- `apps/web/drizzle/meta/_journal.json`
-- `apps/web/drizzle/meta/0000_snapshot.json`
-- `apps/web/drizzle/meta/0001_snapshot.json`
-- `apps/web/src/db/schema.ts`
-- `apps/web/scripts/migrate.js`
+Severity: Medium  
+Confidence: High  
+Files/regions:
 
-Source and source-comment surfaces examined:
-
-- All files under `apps/web/src/` were inventoried and scanned for review-relevant comments, constants, exported contracts, route behavior, privacy filters, upload limits, color/HDR settings, semantic-search gates, deploy/runtime assumptions, and rate-limit/auth/origin claims.
-- Direct line review was performed for the matched implementation anchors behind the findings and for the major documented contracts: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/clip-paths.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, upload/serve routes, health/live routes, and admin action/API guard surfaces.
-
-Tests examined:
-
-- All files under `apps/web/src/__tests__/` were inventoried and scanned for documented contract claims.
-- Direct line review was performed for contract tests covering deploy scripts, nginx caps, semantic search, CLIP paths/offline loading, upload limits, process-image pixel caps, privacy fields, migration journals/reconcile coverage, health/live routes, action-origin/API-auth/public-route-rate-limit lints, and touch-target audit.
-- All files under `apps/web/e2e/` were inventoried and scanned for deployment/runtime claim relevance.
-
-Docs and historical planning/review surfaces examined:
-
-- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-- `.context/plans/README.md`
-- `.context/plans/` and `.context/reviews/` were inventoried for current-cycle carry-forward signals. Historical/archive files and generated artifacts were not treated as current authority when they had archive/historical banners or were prior review records.
-
-Explicit exclusions from authority:
-
-- `node_modules/`, `.git/`, `.next/`, Playwright/Vitest output, screenshots, binary image fixtures, `.omx/state/`, generated session/worktree artifacts, and archived review/plan history unless referenced by current docs.
-- The CLIP `docs/superpowers/...` files were examined but treated as historical because both carry status banners directing readers to current code, `apps/web/README.md`, and `CLAUDE.md`.
-
-## Findings
-
-### DOC-C28-01 - CLIP backfill script's embedded production sidecar example omits the originals data mount
-
-Status: Confirmed
-Severity: Medium
-Confidence: High
-
-Evidence:
-
-- `apps/web/scripts/backfill-clip-embeddings.ts:9-20` gives an inline production `docker run --rm` example. It mounts `src`, `scripts`, and `.../data/models/clip:/app/data/models/clip:ro`, but it does not mount the full `apps/web/data` tree or `/app/data/uploads/original`.
-- The same script's production mode resolves and embeds private originals: `apps/web/scripts/backfill-clip-embeddings.ts:173-178` calls `resolveOriginalUploadPath(filenameOriginal)` and fails the row when the original path cannot be found.
-- `apps/web/src/lib/upload-paths.ts:27-38` resolves private originals from `UPLOAD_ORIGINAL_ROOT` or cwd-relative `data/uploads/original`; `apps/web/src/lib/upload-paths.ts:58-69` returns `null` if neither the private nor legacy candidate exists.
-- The authoritative current CLIP runbook in `CLAUDE.md:523-535` mounts `<deploy-root>/apps/web/data:/app/data` for the production backfill sidecar and sets `CLIP_MODELS_ROOT=/app/data/models/clip`.
+- `CLAUDE.md:559-567`
+- `.context/reviews/photographer-r8/_aggregate.md:1-18`
+- `.context/reviews/run9-cycle8/_aggregate.md:1-14`
 
 Problem:
 
-The script-local runbook contradicts the current CLAUDE.md runbook. It gives operators a command that has model weights but not the original image files required by `--production`.
+`CLAUDE.md` states that the current photographer surface is documented in `photographer-r4/_aggregate.md`. The repo now contains later `photographer-r6`, `photographer-r7`, `photographer-r8`, and run-9 review artifacts. `photographer-r8/_aggregate.md` is a newer comprehensive photographer review dated 2026-05-14, and run-9 cycle 8 records a later convergence state.
 
-Concrete failure scenario:
+Failure scenario:
 
-An operator follows the inline script header instead of CLAUDE.md. The sidecar starts, connects to the DB, selects processed images, then `resolveOriginalUploadPath()` cannot find `/app/data/uploads/original/...` because that path was never mounted. Each selected row increments `failed`; no production embeddings are written. If this is missed before flipping production semantic search, the public semantic/similar paths can remain unavailable or empty of meaningful results even though the model-weight seed appeared complete.
+A future reviewer or planner starts from `CLAUDE.md`, treats r4 as the latest photographer baseline, and misses newer color/HDR/UI findings and closures from r6-r8/run-9. That can cause duplicate work, reopened closed issues, or missing current invariants.
 
 Suggested fix:
 
-Update the header example in `apps/web/scripts/backfill-clip-embeddings.ts` to mirror the current CLAUDE.md sidecar: mount `<deploy-root>/apps/web/data:/app/data`, keep `src` and `scripts` read-only, and pass `-e CLIP_MODELS_ROOT=/app/data/models/clip`. Optionally add an explicit note that production backfill needs originals under `/app/data/uploads/original`, not only the CLIP model directory.
+Update the “Production photographer-perspective audit history” section to name the latest active baseline and explain how r6-r8/run-9 supersede r4. If r8 findings have all been closed by later cycles, point to the aggregate that proves closure instead of leaving r4 as “current.”
 
-### DOC-C28-02 - Scientific-notation pixel-cap comments/test title claim `256e6` equals the 256 MiB default
+### DOC-C29-02 — Auto alt-text is implemented but missing from authoritative runbooks
 
-Status: Confirmed
-Severity: Low
-Confidence: High
+Severity: Medium  
+Confidence: High  
+Files/regions:
 
-Evidence:
-
-- `apps/web/src/lib/process-image.ts:345-347` says `Number('256e6') === 268435456`.
-- The code immediately below actually uses `Number(process.env.IMAGE_MAX_INPUT_PIXELS ?? '')` and falls back to `256 * 1024 * 1024` only when the env value is invalid or non-positive: `apps/web/src/lib/process-image.ts:352-357`.
-- The regression test title repeats the same wrong implication: `apps/web/src/__tests__/process-image-max-input-pixels-env.test.ts:65-70` names the case "256e6 -> 268_435_456" but asserts `256_000_000`.
-- Authoritative env docs use the plain default integer: `CLAUDE.md:102` and `apps/web/.env.local.example:35` document `268435456`.
+- `apps/web/src/lib/gallery-config-shared.ts:39-40`, `apps/web/src/lib/gallery-config-shared.ts:100-101`, `apps/web/src/lib/gallery-config-shared.ts:155-156`
+- `apps/web/src/lib/caption-generator.ts:1-15`, `apps/web/src/lib/caption-generator.ts:43-63`
+- `apps/web/src/lib/image-queue.ts:702-719`
+- `apps/web/scripts/backfill-alt-text.ts:1-24`, `apps/web/scripts/backfill-alt-text.ts:52-60`
+- `README.md:35-48`
+- `apps/web/README.md:28-41`, `apps/web/README.md:57-80`
+- `CLAUDE.md:84-119`, `CLAUDE.md:153-161`
 
 Problem:
 
-The implementation is correct, but two maintenance comments are mathematically false. `Number('256e6')` is `256000000`, not `268435456`. The default `268435456` comes from `256 * 1024 * 1024`, not from parsing `256e6`.
+The current source has an `auto_alt_text_enabled` setting, a caption generator, queue-side caption side effect, admin bulk-apply path, public `alt_text_suggested` fallback, and a manual `backfill-alt-text.ts` operator script. The authoritative docs do not describe the feature contract, the default-off behavior, the fact that the current generator is an EXIF-derived stub rather than vision inference, or the manual backfill command. `apps/web/README.md` lists CLIP and color backfill scripts but not `backfill-alt-text.ts`.
 
-Concrete failure scenario:
+Failure scenario:
 
-A maintainer tuning decompression-bomb limits sees the comment/test title and believes `IMAGE_MAX_INPUT_PIXELS=256e6` is equivalent to the documented default. It is lower by 12,435,456 pixels. That could cause confusing near-threshold upload rejections and makes the env-parser regression test harder to trust because its name contradicts its assertion.
+An operator enables the setting expecting real AI captioning, or assumes old images are backfilled automatically. Existing rows keep `alt_text_suggested = NULL` unless the manual script runs, and new suggestions are stubbed with `[AUTO]`-prefixed EXIF hints internally. The public/a11y behavior becomes surprising because the docs never state this contract.
 
 Suggested fix:
 
-Change the comment and test title to say that `Number('256e6') === 256000000`, while the unset fallback remains `256 * 1024 * 1024 === 268435456`. Alternatively use `268435456` as the example env value when referring to the documented default.
+Add an “Auto alt-text hints” section to `CLAUDE.md` and `apps/web/README.md`: default off, current stub behavior, public fallback chain, admin bulk-apply behavior, `backfill-alt-text.ts [--force]`, and explicit “not real vision captioning yet.” Add the script to the app README script table.
 
-### DOC-C28-03 - CLAUDE.md names a concrete production target despite the config-driven deploy policy
+### DOC-C29-03 — Public route freshness docs omit several current `revalidate = 0` surfaces
 
-Status: Risk
-Severity: Low
-Confidence: Medium
+Severity: Low  
+Confidence: High  
+Files/regions:
 
-Evidence:
-
-- `AGENTS.md:17-18` says `npm run deploy` reads gitignored `.env.deploy`, the deploy host and SSH credentials are config-driven, and hostnames/key paths should stay in `.env.deploy`.
-- `scripts/deploy-remote.sh:31-52` derives the SSH target from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`.
-- `.env.deploy.example:6-14` uses placeholder values and keeps the real target out of the committed example.
-- `CLAUDE.md:465-467` says the current production target is `gallery.atik.kr`.
+- `CLAUDE.md:410-422`
+- `apps/web/src/app/[locale]/(public)/page.tsx:16-18`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:19`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:41`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:18`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:23`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:16`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:18`
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:19`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:11-12`
 
 Problem:
 
-The helper implementation and short-form AGENTS policy are config-driven, but the detailed runbook still hardcodes a concrete production hostname. This is not a code bug, and it may have been intentional status context, but it weakens the "keep hostnames in `.env.deploy`" policy and creates a stale-ops risk if the target changes.
+`CLAUDE.md` says public photo, topic, shared, and home gallery pages set `revalidate = 0`. Current source also marks smart collections, timeline, year-in-review, and the GPS map as dynamic/no-ISR surfaces. The service-worker section similarly says “dynamic public gallery/photo pages,” while the implementation scope is broader.
 
-Concrete failure scenario:
+Failure scenario:
 
-A future operator or agent reads CLAUDE.md as authoritative and treats `gallery.atik.kr` as the deployment target even if `.env.deploy` has been rotated to a different host. In the other direction, if the hostname is sensitive, the committed runbook leaks it despite the environment-file policy.
+A future performance pass reintroduces ISR on timeline/year/map/smart-collection pages because they are not named in the documented freshness contract. Those pages would then show stale archive/map/collection data after processing, metadata, GPS visibility, or collection changes.
 
 Suggested fix:
 
-Remove the concrete hostname from CLAUDE.md or rephrase it as "the configured deploy host from `.env.deploy`". If a named host is intentionally allowed in docs, adjust AGENTS.md to clarify that the "do not hardcode" rule applies to scripts/examples/secrets rather than status prose.
+Replace the enumerated sentence with the current full route list or a category rule: “all public data-backed gallery/archive/map/share/photo/smart-collection pages set `revalidate = 0`; static policy pages such as privacy do not.” Keep the SW offline-fallback language aligned with that list.
 
-## Confirmed Matches And Non-Findings
+### DOC-C29-04 — Touch-target audit docs omit explicitly scanned app-level files
 
-- Semantic-search production empty-state docs match code and tests: `apps/web/src/app/api/search/semantic/route.ts:285-289`, `apps/web/src/__tests__/semantic-route-production.test.ts:33-42`, and `apps/web/src/__tests__/semantic-search-route.test.ts:296-297` all agree on `503` plus `semantic_no_embeddings`.
-- CLIP historical docs under `docs/superpowers/` are explicitly non-current: the spec banner at `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:4` and plan banner at `docs/superpowers/plans/2026-06-15-clip-semantic-search.md:5` direct operators to current code, README, and CLAUDE.md. I did not file their design-time snippets as drift.
-- Deploy-prune policy matches implementation: AGENTS/CLAUDE/README describe prune-after-up and `docker volume prune -f` without `-a`; `apps/web/deploy.sh:77-80` implements that sequence, and deploy-script contract tests pin it.
-- Nginx upload caps, app upload caps, health/live routes, migration journal monotonicity, privacy-field omission, action/API guard lint commands, touch-target audit, and TypeScript script/app split all matched the current docs and tests on this pass.
+Severity: Low  
+Confidence: High  
+Files/regions:
 
-## Missed-Issues Sweep
+- `CLAUDE.md:621-625`
+- `apps/web/src/__tests__/touch-target-audit.test.ts:52-65`
+- `apps/web/src/__tests__/touch-target-audit.test.ts:79-83`
 
-Final sweep commands covered broad terms for deploy, migration, schema, semantic search, CLIP, env defaults, sidecars, Docker pruning, health checks, privacy/sensitive fields, origin/auth guards, upload limits, touch targets, historical banners, and stale comments across `AGENTS.md`, `CLAUDE.md`, `README.md`, env examples, package scripts, `apps/web/scripts`, `apps/web/src`, `apps/web/e2e`, `apps/web/drizzle`, and `docs/`.
+Problem:
 
-No review-relevant file was intentionally skipped. Generated artifacts, dependency/build outputs, binary fixtures, and explicitly historical/archive records were excluded from current-authority findings as noted in the inventory.
+`CLAUDE.md` says the audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` only: components, admin route group, and public route group. The test also scans `app/global-error.tsx`, `app/[locale]/error.tsx`, `app/[locale]/not-found.tsx`, `app/[locale]/layout.tsx`, and `app/[locale]/loading.tsx` through `appLevelExtraFiles`.
 
-## Summary
+Failure scenario:
 
-Finding count: 3
+A maintainer edits a root-level error/not-found/layout/loading surface and relies on `CLAUDE.md` to understand touch-target scope. They may not know these files are audited or that exemptions must be documented in `KNOWN_VIOLATIONS`, causing avoidable test failures or undocumented exemptions.
 
-- Medium: 1 confirmed operator-runbook mismatch.
-- Low: 1 confirmed comment/test-title numeric mismatch, 1 deployment-doc policy risk.
-- Fixes implemented: none, per Prompt 1 review-only instruction.
+Suggested fix:
+
+Update the Touch-Target Audit section to mention both `SCAN_ROOTS` and `appLevelExtraFiles`, naming the five explicitly scanned root-level files.
+
+## Likely Issues
+
+### DOC-C29-05 — Historical migration comments still use superseded product language
+
+Severity: Low  
+Confidence: Medium  
+Files/regions:
+
+- `apps/web/drizzle/0006_admin_tokens.sql:1-8`
+- `apps/web/drizzle/0011_image_alt_text_suggested.sql:1-4`
+- `CLAUDE.md:160`
+- `README.md:45`, `README.md:207`
+- `apps/web/README.md:91`
+- `apps/web/src/lib/caption-generator.ts:1-15`
+
+Problem:
+
+Current docs consistently say the PAT route is an external-client API and no Lightroom Classic plugin is bundled. Current caption source says auto alt-text is an EXIF-derived stub and real vision inference is deferred. Two applied migration comments still say “Lightroom Classic publish plugin” and “Auto alt-text via local Florence-2.”
+
+Why likely, not confirmed:
+
+These are historical migration files, and migration comments often describe the intent at creation time rather than current product state. Also, editing applied migration SQL changes migration hashes, so the fix is not as simple as editing the comments in place.
+
+Failure scenario:
+
+Someone greps current source for product contracts, lands on the migration comments, and concludes GalleryKit ships a Lightroom plugin or a local Florence-2 captioning path. That conflicts with current README/CLAUDE/source behavior.
+
+Suggested fix:
+
+Do not casually edit applied migration SQL without accounting for hash/postcondition consequences. Prefer adding a short `CLAUDE.md` “historical migration wording” note or a migration-comment errata near the schema/migration runbook. If the team chooses to edit comments in old migrations anyway, handle the expected migration-hash impact deliberately.
+
+## Risks Needing Manual Validation
+
+No external/live deployment behavior was validated in this Prompt 1 pass. In particular:
+
+- I did not verify the deployed host’s current semantic-search DB row, CLIP model volume, or live route behavior.
+- I did not run the deploy helper against a remote host.
+- I did not run the full quality gate suite; this was a documentation/source inspection pass only.
+
+## Confirmed Matches / Non-Findings
+
+- Package scripts and documented quality gates align: root scripts delegate to `apps/web`; app `build` runs typecheck before `next build`; lint-gate script names match docs.
+- Deploy docs and scripts align on config-driven `.env.deploy`, remote `apps/web/deploy.sh`, host-network compose, health check, and post-up Docker pruning without `volume prune -a`.
+- Nginx body-size docs match `apps/web/nginx/default.conf`: default 2 MiB, login 64 KiB, DB restore 250 MiB, dashboard upload 216 MiB, LR upload 216 MiB, generic admin API 2 MiB.
+- Semantic/similar route posture matches docs: same-origin gate and `preIncrementSemanticAttempt` are present in the route implementations.
+- Storage quarantine docs match source/tests: `@/lib/storage` exists but is not wired into the live upload/serve pipeline.
+- Privacy-field guard docs match the current `privacy-fields.test.ts` symmetric guard and `data.ts` public/admin select boundary.
+
+## Final Missed-Issues Sweep
+
+Final sweep covered:
+
+- Terms: deploy, backfill, semantic, CLIP, restore maintenance, health/live, upload limits, nginx body caps, site-config, TRUST_PROXY, privacy/sensitive fields, route freshness, touch targets, auto alt-text, caption, Lightroom/plugin, Florence, Stripe/paid/entitlements/reactions historical language.
+- Surfaces: `AGENTS.md`, `CLAUDE.md`, root/app READMEs, env examples, package scripts, deploy scripts, nginx/compose/Dockerfile, migrations/journal, schema, scripts, source comments, route files, contract tests, `.context` current review directories, and `docs/superpowers`.
+
+Historical archive/review files contain many obsolete product references by design. I did not file those as current-doc defects unless current docs still point at the stale baseline.
+
+## Covered-File Summary
+
+Directly read or line-checked:
+
+- `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`
+- `package.json`, `apps/web/package.json`
+- `.env.deploy.example`, `apps/web/.env.local.example`
+- `scripts/deploy-remote.sh`, `apps/web/deploy.sh`
+- `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, `apps/web/next.config.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/caption-generator.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/storage/*`
+- `apps/web/scripts/backfill-alt-text.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/download-clip-models.ts`, `apps/web/scripts/migrate.js`, lint/check scripts by targeted scan
+- `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`
+- Public route pages under `apps/web/src/app/[locale]/(public)/`
+- `apps/web/src/__tests__/touch-target-audit.test.ts`, `privacy-fields.test.ts`, public-route/lint/source-contract tests by targeted scan
+- `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`
+- `.context/reviews/photographer-r6`, `photographer-r7`, `photographer-r8`, `run9-cycle8` aggregates
+
+Fixes implemented: none. This artifact is the only file written for Prompt 1.

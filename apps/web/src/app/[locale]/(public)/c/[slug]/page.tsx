@@ -12,11 +12,15 @@ import { getCspNonce } from '@/lib/csp-nonce';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const { slug } = await params;
+    const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+    if (maintenanceMetadata) return maintenanceMetadata;
+
     const collection = await getSmartCollectionBySlugCached(slug);
     // R19-L1: prefetch translations so the not-found / private-collection
     // branch returns a translated `notFoundTitle` instead of an empty

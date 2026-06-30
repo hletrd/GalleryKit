@@ -38,13 +38,20 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const { t } = useTranslation();
     const { theme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
-    const currentTheme = (theme ?? 'system') as StoredTheme;
+    const [mounted, setMounted] = useState(false);
+    const currentTheme = (mounted ? (theme ?? 'system') : 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
     const hasExpandableMobileContent = topics.length > 0;
     const themeAriaLabel = t('aria.cycleTheme', {
         theme: t(`theme.${currentTheme}`),
         nextTheme: t(`theme.${nextThemeValue}`),
     });
+
+    // Auto-collapse when viewport crosses into desktop
+    useEffect(() => {
+        const frame = requestAnimationFrame(() => setMounted(true));
+        return () => cancelAnimationFrame(frame);
+    }, []);
 
     // Auto-collapse when viewport crosses into desktop
     useEffect(() => {
@@ -169,10 +176,10 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                         aria-label={themeAriaLabel}
                         title={themeAriaLabel}
                     >
-                        {(theme === 'light') && <Sun className="h-4 w-4" />}
-                        {(theme === 'dark') && <Moon className="h-4 w-4" />}
-                        {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
-                        {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+                        {(currentTheme === 'light') && <Sun className="h-4 w-4" />}
+                        {(currentTheme === 'dark') && <Moon className="h-4 w-4" />}
+                        {(currentTheme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+                        {(currentTheme === 'system') && <Monitor className="h-4 w-4" />}
                     </button>
                     <button
                         onClick={handleLocaleSwitch}

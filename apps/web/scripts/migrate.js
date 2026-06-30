@@ -679,6 +679,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'audit_log', 'audit_created_at_idx', 'CREATE INDEX audit_created_at_idx ON audit_log (created_at)');
     await ensureIndex(connection, dbName, 'sessions', 'idx_sessions_expires_at', 'CREATE INDEX idx_sessions_expires_at ON sessions (expires_at)');
     await ensureIndex(connection, dbName, 'shared_group_images', 'idx_shared_group_images_group_position', 'CREATE INDEX idx_shared_group_images_group_position ON shared_group_images (group_id, position)');
+    await ensureIndex(connection, dbName, 'rate_limit_buckets', 'idx_rate_limit_buckets_bucket_start', 'CREATE INDEX idx_rate_limit_buckets_bucket_start ON rate_limit_buckets (bucket_start)');
 
     await ensureForeignKey(connection, dbName, 'images', 'images_topic_topics_slug_fk', 'ALTER TABLE images ADD CONSTRAINT images_topic_topics_slug_fk FOREIGN KEY (topic) REFERENCES topics(slug) ON DELETE RESTRICT');
     await ensureForeignKey(connection, dbName, 'image_tags', 'image_tags_image_id_images_id_fk', 'ALTER TABLE image_tags ADD CONSTRAINT image_tags_image_id_images_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE');

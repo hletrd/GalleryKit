@@ -406,7 +406,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
     });
 
     it('orders semantic results by computed cosine score after enrichment', async () => {
-        const lowerRankedEmbedding = embeddingBufferFrom({ 0: 0.2, 1: Math.sqrt(1 - 0.2 ** 2) });
+        // Non-normalized candidate intentionally distinguishes cosine from dot
+        // product: dot(query, [2, 10]) > dot(query, [1, 0]), but cosine ranks
+        // [1, 0] higher.
+        const lowerRankedEmbedding = embeddingBufferFrom({ 0: 2, 1: 10 });
         const higherRankedEmbedding = embeddingBufferFrom({ 0: 1 });
         const mockEmbeddingRows = [
             { imageId: 2, embedding: lowerRankedEmbedding },

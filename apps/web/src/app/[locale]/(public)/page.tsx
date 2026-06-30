@@ -12,6 +12,7 @@ import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
+import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 
 // Public gallery pages must reflect asynchronous image processing as soon as
 // the background queue marks uploads processed; avoid ISR staleness here.
@@ -19,6 +20,9 @@ export const revalidate = 0;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
+  const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
+  if (maintenanceMetadata) return maintenanceMetadata;
+
   const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const allTagsPromise = requestedTagSlugs.length > 0
     ? getTagsCached()

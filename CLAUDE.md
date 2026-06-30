@@ -408,7 +408,7 @@ docker run --rm \
 
 - **React `cache()`** wraps 10 data-access functions for SSR deduplication — every `data.ts` export ending in `Cached` (`getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`) plus `getSeoSettings`
 - **`Promise.all`** parallelizes independent DB queries in `getImage()` (tags + prev + next)
-- **Public route freshness**: public photo, topic, shared, and home gallery pages currently set `revalidate = 0` so asynchronous image processing and metadata updates are visible immediately; static policy pages such as privacy do not need that dynamic contract. Admin pages remain dynamic. Reintroduce ISR on gallery/photo surfaces only with an explicit invalidation/freshness plan
+- **Public route freshness**: public home, topic, photo, shared single/group, smart collection, timeline, year-in-review, and GPS map pages currently set `revalidate = 0` so asynchronous image processing, metadata updates, share state, archive data, and map-visibility changes are visible immediately; static policy pages such as privacy do not need that dynamic contract. Admin pages remain dynamic. Reintroduce ISR on gallery/photo/archive/map surfaces only with an explicit invalidation/freshness plan
 - **Masonry grid**: pure CSS multi-column layout (`columns-1 sm:columns-2 … 2xl:columns-5` + `break-inside-avoid`) — no JS reorder pass; `requestAnimationFrame`-debounced resize handler for column-count-dependent sizing
 - **ImageZoom**: Ref-based DOM manipulation (no React re-renders on mousemove)
 - **Histogram**: Canvas capped at 256x256 for fast computation
@@ -444,6 +444,8 @@ It only checks `MAX(created_at)` — not per-entry hashes — across `__drizzle_
 3. Update `reconcileLegacySchema` in `migrate.js` to mirror the new schema state (idempotent CREATE/ALTER) so a fresh DB without `__drizzle_migrations` rows can baseline cleanly.
 4. Update `apps/web/src/db/schema.ts`.
 5. If the new column is admin-only, add it to the `_omit*` block in `apps/web/src/lib/data.ts` AND to the `_PrivacySensitiveKeys` type guard AND to the `SENSITIVE_KEYS` fixture in `apps/web/src/__tests__/privacy-fields.test.ts`.
+
+**Historical-comment errata:** older migration comments may mention prior product surfaces such as the Lightroom plugin or Florence-2 planning language. Treat migration SQL files as historical schema records, not current operator runbooks or current feature-state evidence. Use this file, `apps/web/README.md`, and current source/tests for live behavior.
 
 **Forensics on a stuck deploy:**
 
@@ -556,6 +558,10 @@ on expensive natural-language queries.
 
 **Why the binary is already present without extra Dockerfile steps:** `onnxruntime-node` (the CPU inference engine used by `@huggingface/transformers`) bundles its native `.node` binding for all platforms — including `linux/arm64` and `linux/x64` — **directly inside the npm package tarball** (`bin/napi-v3/linux/{arm64,x64}/onnxruntime_binding.node`). Its `postinstall` script only downloads CUDA `.so` files, which are not needed for CPU inference. Since `onnxruntime-node` is a non-dev, non-optional transitive production dependency (via `@huggingface/transformers → onnxruntime-node`), it is installed by `npm ci --omit=dev` in the `prod-deps` stage without any `--include=optional` or explicit extra install step. No Dockerfile change is required to make the CPU binding available at runtime.
 
+### Auto alt-text hints
+
+Auto alt-text (`auto_alt_text_enabled`) is an opt-in local hint pipeline, not a hosted AI captioning feature. The current caption generator derives suggested text from available EXIF/metadata context and stores it as `alt_text_suggested`; public display falls back through explicit alt text, title/description, suggested text, and localized photo labels. Existing rows are not rewritten merely by enabling the setting. Operators can copy suggestions into empty public alt-text fields from the admin bulk action or run `apps/web/scripts/backfill-alt-text.ts` intentionally for existing processed photos.
+
 ### Production photographer-perspective audit history
 
 The `.context/reviews/` directory contains the running history of "as photographers" comprehensive reviews:
@@ -563,8 +569,9 @@ The `.context/reviews/` directory contains the running history of "as photograph
 - `photographer-r3/` (2026-05-08) — first comprehensive R3 pass, 4 CRIT + 7 HIGH findings.
 - `cycle1-rpf-photographer/` … `cycle8-rpf-photographer/` — the 8 cycles of /review-plan-fix that closed nearly all of R3 (commits `94c43393` through `689822d4`).
 - `photographer-r4/` (2026-05-08) — R4 fresh pass after cycle 9 convergence; 0 CRIT + 2 HIGH (Apple gain map detection, ICC chromaticity-based gamut detection) + 5 MED + 4 LOW.
+- Later photographer-perspective and cycle review artifacts, including `photographer-r6`, `photographer-r8`, and `run-9`/cycle review outputs, are also committed under `.context/reviews/`; check the newest aggregate before treating an older round as the current baseline.
 
-The current state of the photographer surface is documented in `photographer-r4/_aggregate.md` and the implementation plan that landed in commits `94c43393` through `2b6cfdb5`.
+Do not use `photographer-r4/_aggregate.md` alone as the current state. It is an important historical baseline; the current photographer surface is the latest committed aggregate plus the implementation history through the current HEAD.
 
 ## Permanently Deferred
 - **2FA/WebAuthn**: Not planned. Multiple root admins with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
@@ -610,9 +617,9 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
   - Read-only exports must carry an explicit leading comment containing `@action-origin-exempt: <reason>`; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
 - `npm run lint:public-route-rate-limit --workspace=apps/web`
-  - Scans every PUBLIC API route file (`apps/web/src/app/api/**` excluding `api/admin/**`) that exports a mutating HTTP handler (POST/PUT/PATCH/DELETE).
+  - Scans every PUBLIC API route file (`apps/web/src/app/api/**` excluding `api/admin/**`) that exports a mutating HTTP handler (POST/PUT/PATCH/DELETE) or an expensive public GET handler.
   - Requires each such file to either call a documented rate-limit pre-increment helper from `@/lib/rate-limit` / `@/lib/auth-rate-limit` (helper names starting with `preIncrement` or `checkAndIncrement`), or carry an explicit `@public-no-rate-limit-required: <reason>` comment.
-  - GET handlers are NOT scanned — expensive public GET routes (ImageResponse, file generation) must be audited separately or opt out with the same exempt tag.
+  - Expensive GET detection includes DB/image/filesystem/embedding markers such as `ImageResponse`, DB helpers/imports, file streams, Sharp, and embedding work. Cheap operational GET routes may pass without a limiter; DB-backed health/readiness routes must carry a reasoned exemption if intentionally unauthenticated.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
@@ -622,7 +629,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
 
 **Policy: 44x44 px minimum** — all interactive elements (buttons, links, checkboxes, etc.) must present a tappable/clickable area of at least 44x44 px, per WCAG 2.5.5 Target Size (Enhanced) — Level AAA in WCAG 2.2 (44×44 px; WCAG 2.2 also adds 2.5.8 Target Size (Minimum), Level AA, 24×24 px — this repo exceeds both), Apple HIG, and Google MDN guidelines. This is enforced as a blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts`.
 
-The vitest fixture at that path enforces the 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/` + the public route group `app/[locale]/(public)/`) recursively.
+The vitest fixture at that path enforces the 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/` + the public route group `app/[locale]/(public)/`) recursively, plus app-level entry files listed in `appLevelExtraFiles` such as root error/loading/layout surfaces.
 
 **Pattern coverage** — the FORBIDDEN regex set catches:
 - shadcn `<Button size="sm">` / `<Button size="icon">` without an explicit `h-11` / `h-12` / `min-h-11` / `size-11` / `size-12` override — kept as belt-and-braces: `ui/button.tsx` now floors every size variant at ≥ 44 px (`min-h-11`/`size-11`/`min-h-12`/`size-12`), so these hits are 44 px-compliant at runtime today, but the scanner cannot see variant CSS and a future variant downgrade must surface here (R4C15 / OBS-R4C14-A);

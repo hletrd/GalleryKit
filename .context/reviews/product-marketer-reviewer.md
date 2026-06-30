@@ -1,195 +1,136 @@
-# Cycle 28 Product Marketer Reviewer
+# Cycle 29 Product Marketer Reviewer
 
 Date: 2026-06-30
 Role: product-marketer-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `9d7f7f7494d8`
+Output: `.context/reviews/product-marketer-reviewer.md`
 
 ## Scope and Method
 
-Applied `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` under `AGENTS.md` and `CLAUDE.md` authority. The local prompt is BurstPick-specific, so I used its evidence-first product-marketing lens for GalleryKit: public positioning, user-facing promises, onboarding flow, SEO/social metadata, i18n copy, privacy expectations, and feature-claim/code alignment.
+This is Prompt 1 review only. I did not plan or implement product-code changes.
 
-This is Prompt 1 review only. No fixes were implemented. This report artifact is the only intended change.
+The installed product-marketer-reviewer prompt was treated only as a reviewer-style lens. Its BurstPick-specific assumptions were not applied. This review is grounded in GalleryKit: a self-hosted finished-photo gallery with private originals, color-managed delivery, public/share routes, admin upload/settings flows, first-party analytics, optional Google Analytics, and operator-gated semantic search.
 
-## Inventory of Review-Relevant Files Examined
-
-Loaded first:
-
-- `/Users/hletrd/.codex/agents/product-marketer-reviewer.md`
-- `AGENTS.md` project instructions from the task prompt
-- `CLAUDE.md`, especially project overview, key files, semantic-search activation, color/HDR pipeline, privacy/security, deployment, and operational playbook sections
-
-Public/product documentation and defaults:
-
-- `README.md`
-- `apps/web/README.md`
-- `apps/web/src/site-config.json`
-- `apps/web/src/site-config.example.json`
-- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-
-i18n/user-facing message catalogs:
-
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-
-Public route, metadata, SEO, privacy, and navigation surfaces:
-
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx` (author/metadata grep)
-- `apps/web/src/app/feed.xml/route.ts` and topic feed route (author/metadata grep)
-- `apps/web/src/components/nav.tsx`
-- `apps/web/src/components/nav-client.tsx`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/upload-dropzone.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx` and `photo-viewer.tsx` GPS-link grep
-
-Admin onboarding/settings/API copy surfaces:
-
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
-- `apps/web/src/app/actions/seo.ts`
-- `apps/web/src/app/actions/topics.ts` (map-visible action grep)
-
-Claim anchors in implementation:
-
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/data.ts`
-- semantic and similar search routes by repository grep
-- upload API/token route by repository grep
-- service-worker/PWA files by repository grep
-- privacy/select-field guards and map GPS query in `data.ts`
-
-Historical review context:
-
-- Existing `.context/reviews/product-marketer-reviewer.md` from cycle 27 was read before replacement.
-- `.context/reviews/` and `.context/plans/` were inventoried/search-scanned for marketing, privacy, semantic-search, SEO, and prior promise-drift themes. Generated screenshots, gate logs, test fixtures, binary assets, migrations, and pure implementation tests were not read line-by-line because they do not contain review-relevant product/marketing/user-facing copy. No relevant copy/doc/message file was intentionally skipped.
+I read `AGENTS.md` and `CLAUDE.md` first, then inventoried documentation, messages, public routes, admin settings/upload/share/token/db flows, privacy/color/HDR/search paths, deployment runbooks, and recent plan/review artifacts with `rg` / `rg --files`.
 
 ## Executive Summary
 
-GalleryKit's positioning is mostly disciplined: it says finished-photo publishing, not editing/culling/proofing/payment; semantic search is documented as disabled-by-default and operator-gated; upload API copy no longer implies a bundled Lightroom plugin; analytics copy distinguishes first-party tracking from optional Google Analytics. The main drift is trust/onboarding: first-run docs and admin labels can lead operators to publish or retain location metadata without realizing the consequence, while the public demo/default SEO still ships generic GalleryKit branding. Market-readiness score for public positioning: 7/10. The product is technically honest in many details, but a photographer evaluating privacy and color fidelity can still be misled at the exact moments that determine trust.
+GalleryKit's positioning is generally honest and unusually specific: it says finished-photo publishing, not editing, culling, proofing, scoring, payments, or hosted SaaS. The docs also correctly describe semantic search as disabled by default and operator-gated, and the upload API as an API contract rather than a bundled Lightroom plugin.
 
-## Findings
+The remaining trust gaps are concentrated around operational expectations: GPS stripping is default-off while the product leads with private-original language; the public privacy page says analytics tables avoid full IPs but does not disclose short-lived full-IP rate-limit buckets; share links are easy to create but not visible/revocable in the production UI; and semantic-search marketing remains dependent on live operator state before any public demo/release claims.
 
-### C28-PMR-01 - First-run docs push upload before GPS/privacy setup, but GPS stripping defaults off and locks after photos exist
+## Confirmed Issues
 
-- Severity: High
-- Confidence: High
-- Category: Onboarding friction / privacy promise drift
-- File and lines:
-  - `README.md:29-32` positions GalleryKit around private original storage and self-hosted publishing, then `README.md:118` tells a new operator to create a category, upload one photo, and confirm the homepage.
-  - `apps/web/README.md:24` repeats the same first-run sequence.
-  - `apps/web/src/lib/gallery-config-shared.ts:97` sets `strip_gps_on_upload` default to `false`.
-  - `apps/web/src/components/upload-dropzone.tsx:77` detects the first-upload GPS warning condition only when GPS stripping is off and no images exist; `upload-dropzone.tsx:387-390` shows a warning, but it appears at the upload surface after the setup path already sent the user there.
-  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:660-675` disables the GPS switch once images exist; `settings-client.tsx:677-680` repeats the lock notice.
-  - `apps/web/messages/en.json:735-739` says new uploads can strip GPS and that image size/GPS settings are locked for an existing gallery.
-  - `apps/web/messages/en.json:172` warns that, with GPS stripping off, first uploads containing location metadata retain it in originals.
-
-Problem: The public setup path optimizes for "upload one photo" before it tells operators to make the irreversible privacy choice. That conflicts with the product's trust positioning around private originals and metadata safety. The code is honest once the operator reaches the upload form, but the docs do not steer first-time admins to Settings before their first real upload, and the setting becomes unavailable after photos exist.
-
-Concrete failure scenario: A photographer follows `README.md`, creates a category, and uploads a sample from a camera roll that contains home/studio GPS metadata. Because `strip_gps_on_upload` defaults to `false`, GalleryKit stores the retained original with GPS. The admin later reads Privacy settings, tries to turn stripping on, and finds the setting locked because the gallery already has images. The public gallery may not expose GPS in normal pages, but the operator's private-original privacy expectation has already been violated.
-
-Suggested fix: Change the first-run docs to explicitly configure privacy before the first upload: "Before uploading real photos, open Settings and decide whether retained originals should have GPS stripped." Stronger product fix: default `strip_gps_on_upload` to `true` for new installs, or add a first-run interstitial that requires an explicit keep/strip GPS choice before the first upload. Keep the upload warning, but do not rely on it as the primary onboarding guard.
-
-### C28-PMR-02 - "Show on Map" hides that the toggle publishes GPS coordinates to a public page
-
-- Severity: High
-- Confidence: High
-- Category: UX copy / privacy disclosure
-- File and lines:
-  - `apps/web/messages/en.json:107-109` labels the admin control as "Show on Map" and "Toggle map visibility for {label}".
-  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:226` renders the table header from that copy.
-  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:260-264` renders a one-click switch with only that aria label.
-  - `apps/web/src/lib/data.ts:410-416` documents `publicMapSelectFields` as the only unauthenticated select retaining latitude/longitude.
-  - `apps/web/src/lib/data.ts:1660-1685` confirms `/map` returns processed images with latitude and longitude for topics where `topics.map_visible = true`.
-  - `apps/web/messages/en.json:808` explains the privacy model on the Privacy page, but the admin toggle itself does not carry that warning.
-
-Problem: The control label is too soft for the action. "Show on Map" sounds like a navigation/display preference; the actual behavior publishes geotagged image coordinates on an unauthenticated public map for the whole topic. That is a high-trust decision for a photographer's private locations, not a simple visibility toggle.
-
-Concrete failure scenario: An admin sees a category table, toggles "Show on Map" to make a portfolio category easier to browse, and does not connect the label to public release of precise GPS coordinates. Photos from a home, client site, school, private venue, or travel location now appear on `/map`. The privacy page is accurate, but it is not in the decision path when the admin flips the switch.
-
-Suggested fix: Rename the label to a consequence-first phrase such as "Publish GPS on public map" and change the aria label accordingly. Add a confirmation dialog the first time a topic is enabled: "This exposes coordinates for photos in this category on the public map. Continue?" Include a short inline help text in the table or category edit dialog; avoid hiding the only disclosure on the Privacy page.
-
-### C28-PMR-03 - Checked-in live site defaults keep generic GalleryKit SEO/brand metadata
+### PM-C29-01 - GPS privacy is positioned as a key trust benefit, but first-run defaults retain GPS in originals unless the operator catches the setting
 
 - Severity: Medium
 - Confidence: High
-- Category: SEO / positioning / public-facing metadata
-- File and lines:
-  - `README.md:22` links the live demo.
-  - `apps/web/src/site-config.json:2-9` sets the live URL to `https://gallery.atik.kr` but keeps `title`, `author`, `nav_title`, and `footer_text` as "GalleryKit" and `description` as "A self-hosted photo gallery".
-  - `apps/web/src/lib/data.ts:1714-1717` documents SEO fallback to `site-config.json`.
-  - `apps/web/src/lib/data.ts:1742-1749` actually falls back to those generic values when DB-backed SEO rows are absent or unreadable.
-  - `apps/web/src/app/[locale]/layout.tsx:22-49` uses the resolved SEO title/description/siteName for root metadata and Open Graph.
-  - `apps/web/src/app/[locale]/(public)/page.tsx:38-53` uses the same SEO values for home title/description, and `page.tsx:176-182` emits them in JSON-LD.
+- Where:
+  - `README.md:8`, `README.md:29-31`, `README.md:118`
+  - `apps/web/src/lib/gallery-config-shared.ts:92-104`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:651-681`
+  - `apps/web/messages/en.json:172`, `apps/web/messages/en.json:735-741`, `apps/web/messages/en.json:810`
+- Evidence: The README leads with "private originals" and tells first-run operators to review Settings, especially GPS stripping. The actual default is `strip_gps_on_upload: 'false'`. The Settings toggle is clear once found, but it is disabled after images exist. Upload success can emit `gpsRetentionWarning`, but that happens after the first upload has already retained GPS-bearing originals.
+- Failure scenario: A photographer installs GalleryKit because the README promises private originals, uploads a first batch from a camera/phone with GPS, misses the Settings toggle, and later discovers retained originals still contain location metadata. Public pages still omit GPS unless map-visible topics opt in, but the private-original trust expectation is already damaged.
+- Fix: Make first-run privacy posture harder to miss. Options: default GPS stripping on for fresh installs; add a blocking first-run upload interstitial; or show an always-visible pre-upload warning in the admin dashboard while `strip_gps_on_upload=false` and no photos exist. Also adjust README wording to state "private from public routes" separately from "GPS retained unless stripping is enabled."
 
-Problem: The repository's production-like config points at a real public origin but still brands the site as the software package rather than the photographer/gallery. If DB SEO settings are missing, unreadable, or not configured in a fresh deployment, the public page, social previews, JSON-LD, footer, and navigation present "GalleryKit" and "A self-hosted photo gallery" instead of a portfolio identity.
-
-Concrete failure scenario: A visitor or social crawler hits `gallery.atik.kr` during a DB issue or before the admin has configured SEO rows. The page title and social card read like a generic app demo, not a photography site. A photographer evaluating GalleryKit sees a self-hosting tool that forgets to make the photographer the brand, which undercuts the product promise that this is for publishing finished work.
-
-Suggested fix: For the checked-in live config, use demo-specific, photographer-facing defaults rather than package defaults. For reusable templates, keep `site-config.example.json` generic but add a first-run/admin SEO checklist before public launch. Consider an admin dashboard warning while SEO title/description/nav title remain the stock defaults.
-
-### C28-PMR-04 - "Color-faithful" and "Photographer-grade color management" overstate a pipeline that can clip, downconvert HDR, and depend on browser/display behavior
+### PM-C29-02 - Public privacy copy omits full-IP rate-limit storage even though visitor actions persist IPs temporarily
 
 - Severity: Medium
 - Confidence: High
-- Category: Marketing claim precision / photographer trust
-- File and lines:
-  - `README.md:31` claims "browser-managed color-faithful delivery".
-  - `README.md:38` claims "Photographer-grade color management" and says Display P3, DCI-P3, Adobe RGB, ProPhoto, and Rec.2020 sources are mapped to Display P3.
-  - `apps/web/messages/en.json:377` says HDR sources are delivered as SDR and HDR AVIF output is only planned.
-  - `apps/web/messages/en.json:384-386` explicitly warns that Adobe RGB, ProPhoto, and Rec.2020 sources may clip when mapped to P3.
-  - `apps/web/messages/en.json:389` warns display calibration affects color accuracy.
-  - `apps/web/messages/en.json:396` says Apple HDR gain maps are not passed through.
-  - `apps/web/messages/en.json:756-759` says forcing sRGB affects WebP/JPEG while AVIF stays wide-gamut, creating format-dependent delivery behavior.
+- Where:
+  - `apps/web/messages/en.json:802-810`
+  - `apps/web/src/db/schema.ts:170-178`, `apps/web/src/db/schema.ts:212-224`
+  - `apps/web/src/app/actions/public.ts:320-407`
+  - `apps/web/src/lib/rate-limit.ts:450-518`
+  - `apps/web/src/lib/image-queue.ts:1019-1047`
+- Evidence: The privacy page says full IP addresses are not stored "in these analytics tables." That is true for `image_views`, `topic_views`, and `shared_group_views`. However, public view recording uses `incrementRateLimit(ip, 'view_record', ...)`, and the shared `rate_limit_buckets` table stores `ip` as a plain varchar primary-key component. Search/share/other guarded paths use the same persistent bucket table. `purgeOldBuckets()` removes expired buckets after a default 24 hours, called on startup and hourly.
+- Failure scenario: A privacy-conscious visitor reads the public Privacy page and concludes GalleryKit stores no full IP address for their visit. In reality, a page view/search/share lookup can leave their IP in `rate_limit_buckets` until the next purge window. The implementation may be reasonable, but the disclosure is incomplete.
+- Fix: Update privacy copy to explicitly distinguish analytics events from security/rate-limit records: "View analytics do not store full IPs; short-lived full IP rate-limit/security records may be stored for abuse prevention and are purged after about 24 hours by default." Consider hashing IPs in DB-backed public rate-limit buckets if exact IP retention is not operationally required.
 
-Problem: The implementation and in-app copy are unusually honest about limitations, but the README headline language is stronger than the delivery contract. "Color-faithful" and "Photographer-grade" imply the photographer's edit is preserved, while the documented reality is a color-aware web pipeline with explicit browser/display limits, gamut mapping, possible clipping, SDR output for HDR sources, and gain-map omission.
-
-Concrete failure scenario: A photographer uploads a ProPhoto or Rec.2020 export with saturated colors, or a PQ/HLG/HDR-gain-map image. They chose GalleryKit partly because the README promised color-faithful, photographer-grade delivery. Public visitors see clipped P3/SDR derivatives or browser-dependent rendering. The admin audit panel may explain why, but the initial marketing promise has already overreached.
-
-Suggested fix: Reframe the README language around verifiable constraints: "color-aware delivery with explicit gamut/HDR audit trails" or "preserves and discloses color decisions within browser delivery limits." Keep the detailed feature bullet, but move the limitations into the same sentence as the benefit: P3 delivery for supported sources, explicit clipping labels for wider gamuts, SDR-only HDR handling until HDR AVIF/gain-map delivery ships.
-
-### C28-PMR-05 - Semantic-search admin copy says "Enable" while the UI can only expose Disabled/Stub, making a test mode look like a public feature
+### PM-C29-03 - Share links are publishable from UI, but revoke/delete management is not exposed in production UI
 
 - Severity: Medium
+- Confidence: High
+- Where:
+  - `README.md:39`, `README.md:44`
+  - `apps/web/src/components/photo-viewer.tsx:588-612`
+  - `apps/web/src/components/image-manager.tsx:194-210`
+  - `apps/web/src/app/actions/sharing.ts:317-395`
+  - Usage sweep: `rg -n "revokePhotoShareLink|deleteGroupShareLink|createPhotoShareLink|createGroupShareLink" apps/web/src --glob '!**/__tests__/**'`
+- Evidence: The UI creates per-photo share links from `PhotoViewer` and group share links from `ImageManager`. Server actions exist to revoke a photo share and delete a group share, and tests cover them, but the non-test usage sweep shows production UI imports/calls only the create actions. The delete/revoke actions are exported but not called by components/pages.
+- Failure scenario: An admin shares a private client/gallery link, the URL is forwarded beyond the intended audience, and the admin cannot find any UI to list or revoke active share links. The only practical mitigations are deleting the image/group via non-obvious side effects or manually invoking DB/server operations.
+- Fix: Add an admin share-management surface: active per-photo and group shares, copy/open, created/view counts, and revoke/delete actions. Until then, make share-copy toasts or docs explicit that revocation is not available through the UI.
+
+## Likely Issues
+
+### PM-C29-04 - "Private originals" can be read as a backup/safety guarantee, but app-level backups intentionally exclude files
+
+- Severity: Low-Medium
 - Confidence: Medium
-- Category: Feature-policy drift / admin UX copy
-- File and lines:
-  - `apps/web/messages/en.json:748-755` says "Enable CLIP-based semantic image search", describes production mode, and says "When enabled, shows a semantic search toggle in the search box."
-  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:758-779` renders only Disabled and Stub options; comments say no production item by design.
-  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:785-788` warns only when a raw stored production value already exists.
-  - `apps/web/src/components/search.tsx:491-520` shows a public "Semantic search" toggle whenever mode is not disabled, including stub mode; in stub mode it adds only "Experimental - results may not match your query."
-  - `apps/web/README.md:73-79` is clearer than the UI: production requires env opt-in plus a DB row and has no one-click admin toggle.
-  - `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md:3-5` and `docs/superpowers/plans/2026-06-15-clip-semantic-search.md:5-17` correctly mark the older semantic-search docs as historical, not current production-state evidence.
+- Where:
+  - `README.md:29-31`, `README.md:83`, `README.md:169`, `README.md:196-198`
+  - `apps/web/messages/en.json:20-26`
+  - `apps/web/README.md:55`
+- Evidence: The README positions private original storage as a core value, and the backup UI copy correctly says database rows only. This is not a code bug. The risk is expectation mismatch: non-operator users may assume the built-in Backup button protects the gallery, while originals/derivatives/resources require host-level backups.
+- Failure scenario: A solo photographer downloads a SQL backup, loses the host volume, and expects "private originals" to be recoverable from the app backup. The DB restore succeeds but files are gone.
+- Fix: Keep the current DB-page warning, but add a short "backup completeness" note to Getting Started/Docker: a complete GalleryKit backup is DB dump plus `data/`, `public/uploads/`, `public/resources`, and `src/site-config.json`.
 
-Problem: The admin Settings card uses enablement language for a feature whose production path is deliberately outside the UI. The only selectable non-disabled state is Stub, which public visitors can see as "Semantic search" even though its embeddings are explicitly non-meaningful. The copy is not false in isolation, but it asks admins to reason across a long paragraph, a hidden runbook, and a public toggle.
+## Risks Needing Manual Validation
 
-Concrete failure scenario: An operator wants semantic search, opens Settings, reads "Enable CLIP-based semantic image search," chooses "Stub (testing only)" because it is the only available enabled-looking option, and saves. Public visitors now see a "Semantic search" toggle and get irrelevant results with a mild experimental disclaimer. The operator thinks the product feature is bad; visitors think GalleryKit's AI search is unreliable.
+### PM-C29-R01 - Semantic-search/demo claims depend on deployed operator state
 
-Suggested fix: Split the card into two policies: "Public semantic search" (production status, read-only unless operator-gated) and "Stub test mode" (clearly marked "Do not expose on public sites"). Rename the public toggle in stub mode to "Test semantic search" or hide it from unauthenticated visitors unless production mode is active. Shorten the admin hint to: "This UI only supports Disabled or Stub test mode. Production requires the operator runbook."
+- Severity: Low-Medium
+- Confidence: High for risk, host-state not validated
+- Where:
+  - `README.md:42`
+  - `apps/web/README.md:59-80`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:760-795`
+  - `apps/web/src/app/api/search/semantic/route.ts:1-31`, `apps/web/src/app/api/search/semantic/route.ts:196-289`
+  - Prior carry-forward: `.context/plans/archive/cycle-27-2026-06-30-deferred.md` item `D27-07`
+- Evidence: Docs are technically honest: disabled by default, production requires weights, env opt-in, DB row, and backfill. The admin UI intentionally offers only Disabled/Stub. The route returns 503 for disabled/not-configured and for production with no embeddings.
+- Failure scenario: A release note, README badge, or demo campaign says GalleryKit has English/Korean semantic search, but the live demo/operator host is in disabled/stub/no-embedding state. A user tests it, sees setup-required or meaningless stub results, and treats the product claim as exaggerated.
+- Fix: Before any public marketing/demo claim, verify the deployed host: `semantic_search_mode='production'`, `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, model weights present at `CLIP_MODELS_ROOT`, and nonzero `jina-clip-v2-d512-q8` embeddings. Add a small operator-facing status readout if marketing will rely on this feature.
 
-## Validated Claims With No New Finding
+### PM-C29-R02 - Production privacy posture depends on proxy trust configuration
 
-- Finished-photo positioning is aligned: `README.md:29-32` says GalleryKit is for edited-work publishing and not editing, culling, scoring, proofing, payment, or SaaS workflows; reviewed app copy did not introduce a conflicting marketed workflow.
-- Upload API wording is aligned: `README.md:205-216`, `apps/web/README.md:82-91`, and `apps/web/messages/en.json:831-858` describe a PAT upload API and explicitly say GalleryKit does not bundle a Lightroom Classic plugin.
-- Google Analytics opt-in is aligned: `README.md:29` and `README.md:69` say GA is optional/disabled unless configured; `apps/web/src/app/[locale]/layout.tsx:147-159` injects GA only for a configured valid ID.
-- Semantic-search docs are mostly cautious: `README.md:42` says disabled by default, operator setup, bounded newest-first scan, and not a vector index; `apps/web/README.md:61-80` gives the production runbook caveats. Finding C28-PMR-05 is about UI copy/mental model, not a false repository claim.
-- Privacy page copy is accurate as written: `apps/web/messages/en.json:803-808` distinguishes processed derivatives, local analytics, no full IP/client fingerprint storage in analytics tables, and map-visible GPS publication. The findings above are about decision-path disclosure and onboarding order.
-- PWA/offline wording remains appropriately bounded in `README.md:43`: visited image caching plus offline HTML fallback, not full gallery sync.
-- Historical CLIP docs are labeled as historical records and point readers back to `CLAUDE.md` / `apps/web/README.md`; I did not find a current-doc contradiction there.
+- Severity: Medium
+- Confidence: Medium, operational-state dependent
+- Where:
+  - `README.md:164-166`
+  - `apps/web/README.md:52`
+  - `apps/web/src/lib/rate-limit.ts:117-169`
+  - Prior carry-forward: `.context/plans/archive/cycle-27-2026-06-30-deferred.md` item `D27-03`
+- Evidence: Docs clearly warn that `TRUST_PROXY=true` is required behind a trusted proxy and that headers must be overwritten by the edge. Code falls back to `"unknown"` without trusted proxy configuration.
+- Failure scenario: A non-standard deployment copies only part of the Docker/nginx setup. Rate limits collapse into one shared visitor bucket or trust the wrong hop, causing either false lockouts or weak abuse controls. The product then feels unreliable despite the code being correct under the documented topology.
+- Fix: Validate deployed proxy headers before public launch and consider adding an admin/runtime health warning when proxy headers are present but `TRUST_PROXY` is unset.
+
+## Non-Findings
+
+- Keyword search claim is aligned. README says titles, descriptions, cameras, and tags; `searchImages()` searches title, description, camera, lens, topic label/slug, tags, and aliases.
+- Upload API copy is aligned. README/app README say API contract, no bundled Lightroom plugin; token UI says upload tokens; the route requires `lr:upload`.
+- Google Analytics opt-in copy is aligned. Layout loads GA only when `siteConfig.google_analytics_id` matches the accepted pattern, and the privacy page switches copy based on the same file-backed setting.
+- HDR/color honesty is mostly aligned. Public copy says HDR ingest is gated and public derivatives are SDR; admin/public labels state HDR source / SDR delivery.
+- S3/MinIO is not marketed. `CLAUDE.md` warns storage abstraction is not integrated; README does not expose it as a supported feature.
+- Payment/Stripe is not marketed. README says payment is out of scope; CLAUDE says do not reintroduce.
 
 ## Missed-Issues Sweep
 
-Final sweeps searched for product-policy drift terms across docs, messages, app routes, components, and core config/data files: `privacy`, `GPS`, `original`, `semantic`, `production`, `stub`, `AI`, `color-faithful`, `Photographer-grade`, `self-hosted`, `map`, `metadata`, `SEO`, `Open Graph`, `Lightroom`, `download`, `license`, `payment`, `proof`, and related variants.
+Before writing this file I re-ran targeted sweeps for:
 
-No relevant file was intentionally skipped. Non-relevant generated artifacts, binary assets, screenshots, migration snapshots, fixture data, and implementation-only tests were excluded from line-by-line review after repository inventory because they do not carry product/positioning/marketing/UX copy.
+- README/app README claims around private originals, semantic search, upload API, deploy, backup, analytics, and sharing.
+- English/Korean message keys around privacy, GPS, semantic search, backup/restore, upload warnings, tokens, analytics, HDR, and share copy.
+- Public routes `/`, `/p/[id]`, `/s/[key]`, `/g/[key]`, `/map`, `/privacy`, and semantic/similar search route behavior.
+- Admin settings, upload, dashboard image manager, tokens, DB backup/restore, and share actions.
+- Prior review/plan artifacts for already-known semantic-search, proxy, analytics, and operator-state risks.
 
-Finding count: 5 confirmed findings (2 High, 3 Medium). No fixes implemented.
+No additional confirmed product/positioning mismatch survived the sweep beyond the findings above.
+
+## Covered File Summary
+
+- Guidance and runbooks: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.env.deploy.example`, `apps/web/.env.local.example`.
+- Product docs/history: `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`, `.context/reviews/run9-cycle7/_aggregate.md`, `.context/reviews/run9-cycle8/_aggregate.md`, `.context/plans/archive/cycle-27-2026-06-30-deferred.md`.
+- Public/admin copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Public surfaces: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/(public)/privacy/page.tsx`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/wide-gamut-hint.tsx`, `apps/web/src/components/similar-photos.tsx`.
+- Admin surfaces: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/components/bulk-edit-dialog.tsx`.
+- Implementation anchors: `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/analytics.ts`, `apps/web/src/lib/audit.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`.

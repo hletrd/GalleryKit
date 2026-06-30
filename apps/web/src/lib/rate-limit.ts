@@ -60,7 +60,7 @@
 import { createHash } from 'crypto';
 import { isIP } from 'net';
 import { db, rateLimitBuckets } from '@/db';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createResetAtBoundedMap, createWindowBoundedMap, type WindowEntry } from '@/lib/bounded-map';
 
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -109,6 +109,8 @@ const RATE_LIMIT_BUCKET_KEY_MAX_LENGTH = 45;
 const ACCOUNT_RATE_LIMIT_PREFIX = 'acct:';
 const ACCOUNT_RATE_LIMIT_HASH_LENGTH = RATE_LIMIT_BUCKET_KEY_MAX_LENGTH - ACCOUNT_RATE_LIMIT_PREFIX.length;
 const DEFAULT_TRUSTED_PROXY_HOPS = 1;
+export const RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE = 1000;
+export const RATE_LIMIT_BUCKET_PURGE_MAX_BATCHES = 50;
 
 // In-memory Maps kept as fast-path cache. On restart they are empty;
 // the DB is the source of truth.
@@ -508,11 +510,33 @@ export async function decrementRateLimit(
     });
 }
 
+function affectedRowsFromDelete(result: unknown): number {
+    const candidate = Array.isArray(result) ? result[0] : result;
+    if (candidate && typeof candidate === 'object' && 'affectedRows' in candidate) {
+        const affectedRows = (candidate as { affectedRows?: unknown }).affectedRows;
+        if (typeof affectedRows === 'number' && Number.isFinite(affectedRows)) return affectedRows;
+    }
+    return 0;
+}
+
 /**
- * Remove expired buckets from the database.
+ * Remove expired buckets from the database in indexed, bounded batches.
  * Call periodically (e.g., from the existing hourly GC interval).
  */
-export async function purgeOldBuckets(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<void> {
+export async function purgeOldBuckets(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<number> {
     const cutoffSec = Math.floor((Date.now() - maxAgeMs) / 1000);
-    await db.delete(rateLimitBuckets).where(lt(rateLimitBuckets.bucketStart, cutoffSec));
+    let deleted = 0;
+
+    for (let batch = 0; batch < RATE_LIMIT_BUCKET_PURGE_MAX_BATCHES; batch += 1) {
+        const result = await db.execute(sql`
+            DELETE FROM ${rateLimitBuckets}
+            WHERE ${rateLimitBuckets.bucketStart} < ${cutoffSec}
+            LIMIT ${RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE}
+        `);
+        const affectedRows = affectedRowsFromDelete(result);
+        deleted += affectedRows;
+        if (affectedRows < RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE) break;
+    }
+
+    return deleted;
 }

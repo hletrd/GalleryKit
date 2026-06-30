@@ -60,11 +60,12 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isDeletingAlias, setIsDeletingAlias] = useState(false);
     const [isAddingAlias, setIsAddingAlias] = useState(false);
     const [togglingMapSlug, setTogglingMapSlug] = useState<string | null>(null);
+    const [mapPublishCandidate, setMapPublishCandidate] = useState<Topic | null>(null);
 
-    async function handleMapVisibleToggle(slug: string, currentValue: boolean) {
+    async function applyMapVisible(slug: string, nextValue: boolean) {
         setTogglingMapSlug(slug);
         try {
-            const res = await setTopicMapVisible(slug, !currentValue);
+            const res = await setTopicMapVisible(slug, nextValue);
             if (typeof res === 'object' && res !== null && 'error' in res && res.error) {
                 toast.error(String(res.error));
             } else {
@@ -76,6 +77,14 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         } finally {
             setTogglingMapSlug(null);
         }
+    }
+
+    function handleMapVisibleToggle(topic: Topic) {
+        if (!topic.map_visible) {
+            setMapPublishCandidate(topic);
+            return;
+        }
+        void applyMapVisible(topic.slug, false);
     }
 
     async function handleCreate(formData: FormData) {
@@ -259,7 +268,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             <TableCell>
                                 <Switch
                                     checked={topic.map_visible}
-                                    onCheckedChange={() => handleMapVisibleToggle(topic.slug, topic.map_visible)}
+                                    onCheckedChange={() => handleMapVisibleToggle(topic)}
                                     disabled={togglingMapSlug === topic.slug}
                                     aria-label={t('categories.mapVisibleToggle', { label: topic.label })}
                                 />
@@ -277,6 +286,39 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 </TableBody>
             </Table>
             </div>
+
+            <AlertDialog
+                open={!!mapPublishCandidate}
+                onOpenChange={(open) => {
+                    if (!open && !togglingMapSlug) setMapPublishCandidate(null);
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('categories.mapPublishConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {mapPublishCandidate
+                                ? t('categories.mapPublishConfirmDescription', { label: mapPublishCandidate.label })
+                                : t('categories.mapPublishConfirmFallback')}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={!!togglingMapSlug}>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async (event) => {
+                                event.preventDefault();
+                                if (!mapPublishCandidate || togglingMapSlug) return;
+                                await applyMapVisible(mapPublishCandidate.slug, true);
+                                setMapPublishCandidate(null);
+                            }}
+                            disabled={!!togglingMapSlug}
+                        >
+                            {togglingMapSlug && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {togglingMapSlug ? t('common.saving') : t('categories.mapPublishConfirmAction')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* Delete Topic Confirmation.
                 COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
