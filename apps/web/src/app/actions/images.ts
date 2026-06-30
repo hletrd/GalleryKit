@@ -44,6 +44,11 @@ type ImageCleanupFailure = {
     reason: string;
 };
 
+type NormalizedBulkTagName = {
+    name: string;
+    slug: string;
+};
+
 // R4C1 COR-R4C1-03: getSafeUserFilename (C2L2-03 / C2L2-05) moved to
 // @/lib/upload-filenames so the Lightroom PAT route shares the exact same
 // sanitizer instead of re-implementing (and drifting from) it.
@@ -51,6 +56,15 @@ const CLEANUP_RETRY_DELAY_MS = 50;
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeBulkTagName(name: string): NormalizedBulkTagName | null {
+    const { value: cleanName, rejected } = requireCleanInput(name);
+    if (rejected || !cleanName) return null;
+    if (!isValidTagName(cleanName)) return null;
+    const slug = getTagSlug(cleanName);
+    if (!isValidTagSlug(slug)) return null;
+    return { name: cleanName, slug };
 }
 
 async function collectImageCleanupFailures(tasks: {
@@ -1001,6 +1015,11 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     if (addTagNames.length > 100 || removeTagNames.length > 100) {
         return { error: t('tooManyTags') };
     }
+    const normalizedAddTagNames = addTagNames.map(normalizeBulkTagName);
+    const normalizedRemoveTagNames = removeTagNames.map(normalizeBulkTagName);
+    if (normalizedAddTagNames.some((tag) => tag === null) || normalizedRemoveTagNames.some((tag) => tag === null)) {
+        return { error: t('invalidTagName') };
+    }
 
     // COR-R5C1-01 (plan-315 item 1, pulled forward this cycle): validate each
     // TriState field's SHAPE before reading `.mode`. The fields below are read
@@ -1131,13 +1150,9 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
 
             // Tag additions: ensure tag record exists, then batch-insert imageTags
             // rows for all selected images.
-            for (const name of addTagNames) {
-                const { value: cleanName, rejected } = requireCleanInput(name);
-                if (rejected || !cleanName) continue;
-                if (!isValidTagName(cleanName)) continue;
-                const slug = getTagSlug(cleanName);
-                if (!isValidTagSlug(slug)) continue;
-                const resolved = await ensureTagRecord(tx, cleanName, slug);
+            for (const tag of normalizedAddTagNames) {
+                if (!tag) continue;
+                const resolved = await ensureTagRecord(tx, tag.name, tag.slug);
                 if (resolved.kind !== 'found') continue;
                 const [insertResult] = await tx.insert(imageTags).ignore().values(
                     existingImageIds.map(imageId => ({ imageId, tagId: resolved.tag.id }))
@@ -1148,10 +1163,9 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             // Tag removals: look up tag by exact name (then slug fallback), then
             // delete only rows matching both the imageId batch AND the specific tagId
             // to avoid removing unrelated tags.
-            for (const name of removeTagNames) {
-                const { value: cleanName, rejected } = requireCleanInput(name);
-                if (rejected || !cleanName) continue;
-                const resolved = await findTagRecordByNameOrSlug(tx, cleanName);
+            for (const tag of normalizedRemoveTagNames) {
+                if (!tag) continue;
+                const resolved = await findTagRecordByNameOrSlug(tx, tag.name, tag.slug);
                 if (resolved.kind !== 'found') continue;
                 const [deleteResult] = await tx.delete(imageTags).where(
                     and(inArray(imageTags.imageId, existingImageIds), eq(imageTags.tagId, resolved.tag.id))

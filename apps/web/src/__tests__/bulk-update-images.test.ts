@@ -275,6 +275,20 @@ describe('bulkUpdateImages — input validation', () => {
         const res = await bulkUpdateImages(input);
         expect(res).toEqual({ error: 'invalidInput' });
     });
+
+    it('rejects invalid addTagNames before opening the transaction', async () => {
+        const res = await bulkUpdateImages(makeInput({ addTagNames: ['nature', '\u202Ehidden'] }));
+
+        expect(res).toEqual({ error: 'invalidTagName' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid removeTagNames before opening the transaction', async () => {
+        const res = await bulkUpdateImages(makeInput({ removeTagNames: [''] }));
+
+        expect(res).toEqual({ error: 'invalidTagName' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('bulkUpdateImages — tri-state diff applier', () => {
