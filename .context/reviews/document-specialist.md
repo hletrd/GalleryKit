@@ -1,75 +1,85 @@
-# Cycle 30 Document Specialist Review
+# Cycle 31 Document Specialist Review
 
-Role: document-specialist  
-Workspace: `/Users/hletrd/flash-shared/gallery`  
-Reviewed HEAD: `666b74f8`  
-Date: 2026-06-30  
-Scope: Prompt 1 review only. No product fixes implemented.
+Reviewer: document-specialist
+Repo: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `f1dd39ebb9c2acde2a4dce5974e6cd1fada6f9aa`
+Date: 2026-06-30 KST
+Scope: README/CLAUDE/.context/source consistency, deploy/docs mismatches, schema/migration docs, and authoritative source claims embedded in docs. No product code was edited.
 
 ## Inventory
 
 Read first: `AGENTS.md`, `CLAUDE.md`.
 
-Then checked current source/docs contracts across:
+Then checked:
 
-- Root/app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`.
-- Package/CI/deploy surfaces: root/app `package.json`, `.github/workflows/quality.yml`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, Docker/Compose/nginx docs.
-- Schema/migration runbook: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration tests.
-- Operational docs: semantic CLIP activation, deploy pruning, restore maintenance, health/live, upload limits, trusted proxy, site config, auto alt-text.
-- Test-contract docs: lint gates, touch targets, Playwright, public GET route scanning, migration monotonicity.
+- Root/app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
+- Source contracts those docs cite: package versions, schema, migrations, migrate runner, deployment scripts, Docker/Compose/nginx, route gates, storage quarantine, semantic search, display capability hook.
+- External authoritative claims: MDN/Browser Compat Data for `color-gamut` and `dynamic-range`, plus the linked Mozilla bug reference used by the docs.
 
-Generated screenshots, archived historical review prose, and old migration comments were not treated as current operator authority unless current docs pointed to them.
+## Findings
 
-## Confirmed Issues
+### C31-DOC-01: Firefox HDR/dynamic-range documentation is stale against current MDN compatibility data
 
-### C30-DOC-01 - `AGENTS.md` contradicts the current public-route rate-limit gate for GET handlers
+Severity: Medium
+Confidence: High
+Failure mode: stale operator/reviewer guidance for display-capability behavior
 
-Severity: Medium  
-Confidence: High  
-Status: Confirmed docs-vs-code mismatch
+Exact local regions:
 
-Files/regions:
+- `CLAUDE.md:367-381`
+- `apps/web/src/lib/use-display-capability.ts:72-74`
+- Related local comments: `apps/web/src/lib/use-display-capability.ts:4-12`, `:64-70`, `:91-109`
 
-- `AGENTS.md:31-38`
-- `CLAUDE.md:619-623`
-- `apps/web/scripts/check-public-route-rate-limit.ts:1-12`, `:57-72`, `:279-283`, `:340-390`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:93-144`
+Evidence:
 
-Problem:
+`CLAUDE.md` says Firefox does not implement `(dynamic-range: high)` and therefore `isHdr` always returns false on Firefox. Current source does not special-case Firefox; it reads `window.matchMedia('(dynamic-range: high)').matches` for every browser. Official MDN says the `dynamic-range` media feature is supported in Firefox, and MDN Browser Compat Data reports Firefox `version_added: "100"` for `dynamic-range`.
 
-`AGENTS.md` says `lint:public-route-rate-limit` scans public mutating handlers and that "GET handlers are not scanned." Current code and `CLAUDE.md` say the opposite for expensive public GET handlers: the scanner detects GET bodies with DB/image/filesystem/embedding markers and requires an approved limiter or a reasoned exemption. The current gate output also proves this path is active for OG and similar-image GET routes.
+The color-gamut part of the same section is more nuanced: MDN BCD still carries a Firefox note that `color-gamut: p3` and `rec2020` are always false because Firefox does not support wide-gamut color, linked to Mozilla bug 1626624. So the stale part is the HDR/dynamic-range claim, not the entire Firefox section.
 
-Failure scenario:
+Concrete failure scenario:
 
-A contributor relies on the short-form `AGENTS.md` quality-gate summary, adds a DB-backed public GET route, and assumes the rate-limit gate will ignore GET. They may add no limiter or exemption, then get surprised by CI failures or, worse, try to bypass the gate because the canonical short-form docs describe the old rule.
+A future reviewer or implementer trusts `CLAUDE.md` and assumes Firefox can never report HDR display capability. They may suppress tests, UI checks, or bug reports for Firefox HDR even though the app now asks the browser directly and current compatibility data says Firefox supports the feature. The docs become a stronger source of false certainty than the source code.
 
-Suggested fix:
+Concrete fix:
 
-Update `AGENTS.md:34` to match `CLAUDE.md` and the scanner: public mutating handlers and expensive public GET handlers must call an approved pre-increment/check-and-increment helper or carry `@public-no-rate-limit-required: <reason>`. Mention cheap operational GET handlers can pass without a limiter.
+Update the Firefox display matrix and impact text to split the claims:
 
-## Likely Issues
+- Keep the `color-gamut: p3/rec2020` Firefox caveat tied to MDN BCD and Mozilla bug 1626624.
+- Replace "dynamic-range not implemented / always false" with current MDN BCD-backed wording: Firefox supports the media feature; actual `high` matches still depend on user agent plus output device capability.
+- Adjust `use-display-capability.ts` comments in the same change, since source comments currently say `(color-gamut: p3)` is restricted to Chrome/Safari/Edge while the code feature-detects it generically.
 
-None promoted. Historical migration comments still contain superseded product wording such as Lightroom/Firenze-era planning language, but `CLAUDE.md:448` now explicitly marks those as historical errata and points maintainers to current docs/source for live behavior.
+### C31-DOC-02: Embedded source line references in `CLAUDE.md` have drifted
 
-## Risks Needing Manual Validation
+Severity: Low
+Confidence: High
+Failure mode: reviewer/runbook navigation error
 
-- Live production state was not validated: semantic-search DB mode, CLIP model volume, deployed nginx, and remote deploy behavior were not checked.
-- Full docs rendered output was not inspected in a browser; this pass was source/markdown inspection.
-- I did not run the full quality gate suite, only targeted gate/test checks supplied in the test-engineer artifact.
+Exact local regions:
+
+- `CLAUDE.md:127` says `IMAGE_PIPELINE_VERSION` is in `gallery-config-shared.ts:21`; source defines it at `apps/web/src/lib/gallery-config-shared.ts:22`.
+- `CLAUDE.md:161` says smart collection `query_json` is at `schema.ts:297`; source table starts at `apps/web/src/db/schema.ts:304` and `query_json` is at `:308`.
+- `CLAUDE.md:172` cites the ProPhoto transfer path at `lib/color-detection.ts:99-108`; source still includes the relevant logic at `apps/web/src/lib/color-detection.ts:98-108`, so this one remains usable but already shifted.
+- `CLAUDE.md:308` says `COLOR_IMPACTING_KEYS` is at `settings-hash.ts:45-57`; the exported list is now `apps/web/src/lib/settings-hash.ts:47-59`.
+
+Concrete failure scenario:
+
+The docs are used as a control surface for agents and contributors. Stale line references make reviewers inspect the wrong region, miss a changed constant, or waste time reconciling a false mismatch. This is low severity because the surrounding filenames and prose are still correct, but it directly undercuts the requested "authoritative source claims" quality of the docs.
+
+Concrete fix:
+
+Avoid exact line numbers in long-lived `CLAUDE.md` prose unless a test pins them. Prefer symbol names and search strings, or update the line references in the same change that moves the symbols. For the current drift, replace these references with symbol-only pointers such as "search for `export const IMAGE_PIPELINE_VERSION`".
 
 ## Confirmed Matches / Non-Findings
 
-- Root/app README and `CLAUDE.md` align with package versions visible in `apps/web/package.json`: Next 16.2, React 19, TypeScript 6, Sharp 0.34, Drizzle 0.45, Node 24 via `.nvmrc`.
-- Auto alt-text docs now align with source: default-off local EXIF-derived hints, no hosted captioning, no automatic rewrite of existing rows, manual `backfill-alt-text.ts`.
-- Public route freshness docs now name home/topic/photo/share/smart-collection/timeline/year/map dynamic surfaces and match the `revalidate = 0` route exports.
-- Touch-target docs now mention both recursive scan roots and app-level extra files, matching `touch-target-audit.test.ts`.
-- Migration runbook matches current migration tests: historical non-monotonic journal entries are documented, and new entries must exceed the global max `when`.
-- Deploy docs match scripts on config-driven `.env.deploy`, no hardcoded host, post-up Docker pruning, no `volume prune -a` in the automatic deploy path, `/api/live` liveness, and bind-mounted mutable data.
-- Semantic/similar docs match route posture: same-origin checks, process-local per-IP limiter, production CLIP opt-in, offline model weights, and bounded scan limits.
-- Paid-download/Stripe removal docs match source: no current payment surface; remaining references are historical migrations/tests or prose explaining removal.
+- `AGENTS.md:31-38` now matches the current public route rate-limit gate: mutating public handlers and expensive public GET handlers must rate-limit or carry a reasoned exemption.
+- Root/app README package claims align with `apps/web/package.json:5-7`, `:57-62`, and `:84-85`: Node 24+, Next 16, React 19, TypeScript 6.
+- Deploy docs align with scripts: config-driven `.env.deploy`, no hardcoded deploy host in the helper, post-health Docker pruning, no automatic `volume prune -a`, `/api/live` liveness, and bind-mounted mutable stores.
+- Semantic search docs match source on disabled-by-default production gating, offline CLIP weights, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, newest-first bounded scan limits, and no bundled Lightroom Classic plugin.
+- Paid-download/Stripe removal docs match current source; remaining references are historical migration/removal records.
+- Storage docs match current source after the quarantine guard: the product supports local filesystem storage only, and `@/lib/storage` is not wired into live upload/serve paths.
 
-## Final Sweep / Skipped Areas
+## Final Missed-Issue Sweep
 
-Final sweep terms and surfaces: deploy, `.env.deploy`, Docker prune, health/live, upload body caps, TRUST_PROXY, semantic/CLIP, auto alt-text, Lightroom/plugin wording, Stripe/payment, public route freshness, service-worker offline scope, touch-target audit, lint gates, migrations/journal, privacy fields, map/timeline/smart-collection docs.
+Final sweep terms and surfaces: deploy, `.env.deploy`, Docker prune, health/live, upload body caps, TRUST_PROXY, semantic/CLIP, auto alt-text, Lightroom/plugin wording, Stripe/payment, public route freshness, service worker offline scope, touch-target audit, lint gates, migrations/journal, privacy fields, storage, Firefox, color-gamut, dynamic-range, stale line refs, and `.context/plans`.
 
-Skipped: live deployment verification, external docs lookup, rendered README preview, and exhaustive archived review history. No fixes were implemented; this artifact is the only document-specialist output for Prompt 1.
+Skipped: live deployment verification, rendered Markdown preview, and exhaustive archived review history. This artifact is the document-specialist output for cycle 31.
