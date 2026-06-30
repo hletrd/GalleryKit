@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { serveUploadFile } from '@/lib/serve-upload';
 
+// @public-no-rate-limit-required: public upload derivative serving is bounded by path containment, ETag/HEAD validators, range handling, and cache headers; rate limiting would break normal gallery image delivery.
 export const runtime = 'nodejs';
 
 export async function GET(

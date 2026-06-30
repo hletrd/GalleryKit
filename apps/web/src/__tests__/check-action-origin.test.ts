@@ -162,6 +162,22 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when the origin-error branch mutates before returning', () => {
+        const src = withApprovedActionGuard(`
+            export async function deleteFoo(id) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) {
+                    await db.delete(foo).where(eq(foo.id, id));
+                    return { error: originError };
+                }
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('allows non-mutating localization before the same-origin guard', () => {
         const src = withApprovedActionGuard(`
             export async function deleteFoo(id) {
@@ -216,6 +232,26 @@ describe('checkActionSource — function declarations', () => {
             }
             export async function updateFoo(id) {
                 await writeAuditBeforeGuard();
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('fails when mutation is hidden behind a wrapper declared before the real mutator', () => {
+        const src = withApprovedActionGuard(`
+            async function writeFirst() {
+                await actuallyWrite();
+            }
+            async function actuallyWrite() {
+                await db.insert(auditLog).values({ ok: true });
+            }
+            export async function updateFoo(id) {
+                await writeFirst();
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
                 return { success: true };
@@ -502,6 +538,47 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
+
+    it('fails wrapped async exports that mutate without a same-origin guard', () => {
+        const src = `
+            import { cache } from 'react';
+            export const mutateFoo = cache(async function mutateFoo() {
+                await db.insert(rows).values({ ok: true });
+                return { success: true };
+            });
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('mutateFoo');
+    });
+
+    it('skips wrapped read-only exports only with an explicit exemption', () => {
+        const src = `
+            import { cache } from 'react';
+            /** @action-origin-exempt: read-only cached lookup */
+            export const getFoo = cache(async function getFoo() {
+                return db.select().from(rows);
+            });
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::getFoo');
+    });
+
+    it('fails closed for exported call wrappers whose body is hidden in a variable', () => {
+        const src = `
+            async function hidden() {
+                await db.insert(rows).values({ ok: true });
+            }
+            export const mutateFoo = wrap(hidden);
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED exported call wrapper');
+    });
 });
 
 describe('checkActionSource — function-expression exports', () => {
@@ -634,6 +711,22 @@ describe('checkActionSource — auth action origin guard', () => {
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
+
+    it('fails auth mutators whose untrusted-origin branch mutates before exiting', () => {
+        const src = withApprovedAuthGuard(`
+            export async function logout() {
+                const requestHeaders = await headers();
+                if (!hasTrustedSameOrigin(requestHeaders)) {
+                    await db.delete(sessions).where(eq(sessions.id, 'x'));
+                    return { error: 'unauthorized' };
+                }
+            }
+        `);
+        const report = checkActionSource(src, 'app/actions/auth.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
 });
 
 describe('checkActionSource — mixed file', () => {
@@ -687,6 +780,28 @@ describe('checkActionSource — aliased exports', () => {
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('STAR RE-EXPORT');
+    });
+
+    it('fails closed for default async function exports', () => {
+        const src = `
+            export default async function deleteFoo(id) {
+                await db.delete(foo).where(eq(foo.id, id));
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED default export');
+    });
+
+    it('fails closed for default async arrow exports', () => {
+        const src = `
+            export default async () => {
+                await db.delete(foo);
+            };
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED default export');
     });
 });
 
@@ -815,6 +930,23 @@ describe('checkActionSource — public analytics actions', () => {
             }
         `;
         const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
+    it('fails an exempt public mutation when the rate-limit rejection branch mutates before return', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                if (isViewRecordRateLimited('1.2.3.4', Date.now())) {
+                    await db.insert(imageViews).values({ imageId: id });
+                    return;
+                }
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });

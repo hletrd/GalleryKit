@@ -172,6 +172,52 @@ describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC
     );
 });
 
+describe('reconcileLegacySchema explicitly repairs current foreign keys', () => {
+    const drizzleDir = path.resolve(__dirname, '..', '..', 'drizzle');
+    const removedForeignKeys = new Set([
+        'entitlements_image_id_fk',
+        'image_reactions_image_fk',
+    ]);
+
+    function collectDeclaredForeignKeyNames(): string[] {
+        const names = new Set<string>();
+        const files = fs
+            .readdirSync(drizzleDir, { withFileTypes: true })
+            .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+            .map((e) => path.join(drizzleDir, e.name));
+        const re = /CONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+FOREIGN\s+KEY/gi;
+        for (const file of files) {
+            const sqlText = fs.readFileSync(file, 'utf8');
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(sqlText)) !== null) {
+                if (!removedForeignKeys.has(m[1])) {
+                    names.add(m[1]);
+                }
+            }
+        }
+        return [...names].sort();
+    }
+
+    const foreignKeyNames = collectDeclaredForeignKeyNames();
+
+    it('finds known live foreign keys (scanner sanity)', () => {
+        expect(foreignKeyNames).toContain('admin_tokens_user_fk');
+        expect(foreignKeyNames).toContain('image_embeddings_image_id_fk');
+        expect(foreignKeyNames.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it.each(foreignKeyNames.map((n) => [n] as const))(
+        'migrate.js reconcile explicitly repairs foreign key %s',
+        (foreignKeyName) => {
+            expect(
+                new RegExp(`ensureForeignKey\\([^\\n]*['"]${foreignKeyName}['"]`).test(MIGRATE_SRC_CODE),
+                `Foreign key \`${foreignKeyName}\` is declared in drizzle/*.sql but is not repaired by an explicit ensureForeignKey(...) call in reconcileLegacySchema. ` +
+                `A legacy table that already exists without the FK would make CREATE TABLE IF NOT EXISTS no-op and leave the relationship unenforced.`,
+            ).toBe(true);
+        },
+    );
+});
+
 /**
  * Run-8 cycle-1 / FIND-R8C1-05: reconcile DROP tripwire (migration 0023).
  *

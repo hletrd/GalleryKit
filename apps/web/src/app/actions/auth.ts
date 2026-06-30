@@ -35,6 +35,7 @@ export async function getSession() {
     return session;
 }
 
+/** @action-origin-exempt: read-only cached current-user lookup used by auth guard callers */
 export const getCurrentUser = cache(async function getCurrentUser() {
     const session = await getSession();
     if (!session) return null;

@@ -223,20 +223,17 @@ function conditionChecksGuardVariable(expression: ts.Expression, guardName: stri
     return false;
 }
 
-function statementReturnsOnGuard(statement: ts.Statement, guardName: string): boolean {
+function statementReturnsOnGuard(
+    statement: ts.Statement,
+    guardName: string,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
     if (!ts.isIfStatement(statement) || !conditionChecksGuardVariable(statement.expression, guardName)) {
         return false;
     }
 
-    if (ts.isReturnStatement(statement.thenStatement)) {
-        return true;
-    }
-
-    if (ts.isBlock(statement.thenStatement)) {
-        return statement.thenStatement.statements.some(ts.isReturnStatement);
-    }
-
-    return false;
+    return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames);
 }
 
 function statementExitsEarly(statement: ts.Statement): boolean {
@@ -247,6 +244,26 @@ function statementExitsEarly(statement: ts.Statement): boolean {
     }
     if (ts.isBlock(statement)) {
         return statement.statements.some(statementExitsEarly);
+    }
+    return false;
+}
+
+function branchExitsBeforeSideEffect(
+    branch: ts.Statement,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
+    const statements = ts.isBlock(branch) ? branch.statements : [branch];
+    for (const statement of statements) {
+        if (
+            statementContainsPreGuardMutation(statement, localMutatingFunctions, importedSideEffectFunctionNames)
+            || statementContainsPreOriginAuthRead(statement)
+        ) {
+            return false;
+        }
+        if (statementExitsEarly(statement)) {
+            return true;
+        }
     }
     return false;
 }
@@ -378,7 +395,11 @@ function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
     return nodeContainsCallNamed(statement, PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
 }
 
-function publicActionCallsRateLimitBeforeMutation(body: ts.Node, importedSideEffectFunctionNames: Set<string>): boolean {
+function publicActionCallsRateLimitBeforeMutation(
+    body: ts.Node,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimitGate = false;
     let sawMutationBeforeRateLimit = false;
@@ -419,12 +440,6 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node, importedSideEff
         return found;
     };
 
-    const returnsEarly = (statement: ts.Statement): boolean => {
-        if (ts.isReturnStatement(statement)) return true;
-        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
-        return false;
-    };
-
     const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
@@ -441,7 +456,7 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node, importedSideEff
         if (ts.isIfStatement(statement)) {
             return (
                 (expressionCallsRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
-                && returnsEarly(statement.thenStatement)
+                && branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames)
             );
         }
         return false;
@@ -462,6 +477,10 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node, importedSideEff
                 return;
             }
             if (ts.isIdentifier(callee) && importedSideEffectFunctionNames.has(callee.text) && !sawRateLimitGate) {
+                sawMutationBeforeRateLimit = true;
+                return;
+            }
+            if (ts.isIdentifier(callee) && localMutatingFunctions.has(callee.text) && !sawRateLimitGate) {
                 sawMutationBeforeRateLimit = true;
                 return;
             }
@@ -535,7 +554,7 @@ function functionCallsRequireSameOriginAdmin(
         }
 
         for (const followingStatement of body.statements.slice(index + 1)) {
-            if (statementReturnsOnGuard(followingStatement, guardName)) {
+            if (statementReturnsOnGuard(followingStatement, guardName, localMutatingFunctions, importedSideEffectFunctionNames)) {
                 return true;
             }
             if (
@@ -589,10 +608,35 @@ function functionCallsAuthSameOriginGuard(
             return false;
         }
 
-        return statementExitsEarly(statement.thenStatement);
+        return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames);
     }
 
     return false;
+}
+
+function hasAsyncModifier(node: ts.Node): boolean {
+    const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+    return !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
+function functionBodyFromExpression(
+    expression: ts.Expression | undefined,
+    options: { requireAsync?: boolean } = {},
+): ts.Node | undefined {
+    if (!expression) return undefined;
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
+        if (options.requireAsync && !hasAsyncModifier(expression)) return undefined;
+        return expression.body;
+    }
+    if (ts.isCallExpression(expression)) {
+        for (const arg of expression.arguments) {
+            if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+                if (options.requireAsync && !hasAsyncModifier(arg)) return undefined;
+                return arg.body;
+            }
+        }
+    }
+    return undefined;
 }
 
 type CheckReport = {
@@ -630,28 +674,32 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
+    const localBodies = new Map<string, ts.Node>();
     const localMutatingFunctions = new Set<string>();
 
     for (const statement of sourceFile.statements) {
-        if (
-            ts.isFunctionDeclaration(statement)
-            && statement.name
-            && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(statement.name.text)
-            && statement.body
-            && nodeContainsMutatingCall(statement.body, new Set(), importedSideEffectFunctionNames)
-        ) {
-            localMutatingFunctions.add(statement.name.text);
+        if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+            localBodies.set(statement.name.text, statement.body);
             continue;
         }
         if (!ts.isVariableStatement(statement)) continue;
         for (const decl of statement.declarationList.declarations) {
             if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
-            if (
-                (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
-                && !PUBLIC_RATE_LIMIT_HELPER_NAMES.has(decl.name.text)
-                && nodeContainsMutatingCall(decl.initializer.body, new Set(), importedSideEffectFunctionNames)
-            ) {
-                localMutatingFunctions.add(decl.name.text);
+            const body = functionBodyFromExpression(decl.initializer);
+            if (body) {
+                localBodies.set(decl.name.text, body);
+            }
+        }
+    }
+
+    let mutatingSetChanged = true;
+    while (mutatingSetChanged) {
+        mutatingSetChanged = false;
+        for (const [name, body] of localBodies) {
+            if (PUBLIC_RATE_LIMIT_HELPER_NAMES.has(name) || localMutatingFunctions.has(name)) continue;
+            if (nodeContainsMutatingCall(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
+                localMutatingFunctions.add(name);
+                mutatingSetChanged = true;
             }
         }
     }
@@ -668,7 +716,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             // gate still green. An exempt comment on a body containing a
             // direct mutating call is therefore a hard failure, not a skip.
             if (body && nodeContainsMutatingCall(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
-                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body, importedSideEffectFunctionNames)) {
+                if (relative.endsWith('actions/public.ts') && publicActionCallsRateLimitBeforeMutation(body, localMutatingFunctions, importedSideEffectFunctionNames)) {
                     report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);
                     return;
                 }
@@ -714,6 +762,13 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             continue;
         }
 
+        if (ts.isExportAssignment(statement)) {
+            report.failed.push(
+                `UNSUPPORTED default export: ${relative}:${lineOf(statement)} default exports hide action names from this scanner. Use a direct named async export so requireSameOriginAdmin() can be verified`,
+            );
+            continue;
+        }
+
         if (ts.isExportDeclaration(statement) && !statement.exportClause && statement.moduleSpecifier) {
             report.failed.push(
                 `STAR RE-EXPORT: ${relative}:${lineOf(statement)} uses 'export * from …', which hides action exports from this scanner. Re-export actions directly so requireSameOriginAdmin() can be verified`,
@@ -737,6 +792,13 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             const modifiers = ts.getModifiers(statement);
             const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
             const isAsync = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+            const isDefault = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+            if (isExported && isDefault) {
+                report.failed.push(
+                    `UNSUPPORTED default export: ${relative}:${lineOf(statement)} default exports hide action names from this scanner. Use a direct named async export so requireSameOriginAdmin() can be verified`,
+                );
+                continue;
+            }
             if (!isExported || !isAsync || !statement.name) continue;
             evaluateBody(statement, statement.body, statement.name.text);
             continue;
@@ -753,29 +815,18 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             if (!ts.isIdentifier(declaration.name)) continue;
             const init = declaration.initializer;
             if (!init) continue;
-            // Arrow function: `async (...) => ...`
-            if (ts.isArrowFunction(init)) {
-                const funcModifiers = ts.getModifiers(init);
-                const isAsync = !!funcModifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
-                if (!isAsync) continue;
-                const name = declaration.name.text;
-                // `init.body` is a concise-body expression OR a block; both are
-                // ts.Node and walkable by functionCallsRequireSameOriginAdmin.
-                // R4C2 SEC-R4C2-02: pass the STATEMENT as the comment owner —
-                // a leading `@action-origin-exempt` JSDoc attaches to the
-                // `export const …` statement's trivia, not to the inner
-                // VariableDeclaration node, so exemption detection (and the
-                // new exempt-on-mutating-body rejection) must look there.
-                evaluateBody(statement, init.body, name);
+            const name = declaration.name.text;
+            const exportedBody = functionBodyFromExpression(init, { requireAsync: true });
+            if (exportedBody) {
+                // `export const …` comments attach to the VariableStatement,
+                // not the inner VariableDeclaration or wrapped function arg.
+                evaluateBody(statement, exportedBody, name);
                 continue;
             }
-            // Function expression: `async function (...) {...}`
-            if (ts.isFunctionExpression(init)) {
-                const funcModifiers = ts.getModifiers(init);
-                const isAsync = !!funcModifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
-                if (!isAsync) continue;
-                const name = declaration.name.text;
-                evaluateBody(statement, init.body, name);
+            if (ts.isCallExpression(init)) {
+                report.failed.push(
+                    `UNSUPPORTED exported call wrapper: ${relative}:${lineOf(statement)} ${name} must wrap an async function body directly or use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
+                );
                 continue;
             }
         }

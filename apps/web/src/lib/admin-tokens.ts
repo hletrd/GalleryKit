@@ -144,9 +144,10 @@ export async function verifyToken(plaintext: string): Promise<VerifiedToken | nu
     let rows: AdminTokenRow[];
     try {
         const result = await db.execute(sql`
-            SELECT id, user_id, label, token_hash, scopes, created_at, last_used_at, expires_at
-            FROM admin_tokens
-            WHERE token_hash = ${presentedHash}
+            SELECT at.id, at.user_id, at.label, at.token_hash, at.scopes, at.created_at, at.last_used_at, at.expires_at
+            FROM admin_tokens AS at
+            INNER JOIN admin_users AS au ON au.id = at.user_id
+            WHERE at.token_hash = ${presentedHash}
             LIMIT 1
         `);
         rows = (Array.isArray(result) ? result[0] : result) as unknown as AdminTokenRow[];

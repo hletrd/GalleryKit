@@ -1,3 +1,19 @@
+# Latest Aggregate Review
+
+Current aggregate: `cycle-36-2026-06-30/_aggregate.md`
+
+Cycle 36 scheduled five findings for this cycle:
+
+- `AGG-C36-01` - action-origin guard branches can mutate before returning.
+- `AGG-C36-02` - action-origin local mutating-helper discovery is order-dependent.
+- `AGG-C36-03` - action-origin scanner ignores wrapped and default exported actions.
+- `AGG-C36-04` - public-route rate-limit scanner misses imported expensive GET helpers.
+- `AGG-C36-05` - `reconcileLegacySchema` does not repair the admin-token owner FK.
+
+Cycle 36 deferred six lower-priority performance and UX findings in `.context/plans/cycle-36-2026-06-30-deferred.md`.
+
+---
+
 # Cycle 35 Aggregate Review
 
 Cycle: 35/100

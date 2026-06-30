@@ -59,6 +59,7 @@ const IMPORTED_SIDE_EFFECT_NAME_RE = /^(?:delete|remove|insert|update|write|enqu
 
 const EXPENSIVE_GET_MARKERS = [
     'ImageResponse',
+    'serveUploadFile',
     'pickFirstAvailablePhotoBuffer',
     'embedText',
     'embedImage',
@@ -577,6 +578,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
                     const localName = element.propertyName?.text ?? element.name.text;
                     mutatingHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
                 } else if (ts.isIdentifier(element.name) && element.name.text === EXPENSIVE_GET_METHOD) {
+                    if (statement.moduleSpecifier) {
+                        report.failed.push(
+                            `UNSUPPORTED GET RE-EXPORT: ${relative} re-exports GET from another module, which hides expensive work from this scanner. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
+                        );
+                        continue;
+                    }
                     const localName = element.propertyName?.text ?? element.name.text;
                     getHandlers.push({ method: element.name.text, body: localBodies.get(localName) });
                 }

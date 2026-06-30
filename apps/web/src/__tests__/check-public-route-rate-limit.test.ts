@@ -237,6 +237,31 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('expensive GET');
     });
 
+    it('fails expensive public GET handlers when expensive work is hidden behind an imported upload helper', () => {
+        const source = `
+            import { serveUploadFile } from '@/lib/serve-upload';
+            export async function GET(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'GET', request.signal);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('allows the upload helper only with a reasoned public-route exemption', () => {
+        const source = `
+            import { serveUploadFile } from '@/lib/serve-upload';
+            // @public-no-rate-limit-required: public derivative serving is bounded by cache validators and path containment
+            export async function GET(request) {
+                return serveUploadFile(['jpeg', 'photo.jpg'], request.headers.get('if-none-match'), 'GET', request.signal);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
+    });
+
     it('passes expensive public GET local helper calls after a limiter gate', () => {
         const source = `
             import { db } from '@/db';
@@ -741,15 +766,15 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('STAR RE-EXPORT');
     });
 
-    it('still passes named re-exports of non-mutating handlers alongside other statements', () => {
-        // Named re-exports stay auditable: a GET-only specifier re-export is
-        // not a mutating handler and must not trip the star-re-export rule.
+    it('fails closed on named GET re-exports from another module', () => {
+        // Bodyless GET re-exports hide whether the target performs DB, image,
+        // filesystem, or embedding work, so they must be local or exempt.
         const source = `
             export { GET } from './handlers';
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
-        expect(result.failed).toHaveLength(0);
-        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('UNSUPPORTED GET RE-EXPORT');
     });
 });
 

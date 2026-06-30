@@ -5,6 +5,8 @@
  * tokenHasScope, verifyToken, and markTokenUsed (mocked DB).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
     generateToken,
     hashToken,
@@ -16,6 +18,11 @@ import {
     TOKEN_PLAINTEXT_LENGTH,
     type AdminTokenScope,
 } from '@/lib/admin-tokens';
+
+const ADMIN_TOKENS_SRC = readFileSync(
+    path.resolve(__dirname, '..', 'lib', 'admin-tokens.ts'),
+    'utf8',
+);
 
 // ── generateToken ────────────────────────────────────────────────────────────
 
@@ -247,6 +254,11 @@ describe('verifyToken', () => {
         expect(result?.scopes).toContain('lr:upload');
         expect(result?.scopes).toContain('lr:read');
         expect(mockExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it('requires a surviving owner admin row when verifying a token', () => {
+        expect(ADMIN_TOKENS_SRC).toContain('INNER JOIN admin_users AS au ON au.id = at.user_id');
+        expect(ADMIN_TOKENS_SRC).toContain('WHERE at.token_hash');
     });
 
     it('markTokenUsed updates last_used_at explicitly', async () => {

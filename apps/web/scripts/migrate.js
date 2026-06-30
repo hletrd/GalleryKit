@@ -689,7 +689,12 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureForeignKey(connection, dbName, 'topic_aliases', 'topic_aliases_topic_slug_topics_slug_fk', 'ALTER TABLE topic_aliases ADD CONSTRAINT topic_aliases_topic_slug_topics_slug_fk FOREIGN KEY (topic_slug) REFERENCES topics(slug) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'sessions', 'sessions_user_id_admin_users_id_fk', 'ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'audit_log', 'audit_log_user_id_admin_users_id_fk', 'ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id)');
+    await ensureForeignKey(connection, dbName, 'admin_tokens', 'admin_tokens_user_fk', 'ALTER TABLE admin_tokens ADD CONSTRAINT admin_tokens_user_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'images', 'images_uploaded_by_admin_users_id_fk', 'ALTER TABLE images ADD CONSTRAINT images_uploaded_by_admin_users_id_fk FOREIGN KEY (uploaded_by) REFERENCES admin_users(id) ON DELETE SET NULL');
+    await ensureForeignKey(connection, dbName, 'image_views', 'image_views_image_id_images_id_fk', 'ALTER TABLE image_views ADD CONSTRAINT image_views_image_id_images_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE');
+    await ensureForeignKey(connection, dbName, 'topic_views', 'topic_views_topic_topics_slug_fk', 'ALTER TABLE topic_views ADD CONSTRAINT topic_views_topic_topics_slug_fk FOREIGN KEY (topic) REFERENCES topics(slug) ON DELETE CASCADE');
+    await ensureForeignKey(connection, dbName, 'shared_group_views', 'shared_group_views_group_id_shared_groups_id_fk', 'ALTER TABLE shared_group_views ADD CONSTRAINT shared_group_views_group_id_shared_groups_id_fk FOREIGN KEY (group_id) REFERENCES shared_groups(id) ON DELETE CASCADE');
+    await ensureForeignKey(connection, dbName, 'image_embeddings', 'image_embeddings_image_id_fk', 'ALTER TABLE image_embeddings ADD CONSTRAINT image_embeddings_image_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE');
 
     // ── Removals (drop dead feature schema) ───────────────────────────────────
     // These run LAST so reconcile converges to the CURRENT schema. The .sql
