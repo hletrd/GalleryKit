@@ -70,7 +70,7 @@ docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up 
 
 ## Environment Variables
 
-Create `apps/web/.env.local` from `apps/web/.env.local.example`:
+Create `apps/web/.env.local` from `apps/web/.env.local.example` and keep it private (`chmod 600 apps/web/.env.local`):
 
 ```env
 DB_HOST=127.0.0.1
@@ -657,7 +657,7 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 
 ## Deployment Checklist
 
-1. Configure `.env.local` with production MySQL credentials
+1. Configure `.env.local` with production MySQL credentials and private file permissions (`chmod 600 apps/web/.env.local`; deploy refuses group/world-readable runtime secret files)
 2. Generate a unique runtime `SESSION_SECRET`: `openssl rand -hex 32`
 3. Copy `apps/web/src/site-config.example.json` to `apps/web/src/site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing. The file is a flat JSON object with **snake_case** keys (read directly via `import siteConfig from '@/site-config.json'` — there is NO camelCase mapping layer, so the key names below are exactly what you must write):
    - `title` — displayed in nav, footer, and OG title

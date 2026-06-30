@@ -25,4 +25,11 @@ describe('buildChangedGallerySettingsPayload', () => {
             { image_sizes: '640,1536', image_quality_jpeg: '90' },
         )).toEqual({});
     });
+
+    it('omits unchanged image sizes when the stored baseline is non-canonical', () => {
+        expect(buildChangedGallerySettingsPayload(
+            { image_sizes: '640,1536', image_quality_jpeg: '90' },
+            { image_sizes: '1536, 640', image_quality_jpeg: '90' },
+        )).toEqual({});
+    });
 });

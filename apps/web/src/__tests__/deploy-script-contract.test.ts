@@ -20,7 +20,7 @@ const deploymentDocs = [
 
 describe('deploy script safety contract', () => {
     it('starts the stack before pruning Docker artifacts', () => {
-        const upIndex = deployScript.indexOf('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
+        const upIndex = deployScript.indexOf('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');
         const healthIndex = deployScript.indexOf('Waiting for gallerykit-web health');
         expect(upIndex).toBeGreaterThan(-1);
         expect(healthIndex).toBeGreaterThan(upIndex);
@@ -82,8 +82,22 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).toContain('Run: chmod 600 \\"$ENV_FILE\\"');
     });
 
+    it('refuses group/world-readable runtime env files before Docker Compose consumes them', () => {
+        const checkIndex = deployScript.indexOf('if (( env_group_perms != 0 || env_world_perms != 0 )); then');
+        const composeIndex = deployScript.indexOf('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');
+
+        expect(deployScript).toContain('env_file="apps/web/.env.local"');
+        expect(deployScript).toContain("env_mode=\"$(stat -f '%Lp' \"$env_file\" 2>/dev/null || stat -c '%a' \"$env_file\")\"");
+        expect(deployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
+        expect(deployScript).toContain('env_world_perms=$((env_perms % 10))');
+        expect(checkIndex).toBeGreaterThan(-1);
+        expect(composeIndex).toBeGreaterThan(-1);
+        expect(checkIndex).toBeLessThan(composeIndex);
+        expect(deployScript).toContain('Run: chmod 600 \\"$env_file\\"');
+    });
+
     it('feeds Docker Compose the runtime env file and forwards build-time upload limits', () => {
-        expect(deployScript).toContain('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
+        expect(deployScript).toContain('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');
         expect(composeConfig).toContain('NEXT_UPLOAD_BODY_MAX_BYTES: ${NEXT_UPLOAD_BODY_MAX_BYTES:-}');
         expect(dockerfile).toContain('ARG NEXT_UPLOAD_BODY_MAX_BYTES');
         expect(dockerfile).toContain('ENV NEXT_UPLOAD_BODY_MAX_BYTES=${NEXT_UPLOAD_BODY_MAX_BYTES}');

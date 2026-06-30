@@ -12,10 +12,26 @@ git pull --ff-only
 
 echo "Starting Gallery Deployment..."
 
-# Check if .env.local exists
-if [ ! -f apps/web/.env.local ]; then
-    echo "Error: apps/web/.env.local file not found!"
-    echo "Please create apps/web/.env.local with DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SESSION_SECRET, and ADMIN_PASSWORD."
+env_file="apps/web/.env.local"
+
+# Check if .env.local exists and is private before Docker Compose consumes it.
+if [ ! -f "$env_file" ]; then
+    echo "Error: $env_file file not found!"
+    echo "Please create $env_file with DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SESSION_SECRET, and ADMIN_PASSWORD."
+    exit 1
+fi
+
+if [ ! -O "$env_file" ]; then
+    echo "Warning: runtime env file is not owned by the current user: $env_file" >&2
+fi
+
+env_mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+env_perms=$((10#$env_mode))
+env_group_perms=$(((env_perms / 10) % 10))
+env_world_perms=$((env_perms % 10))
+if (( env_group_perms != 0 || env_world_perms != 0 )); then
+    echo "Refusing to deploy with unsafe runtime env file permissions ($env_mode): $env_file" >&2
+    echo "Run: chmod 600 \"$env_file\"" >&2
     exit 1
 fi
 
@@ -29,7 +45,7 @@ echo "Building and Starting Containers..."
 
 # Build and start detached. The explicit env file keeps build args and runtime
 # env in sync even when Docker Compose is launched from the repo root.
-docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build
+docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build
 
 echo "Waiting for gallerykit-web health..."
 health_deadline=$((SECONDS + 90))

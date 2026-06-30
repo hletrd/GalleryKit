@@ -14,6 +14,7 @@ mysql -uroot -p -e "CREATE USER 'gallerykit'@'localhost' IDENTIFIED BY 'change-t
 mysql -uroot -p -e "GRANT ALL PRIVILEGES ON gallerykit.* TO 'gallerykit'@'localhost'; FLUSH PRIVILEGES;"
 npm install
 cp .env.local.example .env.local
+chmod 600 .env.local
 $EDITOR .env.local
 cp src/site-config.example.json src/site-config.json
 $EDITOR src/site-config.json
@@ -42,6 +43,7 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 
 ## Environment notes
 
+- Keep `.env.local` private (`chmod 600 .env.local`). It contains DB credentials and session/admin secrets, and the Docker deploy helper refuses group/world-readable runtime env files before starting Compose.
 - `BASE_URL` should point at the public app origin used for sitemap/metadata URLs. Production builds reject missing or placeholder public URLs, so set a real `BASE_URL` or replace `src/site-config.json.url` before building a production image.
 - File-backed `src/site-config.json` owns static links/analytics defaults. Admin-editable SEO and branding fields are stored in the database and override file defaults at runtime. Leave `google_analytics_id` empty to keep analytics fully first-party/self-hosted; setting it loads Google Analytics on public pages and is a deliberate third-party analytics opt-in.
 - `IMAGE_BASE_URL` is optional. Set it to an absolute CDN origin or path prefix (for example `https://cdn.example.com` or `https://cdn.example.com/gallery`) **before** `next build` so Next.js and CSP both allow the remote asset host. Production builds reject plaintext `http://` asset origins and URLs with credentials, query strings, or hashes.

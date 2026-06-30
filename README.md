@@ -107,6 +107,7 @@ mysql -uroot -p -e "CREATE DATABASE gallerykit CHARACTER SET utf8mb4 COLLATE utf
 mysql -uroot -p -e "CREATE USER 'gallerykit'@'localhost' IDENTIFIED BY 'change-this-password';"
 mysql -uroot -p -e "GRANT ALL PRIVILEGES ON gallerykit.* TO 'gallerykit'@'localhost'; FLUSH PRIVILEGES;"
 cp apps/web/.env.local.example apps/web/.env.local
+chmod 600 apps/web/.env.local
 $EDITOR apps/web/.env.local
 cp apps/web/src/site-config.example.json apps/web/src/site-config.json
 $EDITOR apps/web/src/site-config.json
@@ -131,7 +132,7 @@ npm run deploy
 
 ### Environment Setup
 
-Do this before `npm run init --workspace=apps/web`; the init script needs DB credentials plus `ADMIN_PASSWORD`. `SESSION_SECRET` is required for production runtime session signing, but it is not an init-time requirement. Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, runtime session secret, and public URLs:
+Do this before `npm run init --workspace=apps/web`; the init script needs DB credentials plus `ADMIN_PASSWORD`. `SESSION_SECRET` is required for production runtime session signing, but it is not an init-time requirement. Keep `apps/web/.env.local` private (`chmod 600`) because the deploy script refuses group/world-readable runtime secret files. Edit it with your MySQL credentials, strong admin bootstrap secret, runtime session secret, and public URLs:
 
 ```env
 DB_HOST=127.0.0.1
