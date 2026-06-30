@@ -140,14 +140,18 @@ export default async function PhotoPage({ params }: {
         return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
-    const [locale, t, seo, config, isAdminUser] = await Promise.all([
+    const publicImagePromise = getImageCached(imageId);
+    const [locale, t, seo, config, isAdminUser, publicImage] = await Promise.all([
         getLocale(),
         getTranslations('photo'),
         getSeoSettings(),
         getGalleryConfig(),
         isAdmin(),
+        publicImagePromise,
     ]);
-    const image = await getImageForViewerCached(imageId, isAdminUser);
+    const image = isAdminUser && publicImage
+        ? await getImageForViewerCached(imageId, true)
+        : publicImage;
 
     if (!image) return notFound();
 

@@ -210,4 +210,19 @@ describe('updateGallerySettings semantic_search_mode', () => {
         expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });
+
+    it('keeps changed strip-gps locked once any image row exists', async () => {
+        selectLimitResults.push([{ value: 'false' }], [{ id: 42 }]);
+
+        await expect(updateGallerySettings({ strip_gps_on_upload: 'true' })).resolves.toEqual({
+            error: 'uploadSettingsLocked',
+        });
+
+        expect(hasActiveUploadClaimsMock).toHaveBeenCalledTimes(1);
+        expect(acquireUploadProcessingContractLockMock).toHaveBeenCalledTimes(1);
+        expect(releaseUploadContractLockMock).toHaveBeenCalledTimes(1);
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
 });

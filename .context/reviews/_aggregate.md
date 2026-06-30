@@ -1,15 +1,12 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-56-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-57-2026-07-01/_aggregate.md`
 
-Cycle 56 produced seven deduplicated findings:
+Cycle 57 produced four deduplicated findings:
 
-- `C56-01` - Linux deploys fail before Compose because the new env-permission check uses BSD `stat` first.
-- `C56-02` - Settings action still treats key presence as a contract mutation before proving the value changed.
-- `C56-03` - Cycle 55 ledger still presents completed work as active and commit/deploy-pending.
-- `C56-04` - `image_sizes` lock test is not scoped to the branch it claims to protect.
-- `C56-05` - Deploy permission regression tests do not prove refusal actually exits.
-- `C56-06` - Admin photo page uses public image data, so admin-only audit rows cannot render.
-- `C56-07` - App README refers to nonexistent alt-text fields.
+- `C57-01` - Public photo render lost public-image cache reuse and starts the main image query late.
+- `C57-02` - Admin photo audit-data regression is guarded by source strings instead of behavior.
+- `C57-03` - Changed `strip_gps_on_upload` lock branch lacks behavior coverage.
+- `C57-04` - Cycle 56 release ledger still reads active after two fix commits.
 
-Cycle 56 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.
+Cycle 57 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.

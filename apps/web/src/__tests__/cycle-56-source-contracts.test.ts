@@ -25,6 +25,10 @@ describe('cycle 56 source contracts', () => {
         expect(metadataBlock).not.toContain('getImageForViewerCached');
         expect(ogRoute).toContain('getImageCached(imageId)');
         expect(pageBlock).toContain('isAdmin()');
-        expect(pageBlock).toContain('getImageForViewerCached(imageId, isAdminUser)');
+        expect(pageBlock).toContain('const publicImagePromise = getImageCached(imageId)');
+        expect(pageBlock).toContain('publicImagePromise,');
+        expect(pageBlock).toMatch(/isAdminUser\s+&&\s+publicImage[\s\S]*getImageForViewerCached\(imageId,\s*true\)/);
+        expect(pageBlock).toMatch(/:\s*publicImage/);
+        expect(pageBlock).not.toContain('getImageForViewerCached(imageId, isAdminUser)');
     });
 });
