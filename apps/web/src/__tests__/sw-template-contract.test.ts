@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { Script } from 'vm';
 
 const TEMPLATE = readFileSync(
     resolve(__dirname, '../../public/sw.template.js'),
@@ -24,6 +25,36 @@ const TEMPLATE = readFileSync(
 );
 const BUILD_SW = readFileSync(resolve(__dirname, '../../scripts/build-sw.ts'), 'utf-8');
 const PROXY = readFileSync(resolve(__dirname, '../proxy.ts'), 'utf-8');
+const GENERATED_SW = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
+
+type RevocableShareHtmlRouteClassifier = (pathname: string) => boolean;
+
+function loadRevocableShareHtmlRouteClassifier(source: string, label: string): RevocableShareHtmlRouteClassifier {
+    const start = source.indexOf('function isRevocableShareHtmlRoute');
+    const end = source.indexOf('function isSensitiveResponse', start);
+    if (start === -1 || end === -1) {
+        throw new Error(`Unable to locate isRevocableShareHtmlRoute in ${label}`);
+    }
+
+    const classifier = new Script(`(${source.slice(start, end).trim()})`, { filename: label })
+        .runInNewContext({}) as unknown;
+    if (typeof classifier !== 'function') {
+        throw new Error(`isRevocableShareHtmlRoute did not evaluate to a function in ${label}`);
+    }
+
+    return classifier as RevocableShareHtmlRouteClassifier;
+}
+
+const WORKER_CLASSIFIERS = [
+    {
+        label: 'template',
+        classify: loadRevocableShareHtmlRouteClassifier(TEMPLATE, 'sw.template.js'),
+    },
+    {
+        label: 'generated worker',
+        classify: loadRevocableShareHtmlRouteClassifier(GENERATED_SW, 'sw.js'),
+    },
+] as const;
 
 describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
     it('generates sw.js from a deterministic template-plus-pipeline stamp', () => {
@@ -88,6 +119,31 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(classifier).not.toContain('p\\/\\d+');
         expect(classifier).toContain('[csg]\\/[^/]+');
         expect(classifier).toMatch(/map\\\/\?\$/);
+    });
+
+    it('classifies concrete revocable/share routes identically in the template and generated worker', () => {
+        const cases = [
+            ['/p/123', false],
+            ['/ko/p/123', false],
+            ['/en-US/p/123', false],
+            ['/s/share-key', true],
+            ['/ko/s/share-key', true],
+            ['/g/group-key', true],
+            ['/ko/g/group-key', true],
+            ['/c/smart-collection', true],
+            ['/ko/c/smart-collection', true],
+            ['/map', true],
+            ['/ko/map', true],
+            ['/', false],
+            ['/ko', false],
+            ['/timeline', false],
+        ] as const;
+
+        for (const worker of WORKER_CLASSIFIERS) {
+            for (const [pathname, expected] of cases) {
+                expect(worker.classify(pathname), `${worker.label} classifier for ${pathname}`).toBe(expected);
+            }
+        }
     });
 
     it('bypasses unlocalized and localized admin routes', () => {
@@ -221,9 +277,8 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
     });
 
     it('the generated sw.js carries the same bounded HEAD probe as the template', () => {
-        const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
-        expect(generated).toMatch(/signal:\s*AbortSignal\.timeout\(HEAD_REVALIDATE_TIMEOUT_MS\)/);
-        expect(generated).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
+        expect(GENERATED_SW).toMatch(/signal:\s*AbortSignal\.timeout\(HEAD_REVALIDATE_TIMEOUT_MS\)/);
+        expect(GENERATED_SW).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
     });
 
     it('stamps image cache entries and expires unverified stale derivatives', () => {
@@ -247,13 +302,12 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
     });
 
     it('generated sw.js carries image stale-expiry stamping from the template', () => {
-        const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
-        expect(generated).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
-        expect(generated).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
-        expect(generated).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
-        expect(generated).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
-        expect(generated).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
-        expect(generated).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
+        expect(GENERATED_SW).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
+        expect(GENERATED_SW).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
+        expect(GENERATED_SW).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
+        expect(GENERATED_SW).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
+        expect(GENERATED_SW).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
+        expect(GENERATED_SW).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
     });
 
     it('evicts stale derivative cache entries when the server returns 404 or 410', () => {
