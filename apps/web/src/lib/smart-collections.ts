@@ -378,6 +378,10 @@ function validatePredicateSemantics(column: AllowedColumn, operator: string, nod
                 `Tag predicate only supports "eq" and "contains" operators, got "${operator}"`,
             );
         }
+        const value = node.value;
+        if (typeof value !== 'string') {
+            throw new SmartCollectionQueryError('Tag predicate value must be a string tag name');
+        }
         return;
     }
 

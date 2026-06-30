@@ -205,6 +205,13 @@ describe('parseSmartCollectionQuery — scalar value enforcement (R4C4 HARD-R4C4
         expect(() => parseSmartCollectionQuery(tagPred)).toThrow(/string or finite number/);
     });
 
+    it('rejects finite-number tag predicate values before they compile as tag names', () => {
+        const tagPred = JSON.stringify({
+            type: 'predicate', column: 'tag', operator: 'eq', value: 42,
+        });
+        expect(() => parseSmartCollectionQuery(tagPred)).toThrow(/string tag name/);
+    });
+
     it('accepts string and finite-number scalars', () => {
         expect(() => parseSmartCollectionQuery(pred({ value: 'X-T5' }))).not.toThrow();
         const iso = JSON.stringify({ type: 'predicate', column: 'iso', operator: 'gte', value: 800 });
@@ -317,6 +324,8 @@ describe('validate/compile agreement (R4C7 COR-R4C7-03)', () => {
             { type: 'predicate', column: 'capture_date', operator: 'eq', value: 20240101 },
             { type: 'predicate', column: 'topic', operator: 'contains', value: 'old' },
             { type: 'predicate', column: 'topic', operator: 'gt', value: 'travel' },
+            { type: 'predicate', column: 'tag', operator: 'eq', value: 1 },
+            { type: 'predicate', column: 'tag', operator: 'contains', value: 1 },
         ];
 
         for (const ast of invalid) {
