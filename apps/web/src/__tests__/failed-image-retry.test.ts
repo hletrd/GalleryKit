@@ -80,6 +80,7 @@ describe('R10-H2: failed image persistence and retry', () => {
 
         it('selects image with processed=false AND processing_error IS NOT NULL', () => {
             // Must only retry images in the failed state.
+            expect(actionsSource).toContain('const failedStatePredicate = and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error))');
             expect(actionsSource).toMatch(/eq\s*\(\s*images\.processed\s*,\s*false\s*\)/);
             expect(actionsSource).toMatch(/isNotNull\s*\(\s*images\.processing_error\s*\)/);
         });
@@ -98,12 +99,15 @@ describe('R10-H2: failed image persistence and retry', () => {
 
         it('does not clear in-memory failure state or enqueue when no failed row was updated', () => {
             const clearIdx = actionsSource.indexOf('const clearResult = await db.update(images)');
+            const failedPredicateIdx = actionsSource.indexOf('.where(failedStatePredicate)', clearIdx);
             const affectedIdx = actionsSource.indexOf('affectedRows', clearIdx);
             const notFailedReturnIdx = actionsSource.indexOf("return { error: t('imageNotInFailedState') }", affectedIdx);
             const stateIdx = actionsSource.indexOf('const state = getProcessingQueueState()');
             const enqueueIdx = actionsSource.indexOf('const enqueued = enqueueImageProcessing');
 
             expect(clearIdx).toBeGreaterThan(0);
+            expect(failedPredicateIdx).toBeGreaterThan(clearIdx);
+            expect(failedPredicateIdx).toBeLessThan(affectedIdx);
             expect(affectedIdx).toBeGreaterThan(clearIdx);
             expect(notFailedReturnIdx).toBeGreaterThan(affectedIdx);
             expect(notFailedReturnIdx).toBeLessThan(stateIdx);
@@ -131,6 +135,8 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(actionsSource).toMatch(/processing_error:\s*retryError/);
             expect(actionsSource).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
             expect(actionsSource).toMatch(/processing_settings_json:\s*null/);
+            expect(actionsSource).toMatch(/isNull\s*\(\s*images\.processing_error\s*\)/);
+            expect(actionsSource).toContain('const restoredRows = Number(restoreHeader?.affectedRows ?? 0)');
             expect(actionsSource).toContain('state.permanentlyFailedIds.add(id)');
             expect(actionsSource).toContain("return { error: t('failedToRetryImage') }");
         });

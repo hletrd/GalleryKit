@@ -3,7 +3,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
-import { eq, inArray, and, isNotNull, sql } from 'drizzle-orm';
+import { eq, inArray, and, isNotNull, isNull, sql } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariantsStrict, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, deleteOriginalUploadFileStrict, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
@@ -1221,6 +1221,8 @@ export async function retryFailedImage(id: number) {
         return { error: t('invalidImageId') };
     }
 
+    const failedStatePredicate = and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error));
+
     // Fetch the image row (admin-only fields needed for re-enqueue)
     const [image] = await db.select({
         id: images.id,
@@ -1241,7 +1243,7 @@ export async function retryFailedImage(id: number) {
         processing_error: images.processing_error,
     })
         .from(images)
-        .where(and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error)))
+        .where(failedStatePredicate)
         .limit(1);
 
     if (!image) {
@@ -1261,7 +1263,7 @@ export async function retryFailedImage(id: number) {
     // Clear the failure columns only after a fresh strict snapshot is ready.
     const clearResult = await db.update(images)
         .set({ processing_error: null, failed_at: null, processing_settings_json: serializedSnapshot })
-        .where(eq(images.id, id));
+        .where(failedStatePredicate);
     const clearHeader = (Array.isArray(clearResult) ? clearResult[0] : clearResult) as { affectedRows?: number | bigint | string };
     const affectedRows = Number(clearHeader?.affectedRows ?? 0);
     if (!Number.isFinite(affectedRows) || affectedRows <= 0) {
@@ -1309,15 +1311,19 @@ export async function retryFailedImage(id: number) {
     });
     if (!enqueued) {
         const retryError = image.processing_error || t('failedToRetryImage');
-        await db.update(images)
+        const restoreResult = await db.update(images)
             .set({
                 processing_error: retryError,
                 failed_at: toMySqlDateTime(new Date()),
                 processing_settings_json: null,
             })
-            .where(eq(images.id, id));
-        state.permanentlyFailedIds.add(id);
-        state.lastErrors.set(id, retryError);
+            .where(and(eq(images.id, id), eq(images.processed, false), isNull(images.processing_error)));
+        const restoreHeader = (Array.isArray(restoreResult) ? restoreResult[0] : restoreResult) as { affectedRows?: number | bigint | string };
+        const restoredRows = Number(restoreHeader?.affectedRows ?? 0);
+        if (Number.isFinite(restoredRows) && restoredRows > 0) {
+            state.permanentlyFailedIds.add(id);
+            state.lastErrors.set(id, retryError);
+        }
         return { error: t('failedToRetryImage') };
     }
 

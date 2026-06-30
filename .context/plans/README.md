@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 46/100 Implementation Plan — scheduled fixes for deleted-mid-reencode encode-failure cleanup and SW image-cache offline expiry (`cycle-46-2026-07-01-plan.md`)
-- Cycle 46/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-46-2026-07-01-deferred.md`)
+- Cycle 47/100 Implementation Plan — scheduled fixes for SW 304 freshness refresh, sidecar callback wiring, Cycle 46 deploy-context closure, admin HDR visibility, masonry P3 accessible names, and failed-image retry conditional updates (`cycle-47-2026-07-01-plan.md`)
+- Cycle 47/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-47-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 46/100 Implementation Plan — active (`cycle-46-2026-07-01-plan.md`)
+- Cycle 47/100 Implementation Plan — active (`cycle-47-2026-07-01-plan.md`)
+- Cycle 47/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-47-2026-07-01-deferred.md`)
+- Cycle 46/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 47 invocation states `ab38f260` was the current deployed `master` HEAD at start (`cycle-46-2026-07-01-plan.md`)
 - Cycle 46/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-46-2026-07-01-deferred.md`)
 - Cycle 45/100 Implementation Plan — no source fixes scheduled; convergence docs committed/pushed/deployed; deploy evidence recorded in plan (`cycle-45-2026-07-01-plan.md`)
 - Cycle 45/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-45-2026-07-01-deferred.md`)

@@ -307,6 +307,10 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                     const cardIntrinsicHeight = hasValidDims
                         ? Math.round(estimatedCardWidth * image.height / image.width)
                         : Math.round(estimatedCardWidth);
+                    const isWideGamut = isWideGamutPrimary(image.color_primaries);
+                    const photoAriaLabel = isWideGamut
+                        ? `${t('aria.viewPhoto', { title: displayTitle })} (${t('viewer.gamutBadgeP3')})`
+                        : t('aria.viewPhoto', { title: displayTitle });
 
                     return (
                         <div
@@ -323,7 +327,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                             <Link
                                 href={localizePath(locale, `/p/${image.id}`)}
                                 prefetch={false}
-                                aria-label={t('aria.viewPhoto', { title: displayTitle })}
+                                aria-label={photoAriaLabel}
                                 onClick={saveScrollPosition}
                             >
                                 <div className="relative w-full">
@@ -381,7 +385,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                             );
                                         })()}
                                     {/* R10-H5: subtle gamut badge for wide-gamut photos, gated by display capability */}
-                                    {isWideGamutPrimary(image.color_primaries) && (
+                                    {isWideGamut && (
                                         <div className="absolute top-2 right-2 z-10">
                                             <span
                                                 className="gamut-p3-badge inline-flex items-center justify-center min-h-11 min-w-11 px-2 py-1 text-[10px] font-bold bg-purple-200/90 text-purple-900 dark:bg-purple-900/60 dark:text-purple-200 rounded-full backdrop-blur-sm"

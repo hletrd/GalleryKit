@@ -159,9 +159,10 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const fn = imageFn();
         const head304 = fn.indexOf("head.status === 304");
         expect(head304).toBeGreaterThan(-1);
-        const branchEnd = fn.indexOf('return cached;', head304);
+        const branchEnd = fn.indexOf('return refreshedCached;', head304);
         expect(branchEnd).toBeGreaterThan(head304);
         const branch = fn.slice(head304, branchEnd);
+        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(branch).toMatch(/touchMeta\(/);
         expect(branch).not.toMatch(/startRevalidate\(/);
     });
@@ -219,8 +220,10 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const fn = imageFn();
         expect(TEMPLATE).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
         expect(TEMPLATE).toMatch(/function responseWithCacheTimestamp\(response\)/);
+        expect(TEMPLATE).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(TEMPLATE).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
         expect(fn).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
+        expect(fn).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(TEMPLATE).toMatch(/function cachedImageAge\(response\)/);
         expect(TEMPLATE).toMatch(/return Infinity;/);
         expect(TEMPLATE).toMatch(/async function evictExpiredCachedImage\(imageCache, cacheKey, url, cached\)/);
@@ -236,7 +239,9 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
     it('generated sw.js carries image stale-expiry stamping from the template', () => {
         const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
         expect(generated).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
+        expect(generated).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(generated).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
+        expect(generated).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(generated).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
         expect(generated).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
     });

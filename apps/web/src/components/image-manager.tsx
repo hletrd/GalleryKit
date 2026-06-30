@@ -449,7 +449,11 @@ export function ImageManager({
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {images.map((image) => (
+                        {images.map((image) => {
+                            const isWideGamut = isWideGamutPrimary(image.color_primaries);
+                            const knownSrgb = image.color_primaries === 'bt709' || image.color_primaries === 'srgb';
+
+                            return (
                             <TableRow key={image.id} data-state={selectedIds.has(image.id) ? "selected" : undefined}>
                                 <TableCell>
                                     <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
@@ -528,20 +532,20 @@ export function ImageManager({
                                     </div>
                                 </TableCell>
                                 <TableCell>
-                                    {isWideGamutPrimary(image.color_primaries) ? (
-                                        <span className="inline-flex items-center gap-1">
+                                    <span className="inline-flex flex-wrap items-center gap-1">
+                                        {isWideGamut ? (
                                             <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200 rounded-full">
                                                 P3
                                             </span>
-                                            {image.is_hdr && (
-                                                <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded-full shadow-sm">
-                                                    HDR
-                                                </span>
-                                            )}
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground">{knownSrgb ? 'sRGB' : t('common.unknown')}</span>
+                                        )}
+                                        {image.is_hdr && (
+                                            <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded-full shadow-sm">
+                                                HDR
+                                            </span>
+                                        )}
                                         </span>
-                                    ) : (
-                                        <span className="text-xs text-muted-foreground">sRGB</span>
-                                    )}
                                 </TableCell>
                                 <TableCell suppressHydrationWarning>{formatStoredExifDate(image.capture_date, locale) || (image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-')}</TableCell>
                                 <TableCell className="text-right">
@@ -578,11 +582,12 @@ export function ImageManager({
                                                 </AlertDialogAction>
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
-                                    </AlertDialog>
+                                        </AlertDialog>
                                     </div>
                                 </TableCell>
                             </TableRow>
-                        ))}
+                            );
+                        })}
                         {images.length === 0 && (
                             <TableRow>
                                 <TableCell colSpan={9} className="h-24 text-center">
