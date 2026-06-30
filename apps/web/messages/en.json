@@ -11,7 +11,9 @@
     "tokens": "Tokens",
     "logout": "Log out",
     "admin": "Admin",
-    "analytics": "Analytics"
+    "analytics": "Analytics",
+    "label": "Site navigation",
+    "home": "Gallery"
   },
   "db": {
     "title": "Database",
@@ -383,6 +385,7 @@
     "wideGamutHint": "Your display shows the sRGB version of this photo. The full color gamut is available on {gamut} screens.",
     "wideGamutHintWithSource": "Your display shows the sRGB version of this photo (source: {source}). The full color gamut is delivered on {gamut} screens.",
     "wideGamutHintDismiss": "Dismiss color gamut notice",
+    "gamutBadgeP3": "Wide-gamut Display P3 photo",
     "gainMap": "Gain map",
     "gainMapPresent": "Apple HDR gain map detected",
     "gainMapDeliveredAsSdr": "Delivered as SDR base only — gain map not yet passed through.",
@@ -767,6 +770,9 @@
     "backfillTriggerTitle": "Re-encode existing photos",
     "backfillTriggerHint": "Runs the color-pipeline backfill on this live host. Re-encodes every photo whose pipeline version is below the current encoder. Safe after a pipeline version bump; settings-only changes need the sidecar backfill with --force-reencode. A second click while a run is in flight is a no-op.",
     "backfillTriggerCta": "Re-encode now",
+    "backfillConfirmTitle": "Start derivative re-encode?",
+    "backfillConfirmDesc": "This can run CPU- and disk-heavy image processing on the live host. It re-encodes photos below the current pipeline version; settings-only byte changes may still require the sidecar backfill with --force-reencode.",
+    "backfillConfirmCta": "Start re-encode",
     "backfillRunning": "Re-encoding…",
     "backfillQueued": "Re-encoding queued — {count} photo(s) will be processed in the background.",
     "backfillNothingToDo": "All photos are already at the current pipeline version. Nothing to re-encode.",

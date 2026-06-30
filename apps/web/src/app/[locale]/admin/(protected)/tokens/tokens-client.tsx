@@ -194,7 +194,7 @@ export function TokensClient() {
                     }
                 }}
             >
-                <DialogContent>
+                <DialogContent showCloseButton={false}>
                     <DialogHeader>
                         <DialogTitle>{t('lrToken.plaintextTitle')}</DialogTitle>
                         <DialogDescription>{t('lrToken.plaintextDesc')}</DialogDescription>

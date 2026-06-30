@@ -12,6 +12,16 @@ import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -63,6 +73,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     const defaults = getSettingDefaults();
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+    const [showBackfillConfirm, setShowBackfillConfirm] = useState(false);
     // R10-M14: also keep the last-committed values in component STATE
     // (parallel to the existing `initialRef` snapshot used inside the
     // save callback) so render can compare current vs. baseline without
@@ -176,7 +187,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     // synchronous and reports either `queued`, `already_running`, or
     // `unavailable`. No retry on the UI — the photographer reads the toast
     // and decides what to do next.
-    const handleBackfill = () => {
+    const runBackfill = () => {
+        setShowBackfillConfirm(false);
         startBackfillTransition(async () => {
             try {
                 const result = await triggerBackfill();
@@ -208,6 +220,10 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                 toast.error(t('settings.backfillFailed'));
             }
         });
+    };
+
+    const handleBackfill = () => {
+        setShowBackfillConfirm(true);
     };
 
     const handleSave = () => {
@@ -375,6 +391,32 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             )}
                         </div>
                     )}
+                    <AlertDialog open={showBackfillConfirm} onOpenChange={(open) => { if (!isBackfilling) setShowBackfillConfirm(open); }}>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>{t('settings.backfillConfirmTitle')}</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    {t('settings.backfillConfirmDesc')}
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel className="min-h-11" disabled={isBackfilling}>
+                                    {t('common.cancel')}
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                    className="min-h-11 gap-2"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        runBackfill();
+                                    }}
+                                    disabled={isBackfilling}
+                                >
+                                    {isBackfilling && <Loader2 className="h-4 w-4 animate-spin" />}
+                                    {t('settings.backfillConfirmCta')}
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-webp">{t('settings.webpQuality')}</Label>

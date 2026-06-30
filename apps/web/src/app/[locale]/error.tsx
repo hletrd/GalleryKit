@@ -20,7 +20,15 @@ export default function Error({
     }, [t]);
 
     return (
-        <main id="main-content" tabIndex={-1} className="flex min-h-[60vh] items-center justify-center px-4 focus:outline-none" role="main">
+        <main id="main-content" tabIndex={-1} className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-4 focus:outline-none" role="main">
+            <nav aria-label={t('nav.label')} className="flex w-full max-w-md justify-center">
+                <Link
+                    href={localizePath(locale, '/')}
+                    className="inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-sm text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    {t('nav.home')}
+                </Link>
+            </nav>
             <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="route-error-title">
                 {/* AGG-R7-03 (run-7 c1): a single VISIBLE readable <h1> at a
                     prominent, WCAG-1.4.3-passing size. The prior AGG-9 split
@@ -36,18 +44,18 @@ export default function Error({
                     {t('error.description')}
                 </p>
                 <div className="flex flex-col gap-3 sm:flex-row">
-                <button
-                    onClick={reset}
-                    className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                    {t('error.tryAgain')}
-                </button>
-                <Link
-                    href={localizePath(locale, '/')}
-                    className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                    {t('error.backToGallery')}
-                </Link>
+                    <button
+                        onClick={reset}
+                        className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        {t('error.tryAgain')}
+                    </button>
+                    <Link
+                        href={localizePath(locale, '/')}
+                        className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        {t('error.backToGallery')}
+                    </Link>
                 </div>
             </section>
         </main>
