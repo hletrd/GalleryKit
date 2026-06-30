@@ -471,7 +471,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(response.status).toBe(200);
         const json = await response.json();
         expect(json.results.map((result: { imageId: number }) => result.imageId)).toEqual([1, 2]);
-        expect(json.results[0].score).toBeGreaterThan(json.results[1].score);
+        expect(json.results[0]).not.toHaveProperty('score');
+        expect(json.results[1]).not.toHaveProperty('score');
     });
 
     it('skips malformed scanned embedding rows without failing the whole query', async () => {

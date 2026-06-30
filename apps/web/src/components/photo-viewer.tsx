@@ -767,7 +767,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <CardContent>
                                 <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} forceSrgbDerivatives={forceSrgbDerivatives} />
                                 <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
-                                <SimilarPhotos key={image.id} imageId={image.id} imageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
+                                {!isSharedView && <SimilarPhotos key={image.id} imageId={image.id} imageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />}
                                 <h3 className="font-semibold mb-3 flex items-center gap-2 mt-4"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <dl className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                                     {hasExifData(image.camera_model) && (

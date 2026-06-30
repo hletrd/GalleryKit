@@ -264,8 +264,10 @@ export async function GET(
         }
     }
 
+    const publicResults = enrichedResults.map(({ score: _score, ...result }) => result);
+
     return NextResponse.json(
-        { results: enrichedResults },
+        { results: publicResults },
         { headers: NO_STORE_HEADERS },
     );
 }

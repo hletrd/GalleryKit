@@ -4,7 +4,9 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 40/100 Implementation Plan — active (`cycle-40-2026-07-01-plan.md`)
+- Cycle 41/100 Implementation Plan — active (`cycle-41-2026-07-01-plan.md`)
+- Cycle 41/100 Deferred Findings — no new deferred items (`cycle-41-2026-07-01-deferred.md`)
+- Cycle 40/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-40-2026-07-01-plan.md`)
 - Cycle 40/100 Deferred Findings — deferred (`cycle-40-2026-07-01-deferred.md`)
 - Cycle 39/100 Implementation Plan — active (`cycle-39-2026-06-30-plan.md`)
 - Cycle 39/100 Deferred Findings — deferred (`cycle-39-2026-06-30-deferred.md`)

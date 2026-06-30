@@ -312,7 +312,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Enrich results with basic image metadata so the client can render
     // meaningful result cards (thumbnails, titles, topics) instead of
-    // bare imageId+score pairs.
+    // bare image IDs. Similarity scores remain internal ranking data and are
+    // stripped from the public response below.
     let enrichedResults: Array<{ imageId: number; score: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null; lens_model: string | null; capture_date: string | null }> = [];
     if (results.length > 0) {
         if (isRequestAborted(request)) {
@@ -359,8 +360,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
     }
 
+    const publicResults = enrichedResults.map(({ score: _score, ...result }) => result);
+
     return NextResponse.json(
-        { results: enrichedResults },
+        { results: publicResults },
         { headers: NO_STORE_HEADERS },
     );
 }

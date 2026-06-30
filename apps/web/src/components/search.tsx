@@ -214,7 +214,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     setResults([]);
                     setSearchStatus('error');
                 } else {
-                    const json = await resp.json() as { results?: { imageId: number; score: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null; lens_model?: string | null; capture_date?: string | null }[] };
+                    const json = await resp.json() as { results?: { imageId: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null; lens_model?: string | null; capture_date?: string | null }[] };
                     // R4C6 COR-R4C6-07: resp.json() is a SECOND await — re-check
                     // the request id before committing results so a slow stale
                     // response cannot clobber a fresher one (the keyword branch

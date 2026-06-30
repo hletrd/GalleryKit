@@ -49,6 +49,7 @@ const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.
 
 const APPROVED_ACTION_GUARD_MODULE = '@/lib/action-guards';
 const APPROVED_AUTH_GUARD_MODULE = '@/lib/request-origin';
+const DB_MODULE = '@/db';
 
 /**
  * Recursively walk a directory collecting action source files. Throws if the root cannot be
@@ -166,6 +167,48 @@ function collectApprovedHasTrustedSameOriginImports(sourceFile: ts.SourceFile): 
     return approved;
 }
 
+function collectPreOriginAuthReadNames(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set(PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES.has(importedName)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
+function collectDbReadNames(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set(['db']);
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || statement.moduleSpecifier.text !== DB_MODULE
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === 'db') {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
 function isRequireSameOriginAdminExpression(node: ts.Node, approvedImports: Set<string>): boolean {
     const expression = ts.isAwaitExpression(node) ? node.expression : node;
     return (
@@ -240,12 +283,13 @@ function statementReturnsOnGuard(
     guardName: string,
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
+    preOriginAuthReadNames: Set<string>,
 ): boolean {
     if (!ts.isIfStatement(statement) || !conditionChecksGuardVariable(statement.expression, guardName)) {
         return false;
     }
 
-    return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames);
+    return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames, preOriginAuthReadNames);
 }
 
 function statementExitsEarly(statement: ts.Statement): boolean {
@@ -264,12 +308,13 @@ function branchExitsBeforeSideEffect(
     branch: ts.Statement,
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
+    preOriginAuthReadNames: Set<string> = PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES,
 ): boolean {
     const statements = ts.isBlock(branch) ? branch.statements : [branch];
     for (const statement of statements) {
         if (
             statementContainsPreGuardMutation(statement, localMutatingFunctions, importedSideEffectFunctionNames)
-            || statementContainsPreOriginAuthRead(statement)
+            || statementContainsPreOriginAuthRead(statement, preOriginAuthReadNames)
         ) {
             return false;
         }
@@ -403,11 +448,11 @@ function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
     return found;
 }
 
-function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
-    return nodeContainsCallNamed(statement, PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
+function statementContainsPreOriginAuthRead(statement: ts.Statement, preOriginAuthReadNames: Set<string>): boolean {
+    return nodeContainsCallNamed(statement, preOriginAuthReadNames);
 }
 
-function nodeContainsProtectedRead(root: ts.Node): boolean {
+function nodeContainsProtectedRead(root: ts.Node, dbReadNames: Set<string>): boolean {
     const DRIZZLE_RELATIONAL_READ_METHODS = new Set(['findFirst', 'findMany']);
     const isDrizzleRelationalReadCall = (node: ts.CallExpression): boolean => {
         const callee = node.expression;
@@ -421,7 +466,7 @@ function nodeContainsProtectedRead(root: ts.Node): boolean {
             ts.isPropertyAccessExpression(queryAccess)
             && queryAccess.name.text === 'query'
             && ts.isIdentifier(queryAccess.expression)
-            && queryAccess.expression.text === 'db'
+            && dbReadNames.has(queryAccess.expression.text)
         );
     };
 
@@ -452,9 +497,8 @@ function nodeContainsProtectedRead(root: ts.Node): boolean {
     return found;
 }
 
-function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set<string>): boolean {
+function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set<string>, preOriginAuthReadNames: Set<string>): boolean {
     let found = false;
-    const authNames = new Set(['isAdmin', 'getCurrentUser']);
     const visit = (node: ts.Node) => {
         if (found) return;
         if (ts.isFunctionLike(node) && node !== statement) return;
@@ -462,7 +506,7 @@ function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set
             found = true;
             return;
         }
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && authNames.has(node.expression.text)) {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && preOriginAuthReadNames.has(node.expression.text)) {
             found = true;
             return;
         }
@@ -472,17 +516,22 @@ function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set
     return found;
 }
 
-function exemptReadHasAuthBeforeProtectedRead(body: ts.Node, approvedImports: Set<string>): boolean {
+function exemptReadHasAuthBeforeProtectedRead(
+    body: ts.Node,
+    approvedImports: Set<string>,
+    preOriginAuthReadNames: Set<string>,
+    dbReadNames: Set<string>,
+): boolean {
     if (!ts.isBlock(body)) {
         return true;
     }
 
     let sawAuth = false;
     for (const statement of body.statements) {
-        if (!sawAuth && nodeContainsProtectedRead(statement)) {
+        if (!sawAuth && nodeContainsProtectedRead(statement, dbReadNames)) {
             return false;
         }
-        if (statementContainsReadAuth(statement, approvedImports)) {
+        if (statementContainsReadAuth(statement, approvedImports, preOriginAuthReadNames)) {
             sawAuth = true;
         }
     }
@@ -624,6 +673,7 @@ function functionCallsRequireSameOriginAdmin(
     approvedImports: Set<string>,
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
+    preOriginAuthReadNames: Set<string>,
 ): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
@@ -642,18 +692,18 @@ function functionCallsRequireSameOriginAdmin(
         const preGuardStatements = body.statements.slice(0, index);
         if (
             preGuardStatements.some((statement) => statementContainsPreGuardMutation(statement, localMutatingFunctions, importedSideEffectFunctionNames))
-            || preGuardStatements.some(statementContainsPreOriginAuthRead)
+            || preGuardStatements.some((statement) => statementContainsPreOriginAuthRead(statement, preOriginAuthReadNames))
         ) {
             return false;
         }
 
         for (const followingStatement of body.statements.slice(index + 1)) {
-            if (statementReturnsOnGuard(followingStatement, guardName, localMutatingFunctions, importedSideEffectFunctionNames)) {
+            if (statementReturnsOnGuard(followingStatement, guardName, localMutatingFunctions, importedSideEffectFunctionNames, preOriginAuthReadNames)) {
                 return true;
             }
             if (
                 statementContainsPreGuardMutation(followingStatement, localMutatingFunctions, importedSideEffectFunctionNames)
-                || statementContainsPreOriginAuthRead(followingStatement)
+                || statementContainsPreOriginAuthRead(followingStatement, preOriginAuthReadNames)
             ) {
                 return false;
             }
@@ -670,6 +720,7 @@ function functionCallsAuthSameOriginGuard(
     approvedHasTrustedSameOriginImports: Set<string>,
     localMutatingFunctions: Set<string>,
     importedSideEffectFunctionNames: Set<string>,
+    preOriginAuthReadNames: Set<string>,
 ): boolean {
     if (!ts.isBlock(body)) {
         return false;
@@ -697,12 +748,12 @@ function functionCallsAuthSameOriginGuard(
         const preGuardStatements = body.statements.slice(0, index);
         if (
             preGuardStatements.some((preGuardStatement) => statementContainsPreGuardMutation(preGuardStatement, localMutatingFunctions, importedSideEffectFunctionNames))
-            || preGuardStatements.some(statementContainsPreOriginAuthRead)
+            || preGuardStatements.some((preGuardStatement) => statementContainsPreOriginAuthRead(preGuardStatement, preOriginAuthReadNames))
         ) {
             return false;
         }
 
-        return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames);
+        return branchExitsBeforeSideEffect(statement.thenStatement, localMutatingFunctions, importedSideEffectFunctionNames, preOriginAuthReadNames);
     }
 
     return false;
@@ -773,6 +824,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
+    const preOriginAuthReadNames = collectPreOriginAuthReadNames(sourceFile);
+    const dbReadNames = collectDbReadNames(sourceFile);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
     const isActionBarrelFile = /(?:^|[/\\])app[/\\]actions\.[cm]?[jt]sx?$/.test(relative);
@@ -863,7 +916,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 body
                 && !isAuthActionsFile
                 && !relative.endsWith('actions/public.ts')
-                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports)
+                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports, preOriginAuthReadNames, dbReadNames)
             ) {
                 report.failed.push(
                     `EXEMPT READ WITHOUT AUTH: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' and performs protected reads before isAdmin(), getCurrentUser(), or requireSameOriginAdmin()`,
@@ -884,6 +937,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             approvedRequireSameOriginImports,
             localMutatingFunctions,
             importedSideEffectFunctionNames,
+            preOriginAuthReadNames,
         );
         const hasAuthGuard = isAuthActionsFile
             && functionCallsAuthSameOriginGuard(
@@ -891,6 +945,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 approvedHasTrustedSameOriginImports,
                 localMutatingFunctions,
                 importedSideEffectFunctionNames,
+                preOriginAuthReadNames,
             );
         if (!hasStandardGuard && !hasAuthGuard) {
             report.failed.push(

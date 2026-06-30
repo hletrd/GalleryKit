@@ -13,7 +13,6 @@ import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface SimilarResult {
     imageId: number;
-    score: number;
     title: string | null;
     description: string | null;
     filename_jpeg: string;

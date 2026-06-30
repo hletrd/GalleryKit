@@ -211,6 +211,25 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when aliased auth/session reads happen before the same-origin guard', () => {
+        const src = `
+            import { requireSameOriginAdmin } from '@/lib/action-guards';
+            import { isAdmin as canAdmin, getCurrentUser as readUser } from '@/lib/auth';
+
+            export async function deleteFoo(id) {
+                if (!(await canAdmin())) return { error: 'unauthorized' };
+                const user = await readUser();
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true, userId: user?.id };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('fails when revalidation happens before the same-origin guard', () => {
         const src = withApprovedActionGuard(`
             export async function updateFoo(id) {
@@ -498,6 +517,21 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
     });
 
+    it('fails exempt admin read-only bodies that use aliased Drizzle relational reads before auth', () => {
+        const src = `
+            import { db as database } from '@/db';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                return database.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
     it('skips exempt admin read-only bodies after an auth check', () => {
         const src = `
             /** @action-origin-exempt: read-only admin getter */
@@ -509,6 +543,22 @@ describe('checkActionSource — function declarations', () => {
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::listThings');
+    });
+
+    it('skips exempt admin read-only bodies with aliased DB reads after aliased auth checks', () => {
+        const src = `
+            import { db as database } from '@/db';
+            import { isAdmin as canAdmin } from '@/lib/auth';
+
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listSessions() {
+                if (!(await canAdmin())) return [];
+                return database.query.sessions.findMany();
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::listSessions');
     });
 
     it('passes a guard-carrying mutating action WITHOUT an exempt comment (createLrToken shape)', () => {

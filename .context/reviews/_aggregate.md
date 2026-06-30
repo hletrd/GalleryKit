@@ -1,11 +1,11 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-40-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-41-2026-07-01/_aggregate.md`
 
-Cycle 40 scheduled three findings:
+Cycle 41 scheduled ten findings:
 
-- `UI-C40-01` - wide-gamut JPEG download labels must reflect P3 vs forced-sRGB delivery.
-- `TV-40-01` - `lint:action-origin` must treat Drizzle relational reads as protected reads before auth.
-- `TV-40-02` - `lint:public-route-rate-limit` must treat imported DB-backed data helpers as expensive public reads.
+- `TV-C41-01` through `TV-C41-06` - harden public-route and action-origin scanners for inverted limiter checks, alias imports, relative imports, and expensive work before limiters.
+- `DOC-C41-01` / `DOC-C41-02` - align CLIP sidecar and GPS stripping docs with runtime behavior.
+- `UX-C41-01` / `UX-C41-02` - keep shared viewers scoped and keep similarity scores internal to ranking.
 
-Cycle 40 deferred `TV-40-03` in `.context/plans/cycle-40-2026-07-01-deferred.md` and carried forward cycle-39 migration/index and broader scanner-model items.
+Cycle 41 deferred no new findings in `.context/plans/cycle-41-2026-07-01-deferred.md` and carried forward prior script-typing, migration/index, scanner-model, and sidecar-pagination items.

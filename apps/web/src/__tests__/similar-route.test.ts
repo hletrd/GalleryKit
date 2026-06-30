@@ -310,6 +310,7 @@ describe('GET /api/search/similar/[id]', () => {
         expect(neighbour).toBeDefined();
         expect(neighbour).toHaveProperty('lens_model', 'EF 50mm f/1.8');
         expect(neighbour).toHaveProperty('capture_date', '2026-01-02 03:04:05');
+        expect(neighbour).not.toHaveProperty('score');
 
         // The neighbour must appear (score above PRODUCTION_COSINE_THRESHOLD for
         // nearly-identical embeddings like 0.49 vs 0.5).

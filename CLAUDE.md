@@ -515,6 +515,7 @@ docker run --rm \
   --network host \
   -v <deploy-root>/apps/web/src:/app/apps/web/src:ro \
   -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v <deploy-root>/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
   -v <deploy-root>/apps/web/data:/app/data \
   --env-file <deploy-root>/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
@@ -530,6 +531,7 @@ docker run --rm \
   --network host \
   -v <deploy-root>/apps/web/src:/app/apps/web/src:ro \
   -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v <deploy-root>/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
   -v <deploy-root>/apps/web/data:/app/data \
   --env-file <deploy-root>/apps/web/.env.local \
   -e SEMANTIC_SEARCH_ALLOW_PRODUCTION=true \

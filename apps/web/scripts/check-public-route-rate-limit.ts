@@ -87,10 +87,29 @@ const EXPENSIVE_READ_IMPORT_MODULES = new Set([
     '@/lib/serve-upload',
 ]);
 
+const EXPENSIVE_READ_MODULE_PATHS = new Set([
+    'src/db',
+    'src/lib/analytics-data',
+    'src/lib/clip-inference',
+    'src/lib/clip-model',
+    'src/lib/data',
+    'src/lib/data-timeline',
+    'src/lib/gallery-config',
+    'src/lib/og-photo-fetch',
+    'src/lib/serve-upload',
+]);
+
 type ImportedExpensiveReadFunctions = {
     identifiers: Set<string>;
     namespaces: Set<string>;
+    propertyRoots: Set<string>;
 };
+
+const emptyImportedExpensiveReadFunctions = (): ImportedExpensiveReadFunctions => ({
+    identifiers: new Set(),
+    namespaces: new Set(),
+    propertyRoots: new Set(),
+});
 
 function findRouteFiles(dir: string): string[] {
     const results: string[] = [];
@@ -200,22 +219,65 @@ function collectImportedSideEffectFunctionNames(sourceFile: ts.SourceFile): Set<
     return names;
 }
 
-function collectImportedExpensiveReadFunctions(sourceFile: ts.SourceFile): ImportedExpensiveReadFunctions {
+function stripModuleExtension(target: string): string {
+    return target
+        .replace(/\.(?:[cm]?[jt]sx?)$/, '')
+        .replace(/\/index$/, '');
+}
+
+function normalizeModuleSpecifier(moduleSpecifier: string, relative: string): string {
+    if (moduleSpecifier.startsWith('@/')) {
+        return stripModuleExtension(`src/${moduleSpecifier.slice(2)}`);
+    }
+    if (!moduleSpecifier.startsWith('.')) {
+        return stripModuleExtension(moduleSpecifier);
+    }
+    const sourceDir = path.posix.dirname(relative.replace(/\\/g, '/'));
+    return stripModuleExtension(path.posix.normalize(path.posix.join(sourceDir, moduleSpecifier)));
+}
+
+function modulePathMatches(normalized: string, modulePaths: Set<string>): boolean {
+    if (modulePaths.has(normalized)) return true;
+    for (const modulePath of modulePaths) {
+        if (normalized.endsWith(`/${modulePath}`)) return true;
+    }
+    return false;
+}
+
+function isExpensiveReadModuleSpecifier(moduleSpecifier: string, relative: string): boolean {
+    if (EXPENSIVE_READ_IMPORT_MODULES.has(moduleSpecifier)) return true;
+    return modulePathMatches(normalizeModuleSpecifier(moduleSpecifier, relative), EXPENSIVE_READ_MODULE_PATHS);
+}
+
+function isDbModuleSpecifier(moduleSpecifier: string, relative: string): boolean {
+    if (moduleSpecifier === '@/db') return true;
+    return modulePathMatches(normalizeModuleSpecifier(moduleSpecifier, relative), new Set(['src/db']));
+}
+
+function collectImportedExpensiveReadFunctions(sourceFile: ts.SourceFile, relative: string): ImportedExpensiveReadFunctions {
     const identifiers = new Set<string>();
     const namespaces = new Set<string>();
+    const propertyRoots = new Set<string>();
     for (const statement of sourceFile.statements) {
         if (
             !ts.isImportDeclaration(statement)
             || !statement.importClause
             || statement.importClause.isTypeOnly
             || !ts.isStringLiteral(statement.moduleSpecifier)
-            || !EXPENSIVE_READ_IMPORT_MODULES.has(statement.moduleSpecifier.text)
+            || !isExpensiveReadModuleSpecifier(statement.moduleSpecifier.text, relative)
         ) {
             continue;
         }
 
+        const moduleSpecifier = statement.moduleSpecifier.text;
+        const isDbModule = isDbModuleSpecifier(moduleSpecifier, relative);
+
         if (statement.importClause.name) {
-            identifiers.add(statement.importClause.name.text);
+            if (isDbModule) {
+                propertyRoots.add(statement.importClause.name.text);
+            } else {
+                identifiers.add(statement.importClause.name.text);
+            }
         }
 
         const bindings = statement.importClause.namedBindings;
@@ -227,16 +289,127 @@ function collectImportedExpensiveReadFunctions(sourceFile: ts.SourceFile): Impor
         if (!ts.isNamedImports(bindings)) continue;
         for (const element of bindings.elements) {
             if (element.isTypeOnly) continue;
-            identifiers.add(element.name.text);
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (isDbModule && importedName === 'db') {
+                propertyRoots.add(element.name.text);
+            } else {
+                identifiers.add(element.name.text);
+            }
         }
     }
-    return { identifiers, namespaces };
+    return { identifiers, namespaces, propertyRoots };
 }
 
 function isRateLimitHelperCall(node: ts.CallExpression, approvedRateLimitImports: Set<string>): boolean {
     const callee = node.expression;
     if (!ts.isIdentifier(callee)) return false;
     return approvedRateLimitImports.has(callee.text);
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAwaitExpression(current)) {
+        current = ts.isParenthesizedExpression(current) ? current.expression : current.expression;
+    }
+    return current;
+}
+
+function isTrueLiteral(expression: ts.Expression): boolean {
+    return unwrapExpression(expression).kind === ts.SyntaxKind.TrueKeyword;
+}
+
+function isFalseLiteral(expression: ts.Expression): boolean {
+    return unwrapExpression(expression).kind === ts.SyntaxKind.FalseKeyword;
+}
+
+function isRateLimitResultIdentifier(expression: ts.Expression, rateLimitResultNames: Set<string>): boolean {
+    const unwrapped = unwrapExpression(expression);
+    return ts.isIdentifier(unwrapped) && rateLimitResultNames.has(unwrapped.text);
+}
+
+function isRateLimitCallExpression(expression: ts.Expression, approvedRateLimitImports: Set<string>): boolean {
+    const unwrapped = unwrapExpression(expression);
+    return ts.isCallExpression(unwrapped) && isRateLimitHelperCall(unwrapped, approvedRateLimitImports);
+}
+
+function expressionCapturesRateLimitResult(expression: ts.Expression, approvedRateLimitImports: Set<string>): boolean {
+    return isRateLimitCallExpression(expression, approvedRateLimitImports);
+}
+
+function expressionChecksPositiveRateLimitResult(expression: ts.Expression, rateLimitResultNames: Set<string>): boolean {
+    const unwrapped = unwrapExpression(expression);
+    if (ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken) {
+        return false;
+    }
+    if (isRateLimitResultIdentifier(unwrapped, rateLimitResultNames)) {
+        return true;
+    }
+    if (!ts.isBinaryExpression(unwrapped)) {
+        return false;
+    }
+
+    const leftIsResult = isRateLimitResultIdentifier(unwrapped.left, rateLimitResultNames);
+    const rightIsResult = isRateLimitResultIdentifier(unwrapped.right, rateLimitResultNames);
+    if (!leftIsResult && !rightIsResult) return false;
+    const compared = leftIsResult ? unwrapped.right : unwrapped.left;
+
+    switch (unwrapped.operatorToken.kind) {
+        case ts.SyntaxKind.EqualsEqualsEqualsToken:
+        case ts.SyntaxKind.EqualsEqualsToken:
+            return isTrueLiteral(compared);
+        case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+        case ts.SyntaxKind.ExclamationEqualsToken:
+            return isFalseLiteral(compared);
+        default:
+            return false;
+    }
+}
+
+function expressionIsPositiveRateLimitGate(
+    expression: ts.Expression,
+    approvedRateLimitImports: Set<string>,
+    rateLimitResultNames: Set<string>,
+): boolean {
+    const unwrapped = unwrapExpression(expression);
+    if (ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken) {
+        return false;
+    }
+    if (isRateLimitCallExpression(unwrapped, approvedRateLimitImports)) {
+        return true;
+    }
+    return expressionChecksPositiveRateLimitResult(unwrapped, rateLimitResultNames);
+}
+
+function conditionReturnsEarly(statement: ts.Statement): boolean {
+    if (ts.isReturnStatement(statement)) return true;
+    if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
+    return false;
+}
+
+function statementHasRateLimitGate(
+    statement: ts.Statement,
+    approvedRateLimitImports: Set<string>,
+    rateLimitResultNames: Set<string>,
+): boolean {
+    if (ts.isVariableStatement(statement)) {
+        for (const decl of statement.declarationList.declarations) {
+            if (
+                ts.isIdentifier(decl.name)
+                && decl.initializer
+                && expressionCapturesRateLimitResult(decl.initializer, approvedRateLimitImports)
+            ) {
+                rateLimitResultNames.add(decl.name.text);
+            }
+        }
+        return false;
+    }
+    if (!ts.isIfStatement(statement)) {
+        return false;
+    }
+    return (
+        expressionIsPositiveRateLimitGate(statement.expression, approvedRateLimitImports, rateLimitResultNames)
+        && conditionReturnsEarly(statement.thenStatement)
+    );
 }
 
 function isKnownMutationCall(node: ts.CallExpression, importedSideEffectFunctionNames: Set<string> = new Set()): boolean {
@@ -248,13 +421,16 @@ function isKnownMutationCall(node: ts.CallExpression, importedSideEffectFunction
 function bodyCallsRateLimitBeforeMutation(
     body: ts.Node | undefined,
     approvedRateLimitImports: Set<string>,
+    sourceFile: ts.SourceFile,
     localMutatingFunctions: Set<string> = new Set(),
     importedSideEffectFunctionNames: Set<string> = new Set(),
+    localExpensiveGetFunctions: Set<string> = new Set(),
+    importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = emptyImportedExpensiveReadFunctions(),
 ): boolean {
     if (!body) return false;
 
     let sawRateLimitGate = false;
-    let sawMutation = false;
+    let sawProtectedWork = false;
     const rateLimitResultNames = new Set<string>();
 
     const inspectExpression = (node: ts.Node) => {
@@ -263,70 +439,10 @@ function bodyCallsRateLimitBeforeMutation(
                 isKnownMutationCall(node, importedSideEffectFunctionNames)
                 || (ts.isIdentifier(node.expression) && localMutatingFunctions.has(node.expression.text))
             ) {
-                sawMutation = true;
+                sawProtectedWork = true;
             }
         }
         ts.forEachChild(node, inspectExpression);
-    };
-
-    const expressionHasTopLevelRateLimit = (node: ts.Node): boolean => {
-        let found = false;
-        const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
-            if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
-                found = true;
-                return;
-            }
-            ts.forEachChild(current, visit);
-        };
-        visit(node);
-        return found;
-    };
-
-    const conditionReturnsEarly = (statement: ts.Statement): boolean => {
-        if (ts.isReturnStatement(statement)) return true;
-        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
-        return false;
-    };
-
-    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
-        let found = false;
-        const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
-            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
-                found = true;
-                return;
-            }
-            ts.forEachChild(current, visit);
-        };
-        visit(node);
-        return found;
-    };
-
-    const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
-        if (ts.isVariableStatement(statement)) {
-            for (const decl of statement.declarationList.declarations) {
-                if (
-                    ts.isIdentifier(decl.name)
-                    && decl.initializer
-                    && expressionHasTopLevelRateLimit(decl.initializer)
-                ) {
-                    rateLimitResultNames.add(decl.name.text);
-                }
-            }
-            return false;
-        }
-        if (ts.isIfStatement(statement)) {
-            // The helper result must dominate subsequent mutation by returning
-            // early on over-limit. A bare helper call is not enough.
-            return (
-                (expressionHasTopLevelRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
-                && conditionReturnsEarly(statement.thenStatement)
-            );
-        }
-        return false;
     };
 
     const inspectStatement = (statement: ts.Statement) => {
@@ -342,10 +458,16 @@ function bodyCallsRateLimitBeforeMutation(
             ts.forEachChild(node, visit);
         };
         visit(statement);
-        if (statementHasMutation && !sawRateLimitGate) {
-            sawMutation = true;
+        const statementHasExpensiveWork = bodyContainsExpensiveGetWork(
+            statement,
+            sourceFile,
+            localExpensiveGetFunctions,
+            importedExpensiveReadFunctions,
+        );
+        if ((statementHasMutation || statementHasExpensiveWork) && !sawRateLimitGate) {
+            sawProtectedWork = true;
         }
-        if (statementHasRateLimitGate(statement)) {
+        if (statementHasRateLimitGate(statement, approvedRateLimitImports, rateLimitResultNames)) {
             sawRateLimitGate = true;
         }
     };
@@ -356,9 +478,12 @@ function bodyCallsRateLimitBeforeMutation(
         }
     } else {
         inspectExpression(body);
+        if (bodyContainsExpensiveGetWork(body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions)) {
+            sawProtectedWork = true;
+        }
     }
 
-    return sawRateLimitGate && !sawMutation;
+    return sawRateLimitGate && !sawProtectedWork;
 }
 
 function bodyCallsApprovedRateLimit(body: ts.Node | undefined, approvedRateLimitImports: Set<string>): boolean {
@@ -388,64 +513,6 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
 
     let sawRateLimitGate = false;
     const rateLimitResultNames = new Set<string>();
-
-    const expressionHasTopLevelRateLimit = (node: ts.Node): boolean => {
-        let found = false;
-        const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
-            if (ts.isCallExpression(current) && isRateLimitHelperCall(current, approvedRateLimitImports)) {
-                found = true;
-                return;
-            }
-            ts.forEachChild(current, visit);
-        };
-        visit(node);
-        return found;
-    };
-
-    const conditionReturnsEarly = (statement: ts.Statement): boolean => {
-        if (ts.isReturnStatement(statement)) return true;
-        if (ts.isBlock(statement)) return statement.statements.some(ts.isReturnStatement);
-        return false;
-    };
-
-    const expressionChecksRateLimitResult = (node: ts.Node): boolean => {
-        let found = false;
-        const visit = (current: ts.Node) => {
-            if (found) return;
-            if (ts.isFunctionLike(current)) return;
-            if (ts.isIdentifier(current) && rateLimitResultNames.has(current.text)) {
-                found = true;
-                return;
-            }
-            ts.forEachChild(current, visit);
-        };
-        visit(node);
-        return found;
-    };
-
-    const statementHasRateLimitGate = (statement: ts.Statement): boolean => {
-        if (ts.isVariableStatement(statement)) {
-            for (const decl of statement.declarationList.declarations) {
-                if (
-                    ts.isIdentifier(decl.name)
-                    && decl.initializer
-                    && expressionHasTopLevelRateLimit(decl.initializer)
-                ) {
-                    rateLimitResultNames.add(decl.name.text);
-                }
-            }
-            return false;
-        }
-        if (ts.isIfStatement(statement)) {
-            return (
-                (expressionHasTopLevelRateLimit(statement.expression) || expressionChecksRateLimitResult(statement.expression))
-                && conditionReturnsEarly(statement.thenStatement)
-            );
-        }
-        return false;
-    };
 
     const nodeContainsExpensiveWork = (node: ts.Node | undefined): boolean => {
         return bodyContainsExpensiveGetWork(node, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions);
@@ -482,7 +549,7 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
             if (!sawRateLimitGate && statementContainsExpensiveWork(statement)) {
                 return false;
             }
-            if (statementHasRateLimitGate(statement)) {
+            if (statementHasRateLimitGate(statement, approvedRateLimitImports, rateLimitResultNames)) {
                 sawRateLimitGate = true;
             }
         }
@@ -500,7 +567,7 @@ function bodyContainsExpensiveGetWork(
     body: ts.Node | undefined,
     sourceFile: ts.SourceFile,
     localExpensiveGetFunctions: Set<string> = new Set(),
-    importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = { identifiers: new Set(), namespaces: new Set() },
+    importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = emptyImportedExpensiveReadFunctions(),
 ): boolean {
     if (!body) return false;
     const text = body.getText(sourceFile);
@@ -526,8 +593,11 @@ function bodyContainsExpensiveGetWork(
             }
             if (
                 ts.isPropertyAccessExpression(callee)
-                && ts.isIdentifier(callee.expression)
-                && importedExpensiveReadFunctions.namespaces.has(callee.expression.text)
+                && rootIdentifierName(callee)
+                && (
+                    importedExpensiveReadFunctions.namespaces.has(rootIdentifierName(callee) as string)
+                    || importedExpensiveReadFunctions.propertyRoots.has(rootIdentifierName(callee) as string)
+                )
             ) {
                 found = true;
                 return;
@@ -537,6 +607,14 @@ function bodyContainsExpensiveGetWork(
     };
     visit(body);
     return found;
+}
+
+function rootIdentifierName(expression: ts.Expression): string | null {
+    let current = expression;
+    while (ts.isPropertyAccessExpression(current)) {
+        current = current.expression;
+    }
+    return ts.isIdentifier(current) ? current.text : null;
 }
 
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {
@@ -551,7 +629,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRateLimitImports = collectApprovedRateLimitImports(sourceFile);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
-    const importedExpensiveReadFunctions = collectImportedExpensiveReadFunctions(sourceFile);
+    const importedExpensiveReadFunctions = collectImportedExpensiveReadFunctions(sourceFile, relative);
 
     // Find any exported mutating handler in the file
     const localBodies = new Map<string, ts.Node | undefined>();
@@ -723,8 +801,11 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     if (mutatingHandlers.length > 0 && mutatingHandlers.every((handler) => bodyCallsRateLimitBeforeMutation(
         handler.body,
         approvedRateLimitImports,
+        sourceFile,
         localMutatingFunctions,
         importedSideEffectFunctionNames,
+        localExpensiveGetFunctions,
+        importedExpensiveReadFunctions,
     ))) {
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else if (mutatingHandlers.length > 0) {

@@ -224,6 +224,22 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails expensive public GET handlers when a captured limiter result is checked against false', () => {
+        const source = `
+            import { db } from '@/db';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                const overLimit = preIncrementSemanticAttempt('203.0.113.10', Date.now());
+                if (overLimit === false) return Response.json({}, { status: 429 });
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
     it('passes expensive public GET handlers when the limiter gate is inside a try block before expensive work', () => {
         const source = `
             import { ImageResponse } from 'next/og';
@@ -326,6 +342,20 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('expensive GET');
     });
 
+    it('fails expensive public GET handlers when DB is imported under an alias', () => {
+        const source = `
+            import { db as database } from '@/db';
+            import { images } from '@/db/schema';
+            export async function GET() {
+                const rows = await database.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
     it('passes DB-backed imported data helpers after a limiter gate', () => {
         const source = `
             import { getTopicBySlug } from '@/lib/data';
@@ -351,6 +381,32 @@ describe('checkPublicRouteSource', () => {
             }
         `;
         const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('fails expensive public GET handlers when DB-backed data helpers are imported relatively', () => {
+        const source = `
+            import { getTopicBySlug } from '../../../lib/data';
+            export async function GET() {
+                const topic = await getTopicBySlug('weddings');
+                return Response.json({ topic });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/topics/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('fails expensive public GET handlers when relative DB-backed helpers use namespace imports', () => {
+        const source = `
+            import * as data from '../../../lib/data';
+            export async function GET() {
+                const topic = await data.getTopicBySlug('weddings');
+                return Response.json({ topic });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/topics/route.ts');
         expect(result.failed).toHaveLength(1);
         expect(result.failed[0]).toContain('expensive GET');
     });
@@ -707,6 +763,53 @@ describe('checkPublicRouteSource', () => {
         const result = checkPublicRouteSource(source, 'route.ts');
         expect(result.failed).toHaveLength(0);
         expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails when a direct limiter gate is inverted before mutation', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                if (!preIncrementShareAttempt('1.2.3.4')) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when a captured limiter result is compared to false before mutation', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                const overLimit = preIncrementShareAttempt('1.2.3.4');
+                if (false === overLimit) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when expensive public work runs before a mutating handler limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                const rows = await db.select().from(images).limit(10);
+                const overLimit = preIncrementShareAttempt('1.2.3.4');
+                if (overLimit) return { status: 429 };
+                await db.insert(auditRows).values({ count: rows.length });
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
     it('fails when a local helper wraps an approved rate-limit gate before mutation', () => {
