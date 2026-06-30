@@ -112,6 +112,12 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
             // `hdr-badge` span is preceded by an `isAdmin && isHdr` condition.
             expect(PIP_BODY).toMatch(/isAdmin\s*&&\s*isHdr\s*&&[\s\S]{0,120}hdr-badge/);
         });
+
+        it('gates collapsed transfer text on isAdmin so public admin-shaped data cannot leak it', () => {
+            expect(PIP_BODY).toContain('const transfer = isAdmin ? humanizeTransferFunction');
+            expect(PIP_BODY).toContain('const rawDecision = isAdmin ? image.color_pipeline_decision : undefined');
+            expect(PIP_BODY).not.toMatch(/const transfer = humanizeTransferFunction\(image\.transfer_function/);
+        });
     });
 
     describe('HDR badge renders exactly once (C5-A1 single-render lock)', () => {

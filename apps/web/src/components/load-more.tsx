@@ -36,10 +36,14 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
     const mountedRef = useRef(true);
     const maintenanceCooldownRef = useRef<number>(0);
     const MAINTENANCE_COOLDOWN_MS = 5000;
+    const transientRetryAfterRef = useRef<number>(0);
+    const TRANSIENT_RETRY_COOLDOWN_MS = 5000;
     const [statusMessage, setStatusMessage] = useState('');
 
     const loadMore = useCallback(async () => {
         if (loadingRef.current || !hasMore) return;
+        const retryNow = Date.now();
+        if (transientRetryAfterRef.current > retryNow) return;
         loadingRef.current = true;
         setLoading(true);
         setStatusMessage(t('home.loadingMore'));
@@ -50,6 +54,7 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
                 : await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
             if (version !== queryVersionRef.current || !mountedRef.current) return;
             if (page.status === 'ok') {
+                transientRetryAfterRef.current = 0;
                 setHasMore(page.hasMore);
                 if (page.images.length > 0) {
                     onLoadMore(page.images);
@@ -70,6 +75,9 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
             }
 
             setHasMore(page.hasMore);
+            if (page.status === 'rateLimited' || page.status === 'maintenance' || page.status === 'error') {
+                transientRetryAfterRef.current = Date.now() + TRANSIENT_RETRY_COOLDOWN_MS;
+            }
             if (page.status === 'rateLimited') {
                 toast.error(t('home.loadMoreRateLimited'));
             } else if (page.status === 'maintenance') {
@@ -86,6 +94,7 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
             }
         } catch (error) {
             console.error('Failed to load more images:', error);
+            transientRetryAfterRef.current = Date.now() + TRANSIENT_RETRY_COOLDOWN_MS;
             toast.error(t('home.loadMoreFailed'));
         } finally {
             if (version === queryVersionRef.current && mountedRef.current) {

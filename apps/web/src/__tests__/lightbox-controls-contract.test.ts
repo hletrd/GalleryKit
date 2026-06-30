@@ -4,8 +4,8 @@
  * UX-R4C6-03: the hide timer must consult `:focus-visible` (keyboard
  * modality) instead of the always-true `contains(document.activeElement)`
  * keepalive that made auto-hide dead, and must blur a pointer-focused
- * control BEFORE hiding so `aria-hidden` never lands on a focused
- * element (WCAG 4.1.2).
+ * control before hiding. C32-A11Y keeps essential controls in the
+ * accessibility tree while the visual overlay is idle-hidden.
  * A11Y-R4C6-04: the lightbox <img> must NOT carry an aria-label — it
  * would win accessible-name computation over the descriptive alt text.
  * COR-R4C6-12: the Space branch must consult isEditableTarget BEFORE
@@ -46,6 +46,12 @@ describe('lightbox hide-timer focus modality (UX-R4C6-03)', () => {
     it('closes and removes the color pip from tab order when controls auto-hide', () => {
         expect(SRC).toContain('setColorPipOpen(false)');
         expect(SRC).toContain('interactive={controlsVisible}');
+    });
+
+    it('does not remove essential controls from the accessibility tree during idle visual hide', () => {
+        expect(SRC).toContain('const controlVisibilityProps = {};');
+        expect(SRC).not.toContain("'aria-hidden': true as const");
+        expect(SRC).not.toContain('tabIndex: -1,');
     });
 });
 

@@ -368,9 +368,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         showControls();
     }, [showControls]);
 
-    const controlVisibilityProps = controlsVisible
-        ? {}
-        : { tabIndex: -1, 'aria-hidden': true as const };
+    const controlVisibilityProps = {};
     const controlPointerEventsClass = controlsVisible ? 'pointer-events-auto' : 'pointer-events-none';
 
     const { avifSrcSet, webpSrcSet, jpegSrc, jpegBaseSrc } = useMemo(() => {

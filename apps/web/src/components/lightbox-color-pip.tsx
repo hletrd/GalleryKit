@@ -63,8 +63,8 @@ export function LightboxColorPip({ image, t, open, onToggle, interactive = true,
     if (!hasData) return null;
 
     const primaries = humanizeColorPrimaries(image.color_primaries);
-    const transfer = humanizeTransferFunction(image.transfer_function, t);
-    const rawDecision = image.color_pipeline_decision;
+    const transfer = isAdmin ? humanizeTransferFunction(image.transfer_function, t) : null;
+    const rawDecision = isAdmin ? image.color_pipeline_decision : undefined;
     const pipeline = humanizeColorPipelineDecision(
         rawDecision && COLOR_PIPELINE_DECISIONS.includes(rawDecision as typeof COLOR_PIPELINE_DECISIONS[number])
             ? (rawDecision as ColorPipelineDecision)
