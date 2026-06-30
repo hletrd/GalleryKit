@@ -1,69 +1,70 @@
-# Cycle 29 Debugger Review
+# Cycle 30 Debugger Review
 
-Repo: `/Users/hletrd/flash-shared/gallery`  
-HEAD reviewed: `b4fa1f64` (`fix(cycle-28): 🐛 harden restore and privacy flows`)  
-Mode: Prompt 1 only, static latent-bug/failure-mode review. No product code modified.
+Role: debugger  
+Workspace: `/Users/hletrd/flash-shared/gallery`  
+Reviewed HEAD: `666b74f8` (`fix(cycle-29): harden review findings`)  
+Date: 2026-06-30  
+Scope: Prompt 1 of cycle 30/100. Latent failure-mode review only; no fixes implemented.
 
-## Process
+## Inventory
 
-- Read `AGENTS.md` and `CLAUDE.md` first.
-- Inventoried relevant files with `rg --files`, `find .context/reviews`, and focused `rg` sweeps for TODO/FIXME, timers, abort handling, rate-limit/origin gates, cache/revalidation, and embedding/backfill paths.
-- Reviewed cross-file interactions across public routes, admin actions, upload/queue/backfill flows, semantic search, share/view counters, restore maintenance, and client stale-state surfaces.
-- Did not run the full quality gate suite; this is a review artifact only.
+Reviewed current HEAD across:
+
+- Restore/DB maintenance: `db-actions.ts`, durable/process restore maintenance, image queue quiesce/resume, background DB write drain.
+- Public APIs and guards: health/live routes, OG routes, semantic/similar search, public route rate-limit lint.
+- CLIP/semantic paths: route mode gates, sidecar backfill, unwired server action backfill.
+- Recent client changes: similar photos retry handling, nav hydration theme, topic map visibility confirmation.
+- Tests/source contracts: restore-upload lock tests, health tests, map privacy tests, semantic route tests, public-route lint tests.
+
+Validation commands:
+
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Targeted Vitest slice passed: `health-route`, `map-privacy`, `check-public-route-rate-limit`, `semantic-search-route` (79 tests).
 
 ## Confirmed Issues
 
-### DBG29-01 — Similar-photos panel permanently caches transient fetch failures
+### DBG30-01: Restore prep can leave the image-processing queue paused after a partial setup failure
 
-- Severity: Low
+- Severity: High
 - Confidence: High
-- File/region: `apps/web/src/components/similar-photos.tsx:78-108`, render feedback at `apps/web/src/components/similar-photos.tsx:137-147`.
-- Failure scenario: In production semantic mode, the photographer expands "Similar photos" and `/api/search/similar/:id` returns a transient non-OK response: 429 rate limit, 503 setup/backfill hiccup, 404 temporarily missing embedding during backfill, or a network error. `handleToggle()` sets `fetchedRef.current = true` before the request. On any non-abort failure it sets `results` to `'error'`, but never resets `fetchedRef.current`. Closing and reopening the disclosure cannot retry; the inline error is pinned until the whole photo viewer remounts or the page reloads.
-- Why confirmed: The only reset to `fetchedRef.current = false` is in the abort branch (`apps/web/src/components/similar-photos.tsx:96-99`). The non-OK branch (`:89-92`) and non-abort catch branch (`:101-102`) leave the fetched guard true.
-- Fix: Reset `fetchedRef.current = false` on retryable failures, or add an explicit retry control that clears the guard and refetches. Keep successful empty/result responses cached.
-- Suggested regression test: A component test that mocks first fetch as 503 or rejected, toggles closed/open, and asserts a second fetch occurs. Existing source-contract tests only assert the error UI exists; they do not pin retryability.
+- Classification: Confirmed latent bug
+- File/region: `apps/web/src/app/[locale]/admin/db-actions.ts:492-518`; queue pause in `apps/web/src/lib/image-queue.ts:1060-1087`.
+- Evidence: `restoreDatabase()` begins durable maintenance, then runs `flushBufferedSharedGroupViewCounts()`, `quiesceImageProcessingQueueForRestore()`, and `drainBackgroundDbWritesForRestore()` in one `try`. The `imageQueueQuiesced = true` flag is set only after all three finish. If `quiesceImageProcessingQueueForRestore()` succeeds and `drainBackgroundDbWritesForRestore()` throws, the catch returns `{ success:false }`. The finally clears maintenance, but the resume branch only runs when `restoreLifecycleVerified || imageQueueQuiesced`, so it skips `resumeImageProcessingQueueAfterRestore()` even though the queue was already paused/cleared.
+- Concrete failure scenario: An admin starts restore while a public analytics write is hung or the DB pool errors during `drainBackgroundDbWritesForRestore()`. Restore reports failure and exits maintenance, uploads become allowed again, but the in-process PQueue remains paused. New uploads can insert rows/enqueue work, but processing does not resume until a process restart/redeploy or another code path happens to start the queue.
+- Suggested fix: Set a separate `queueQuiesced`/`queuePaused` flag immediately after `quiesceImageProcessingQueueForRestore()` succeeds, before draining background writes, and resume whenever that flag is true on any exit that clears maintenance. Add a regression test where drain throws after quiesce resolves and assert resume is called.
 
 ## Likely Issues
 
-None promoted. The strongest likely candidates from prior cycles were rechecked and appear closed or intentionally constrained in the current tree:
+### DBG30-02: Unwired CLIP backfill server action still reports row-level failures as successful skips
 
-- `scripts/backfill-clip-embeddings.ts` now rejects `--production` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`apps/web/scripts/backfill-clip-embeddings.ts:101-103`).
-- `OptimisticImage` now remounts on primary `src` changes (`apps/web/src/components/optimistic-image.tsx:13-16`), which addresses the stale retry/fallback state pattern noted previously.
-- Shared-group metadata no longer performs an unthrottled share lookup; the body enforces the rate limit before `getSharedGroupCached()` (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:43-56`, `:100-108`).
+- Severity: Low while unwired; Medium if surfaced in admin UI
+- Confidence: Medium
+- Classification: Likely latent bug
+- File/region: `apps/web/src/app/actions/embeddings.ts:53-55`, `apps/web/src/app/actions/embeddings.ts:145-188`; no call sites found by `rg "backfillClipEmbeddings\\("`.
+- Evidence: The action catches all per-row embedding/upsert failures at `:181-183`, increments `skipped`, and still returns `{ status: 'ok', processed, skipped }` at `:188`. The sidecar script has stricter failure semantics and exits non-zero when rows fail.
+- Concrete failure scenario: A future settings button wires this action. Missing originals, CLIP model load errors, corrupt images, or DB upsert failures are presented as an OK backfill with skipped rows. An operator can enable production semantic search with partial/missing embeddings and no failed-id list.
+- Suggested fix: Keep the sidecar as the only supported entry by deleting/deprecating the action, or mirror sidecar behavior: collect failed IDs, log error causes server-side, return non-OK when failures occur, and distinguish expected missing-original skips from unexpected encoder/DB failures.
+
+### DBG30-03: `/api/health` restore-maintenance behavior can confuse liveness integrations
+
+- Severity: Medium
+- Confidence: High
+- Classification: Likely operational bug outside checked-in Docker path
+- File/region: `apps/web/src/app/api/health/route.ts:7-20`; Docker uses `/api/live` at `apps/web/Dockerfile:140-143` and `apps/web/deploy.sh:34-47`.
+- Evidence: The checked-in container and deploy script correctly use `/api/live`, but `/api/health` now returns `503` during restore even with `HEALTH_CHECK_DB` unset. Docs still describe `/api/health` as default liveness-only.
+- Concrete failure scenario: A custom reverse proxy, uptime checker, or orchestrator follows the README and uses `/api/health` for liveness. During a planned restore, it treats the app as failed and can alert or restart/evict the process while the restore marker is active.
+- Suggested fix: Align code/docs: either make `/api/health` readiness-only and update docs, or keep restore-maintenance 503 behind `HEALTH_CHECK_DB=true` while `/api/live` remains pure process liveness.
 
 ## Risks Needing Manual Validation
 
-### DBG29-R1 — Lightroom upload still materializes the multipart body before exact file-size rejection
+- Production semantic search still needs seeded model validation outside default CI. The gated tests prove the intended path only when `CLIP_OFFLINE_LOAD=1` / `CLIP_INTEGRATION=1` and model weights exist.
+- E2E admin specs skip locally unless `E2E_ADMIN_ENABLED=true`; CI covers the normal path, but manual remote admin E2E remains opt-in.
+- The public GET rate-limit gate now detects expensive GET routes, but it should be manually reviewed until it also proves rate-limit dominance before expensive work.
 
-- Severity: Medium if the route is exposed to untrusted PAT clients; Low if only trusted local Lightroom clients use it.
-- Confidence: Medium
-- File/region: `apps/web/src/app/api/admin/lr/upload/route.ts:85-112`, `:153-172`.
-- Failure scenario: The route rejects missing/chunked/oversized `Content-Length` before parsing and caps declared upload bytes at `MAX_UPLOAD_FILE_BYTES + SERVER_ACTION_BODY_OVERHEAD_BYTES`. However, the exact file-size check happens only after `await request.formData()`. A request with a file slightly over `MAX_UPLOAD_FILE_BYTES` but total body under the overhead allowance is fully materialized before the 413 response. On the disk-constrained/low-memory deploy host, repeated authenticated or PAT-backed oversized uploads can spike memory/temp storage before being rejected.
-- Validation needed: Confirm Next/Node multipart buffering behavior and any upstream reverse-proxy/body-size cap in production. Also confirm the real Lightroom multipart overhead required for a legitimate 200 MiB file.
-- Fix: Prefer streaming multipart parsing with a hard per-file byte cap, or enforce a tighter upstream cap for this single-file endpoint with a measured small metadata overhead. Add a route-level test around declared length near the cap and a deployment note for proxy `client_max_body_size`.
+## Final Sweep
 
-### DBG29-R2 — Unwired CLIP backfill server action reports per-row production failures as successful skips
+Rechecked previous debugger candidates against HEAD: similar-photos transient fetch retry was fixed, CLIP sidecar production mode now requires `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, share metadata avoids unthrottled key lookups, and public restore metadata guards were added.
 
-- Severity: Low while unwired; Medium if surfaced in the admin UI.
-- Confidence: Medium
-- File/region: `apps/web/src/app/actions/embeddings.ts:53-55`, `:145-188`; no UI call sites found by `rg "backfillClipEmbeddings\\("`.
-- Failure scenario: `backfillClipEmbeddings()` is exported and admin-gated, but it is currently unwired. If a future UI or script starts using it, production embedding failures from missing originals, model load errors, path resolution misses, or DB upsert exceptions are counted as `skipped` and the action still returns `{ status: 'ok', processed, skipped }`. The inner catch at `:181-183` also drops the actual error. An operator could see a successful backfill with skipped rows and no failed IDs, then enable semantic search with partial embeddings.
-- Validation needed: Confirm this action is intentionally dead code and not reachable through generated server-action manifests or future settings UI work.
-- Fix: Remove the unwired action if the sidecar is canonical, or mirror the sidecar's failure semantics: log failed image IDs, return a non-OK status when failures occur, and distinguish missing-original skips from actual encoder/upsert failures.
-
-## Covered Surface Summary
-
-- Project instructions and operational context: `AGENTS.md`, `CLAUDE.md`.
-- Upload and processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/advisory-locks.ts`.
-- Restore and DB maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/db/schema.ts`.
-- Public data and counters: `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`.
-- Semantic/CLIP paths: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/gallery-config.ts`.
-- Backfill runner: `apps/web/src/app/actions/admin-backfill.ts`, `apps/web/src/lib/admin-backfill-runner.ts`.
-- Public/admin route guards: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/lib/rate-limit.ts`, public/admin route exports under `apps/web/src/app/api`.
-- Client stale-state/timer surfaces: `apps/web/src/components/similar-photos.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/optimistic-image.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/lightbox-color-pip.tsx`.
-
-## Final Missed-Issues Sweep
-
-- Re-ran targeted searches for stale refs, timers/listeners, abort controllers, fire-and-forget promises, route rate-limit/origin gates, restore-maintenance guards, and previous-cycle finding identifiers.
-- Checked existing tests around similar route, semantic route, backfill runner, privacy fields, queue quiescence, and source contracts to avoid duplicating pinned behavior as a finding.
-- No destructive operations performed. Only this review file was updated.
+Skipped areas: full build/typecheck/e2e and live restore simulation were not run. No destructive, deploy, database, or production actions were performed. Only the two requested review artifacts were changed.
