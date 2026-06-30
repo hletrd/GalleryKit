@@ -31,8 +31,26 @@ export const APP_BACKUP_TABLES = [
 ] as const;
 
 const APP_BACKUP_TABLE_PATTERN = APP_BACKUP_TABLES.join('|');
+const APP_BACKUP_TABLE_SET = new Set<string>(APP_BACKUP_TABLES);
 const ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN = new RegExp(
     "\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\s+`?(?:" + APP_BACKUP_TABLE_PATTERN + ")`?\\s*;",
+    'gi',
+);
+const SQL_IDENTIFIER_PATTERN = '(?:`(?:``|[^`])+`|[A-Za-z0-9_$]+)';
+const SQL_WRITE_TARGET_PATTERN = new RegExp(
+    [
+        '\\b(?:',
+        'CREATE\\s+(?:TEMPORARY\\s+)?TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?',
+        '|ALTER\\s+TABLE',
+        '|INSERT\\s+(?:IGNORE\\s+)?INTO',
+        '|REPLACE(?:\\s+INTO)?',
+        '|UPDATE(?:\\s+LOW_PRIORITY)?(?:\\s+IGNORE)?',
+        ')\\s+(',
+        SQL_IDENTIFIER_PATTERN,
+        ')(?:\\s*\\.\\s*(',
+        SQL_IDENTIFIER_PATTERN,
+        '))?',
+    ].join(''),
     'gi',
 );
 
@@ -147,7 +165,55 @@ function stripSqlCommentsAndLiteralsWithCommentSpaces(input: string): string {
     ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
 }
 
+function stripSqlCommentsAndValueLiterals(input: string): string {
+    const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
+    const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '');
+    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+
+    return [
+        /'(?:''|\\.|[^'\\])*'/gs,
+        /"(?:\"\"|\\.|[^"\\])*"/gs,
+        /0x[0-9a-fA-F]+/g,
+        /b'[01]+'/g,
+        /0b[01]+/g,
+    ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
+}
+
+function normalizeSqlIdentifier(identifier: string) {
+    const trimmed = identifier.trim();
+    if (trimmed.startsWith('`') && trimmed.endsWith('`')) {
+        return trimmed.slice(1, -1).replace(/``/g, '`').toLowerCase();
+    }
+    return trimmed.toLowerCase();
+}
+
+function hasDisallowedRestoreWriteTarget(input: string) {
+    const sanitized = stripSqlCommentsAndValueLiterals(input);
+    SQL_WRITE_TARGET_PATTERN.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = SQL_WRITE_TARGET_PATTERN.exec(sanitized)) !== null) {
+        const firstIdentifier = normalizeSqlIdentifier(match[1] ?? '');
+        const secondIdentifier = match[2] ? normalizeSqlIdentifier(match[2]) : null;
+        if (!firstIdentifier) continue;
+
+        if (secondIdentifier) {
+            return true;
+        }
+
+        if (!APP_BACKUP_TABLE_SET.has(firstIdentifier)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function containsDangerousSql(input: string): boolean {
+    if (hasDisallowedRestoreWriteTarget(input)) {
+        return true;
+    }
+
     const sanitizedForms = [
         stripSqlCommentsAndLiterals(input),
         stripSqlCommentsAndLiteralsWithCommentSpaces(input),

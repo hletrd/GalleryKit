@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 import {
     beginRestoreMaintenance,
@@ -9,19 +8,28 @@ import {
 
 const RESTORE_MAINTENANCE_MARKER_FILENAME = 'restore-maintenance.json';
 
+function dirname(filePath: string) {
+    const slash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+    return slash > 0 ? filePath.slice(0, slash) : '.';
+}
+
 function getRestoreMaintenanceMarkerLocation() {
     if (process.env.NODE_ENV === 'test' && process.env.RESTORE_MAINTENANCE_MARKER_PATH) {
         return {
-            dir: path.dirname(process.env.RESTORE_MAINTENANCE_MARKER_PATH),
+            dir: dirname(process.env.RESTORE_MAINTENANCE_MARKER_PATH),
             path: process.env.RESTORE_MAINTENANCE_MARKER_PATH,
         };
     }
 
-    const dir = path.join(process.cwd(), 'data');
+    const dir = 'data';
     return {
         dir,
-        path: path.join(dir, RESTORE_MAINTENANCE_MARKER_FILENAME),
+        path: `${dir}/${RESTORE_MAINTENANCE_MARKER_FILENAME}`,
     };
+}
+
+export function getDurableRestoreMaintenanceMarkerPath() {
+    return getRestoreMaintenanceMarkerLocation().path;
 }
 
 function readDurableRestoreMaintenance() {
@@ -32,6 +40,10 @@ function readDurableRestoreMaintenance() {
         console.error('[restore] Failed to read restore maintenance marker; failing closed:', err);
         return true;
     }
+}
+
+export function isDurableRestoreMaintenanceMarked() {
+    return readDurableRestoreMaintenance();
 }
 
 function writeDurableRestoreMaintenance() {
@@ -68,12 +80,24 @@ export function syncRestoreMaintenanceFromDurable() {
 export function beginDurableRestoreMaintenance(options: { allowExisting?: boolean } = {}) {
     const started = beginRestoreMaintenance(options);
     if (started) {
-        writeDurableRestoreMaintenance();
+        try {
+            writeDurableRestoreMaintenance();
+        } catch (err) {
+            endRestoreMaintenance();
+            throw err;
+        }
     }
     return started;
 }
 
 export function endDurableRestoreMaintenance() {
-    clearDurableRestoreMaintenance();
-    endRestoreMaintenance();
+    try {
+        clearDurableRestoreMaintenance();
+    } finally {
+        endRestoreMaintenance();
+    }
+}
+
+export function clearDurableRestoreMaintenanceForRecovery() {
+    endDurableRestoreMaintenance();
 }

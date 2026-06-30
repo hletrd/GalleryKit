@@ -20,6 +20,7 @@ import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embedding-constants';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
 import { countCodePoints } from '@/lib/utils';
+import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 
 // AGG-C8-04 (run-6 cycle-8): the semantic route rejects queries shorter than this
 // many code points with HTTP 400 (api/search/semantic/route.ts: `countCodePoints(query) < 3`).
@@ -139,11 +140,13 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const modalRootRef = useRef<HTMLDivElement>(null);
     const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
     const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const requestIdRef = useRef(0);
     const semanticAbortRef = useRef<AbortController | null>(null);
     const wasOpenRef = useRef(false);
+    useModalTreeIsolation(isOpen, modalRootRef);
 
     const clearSearchState = useCallback(() => {
         requestIdRef.current++;
@@ -361,7 +364,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     }
 
     const dialog = (
-        <>
+        <div ref={modalRootRef} className="contents">
             <div
                 className="fixed inset-0 bg-black/50 z-40"
                 onClick={handleClose}
@@ -527,7 +530,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 </div>
             </div>
             </FocusTrap>
-        </>
+        </div>
     );
 
     return createPortal(dialog, document.body);

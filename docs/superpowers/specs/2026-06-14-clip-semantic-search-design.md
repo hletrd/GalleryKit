@@ -1,12 +1,12 @@
 # Design Spec — Real CLIP Semantic Search (US-P51 → production)
 
 - **Date:** 2026-06-14
-- **Status:** ✅ **SHIPPED & ACTIVATED in production** (live since 2026-06-15). The stub encoder was replaced with the real `jina-clip-v2` encoder (int8 ONNX, Matryoshka-512, `model_version` `jina-clip-v2-d512-q8`), now serving live English + Korean natural-language search and image→image "similar photos" over ~445 real embeddings. Built via the plan at `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`; activated with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (env) + `admin_settings.semantic_search_mode='production'` (DB). Production cosine threshold `0.22`.
+- **Status:** Historical implementation record. This spec records the June 2026 production launch path for the real `jina-clip-v2` encoder (int8 ONNX, Matryoshka-512, `model_version` `jina-clip-v2-d512-q8`) and the activation procedure used at that time. It is not current production-state evidence; use `CLAUDE.md` and `apps/web/README.md` for the live operator runbook and verify current embedding counts/settings from the running system before claiming activation.
 - **Scope owner:** GalleryKit (`apps/web`, Next.js 16 self-hosted photo gallery)
 
 ## 1. Problem & Goal
 
-**Historical pre-implementation context:** before the production activation recorded above, semantic search in GalleryKit was ~95% built but its encoder was a stub: `CLIP_MODEL_VERSION = 'stub-sha256-v1'`, where `embedImageStub` / `embedTextStub` produced deterministic **SHA-256-derived** 512-dim vectors. Cosine similarity between a query and an image was therefore essentially random, the admin `semantic_search_mode` could only be `disabled` or `stub`, and the search UI carried an "experimental — results may not match" disclaimer.
+**Historical pre-implementation context:** before the implementation recorded here, semantic search in GalleryKit was ~95% built but its encoder was a stub: `CLIP_MODEL_VERSION = 'stub-sha256-v1'`, where `embedImageStub` / `embedTextStub` produced deterministic **SHA-256-derived** 512-dim vectors. Cosine similarity between a query and an image was therefore essentially random, the admin `semantic_search_mode` could only be `disabled` or `stub`, and the search UI carried an "experimental — results may not match" disclaimer.
 
 **Goal (completed 2026-06-15):** replace the stub with a **real multilingual CLIP encoder**, open the config gate to `production`, recalibrate the relevance threshold, and ship two genuinely-working features — **natural-language search (Korean + English)** and **"similar photos"** — fully self-hosted (CPU, no per-query API cost, single Docker container).
 

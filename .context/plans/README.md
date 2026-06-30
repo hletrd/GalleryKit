@@ -2,8 +2,8 @@
 
 ## Active Plans
 
-- Cycle 25/100 Implementation Plan — TODO (`cycle-25-2026-06-30-plan.md`)
-- Cycle 25/100 Deferred Findings — TODO / deferred (`cycle-25-2026-06-30-deferred.md`)
+- Cycle 26/100 Implementation Plan — TODO (`cycle-26-2026-06-30-plan.md`)
+- Cycle 26/100 Deferred Findings — TODO / deferred (`cycle-26-2026-06-30-deferred.md`)
 - Cycle 23/100 Implementation Plan — TODO (`cycle-23-2026-06-30-plan.md`)
 - Cycle 23/100 Deferred Findings — TODO / deferred (`cycle-23-2026-06-30-deferred.md`)
 - Cycle 22/100 Implementation Plan — TODO (`cycle-22-2026-06-30-plan.md`)
@@ -48,6 +48,8 @@
 
 ## Completed Plans (Cycle 6 Loop)
 
+- Cycle 25/100 Implementation Plan — DONE / archived under `archive/cycle-25-2026-06-30-plan.md`
+- Cycle 25/100 Deferred Findings — archived under `archive/cycle-25-2026-06-30-deferred.md`
 - Cycle 24/100 Implementation Plan — DONE / archived under `archive/cycle-24-2026-06-30-plan.md`
 - Cycle 24/100 Deferred Findings — archived under `archive/cycle-24-2026-06-30-deferred.md`
 - Cycle 19/100 Implementation Plan — DONE (`../../plan/plan-376-cycle19-fixes.md`)

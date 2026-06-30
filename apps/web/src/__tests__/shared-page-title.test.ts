@@ -158,4 +158,27 @@ describe('shared page display titles', () => {
         expect(markup).toContain('Golden Hour');
         expect(markup).not.toContain('#Night</h1>');
     });
+
+    it('rejects over-limit shared photo lookups before data fetches', async () => {
+        preIncrementShareAttemptMock.mockReturnValue(true);
+
+        await expect(SharedPhotoPage({ params: Promise.resolve({ key: VALID_PHOTO_SHARE_KEY }) })).rejects.toThrow('notFound');
+
+        expect(getImageByShareKeyCachedMock).not.toHaveBeenCalled();
+        expect(getSeoSettingsMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects over-limit shared group lookups before data fetches', async () => {
+        preIncrementShareAttemptMock.mockReturnValue(true);
+
+        await expect(SharedGroupPage({
+            params: Promise.resolve({ key: VALID_GROUP_SHARE_KEY, locale: 'en' }),
+            searchParams: Promise.resolve({}),
+        })).rejects.toThrow('notFound');
+
+        expect(getSharedGroupCachedMock).not.toHaveBeenCalled();
+        expect(getSeoSettingsMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+    });
 });

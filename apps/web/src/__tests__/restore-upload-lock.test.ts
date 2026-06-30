@@ -13,8 +13,9 @@ describe('restore/upload writer coordination', () => {
         expect(dbRestoreLockIdx).toBeGreaterThan(-1);
         expect(source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)'))
             .toBeGreaterThan(dbRestoreLockIdx);
-        expect(source.indexOf('if (!beginDurableRestoreMaintenance({ allowExisting: true }))'))
+        expect(source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })'))
             .toBeGreaterThan(source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)'));
+        expect(source).toContain('if (!restoreMaintenanceStarted)');
         expect(source).toContain('await uploadContractLock?.release()');
     });
 
@@ -23,7 +24,7 @@ describe('restore/upload writer coordination', () => {
 
         const uploadLockIdx = source.indexOf('uploadContractLock = await acquireUploadProcessingContractLock(0)');
         const backfillGetLockIdx = source.indexOf('[LOCK_COLOR_PIPELINE_BACKFILL]');
-        const maintenanceIdx = source.indexOf('if (!beginDurableRestoreMaintenance({ allowExisting: true }))');
+        const maintenanceIdx = source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })');
         expect(uploadLockIdx).toBeGreaterThan(-1);
         expect(backfillGetLockIdx).toBeGreaterThan(uploadLockIdx);
         expect(maintenanceIdx).toBeGreaterThan(backfillGetLockIdx);
@@ -36,7 +37,7 @@ describe('restore/upload writer coordination', () => {
 
         const colorLockIdx = source.indexOf('[LOCK_COLOR_PIPELINE_BACKFILL]');
         const semanticLockIdx = source.indexOf('[LOCK_SEMANTIC_EMBEDDING_BACKFILL]');
-        const maintenanceIdx = source.indexOf('if (!beginDurableRestoreMaintenance({ allowExisting: true }))');
+        const maintenanceIdx = source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })');
         expect(colorLockIdx).toBeGreaterThan(-1);
         expect(semanticLockIdx).toBeGreaterThan(colorLockIdx);
         expect(maintenanceIdx).toBeGreaterThan(semanticLockIdx);

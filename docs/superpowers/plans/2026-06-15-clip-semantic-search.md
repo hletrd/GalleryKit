@@ -14,7 +14,7 @@
 
 **Repo rules (every commit):** GPG-sign (`git commit -S`), conventional-commit + gitmoji, NO `Co-Authored-By`, `git pull --rebase` before push, fine-grained commits. Run `npm run typecheck --workspace=apps/web` before committing test/TS changes.
 
-**Status:** ✅ **COMPLETE — all tasks shipped; feature activated live in production** (2026-06-15). The real `jina-clip-v2-d512-q8` encoder serves live ko+en natural-language + image→image "similar photos" over ~445 embeddings. See the [spec](../specs/2026-06-14-clip-semantic-search-design.md)'s status banner for the activation switches.
+**Status:** Historical completed implementation plan (2026-06-15). The checklist records the launch work for the real `jina-clip-v2-d512-q8` encoder and the activation switches used at that time. Do not treat this file as current production-state evidence or a live operator runbook; use `CLAUDE.md`, `apps/web/README.md`, and current runtime/DB checks before claiming activation, embedding counts, or mode state.
 
 ---
 

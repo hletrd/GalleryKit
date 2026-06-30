@@ -445,7 +445,16 @@ export async function restoreDatabase(formData: FormData) {
         }
         semanticBackfillLockHeld = true;
 
-        if (!beginDurableRestoreMaintenance({ allowExisting: true })) {
+        let restoreMaintenanceStarted = false;
+        let restoreMaintenanceStartError: unknown = null;
+        try {
+            restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true });
+        } catch (err) {
+            restoreMaintenanceStartError = err;
+            console.error('Failed to enter durable restore maintenance', err);
+        }
+
+        if (!restoreMaintenanceStarted) {
             // C7R-RPL-02 / AGG7R-02: explicitly RELEASE_LOCK on this
             // early-return path. The original code skipped the inner
             // try/finally whose RELEASE_LOCK statement is the only one
@@ -476,7 +485,7 @@ export async function restoreDatabase(formData: FormData) {
             }
             await uploadContractLock.release();
             uploadContractLock = null;
-            return { success: false, error: t('restoreInProgress') };
+            return { success: false, error: restoreMaintenanceStartError ? t('restoreFailed') : t('restoreInProgress') };
         }
 
         try {
@@ -495,7 +504,11 @@ export async function restoreDatabase(formData: FormData) {
             return restoreResult;
         } finally {
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
-                endDurableRestoreMaintenance();
+                try {
+                    endDurableRestoreMaintenance();
+                } catch (err) {
+                    console.error('Failed to clear durable restore maintenance marker', err);
+                }
                 if (restoreLifecycleVerified || imageQueueQuiesced) {
                     await resumeImageProcessingQueueAfterRestore().catch((err) => {
                         console.error('Failed to resume image-processing queue after restore', err);

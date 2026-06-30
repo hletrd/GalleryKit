@@ -1,59 +1,52 @@
-# Product Marketer Reviewer - Cycle 25
+# Cycle 26 Product Marketer Reviewer
 
-Reviewed HEAD: `4cb1258ba0b2cca689846a85423264edc2d96b90`
+Date: 2026-06-30
+Role: product-marketer-reviewer
+Repo: `/Users/hletrd/flash-shared/gallery`
+Reviewed HEAD: `5eb711e7305d`
 
-Review mode: read-only product / market / documentation-positioning review, treated as a code review. I wrote this report artifact only; no source, config, test, commit, push, or deploy action was performed.
+## Inventory
+
+Read first: `AGENTS.md`, `CLAUDE.md`.
+
+Product and marketing inventory covered:
+
+- Root `README.md`, `apps/web/README.md`, `.env.local.example`, `.env.deploy.example`, nginx comments, Docker/deploy docs, and site config example.
+- Localized user/admin copy in `apps/web/messages/en.json` and `apps/web/messages/ko.json`.
+- Product-claim implementation anchors for finished-photo positioning, no payment/editing/culling/scoring surface, local-only storage positioning, semantic-search gates, Google Analytics opt-in, privacy copy, HDR/color honesty, and external upload API wording.
+- Public/admin UI surfaces where positioning appears in-product: privacy page, admin settings, upload/tokens copy, search/semantic search copy, color/HDR settings.
 
 ## Findings
 
-### PMR-25-01 - Fresh-install database onboarding uses three incompatible credential/name examples
+### C26-PMR-01 - Primary admin settings copy blends photographer decisions with operator runbook detail
 
 - Severity: Medium
-- Confidence: High
-- Risk type: Confirmed onboarding / conversion blocker
-- Evidence:
-  - Root installation creates database/user `gallerykit`: `README.md:106-110`.
-  - The same root README later tells operators to fill `DB_USER=your_user` and `DB_NAME=gallery`: `README.md:134-141`.
-  - The app README also creates database/user `gallerykit`: `apps/web/README.md:9-20`.
-  - The copied environment template defaults to `DB_USER=gallery` and `DB_NAME=gallery`: `apps/web/.env.local.example:1-7`.
-- Concrete failure scenario: A new self-hosting evaluator follows the quick start, runs the MySQL commands that create only `gallerykit`/`gallerykit`, copies `.env.local.example`, sets the password, and runs `npm run init --workspace=apps/web`. The init process then attempts to connect as `gallery` to database `gallery`, which was never created, causing an access-denied or unknown-database failure before the product can be evaluated.
-- Suggested fix: Pick one canonical local install identity and use it everywhere. The least disruptive path is to change `.env.local.example` and the root env snippet to `DB_USER=gallerykit` and `DB_NAME=gallerykit`, with `DB_PASSWORD=<change-me>` or an explicit "replace this with the password from the CREATE USER command" note. Alternatively change both README SQL blocks to create `gallery`/`gallery`; do not leave the quick-start SQL and copied env template out of sync.
+- Confidence: Medium
+- File and lines:
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:296-328`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:741-789`
+  - `apps/web/messages/en.json:748-781`
+  - `apps/web/messages/ko.json:748-781`
+- Failure scenario: A photographer-admin trying to decide whether to enable semantic search or re-encode existing photos has to parse implementation terms such as CLIP, deterministic placeholder embeddings, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, stored `production` values, sidecar backfill, `--force-reencode`, CPU/disk-heavy live-host work, and pipeline versions inside the primary settings flow. The product promise is self-hosted finished-photo publishing, but the control surface reads like an operator runbook, especially in Korean where the paragraphs are long and dense.
+- Fix: Split the copy into outcome-first primary text and collapsible/operator-detail text. The primary controls should say what visitors will see, whether existing photos need processing, and what mode is safe for normal admins. Move env flags, sidecar commands, production DB rows, and `--force-reencode` into an "Operator details" disclosure or docs link. Rewrite Korean text as shorter native UI copy instead of a line-for-line technical explanation.
 
-### PMR-25-02 - Nginx deploy comments still frame the upload route as a Lightroom publish-plugin integration
+## Prior Product-Issue Recheck
 
-- Severity: Low
-- Confidence: High
-- Risk type: Confirmed deploy/operator positioning drift
-- Evidence:
-  - Current product docs say the upload route is an external-client API contract, not a bundled Lightroom Classic plugin: `README.md:205-214`, `apps/web/README.md:82-91`.
-  - Admin copy tells operators GalleryKit exposes the API endpoint and does not bundle or distribute a Lightroom Classic plugin: `apps/web/messages/en.json:830-835`.
-  - CLAUDE.md states the same product boundary while documenting the token model: `CLAUDE.md:160`.
-  - The shipped nginx template still labels the route "Lightroom Classic publish-plugin upload" and warns about "breaking the LR publish integration": `apps/web/nginx/default.conf:124-130`.
-- Concrete failure scenario: An operator adapting the deployment template reads the nginx comments, then documents or sells the deployment internally as including a Lightroom Classic publish-plugin integration. That conflicts with the user-facing README/admin contract and creates avoidable support pressure when no plugin is bundled.
-- Suggested fix: Reword the nginx comment to match the current positioning, for example "PAT-authenticated external upload API" and "external upload clients." Keep the `/api/admin/lr/upload` path and body-size rationale, but avoid implying a shipped Lightroom plugin or maintained Lightroom integration surface.
+- Fixed: the fresh-install DB examples now consistently use `gallerykit` in `README.md`, `apps/web/README.md`, and `apps/web/.env.local.example`.
+- Fixed: nginx upload-route comments now say `PAT-authenticated external upload API` and `external publish clients`, no longer implying a bundled Lightroom publish plugin.
 
-## Inventory Covered
+## Validated Claims With No New Finding
 
-I inventoried and inspected the product-facing surfaces rather than sampling:
-
-- Product and operator docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.env.deploy.example`, `apps/web/.env.local.example`, deploy scripts, Dockerfile, Compose, nginx, site config examples, and package metadata.
-- Localized copy: full `apps/web/messages/en.json` and `apps/web/messages/ko.json`, with focused checks around privacy, analytics, semantic search, upload tokens, HDR/color, auto alt text, settings, navigation, errors, and public/admin labels.
-- Public routes and metadata: every public `page.tsx` / `layout.tsx` / feed / upload route under `apps/web/src/app/[locale]/(public)/`, plus root `manifest.ts`, `robots.ts`, `sitemap.ts`, `feed.xml/route.ts`, `not-found.tsx`, `error.tsx`, and `global-error.tsx`.
-- Admin and API surfaces: admin dashboard, settings, SEO, tokens, analytics, db, categories, tags, users, login/layout pages, admin upload API, health/live, semantic search, similar search, OG routes, and upload-serving routes.
-- Feature-claim implementation checks: `gallery-config-shared.ts`, `gallery-config.ts`, semantic search routes/actions, image-processing/color/HDR support, privacy/analytics storage paths, upload token schema, and source-contract tests that lock product claims.
-
-## Validated Claims With No Finding
-
-- Finished-photo positioning is consistent: README says GalleryKit is for published edited work and explicitly not for editing, culling, scoring, proofing, payment, or hosted SaaS workflows; code/test sweeps did not find a revived payment or scoring surface.
-- Semantic search positioning is honest: docs and admin copy describe disabled-by-default, stub-vs-production behavior, operator env opt-in, model-weight seeding, and backfill requirements; config and route code enforce those gates.
-- Google Analytics positioning is aligned: file-backed `google_analytics_id` defaults empty, public layout injects GA only for a valid configured ID, and privacy copy distinguishes first-party analytics from third-party GA.
-- Storage positioning remains local-filesystem only in product docs; I did not find S3/MinIO exposed as a supported admin feature.
-- Upload API docs and admin copy mostly match the current product boundary: external PAT-authenticated API, no bundled Lightroom Classic plugin. The only drift found is the nginx comment above.
-
-## Missed-Issue Sweep
-
-Final sweeps searched for database onboarding names, Lightroom/plugin wording, S3/MinIO, Stripe/payment/paid-download terms, editing/culling/scoring claims, Google Analytics claims, semantic-search mode gates, auto-alt/Firenze-style future-feature wording, HDR planned-output wording, public route metadata, and deploy/onboarding snippets. No additional product-facing mismatch rose above the reporting threshold.
+- Finished-photo positioning is consistent: docs say GalleryKit is not for editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
+- Payment/Stripe surfaces remain absent from the reviewed product copy and route inventory.
+- Semantic search is honestly positioned as disabled by default and operator-enabled for production.
+- Google Analytics copy remains opt-in and distinguishes third-party GA from first-party local analytics.
+- Storage positioning remains local/self-hosted; no S3/MinIO switching is marketed as a supported admin feature.
+- Upload API wording is now aligned around PAT-authenticated external clients and no bundled Lightroom Classic plugin.
 
 ## Verification
 
-Validation was static inspection and repository search only, appropriate for a read-only review report. I did not run lint, typecheck, build, unit tests, e2e tests, commits, pushes, or deploys because the requested deliverable was a review artifact, not an implementation change.
+Static product-copy and implementation-claim sweep plus browser checks of public privacy/search/error surfaces. Targeted UI/a11y tests passed: 4 files, 43 tests. No source code beyond these review artifacts was changed.
+
+## Missed-Issue Sweep
+
+Searched for database onboarding names, Lightroom/plugin wording, S3/MinIO claims, Stripe/payment/paid-download terms, editing/culling/scoring/proofing claims, Google Analytics claims, semantic-search gate wording, HDR planned-output wording, public metadata/privacy claims, and deploy/onboarding snippets. No additional product-marketing mismatch rose above the reporting threshold.

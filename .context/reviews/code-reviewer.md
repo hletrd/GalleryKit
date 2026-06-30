@@ -1,93 +1,61 @@
-# Cycle 25 Code Review
+# Cycle 26 Code Review
 
-Reviewer: cycle-25 code-reviewer
+Reviewer: cycle-26 code-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `4cb1258ba0b2cca689846a85423264edc2d96b90`
+HEAD reviewed: `d13d66377e6952ae974a6ee3d29ce52f0aa77640`
 Date: 2026-06-30
 
-## Scope And Method
+## Inventory
 
-I read the current repo `AGENTS.md` and `CLAUDE.md` first, then rebuilt the review context from the current tree instead of carrying forward earlier cycle assumptions. The user instruction for this cycle was to review only, write this report, and not commit or push.
+Read first, before inventory/review: `AGENTS.md`, `CLAUDE.md`.
 
 Tracked file inventory from `git ls-files`:
 
 | Area | Count |
 | --- | ---: |
-| Source outside tests | 239 |
-| Unit-test area files | 274 |
-| E2E files | 8 |
+| App Router/API/actions | 77 |
+| Components | 57 |
+| Shared/domain/runtime libs | 98 |
+| DB schema | 3 |
+| Unit/source-contract tests | 274 |
+| E2E tests | 8 |
 | Scripts | 27 |
 | Drizzle migrations/meta | 31 |
-| Locale messages | 2 |
-| Public assets | 9 |
-| Other app files | 26 |
-| Context/review history | 1771 |
-| Plans | 180 |
+| Other app/config/assets | 42 |
+| Review history | 1678 |
+| Plans | 275 |
 | Docs | 2 |
 | Root/config/other | 16 |
-| Total tracked files | 2585 |
+| Total tracked files | 2588 |
 
-Focused inspection covered the current application, data, auth, migration, script, and test surfaces that carry the highest logic and maintainability risk:
-
-- Root/project docs and package manifests: `AGENTS.md`, `CLAUDE.md`, `package.json`, `apps/web/package.json`.
-- Auth/session/security boundaries: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/proxy.ts`, admin API routes, action-origin lint coverage.
-- Data and schema path: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/scripts/migrate.js`, committed Drizzle SQL/meta.
-- Public mutation and rate-limit surfaces: `apps/web/src/app/actions/public.ts`, public API routes, auth actions, sharing actions.
-- Admin mutation surfaces: image, collection, topic, tag, settings, SEO, LR-token, embedding, backfill, and DB action files.
-- Upload and generated-file paths: `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/upload-paths.ts`, LR upload API, download API.
-- Search and semantic search paths: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/lib/smart-collections.ts`.
-- Sitemap/feed/robots paths and related tests.
-- Broad sweeps for unsafe SQL, filesystem deletion, auth bypass patterns, lint suppressions, TODO/FIXME markers, direct env usage, raw response construction, and suspicious script behavior.
+Review focus: whole-repo code quality, logic, maintainability, correctness, cross-file interactions, and the delta since cycle 25 (`4cb1258b..HEAD`). Deep inspection covered restore maintenance, DB restore, image queue quiescing/resume, public analytics rate limiting, action-origin linting, deploy/entrypoint scripts, changed tests, and broad `rg` sweeps for unsafe SQL, filesystem side effects, server/client boundary issues, broad action imports, ignored promises, and TODO/suppression hotspots.
 
 ## Findings
 
-No confirmed code quality, logic, security, or maintainability findings were found in the reviewed current tree.
+### C26-CODE-HIGH-01 - Durable restore marker I/O can wedge maintenance state
 
-Several issues from older review artifacts were explicitly rechecked and not carried forward because the current source no longer supports them as confirmed defects. For example, semantic search now filters against processed images during candidate collection, migration/schema snippets that appeared duplicated in truncated terminal output were valid in the actual files, and sitemap DB unavailability during local build is covered by fallback behavior and tests.
+Severity: High
+Confidence: High
+Region: `apps/web/src/lib/restore-maintenance-durable.ts:68-78`, called from `apps/web/src/app/[locale]/admin/db-actions.ts:448` and `apps/web/src/app/[locale]/admin/db-actions.ts:498`
 
-## Likely Risks
+Failure scenario:
+`beginDurableRestoreMaintenance()` sets the process-local restore flag before writing `data/restore-maintenance.json`. If `fs.mkdirSync` or `fs.writeFileSync` throws because the bind mount is read-only, full, or permission-broken, the exception aborts `restoreDatabase()` before the inner cleanup block is entered. The outer `finally` releases advisory locks, but no code clears the in-process maintenance flag. The current Node process then rejects uploads/admin mutations/analytics as "restore in progress" until restart.
 
-No likely risks were strong enough to promote to findings without inventing failure assumptions beyond the inspected code and available validation.
+The end path has the same exception-ordering problem. `endDurableRestoreMaintenance()` unlinks the marker before calling `endRestoreMaintenance()`. If `fs.unlinkSync` throws after a successful restore, `restoreDatabase()` exits its cleanup block before clearing maintenance or resuming the quiesced image-processing queue, leaving the process and queue wedged even though the DB restore may have completed.
 
-## Manual-Validation Risks
+Concrete fix:
+Make the durable lifecycle exception-safe and atomic. On begin, either write the marker first and then set process state, or catch marker-write failure and immediately `endRestoreMaintenance()` before rethrowing/returning a failed restore result. Prefer write-to-temp + fsync/rename for the marker. On end, use `try/finally` so process cleanup and queue resume cannot be skipped by marker cleanup failure, and make `restoreDatabase()` catch/report marker cleanup errors explicitly. Add tests for marker write failure and marker unlink failure that assert maintenance state is cleared or intentionally preserved with a surfaced error and that the queue resume path is not skipped accidentally.
 
-These are not confirmed defects. They are environment-dependent areas that cannot be fully proven from the local review alone.
+## Evidence
 
-| Area | Severity | Confidence | Region | Risk | Suggested validation |
-| --- | --- | --- | --- | --- | --- |
-| Production DB-backed deploy behavior | Medium | Medium | `apps/web/scripts/migrate.js`, `apps/web/deploy.sh`, DB action scripts | Local validation did not connect to the production-style MySQL instance, so restore/import/backfill behavior was reviewed statically and through existing tests rather than exercised against live production-like data. | Run the normal deploy/migration path in the intended environment and confirm migration journal hashes, schema reconciliation, and backup/restore smoke checks. |
-| Semantic ranking quality | Low | Medium | `apps/web/src/app/api/search/semantic/route.ts`, CLIP embedding data | The query path is tested and statically reviewed, but relevance thresholds and ranking quality depend on the production embedding corpus. | Validate representative Korean/English photographer queries against production or a recent production clone. |
-| Single-writer/runtime assumptions | Medium | Medium | `apps/web/src/lib/*.ts`, background/backfill/admin mutation paths | The docs describe a single-instance runtime posture. The code has local transaction and uniqueness protections in important areas, but a true multi-writer topology would still need environment-level validation. | Confirm production runs one writer instance or add concurrency/load tests before changing deployment topology. |
+Commands run:
 
-## Validation Evidence
+- `git status --short` - clean before writing this report.
+- `git ls-files` inventory - 2588 tracked files.
+- `npm test --workspace=apps/web -- restore-maintenance public-actions` - passed, 2 files / 28 tests.
+- `npm run lint:action-origin --workspace=apps/web` - passed, all mutating server actions covered.
+- Static sweeps over `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, deploy scripts, and app config for filesystem side effects, raw SQL/query surfaces, broad action imports, public analytics recorders, restore marker usage, exception ordering, and lint suppressions.
 
-Commands run from repo root:
+## Final Missed-Issues Sweep
 
-- `npm run lint --workspace=apps/web` - passed.
-- `npm run lint:api-auth --workspace=apps/web` - passed.
-- `npm run lint:action-origin --workspace=apps/web` - passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-- `npm run typecheck --workspace=apps/web` - passed.
-- `npm test --workspace=apps/web` - passed: 267 passed, 2 skipped test files; 2498 passed, 4 skipped tests.
-- `npm run build --workspace=apps/web` - passed. Build emitted the expected local sitemap DB fallback warning because no local MySQL was available on `127.0.0.1:3306`; the fallback path is covered by existing sitemap/robots tests and did not fail the build.
-
-One invalid validation attempt was discarded: `npm test --workspace=apps/web -- --runInBand` failed because Vitest does not support Jest's `--runInBand` flag. The correct Vitest command above was run afterward and passed.
-
-## Final Sweep
-
-Final sweeps included:
-
-- `git status --short` / `git diff --stat` to identify dirty worktree state.
-- Broad `rg` scans over source, scripts, migrations, tests, and config for auth, mutation, filesystem, SQL, env, lint-disable, TODO/FIXME, and unsafe-pattern indicators.
-- Line-numbered inspection of any suspicious snippets before deciding whether they were real. Tool-output truncation caused a few false positives; each was checked against the actual file before being discarded.
-
-Skipped or low-depth areas:
-
-- Historical `.context/` review and plan files were inventoried but not deeply rereviewed as source of truth, except to avoid carrying stale findings into this cycle.
-- Generated/build/dependency outputs such as `node_modules`, `.next`, and cache directories were excluded from review.
-- Binary/static public assets were inventoried but not visually audited because this was a code quality, logic, and maintainability review.
-- Playwright E2E tests were not run because the inspected changes were review-only and the standard lint/type/unit/build gates already passed. No browser-flow defect was identified that required E2E confirmation.
-
-## Worktree Note
-
-The worktree already contained an unrelated modification to `.context/reviews/verifier.md` before this report was written. I did not inspect it as a finding source, did not modify it, and did not revert it.
+Rechecked the confirmed finding against `restoreDatabase()` cleanup order, image queue quiesce/resume, and marker startup sync. Rechecked public analytics rate-limit ordering and action-origin scanner fixtures; no additional code-review findings met the confidence bar. Existing cycle-25 architecture backlog items remain separate and are not duplicated here.

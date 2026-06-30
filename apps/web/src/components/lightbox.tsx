@@ -12,6 +12,7 @@ import { isEditableTarget } from '@/components/photo-viewer';
 import { LightboxColorPip } from '@/components/lightbox-color-pip';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize, SLIDESHOW_INTERVAL_DEFAULT } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText } from '@/lib/photo-title';
+import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -97,6 +98,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     const previouslyFocusedRef = useRef<HTMLElement | null>(null);
     const dialogRef = useRef<HTMLDivElement>(null);
     const slideshowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    useModalTreeIsolation(true, dialogRef);
     // Stable ref so the interval callback always sees the latest advance function
     const onSlideshowAdvanceRef = useRef(onSlideshowAdvance);
     useEffect(() => { onSlideshowAdvanceRef.current = onSlideshowAdvance; }, [onSlideshowAdvance]);

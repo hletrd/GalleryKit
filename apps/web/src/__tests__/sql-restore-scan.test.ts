@@ -6,11 +6,11 @@ import * as schema from '@/db/schema';
 
 describe('stripSqlCommentsAndLiterals', () => {
     it('masks quoted strings before scanning', () => {
-        const sanitized = stripSqlCommentsAndLiterals("INSERT INTO notes VALUES ('Grant Morrison', 'PREPARE for launch');");
+        const sanitized = stripSqlCommentsAndLiterals("INSERT INTO images VALUES ('Grant Morrison', 'PREPARE for launch');");
 
         expect(sanitized).not.toContain('Grant');
         expect(sanitized).not.toContain('PREPARE');
-        expect(sanitized).toContain('INSERT INTO notes VALUES');
+        expect(sanitized).toContain('INSERT INTO images VALUES');
     });
 
     it('strips block comments so split keywords still scan as one token', () => {
@@ -47,7 +47,52 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('DROP TEMPORARY TABLE images;')).toBe(false);
         expect(containsDangerousSql('DELETE FROM images WHERE id = 1;')).toBe(true);
         expect(containsDangerousSql('TRUNCATE TABLE sessions;')).toBe(true);
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('DROP TABLE images');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('DROP TABLE images');")).toBe(false);
+    });
+
+    it('blocks restore writes to schema-qualified targets', () => {
+        const statements = [
+            'CREATE TABLE otherdb.images (id INT);',
+            'ALTER TABLE otherdb.images ADD COLUMN title varchar(255);',
+            'INSERT INTO otherdb.images VALUES (1);',
+            'REPLACE INTO otherdb.images VALUES (1);',
+            'UPDATE otherdb.images SET title = "x";',
+            'CREATE TABLE `otherdb`.`images` (id INT);',
+            'INSERT INTO `otherdb`.`images` VALUES (1);',
+        ];
+
+        for (const statement of statements) {
+            expect(containsDangerousSql(statement), statement).toBe(true);
+        }
+    });
+
+    it('blocks restore writes to unknown tables in the current schema', () => {
+        const statements = [
+            'CREATE TABLE unknown_table (id INT);',
+            'ALTER TABLE unknown_table ADD COLUMN title varchar(255);',
+            'INSERT INTO unknown_table VALUES (1);',
+            'REPLACE INTO unknown_table VALUES (1);',
+            'UPDATE unknown_table SET title = "x";',
+        ];
+
+        for (const statement of statements) {
+            expect(containsDangerousSql(statement), statement).toBe(true);
+        }
+    });
+
+    it('allows restore writes to known app tables in the current schema', () => {
+        const statements = [
+            'CREATE TABLE `images` (`id` int NOT NULL);',
+            'CREATE TABLE IF NOT EXISTS topics (`slug` varchar(255) NOT NULL);',
+            'ALTER TABLE images DISABLE KEYS;',
+            'INSERT INTO `images` VALUES (1);',
+            'REPLACE INTO tags VALUES (1, "travel");',
+            'UPDATE topic_views SET view_count = 1;',
+        ];
+
+        for (const statement of statements) {
+            expect(containsDangerousSql(statement), statement).toBe(false);
+        }
     });
 
     it('blocks dangerous multi-token statements split by block comments', () => {
@@ -118,7 +163,7 @@ describe('containsDangerousSql', () => {
     it('blocks CREATE DATABASE (C4R-RPL2-05 defence-in-depth)', () => {
         expect(containsDangerousSql('CREATE DATABASE other;')).toBe(true);
         expect(containsDangerousSql('CREATE  DATABASE  IF NOT EXISTS other;')).toBe(true);
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('CREATE DATABASE tutorial');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('CREATE DATABASE tutorial');")).toBe(false);
     });
 
     it('blocks CALL proc_name (C5R-RPL-01 defence-in-depth)', () => {
@@ -126,7 +171,7 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('CALL dangerous.proc();')).toBe(true);
         expect(containsDangerousSql('CALL  some_proc (1, 2);')).toBe(true);
         // Benign fixtures — "CALL" word inside string data, not a statement
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('Please CALL me back');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('Please CALL me back');")).toBe(false);
         // Normal mysqldump output never contains CALL; should pass unaffected
         expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
     });
@@ -136,7 +181,7 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('HANDLER  images READ NEXT;')).toBe(true);
         expect(containsDangerousSql('HANDLER mydb.images OPEN;')).toBe(true);
         // Benign — "HANDLER" word inside string data
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('Error HANDLER test');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('Error HANDLER test');")).toBe(false);
         // Normal mysqldump output never contains HANDLER
         expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
     });
@@ -144,23 +189,23 @@ describe('containsDangerousSql', () => {
     it('blocks DO statements that can hold the restore session open', () => {
         expect(containsDangerousSql('DO SLEEP(5);')).toBe(true);
         expect(containsDangerousSql('DO 1;')).toBe(true);
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('DO SLEEP(5);');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('DO SLEEP(5);');")).toBe(false);
     });
 
     it('blocks REVOKE (C5R-RPL-01 defence-in-depth)', () => {
         expect(containsDangerousSql("REVOKE ALL ON *.* FROM 'other'@'%';")).toBe(true);
         expect(containsDangerousSql("REVOKE SELECT ON db.tbl FROM 'u'@'%';")).toBe(true);
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('Never REVOKE consent');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('Never REVOKE consent');")).toBe(false);
     });
 
     it('blocks RENAME USER (C5R-RPL-01 defence-in-depth)', () => {
         expect(containsDangerousSql("RENAME USER 'foo'@'%' TO 'bar'@'%';")).toBe(true);
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('rename user manual');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('rename user manual');")).toBe(false);
     });
 
     it('ignores dangerous-looking words inside benign data strings', () => {
-        expect(containsDangerousSql("INSERT INTO notes VALUES ('Grant Morrison');")).toBe(false);
-        expect(containsDangerousSql("INSERT INTO captions VALUES ('Prepare for landing');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO images VALUES ('Grant Morrison');")).toBe(false);
+        expect(containsDangerousSql("INSERT INTO tags VALUES ('Prepare for landing');")).toBe(false);
     });
 
 

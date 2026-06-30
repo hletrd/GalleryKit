@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { beginRestoreMaintenance, cleanupOriginalIfRestoreMaintenanceBegan, endRestoreMaintenance, getRestoreMaintenanceMessage, isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
-import { beginDurableRestoreMaintenance } from '@/lib/restore-maintenance-durable';
+import { beginRestoreMaintenance, cleanupOriginalIfRestoreMaintenanceBegan, endRestoreMaintenance, getRestoreMaintenanceMessage, isRestoreMaintenanceActive, setRestoreMaintenanceActiveForProcess } from '@/lib/restore-maintenance';
+import {
+    beginDurableRestoreMaintenance,
+    clearDurableRestoreMaintenanceForRecovery,
+    endDurableRestoreMaintenance,
+    isDurableRestoreMaintenanceMarked,
+} from '@/lib/restore-maintenance-durable';
 
 describe('restore maintenance state', () => {
     let tempDir: string;
@@ -74,5 +79,32 @@ describe('restore maintenance state', () => {
         expect(reloadedProcess.isRestoreMaintenanceActive()).toBe(true);
         reloadedDurable.endDurableRestoreMaintenance();
         expect(reloadedProcess.isRestoreMaintenanceActive()).toBe(false);
+    });
+
+    it('clears process maintenance if durable marker creation fails', () => {
+        vi.stubEnv('RESTORE_MAINTENANCE_MARKER_PATH', tempDir);
+
+        expect(() => beginDurableRestoreMaintenance()).toThrow();
+        expect(isRestoreMaintenanceActive()).toBe(false);
+    });
+
+    it('clears process maintenance even when durable marker removal fails', () => {
+        const markerDir = join(tempDir, 'restore-maintenance.json');
+        mkdirSync(markerDir);
+
+        expect(beginRestoreMaintenance()).toBe(true);
+        expect(() => endDurableRestoreMaintenance()).toThrow();
+        expect(isRestoreMaintenanceActive()).toBe(false);
+    });
+
+    it('exposes an explicit recovery helper for stale durable markers', () => {
+        expect(beginDurableRestoreMaintenance()).toBe(true);
+        setRestoreMaintenanceActiveForProcess(false);
+
+        expect(isDurableRestoreMaintenanceMarked()).toBe(true);
+        clearDurableRestoreMaintenanceForRecovery();
+
+        expect(isDurableRestoreMaintenanceMarked()).toBe(false);
+        expect(isRestoreMaintenanceActive()).toBe(false);
     });
 });

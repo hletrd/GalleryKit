@@ -23,6 +23,7 @@ import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { buildDownloadFilename } from '@/lib/download-filename';
+import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -48,11 +49,13 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
+    const modalRootRef = useRef<HTMLDivElement>(null);
     const dragHandleRef = useRef<HTMLButtonElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
     const prevIsOpenRef = useRef(isOpen);
+    useModalTreeIsolation(isOpen, modalRootRef);
 
     // Reset to 'peek' when transitioning from closed to open.
     // The ref guard prevents unnecessary re-renders when isOpen is already true.
@@ -172,7 +175,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     );
 
     return (
-        <>
+        <div ref={modalRootRef} className="contents">
             {/* Backdrop — only shown when expanded */}
             {sheetState === 'expanded' && (
                 <div
@@ -542,6 +545,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                 )}
             </div>
             </FocusTrap>
-        </>
+        </div>
     );
 }
