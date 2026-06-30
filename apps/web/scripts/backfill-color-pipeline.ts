@@ -104,7 +104,7 @@ interface ReprocessDerivativeOnly {
 }
 
 interface ReprocessResult {
-    outcome: 'processed' | 'skipped' | 'error';
+    outcome: 'processed' | 'skipped' | 'error' | 'deleted-mid-reencode';
     signals?: ReprocessSignals;
     /** Set ONLY on the detection-failure branch (encode ok, detection threw). */
     derivativeOnly?: ReprocessDerivativeOnly;
@@ -136,6 +136,14 @@ export async function cleanupDeletedMidReencodeVariants(files: BatchFilenames): 
             );
         }
     }
+}
+
+function rowFilenames(row: ImageRow): BatchFilenames {
+    return {
+        filename_webp: row.filename_webp,
+        filename_avif: row.filename_avif,
+        filename_jpeg: row.filename_jpeg,
+    };
 }
 
 /**
@@ -195,7 +203,11 @@ interface BackfillSettings {
 // Single-row reprocessor — exported for unit tests.
 // ---------------------------------------------------------------------------
 
-export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): Promise<ReprocessResult> {
+export async function reprocessRow(
+    row: ImageRow,
+    settings?: BackfillSettings,
+    rowExists?: (id: number) => Promise<boolean>,
+): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     if (!originalPath) {
         return { outcome: 'skipped' };
@@ -231,6 +243,16 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
         avif10bit = result.avif10bit;
     } catch (err) {
         console.error(`  [error] id=${row.id}: ${err}`);
+        if (rowExists) {
+            const stillExists = await rowExists(row.id).catch((existsErr) => {
+                console.warn(`  [warn] id=${row.id}: could not verify row existence after encode failure: ${existsErr}`);
+                return true;
+            });
+            if (!stillExists) {
+                await cleanupDeletedMidReencodeVariants(rowFilenames(row));
+                return { outcome: 'deleted-mid-reencode' };
+            }
+        }
         return { outcome: 'error' };
     }
 
@@ -406,6 +428,12 @@ async function main() {
         return updateBatch.length + derivativeBatch.length;
     }
 
+    async function rowExists(id: number): Promise<boolean> {
+        const raw = await db.execute(sql`SELECT id FROM images WHERE id = ${id} LIMIT 1`);
+        const rowsForId = (Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw) as unknown[];
+        return Array.isArray(rowsForId) && rowsForId.length > 0;
+    }
+
     async function flushBatch(): Promise<void> {
         if (pendingUpdates() === 0) return;
         const items = updateBatch.splice(0, updateBatch.length);
@@ -475,14 +503,10 @@ async function main() {
     const queuedTasks: Promise<void>[] = [];
     for (const [index, row] of rows.entries()) {
         queuedTasks.push(queue.add(async () => {
-            const result = await reprocessRow(row, backfillSettings);
+            const result = await reprocessRow(row, backfillSettings, rowExists);
             if (result.outcome === 'processed') {
                 processed++;
-                const files: BatchFilenames = {
-                    filename_webp: row.filename_webp,
-                    filename_avif: row.filename_avif,
-                    filename_jpeg: row.filename_jpeg,
-                };
+                const files = rowFilenames(row);
                 if (result.signals) {
                     updateBatch.push({ id: row.id, signals: result.signals, files });
                 } else if (result.derivativeOnly) {
@@ -498,6 +522,8 @@ async function main() {
                 }
             } else if (result.outcome === 'skipped') {
                 skipped++;
+            } else if (result.outcome === 'deleted-mid-reencode') {
+                deletedMidReencode++;
             } else {
                 errors++;
             }

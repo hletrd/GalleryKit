@@ -4,10 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- No active current-cycle plan after Cycle 45 completion.
+- Cycle 46/100 Implementation Plan — scheduled fixes for deleted-mid-reencode encode-failure cleanup and SW image-cache offline expiry (`cycle-46-2026-07-01-plan.md`)
+- Cycle 46/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-46-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 46/100 Implementation Plan — active (`cycle-46-2026-07-01-plan.md`)
+- Cycle 46/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-46-2026-07-01-deferred.md`)
 - Cycle 45/100 Implementation Plan — no source fixes scheduled; convergence docs committed/pushed/deployed; deploy evidence recorded in plan (`cycle-45-2026-07-01-plan.md`)
 - Cycle 45/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-45-2026-07-01-deferred.md`)
 - Cycle 44/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-44-2026-07-01-plan.md`)

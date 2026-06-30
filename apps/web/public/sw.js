@@ -3,7 +3,7 @@
  *
  * Strategies:
  *  - Image derivatives (/uploads/avif|webp|jpeg/): stale-while-revalidate,
- *    50 MB LRU cap, admin-route bypass.
+ *    50 MB LRU cap, 1 h failed-probe/offline stale cap, admin-route bypass.
  *  - HTML routes: network-first, 24 h OFFLINE-ONLY fallback cache.
  *    R4C6 COR-R4C6-05: dynamic gallery/photo pages set revalidate = 0
  *    rendering; Next.js emits no-cache response headers for dynamically
@@ -23,12 +23,13 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '533c2634-p7';
+const SW_VERSION = '9aff70f3-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024; // 50 MB
+const IMAGE_MAX_STALE_MS = 60 * 60 * 1000; // 1 h, mirrors derivative max-age
 const HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 h
 const MAX_HTML_ENTRIES = 50; // cap HTML cache to avoid unbounded growth
 // AGG-R8-05 (run-8 c2): worst-case bound for the synchronous HEAD ETag probe
@@ -206,6 +207,34 @@ async function responseSize(response) {
   return (await response.clone().blob()).size;
 }
 
+function responseWithCacheTimestamp(response) {
+  const headers = new Headers(response.headers);
+  headers.set('sw-cached-at', String(Date.now()));
+  return new Response(response.clone().body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function cachedImageAge(response) {
+  const cachedAt = Number(response.headers.get('sw-cached-at'));
+  if (!Number.isFinite(cachedAt) || cachedAt <= 0) {
+    return Infinity;
+  }
+  return Date.now() - cachedAt;
+}
+
+async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
+  const age = cachedImageAge(cached);
+  if (!Number.isNaN(age) && age > IMAGE_MAX_STALE_MS) {
+    await imageCache.delete(cacheKey);
+    await deleteMeta(url);
+    return true;
+  }
+  return false;
+}
+
 async function staleWhileRevalidateImage(request) {
   const imageCache = await caches.open(IMAGE_CACHE);
   // C18-MED-01: use request.url (string) as the cache key so it matches
@@ -235,7 +264,7 @@ async function staleWhileRevalidateImage(request) {
           if (isSensitiveResponse(networkResponse)) return networkResponse;
           if (!networkResponse.ok) return networkResponse;
           const size = await responseSize(networkResponse);
-          await imageCache.put(cacheKey, networkResponse.clone());
+          await imageCache.put(cacheKey, responseWithCacheTimestamp(networkResponse));
           await recordAndEvict(request.url, size);
           return networkResponse;
         })
@@ -271,6 +300,7 @@ async function staleWhileRevalidateImage(request) {
     // already accepts). We do NOT remove the synchronous HEAD — that would
     // regress the documented freshness behavior.
     const cachedEtag = cached.headers.get('ETag');
+    let cacheVerifiedByProbe = false;
     if (cachedEtag) {
       try {
         const head = await fetch(request.url, {
@@ -296,10 +326,17 @@ async function staleWhileRevalidateImage(request) {
             const fresh = await startRevalidate();
             if (fresh) return fresh;
           }
+          if (networkEtag && networkEtag === cachedEtag) {
+            cacheVerifiedByProbe = true;
+          }
         }
       } catch {
         // HEAD probe failed — fall through to stale-serve below
       }
+    }
+    if (!cacheVerifiedByProbe && await evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)) {
+      const fresh = await startRevalidate();
+      return fresh ?? new Response('Network error', { status: 503 });
     }
     // Serve stale immediately, revalidate in background (true SWR path:
     // no ETag to probe, probe network-failed, or probe answered 200 with

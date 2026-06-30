@@ -452,6 +452,12 @@ async function cleanupDeletedMidReencodeVariants(row: CandidateRow): Promise<voi
     });
 }
 
+async function imageRowStillExists(id: number): Promise<boolean> {
+    const result = await db.execute(sql`SELECT id FROM images WHERE id = ${id} LIMIT 1`);
+    const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result) as unknown[];
+    return Array.isArray(rows) && rows.length > 0;
+}
+
 async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     if (!originalPath) {
@@ -532,6 +538,14 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
             avif10bit = result.avif10bit;
         } catch (err) {
             console.error(`[admin-backfill] id=${row.id} encode failed:`, err);
+            const stillExists = await imageRowStillExists(row.id).catch((existsErr) => {
+                console.warn(`[admin-backfill] id=${row.id} could not verify row existence after encode failure:`, existsErr);
+                return true;
+            });
+            if (!stillExists) {
+                await cleanupDeletedMidReencodeVariants(row);
+                return { ok: false, reason: 'deleted-mid-reencode' };
+            }
             return { ok: false, reason: 'encode-failed', error: err };
         }
 

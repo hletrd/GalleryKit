@@ -215,6 +215,32 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(generated).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
     });
 
+    it('stamps image cache entries and expires unverified stale derivatives', () => {
+        const fn = imageFn();
+        expect(TEMPLATE).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
+        expect(TEMPLATE).toMatch(/function responseWithCacheTimestamp\(response\)/);
+        expect(TEMPLATE).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
+        expect(fn).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
+        expect(TEMPLATE).toMatch(/function cachedImageAge\(response\)/);
+        expect(TEMPLATE).toMatch(/return Infinity;/);
+        expect(TEMPLATE).toMatch(/async function evictExpiredCachedImage\(imageCache, cacheKey, url, cached\)/);
+        expect(TEMPLATE).toMatch(/age > IMAGE_MAX_STALE_MS/);
+        expect(TEMPLATE).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*await deleteMeta\(url\);/);
+        const expiryIdx = fn.indexOf('evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)');
+        expect(expiryIdx).toBeGreaterThan(-1);
+        const expiryBranch = fn.slice(expiryIdx, expiryIdx + 260);
+        expect(expiryBranch).toMatch(/const fresh = await startRevalidate\(\);/);
+        expect(expiryBranch).toMatch(/return fresh \?\? new Response\('Network error', \{ status: 503 \}\);/);
+    });
+
+    it('generated sw.js carries image stale-expiry stamping from the template', () => {
+        const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
+        expect(generated).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
+        expect(generated).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
+        expect(generated).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
+        expect(generated).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
+    });
+
     it('evicts stale derivative cache entries when the server returns 404 or 410', () => {
         const fn = imageFn();
         expect(TEMPLATE).toMatch(/async function deleteMeta\(url\)/);
