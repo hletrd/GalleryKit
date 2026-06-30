@@ -122,6 +122,22 @@ function expressionBody(node: ts.Expression | undefined): ts.Node | undefined {
     return undefined;
 }
 
+function handlerBodyFromExportedVariable(
+    initializer: ts.Expression | undefined,
+    localBodies: Map<string, ts.Node | undefined>,
+): { body: ts.Node | undefined; unsupportedAlias: string | null } | null {
+    if (isFunctionLikeInitializer(initializer)) {
+        return { body: expressionBody(initializer), unsupportedAlias: null };
+    }
+    if (initializer && ts.isIdentifier(initializer)) {
+        if (localBodies.has(initializer.text)) {
+            return { body: localBodies.get(initializer.text), unsupportedAlias: null };
+        }
+        return { body: undefined, unsupportedAlias: initializer.text };
+    }
+    return null;
+}
+
 function collectApprovedRateLimitImports(sourceFile: ts.SourceFile): Set<string> {
     const approved = new Set<string>();
     for (const statement of sourceFile.statements) {
@@ -556,18 +572,30 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         if (ts.isVariableStatement(statement)) {
             for (const decl of statement.declarationList.declarations) {
                 if (ts.isIdentifier(decl.name) && MUTATING_METHODS.has(decl.name.text)) {
-                    // C1-BUG-04: only flag variable exports whose initializer is
-                    // function-like (arrow, function expression, or call wrapper).
-                    const init = decl.initializer;
-                    if (isFunctionLikeInitializer(init)) {
-                        mutatingHandlers.push({ method: decl.name.text, body: expressionBody(init) });
+                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies);
+                    if (handler?.unsupportedAlias) {
+                        report.failed.push(
+                            `UNSUPPORTED HANDLER ALIAS: ${relative} exports ${decl.name.text} = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
+                        );
+                        continue;
+                    }
+                    if (handler) {
+                        mutatingHandlers.push({ method: decl.name.text, body: handler.body });
                     }
                 } else if (
                     ts.isIdentifier(decl.name)
                     && decl.name.text === EXPENSIVE_GET_METHOD
-                    && isFunctionLikeInitializer(decl.initializer)
                 ) {
-                    getHandlers.push({ method: decl.name.text, body: expressionBody(decl.initializer) });
+                    const handler = handlerBodyFromExportedVariable(decl.initializer, localBodies);
+                    if (handler?.unsupportedAlias) {
+                        report.failed.push(
+                            `UNSUPPORTED HANDLER ALIAS: ${relative} exports GET = ${handler.unsupportedAlias}, but this scanner could not resolve that local body. Export a local handler body or add a reasoned '${EXEMPT_TAG}: <reason>' comment.`,
+                        );
+                        continue;
+                    }
+                    if (handler) {
+                        getHandlers.push({ method: decl.name.text, body: handler.body });
+                    }
                 }
             }
         }

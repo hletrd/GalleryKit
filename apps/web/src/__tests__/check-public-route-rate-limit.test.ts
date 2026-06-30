@@ -30,6 +30,70 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails exported mutating handler aliases without a rate-limit helper', () => {
+        const source = `
+            const handler = async (request) => {
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            };
+            export const POST = handler;
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+        expect(result.failed[0]).toContain('POST');
+    });
+
+    it('passes exported mutating handler aliases with a rate-limit helper', () => {
+        const source = `
+            import { preIncrementShareAttempt } from '@/lib/rate-limit';
+            const handler = async (request) => {
+                const overLimit = preIncrementShareAttempt('1.2.3.4');
+                if (overLimit) return { status: 429 };
+                await db.insert(rows).values({ ok: true });
+                return { status: 200 };
+            };
+            export const POST = handler;
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails exported expensive GET handler aliases without a rate-limit helper', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            const handler = async () => {
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            };
+            export const GET = handler;
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes exported cheap GET handler aliases', () => {
+        const source = `
+            const handler = async () => Response.json({ ok: true });
+            export const GET = handler;
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
+    });
+
+    it('fails closed on unresolved exported handler aliases', () => {
+        const source = `
+            export const GET = handler;
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('UNSUPPORTED HANDLER ALIAS');
+    });
+
     it('fails export specifier form without rate-limit helper (C1-BUG-02)', () => {
         const source = `
             async function handler(request) {

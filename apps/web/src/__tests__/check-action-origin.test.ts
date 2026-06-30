@@ -425,6 +425,32 @@ describe('checkActionSource — function declarations', () => {
         expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::mutateFoo');
     });
 
+    it('fails malformed exempt comments without a reason', () => {
+        const src = `
+            /** @action-origin-exempt */
+            export async function getFoo() {
+                return [];
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MALFORMED ACTION-ORIGIN EXEMPTION');
+    });
+
+    it('fails malformed exempt comments with an empty reason', () => {
+        const src = `
+            /** @action-origin-exempt: */
+            export async function getFoo() {
+                return [];
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MALFORMED ACTION-ORIGIN EXEMPTION');
+    });
+
     // R4C2 SEC-R4C2-02: exemption comments must not silence verification of
     // mutating actions — that let `createLrToken` opt out of the gate while
     // minting credentials, so a future guard removal would have shipped with
@@ -459,10 +485,24 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('auditThing');
     });
 
-    it('still skips exempt read-only bodies that only db.select', () => {
+    it('fails exempt admin read-only bodies that hit the DB before auth', () => {
         const src = `
             /** @action-origin-exempt: read-only admin getter */
             export async function listThings() {
+                return db.select().from(things).orderBy(things.name);
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT READ WITHOUT AUTH');
+    });
+
+    it('skips exempt admin read-only bodies after an auth check', () => {
+        const src = `
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listThings() {
+                if (!(await isAdmin())) return [];
                 return db.select().from(things).orderBy(things.name);
             }
         `;
@@ -579,6 +619,7 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
             import { cache } from 'react';
             /** @action-origin-exempt: read-only cached lookup */
             export const getFoo = cache(async function getFoo() {
+                if (!(await isAdmin())) return [];
                 return db.select().from(rows);
             });
         `;

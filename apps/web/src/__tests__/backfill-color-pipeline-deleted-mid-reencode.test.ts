@@ -175,6 +175,18 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
     it('main() computes the exit code via the exported helper (AGG-C4-03)', () => {
         expect(scriptSrc).toMatch(/process\.exit\(\s*computeBackfillExitCode\(/);
     });
+
+    it('main() awaits queued task promises and counts task rejections before summary', () => {
+        // Cycle 38: p-queue's onIdle() can resolve even when an individual task
+        // promise rejects. The sidecar must retain and settle the queue.add()
+        // promises so a flushBatch/task failure is counted as an explicit
+        // backfill error instead of surfacing as an unhandled rejection.
+        expect(scriptSrc).toContain('const queuedTasks: Promise<void>[] = [];');
+        expect(scriptSrc).toMatch(/queuedTasks\.push\(\s*queue\.add\(async \(\) =>/);
+        expect(scriptSrc).toContain('const taskResults = await Promise.allSettled(queuedTasks);');
+        expect(scriptSrc).toContain('errors += rejectedTaskResults.length;');
+        expect(scriptSrc).toContain("[backfill-color-pipeline] queued task failed:");
+    });
 });
 
 describe('countDeletedMidReencodeDetectionFailures (AGG-C4-04 — detection-failure∩deleted overlap)', () => {

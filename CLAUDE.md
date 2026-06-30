@@ -483,11 +483,11 @@ ssh ubuntu@atik.kr
 docker container prune -f
 docker image prune -af          # only removes images not referenced by a running container
 docker builder prune -af        # frees BuildKit cache (often 10-20 G)
-docker volume prune -af         # safe here: gallery data is bind-mounted, not a Docker volume
+docker volume prune -f          # anonymous/dangling volumes only; matches deploy.sh safety contract
 df -h /
 ```
 
-The running `gallerykit-web` container's image survives `docker image prune -af` because `-a` only removes unused images.
+The running `gallerykit-web` container's image survives `docker image prune -af` because `-a` only removes unused images. Treat `docker volume prune -af` as a dedicated GalleryKit-only host break-glass step after inspecting `docker volume ls`; it is host-global and can delete unused named volumes belonging to other Docker workloads.
 
 **Real incident (2026-06-17) — userspace starvation past the point of SSH recovery:** disk exhaustion once wedged the host so hard that userspace itself was starved — `nginx`, `sshd`, AND the Node app all stopped responding at the application layer while TCP handshakes on `:443` / `:22` still completed (kernel/network alive, userspace blocked). `ssh` hung at "banner exchange" even with a 60 s `ConnectTimeout`, so the manual `ssh … && docker prune` recovery above was UNREACHABLE. Recovery was a **block-volume resize** — the host self-healed once disk pressure lifted (no reboot needed, no data loss; bind-mounted `./data`, `./public/uploads`, `./public/resources`, and host MySQL were never at risk; the filesystem now reports 124 G at ~21 % used). Lesson: if the host is starved past the point where `ssh` can return a shell, the prune recovery cannot run — use the cloud provider's **console / serial console (or resize the block volume)** to relieve disk first, then prune. The per-deploy auto-prune is the primary prevention; watch the `df -h /` line in the deploy logs for a host trending toward full.
 

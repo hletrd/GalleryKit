@@ -472,8 +472,9 @@ async function main() {
         console.log(`  [batch-flush] ${updatedOk} row(s) updated (${derivativeItems.length} derivative-only)`);
     }
 
+    const queuedTasks: Promise<void>[] = [];
     for (const [index, row] of rows.entries()) {
-        queue.add(async () => {
+        queuedTasks.push(queue.add(async () => {
             const result = await reprocessRow(row, backfillSettings);
             if (result.outcome === 'processed') {
                 processed++;
@@ -506,10 +507,17 @@ async function main() {
                     `  [progress] ${index + 1}/${rows.length} processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures}`,
                 );
             }
-        });
+        }));
     }
 
-    await queue.onIdle();
+    const taskResults = await Promise.allSettled(queuedTasks);
+    const rejectedTaskResults = taskResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (rejectedTaskResults.length > 0) {
+        errors += rejectedTaskResults.length;
+        for (const result of rejectedTaskResults) {
+            console.error('[backfill-color-pipeline] queued task failed:', result.reason);
+        }
+    }
 
     // Flush any remaining rows.
     await flushBatch();

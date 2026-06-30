@@ -103,11 +103,18 @@ function discoverActionFiles(): string[] {
     return found.sort();
 }
 
-function hasExemptComment(node: ts.Node, source: string): boolean {
+function getLeadingText(node: ts.Node, source: string): string {
     const start = node.getFullStart();
     const end = node.getStart();
-    const leadingText = source.slice(start, end);
-    return /@action-origin-exempt/.test(leadingText);
+    return source.slice(start, end);
+}
+
+function hasExemptTag(node: ts.Node, source: string): boolean {
+    return /@action-origin-exempt/.test(getLeadingText(node, source));
+}
+
+function hasReasonedExemptComment(node: ts.Node, source: string): boolean {
+    return /@action-origin-exempt:[^\S\r\n]*(?=[^\s*/])/.test(getLeadingText(node, source));
 }
 
 function collectApprovedRequireSameOriginImports(sourceFile: ts.SourceFile): Set<string> {
@@ -393,6 +400,68 @@ function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
 
 function statementContainsPreOriginAuthRead(statement: ts.Statement): boolean {
     return nodeContainsCallNamed(statement, PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES);
+}
+
+function nodeContainsProtectedRead(root: ts.Node): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionLike(node) && node !== root) return;
+        if (ts.isCallExpression(node)) {
+            const callee = node.expression;
+            if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'select') {
+                found = true;
+                return;
+            }
+            if (
+                ts.isIdentifier(callee)
+                && /^(?:getAdmin|list.*ForUser|readAdmin|queryAdmin|loadAdmin)/.test(callee.text)
+            ) {
+                found = true;
+                return;
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return found;
+}
+
+function statementContainsReadAuth(statement: ts.Statement, approvedImports: Set<string>): boolean {
+    let found = false;
+    const authNames = new Set(['isAdmin', 'getCurrentUser']);
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionLike(node) && node !== statement) return;
+        if (isRequireSameOriginAdminExpression(node, approvedImports)) {
+            found = true;
+            return;
+        }
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && authNames.has(node.expression.text)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(statement);
+    return found;
+}
+
+function exemptReadHasAuthBeforeProtectedRead(body: ts.Node, approvedImports: Set<string>): boolean {
+    if (!ts.isBlock(body)) {
+        return true;
+    }
+
+    let sawAuth = false;
+    for (const statement of body.statements) {
+        if (!sawAuth && nodeContainsProtectedRead(statement)) {
+            return false;
+        }
+        if (statementContainsReadAuth(statement, approvedImports)) {
+            sawAuth = true;
+        }
+    }
+    return true;
 }
 
 function publicActionCallsRateLimitBeforeMutation(
@@ -707,7 +776,14 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
         sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 
     const evaluateBody = (owner: ts.Node, body: ts.Node | undefined, name: string) => {
-        if (hasExemptComment(owner, content)) {
+        if (hasExemptTag(owner, content) && !hasReasonedExemptComment(owner, content)) {
+            report.failed.push(
+                `MALFORMED ACTION-ORIGIN EXEMPTION: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' without a non-empty ': <reason>'; document why the export is read-only or intentionally public`,
+            );
+            return;
+        }
+
+        if (hasReasonedExemptComment(owner, content)) {
             // R4C2 SEC-R4C2-02: exemption is reserved for READ-ONLY exports
             // (scanner header + CLAUDE.md "Lint Gates"). Honoring the comment
             // unconditionally let a mutating action opt out of verification
@@ -721,6 +797,17 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 }
                 report.failed.push(
                     `EXEMPT COMMENT ON MUTATING ACTION: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' but its body performs mutations; exemption is reserved for read-only exports — remove the comment and return early on requireSameOriginAdmin() instead`,
+                );
+                return;
+            }
+            if (
+                body
+                && !isAuthActionsFile
+                && !relative.endsWith('actions/public.ts')
+                && !exemptReadHasAuthBeforeProtectedRead(body, approvedRequireSameOriginImports)
+            ) {
+                report.failed.push(
+                    `EXEMPT READ WITHOUT AUTH: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' and performs protected reads before isAdmin(), getCurrentUser(), or requireSameOriginAdmin()`,
                 );
                 return;
             }

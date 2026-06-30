@@ -4,15 +4,17 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
+- Cycle 38/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-38-2026-06-30-plan.md`)
+- Cycle 38/100 Deferred Findings — deferred (`cycle-38-2026-06-30-deferred.md`)
 - Cycle 37/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-37-2026-06-30-plan.md`)
 - Cycle 37/100 Deferred Findings — deferred (`cycle-37-2026-06-30-deferred.md`)
 - Cycle 36/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-36-2026-06-30-plan.md`)
 - Cycle 36/100 Deferred Findings — deferred (`cycle-36-2026-06-30-deferred.md`)
-- Cycle 35/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-35-2026-06-30-plan.md`)
-- Cycle 35/100 Deferred Findings — no new deferred items (`cycle-35-2026-06-30-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 35/100 Implementation Plan — implementation complete; push/deploy evidence in final report (`cycle-35-2026-06-30-plan.md`)
+- Cycle 35/100 Deferred Findings — no new deferred items (`cycle-35-2026-06-30-deferred.md`)
 - Cycle 34/100 Implementation Plan — done (`cycle-34-2026-06-30-plan.md`)
 - Cycle 34/100 Deferred Findings — no new deferred items (`cycle-34-2026-06-30-deferred.md`)
 - Cycle 33/100 Implementation Plan — done (`cycle-33-2026-06-30-plan.md`)
