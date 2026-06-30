@@ -346,13 +346,13 @@ All admin tunables flow through `gallery-config-shared.ts` (validation) → `gal
 docker run --rm \
   --name gk-backfill \
   --network host \
-  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
-  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
-  -v /home/ubuntu/gallery/apps/web/data:/app/data \
-  -v /home/ubuntu/gallery/apps/web/public/uploads:/app/apps/web/public/uploads \
-  -v /home/ubuntu/gallery/apps/web/public/resources:/app/apps/web/public/resources \
-  -v /home/ubuntu/gallery/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
-  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -v <deploy-root>/apps/web/src:/app/apps/web/src:ro \
+  -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v <deploy-root>/apps/web/data:/app/data \
+  -v <deploy-root>/apps/web/public/uploads:/app/apps/web/public/uploads \
+  -v <deploy-root>/apps/web/public/resources:/app/apps/web/public/resources \
+  -v <deploy-root>/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
+  --env-file <deploy-root>/apps/web/.env.local \
   -e BACKFILL_CONCURRENCY=2 -e UPLOAD_ORIGINAL_ROOT=/app/data/uploads/original \
   --user root -w /app/apps/web web-web:latest \
   sh -c "npx --yes tsx@4.22.4 scripts/backfill-color-pipeline.ts"
@@ -508,10 +508,10 @@ The CLIP model weights are **NOT baked into the Docker image** (they are tens-of
 docker run --rm \
   --name gk-clip-seed \
   --network host \
-  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
-  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
-  -v /home/ubuntu/gallery/apps/web/data:/app/data \
-  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -v <deploy-root>/apps/web/src:/app/apps/web/src:ro \
+  -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v <deploy-root>/apps/web/data:/app/data \
+  --env-file <deploy-root>/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
   sh -c "npx --yes tsx@4.22.4 scripts/download-clip-models.ts"
@@ -523,10 +523,10 @@ docker run --rm \
 docker run --rm \
   --name gk-clip-backfill \
   --network host \
-  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
-  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
-  -v /home/ubuntu/gallery/apps/web/data:/app/data \
-  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -v <deploy-root>/apps/web/src:/app/apps/web/src:ro \
+  -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v <deploy-root>/apps/web/data:/app/data \
+  --env-file <deploy-root>/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
   sh -c "npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
@@ -571,7 +571,7 @@ The current state of the photographer surface is documented in `photographer-r4/
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Processed images are stored in `apps/web/public/uploads/`, runtime topic covers are stored in `apps/web/public/resources/`, and original uploads are stored privately under the data volume — **ensure all three mutable stores are persisted in Docker**
 - Max upload size: 200 MB per file; batch byte cap (`UPLOAD_MAX_TOTAL_BYTES`, default 2 GiB) and batch file-count cap (`UPLOAD_MAX_FILES_PER_WINDOW`, default 100) are separate limits that both apply to every upload
-- Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 MiB** by default, **64 KiB** for login, **250 MiB** for `/admin/db` restore requests, **216 MiB** for admin dashboard uploads, and **216 MiB** for the Lightroom Classic publish-plugin upload route `/api/admin/lr/upload` (a dedicated `^~ /api/admin/lr/upload` location that wins over the generic `^~ /api/admin/` 2 MiB catch-all by longest-prefix match — without it the generic 2 MiB cap 413s every real photo at the edge before the route runs; run-6 cycle-10 AGG-C10-01). The app enforces **200 MiB per file**, a default **2 GiB** cumulative upload window, and **100 files per window**.
+- Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 MiB** by default, **64 KiB** for login, **250 MiB** for `/admin/db` restore requests, **216 MiB** for admin dashboard uploads, and **216 MiB** for the PAT-authenticated external upload route `/api/admin/lr/upload` (a dedicated `^~ /api/admin/lr/upload` location that wins over the generic `^~ /api/admin/` 2 MiB catch-all by longest-prefix match — without it the generic 2 MiB cap 413s every real photo at the edge before the route runs; run-6 cycle-10 AGG-C10-01). The app enforces **200 MiB per file**, a default **2 GiB** cumulative upload window, and **100 files per window**.
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
 - Docker liveness should probe `/api/live`; `/api/health` is liveness-only by default and performs a DB readiness probe only when `HEALTH_CHECK_DB=true`

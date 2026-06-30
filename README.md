@@ -5,7 +5,7 @@
 <h1 align="center">GalleryKit</h1>
 
 <p align="center">
-  A high-performance, self-hosted photo gallery built with Next.js
+  A self-hosted gallery for publishing finished photography with accurate color, private originals, and operator-controlled search
 </p>
 
 <p align="center">
@@ -25,6 +25,8 @@
 </p>
 
 ---
+
+GalleryKit is built for photographers and small teams who want to publish edited work without handing originals, analytics, or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions, and leaves heavy operator features such as semantic search behind explicit setup steps.
 
 ## Features
 
@@ -73,7 +75,9 @@ gallerykit/
 │   │   ├── lib/              # Utilities (image processing, data layer)
 │   │   └── i18n/             # Internationalization config
 │   ├── messages/             # Translation files (en.json, ko.json)
-│   ├── public/uploads/       # Processed public image derivatives (persistent volume)
+│   ├── data/                 # Private originals, DB backups, CLIP model weights (persistent)
+│   ├── public/uploads/       # Processed public image derivatives (persistent)
+│   ├── public/resources/     # Runtime topic cover resources (persistent)
 │   ├── scripts/              # DB init, migration, seed scripts
 │   ├── Dockerfile            # Multi-stage production build
 │   └── docker-compose.yml    # Docker deployment config
@@ -94,7 +98,10 @@ gallerykit/
 git clone https://github.com/hletrd/gallerykit.git
 cd gallerykit
 npm install
-# Create a MySQL database/user first, then copy and edit the app environment.
+# Create a local MySQL database/user first, then copy and edit the app environment.
+mysql -uroot -p -e "CREATE DATABASE gallerykit CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -uroot -p -e "CREATE USER 'gallerykit'@'localhost' IDENTIFIED BY 'change-this-password';"
+mysql -uroot -p -e "GRANT ALL PRIVILEGES ON gallerykit.* TO 'gallerykit'@'localhost'; FLUSH PRIVILEGES;"
 cp apps/web/.env.local.example apps/web/.env.local
 $EDITOR apps/web/.env.local
 cp apps/web/src/site-config.example.json apps/web/src/site-config.json
@@ -148,7 +155,7 @@ git values must be treated as compromised and must not be reused.
 Production builds require a real absolute public URL: set `BASE_URL` or replace `site-config.json.url` with a non-placeholder origin before `next build` / Docker build. The example values (`https://example.com`, localhost) are development placeholders and are rejected by the production build guard.
 If you set `BASE_URL`, `IMAGE_BASE_URL`, or `UPLOAD_MAX_TOTAL_BYTES`, do it **before** running `next build` / `docker compose ... --build` so Next.js can validate public origins, allow remote image hosts, and bake the same upload cap into the build. The shipped compose file forwards those values as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development. `IMAGE_BASE_URL` must be an absolute URL without credentials, query strings, or hashes.
 `DB_SSL` defaults to TLS for non-localhost database hosts and plaintext for loopback/private local development. Backup/restore CLI calls fail closed for non-local DB hosts unless `DB_SSL_CA` points at the CA used to verify the server certificate; set `DB_SSL=false` only when the database connection is protected by a trusted private network. `QUEUE_CONCURRENCY` controls the in-process `PQueue` image conversion workers (default `1`); raise it only after confirming CPU and memory headroom alongside `SHARP_CONCURRENCY`.
-If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config caps general requests at **2 MiB**, login at **64 KiB**, admin DB restore at **250 MiB**, admin dashboard uploads at **216 MiB**, and `/api/admin/lr/upload` at **216 MiB** so Lightroom publishes are not caught by the generic `/api/admin/` 2 MiB cap. The app separately enforces **200 MiB per file**, **2 GiB per upload window** by default, and **100 files per window**; keep those layers aligned if you customize either side.
+If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config caps general requests at **2 MiB**, login at **64 KiB**, admin DB restore at **250 MiB**, admin dashboard uploads at **216 MiB**, and `/api/admin/lr/upload` at **216 MiB** so external PAT upload clients are not caught by the generic `/api/admin/` 2 MiB cap. The app separately enforces **200 MiB per file**, **2 GiB per upload window** by default, and **100 files per window**; keep those layers aligned if you customize either side.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. The checked-in nginx config is an internal HTTP hop behind a TLS-terminating edge; do not expose its port 80 listener directly as the public cleartext edge. It is intended as a single web-instance/single-writer deployment; restore maintenance, upload quotas, and image queue state are process-local. Keep those protections if you adapt the compose file, and do not scale the web service horizontally without moving those coordination states into shared storage.
 
 **`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). The checked-in nginx template overwrites incoming `X-Forwarded-For` with `$remote_addr`, so keep `TRUSTED_PROXY_HOPS=1` for the shipped nginx-app topology. If another trusted edge sits in front of nginx and you need the outer client IP, configure nginx `real_ip` for that trusted edge before forwarding headers to the app. The same trusted-proxy setting also affects same-origin validation for mutating admin actions, login cookie security, and DB backup downloads, so the proxy must overwrite `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with values from the trusted edge hop. Admin same-origin checks intentionally fail closed when both `Origin` and `Referer` are absent. Only enable proxy trust when the incoming headers are actually set by a trusted proxy hop.
@@ -178,7 +185,7 @@ npm run build
 4. Run:
 
 ```bash
-docker compose -f apps/web/docker-compose.yml up -d --build
+docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build
 ```
 
 The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`, and runtime topic cover resources remain under `public/resources/`.
@@ -189,6 +196,19 @@ Legacy originals must not remain under `public/uploads/original/`. The startup p
 The container liveness probe now uses `/api/live`. `/api/health` is liveness-only by default; set `HEALTH_CHECK_DB=true` only on private monitoring paths that intentionally need a DB readiness probe.
 
 The checked-in `apps/web/nginx/default.conf` proxies `/uploads/{jpeg,webp,avif}` back to Next by default, which matches the host-side nginx + app-container deployment. If you intentionally serve `/uploads/*` statically from a custom host nginx, point it at the host bind mount (`apps/web/public/uploads`) and preserve the private-originals 404 rule; do not copy container-internal paths into host nginx configs unchanged.
+
+## Upload API
+
+GalleryKit exposes a PAT-authenticated upload route for external publish clients. It is an API contract, not a bundled Lightroom Classic plugin.
+
+- Endpoint: `POST /api/admin/lr/upload`
+- Auth header: `X-GalleryKit-Token: gk_...`
+- Required token scope: `lr:upload`
+- Body: `multipart/form-data`
+- File field: `file`
+- Metadata fields: `topic` plus optional `title`, `description`, `tags`, `camera_model`, `lens_model`, `capture_date`, and exposure fields accepted by the admin upload path.
+- Limits: 200 MiB per file, 2 GiB per upload window, 100 files per window by default; the shipped nginx route cap is 216 MiB.
+- Response: JSON with the created image id and processed filenames on success, or an error JSON response with the matching HTTP status.
 
 ## Tech Stack
 
