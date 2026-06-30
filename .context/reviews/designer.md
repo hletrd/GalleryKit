@@ -1,93 +1,75 @@
-# Cycle 31 Designer UI/UX Review
+# Cycle 32 Designer UI/UX Review
 
-Reviewer lane: designer plus custom UI/UX coverage. Product code was not edited.
+Reviewer lane: designer. Product code was not edited.
 
 ## Evidence
 
-- Project context: `AGENTS.md` and `CLAUDE.md` reviewed. Relevant product constraints: photographer intent, no edit/culling/scoring features, color/HDR honesty, English/Korean UI, 44 px touch target policy.
-- Custom reviewer prompts: `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` and `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md` were readable; their review lenses were incorporated into the separate artifacts.
-- Local runtime: `npm run dev --workspace=apps/web -- --port 3021` reached Next.js, but the app rendered the error shell because MySQL was unavailable: `ECONNREFUSED`, then a failing topics query. Local screenshot: `/tmp/gallery-local-home-desktop.png`.
-- Live runtime: `https://gallery.atik.kr/en` tested with agent-browser at desktop `1440x1000` and mobile `390x844`.
-- Live screenshots: `/tmp/gallery-live-home-desktop.png`, `/tmp/gallery-live-home-mobile.png`, `/tmp/gallery-live-home-mobile-menu.png`, `/tmp/gallery-live-photo-mobile.png`, `/tmp/gallery-live-lightbox-mobile.png`.
+- Read first: `AGENTS.md`, `CLAUDE.md`, and the required agent-browser skill files under `/Users/hletrd/.codex/skills/agent-browser*`.
+- File inventory built from `apps/web/src/app`, `apps/web/src/components`, `apps/web/messages`, and admin protected routes.
+- Local runtime: `npm run dev --workspace=apps/web -- --port 3022`; Next.js 16.2.9 served `http://localhost:3022`. Public DB-backed pages hit the error shell because local DB reads failed; admin login remained reachable.
+- Browser evidence: agent-browser 0.22.2 snapshots, box metrics, computed styles, console/errors, and selector evals.
+- Public live evidence: `https://gallery.atik.kr/en` and `/ko` at desktop/mobile. Admin protected browser evidence was limited to local login because authenticated DB-backed admin pages were not reachable in this session.
 
-## UI Inventory
+## Relevant File Inventory
 
-- Public routes: `apps/web/src/app/[locale]/(public)/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `c/[slug]/page.tsx`, `map/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `privacy/page.tsx`.
-- Admin routes: `apps/web/src/app/[locale]/admin/**`, `apps/web/src/app/api/**`.
-- Public UI: `home-client.tsx`, `nav-client.tsx`, `search.tsx`, `tag-filter.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `image-zoom.tsx`, `color-details-section.tsx`, `wide-gamut-hint.tsx`, `lightbox-color-pip.tsx`, `footer.tsx`, `load-more.tsx`.
-- Admin UI: `login-form.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `image-manager.tsx`, `settings-client.tsx`, `admin-nav.tsx`.
-- Global UX systems: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/globals.css`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Public routes: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `c/[slug]/page.tsx`, `map/page.tsx`, `timeline/page.tsx`, `year/[year]/page.tsx`, `privacy/page.tsx`.
+- Public UI: `components/nav-client.tsx`, `home-client.tsx`, `tag-filter.tsx`, `search.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `color-details-section.tsx`, `lightbox-color-pip.tsx`, `wide-gamut-hint.tsx`, `load-more.tsx`, `footer.tsx`.
+- Admin UI: `app/[locale]/admin/login-form.tsx`, `admin-header.tsx`, `admin-nav.tsx`, `upload-dropzone.tsx`, `image-manager.tsx`, `settings-client.tsx`, `tokens-client.tsx`, `admin-user-manager.tsx`, `db/page.tsx`, `analytics-client.tsx`.
+- Global systems: `app/[locale]/layout.tsx`, `app/[locale]/globals.css`, `app/[locale]/error.tsx`, `app/[locale]/loading.tsx`, `app/[locale]/not-found.tsx`, `messages/en.json`, `messages/ko.json`.
 
 ## Findings
 
-### D31-UX-01: Mobile home delays the photo-first experience behind a large tag wall
+### D32-UX-01: Lightbox auto-hide removes essential modal controls from assistive technology
 
 - Severity: Medium
 - Confidence: High
-- Evidence: live mobile `390x844`; tag chips occupy approximately `y=180..380`, and the first photo card begins around `y=412`. Source order places the filter before the gallery in `apps/web/src/components/home-client.tsx:255` and `apps/web/src/components/home-client.tsx:273`; the filter renders every tag as wrapping 44 px controls in `apps/web/src/components/tag-filter.tsx:63` and `apps/web/src/components/tag-filter.tsx:120`.
-- Selector/metric: `[role="group"][aria-label*="Filter"] button` heights were 44 px, but the wrapped group consumed roughly 200 px of first-screen height.
-- Failure scenario: a first-time mobile visitor lands on a photographer portfolio and sees taxonomy controls before enough photography, weakening IA and perceived content quality.
-- Fix: on small screens, make the tag filter horizontally scrollable, collapsed behind a "Filters" control, or cap visible chips with a "More filters" disclosure after the first row. Keep the active filter visible.
+- Evidence: live mobile `390x844`, opened `/en/p/348`, tapped "Open fullscreen view", waited 3.5 s. Accessibility snapshot contained only `dialog "Photo lightbox"` and the image. Selector eval found buttons still in DOM but hidden from AT and keyboard: Close `{hidden:"true", tabIndex:"-1", style:"none", rect:44x44}`, Fullscreen `{hidden:"true", tabIndex:"-1"}`, Next `{hidden:"true", tabIndex:"-1", rect:64x844}`.
+- Source: `apps/web/src/components/lightbox.tsx:270` arms the 3 s hide timer, `apps/web/src/components/lightbox.tsx:371` maps hidden state to `tabIndex=-1` and `aria-hidden=true`, and `apps/web/src/components/lightbox.tsx:546` fades the whole controls overlay to opacity 0. Close/fullscreen/slideshow/prev/next live at `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/lightbox.tsx:576`, `apps/web/src/components/lightbox.tsx:600`, `apps/web/src/components/lightbox.tsx:623`, and `apps/web/src/components/lightbox.tsx:644`.
+- Impact: a screen-reader, switch-control, or voice-control user who pauses in the modal loses discoverable close and navigation actions until another pointer/focus/key event happens.
+- Recommendation: keep close and previous/next controls in the accessibility tree while visually hidden, or provide a persistent visually hidden command group. Visual auto-hide should not equal modal affordance removal.
 
-### D31-UX-02: Idle lightbox can expose a dialog with no actionable controls in the accessibility tree
+### D32-UX-02: Mobile home still pushes the first photograph below a large tag wall
 
 - Severity: Medium
+- Confidence: High
+- Evidence: live mobile `390x844` on `https://gallery.atik.kr/en`; box metrics: filter group `{x:16,y:180,w:358,h:200}`, first photo link `{x:16,y:412,w:358,h:238}`. Snapshot showed all eight tag chips before the `Photos` heading and first card.
+- Source: `apps/web/src/components/home-client.tsx:257` lays out heading plus filter ahead of the masonry grid; `apps/web/src/components/home-client.tsx:271` renders `<TagFilter>` before photos; `apps/web/src/components/tag-filter.tsx:63` uses `flex flex-wrap`; each chip is a 44 px button at `apps/web/src/components/tag-filter.tsx:70` and `apps/web/src/components/tag-filter.tsx:88`.
+- Impact: first-time mobile visitors see taxonomy controls before enough photography, which weakens the photo-first portfolio experience.
+- Recommendation: on small screens, collapse filters behind a `Filters` disclosure, cap visible chips to one row with "More", or switch to horizontal scrolling while keeping active filters visible.
+
+### D32-UX-03: Live search remains unavailable for a visible tag
+
+- Severity: Medium
+- Confidence: High
+- Evidence: live `https://gallery.atik.kr/en`; visible chip `JIHOON (134)`. Searching `jihoon` produced "Search is temporarily unavailable. Please try again later.", no `#search-results` options, and `results:0`.
+- Source: `apps/web/src/components/search.tsx:160` performs the request, `apps/web/src/components/search.tsx:240` calls `searchImagesAction`, `apps/web/src/components/search.tsx:245` maps non-ok status to `searchStatus`, and `apps/web/src/components/search.tsx:473` renders the empty/error message. The server action catches search failure and returns structured `status:'error'` at `apps/web/src/app/actions/public.ts:305`.
+- Impact: users try the most obvious discovery mechanism for a tag they can see on the page and get a generic outage message, reducing trust in gallery findability.
+- Recommendation: fix the underlying live search failure, then add a graceful fallback for exact visible tag matches or link users to the matching tag filter when full search is unavailable.
+
+### D32-UX-04: Photo card accessible names are verbose and repetitive
+
+- Severity: Low
 - Confidence: Medium
-- Evidence: live mobile lightbox snapshot after controls auto-hid showed only `dialog "Photo lightbox"` and the image. Source hides every overlay control with `aria-hidden` and `tabIndex=-1` when `controlsVisible` is false in `apps/web/src/components/lightbox.tsx:371`; the overlay opacity also becomes 0 in `apps/web/src/components/lightbox.tsx:546` and `apps/web/src/components/lightbox.tsx:550`. Close, fullscreen, slideshow, previous, and next controls are inside that hidden overlay at `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/lightbox.tsx:576`, `apps/web/src/components/lightbox.tsx:600`, `apps/web/src/components/lightbox.tsx:623`, and `apps/web/src/components/lightbox.tsx:644`.
-- Selector/metric: `role=dialog[aria-label="Photo lightbox"]` accessibility snapshot contained image content only after the 3 second hide timer from `apps/web/src/components/lightbox.tsx:201`.
-- Failure scenario: a screen reader, switch, or voice-control user idles in the modal and loses discoverable close/navigation actions until another interaction re-reveals controls.
-- Fix: keep at least close and next/previous controls in the accessibility tree while visually hidden, or provide a persistent visually hidden command group. Avoid setting `aria-hidden` on essential modal controls solely because the visual overlay is faded.
+- Evidence: live mobile and Korean snapshots show each card link exposes a link label, image alt, visible heading, and topic text. Example: link "View photo: #Color in Music Festival #DOHOON #JIHOON" contains image "Color in Music Festival, DOHOON, JIHOON", heading with the same tags, and topic `TWS`.
+- Source: authoritative link label at `apps/web/src/components/home-client.tsx:323`, image alt at `apps/web/src/components/home-client.tsx:353`, mobile overlay heading/topic at `apps/web/src/components/home-client.tsx:395`, and desktop overlay heading/topic at `apps/web/src/components/home-client.tsx:401`.
+- Impact: screen-reader browse mode across the masonry grid is unnecessarily noisy.
+- Recommendation: when the link `aria-label` is authoritative, hide the decorative overlay copy from AT inside the linked card, or reduce card-image alt verbosity while preserving rich alt text on photo detail pages.
 
-### D31-UX-03: Search error messaging is duplicated for assistive technology
+## Positive Coverage
 
-- Severity: Low
-- Confidence: High
-- Evidence: live search for `jihoon` returned "Search is temporarily unavailable. Please try again later." twice in the accessibility snapshot. Source writes the same status into an `sr-only` live region in `apps/web/src/components/search.tsx:440` and a visible message in `apps/web/src/components/search.tsx:473`.
-- Selector/metric: search dialog `#search-input` plus live region; duplicate text appeared after the query failed.
-- Failure scenario: screen reader users hear or encounter the same failure twice, making the command dialog feel broken rather than merely unavailable.
-- Fix: choose one announcement path. Either make the visible status the live region, or keep the `sr-only` live region and mark the duplicate visible copy `aria-hidden="true"` for repeated status text.
+- Admin login validation works well locally: submitting empty Korean login focused the username field, set `aria-invalid=true`, attached `aria-describedby` error ids, surfaced both errors as alerts, and all visible controls measured 44 px high. Source: `apps/web/src/app/[locale]/admin/login-form.tsx:28` and `apps/web/src/app/[locale]/admin/login-form.tsx:62`.
+- Dark/light mode is wired and browser-verified. Theme cycling reached `html.dark`; computed body colors changed from `rgb(255,255,255) / rgb(9,9,11)` to `rgb(9,9,11) / rgb(250,250,250)`. Source tokens and contrast notes: `apps/web/src/app/[locale]/globals.css:14`, `apps/web/src/app/[locale]/globals.css:50`, and `apps/web/src/app/[locale]/globals.css:75`.
+- Reduced motion and forced-colors coverage are explicit in CSS: `apps/web/src/app/[locale]/globals.css:253` suppresses motion, and `apps/web/src/app/[locale]/globals.css:164` plus `apps/web/src/app/[locale]/globals.css:281` handle high-contrast color surfaces.
+- Public loading/error/not-found states are accessible: loading uses `role=status` at `apps/web/src/app/[locale]/loading.tsx:8`; local DB failure rendered an error page with Try Again and Return to Gallery actions from `apps/web/src/app/[locale]/error.tsx:34`; not-found preserves nav/footer at `apps/web/src/app/[locale]/not-found.tsx:20`.
+- Admin protected source has substantial UX safeguards: 44 px admin nav links at `apps/web/src/components/admin-nav.tsx:29`, upload no-category empty state with direct category CTA at `apps/web/src/components/upload-dropzone.tsx:373`, upload progress `role=progressbar` at `apps/web/src/components/upload-dropzone.tsx:476`, settings field validation with `aria-invalid` at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:424`, and destructive image operations with confirmation/settle states at `apps/web/src/components/image-manager.tsx:391`.
+- Korean localization is complete at key surfaces tested: live `/ko` rendered Korean nav/search/theme/language labels; local `/ko/admin` rendered Korean login labels and validation. Message parity files both have 916 lines.
 
-### D31-UX-04: Photo card links can read repetitively in the accessibility tree
+## Prior-Cycle Status
 
-- Severity: Low
-- Confidence: Medium
-- Evidence: live desktop link text for initial `a[href*="/p/"]` cards repeated title/topic text. Source sets an authoritative `aria-label` on the link in `apps/web/src/components/home-client.tsx:323`, then also exposes image alt text in `apps/web/src/components/home-client.tsx:353` and overlay headings/copy in `apps/web/src/components/home-client.tsx:395` and `apps/web/src/components/home-client.tsx:401`.
-- Selector/metric: first desktop card `a[href="/en/p/348"]` exposed repeated `#Color in Music Festival` and `TWS` text in the browser accessibility tree.
-- Failure scenario: screen reader browse mode on the masonry grid becomes verbose, especially across dozens of visually similar cards.
-- Fix: treat overlay text as decorative for AT when the link `aria-label` is authoritative, or reduce image alt duplication inside linked cards while preserving descriptive alt text on the detail page.
-
-### D31-UX-05: Live production search failed for a known visible term
-
-- Severity: Medium
-- Confidence: High
-- Evidence: on `https://gallery.atik.kr/en`, visible chips included `JIHOON`, but entering `jihoon` in the search dialog produced the generic unavailable state. Source maps failures into `error` in `apps/web/src/components/search.tsx:160` through `apps/web/src/components/search.tsx:270`, then displays the generic status at `apps/web/src/components/search.tsx:473`.
-- Selector/metric: `#search-input` query `jihoon`; no result list, error status shown.
-- Failure scenario: users try the most obvious discovery mechanism for a known performer and lose trust in the gallery's findability.
-- Fix: fix the backend failure path, then add a graceful fallback that links visible tag matches or recent cached results when full search is unavailable.
-
-### D31-UX-06: RTL support is scaffolded but not ready to activate safely
-
-- Severity: Low
-- Confidence: High
-- Evidence: layout sets `dir={getLocaleDirection(locale)}` in `apps/web/src/app/[locale]/layout.tsx:94`, but shipped locale switching is English/Korean in `apps/web/src/components/nav-client.tsx:19`. Several UI controls still use physical directions: `right-4`, `left-0`, and `right-0` in `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/lightbox.tsx:621`, and `apps/web/src/components/lightbox.tsx:642`; mobile nav spacing uses physical margin classes in `apps/web/src/components/nav-client.tsx:100` and `apps/web/src/components/nav-client.tsx:170`.
-- Selector/metric: no RTL locale is currently exposed; this is a future-activation risk, not a current English/Korean defect.
-- Failure scenario: adding Arabic/Hebrew later would flip text direction but leave navigation, lightbox, and carousel affordances physically oriented.
-- Fix: before adding RTL locales, convert directional layout to logical start/end utilities and add RTL visual snapshots for nav, search, home, photo viewer, and lightbox.
-
-## Coverage Notes
-
-- IA: public IA is simple and understandable: top nav, topic links, search, tags, masonry, photo detail. The mobile filter placement is the main IA concern.
-- Affordances: nav, search, theme, language, photo viewer controls, and admin controls generally use icon buttons with accessible names. Live mobile touch target metrics showed nav/buttons/chips at or above 44 px.
-- Keyboard/focus: skip link exists in `apps/web/src/app/[locale]/layout.tsx:119`; search supports `Ctrl/Cmd+K` and Escape in `apps/web/src/components/search.tsx:297`; photo viewer supports arrow/F/I/C/H shortcuts in `apps/web/src/components/photo-viewer.tsx:370`; lightbox focus management starts at `apps/web/src/components/lightbox.tsx:434`. Lightbox auto-hide is the remaining keyboard/AT risk.
-- WCAG 2.2 and contrast: `apps/web/src/app/globals.css:14` through `apps/web/src/app/globals.css:101` defines light/dark/OLED tokens with contrast comments; forced-colors adjustments exist at `apps/web/src/app/globals.css:164` and `apps/web/src/app/globals.css:281`; reduced motion support exists at `apps/web/src/app/globals.css:253`.
-- ARIA: search combobox attributes are explicit in `apps/web/src/components/search.tsx:394`; tag filter uses `aria-pressed` in `apps/web/src/components/tag-filter.tsx:81`; photo viewer has a hidden H1 and description in `apps/web/src/components/photo-viewer.tsx:540`. Main ARIA defects are duplicated search status and lightbox hidden controls.
-- Responsive: masonry breakpoints are explicit in `apps/web/src/components/home-client.tsx:35`; mobile nav menu worked at `390x844`; photo viewer controls met target sizes at mobile. The filter wall is the main responsive layout issue.
-- Loading/empty/error: loading uses `role="status"` in `apps/web/src/app/[locale]/loading.tsx:8`; public error shell rendered locally and provided retry/home actions in `apps/web/src/app/[locale]/error.tsx:22`; empty gallery copy exists in `apps/web/src/components/home-client.tsx:426`.
-- Form validation UX: login labels, invalid state, descriptions, and alert are in `apps/web/src/components/login-form.tsx:58` through `apps/web/src/components/login-form.tsx:129`; upload disabled/no-topic/progress states are in `apps/web/src/components/upload-dropzone.tsx:373` through `apps/web/src/components/upload-dropzone.tsx:488`.
-- Dark/light: theme provider supports system/light/dark/OLED in `apps/web/src/app/[locale]/layout.tsx:130`; theme button worked in the live nav; CSS includes dark and OLED tokens.
-- i18n: English/Korean messages exist; `dir` is wired for future locales, but RTL needs a dedicated pass before activation.
-- Perceived performance: images use sized AVIF/WebP/JPEG sources and lazy/eager behavior in `apps/web/src/components/home-client.tsx:333`; reduced motion suppresses major transforms in `apps/web/src/app/globals.css:253`. Hover/card transitions around `500ms` in `apps/web/src/components/home-client.tsx:357` and sidebar transitions around `500ms` in `apps/web/src/components/photo-viewer.tsx:718` may feel slow for repeated professional browsing.
+- D31 duplicate search error announcement appears addressed in source: visible empty/error status is now inside `aria-hidden="true"` at `apps/web/src/components/search.tsx:473`, while the live region remains at `apps/web/src/components/search.tsx:440`.
+- D31 lightbox hidden controls, mobile filter wall, live search failure, and repetitive card AT text remain open as D32 findings above.
+- Dormant RTL risk remains a future-activation note, not a current English/Korean defect. `dir` is wired at `apps/web/src/app/[locale]/layout.tsx:94`, but several controls still use physical `left/right` classes in `apps/web/src/components/lightbox.tsx:555` and `apps/web/src/components/nav-client.tsx:100`. Do an RTL pass before adding RTL locales.
 
 ## Verdict
 
-The UI is generally mature: touch targets, focus rings, color modes, reduced motion, form validation, and error shells are well-covered. The current cycle should prioritize mobile information architecture, live search reliability, and lightbox accessibility discoverability before adding new surface area.
+The UI foundation is strong: touch targets, form validation, localization, color modes, reduced motion, and admin safety messaging are mature. The main cycle-32 priorities should be lightbox accessibility, mobile photo-first IA, and live search reliability.

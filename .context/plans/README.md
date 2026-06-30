@@ -2,7 +2,7 @@
 
 ## Active Plans
 
-- Cycle 29/100 Implementation Plan — DONE / commit-deploy pending (`cycle-29-2026-06-30-plan.md`)
+- Cycle 32/100 Deferred Findings — TODO / deferred (`cycle-32-2026-06-30-deferred.md`)
 - Cycle 29/100 Deferred Findings — TODO / deferred (`cycle-29-2026-06-30-deferred.md`)
 - Cycle 28/100 Implementation Plan — TODO (`cycle-28-2026-06-30-plan.md`)
 - Cycle 28/100 Deferred Findings — TODO / deferred (`cycle-28-2026-06-30-deferred.md`)
@@ -50,6 +50,11 @@
 
 ## Completed Plans (Cycle 6 Loop)
 
+- Cycle 32/100 Implementation Plan — DONE / gates, push, deploy pending (`cycle-32-2026-06-30-plan.md`)
+- Cycle 31/100 Implementation Plan — DONE (`cycle-31-2026-06-30-plan.md`)
+- Cycle 30/100 Implementation Plan — DONE (`cycle-30-2026-06-30-plan.md`)
+- Cycle 30/100 Deferred Findings — archived/deferred (`cycle-30-2026-06-30-deferred.md`)
+- Cycle 29/100 Implementation Plan — DONE (`cycle-29-2026-06-30-plan.md`)
 - Cycle 27/100 Implementation Plan — DONE / archived under `archive/cycle-27-2026-06-30-plan.md`
 - Cycle 27/100 Deferred Findings — archived under `archive/cycle-27-2026-06-30-deferred.md`
 - Cycle 26/100 Implementation Plan — DONE / archived under `archive/cycle-26-2026-06-30-plan.md`

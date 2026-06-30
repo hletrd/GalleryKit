@@ -1,137 +1,141 @@
-# Cycle 31 Code Reviewer Review
+# Cycle 32 Code Reviewer Review
 
 Reviewer: code-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `f1dd39eb`
+HEAD reviewed: `3d174c96`
 Date: 2026-06-30 KST
-Scope: review only. No product code was edited.
+Scope: full-repository review lane. Report artifact only; no product code or other review files were edited.
 
-## Inventory Summary
+## Inventory And Method
 
-I built the inventory from current HEAD before reviewing implementation details.
+I read `AGENTS.md` and `CLAUDE.md` before inspecting implementation files. I then built the repository inventory with `rg --files` and `find`, and used targeted `rg` sweeps to map the app, tests, scripts, migrations, and docs before line-level review.
 
-- Current branch: `master...origin/master`, clean before review edits.
-- Current HEAD: `f1dd39eb fix(cycle-30): harden restore and public route guards`.
-- HEAD changed 19 files, centered on restore locking, public search copy, map query tests, and the public API route rate-limit checker.
-- Source inventory inspected with `rg --files`: 595 files across `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, and `apps/web/e2e`.
-- Primary review surfaces: `AGENTS.md`, `CLAUDE.md`, cycle-30 plan/deferred register, changed HEAD files, public route handlers, public server actions, map privacy path, restore flow, search UI/request ownership, feed route handlers, and related tests.
+Inventory counts from this checkout:
 
-Files inspected in detail:
+- `rg --files -g '!node_modules' -g '!.next' -g '!dist' -g '!coverage'`: 816 tracked/unignored workspace files.
+- `find apps/web/src apps/web/scripts apps/web/drizzle apps/web/e2e .context -type f`: 2952 files across app, tests, scripts, migrations, e2e, and committed context.
+- `apps/web/src` TypeScript/TSX files: 519.
+- `apps/web/src/__tests__` plus `apps/web/e2e` TypeScript/TSX files: 283.
+- `apps/web/scripts` top-level scripts: 29.
+- `apps/web/drizzle` migration/meta files: 32.
+- `.context` markdown files: 2182.
 
-- `apps/web/scripts/check-public-route-rate-limit.ts`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/__tests__/search-stale-response.test.ts`
-- `apps/web/src/__tests__/search-semantic-toggle-source.test.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/feed.xml/route.ts`
-- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`
-- `apps/web/src/app/api/health/route.ts`
-- `apps/web/src/app/api/og/route.tsx`
-- `apps/web/src/app/api/og/photo/[id]/route.tsx`
-- `apps/web/src/app/api/search/semantic/route.ts`
-- `apps/web/src/app/api/search/similar/[id]/route.ts`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/__tests__/restore-upload-lock.test.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/components/map/map-client.tsx`
-- `apps/web/src/__tests__/map-get-images-behavior.test.ts`
+Primary surfaces inspected in detail:
 
-## Findings
+- App routes: public pages, admin pages, `api/admin/*`, `api/search/*`, `api/og/*`, health/live, feeds, upload serving.
+- Server actions: auth, public load-more/search/analytics, images, tags, topics, settings, SEO, sharing, collections, users, embeddings, Lightroom tokens, admin backfill.
+- Libraries: data access, privacy field selections, rate limits, API auth, session auth, image processing, upload paths/storage, restore maintenance, smart collections, CLIP/semantic search, SQL restore scanning, CSP/SEO helpers.
+- Tests: privacy guards, action/API route lint contracts, public rate-limit scanner, upload locks, semantic search, smart collection pagination, map privacy, migration journal monotonicity, restore/upload locks, source-contract tests.
+- Scripts/migrations: deploy helper contracts, migration/reconcile flow, DB backup/restore, admin seed/migrate scripts, semantic/color backfills, service-worker build, e2e seed/server.
+- Docs/context: `CLAUDE.md`, `AGENTS.md`, `.context/plans`, `.context/reviews`, and cycle history relevant to current invariants.
 
-### C31-CODE-01 - Search mode toggle can commit stale results during the debounce gap
+Validation commands run:
 
-Severity: Medium
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Final sweeps covered raw SQL/filesystem boundaries, env/config usage, exemptions, TODO/FIXME markers, pagination limits, migrations, and auth/rate-limit surfaces.
+
+Full lint/typecheck/build/Vitest/e2e were not run in this read-only review lane.
+
+## Summary
+
+No critical or high-severity confirmed issue was found. The repo has strong guardrails around admin API auth, server-action origin checks, public route rate limits, privacy field omissions, restore maintenance, upload-processing locks, migration journal coverage, and semantic-search operator gating.
+
+I found one low-severity confirmed helper-contract issue. I also noted two risks that need live/manual validation because their correctness depends on deployment configuration or external operator state.
+
+## Confirmed Issues
+
+### C32-CODE-01 - Listing page-size helpers can fetch 102 rows despite a documented 100-row cap
+
+Severity: Low
 Confidence: High
 
 Exact citations:
 
-- `apps/web/src/components/search.tsx:151-158`
-- `apps/web/src/components/search.tsx:167`
-- `apps/web/src/components/search.tsx:195`
-- `apps/web/src/components/search.tsx:222`
-- `apps/web/src/components/search.tsx:240-248`
-- `apps/web/src/components/search.tsx:278-287`
-- `apps/web/src/components/search.tsx:503-507`
-- `apps/web/src/__tests__/search-semantic-toggle-source.test.ts:14-16`
+- `apps/web/src/lib/data.ts:664-670`
+- `apps/web/src/lib/data.ts:898-927`
+- `apps/web/src/lib/data.ts:1437-1480`
+- `apps/web/src/app/actions/public.ts:121-157`
+- `apps/web/src/app/actions/public.ts:170-222`
+- `apps/web/src/__tests__/smart-collection-pagination.test.ts:257-260`
 
 Issue:
 
-`clearSearchState()` is the only helper that synchronously increments `requestIdRef` and aborts an in-flight semantic request. The semantic toggle handler only calls `setUseSemanticSearch(checked)`, clears visible results/status, and waits for the `useEffect` debounce to start the next search 300 ms later. During that window, the previous in-flight keyword or semantic request still owns the current `requestIdRef` value, so its response can pass the existing stale-response checks and repopulate results from the mode the user just left.
+`LISTING_QUERY_LIMIT` is documented as the maximum number of image rows a listing query may return, and `LISTING_QUERY_LIMIT_PLUS_ONE` is intended only for has-more lookahead. `getImagesLitePage()` and `getImagesForSmartCollection()` clamp `pageSize` to `LISTING_QUERY_LIMIT_PLUS_ONE` at `data.ts:910` and `data.ts:1442`, then apply another lookahead with `.limit(normalizedPageSize + 1)` at `data.ts:926`, `data.ts:1458`, and `data.ts:1479`.
 
-Failure scenario:
+That means a direct caller passing `pageSize = 101` produces a SQL limit of 102, exceeding the documented listing cap by one row. Current public server-action callers clamp user input to 100 before reaching these helpers (`public.ts:126` and `public.ts:179`), and initial public pages pass `PAGE_SIZE = 30`, so this is not a current public DoS. The defect is in the exported helper contract and could become user-facing if a future route or admin surface calls these helpers directly with the advertised upper bound.
 
-A visitor has a semantic request in flight, toggles semantic search off, and the old semantic response returns before the debounced keyword search starts. Because the toggle did not invalidate `requestIdRef` or abort the fetch, the semantic branch can execute `setResults(semanticResults)` even though the UI now shows keyword mode. The reverse keyword-to-semantic transition has the same request-id gap for server-action results.
+The source-contract test for smart collections currently locks in the two internal `normalizedPageSize + 1` lookaheads (`smart-collection-pagination.test.ts:257-260`) but does not assert that `normalizedPageSize` itself is capped to the visible row maximum before the lookahead is added.
 
-Concrete fix:
+Recommended fix:
 
-Invalidate ownership synchronously in `onCheckedChange`: call `clearSearchState()` before or immediately after `setUseSemanticSearch(checked)`, or extract a lighter `invalidateSearchRequests()` that increments `requestIdRef` and aborts `semanticAbortRef` without changing query text. Add a source-contract test that the semantic toggle handler invalidates request ownership, not just that it avoids directly calling `performSearch()`.
+Clamp visible page size to `LISTING_QUERY_LIMIT`, not `LISTING_QUERY_LIMIT_PLUS_ONE`, in `getImagesLitePage()` and `getImagesForSmartCollection()`. Keep the SQL lookahead as `normalizedPageSize + 1`. Add a targeted test/source contract asserting the visible cap is 100 and the SQL limit cannot exceed 101.
 
-### C31-CODE-02 - A file-level public-route exemption can hide an expensive GET in the same route file
+## Likely Issues
 
-Severity: Medium
-Confidence: High
+None confirmed enough to classify as likely code defects after cross-file inspection.
 
-Exact citations:
+One investigated path was the settings upload-contract lock: `SettingsClient` sends only changed fields at `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:238-253`, so `updateGallerySettings()` does not normally acquire the upload-processing contract lock for no-op or unrelated saves. That suspected issue is not present in the standard UI path.
 
-- `apps/web/scripts/check-public-route-rate-limit.ts:505-516`
-- `apps/web/scripts/check-public-route-rate-limit.ts:527-536`
-- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:197-212`
+## Risks Needing Manual Validation
 
-Issue:
-
-The checker handles a reasoned `@public-no-rate-limit-required` as file-level. It only rejects ambiguity when there is more than one mutating handler, then returns immediately whenever `mutatingHandlers.length > 0 && hasExemption`. That return bypasses the expensive-GET check entirely. The existing ambiguous-exemption test covers `POST` plus `DELETE`, but it does not cover `POST` plus an expensive `GET`.
-
-Failure scenario:
-
-A future public route file adds a signature-gated `POST` with a valid exemption comment and also exports a DB-backed `GET` in the same file. The checker reports the file as OK because of the POST exemption, while the expensive GET remains unmetered. I validated this with `checkPublicRouteSource()` using a minimal route containing one exempt `POST` and one `GET` that calls `db.select()`: the report passed with no failures.
-
-Concrete fix:
-
-Treat exemptions as handler-scoped or fail closed whenever a file-level exemption coexists with more than one protected surface, counting both mutating handlers and expensive GET handlers. Do not return before evaluating `expensiveGetHandlers`. Add a regression fixture for `POST` with exemption plus unmetered expensive `GET`.
-
-### C31-CODE-03 - Atom feeds do full public DB work before 304 handling and are outside the public-route rate-limit gate
+### C32-RISK-01 - Production reverse-proxy rate limiting depends on `TRUST_PROXY=true`
 
 Severity: Medium
 Confidence: Medium
 
 Exact citations:
 
-- `apps/web/src/app/feed.xml/route.ts:29-40`
-- `apps/web/src/app/feed.xml/route.ts:144-153`
-- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50-64`
-- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:146-155`
-- `apps/web/scripts/check-public-route-rate-limit.ts:25`
-- `apps/web/scripts/check-public-route-rate-limit.ts:557`
-- `CLAUDE.md:619-623`
+- `apps/web/src/lib/rate-limit.ts:166-196`
+- `apps/web/scripts/run-e2e-server.mjs:35-36`
 
-Issue:
+Risk:
 
-Both Atom feed route handlers execute SEO/config/topic/image queries before checking `If-Modified-Since` and returning 304. The public-route lint gate only discovers files under `src/app/api`, so these route handlers are not forced to rate-limit or carry an explicit exemption even though they perform public DB work on every request. Cache headers help downstream caches, but a direct client or cache miss still pays the full query/compose cost even for a not-modified poll.
+`getClientIp()` intentionally ignores `x-forwarded-for` and `x-real-ip` unless `TRUST_PROXY === 'true'`. If production is behind nginx or another reverse proxy and `TRUST_PROXY` is missing, all users collapse into the `"unknown"` bucket. The code logs a security warning at `rate-limit.ts:192-194`, but login/public-action rate limits can still globally throttle legitimate users until configuration is fixed.
 
-Failure scenario:
+This is the correct secure default against spoofed proxy headers, so it is not a code bug by itself. It needs live environment validation: confirm the deployed app has `TRUST_PROXY=true` and an appropriate `TRUSTED_PROXY_HOPS` value for the actual proxy chain.
 
-An RSS crawler, misconfigured monitor, or simple script repeatedly requests `/feed.xml` or `/{locale}/{topic}/feed.xml` with a valid `If-Modified-Since`. The app still resolves settings/config and fetches up to 50 feed rows before returning 304. Topic feeds also resolve the topic before the conditional check. Under abuse or many subscribed topics, this becomes an unmetered public DB path that the current lint gate never inventories.
+### C32-RISK-02 - Semantic-search production mode remains operator-state dependent
 
-Concrete fix:
+Severity: Medium
+Confidence: Medium
 
-Either extend the public-route scanner to include dotted route handlers under `src/app/**/route.ts(x)` that perform DB/image/filesystem work, or add explicit source-contract coverage and documented exemptions for feed routes. For runtime behavior, split feed freshness into a cheap indexed freshness query before composing entries, then return 304 before fetching full rows when possible; otherwise add a small per-IP feed limiter or CDN-only operational exemption with clear reasoning.
+Exact citations:
 
-## No-Finding Areas
+- `apps/web/src/lib/gallery-config.ts:125-129`
+- `apps/web/src/app/api/search/semantic/route.ts:107-168`
+- `apps/web/src/app/api/search/similar/[id]/route.ts:68-122`
+- `apps/web/scripts/backfill-clip-embeddings.ts:95-116`
+- `apps/web/src/lib/clip-paths.ts:62-93`
 
-- Restore coordination: current HEAD sets `imageQueueQuiesced = true` immediately after `quiesceImageProcessingQueueForRestore()` and before `drainBackgroundDbWritesForRestore()`, then resumes when maintenance exits. This addresses the cycle-30 queue resume gap.
-- Map privacy: `getMapImages()` uses an inner join on `topics.map_visible = true`, requires non-null GPS fields, applies a deterministic 10k cap, and asserts `topic_map_visible` before returning rows.
-- Search generic copy: the current messages now describe temporary unavailability rather than blaming user input. I did not find a copy regression in the changed locale keys.
-- Public API route rate-limit gate: the configured lint command is green for current `src/app/api/**` route files.
+Risk:
 
-## Verification Evidence
+The repo correctly gates production semantic search behind config/env/model/backfill state: production mode is healed unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, routes check mode before expensive work, backfill refuses production without the env gate, and model paths are validated. The remaining correctness risk is live operator state: DB mode, env flag, CLIP weights/manifests, and image embeddings must agree on the deployed host.
 
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
-- `npm test --workspace=apps/web -- search-stale-response search-semantic-toggle-source check-public-route-rate-limit feed-sized-derivative`: 4 files passed, 69 tests passed.
-- Minimal `checkPublicRouteSource()` repro confirmed C31-CODE-02.
-- Final missed-issue sweep covered changed HEAD files, adjacent route/action/data paths, source-contract tests, public API routes, feed handlers, restore locking, map privacy, and search request ownership.
+Manual validation should confirm production semantic search is either intentionally disabled or fully activated with weights present and embeddings backfilled. This cannot be proven from the repository alone.
 
-## Recommendation
+## Positive Cross-File Checks
 
-Request changes for C31-CODE-01 before more search UI work, because it is a user-visible stale-state bug. C31-CODE-02 should be fixed with the route-gate hardening work because it weakens a security/performance invariant. C31-CODE-03 can be handled as a bounded public-surface hardening task unless production logs show feed traffic is already hot.
+- Admin API route exports are covered by `withAdminAuth(...)`; the auth lint gate passed.
+- Mutating server actions return early on `requireSameOriginAdmin()`; the action-origin lint gate passed.
+- Public mutating/expensive routes are rate-limited or explicitly exempted; the public-route rate-limit lint gate passed.
+- Public image select fields omit admin/private fields, and the symmetric privacy guard is locked by `apps/web/src/__tests__/privacy-fields.test.ts`.
+- Migration journal and reconcile rules are present: migrations live in `apps/web/drizzle`, journal metadata is in `apps/web/drizzle/meta/_journal.json`, and legacy reconciliation is centralized in `apps/web/scripts/migrate.js`.
+- Upload, restore, and backfill flows use advisory/maintenance locks across server actions, API routes, and scripts; I did not find an unguarded cross-flow mutation path in the inspected surfaces.
+- OG image fetching uses the configured canonical origin and bounded fetch behavior, avoiding user-controlled SSRF surfaces.
+- The settings client only submits changed fields, limiting transaction size and avoiding unnecessary upload-contract lock contention.
+
+## Final Missed-Issues Sweep
+
+Final sweeps covered:
+
+- Raw SQL and database execution calls.
+- Filesystem read/write/unlink/rename/copy boundaries.
+- Auth, token, session, password, env, and proxy configuration usage.
+- Public-route exemptions and server-action origin exemptions.
+- Pagination limit/cursor paths.
+- TODO/FIXME/HACK markers and explicit error/log paths.
+- Migration/reconcile files and tests around migration journal monotonicity.
+
+No additional confirmed medium/high issues were found in that sweep. The only product-code change I would recommend from this review is the low-risk pagination cap adjustment in `apps/web/src/lib/data.ts` plus its focused test.

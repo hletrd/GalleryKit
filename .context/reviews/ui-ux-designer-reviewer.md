@@ -1,71 +1,114 @@
-# Cycle 31 UI/UX Designer Reviewer
+# Cycle 32 UI/UX Designer Reviewer
 
-Custom reviewer prompt was readable at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`. The prompt is BurstPick-specific, so this pass applies its senior UI/UX critique lens to GalleryKit: hierarchy, control behavior, accessibility, state design, responsive behavior, and professional polish. Product code was not edited.
+Reviewer profile loaded from `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`; the stale BurstPick/Swift specifics were ignored. This pass applies the professional creative-tool reviewer perspective to GalleryKit's Next.js public gallery and admin operator UI. Product code was not edited.
 
-## Evidence And Inventory
+## Executive Summary
 
-- Agent-browser live coverage: desktop home, mobile home, mobile menu, mobile photo viewer, mobile lightbox, search dialog, failed search state.
-- Local dev coverage: Next.js server reached, but content blocked by unavailable MySQL. Error shell verified.
-- Main UI files reviewed: `home-client.tsx`, `nav-client.tsx`, `search.tsx`, `tag-filter.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `image-zoom.tsx`, `color-details-section.tsx`, `wide-gamut-hint.tsx`, `lightbox-color-pip.tsx`, `login-form.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `image-manager.tsx`, `settings-client.tsx`, `footer.tsx`, `load-more.tsx`, `globals.css`, `layout.tsx`, English/Korean messages.
+GalleryKit is already stronger than a generic self-hosted gallery on accessibility basics, color/HDR honesty, and admin-state feedback, but the main professional UX risk is that high-frequency visual browsing and admin batch work are still shaped by control-heavy web patterns. Design quality: **7.4/10**. The public viewer respects photography well; the admin console is functional and safe, but dense table-only management and mobile filter hierarchy still cost operators time.
+
+## Evidence
+
+- Source inventory covered public routes, admin routes, shared routes, layout/i18n, and UI components under `apps/web/src/app`, `apps/web/src/components`, and `apps/web/messages`.
+- Browser evidence used the already-running local Next dev server at `http://localhost:3022` because port 3000 was occupied and a new 3010 server was rejected by Next as another dev server for the repo was already running.
+- Local DB was unavailable during browser capture (`ECONNREFUSED` in `apps/web/.next/dev/logs/next-development.log`), so normal masonry/admin-authenticated screenshots were not feasible. Public `/en` rendered the generic route error surface; `/en/admin` rendered the login surface.
+- Playwright screenshots captured:
+  - `/tmp/gk-home-mobile.png`, `/tmp/gk-home-desktop.png`: DB-failure error state.
+  - `/tmp/gk-admin-login-mobile.png`, `/tmp/gk-admin-login-desktop.png`: admin login.
+- Playwright DOM metrics confirmed admin login initial focus lands on `#login-username`; mobile username/password/sign-in controls measured `308x44`, password reveal measured `44x44`; desktop form controls measured `334x44`.
 
 ## Findings
 
-### UXD-31-01: Mobile home hierarchy is control-heavy for a visual gallery
+### UXD-32-01 - Mobile gallery hierarchy still puts controls before photography
 
 - Severity: Medium
 - Confidence: High
-- Evidence: runtime at `390x844` showed nav, H1/count, then approximately 200 px of tag buttons before the first photo. Source confirms the sequence in `apps/web/src/components/home-client.tsx:255` through `apps/web/src/components/home-client.tsx:286`; tag chips render as full buttons with counts in `apps/web/src/components/tag-filter.tsx:81` through `apps/web/src/components/tag-filter.tsx:120`.
-- Failure scenario: the page feels like a filter dashboard instead of a photography surface, particularly for new mobile visitors.
-- Fix: keep filters available but visually subordinate. Use a single-row scroll strip, "Filters" disclosure, or first-row cap. Let photography occupy the first-scroll experience.
+- Evidence: `HomeClient` renders the page heading/count and then the full `TagFilter` before the photo masonry (`apps/web/src/components/home-client.tsx:255-286`). `TagFilter` renders all tags as wrapping 44px button chips with counts (`apps/web/src/components/tag-filter.tsx:63-120`).
+- Why it matters: for a photo gallery, the first mobile viewport should establish the photographic body of work. A wrapped taxonomy wall makes the first impression feel like a dashboard, especially when many tags exist.
+- Recommendation: cap mobile filters to one horizontal row, move them behind a filter disclosure, or show active filters first with an explicit "all filters" control.
 
-### UXD-31-02: Lightbox auto-hide trades visual cleanliness for accessibility discoverability
+### UXD-32-02 - Lightbox auto-hide removes essential controls from the accessibility tree
 
 - Severity: Medium
+- Confidence: High
+- Evidence: hidden lightbox controls receive `{ tabIndex: -1, aria-hidden: true }` (`apps/web/src/components/lightbox.tsx:371-373`). The close, fullscreen, slideshow, prev/next, color pip, and counter all live in that fading overlay (`apps/web/src/components/lightbox.tsx:546-687`).
+- Why it matters: visual cleanliness is useful for photos, but a dialog should not become image-only for screen-reader, switch, or voice-control users after idle. Escape still works, but discoverability and recoverability degrade.
+- Recommendation: keep close and prev/next in the accessibility tree while visually faded, or provide a persistent off-screen accessible command group.
+
+### UXD-32-03 - Admin image management is table-first and awkward on small screens
+
+- Severity: Medium
+- Confidence: High
+- Evidence: Dashboard constrains the recent uploads area to a scroll container (`apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`). `ImageManager` then renders a 9-column table with preview/title/filename/topic/tags/gamut/date/actions (`apps/web/src/components/image-manager.tsx:424-594`), including per-row `TagInput` controls (`apps/web/src/components/image-manager.tsx:494-528`).
+- Why it matters: a table is efficient on desktop, but on phone/tablet an admin must horizontally pan while editing tags or selecting rows. Upload from mobile is a real path in this product, so post-upload triage should not be desktop-only.
+- Recommendation: add a responsive card/list mode below `lg`, with preview, title, topic, tags, gamut, and actions grouped vertically; keep the table for desktop density.
+
+### UXD-32-04 - Admin navigation is ungrouped and likely to wrap into a control wall
+
+- Severity: Low
 - Confidence: Medium
-- Evidence: live idle lightbox accessibility snapshot exposed only the dialog and image. Source applies `aria-hidden` and `tabIndex=-1` to hidden controls in `apps/web/src/components/lightbox.tsx:371`; the hide timer runs at `apps/web/src/components/lightbox.tsx:201`; close/navigation controls are inside the hidden overlay from `apps/web/src/components/lightbox.tsx:546` through `apps/web/src/components/lightbox.tsx:687`.
-- Failure scenario: after controls fade, a non-pointer user can be inside a modal that appears to contain only an image. Escape works, but the visible and accessible recovery affordance is gone.
-- Fix: never remove close from the accessibility tree. Prefer visual opacity-only for essential controls, or maintain an off-screen accessible control group while the visual overlay is hidden.
+- Evidence: `AdminNav` exposes 10 peer links in one wrapping nav (`apps/web/src/components/admin-nav.tsx:15-29`), and `AdminHeader` places that nav beside the Admin brand and logout in a flex-wrap header (`apps/web/src/components/admin-header.tsx:13-27`).
+- Why it matters: operators need fast orientation between "operate photos", "configure site", "security/users/tokens", and "maintenance/analytics". A flat row works when short, but as it wraps it loses grouping and scan order.
+- Recommendation: group admin routes into operational sections or use a sidebar/overflow menu for lower-frequency maintenance pages.
 
-### UXD-31-03: Search status repeats itself in assistive output
-
-- Severity: Low
-- Confidence: High
-- Evidence: failed production search produced duplicate error text in the accessibility snapshot. Source has both a screen-reader-only live region in `apps/web/src/components/search.tsx:440` through `apps/web/src/components/search.tsx:449` and a visible duplicate in `apps/web/src/components/search.tsx:473` through `apps/web/src/components/search.tsx:476`.
-- Failure scenario: AT users get unnecessary repetition at the exact moment the UI is already failing to provide results.
-- Fix: consolidate the announcement. One live status is enough; duplicate visual text should be hidden from AT or the hidden live region should be removed.
-
-### UXD-31-04: Card link accessible text is more verbose than necessary
+### UXD-32-05 - Photo card accessible naming is probably redundant
 
 - Severity: Low
 - Confidence: Medium
-- Evidence: live desktop accessibility output for photo links repeated title/topic text. Source combines link `aria-label` at `apps/web/src/components/home-client.tsx:323`, image `alt` at `apps/web/src/components/home-client.tsx:353`, and visible overlay title/topic blocks at `apps/web/src/components/home-client.tsx:395` and `apps/web/src/components/home-client.tsx:401`.
-- Failure scenario: keyboard and screen reader users traverse the masonry grid and hear repeated labels for each card, slowing scanning across 30-plus cards.
-- Fix: keep one authoritative accessible name per card. Mark overlay text decorative for AT, or tune image alt in linked cards while keeping rich alt on photo detail.
+- Evidence: masonry cards set a link `aria-label` (`apps/web/src/components/home-client.tsx:323-327`), image alt (`apps/web/src/components/home-client.tsx:353-355`), and visible overlay title/topic text (`apps/web/src/components/home-client.tsx:395-405`) inside the same link.
+- Why it matters: screen-reader users scanning 30+ image links can hear repeated title/topic content. The design has the right information, but too many nodes may compete to name the same card.
+- Recommendation: choose one authoritative accessible name for the card link; make decorative overlay text `aria-hidden` if it duplicates the link name.
 
-### UXD-31-05: Motion is responsibly reduced, but default timings are a little slow for repeated browsing
-
-- Severity: Low
-- Confidence: High
-- Evidence: reduced motion is covered in `apps/web/src/app/globals.css:253` through `apps/web/src/app/globals.css:279`. Default card image scale uses `duration-500` in `apps/web/src/components/home-client.tsx:357` and `apps/web/src/components/home-client.tsx:371`; the photo info sidebar uses `duration-500` in `apps/web/src/components/photo-viewer.tsx:718` through `apps/web/src/components/photo-viewer.tsx:724`.
-- Failure scenario: repeated hover and info-panel toggles feel slightly sluggish for power browsing, even though accessibility motion preferences are respected.
-- Fix: reduce routine UI transitions to 150-250 ms and keep longer motion only for deliberate viewer transitions.
-
-### UXD-31-06: RTL readiness is partial, not complete
+### UXD-32-06 - Routine UI motion remains slower than necessary for repeated browsing
 
 - Severity: Low
 - Confidence: High
-- Evidence: `dir` is wired in `apps/web/src/app/[locale]/layout.tsx:94`, but exposed locales are English/Korean in `apps/web/src/components/nav-client.tsx:19`; lightbox and nav use physical directions in `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/lightbox.tsx:621`, `apps/web/src/components/lightbox.tsx:642`, and `apps/web/src/components/nav-client.tsx:100`.
-- Failure scenario: future RTL locales would get correct text direction but incorrect spatial affordances and carousel placement.
-- Fix: do not activate RTL locales until directional CSS and interaction semantics are converted to logical start/end and verified with RTL screenshots.
+- Evidence: reduced motion is globally respected (`apps/web/src/app/[locale]/globals.css:253-279`), but normal masonry hover image transitions use `duration-500` (`apps/web/src/components/home-client.tsx:357-371`) and the desktop info sidebar uses `duration-500` (`apps/web/src/components/photo-viewer.tsx:716-724`).
+- Why it matters: 500ms motion is acceptable for showcase feel, but repeated photo browsing benefits from 150-250ms utility transitions.
+- Recommendation: shorten routine hover/sidebar transitions and reserve longer animation for deliberate viewer mode changes.
 
-## Strengths
+### UXD-32-07 - Generic route error is usable but not operator-informative
 
-- Touch target discipline is strong. Live mobile metrics showed nav controls, language/theme/search buttons, tag chips, photo controls, and footer links at or above 44 px. Source also uses `min-h-11` and `h-11/w-11` throughout `nav-client.tsx`, `tag-filter.tsx`, `photo-viewer.tsx`, and `footer.tsx`.
-- Focus and keyboard coverage is broad: skip link in `apps/web/src/app/[locale]/layout.tsx:119`, search shortcuts in `apps/web/src/components/search.tsx:297`, viewer shortcuts in `apps/web/src/components/photo-viewer.tsx:370`, and lightbox focus management in `apps/web/src/components/lightbox.tsx:434`.
-- Color and contrast systems are unusually mature for a gallery: theme tokens in `apps/web/src/app/globals.css:14` through `apps/web/src/app/globals.css:101`, forced-colors support at `apps/web/src/app/globals.css:164`, and color/HDR affordances in `color-details-section.tsx`, `wide-gamut-hint.tsx`, and `lightbox-color-pip.tsx`.
-- State design is mostly complete: loading status in `apps/web/src/app/[locale]/loading.tsx:8`, error recovery in `apps/web/src/app/[locale]/error.tsx:22`, empty gallery in `apps/web/src/components/home-client.tsx:426`, upload disabled/progress/skipped states in `apps/web/src/components/upload-dropzone.tsx:373`, and login validation in `apps/web/src/components/login-form.tsx:58`.
-- Admin UI uses pragmatic density: tables scroll horizontally in `apps/web/src/components/image-manager.tsx:424`, batch toolbar is sticky at `apps/web/src/components/image-manager.tsx:321`, and admin nav wraps with minimum target sizing in `apps/web/src/components/admin-nav.tsx:29`.
+- Severity: Low
+- Confidence: High
+- Browser evidence: local `/en` with DB unavailable showed `Error`, "Something went wrong loading this page.", `Try again`, and `Return to Gallery`; DOM controls were 44px high.
+- Source evidence: the route error surface intentionally renders generic copy and two recovery controls (`apps/web/src/app/[locale]/error.tsx:22-57`).
+- Why it matters: generic public copy is safe, but operators diagnosing a broken self-hosted gallery get no incident ID or "service temporarily unavailable" distinction.
+- Recommendation: keep public-safe wording, but consider a non-sensitive support/reference code or differentiated unavailable copy when server data dependencies fail.
 
-## Designer Verdict
+## Category Review
 
-GalleryKit already has the fundamentals of a serious photographer-facing UI: color respect, strong touch targets, explicit states, and keyboard-aware viewer controls. The remaining design debt is concentrated in mobile hierarchy and assistive discoverability, not in visual styling. Fix the mobile filter presentation, keep modal controls discoverable, and repair search recovery before spending design time on new features.
+### Responsive Layout
+
+Public masonry adapts from 1 to 5 CSS columns and reserves intrinsic card height (`apps/web/src/components/home-client.tsx:222-237`, `apps/web/src/components/home-client.tsx:286-321`). The photo viewer has mobile bottom-sheet handling and desktop info sidebar split (`apps/web/src/components/info-bottom-sheet.tsx:197-213`, `apps/web/src/components/photo-viewer.tsx:716-727`). Main gap: mobile filter hierarchy and admin table responsiveness.
+
+### Accessibility, Keyboard, Focus
+
+Strong base: root skip link and focusable main target (`apps/web/src/app/[locale]/layout.tsx:119-128`, `apps/web/src/app/[locale]/(public)/layout.tsx:7-16`), 44px Button/Input/Switch primitives (`apps/web/src/components/ui/button.tsx:23-29`, `apps/web/src/components/ui/input.tsx:10-13`, `apps/web/src/components/ui/switch.tsx:24-54`), IME-safe search/tag/login patterns (`apps/web/src/components/search.tsx:297-314`, `apps/web/src/components/tag-input.tsx:104-155`, `apps/web/src/app/[locale]/admin/login-form.tsx:28-43`). Main gap: lightbox idle accessibility.
+
+### Touch Targets
+
+Browser-confirmed login controls meet 44px. Source-level target discipline is consistent across buttons, nav links, tag chips, uploader controls, image manager checkboxes, and modal closes (`apps/web/src/components/ui/button.tsx:23-29`, `apps/web/src/components/tag-filter.tsx:63-120`, `apps/web/src/components/image-manager.tsx:429-463`, `apps/web/src/components/upload-dropzone.tsx:493-590`).
+
+### I18n
+
+English/Korean message namespaces cover nav, upload, image manager, login, search, aria, error, and settings (`apps/web/messages/en.json`, `apps/web/messages/ko.json`). Root layout sets `lang` and `dir` via locale helpers (`apps/web/src/app/[locale]/layout.tsx:93-100`). RTL is future-proofed only at the document level; physical left/right placement remains in lightbox/nav code, so RTL should stay deferred until a real RTL locale is planned.
+
+### Public Workflows
+
+Home/topic/shared routes use dynamic freshness and shared gallery components (`apps/web/src/app/[locale]/(public)/page.tsx:155-178`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:173-225`). Shared single/group views preserve noindex and route into the same viewer (`apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:122-150`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:144-176`). Color/HDR truthfulness is a standout: display-gated P3/HDR badges and color details are explicit (`apps/web/src/app/[locale]/globals.css:145-162`, `apps/web/src/components/color-details-section.tsx:144-204`).
+
+### Admin Workflows
+
+Upload has good no-category, GPS warning, skipped-file, progress, and per-file error states (`apps/web/src/components/upload-dropzone.tsx:373-489`, `apps/web/src/components/upload-dropzone.tsx:568-571`). Image management supports selection, bulk edit/tag/share/delete, and destructive confirmation (`apps/web/src/components/image-manager.tsx:319-421`, `apps/web/src/components/image-manager.tsx:597-662`). Settings exposes backfill warnings, trigger confirmation, and last-run status (`apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:302-420`). Main gap is responsive ergonomics, not capability.
+
+### Loading, Empty, Error States
+
+Loading status is localized and ARIA-labelled (`apps/web/src/app/[locale]/loading.tsx:1-14`, `apps/web/src/app/[locale]/admin/(protected)/loading.tsx:1-14`). Empty states exist for gallery filters, uploads without categories, image manager, analytics, and tokens (`apps/web/src/components/home-client.tsx:426-442`, `apps/web/src/components/upload-dropzone.tsx:373-384`, `apps/web/src/components/image-manager.tsx:586-591`, `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:105-110`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:120-124`). Error recovery is usable but generic.
+
+### Visual Hierarchy And Design System
+
+The token system is restrained and contrast-aware, including dark/OLED themes, forced-colors adjustments, and reduced-motion suppression (`apps/web/src/app/[locale]/globals.css:13-101`, `apps/web/src/app/[locale]/globals.css:164-182`, `apps/web/src/app/[locale]/globals.css:253-300`). The public viewer correctly makes the photo the primary object. The admin console is pragmatic, but flat nav and table-first management make it feel more like a database console than a polished photo-operations tool.
+
+## Final Verdict
+
+GalleryKit helps photographers and operators more than it gets in their way, especially on color fidelity, safety states, and touch/accessibility fundamentals. Before calling the UI professionally polished, fix mobile gallery filter hierarchy, keep lightbox controls accessible while hidden, and add a responsive admin image-management mode. After those, the remaining work is mostly interaction polish rather than structural repair.

@@ -1,264 +1,175 @@
-# Cycle 31 Aggregate Review
+# Cycle 32 Aggregate Review
 
+Reviewed HEAD at fan-out start: `3d174c96` (two review-artifact commits landed during fan-out: `7143d826`, `8849f5b1`).
 Date: 2026-06-30 KST
-Reviewed HEAD at fan-out start: `f1dd39eb`
-Current cycle note: `architect.md` and `document-specialist.md` were committed by a review lane as `b59280cc` while the fan-out was running; all other review files remained local artifacts for aggregation.
 
-## Review Lanes
+## Agent Coverage
 
-- `code-reviewer.md` and `critic.md`: code quality and critique.
-- `perf-reviewer.md`, `debugger.md`, and `tracer.md`: performance, latent bugs, and causal tracing.
-- `security-reviewer.md`: security and guardrail review.
-- `verifier.md` and `test-engineer.md`: evidence and test coverage review.
-- `architect.md` and `document-specialist.md`: architecture and docs/source consistency.
-- `designer.md`, `product-marketer-reviewer.md`, and `ui-ux-designer-reviewer.md`: UI/UX plus available custom reviewer prompts.
+Completed review artifacts:
 
-## Deduped Findings
+- `.context/reviews/code-reviewer.md`
+- `.context/reviews/perf-reviewer.md`
+- `.context/reviews/security-reviewer.md`
+- `.context/reviews/critic.md`
+- `.context/reviews/verifier.md`
+- `.context/reviews/test-engineer.md`
+- `.context/reviews/tracer.md`
+- `.context/reviews/architect.md`
+- `.context/reviews/debugger.md`
+- `.context/reviews/document-specialist.md`
+- `.context/reviews/designer.md`
+- `.context/reviews/ui-ux-designer-reviewer.md`
+- `.context/reviews/product-marketer-reviewer.md`
 
-### C31-AGG-01 - Search mode toggle can commit stale results
+Agent failures: none. Two subagents committed/pushed review artifacts despite Prompt 1 being review-only; history was preserved and this aggregate accounts for those commits.
 
-- Severity: Medium
-- Confidence: High
-- Reported by: code-reviewer, critic
-- Citations: `apps/web/src/components/search.tsx:151`, `apps/web/src/components/search.tsx:167`, `apps/web/src/components/search.tsx:240`, `apps/web/src/components/search.tsx:503`, `apps/web/src/__tests__/search-semantic-toggle-source.test.ts:14`
-- Problem: the semantic toggle resets visible state but does not synchronously invalidate request ownership or abort an in-flight semantic fetch.
-- Failure scenario: a visitor switches search modes while an old request is in flight, and the old mode repopulates results during the debounce gap.
-- Fix: invalidate request ownership in the toggle handler and lock it with a source-contract test.
+## High Signal Findings
 
-### C31-AGG-02 - File-level public-route exemption can hide an expensive GET
+### AGG32-01 - Aborted queued CLIP request can leak an inference slot
 
-- Severity: Medium
-- Confidence: High
-- Reported by: code-reviewer, critic
-- Citations: `apps/web/scripts/check-public-route-rate-limit.ts:505`, `apps/web/scripts/check-public-route-rate-limit.ts:527`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:197`
-- Problem: a reasoned exemption for one handler can return before expensive GET analysis runs.
-- Failure scenario: a future file combines an exempt webhook-style `POST` with an unmetered DB-backed `GET`, and the custom gate passes.
-- Fix: fail closed when a file-level exemption coexists with more than one protected surface, including expensive GET handlers.
+Severity: High
+Confidence: High
+Sources: perf-reviewer
 
-### C31-AGG-03 - Public expensive-GET gate misses local helper DB/CPU work
+Citations: `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:117-170`, `apps/web/src/app/api/search/semantic/route.ts:247-260`, `apps/web/src/components/search.tsx:184-193`.
 
-- Severity: Low
-- Confidence: High
-- Reported by: security-reviewer
-- Citations: `apps/web/scripts/check-public-route-rate-limit.ts:57`, `apps/web/scripts/check-public-route-rate-limit.ts:279`, `apps/web/scripts/check-public-route-rate-limit.ts:527`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:132`
-- Problem: expensive GET detection scans the exported handler text but does not trace local helper calls the way mutating detection does.
-- Failure scenario: a future `GET` calls `await loadRows()` before the limiter; `loadRows()` performs `db.select()`, but the gate treats the route as cheap.
-- Fix: compute local expensive helper closures and include those calls in expensive GET detection.
+`releaseInferenceSlot()` reserves an active slot while handing it to a queued waiter. If that waiter aborts after the handoff but before `withInferenceSlot()` enters its `try/finally`, the reserved slot is never released. With concurrency 1, production semantic search and image embedding can stall until restart.
 
-### C31-AGG-04 - Public expensive-GET gate ignores catch/finally expensive work
+Fix: make slot acquisition release-safe for abort-after-handoff and add a behavioral regression test.
 
-- Severity: Medium
-- Confidence: High
-- Reported by: verifier, test-engineer
-- Citations: `apps/web/scripts/check-public-route-rate-limit.ts:352`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:163`
-- Problem: `bodyCallsRateLimitBeforeExpensiveGetWork()` recurses only into `tryBlock`, ignores catch/finally, and discards the returned failure value at the top level.
-- Failure scenario: a future public GET performs DB/file/image work in `catch` before any limiter; the gate passes because a limiter exists later in the try block.
-- Fix: inspect catch/finally or fail closed when those branches contain expensive work before a dominating limiter.
+### AGG32-02 - Bulk edit can silently ignore invalid tag mutations while reporting success
 
-### C31-AGG-05 - Atom feed routes perform full DB work before 304 and sit outside the public-route gate
+Severity: Medium
+Confidence: High
+Sources: critic
 
-- Severity: Medium
-- Confidence: Medium
-- Reported by: code-reviewer, critic
-- Citations: `apps/web/src/app/feed.xml/route.ts:29`, `apps/web/src/app/feed.xml/route.ts:144`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:146`, `apps/web/scripts/check-public-route-rate-limit.ts:25`
-- Problem: feeds compose rows and settings before honoring `If-Modified-Since`; the scanner only walks `src/app/api`.
-- Failure scenario: direct feed pollers repeatedly request with a valid conditional header, and the app still does full public feed DB work.
-- Fix: add a cheap freshness query before full feed composition and document/test the conditional fast path.
+Citations: `apps/web/src/components/bulk-edit-dialog.tsx:112-153`, `apps/web/src/app/actions/images.ts:995-1003`, `apps/web/src/app/actions/images.ts:1132-1155`, `apps/web/src/app/actions/images.ts:1169-1184`, `apps/web/src/__tests__/bulk-update-images.test.ts:202-278`.
 
-### C31-AGG-06 - CLIP inference slot handoff can exceed the configured concurrency cap
+`bulkUpdateImages()` skips invalid add/remove tag names with `continue`, then can still return success and audit the requested tag names. Operators can believe a batch tag correction applied when the server ignored it.
 
-- Severity: Medium
-- Confidence: High
-- Reported by: perf-reviewer, debugger, tracer
-- Citations: `apps/web/src/lib/clip-model.ts:53`, `apps/web/src/lib/clip-model.ts:117`, `apps/web/src/lib/clip-model.ts:148`, `apps/web/src/app/api/search/semantic/route.ts:247`, `apps/web/scripts/backfill-clip-embeddings.ts:179`
-- Problem: a release decrements `activeInferenceCount` before resolving a waiter, so a fresh caller can steal the visible free slot before the waiter resumes.
-- Failure scenario: with `CLIP_INFERENCE_CONCURRENCY=1`, two ONNX inferences can run concurrently during semantic search or production backfill bursts.
-- Fix: make release transfer a reserved slot to one waiter, and add a contract test for the handoff shape.
+Fix: validate all add/remove tag candidates before transaction start and fail the batch on any rejected tag; add mixed valid/invalid tests.
 
-### C31-AGG-07 - Semantic retrieval is brute-force newest-window scoring on the public request path
+### AGG32-03 - Lightbox color pip exposes admin-only transfer metadata outside the `isAdmin` gate
 
-- Severity: Medium
-- Confidence: High
-- Reported by: architect
-- Citations: `apps/web/src/lib/clip-embeddings.ts:36`, `apps/web/src/app/api/search/semantic/route.ts:263`, `apps/web/src/app/api/search/similar/[id]/route.ts:164`, `README.md:42`, `CLAUDE.md:553`
-- Problem: semantic and similar search scan newest embeddings from MySQL and score vectors in the web process.
-- Failure scenario: when embeddings exceed `SEMANTIC_SCAN_LIMIT`, older relevant photos are unretrievable; raising the limit increases request-path CPU/DB work.
-- Fix: defer to a search-owned boundary/vector-index plan; add operator warning or health visibility before larger galleries.
+Severity: Medium
+Confidence: High
+Sources: verifier
 
-### C31-AGG-08 - Firefox HDR/dynamic-range docs are stale
+Citations: `apps/web/src/components/lightbox-color-pip.tsx:44-84`, `apps/web/src/components/lightbox-color-pip.tsx:161-185`, `apps/web/src/__tests__/lightbox-color-pip-hdr.test.ts:208-220`.
 
-- Severity: Medium
-- Confidence: High
-- Reported by: document-specialist
-- Citations: `CLAUDE.md:367`, `apps/web/src/lib/use-display-capability.ts:72`, `apps/web/src/lib/use-display-capability.ts:91`
-- Problem: docs say Firefox does not implement `(dynamic-range: high)` and always reports non-HDR, while current compatibility data says Firefox supports the media feature and the code feature-detects it.
-- Failure scenario: future reviewers suppress valid Firefox HDR checks based on stale docs.
-- Fix: update the docs/comments to split Firefox `color-gamut` caveats from `dynamic-range` capability.
+The public canonical data path omits `transfer_function`, but the component computes and renders it in collapsed text/aria labels whenever an admin-shaped image is passed with `isAdmin={false}`. This violates the component's own privacy boundary.
 
-### C31-AGG-09 - Embedded source line references in `CLAUDE.md` have drifted
+Fix: gate collapsed transfer text and aria label on `isAdmin`; add a regression test with admin-shaped data rendered as non-admin.
 
-- Severity: Low
-- Confidence: High
-- Reported by: document-specialist
-- Citations: `CLAUDE.md:127`, `CLAUDE.md:161`, `CLAUDE.md:172`, `CLAUDE.md:308`
-- Problem: several long-lived source line references point one or more lines away from current symbols.
-- Failure scenario: agents and contributors inspect the wrong region or treat a navigation mismatch as a source/docs defect.
-- Fix: replace brittle line references with symbol/search-string pointers.
+### AGG32-04 - Atom feed conditional 304 ignores feed-shaping SEO settings
 
-### C31-AGG-10 - Mobile home delays photo-first experience behind tag filters
+Severity: Medium
+Confidence: High
+Sources: tracer
 
-- Severity: Medium
-- Confidence: High
-- Reported by: designer, product-marketer-reviewer, ui-ux-designer-reviewer
-- Citations: `apps/web/src/components/home-client.tsx:255`, `apps/web/src/components/home-client.tsx:273`, `apps/web/src/components/tag-filter.tsx:63`, `apps/web/src/components/tag-filter.tsx:120`
-- Problem: at `390x844`, wrapped tag chips consume roughly 200px before the first photo card.
-- Failure scenario: first-time mobile visitors see taxonomy controls before photography.
-- Fix: collapse, horizontally scroll, or cap mobile filters while preserving the active filter.
+Citations: `apps/web/src/app/feed.xml/route.ts:29-44`, `apps/web/src/app/feed.xml/route.ts:46-141`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50-72`, `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:74-153`, `apps/web/src/app/actions/seo.ts:136-157`.
 
-### C31-AGG-11 - Idle lightbox can hide all actionable controls from the accessibility tree
+The feed routes return 304 based only on image freshness before loading SEO/feed settings. Changing feed title, author, rights, or related SEO copy can leave feed readers with stale metadata until an image changes.
 
-- Severity: Medium
-- Confidence: Medium
-- Reported by: designer, ui-ux-designer-reviewer
-- Citations: `apps/web/src/components/lightbox.tsx:201`, `apps/web/src/components/lightbox.tsx:371`, `apps/web/src/components/lightbox.tsx:546`, `apps/web/src/components/lightbox.tsx:555`
-- Problem: when controls auto-hide, essential modal controls are `aria-hidden` and `tabIndex=-1`.
-- Failure scenario: a screen-reader, switch, or voice-control user idles in the modal and only sees an image in the dialog.
-- Fix: keep close and navigation controls in the accessibility tree while visually hidden, or add a persistent accessible command group.
+Fix: include feed-shaping settings freshness/revision in the feed validator or remove early 304 for settings-dependent feeds; add tests for SEO changes plus conditional requests.
 
-### C31-AGG-12 - Search status is announced twice to assistive tech
+### AGG32-05 - Load-more sentinel can repeat server actions indefinitely on transient failures
 
-- Severity: Low
-- Confidence: High
-- Reported by: designer, ui-ux-designer-reviewer
-- Citations: `apps/web/src/components/search.tsx:440`, `apps/web/src/components/search.tsx:473`
-- Problem: the same search status appears in an `sr-only` live region and visible text.
-- Failure scenario: screen-reader users hear duplicate failure/status messages.
-- Fix: keep one live announcement path and hide the duplicate visible status from AT.
+Severity: Medium
+Confidence: High
+Sources: debugger
 
-### C31-AGG-13 - Photo card links can expose repetitive accessible text
+Citations: `apps/web/src/components/load-more.tsx:41-50`, `apps/web/src/components/load-more.tsx:72-95`, `apps/web/src/components/load-more.tsx:122-132`, `apps/web/src/app/actions/public.ts:24-27`.
 
-- Severity: Low
-- Confidence: Medium
-- Reported by: designer, ui-ux-designer-reviewer
-- Citations: `apps/web/src/components/home-client.tsx:323`, `apps/web/src/components/home-client.tsx:353`, `apps/web/src/components/home-client.tsx:395`, `apps/web/src/components/home-client.tsx:401`
-- Problem: card link `aria-label`, image alt, and overlay text can repeat title/topic text.
-- Failure scenario: screen-reader traversal of masonry cards becomes verbose.
-- Fix: keep one authoritative accessible name per card and make duplicate overlay copy decorative for AT.
+Transient `maintenance`, `rateLimited`, and `error` results keep `hasMore: true`; the observed sentinel remains mounted and can immediately call the server action again after `loadingRef` clears.
 
-### C31-AGG-14 - Live production search failed for a visible tag term
+Fix: add a retry/cooldown gate or explicit retry affordance for non-ok transient responses; add a component/source test.
 
-- Severity: Medium
-- Confidence: High
-- Reported by: designer, product-marketer-reviewer
-- Citations: `apps/web/src/components/search.tsx:160`, `apps/web/src/components/search.tsx:270`, `apps/web/src/components/search.tsx:473`
-- Problem: live `https://gallery.atik.kr/en` returned a generic unavailable state for `jihoon` while `JIHOON` was visible as a tag.
-- Failure scenario: users searching an obvious performer name lose trust in gallery discovery.
-- Fix: investigate backend/runtime cause; add a graceful tag/local fallback if full search is unavailable.
+### AGG32-06 - Lightbox auto-hide removes essential modal controls from AT/keyboard
 
-### C31-AGG-15 - RTL readiness is partial
+Severity: Medium
+Confidence: High
+Sources: designer, ui-ux-designer-reviewer
 
-- Severity: Low
-- Confidence: High
-- Reported by: designer, ui-ux-designer-reviewer
-- Citations: `apps/web/src/app/[locale]/layout.tsx:94`, `apps/web/src/components/nav-client.tsx:19`, `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/nav-client.tsx:100`
-- Problem: `dir` is wired, but exposed locales are English/Korean and several controls use physical direction utilities.
-- Failure scenario: adding Arabic/Hebrew later would flip text direction without correct spatial affordances.
-- Fix: defer until an RTL locale is planned, then convert directional layout to logical utilities and add RTL snapshots.
+Citations: `apps/web/src/components/lightbox.tsx:270`, `apps/web/src/components/lightbox.tsx:371-373`, `apps/web/src/components/lightbox.tsx:546-687`.
 
-### C31-AGG-16 - Routine UI transition timings are slow for repeated browsing
+After idle, lightbox controls receive `tabIndex=-1` and `aria-hidden=true`. Browser evidence showed the dialog accessibility tree reduced to the image, removing close/navigation discoverability for screen-reader, switch-control, and voice-control users.
 
-- Severity: Low
-- Confidence: High
-- Reported by: ui-ux-designer-reviewer
-- Citations: `apps/web/src/app/globals.css:253`, `apps/web/src/components/home-client.tsx:357`, `apps/web/src/components/photo-viewer.tsx:718`
-- Problem: reduced motion exists, but default hover/sidebar transitions use `duration-500`.
-- Failure scenario: repeated browsing feels slightly sluggish for power users.
-- Fix: reduce routine transitions to 150-250ms while keeping longer motion for deliberate viewer transitions.
+Fix: keep essential controls accessible while visually faded, or add a persistent accessible command group.
 
-### C31-AGG-17 - Brand signal under-explains specialist value
+### AGG32-07 - Dependabot watches `/apps/web` instead of the root workspace lockfile
 
-- Severity: Low
-- Confidence: Medium
-- Reported by: product-marketer-reviewer
-- Citations: `apps/web/src/components/nav-client.tsx:91`, `apps/web/src/components/home-client.tsx:255`, `apps/web/src/components/footer.tsx:34`
-- Problem: the public UI communicates "gallery" but not the color-aware, photographer-authored specialist value.
-- Failure scenario: new visitors do not understand why the gallery differs from generic photo hosting.
-- Fix: add a quiet support line near the home H1 or footer.
+Severity: Medium
+Confidence: High
+Sources: architect
 
-### C31-AGG-18 - Search failures lack a helpful recovery action
+Citations: `.github/dependabot.yml:1-18`, `package.json:1-10`, `package-lock.json:1-14`.
 
-- Severity: Low
-- Confidence: High
-- Reported by: product-marketer-reviewer
-- Citations: `apps/web/src/components/search.tsx:473`, `apps/web/src/components/home-client.tsx:426`
-- Problem: whole-page failures provide recovery actions, but command-level search failures only show a generic unavailable message.
-- Failure scenario: partial search outage is a dead end.
-- Fix: provide a recovery path such as clearing the query, opening visible tags, or browsing latest photos.
+The canonical npm lockfile and root overrides live at repository root, but Dependabot is configured for `/apps/web`. Dependency automation can miss the actual workspace dependency graph.
 
-### C31-AGG-19 - Restore regression test is source-order only
+Fix: point the npm Dependabot entry at `/`, or add root coverage while preserving any app-specific entry that is proven useful.
 
-- Severity: Low
-- Confidence: Medium
-- Reported by: test-engineer
-- Citations: `apps/web/src/__tests__/restore-upload-lock.test.ts:103`, `apps/web/src/app/[locale]/admin/db-actions.ts:493`
-- Problem: the test searches source ordering rather than executing the partial prepare failure path.
-- Failure scenario: a refactor preserves strings/order but breaks resume behavior after quiesce succeeds and drain fails.
-- Fix: add an executable module-level test with mocks for queue, background writes, maintenance, locks, and connection acquisition.
+### AGG32-08 - Listing helpers can request 102 rows despite a documented 100-row visible cap
 
-### C31-AGG-20 - Cycle-30 plan files fail whitespace check
+Severity: Low
+Confidence: High
+Sources: code-reviewer
 
-- Severity: Low
-- Confidence: High
-- Reported by: verifier, test-engineer
-- Citations: `.context/plans/cycle-30-2026-06-30-plan.md:3`, `.context/plans/cycle-30-2026-06-30-deferred.md:3`
-- Problem: `git show --check HEAD` reports trailing whitespace in committed plan artifacts.
-- Failure scenario: static whitespace checks fail on HEAD and create noise for future automation.
-- Fix: remove trailing spaces.
+Citations: `apps/web/src/lib/data.ts:664-670`, `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1437-1480`, `apps/web/src/app/actions/public.ts:121-157`.
 
-## Manual Validation Risks
+Helpers clamp page size to `LISTING_QUERY_LIMIT_PLUS_ONE`, then add one more lookahead. Public callers clamp to 100 today, but the exported helper contract can exceed its intended cap.
 
-### C31-AGG-MV-01 - Public TLS/header-trust topology must match the internal-hop nginx design
+Fix: clamp visible page size to `LISTING_QUERY_LIMIT`, keep one-row lookahead, add a source/behavior test.
 
-- Severity: Medium
-- Confidence: Medium
-- Reported by: security-reviewer
-- Citations: `apps/web/nginx/default.conf:21`, `apps/web/nginx/default.conf:67`, `apps/web/docker-compose.yml:20`, `apps/web/src/lib/request-origin.ts:45`, `apps/web/src/lib/rate-limit.ts:166`
-- Required validation: confirm production cleartext traffic is redirected or terminated before nginx, only trusted proxies can reach the app, and `TRUSTED_PROXY_HOPS` matches the actual chain.
+## Additional Findings And Risks
 
-### C31-AGG-MV-02 - Admin DB restore trusts dump provenance and DB grants
+### Performance and Scale
 
-- Severity: Medium
-- Confidence: Medium
-- Reported by: security-reviewer
-- Citations: `apps/web/src/lib/sql-restore-scan.ts:12`, `apps/web/src/app/[locale]/admin/db-actions.ts:365`, `apps/web/src/app/[locale]/admin/db-actions.ts:620`
-- Required validation: verify production MySQL grants are limited to the app schema and treat restore dumps as privileged artifacts.
+- AGG32-09: Initial dynamic gallery pages use grouped `COUNT(*) OVER()` over all matching rows before limit. Severity Medium, confidence High. Source: perf-reviewer. Citations: `apps/web/src/lib/data.ts:898-927`, `apps/web/src/lib/data.ts:1466-1481`.
+- AGG32-10: Semantic/similar search scans newest embeddings only; relevant older photos beyond `SEMANTIC_SCAN_LIMIT` are unsearchable. Severity Medium, confidence High. Sources: architect, debugger. Citations: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:164-201`.
+- AGG32-11: Timeline and On This Day predicates use `YEAR()`, `MONTH()`, and `DAY()` functions on `capture_date`, limiting index use. Severity Low, confidence High. Source: perf-reviewer. Citations: `apps/web/src/lib/data-timeline.ts:88-117`, `apps/web/src/lib/data-timeline.ts:125-145`.
+- AGG32-12: Masonry JPEG fallback can load the base JPEG rather than a sized derivative. Severity Low, confidence Medium. Source: perf-reviewer. Citations: `apps/web/src/components/grid-picture.tsx:30-50`, `apps/web/src/components/home-client.tsx:334-361`.
+- AGG32-13: Optional DB health check is unauthenticated and unthrottled when `HEALTH_CHECK_DB=true`. Severity Low, confidence Medium. Source: debugger. Citation: `apps/web/src/app/api/health/route.ts:6-40`.
 
-### C31-AGG-MV-03 - Public map exact-GPS publication depends on operator intent
+### Security and Operational Boundaries
 
-- Severity: Low
-- Confidence: High
-- Reported by: security-reviewer
-- Citations: `apps/web/src/lib/data.ts:410`, `apps/web/src/lib/data.ts:1660`, `apps/web/src/app/actions/topics.ts:600`
-- Required validation: confirm the admin UX/runbook makes exact coordinate publication clear before enabling map visibility.
+- AGG32-14: Every admin is root-equivalent, including backup, restore, and user management. Severity Medium, confidence High. Source: security-reviewer. Citations: `CLAUDE.md:5`, `CLAUDE.md:234-236`, `apps/web/src/app/actions/admin-users.ts:77-84`, `apps/web/src/app/[locale]/admin/db-actions.ts:365-371`.
+- AGG32-15: DB restore treats scanner-allowed app tables, including auth tables, as trusted full-state input. Severity Medium, confidence High. Source: security-reviewer. Citations: `apps/web/src/lib/sql-restore-scan.ts:12-31`, `apps/web/src/app/[locale]/admin/db-actions.ts:570-680`.
+- AGG32-16: Public/token-spray limits are process-local under the single-instance deployment assumption. Severity Low, confidence High. Sources: security-reviewer, code-reviewer. Citations: `CLAUDE.md:234-236`, `apps/web/src/lib/rate-limit.ts:74-99`, `apps/web/src/lib/rate-limit.ts:318-375`.
+- AGG32-17: Plaintext SQL backups are an operator storage boundary. Severity Low, confidence High. Source: security-reviewer. Citations: `CLAUDE.md:213-218`, `apps/web/src/app/[locale]/admin/db-actions.ts:185-230`, `apps/web/src/app/api/admin/db/download/route.ts:45-90`.
+- AGG32-18: Production reverse-proxy rate limiting depends on live `TRUST_PROXY=true` configuration. Severity Medium, confidence Medium. Source: code-reviewer. Citation: `apps/web/src/lib/rate-limit.ts:166-196`.
+- AGG32-19: Advisory lock names are global across a MySQL server, so multiple GalleryKit DBs on one server can block each other. Severity Low, confidence High. Source: architect. Citations: `apps/web/src/lib/advisory-locks.ts:8-47`, `CLAUDE.md:234-237`.
 
-### C31-AGG-MV-04 - Some public expensive-route limits remain process-local
+### Tests and Delivery Automation
 
-- Severity: Low
-- Confidence: Medium
-- Reported by: security-reviewer
-- Citations: `apps/web/src/lib/rate-limit.ts:78`, `apps/web/src/lib/rate-limit.ts:320`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:98`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:104`
-- Required validation: keep production single-instance or move these limits to shared/edge storage before horizontal scaling.
+- AGG32-20: Schema reconcile is tested by source tripwires, not a structural MySQL/information_schema diff. Severity High, confidence High. Source: test-engineer. Citations: `apps/web/scripts/migrate.js:317-819`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-172`.
+- AGG32-21: Restore/backup state-machine tests are mostly source-order checks. Severity High, confidence Medium. Source: test-engineer. Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:365-820`, `apps/web/src/__tests__/db-restore.test.ts:42-77`.
+- AGG32-22: Production CLIP activation/integration is outside default CI. Severity Medium, confidence High. Sources: test-engineer, code-reviewer. Citations: `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`, `.github/workflows/quality.yml:66-80`.
+- AGG32-23: Deploy/nginx safety tests are string contracts, not parser/runtime checks. Severity Medium, confidence High. Source: test-engineer. Citations: `apps/web/deploy.sh:1-85`, `apps/web/nginx/default.conf:21-203`, `apps/web/src/__tests__/deploy-script-contract.test.ts:21-127`.
+- AGG32-24: Docker production image is not built in CI while native package pins are manually synchronized. Severity Medium, confidence High. Source: architect. Citations: `apps/web/Dockerfile:49-61`, `.github/workflows/quality.yml:48-80`.
 
-## AGENT FAILURES / RETRIES
+### UI/UX and Documentation
 
-- Initial designer/custom reviewer spawn failed with `agent thread limit reached`; it was retried after another lane completed and then produced `designer.md`, `product-marketer-reviewer.md`, and `ui-ux-designer-reviewer.md`.
-- No reviewer failed after retry.
+- AGG32-25: Mobile gallery hierarchy puts the tag wall before the first photo. Severity Medium, confidence High. Sources: designer, ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:255-286`, `apps/web/src/components/tag-filter.tsx:63-120`.
+- AGG32-26: Live search for visible tag `jihoon` returned a generic outage message. Severity Medium, confidence High for live symptom; root cause unconfirmed. Source: designer. Citations: `apps/web/src/components/search.tsx:160-245`, `apps/web/src/app/actions/public.ts:305`.
+- AGG32-27: Admin image management is table-first and awkward on small screens. Severity Medium, confidence High. Source: ui-ux-designer-reviewer. Citations: `apps/web/src/components/image-manager.tsx:424-594`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:123-132`.
+- AGG32-28: Photo card accessible names are repetitive. Severity Low, confidence Medium. Sources: designer, ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:323-355`, `apps/web/src/components/home-client.tsx:395-405`.
+- AGG32-29: Routine UI transitions use 500 ms durations in repeated browsing surfaces. Severity Low, confidence High. Source: ui-ux-designer-reviewer. Citations: `apps/web/src/components/home-client.tsx:357-371`, `apps/web/src/components/photo-viewer.tsx:716-724`.
+- AGG32-30: Generic route error is usable but not operator-informative. Severity Low, confidence High. Source: ui-ux-designer-reviewer. Citation: `apps/web/src/app/[locale]/error.tsx:22-57`.
+- AGG32-31: Auto-alt-text docs describe a fallback chain the core public UI does not implement. Severity Medium, confidence High. Source: document-specialist. Citations: `CLAUDE.md:561-563`, `apps/web/src/lib/photo-title.ts:85-125`, `apps/web/src/components/home-client.tsx:293-355`.
+- AGG32-32: `.context/plans/README.md` is stale and contains broken links. Severity Low, confidence High. Source: document-specialist. Citations: `.context/plans/README.md:3-16`, `.context/plans/README.md:61-62`.
+- AGG32-33: README "private originals" positioning does not front-load that GPS stripping is off by default. Severity Medium, confidence High. Source: product-marketer-reviewer. Citations: `README.md:8`, `README.md:29`, `README.md:40`, `apps/web/src/lib/gallery-config-shared.ts:93-105`.
+- AGG32-34: Legacy `lr` upload namespace can imply broader Lightroom parity. Severity Low, confidence High. Source: product-marketer-reviewer. Citations: `README.md:207-216`, `apps/web/src/app/api/admin/lr/upload/route.ts:1-19`, `apps/web/src/lib/admin-tokens.ts:25-29`.
+- AGG32-35: README feature list has duplicate sharing/polish debt. Severity Low, confidence High. Source: product-marketer-reviewer. Citations: `README.md:39-49`.
+- AGG32-36: Gallery scroll restoration keys only by pathname, so tag-filtered states collide. Severity Low, confidence High. Source: critic. Citations: `apps/web/src/components/home-client.tsx:124-170`, `apps/web/src/components/tag-filter.tsx:23-45`.
 
-## Validation Evidence Reported By Reviewers
+## Cross-Agent Agreement
 
-- `npm run lint:api-auth --workspace=apps/web`: passed in security lane.
-- `npm run lint:action-origin --workspace=apps/web`: passed in security lane.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed in multiple lanes.
-- `npm audit --workspace=apps/web --audit-level=high`: passed in security lane.
-- Targeted Vitest slices passed in code-reviewer, verifier, test-engineer, and security lanes.
-- UI/UX lane exercised production with `agent-browser`; local dev rendered but data was blocked by MySQL `ECONNREFUSED`.
+- Lightbox accessibility is high signal: both designer lanes independently found the controls are removed from AT/keyboard on idle.
+- Semantic search scan-window limitations were independently flagged by architect and debugger; perf also found a separate CLIP inference concurrency defect.
+- UI mobile filter hierarchy was independently flagged by both designer lanes.
+- The strongest immediately actionable correctness/security fixes are AGG32-01 through AGG32-08.
+
+## Verification Performed During Review
+
+Subagents ran targeted gates including `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `npm audit`, focused Vitest suites, and browser/Playwright checks. Full cycle gates remain required in Prompt 3 after implementation.

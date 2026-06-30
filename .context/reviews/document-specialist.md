@@ -1,85 +1,89 @@
-# Cycle 31 Document Specialist Review
+# Cycle 32 Document Specialist Review
 
 Reviewer: document-specialist
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `f1dd39ebb9c2acde2a4dce5974e6cd1fada6f9aa`
+HEAD reviewed: `3d174c96`
 Date: 2026-06-30 KST
-Scope: README/CLAUDE/.context/source consistency, deploy/docs mismatches, schema/migration docs, and authoritative source claims embedded in docs. No product code was edited.
+Scope: documentation, runbook, comment, package metadata, migration/deploy, and `.context` consistency against authoritative repo sources. Product code and sibling review files were not edited.
 
 ## Inventory
 
 Read first: `AGENTS.md`, `CLAUDE.md`.
 
-Then checked:
+Then inspected:
 
-- Root/app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
-- Source contracts those docs cite: package versions, schema, migrations, migrate runner, deployment scripts, Docker/Compose/nginx, route gates, storage quarantine, semantic search, display capability hook.
-- External authoritative claims: MDN/Browser Compat Data for `color-gamut` and `dynamic-range`, plus the linked Mozilla bug reference used by the docs.
+- Root/app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`, `.env.deploy.example`, `apps/web/.env.local.example`.
+- Runtime/deploy sources those docs cite: `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`.
+- Schema/migration sources: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/drizzle/meta/_journal.json`, representative migration comments, `apps/web/scripts/migrate.js`.
+- Feature-state sources: semantic search routes/scripts, LR upload route, storage quarantine, auto-alt-text helpers, public image components, paid/removal guards, HDR/WI-09 comments.
+- Context artifacts: current top-level cycle-32 sibling reviews, `.context/plans/README.md`, active cycle plan files, and recent plan/review history where it affected current documentation.
 
 ## Findings
 
-### C31-DOC-01: Firefox HDR/dynamic-range documentation is stale against current MDN compatibility data
+### C32-DOC-01 - Auto-alt-text runbook describes a fallback chain the core public UI does not implement
 
 Severity: Medium
 Confidence: High
-Failure mode: stale operator/reviewer guidance for display-capability behavior
+Consequence: accessibility/operator documentation drift
 
-Exact local regions:
+Exact regions:
 
-- `CLAUDE.md:367-381`
-- `apps/web/src/lib/use-display-capability.ts:72-74`
-- Related local comments: `apps/web/src/lib/use-display-capability.ts:4-12`, `:64-70`, `:91-109`
+- `CLAUDE.md:561-563`
+- `apps/web/src/lib/photo-title.ts:85-125`
+- `apps/web/src/__tests__/alt-text-fallback.test.ts:1-6`, `apps/web/src/__tests__/alt-text-fallback.test.ts:13-89`
+- `apps/web/src/components/home-client.tsx:293-355`
+- `apps/web/src/components/lightbox.tsx:500-503`
+- `apps/web/src/app/actions/images.ts:1080-1126`
 
-Evidence:
+Mismatch:
 
-`CLAUDE.md` says Firefox does not implement `(dynamic-range: high)` and therefore `isHdr` always returns false on Firefox. Current source does not special-case Firefox; it reads `window.matchMedia('(dynamic-range: high)').matches` for every browser. Official MDN says the `dynamic-range` media feature is supported in Firefox, and MDN Browser Compat Data reports Firefox `version_added: "100"` for `dynamic-range`.
-
-The color-gamut part of the same section is more nuanced: MDN BCD still carries a Firefox note that `color-gamut: p3` and `rec2020` are always false because Firefox does not support wide-gamut color, linked to Mozilla bug 1626624. So the stale part is the HDR/dynamic-range claim, not the entire Firefox section.
+`CLAUDE.md` says public display falls back through "explicit alt text, title/description, suggested text, and localized photo labels." The current core helper and tests define a different chain: `title > tag-derived > alt_text_suggested > fallback`. There is no explicit `alt_text` field in the schema surface, and `description` is not part of `getConcisePhotoAltText()`. Home cards and the lightbox use that helper directly for `<img alt>`, so a photo with only `description` gets the generic localized fallback unless it has tags or `alt_text_suggested`. The source comment at `photo-title.ts:90-91` also says "Admin-set alt always takes precedence", but the only admin copy action copies `alt_text_suggested` into `title` or `description`, not a distinct alt field.
 
 Concrete failure scenario:
 
-A future reviewer or implementer trusts `CLAUDE.md` and assumes Firefox can never report HDR display capability. They may suppress tests, UI checks, or bug reports for Firefox HDR even though the app now asks the browser directly and current compatibility data says Firefox supports the feature. The docs become a stronger source of false certainty than the source code.
+An operator follows the runbook and puts accessibility-facing text in `image.description`, expecting it to be used as public alt text. On the home grid and lightbox, screen-reader users still hear the generic fallback or generated suggestion instead of that description. This is not a data leak, but it is a trust and accessibility mismatch in the docs' stated behavior.
 
-Concrete fix:
+Fix:
 
-Update the Firefox display matrix and impact text to split the claims:
+Either update `CLAUDE.md` and the source comment to the implemented contract (`title > tags > alt_text_suggested > localized fallback` for core gallery/lightbox alt text; descriptions are visible metadata and are used by some adjacent labels such as similar/search cards), or deliberately add description/explicit-alt support to `getConcisePhotoAltText()` with tests and schema/UI docs. The smaller safe fix is documentation/comment correction.
 
-- Keep the `color-gamut: p3/rec2020` Firefox caveat tied to MDN BCD and Mozilla bug 1626624.
-- Replace "dynamic-range not implemented / always false" with current MDN BCD-backed wording: Firefox supports the media feature; actual `high` matches still depend on user agent plus output device capability.
-- Adjust `use-display-capability.ts` comments in the same change, since source comments currently say `(color-gamut: p3)` is restricted to Chrome/Safari/Edge while the code feature-detects it generically.
-
-### C31-DOC-02: Embedded source line references in `CLAUDE.md` have drifted
+### C32-DOC-02 - `.context/plans/README.md` is stale and contains broken plan links
 
 Severity: Low
 Confidence: High
-Failure mode: reviewer/runbook navigation error
+Consequence: planning/navigation drift for agents and contributors
 
-Exact local regions:
+Exact regions:
 
-- `CLAUDE.md:127` says `IMAGE_PIPELINE_VERSION` is in `gallery-config-shared.ts:21`; source defines it at `apps/web/src/lib/gallery-config-shared.ts:22`.
-- `CLAUDE.md:161` says smart collection `query_json` is at `schema.ts:297`; source table starts at `apps/web/src/db/schema.ts:304` and `query_json` is at `:308`.
-- `CLAUDE.md:172` cites the ProPhoto transfer path at `lib/color-detection.ts:99-108`; source still includes the relevant logic at `apps/web/src/lib/color-detection.ts:98-108`, so this one remains usable but already shifted.
-- `CLAUDE.md:308` says `COLOR_IMPACTING_KEYS` is at `settings-hash.ts:45-57`; the exported list is now `apps/web/src/lib/settings-hash.ts:47-59`.
+- `.context/plans/README.md:3-16`
+- `.context/plans/README.md:61-62`
+- `.context/plans/cycle-30-2026-06-30-plan.md:1-6`
+- `.context/plans/cycle-31-2026-06-30-plan.md:1-6`
+
+Mismatch:
+
+The plans index lists active work through cycle 29 and older deferred entries, but current committed plan files include cycle 30 and cycle 31 artifacts. Cycle 30 is marked "implementation complete; gates green; commit/deploy pending"; cycle 31 is a current review/implementation plan. The index also links cycle 18/19 plan entries as `../../plan/...` from inside `.context/plans/README.md`; those paths resolve outside `.context` and do not exist in this checkout. The nearby actual legacy plan directory is `.context/plan/`, and it does not contain the cited `plan-377` / `plan-375` files either.
 
 Concrete failure scenario:
 
-The docs are used as a control surface for agents and contributors. Stale line references make reviewers inspect the wrong region, miss a changed constant, or waste time reconciling a false mismatch. This is low severity because the surrounding filenames and prose are still correct, but it directly undercuts the requested "authoritative source claims" quality of the docs.
+An agent uses `.context/plans/README.md` as the authoritative planning index, misses cycle 30/31 state, and either re-triages already completed work or follows a broken link while trying to preserve deferred findings. This is low severity because the individual plan files still exist and current sibling reviews cite direct files, but it makes the committed plan index unreliable.
 
-Concrete fix:
+Fix:
 
-Avoid exact line numbers in long-lived `CLAUDE.md` prose unless a test pins them. Prefer symbol names and search strings, or update the line references in the same change that moves the symbols. For the current drift, replace these references with symbol-only pointers such as "search for `export const IMAGE_PIPELINE_VERSION`".
+Refresh the active/completed/deferred index for cycles 30 and 31, correct or remove the broken `../../plan/...` references, and consider making the index generated or explicitly "best effort / may lag" if it is not maintained every cycle.
 
 ## Confirmed Matches / Non-Findings
 
-- `AGENTS.md:31-38` now matches the current public route rate-limit gate: mutating public handlers and expensive public GET handlers must rate-limit or carry a reasoned exemption.
-- Root/app README package claims align with `apps/web/package.json:5-7`, `:57-62`, and `:84-85`: Node 24+, Next 16, React 19, TypeScript 6.
-- Deploy docs align with scripts: config-driven `.env.deploy`, no hardcoded deploy host in the helper, post-health Docker pruning, no automatic `volume prune -a`, `/api/live` liveness, and bind-mounted mutable stores.
-- Semantic search docs match source on disabled-by-default production gating, offline CLIP weights, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, newest-first bounded scan limits, and no bundled Lightroom Classic plugin.
-- Paid-download/Stripe removal docs match current source; remaining references are historical migration/removal records.
-- Storage docs match current source after the quarantine guard: the product supports local filesystem storage only, and `@/lib/storage` is not wired into live upload/serve paths.
+- Package/version docs align with `apps/web/package.json`: Node `>=24`, Next `^16.2.9`, React `^19.2.5`, TypeScript `^6`.
+- Deploy docs align with scripts: `.env.deploy` fallback behavior, derived SSH command, health check before Docker pruning, bind-mounted mutable data, and no automatic `docker volume prune -a`.
+- `/api/live` and `/api/health` docs match Dockerfile and deploy script behavior.
+- Semantic search docs match source on disabled default, production env gate, offline CLIP weights, model-version separation, scan/topK caps, and operator-only production activation.
+- Storage docs match current quarantine: `@/lib/storage` is local-only and not wired into live upload/serve paths.
+- Paid download/Stripe removal docs match current source; remaining references are historical migrations/tests/archive context or explicit removal guards.
+- LR upload docs match the current route: it consumes `file`, `topic`, optional `title`, optional `description`; other submitted metadata override fields are not consumed.
 
-## Final Missed-Issue Sweep
+## Final Sweep
 
-Final sweep terms and surfaces: deploy, `.env.deploy`, Docker prune, health/live, upload body caps, TRUST_PROXY, semantic/CLIP, auto alt-text, Lightroom/plugin wording, Stripe/payment, public route freshness, service worker offline scope, touch-target audit, lint gates, migrations/journal, privacy fields, storage, Firefox, color-gamut, dynamic-range, stale line refs, and `.context/plans`.
+Final sweep covered: README/CLAUDE/AGENTS, package metadata, env examples, Docker/Compose/nginx/deploy scripts, migration journal and schema comments, privacy/public field docs, CLIP/semantic search runbooks, LR upload wording, unsupported storage, removed payment/reaction surfaces, HDR/WI-09 placeholders, auto-alt-text, `.context/plans`, and current cycle-32 sibling reports.
 
-Skipped: live deployment verification, rendered Markdown preview, and exhaustive archived review history. This artifact is the document-specialist output for cycle 31.
+This was a static documentation lane. I did not run the full lint/typecheck/build/test suite because no product behavior was changed. I wrote only `.context/reviews/document-specialist.md`.
