@@ -471,7 +471,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                 ))}
                             </div>
                         ) : query.trim() ? (
-                            <div className="p-8 text-center text-muted-foreground text-sm">
+                            <div className="p-8 text-center text-muted-foreground text-sm" aria-hidden="true">
                                 {loading ? '' : searchStatus ? t(`search.${searchStatus}`) : t('search.noResults')}
                             </div>
                         ) : (
@@ -501,9 +501,8 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                     id="semantic-search-toggle"
                                     checked={useSemanticSearch}
                                     onCheckedChange={(checked) => {
+                                        clearSearchState();
                                         setUseSemanticSearch(checked);
-                                        setResults([]);
-                                        setSearchStatus(null);
                                     }}
                                     aria-describedby={semanticSearchMode !== 'disabled' ? 'semantic-search-hint' : undefined}
                                     aria-label={t('search.semanticToggle')}

@@ -60,6 +60,19 @@ for (const [label, source] of SUITES) {
             expect(source).toContain('getGalleryConfig');
         });
 
+        it('checks feed freshness before composing the full feed', () => {
+            expect(source).toContain('getFeedUpdatedAt');
+            const freshnessIndex = source.indexOf('getFeedUpdatedAt(');
+            const rowsIndex = source.indexOf('getImagesForFeed(');
+            const seoIndex = source.indexOf('getSeoSettings(');
+            const configIndex = source.indexOf('getGalleryConfig(');
+            expect(freshnessIndex).toBeGreaterThan(-1);
+            expect(rowsIndex).toBeGreaterThan(freshnessIndex);
+            expect(seoIndex).toBeGreaterThan(freshnessIndex);
+            expect(configIndex).toBeGreaterThan(freshnessIndex);
+            expect(source.indexOf('status: 304', freshnessIndex)).toBeGreaterThan(freshnessIndex);
+        });
+
         it('picks the nearest configured size via findNearestImageSize(config.imageSizes, 1536)', () => {
             expect(source).toContain('findNearestImageSize(config.imageSizes, 1536)');
         });

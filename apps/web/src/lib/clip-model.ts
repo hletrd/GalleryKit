@@ -145,18 +145,27 @@ async function waitForInferenceSlot(signal?: AbortSignal): Promise<void> {
     throwIfInferenceAborted(signal);
 }
 
+function releaseInferenceSlot(): void {
+    const nextWaiter = inferenceWaiters.shift();
+    if (nextWaiter) {
+        nextWaiter.resolve();
+        return;
+    }
+    activeInferenceCount--;
+}
+
 async function withInferenceSlot<T>(fn: () => Promise<T>, options: InferenceSlotOptions = {}): Promise<T> {
     throwIfInferenceAborted(options.signal);
     if (activeInferenceCount >= CLIP_INFERENCE_CONCURRENCY) {
         await waitForInferenceSlot(options.signal);
+    } else {
+        activeInferenceCount++;
     }
-    throwIfInferenceAborted(options.signal);
-    activeInferenceCount++;
     try {
+        throwIfInferenceAborted(options.signal);
         return await fn();
     } finally {
-        activeInferenceCount--;
-        inferenceWaiters.shift()?.resolve();
+        releaseInferenceSlot();
     }
 }
 

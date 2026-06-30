@@ -11,7 +11,9 @@ describe('search semantic toggle request ownership', () => {
         expect(handlerStart).toBeGreaterThan(-1);
         const handler = source.slice(handlerStart, source.indexOf('}}', handlerStart));
 
+        expect(handler).toContain('clearSearchState()');
         expect(handler).toContain('setUseSemanticSearch(checked)');
+        expect(handler.indexOf('clearSearchState()')).toBeLessThan(handler.indexOf('setUseSemanticSearch(checked)'));
         expect(handler).not.toContain('performSearch(query, checked)');
         expect(source).toContain('}, [query, useSemanticSearch, performSearch, clearSearchState]);');
     });

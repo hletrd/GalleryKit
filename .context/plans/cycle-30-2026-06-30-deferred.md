@@ -1,7 +1,7 @@
 # Cycle 30/100 Deferred Findings
 
-Date: 2026-06-30 KST  
-Review source: `.context/reviews/_aggregate.md`  
+Date: 2026-06-30 KST
+Review source: `.context/reviews/_aggregate.md`
 Status: deferred carry-forward
 
 Deferral rules applied: each item preserves original severity/confidence and cites the aggregate finding plus source regions. Security, correctness, and data-loss findings are not deferred unless they are operational/manual-validation risks with no safe local-code action this cycle. Deferred work remains bound by repo policy: GPG-signed Conventional Commit + gitmoji commits, `git pull --rebase` before push, required gates, no force-push, no `--no-verify`, and current toolchain/package policy.

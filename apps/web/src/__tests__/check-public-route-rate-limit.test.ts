@@ -180,6 +180,82 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails expensive public GET handlers when expensive catch work is not dominated by a limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                try {
+                    JSON.parse('{');
+                    if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                } catch {
+                    const rows = await db.select().from(images).limit(10);
+                    return Response.json({ rows });
+                }
+                return Response.json({ ok: true });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
+    it('fails expensive public GET handlers when expensive finally work is not dominated by a limiter', () => {
+        const source = `
+            import { db } from '@/db';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                try {
+                    if (Math.random() > 2) throw new Error('never');
+                    if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                } finally {
+                    await db.execute('SELECT 1');
+                }
+                return Response.json({ ok: true });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('before expensive work');
+    });
+
+    it('fails expensive public GET handlers when expensive work is hidden behind a local helper', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            async function loadRows() {
+                return db.select().from(images).limit(10);
+            }
+            export async function GET() {
+                const rows = await loadRows();
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes expensive public GET local helper calls after a limiter gate', () => {
+        const source = `
+            import { db } from '@/db';
+            import { images } from '@/db/schema';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            async function loadRows() {
+                return db.select().from(images).limit(10);
+            }
+            export async function GET() {
+                if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                const rows = await loadRows();
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
     it('passes expensive public GET handlers with a reasoned exemption', () => {
         const source = `
             import { db } from '@/db';
@@ -209,6 +285,24 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed).toHaveLength(1);
         expect(result.failed[0]).toContain('AMBIGUOUS RATE-LIMIT EXEMPTION');
         expect(result.failed[0]).toContain('POST, DELETE');
+    });
+
+    it('fails a file-level exemption when an expensive GET would inherit it from a mutating handler', () => {
+        const source = `
+            import { db } from '@/db';
+            // @public-no-rate-limit-required: webhook POST is gated by signature
+            export async function POST(request) {
+                return { status: 200 };
+            }
+            export async function GET() {
+                const rows = await db.select().from(images).limit(10);
+                return Response.json({ rows });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('AMBIGUOUS RATE-LIMIT EXEMPTION');
+        expect(result.failed[0]).toContain('POST, GET');
     });
 
     it('fails when exempt tag is inside string literal (C1-BUG-05)', () => {

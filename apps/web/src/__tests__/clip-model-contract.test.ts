@@ -39,6 +39,14 @@ describe('clip-model module contract', () => {
     expect(src).toContain('removeInferenceWaiter(waiter)');
   });
 
+  it('hands an inference slot directly to the next queued waiter', () => {
+    expect(src).toContain('function releaseInferenceSlot()');
+    expect(src).toMatch(/const\s+nextWaiter\s*=\s*inferenceWaiters\.shift\(\)/);
+    expect(src).toMatch(/if\s*\(\s*nextWaiter\s*\)\s*\{[\s\S]*nextWaiter\.resolve\(\)[\s\S]*return;/);
+    expect(src).toMatch(/finally\s*\{[\s\S]*releaseInferenceSlot\(\);[\s\S]*\}/);
+    expect(src).not.toMatch(/activeInferenceCount--;\s*inferenceWaiters\.shift\(\)\?\.resolve\(\)/);
+  });
+
   it('threads AbortSignal through queued text inference', () => {
     expect(src).toContain('ClipInferenceQueueAbortError');
     expect(src).toMatch(/signal\?:\s*AbortSignal/);

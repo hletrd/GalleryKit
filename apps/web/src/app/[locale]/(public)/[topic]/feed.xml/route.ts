@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
+import { getFeedUpdatedAt, getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
@@ -47,16 +47,35 @@ export async function GET(
         return new NextResponse(null, { status: 404 });
     }
 
-    const [seo, topicData, config, tCommon] = await Promise.all([
-        getSeoSettings(),
+    const ifModifiedSince = request.headers.get('if-modified-since');
+    const [topicData, feedFreshness] = await Promise.all([
         getTopicBySlug(topicSlug),
-        getGalleryConfig(),
-        getTranslations({ locale, namespace: 'common' }),
+        getFeedUpdatedAt(topicSlug),
     ]);
 
     if (!topicData) {
         return new NextResponse(null, { status: 404 });
     }
+
+    const feedFreshnessUpdated = feedFreshness
+        ? toIso(feedFreshness.updated_at) ?? toIso(feedFreshness.created_at)
+        : null;
+    if (feedFreshnessUpdated && isFeedNotModified(ifModifiedSince, feedFreshnessUpdated)) {
+        return new NextResponse(null, {
+            status: 304,
+            headers: {
+                'Cache-Control': CACHE_CONTROL,
+                'Vary': 'Accept-Language',
+                'Last-Modified': new Date(feedFreshnessUpdated).toUTCString(),
+            },
+        });
+    }
+
+    const [seo, config, tCommon] = await Promise.all([
+        getSeoSettings(),
+        getGalleryConfig(),
+        getTranslations({ locale, namespace: 'common' }),
+    ]);
 
     const baseUrl = seo.url;
     // R17-M3: publication-time ordering for the topic feed (same
@@ -143,7 +162,6 @@ export async function GET(
 
     // R19-M1: 304 Not Modified when If-Modified-Since covers feedUpdated
     // (second precision per RFC 7232 §3.3). Mirrors the root /feed.xml.
-    const ifModifiedSince = request.headers.get('if-modified-since');
     if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
         return new NextResponse(null, {
             status: 304,

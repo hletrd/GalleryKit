@@ -1,10 +1,10 @@
-# Cycle 30 Verifier Review
+# Cycle 31 Verifier Review
 
-Role: verifier  
-Workspace: `/Users/hletrd/flash-shared/gallery`  
-Reviewed HEAD: `666b74f8` (`fix(cycle-29): harden review findings`)  
-Date: 2026-06-30  
-Scope: Prompt 1 of cycle 30/100. Review only; no fixes implemented.
+Role: verifier
+Workspace: `/Users/hletrd/flash-shared/gallery`
+Reviewed HEAD: `f1dd39eb` (`fix(cycle-30): harden restore and public route guards`)
+Date: 2026-06-30
+Scope: review current HEAD only; no product code modified.
 
 ## Inventory
 
@@ -14,62 +14,49 @@ Read before reviewing:
 - `CLAUDE.md`
 - `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-Current HEAD inventory:
+Current HEAD change inventory:
 
-- App/API surface: 8 API route files, 12 server-action files, localized public/admin page routes under `apps/web/src/app/[locale]`.
-- Core libraries reviewed: restore maintenance, DB restore, rate limiting, data access, semantic search, CLIP backfill, health/live routes, image queue.
-- Tests inventoried: 270+ Vitest files under `apps/web/src/__tests__` plus Playwright specs under `apps/web/e2e`.
-- Recent HEAD focus: cycle-29 changes to rate-limit bucket indexing, public restore-maintenance metadata, health route behavior, public-route rate-limit scanner, map privacy tests, semantic search tests, and topic map publishing UI.
+- Cycle plan/review artifacts: `.context/plans/cycle-30-2026-06-30-plan.md`, `.context/plans/cycle-30-2026-06-30-deferred.md`, `.context/reviews/_aggregate.md`, and role review files.
+- Restore hardening: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/__tests__/restore-upload-lock.test.ts`.
+- Public route rate-limit gate: `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
+- Map GPS privacy behavior coverage: `apps/web/src/__tests__/map-get-images-behavior.test.ts`, verified against `apps/web/src/lib/data.ts`.
+- Search failure copy/comment updates: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/src/components/search.tsx`, `apps/web/src/__tests__/search-short-query-guard.test.ts`.
 
 Validation evidence:
 
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm test --workspace=apps/web -- src/__tests__/health-route.test.ts src/__tests__/map-privacy.test.ts src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/semantic-search-route.test.ts` passed: 4 files, 79 tests.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed. It reported OK for the six public route files: health, live, OG photo, OG topic, semantic search, and similar search.
+- Targeted Vitest passed: `npm test --workspace=apps/web -- src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/map-get-images-behavior.test.ts src/__tests__/restore-upload-lock.test.ts src/__tests__/search-short-query-guard.test.ts` -> 4 files, 61 tests.
+- No focused test markers found in the touched suites: `rg "\.only\(|\.skip\(|it\.only|it\.skip|describe\.only|describe\.skip" ...` returned no matches.
+- `git show --check --oneline --decorate HEAD` failed on trailing whitespace in the two new cycle-30 plan files; details below.
 
-## Confirmed Issues
+## Findings
 
-### VER30-01: `/api/health` no longer matches the documented liveness-only default
-
-- Severity: Medium
-- Confidence: High
-- Classification: Confirmed contract/documentation mismatch
-- File/region: `apps/web/src/app/api/health/route.ts:7-20`; docs at `CLAUDE.md:99`, `CLAUDE.md:588`, `README.md:201`, `apps/web/README.md:50`.
-- Evidence: The route returns `503` whenever `isRestoreMaintenanceActive()` is true, before checking `HEALTH_CHECK_DB`. The docs still say `/api/health` is liveness-only by default and only probes readiness when `HEALTH_CHECK_DB=true`.
-- Failure scenario: An operator or monitor follows the documented contract and uses `/api/health` as a liveness-only endpoint. During an intentional DB restore, it reports unhealthy even when the process is alive. Docker's checked-in healthcheck uses `/api/live`, so the shipped container avoids restart loops, but external monitoring/load balancers can still act on the stale contract.
-- Suggested fix: Either keep `/api/health` liveness-only unless `HEALTH_CHECK_DB=true`, or update docs/tests to define it as readiness/unavailable during restore and direct all liveness users to `/api/live`.
-
-## Likely Issues
-
-### VER30-02: Map privacy coverage still does not execute `getMapImages()`
+### VER31-01 - Public expensive-GET gate ignores expensive work in `catch`/`finally`
 
 - Severity: Medium
 - Confidence: High
-- Classification: Test-quality gap
-- File/region: `apps/web/src/__tests__/map-privacy.test.ts:82-152`; production code at `apps/web/src/lib/data.ts:1660-1697`.
-- Evidence: The test now source-checks that `getMapImages()` contains the topic join, `eq(topics.map_visible, true)`, GPS predicates, and marker limit. But the runtime guard tests at `map-privacy.test.ts:112-140` still use local fake rows and copied guard logic rather than importing/executing `getMapImages()`.
-- Failure scenario: A refactor keeps the searched source strings but changes query composition or row handling in a way the production function no longer enforces, while the copied-logic tests still pass. The highest-risk result is GPS coordinates from non-opted-in topics reaching `/map`.
-- Suggested fix: Add a behavior test around `getMapImages()` with a mocked Drizzle chain or a test DB fixture that returns mixed `topic_map_visible` rows and verifies the production function filters/throws. Keep the source contract as a secondary guard.
+- File/region: `apps/web/scripts/check-public-route-rate-limit.ts:352-372`; fixture coverage at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:163-181`.
+- Evidence: `bodyCallsRateLimitBeforeExpensiveGetWork()` recurses into `statement.tryBlock.statements` for a `TryStatement`, then `continue`s. It never inspects `catchClause` or `finallyBlock`, and the block-level caller ignores the boolean result from `inspectStatements(...)` while returning only the shared `sawRateLimitGate` flag.
+- Reproducer run during review: a synthetic GET route with `JSON.parse('{')` before the limiter in `try`, followed by `db.select()` in `catch`, passed `checkPublicRouteSource(...)` as `OK: route.ts (expensive GET uses rate-limit helper)`.
+- Failure scenario: a future public GET route can perform DB/file/image work in a catch or finally path reached before the limiter runs. The custom lint gate passes because it saw an approved limiter elsewhere in the `try` block.
+- Concrete fix: inspect `catchClause.block.statements` and `finallyBlock.statements` with the same expensive-work-before-gate logic, or fail closed on try/catch/finally shapes the scanner cannot dominate. Add a failing fixture where expensive `catch` work is reachable before the limiter, next to the existing positive try-block fixture at `check-public-route-rate-limit.test.ts:163-181`.
 
-### VER30-03: Expensive public GET linting proves presence of a limiter, not dominance before work
+### VER31-02 - Cycle-30 plan artifacts fail whitespace checking
 
-- Severity: Medium
-- Confidence: Medium
-- Classification: Gate blind spot / future-risk
-- File/region: `apps/web/scripts/check-public-route-rate-limit.ts:263-282`, `apps/web/scripts/check-public-route-rate-limit.ts:428-437`; tests at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:117-130`.
-- Evidence: Mutating handlers use `bodyCallsRateLimitBeforeMutation(...)`, which checks ordering. Expensive GET handlers use `bodyCallsApprovedRateLimit(...)`, which only checks that an approved helper is called somewhere in the handler body. The current API routes put their limit before DB/CPU work, but the custom gate would pass a future expensive GET that calls the limiter after `db.select()`, `ImageResponse`, or embedding work.
-- Failure scenario: A new public GET endpoint performs DB/Sharp/embedding work and then calls `preIncrement*` near the end. The route passes `lint:public-route-rate-limit` while allowing unmetered expensive work.
-- Suggested fix: Reuse a dominance-style check for expensive GET handlers, or add fixture tests that fail when approved rate-limit helpers appear only after an expensive marker/mutation-like call.
+- Severity: Low
+- Confidence: High
+- File/region: `.context/plans/cycle-30-2026-06-30-plan.md:3-4`; `.context/plans/cycle-30-2026-06-30-deferred.md:3-4`.
+- Evidence: `git show --check --oneline --decorate HEAD` exits 2 and reports trailing whitespace on those four lines.
+- Failure scenario: this is not a product runtime defect, but it makes the HEAD diff fail a standard static hygiene check and can hide meaningful whitespace failures if `git diff --check` is added as a blocking gate later.
+- Concrete fix: remove the two trailing spaces from each date/source line or use explicit Markdown line breaks only where required.
 
-## Risks Needing Manual Validation
+## Non-Findings
 
-- Real CLIP activation remains skipped by default CI. `clip-offline-load.test.ts:15-21` and `clip-semantic-integration.test.ts:8-31` are gated on seeded env vars; `.github/workflows/quality.yml:66-80` runs normal tests/build only.
-- Browser matrix remains Chromium-only in CI. `apps/web/playwright.config.ts:72-77` defines only `chromium`, and `.github/workflows/quality.yml:72-77` installs only Chromium.
-- `nav-visual-check.spec.ts:51`, `:65`, and `:78` write screenshots but use geometry assertions rather than `toHaveScreenshot(...)` baselines. This is useful smoke coverage, not visual diff coverage.
+- Restore queue cleanup ordering matches the cycle-30 intent: `imageQueueQuiesced = true` is now set immediately after `quiesceImageProcessingQueueForRestore()` and before `drainBackgroundDbWritesForRestore()` in `apps/web/src/app/[locale]/admin/db-actions.ts:493-498`; resume is guarded on `restoreLifecycleVerified || imageQueueQuiesced` at `db-actions.ts:514-517`.
+- The new map behavior test imports `getMapImages()`, checks the join/predicate/limit shape, and asserts the runtime GPS leak guard in `apps/web/src/__tests__/map-get-images-behavior.test.ts:80-130`. This closes the prior cycle's "source-only map privacy test" gap for the current function.
+- Search generic error copy now states temporary unavailability in both locales at `apps/web/messages/en.json:423` and `apps/web/messages/ko.json:423`. The short semantic query guard still has a targeted source contract and passed in the focused test run.
+- Current public API route inventory is small and scanned: `health`, `live`, `og/photo/[id]`, `og`, `search/semantic`, and `search/similar/[id]`. The active routes pass the public route rate-limit gate.
 
 ## Final Sweep
 
-Rechecked current HEAD rather than previous cycle assumptions. Cycle-29 items that appear fixed in HEAD: rate-limit bucket `bucket_start` index exists in schema/migration/journal; semantic stub ranking now has a formula-distinguishing behavior test; public restore-maintenance metadata guards were added to DB-backed public metadata routes; similar-photos retry cache was reset on transient failures.
-
-Skipped areas: no full `npm test`, `npm run typecheck`, `npm run build`, or Playwright run due review-only scope and time. No production/deploy commands were run. No product code was modified.
+Final missed-issue sweep covered the current HEAD diff, touched tests, changed gate script, current public API routes, map serialization path, restore prep/finally path, search message usage, focused test markers, and whitespace checks. Full lint/typecheck/build/Vitest were not rerun because the commit records them as green and this lane used lightweight review checks; Playwright was not run.

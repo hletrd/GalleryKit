@@ -280,6 +280,7 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
     body: ts.Node | undefined,
     approvedRateLimitImports: Set<string>,
     sourceFile: ts.SourceFile,
+    localExpensiveGetFunctions: Set<string>,
 ): boolean {
     if (!body) return false;
 
@@ -344,15 +345,34 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
         return false;
     };
 
+    const nodeContainsExpensiveWork = (node: ts.Node | undefined): boolean => {
+        return bodyContainsExpensiveGetWork(node, sourceFile, localExpensiveGetFunctions);
+    };
+
     const statementContainsExpensiveWork = (statement: ts.Statement): boolean => {
-        const text = statement.getText(sourceFile);
-        return EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker));
+        return nodeContainsExpensiveWork(statement);
     };
 
     const inspectStatements = (statements: ts.NodeArray<ts.Statement>): boolean => {
         for (const statement of statements) {
             if (ts.isTryStatement(statement)) {
+                const gateBeforeTry = sawRateLimitGate;
+                if (
+                    !gateBeforeTry
+                    && (
+                        nodeContainsExpensiveWork(statement.catchClause?.block)
+                        || nodeContainsExpensiveWork(statement.finallyBlock)
+                    )
+                ) {
+                    return false;
+                }
                 if (!inspectStatements(statement.tryBlock.statements)) {
+                    return false;
+                }
+                if (gateBeforeTry && statement.catchClause && !inspectStatements(statement.catchClause.block.statements)) {
+                    return false;
+                }
+                if (gateBeforeTry && statement.finallyBlock && !inspectStatements(statement.finallyBlock.statements)) {
                     return false;
                 }
                 continue;
@@ -368,17 +388,39 @@ function bodyCallsRateLimitBeforeExpensiveGetWork(
     };
 
     if (ts.isBlock(body)) {
-        inspectStatements(body.statements);
-        return sawRateLimitGate;
+        return inspectStatements(body.statements);
     }
 
     return bodyCallsApprovedRateLimit(body, approvedRateLimitImports);
 }
 
-function bodyContainsExpensiveGetWork(body: ts.Node | undefined, sourceFile: ts.SourceFile): boolean {
+function bodyContainsExpensiveGetWork(
+    body: ts.Node | undefined,
+    sourceFile: ts.SourceFile,
+    localExpensiveGetFunctions: Set<string> = new Set(),
+): boolean {
     if (!body) return false;
     const text = body.getText(sourceFile);
-    return EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker));
+    if (EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker))) {
+        return true;
+    }
+
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isFunctionLike(node) && node !== body) return;
+        if (
+            ts.isCallExpression(node)
+            && ts.isIdentifier(node.expression)
+            && localExpensiveGetFunctions.has(node.expression.text)
+        ) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
 }
 
 export function checkPublicRouteSource(content: string, relative: string = 'route.ts'): CheckReport {
@@ -432,6 +474,19 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
             if (containsMutation) {
                 localMutatingFunctions.add(name);
                 mutatingSetChanged = true;
+            }
+        }
+    }
+
+    const localExpensiveGetFunctions = new Set<string>();
+    let expensiveGetSetChanged = true;
+    while (expensiveGetSetChanged) {
+        expensiveGetSetChanged = false;
+        for (const [name, body] of localBodies) {
+            if (!body || localExpensiveGetFunctions.has(name)) continue;
+            if (bodyContainsExpensiveGetWork(body, sourceFile, localExpensiveGetFunctions)) {
+                localExpensiveGetFunctions.add(name);
+                expensiveGetSetChanged = true;
             }
         }
     }
@@ -503,9 +558,10 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         .replace(/'[^']*'/g, '');
     const hasExemption = EXEMPT_COMMENT_RE.test(withoutStrings);
     if (hasExemption) {
-        if (mutatingHandlers.length > 1) {
+        const protectedSurfaceCount = mutatingHandlers.length + getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions)).length;
+        if (protectedSurfaceCount > 1) {
             report.failed.push(
-                `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports mutating handlers ${mutatingHandlers.map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt mutating handler.`,
+                `AMBIGUOUS RATE-LIMIT EXEMPTION: ${relative} exports protected handlers ${[...mutatingHandlers, ...getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions))].map((handler) => handler.method).join(', ')} and carries a file-level '${EXEMPT_TAG}: <reason>'. Move the exemption into a single-handler route file or rate-limit every non-exempt protected handler.`,
             );
             return report;
         }
@@ -524,9 +580,9 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         );
     }
 
-    const expensiveGetHandlers = getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile));
+    const expensiveGetHandlers = getHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions));
     if (expensiveGetHandlers.length > 0 && !hasExemption) {
-        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile));
+        const unmeteredGetHandlers = expensiveGetHandlers.filter((handler) => !bodyCallsRateLimitBeforeExpensiveGetWork(handler.body, approvedRateLimitImports, sourceFile, localExpensiveGetFunctions));
         if (unmeteredGetHandlers.length > 0) {
             report.failed.push(
                 `MISSING RATE LIMIT: ${relative} exports expensive GET handler(s) ${unmeteredGetHandlers.map((handler) => handler.method).join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit pre-increment helper before expensive work.`

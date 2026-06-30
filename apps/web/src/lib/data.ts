@@ -850,7 +850,27 @@ export async function getImagesForFeed(limit: number, topicSlug?: string) {
         .where(where)
         .groupBy(images.id)
         .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
-        .limit(safeLimit);
+	        .limit(safeLimit);
+}
+
+export async function getFeedUpdatedAt(topicSlug?: string) {
+    if (topicSlug && !isValidSlug(topicSlug)) {
+        return null;
+    }
+    const where = topicSlug
+        ? and(eq(images.processed, true), eq(images.topic, topicSlug))
+        : eq(images.processed, true);
+
+    const rows = await db.select({
+        updated_at: images.updated_at,
+        created_at: images.created_at,
+    })
+        .from(images)
+        .where(where)
+        .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
+        .limit(1);
+
+    return rows[0] ?? null;
 }
 
 export function normalizePaginatedRows<T extends { total_count: number | null }>(

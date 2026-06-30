@@ -1,124 +1,62 @@
-# Cycle 30 Product Marketer Reviewer
+# Cycle 31 Product Marketer Review
 
-Reviewer: product-marketer-reviewer
-Repo: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-06-30
-Scope: GalleryKit product/positioning review. The installed prompt's BurstPick assumptions were ignored; only the product-marketing review lens was reused.
+Custom reviewer prompt was readable at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md`. The prompt is BurstPick-specific, so this pass adapts its market-readiness lens to GalleryKit: clarity of promise, first-impression trust, differentiation, conversion/discovery paths, and credibility of product claims. Product code was not edited.
 
-## Executive Summary
+## Evidence
 
-GalleryKit has a credible position: self-hosted finished-photo publishing with private originals, color-managed derivatives, first-party analytics, optional Google Analytics, share links, and operator-controlled search. The biggest go-to-market problem is that two marketed trust pillars are not fully demonstrable today: live keyword search fails for a normal query on the demo, and shared links can be created but not managed/revoked through the UI. Market-readiness score: 6/10 for a technical self-hosted audience; lower for photographers who need turnkey trust and support.
+- Runtime: production `https://gallery.atik.kr/en` at desktop `1440x1000` and mobile `390x844`; local dev blocked by missing MySQL with `ECONNREFUSED`.
+- Live screenshots: `/tmp/gallery-live-home-desktop.png`, `/tmp/gallery-live-home-mobile.png`, `/tmp/gallery-live-photo-mobile.png`, plus `/tmp/gallery-live-lightbox-mobile.png`.
+- Source inventory reviewed: public home, nav, search, photo viewer, lightbox, color metadata, upload/admin, messages, and global CSS.
 
-## Product-Market Fit Assessment
+## Positioning Read
 
-- Problem clarity: Strong. GalleryKit is for photographers/small teams who want to publish edited work without hosted SaaS.
-- Target user: Self-hosting photographer/operator, not general clients and not photo editors.
-- Wedge: Color/HDR honesty plus private originals plus self-hosted gallery/share/search. This is differentiated from commodity static galleries, but it depends on reliable search/share operations.
-- Switching cost: Moderate. Setup requires MySQL, Docker/Node, environment, and first-run settings decisions. This is acceptable for operators, not casual photographers.
-- Durability: Color pipeline and privacy posture are harder to copy than generic masonry UI; semantic search is less durable until backed by scalable retrieval and a working demo path.
+GalleryKit's strongest differentiator is not generic photo hosting. It is a photographer-operated, color-aware, self-hosted gallery that preserves authored images, exposes camera/color details, supports Korean/English, and avoids culling/scoring/edit features. That positioning is credible in source and UI, but the public first impression currently spends too much mobile space on filters and then lets search fail for an obvious term.
 
 ## Findings
 
-### C30-PM-01 - Live demo search failure undermines the "operator-controlled search" positioning
+### PM-31-01: Mobile first impression emphasizes taxonomy before the photography
 
-Severity: High
-Confidence: High for live symptom, Medium for root cause
-Region: `README.md:8`, `README.md:41-42`, `apps/web/README.md:60-70`, `apps/web/src/components/search.tsx:473-528`, `apps/web/src/app/actions/public.ts:305-316`
+- Severity: Medium
+- Confidence: High
+- Evidence: live mobile `390x844`; first photo begins around `y=412` after H1, count, and a multi-row tag filter. Source order is `Latest`, count, `TagFilter`, then the photo grid in `apps/web/src/components/home-client.tsx:255` through `apps/web/src/components/home-client.tsx:286`; all tag chips render as prominent buttons in `apps/web/src/components/tag-filter.tsx:63` through `apps/web/src/components/tag-filter.tsx:120`.
+- Failure scenario: a visitor arriving from social/referral wants visual proof first, but the viewport frames the site as a database/filter UI before it frames it as a gallery.
+- Fix: make the first mobile viewport photo-led. Collapse or horizontally scroll filters, keep the active state visible, and show at least one strong card immediately under the page title.
 
-Concrete failure scenario: A prospective operator clicks the README live demo, searches for a visible term from the gallery (`JIHOON`), and sees "Search failed. Please try again." The demo then makes both keyword search and semantic search feel like unfinished claims.
+### PM-31-02: Search failure undermines the gallery's discovery promise
 
-Suggested fix: Treat live-demo search as a release-blocking marketing smoke. Add a pre-release checklist item: known visible keyword query returns results; semantic toggle state matches deployed setup; no generic search failure appears on the demo.
+- Severity: Medium
+- Confidence: High
+- Evidence: live search for `jihoon` on production returned "Search is temporarily unavailable. Please try again later." while `JIHOON` was visible as a top tag. Search errors are mapped generically in `apps/web/src/components/search.tsx:160` through `apps/web/src/components/search.tsx:270`, and the visible error renders at `apps/web/src/components/search.tsx:473`.
+- Selector/metric: search dialog `#search-input`, query `jihoon`, no results, generic unavailable state.
+- Failure scenario: a fan, client, or collaborator searches a visible performer name and concludes the archive is unreliable or incomplete.
+- Fix: repair the production search failure, then add a resilient fallback: when backend search fails, match visible tags/topics locally and offer "Open JIHOON tag" or "Browse recent photos" instead of a dead end.
 
-### C30-PM-02 - Share-link lifecycle is not credible enough for client-delivery positioning
+### PM-31-03: The brand signal is clean but under-explains the specialist value
 
-Severity: Medium
-Confidence: High
-Region: `README.md:39`, `README.md:44-45`, `apps/web/src/components/photo-viewer.tsx:586-618`, `apps/web/src/components/image-manager.tsx:194-210`, `apps/web/src/app/actions/sharing.ts:317-397`
+- Severity: Low
+- Confidence: Medium
+- Evidence: live nav presents `ATIK.KR Gallery`; home H1 is `Latest`; footer is byline only. Source nav brand comes from `apps/web/src/components/nav-client.tsx:91` through `apps/web/src/components/nav-client.tsx:108`; home title/count are in `apps/web/src/components/home-client.tsx:255` through `apps/web/src/components/home-client.tsx:264`; footer byline is in `apps/web/src/components/footer.tsx:34` through `apps/web/src/components/footer.tsx:58`.
+- Failure scenario: new visitors understand "gallery" but not why this gallery is distinct: color-accurate concert/event photography, photographer-authored presentation, Korean/English browsing, and metadata transparency.
+- Fix: add a concise, non-marketing support line near the home H1 or footer, for example one sentence about authored concert/event photography and color-accurate delivery. Keep it quiet; this is a portfolio, not a SaaS landing page.
 
-Concrete failure scenario: A photographer sends a client a private-ish share link, the client forwards it, and the photographer cannot revoke or audit the link from the UI. That gap is more damaging than missing a minor feature because sharing is a trust boundary.
+### PM-31-04: Color/HDR credibility is strong and should remain a visible trust cue
 
-Suggested fix: Before positioning GalleryKit for client delivery, add active share management: list, copy, open, revoke/delete, optional expiry, and view count. Marketing copy should say "create and manage share links" only after that UI exists.
+- Severity: Positive finding
+- Confidence: High
+- Evidence: global CSS includes P3/HDR handling and high-quality rendering in `apps/web/src/app/globals.css:145` through `apps/web/src/app/globals.css:202`; viewer/color details exist in `apps/web/src/components/color-details-section.tsx:303` through `apps/web/src/components/color-details-section.tsx:344`; the lightbox color pip is integrated in `apps/web/src/components/lightbox.tsx:663` through `apps/web/src/components/lightbox.tsx:674`.
+- Failure scenario if regressed: the gallery becomes visually generic and loses its strongest professional-photographer differentiator.
+- Fix: preserve color/HDR UI as a trust cue, but keep it opt-in and subordinate to the photo unless the user opens details.
 
-### C30-PM-03 - Semantic search copy is honest but still too prominent relative to operational maturity
+### PM-31-05: Error and empty states are trust-preserving, but production search needs a friendlier recovery path
 
-Severity: Medium
-Confidence: High
-Region: `README.md:42`, `apps/web/README.md:62-81`, `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:270-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:168-201`, `apps/web/messages/en.json:429-431`
+- Severity: Low
+- Confidence: High
+- Evidence: local DB failure rendered a branded error shell with retry/home actions from `apps/web/src/app/[locale]/error.tsx:22` through `apps/web/src/app/[locale]/error.tsx:57`; empty gallery copy exists in `apps/web/src/components/home-client.tsx:426` through `apps/web/src/components/home-client.tsx:442`. Search, by contrast, shows a generic unavailable message in `apps/web/src/components/search.tsx:473`.
+- Failure scenario: whole-page failures communicate recovery, but command-level failures communicate only outage.
+- Fix: give search a recovery action: clear query, open current tag list, or link to latest photos. This keeps the product promise alive during partial failure.
 
-Concrete failure scenario: A user reads "fully self-hosted, multilingual natural-language photo search" in the app README, then tries a deployment where weights, backfill, env opt-in, or scan limits are not production-ready. The route is honest about disabled/setup-required states, but the feature still reads like a mature differentiator.
+## Market Readiness Summary
 
-Suggested fix: Move semantic search messaging below core gallery/share/color features until the demo and operator status are robust. Add a visible admin status panel: mode, model weights present, embeddings count, model version, last backfill, scan limit, and production readiness.
-
-### C30-PM-04 - Map/GPS story is privacy-honest but scale-light
-
-Severity: Medium
-Confidence: High
-Region: `apps/web/messages/en.json:110-114`, `apps/web/messages/en.json:814`, `apps/web/src/lib/data.ts:1649-1685`, `apps/web/src/app/[locale]/(public)/map/page.tsx:87-99`
-
-Concrete failure scenario: A travel/event photographer enables public GPS for a large category and the map experience becomes slow or inaccessible. The privacy messaging is now clear, but the product story does not yet say "large geotagged galleries are clustered/paginated."
-
-Suggested fix: Do not market the map as a large-gallery feature until it has clustering/viewport loading and a paginated accessible list. Current positioning should frame it as an optional small/personal-gallery map.
-
-### C30-PM-05 - Backup completeness remains easy to misunderstand from the top-level "private originals" story
-
-Severity: Low-Medium
-Confidence: Medium
-Region: `README.md:29-31`, `README.md:83-85`, `apps/web/README.md:55-56`
-
-Concrete failure scenario: A photographer equates "private originals" with app-level backup safety, downloads only a SQL backup, loses the host filesystem, and cannot restore originals/derivatives/resources.
-
-Suggested fix: Add a short top-level "Complete backups" note near Getting Started: SQL dump plus `data/`, `public/uploads/`, `public/resources`, and `src/site-config.json`. Keep the DB-page warning, but repeat it where operators make setup decisions.
-
-## Positioning Recommendation
-
-Use this as the core position:
-
-> GalleryKit is a self-hosted publishing gallery for finished photography: private originals, color-honest derivatives, first-party analytics, and operator-controlled sharing/search.
-
-Avoid leading with "AI" or semantic search. Use it as an advanced operator feature until the live demo and status tooling prove it reliably.
-
-## Messaging Architecture
-
-- Hero: self-hosted finished-photo publishing.
-- Proof: color/HDR decision matrix, private original storage, GPS public-map opt-in, first-party analytics default, explicit no editor/culler/payment boundary.
-- Risk reducers: setup checklist, backup completeness, search readiness, share revocation, GPS stripping before first upload.
-- Current weak copy: Search and sharing are listed as complete features, but live search fails and share revocation UI is absent.
-
-## Business Model / Distribution Notes
-
-This is open-source/self-hosted infrastructure rather than a packaged photographer SaaS. The best growth path is technical credibility: README clarity, demo reliability, Docker deployment reliability, screenshots/videos of upload/color/share/search, and transparent limitations. Avoid paid/client-delivery positioning until share management and backup docs are stronger.
-
-## Trust-Building Roadmap
-
-- Tier 0: Fix live demo keyword search and add a known-query smoke test.
-- Tier 0: Add share management/revocation UI before promoting sharing for client delivery.
-- Tier 1: Add semantic-search readiness/status UI and keep the feature secondary in marketing.
-- Tier 1: Add map clustering/pagination or explicitly position public map as small-gallery only.
-- Tier 2: Add complete-backup checklist near first-run docs.
-- Tier 2: Publish a short "what GalleryKit does not do" section in docs and demo footer, matching the existing README boundary.
-
-## Risk Matrix
-
-- Demo reliability risk: High probability, high impact. Current search failure is visible.
-- Privacy/share trust risk: Medium probability, high impact. Share revocation UI is missing.
-- Operator complexity risk: High probability, medium impact. Setup is technical by design.
-- Semantic-search overclaim risk: Medium probability, medium impact. Copy is caveated but prominent.
-- Scale risk: Medium probability, medium impact. Map and vector search need large-gallery constraints.
-
-## Non-Findings
-
-- The product is not falsely positioned as an editor/culler/scorer.
-- GPS public publishing now has confirmation copy and privacy-page disclosure.
-- Google Analytics is clearly optional and disabled unless configured.
-- Payment/Stripe is not marketed.
-- S3/MinIO is not marketed as supported storage.
-
-## Skipped Areas
-
-- Did not inspect production env, DB rows, or server logs.
-- Did not mutate production admin state.
-- Did not conduct competitor pricing research because GalleryKit is currently open-source/self-hosted and no pricing surface is present.
-
-## Final Verdict
-
-Wait before broader public promotion beyond technical/self-hosted users. The first 100 users should be self-hosting photographers and developers comfortable with Docker/MySQL who value color/privacy control. Required before stronger launch messaging: live search works, share links are manageable/revocable, semantic readiness is visible, and backup completeness is repeated in setup docs.
+- Strong: visual product, bilingual nav, precise color pipeline, photo-first detail pages, privacy/admin separation, touch-target discipline.
+- Weak: mobile home hierarchy, production search reliability, slightly generic public positioning.
+- Best next move: fix live search and compress mobile filters before adding new public features. Those two changes would improve conversion from "visitor sees archive" to "visitor finds the right photo."

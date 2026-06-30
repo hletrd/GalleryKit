@@ -4,8 +4,8 @@
  * Layered detection in priority order:
  *
  *   1. `screen.colorGamut` (Chromium 121+, Safari 18+ TP) — authoritative.
- *   2. `(color-gamut: rec2020)` MQ — supported on Chrome / Safari / Edge.
- *   3. `(color-gamut: p3)` MQ — same browsers.
+ *   2. `(color-gamut: rec2020)` MQ — feature-detected with matchMedia.
+ *   3. `(color-gamut: p3)` MQ — feature-detected with matchMedia.
  *   4. Firefox fallback — defaults to 'srgb' because Firefox's canvas-P3
  *      probe tests API capability, not display gamut, producing systematic
  *      false positives on sRGB displays (R9-R1).
@@ -62,9 +62,9 @@ function detect(): DisplayCapability {
             gamut = 'p3';
         }
         // R9-R1: Firefox parses the (color-gamut: p3) MQ syntax since v110, but
-        // it ALWAYS returns false because Firefox does not implement wide-gamut
-        // rendering (Mozilla bug 1626624, still open). So all Firefox versions
-        // effectively fall through to the conservative 'srgb' default here.
+        // its p3/rec2020 queries still effectively return false for wide-gamut
+        // display detection (Mozilla bug 1626624, still open). So Firefox gamut
+        // detection falls through to the conservative 'srgb' default here.
         // Firefox ≤109 lacks the MQ entirely. screen.colorGamut is unsupported
         // in Firefox across all versions.
     }

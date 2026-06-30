@@ -1,100 +1,105 @@
-# Cycle 30 Critic Review
+# Cycle 31 Critic Review
 
 Reviewer: critic
 Repo: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-06-30
-Scope: Prompt 1 review only. No product-code fixes.
+HEAD reviewed: `f1dd39eb`
+Date: 2026-06-30 KST
+Scope: multi-perspective critique only. No product code was edited.
 
-## Executive Summary
+## Review Frame
 
-GalleryKit's core product boundary is strong: it is a self-hosted finished-photo gallery, not an editor, culler, proofing system, payment surface, or hosted SaaS. The main current risks are not conceptual drift; they are reliability and trust gaps in public surfaces that are positioned as product strengths. Live browser inspection of `https://gallery.atik.kr/en` found keyword search returning `{"status":"error","results":[]}` for a normal visible query, while source review confirmed that share links still lack a management/revocation UI and the public map can still serialize/render up to 10,000 GPS items in one request. Overall critic verdict: usable product foundation, but launch/demo trust is weakened by search failure, share lifecycle incompleteness, and scale-sensitive public UI paths.
+GalleryKit's current HEAD is not failing at the broad product premise: the app still presents as a self-hosted finished-photo gallery, and the recent cycle-30 changes improved restore coordination, map privacy testing, route guard documentation, and public search copy. The remaining risks are narrower: request ownership in search, public route guard boundaries, and public feed cost control.
 
-## Review Evidence
-
-- Read `AGENTS.md`, `CLAUDE.md`, current review aggregate, assigned reviewer prompts, app docs, messages, public/admin routes, data/search/share/map code, and relevant tests/history.
-- Used Playwright headless against the live demo for `/en`, `/ko`, `/en/privacy`, `/en/map`, and `/en/timeline` at desktop and mobile sizes.
-- Live public pages rendered without page errors. Sampled controls met 44 px targets. `/en/map` currently has zero public GPS markers.
-- Live keyword search on `/en` for `JIHOON` posted to `https://gallery.atik.kr/en` and returned a Next server-action payload: `1:{"status":"error","results":[]}`. The dialog displayed "Search failed. Please try again."
-- Skipped production admin mutation and login flows to avoid changing live state.
+Inventory and inspection covered current HEAD, not older review assumptions: 595 source/script/e2e files were inventoried, HEAD's 19 changed files were checked, and adjacent public route/action/data/test paths were inspected for cross-file behavior.
 
 ## Findings
 
-### C30-CRIT-01 - Live keyword search fails for normal visible gallery terms
-
-Severity: High
-Confidence: High for live symptom, Medium for root cause
-Region: `apps/web/src/components/search.tsx:240-248`, `apps/web/src/components/search.tsx:473-476`, `apps/web/src/app/actions/public.ts:305-316`, `apps/web/src/lib/data.ts:1545-1621`, `apps/web/messages/en.json:421-424`
-
-Failure scenario: A visitor opens the live demo, sees many photos titled/tagged with `JIHOON`, searches for `JIHOON`, and receives a generic failure state rather than results. This directly weakens the README feature claim that keyword search covers titles, descriptions, cameras, and tags.
-
-Suggested fix: Inspect production logs for the caught `searchImagesAction failed` error, then add a regression test that exercises `searchImagesAction()` against seeded topic/tag/title data under the deployed SQL mode. Improve the client status mapping so expected setup/DB/query failures return actionable copy instead of a generic retry message.
-
-### C30-CRIT-02 - Public map still has a one-request/one-DOM-node-per-marker scale cliff
+### C31-CRIT-01 - Search mode changes can show results from the mode the user just left
 
 Severity: Medium
 Confidence: High
-Region: `apps/web/src/lib/data.ts:1649-1685`, `apps/web/src/app/[locale]/(public)/map/page.tsx:41-60`, `apps/web/src/app/[locale]/(public)/map/page.tsx:87-99`, `apps/web/src/components/map/map-client.tsx:86-90`, `apps/web/src/components/map/map-client.tsx:119-140`
 
-Failure scenario: An operator enables public GPS on a large topic. `/map` fetches up to 10,000 rows, serializes every marker to the client, computes bounds by materializing latitude/longitude arrays, mounts one Leaflet marker per row, and renders one fallback link per row. A mobile browser or assistive-tech session can freeze even though the live demo currently has zero public markers.
+Exact citations:
 
-Suggested fix: Add server-side viewport/bounds pagination or marker clustering before raising GPS usage. As a near-term safety step, lower the initial cap and show a truncation notice, then virtualize or paginate the fallback list.
+- `apps/web/src/components/search.tsx:151-158`
+- `apps/web/src/components/search.tsx:167`
+- `apps/web/src/components/search.tsx:195`
+- `apps/web/src/components/search.tsx:222`
+- `apps/web/src/components/search.tsx:240-248`
+- `apps/web/src/components/search.tsx:278-287`
+- `apps/web/src/components/search.tsx:503-507`
+- `apps/web/src/__tests__/search-semantic-toggle-source.test.ts:14-16`
 
-### C30-CRIT-03 - Share links can be created from UI but not listed or revoked from UI
+Failure scenario:
+
+A visitor searches, flips the semantic-search switch, and briefly sees stale results from the previous mode because the toggle resets visible state but does not invalidate the in-flight request until the next debounced search begins. This is most visible on a slow semantic request: the switch says one thing, the results are from another retrieval mode.
+
+Critic impact:
+
+Search is a trust surface. The new generic error copy is more honest, but a stale cross-mode result is worse than a failed search because it silently presents mismatched evidence.
+
+Concrete fix:
+
+Make the toggle handler invalidate request ownership synchronously by calling `clearSearchState()` or an extracted invalidation helper that increments `requestIdRef` and aborts semantic fetches. Update the toggle source-contract test so "effect owns the next search" also means "the old search is cancelled/invalidated immediately."
+
+### C31-CRIT-02 - The public-route guard still treats exemptions as a file-level escape hatch
 
 Severity: Medium
 Confidence: High
-Region: `apps/web/src/components/photo-viewer.tsx:586-618`, `apps/web/src/components/image-manager.tsx:194-210`, `apps/web/src/app/actions/sharing.ts:317-397`, `apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:204-235`
 
-Failure scenario: An admin creates a per-photo or group share link, later learns it was forwarded outside the intended audience, and cannot find a production UI to list active links or revoke/delete them. Server actions for revocation/deletion exist, and analytics can deep-link top shared groups, but the creation surfaces only copy URLs and clear selection.
+Exact citations:
 
-Suggested fix: Add an admin share-management surface that lists active per-photo and group links, created time, view counts, copy/open actions, and revoke/delete actions. Until then, update share toasts/docs to state that UI revocation is not yet exposed.
+- `apps/web/scripts/check-public-route-rate-limit.ts:505-516`
+- `apps/web/scripts/check-public-route-rate-limit.ts:527-536`
+- `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:197-212`
 
-### C30-CRIT-04 - Semantic and similar search remain request-thread brute-force paths
+Failure scenario:
+
+A future route combines a legitimately exempt webhook-style `POST` and a DB-backed public `GET`. The exemption comment satisfies the file, and the checker returns before evaluating the expensive GET. That means one reasonable local exception can accidentally bless an unrelated public read path.
+
+Critic impact:
+
+The project has many source-contract gates, but this one currently encodes the wrong granularity. The safety invariant is per public surface, not per file. File-level exceptions encourage unrelated handlers to share trust decisions.
+
+Concrete fix:
+
+Require handler-scoped exemptions, or fail closed when a file-level exemption coexists with any additional protected surface, including expensive GET handlers. Add the missing POST-plus-expensive-GET regression.
+
+### C31-CRIT-03 - Feed routes are public DB surfaces but not part of the route-guard inventory
 
 Severity: Medium
-Confidence: High
-Region: `apps/web/src/lib/clip-embeddings.ts:36-44`, `apps/web/src/app/api/search/semantic/route.ts:270-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:168-201`, `README.md:41-42`, `apps/web/README.md:60-70`
-
-Failure scenario: An operator markets semantic search, raises `SEMANTIC_SCAN_LIMIT` for recall, and concurrent public requests decode/score thousands of vectors synchronously on the Node request thread. SSR, admin actions, upload polling, and queue timers can see avoidable latency.
-
-Suggested fix: Keep current honesty copy, but add an event-loop-safe scoring path before promoting semantic search as a production differentiator for large galleries: worker thread, ANN/vector index, chunked yielding, or a lower per-request hard cap plus global concurrency gate.
-
-### C30-CRIT-05 - Generic route error shell hides product-specific recovery context
-
-Severity: Low-Medium
 Confidence: Medium
-Region: `apps/web/src/app/[locale]/error.tsx:22-57`, `apps/web/src/app/[locale]/(public)/page.tsx:161-178`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-94`
 
-Failure scenario: A transient DB failure on a public page drops visitors into a generic "Something went wrong loading this page" shell with only Home/Try Again. They cannot tell whether photos are empty, maintenance is active, search is unavailable, or the gallery is broken.
+Exact citations:
 
-Suggested fix: Use page-level expected-failure boundaries for public data reads where possible: a localized "gallery temporarily unavailable" state inside the normal public shell, preserving navigation/search/theme/locale when those can be resolved safely.
+- `apps/web/src/app/feed.xml/route.ts:29-40`
+- `apps/web/src/app/feed.xml/route.ts:144-153`
+- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:50-64`
+- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts:146-155`
+- `apps/web/scripts/check-public-route-rate-limit.ts:25`
+- `apps/web/scripts/check-public-route-rate-limit.ts:557`
+- `CLAUDE.md:619-623`
 
-## Multi-Perspective Critique
+Failure scenario:
 
-- Information architecture: Public browsing is clear for home/topic/photo/timeline/privacy, but share lifecycle IA is incomplete because creation is visible and revocation is hidden.
-- Affordances: Search, theme, locale, tags, load-more, photo links, map skip link, and GPS publish confirmation are clear. The generic search error gives no next action.
-- Keyboard/focus: Public nav/search/lightbox have visible focus and shortcut affordances. Search results use a combobox/listbox pattern with arrow/Enter instructions, but the current live failure prevents that path from proving value.
-- WCAG 2.2: Touch target evidence is good. Map fallback can become an accessibility problem at scale because thousands of links are exposed in one list.
-- Responsive states: Desktop/mobile live pages render. The risk is data volume rather than breakpoint layout.
-- Loading/empty/error: Map empty state is clear. Search error and route error are too generic.
-- Forms: Admin mutation forms were source-reviewed only; no production admin mutation was performed.
-- i18n/RTL: English and Korean messages have parity; RTL is not implemented or claimed.
-- Perceived performance: Masonry first page is usable on live demo; map and vector search have scale cliffs.
-- Product-message alignment: "Not editing/culling/scoring" is aligned. Search/share claims need lifecycle/runtime reliability work.
+Feed readers poll root and topic feeds with `If-Modified-Since`. The app still does settings/config/topic/image work before deciding the feed is not modified. Since the lint gate only walks `src/app/api`, these route handlers are not forced to be rate-limited or explicitly exempted.
 
-## Checked Clean / Not Re-filed
+Critic impact:
 
-- GPS public-map toggle now has an explicit confirmation dialog in `topic-manager.tsx:290-321` and localized consequence copy in `apps/web/messages/en.json:110-113`.
-- Privacy copy now discloses short-lived full-IP rate-limit buckets in both English and Korean at `apps/web/messages/en.json:811-812` and `apps/web/messages/ko.json:811-812`.
-- Rate-limit cleanup now has a `bucketStart` index at `apps/web/src/db/schema.ts:217-220` and bounded cleanup code in `apps/web/src/lib/rate-limit.ts:522+`.
-- The app README now warns to review GPS stripping before any real upload at `apps/web/README.md:24`.
+Feeds are meant to be boring and cheap. Current behavior makes them quiet public DB endpoints whose cost profile is hidden from the main public-route guard. That is a maintainability problem even if CDN caching hides most live traffic.
 
-## Skipped Areas
+Concrete fix:
 
-- Did not log into the live admin UI or create/revoke real share links.
-- Did not inspect gitignored production env, DB rows, upload files, or server logs.
-- Did not run full lint/typecheck/test gates because this turn writes review artifacts only.
+Inventory all public route handlers with expensive work, not only `/api`. For feeds specifically, add a cheap freshness path before full entry composition or document and test an intentional exemption.
 
-## Final Sweep
+## Positive Evidence
 
-Final sweep covered public IA, map, search, semantic/similar routes, share actions, admin analytics, privacy copy, README/app README claims, loading/error states, i18n messages, focus/touch affordances, and current review history. Findings above are the confirmed current issues for this perspective.
+- Restore maintenance now resumes the image queue after a partial prepare failure when the queue was already quiesced.
+- Map GPS publication has both SQL and runtime privacy fences.
+- Current public API route lint passes.
+- Targeted source-contract tests for reviewed areas pass: 4 files, 69 tests.
+- No product-code edits were made in this review lane.
+
+## Final Missed-Issue Sweep
+
+I rechecked the cycle-30 changed files, public route scanner behavior, search request ownership, restore flow, map privacy path, feed route handlers, and current source-contract tests. I did not find additional confirmed findings in the reviewed slice. Remaining residual risk: this was a static/source review with targeted tests, not a full browser or production-log investigation.

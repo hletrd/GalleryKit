@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getImagesForFeed, getSeoSettings } from '@/lib/data';
+import { getFeedUpdatedAt, getImagesForFeed, getSeoSettings } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
@@ -27,6 +27,22 @@ function toIso(value: unknown): string | null {
 }
 
 export async function GET(request: NextRequest) {
+    const ifModifiedSince = request.headers.get('if-modified-since');
+    const feedFreshness = await getFeedUpdatedAt();
+    const feedFreshnessUpdated = feedFreshness
+        ? toIso(feedFreshness.updated_at) ?? toIso(feedFreshness.created_at)
+        : null;
+    if (feedFreshnessUpdated && isFeedNotModified(ifModifiedSince, feedFreshnessUpdated)) {
+        return new NextResponse(null, {
+            status: 304,
+            headers: {
+                'Cache-Control': CACHE_CONTROL,
+                'Vary': 'Accept-Language',
+                'Last-Modified': new Date(feedFreshnessUpdated).toUTCString(),
+            },
+        });
+    }
+
     const [seo, config] = await Promise.all([
         getSeoSettings(),
         getGalleryConfig(),
@@ -141,7 +157,6 @@ export async function GET(request: NextRequest) {
     // they re-download the full feed body even when nothing changed.
     // RFC 7232 §3.3: compare at second precision (HTTP-date is
     // second-precision; the ISO ms must be floored to match).
-    const ifModifiedSince = request.headers.get('if-modified-since');
     if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
         return new NextResponse(null, {
             status: 304,

@@ -1,107 +1,71 @@
-# Cycle 30 UI/UX Designer Reviewer
+# Cycle 31 UI/UX Designer Reviewer
 
-Reviewer: ui-ux-designer-reviewer
-Repo: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-06-30
-Scope: GalleryKit UI/UX review. The installed reviewer prompt was BurstPick-specific; this artifact uses only its professional UI/UX review intent and applies it to GalleryKit.
+Custom reviewer prompt was readable at `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`. The prompt is BurstPick-specific, so this pass applies its senior UI/UX critique lens to GalleryKit: hierarchy, control behavior, accessibility, state design, responsive behavior, and professional polish. Product code was not edited.
 
-## Executive Summary
+## Evidence And Inventory
 
-GalleryKit is not a professional culling instrument; it is a publishing and browsing surface for finished photography. Judged on that actual product, the public browsing UI is pleasant and mostly accessible, but two interaction systems are not yet production-grade: discovery search fails on the live demo for a normal query, and share links have creation affordances without lifecycle affordances. The map also has an accessibility/performance design flaw when GPS-visible collections grow. UI/UX readiness: 7/10 for current browsing, 5/10 for admin trust workflows.
+- Agent-browser live coverage: desktop home, mobile home, mobile menu, mobile photo viewer, mobile lightbox, search dialog, failed search state.
+- Local dev coverage: Next.js server reached, but content blocked by unavailable MySQL. Error shell verified.
+- Main UI files reviewed: `home-client.tsx`, `nav-client.tsx`, `search.tsx`, `tag-filter.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `image-zoom.tsx`, `color-details-section.tsx`, `wide-gamut-hint.tsx`, `lightbox-color-pip.tsx`, `login-form.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `image-manager.tsx`, `settings-client.tsx`, `footer.tsx`, `load-more.tsx`, `globals.css`, `layout.tsx`, English/Korean messages.
 
-## Information Architecture Assessment
+## Findings
 
-The public IA is simple: localized home/topic/photo/share/map/timeline/privacy pages under a sticky nav, with admin pages separated behind `/admin`. This matches GalleryKit's "finished-photo publishing" scope. The weak IA is operational: "Share" is treated as an action, not an object with state. A share link becomes an external public artifact, but the admin navigation does not expose a place to audit, copy again, expire, or revoke it.
+### UXD-31-01: Mobile home hierarchy is control-heavy for a visual gallery
 
-## Visual Design Audit
+- Severity: Medium
+- Confidence: High
+- Evidence: runtime at `390x844` showed nav, H1/count, then approximately 200 px of tag buttons before the first photo. Source confirms the sequence in `apps/web/src/components/home-client.tsx:255` through `apps/web/src/components/home-client.tsx:286`; tag chips render as full buttons with counts in `apps/web/src/components/tag-filter.tsx:81` through `apps/web/src/components/tag-filter.tsx:120`.
+- Failure scenario: the page feels like a filter dashboard instead of a photography surface, particularly for new mobile visitors.
+- Fix: keep filters available but visually subordinate. Use a single-row scroll strip, "Filters" disclosure, or first-row cap. Let photography occupy the first-scroll experience.
 
-Live desktop/mobile pages use consistent Tailwind tokens, restrained typography, rounded photo cards, visible focus rings, and a quiet gallery-first hierarchy. Sampled controls met the 44 px target. The design concern is not visual polish; it is state representation. Search failure is visually indistinguishable from a generic transient problem, semantic search appears as an advanced promise in the same dialog, and map scale has no progressive disclosure beyond an all-or-nothing marker/list render.
+### UXD-31-02: Lightbox auto-hide trades visual cleanliness for accessibility discoverability
 
-## Interaction Findings
+- Severity: Medium
+- Confidence: Medium
+- Evidence: live idle lightbox accessibility snapshot exposed only the dialog and image. Source applies `aria-hidden` and `tabIndex=-1` to hidden controls in `apps/web/src/components/lightbox.tsx:371`; the hide timer runs at `apps/web/src/components/lightbox.tsx:201`; close/navigation controls are inside the hidden overlay from `apps/web/src/components/lightbox.tsx:546` through `apps/web/src/components/lightbox.tsx:687`.
+- Failure scenario: after controls fade, a non-pointer user can be inside a modal that appears to contain only an image. Escape works, but the visible and accessible recovery affordance is gone.
+- Fix: never remove close from the accessibility tree. Prefer visual opacity-only for essential controls, or maintain an off-screen accessible control group while the visual overlay is hidden.
 
-### C30-UXR-01 - Live search returns a generic failure for a normal gallery query
+### UXD-31-03: Search status repeats itself in assistive output
 
-Severity: High
-Confidence: High for symptom, Medium for root cause
-Region: `#search-dialog`, `#search-input`; `apps/web/src/components/search.tsx:160-270`, `apps/web/src/components/search.tsx:473-476`, `apps/web/src/app/actions/public.ts:236-317`, `apps/web/src/lib/data.ts:1490-1628`
+- Severity: Low
+- Confidence: High
+- Evidence: failed production search produced duplicate error text in the accessibility snapshot. Source has both a screen-reader-only live region in `apps/web/src/components/search.tsx:440` through `apps/web/src/components/search.tsx:449` and a visible duplicate in `apps/web/src/components/search.tsx:473` through `apps/web/src/components/search.tsx:476`.
+- Failure scenario: AT users get unnecessary repetition at the exact moment the UI is already failing to provide results.
+- Fix: consolidate the announcement. One live status is enough; duplicate visual text should be hidden from AT or the hidden live region should be removed.
 
-Concrete failure scenario: A keyboard user presses Cmd/Ctrl+K, types a visible term like `JIHOON`, waits, and hears/sees "Search failed. Please try again." There are no results, no error code, and no path to recover beyond retrying the same broken action.
+### UXD-31-04: Card link accessible text is more verbose than necessary
 
-Suggested fix: Fix the underlying production query failure and add a targeted seeded-browser smoke for a known title/tag. Return specific server-action statuses for DB/query failures and display a clear temporary-unavailable state.
+- Severity: Low
+- Confidence: Medium
+- Evidence: live desktop accessibility output for photo links repeated title/topic text. Source combines link `aria-label` at `apps/web/src/components/home-client.tsx:323`, image `alt` at `apps/web/src/components/home-client.tsx:353`, and visible overlay title/topic blocks at `apps/web/src/components/home-client.tsx:395` and `apps/web/src/components/home-client.tsx:401`.
+- Failure scenario: keyboard and screen reader users traverse the masonry grid and hear repeated labels for each card, slowing scanning across 30-plus cards.
+- Fix: keep one authoritative accessible name per card. Mark overlay text decorative for AT, or tune image alt in linked cards while keeping rich alt on photo detail.
 
-### C30-UXR-02 - Search result list is keyboard-designed, but unproven because the live result path fails
+### UXD-31-05: Motion is responsibly reduced, but default timings are a little slow for repeated browsing
 
-Severity: Medium
-Confidence: Medium
-Region: `apps/web/src/components/search.tsx:73-109`, `apps/web/src/components/search.tsx:394-426`, `apps/web/src/components/search.tsx:451-472`
+- Severity: Low
+- Confidence: High
+- Evidence: reduced motion is covered in `apps/web/src/app/globals.css:253` through `apps/web/src/app/globals.css:279`. Default card image scale uses `duration-500` in `apps/web/src/components/home-client.tsx:357` and `apps/web/src/components/home-client.tsx:371`; the photo info sidebar uses `duration-500` in `apps/web/src/components/photo-viewer.tsx:718` through `apps/web/src/components/photo-viewer.tsx:724`.
+- Failure scenario: repeated hover and info-panel toggles feel slightly sluggish for power browsing, even though accessibility motion preferences are respected.
+- Fix: reduce routine UI transitions to 150-250 ms and keep longer motion only for deliberate viewer transitions.
 
-Concrete failure scenario: The component implements `role="combobox"` plus `aria-activedescendant` and arrow/Enter activation, but a live user never reaches result navigation when keyword search fails. If this regresses further, result anchors are `tabIndex={-1}`, so Tab users rely entirely on the custom combobox behavior.
+### UXD-31-06: RTL readiness is partial, not complete
 
-Suggested fix: After fixing search, add E2E coverage for open dialog -> type seeded query -> ArrowDown -> Enter -> navigates to expected photo, and a screen-reader-oriented assertion that active descendant and selected option update.
+- Severity: Low
+- Confidence: High
+- Evidence: `dir` is wired in `apps/web/src/app/[locale]/layout.tsx:94`, but exposed locales are English/Korean in `apps/web/src/components/nav-client.tsx:19`; lightbox and nav use physical directions in `apps/web/src/components/lightbox.tsx:555`, `apps/web/src/components/lightbox.tsx:621`, `apps/web/src/components/lightbox.tsx:642`, and `apps/web/src/components/nav-client.tsx:100`.
+- Failure scenario: future RTL locales would get correct text direction but incorrect spatial affordances and carousel placement.
+- Fix: do not activate RTL locales until directional CSS and interaction semantics are converted to logical start/end and verified with RTL screenshots.
 
-### C30-UXR-03 - Share creation has no UI memory or undo/revoke path
+## Strengths
 
-Severity: Medium
-Confidence: High
-Region: `apps/web/src/components/photo-viewer.tsx:586-618`, `apps/web/src/components/image-manager.tsx:194-210`, `apps/web/src/app/actions/sharing.ts:317-397`
+- Touch target discipline is strong. Live mobile metrics showed nav controls, language/theme/search buttons, tag chips, photo controls, and footer links at or above 44 px. Source also uses `min-h-11` and `h-11/w-11` throughout `nav-client.tsx`, `tag-filter.tsx`, `photo-viewer.tsx`, and `footer.tsx`.
+- Focus and keyboard coverage is broad: skip link in `apps/web/src/app/[locale]/layout.tsx:119`, search shortcuts in `apps/web/src/components/search.tsx:297`, viewer shortcuts in `apps/web/src/components/photo-viewer.tsx:370`, and lightbox focus management in `apps/web/src/components/lightbox.tsx:434`.
+- Color and contrast systems are unusually mature for a gallery: theme tokens in `apps/web/src/app/globals.css:14` through `apps/web/src/app/globals.css:101`, forced-colors support at `apps/web/src/app/globals.css:164`, and color/HDR affordances in `color-details-section.tsx`, `wide-gamut-hint.tsx`, and `lightbox-color-pip.tsx`.
+- State design is mostly complete: loading status in `apps/web/src/app/[locale]/loading.tsx:8`, error recovery in `apps/web/src/app/[locale]/error.tsx:22`, empty gallery in `apps/web/src/components/home-client.tsx:426`, upload disabled/progress/skipped states in `apps/web/src/components/upload-dropzone.tsx:373`, and login validation in `apps/web/src/components/login-form.tsx:58`.
+- Admin UI uses pragmatic density: tables scroll horizontally in `apps/web/src/components/image-manager.tsx:424`, batch toolbar is sticky at `apps/web/src/components/image-manager.tsx:321`, and admin nav wraps with minimum target sizing in `apps/web/src/components/admin-nav.tsx:29`.
 
-Concrete failure scenario: The admin copies a share URL but misses the toast, closes the tab, or later needs to pull access. There is no visible "active shares" state in the photo, image manager, or analytics UI, even though revoke/delete actions exist server-side.
+## Designer Verdict
 
-Suggested fix: Model shares as durable admin objects. Add active-state badges on shared photos/groups, a manage-shares table, and confirmation-backed revoke/delete actions.
-
-### C30-UXR-04 - Public map exposes an unbounded-feeling accessibility surface
-
-Severity: Medium
-Confidence: High
-Region: `apps/web/src/app/[locale]/(public)/map/page.tsx:75-99`, `apps/web/src/components/map/map-client.tsx:76-90`, `apps/web/src/components/map/map-client.tsx:119-140`, `apps/web/src/lib/data.ts:1649-1685`
-
-Concrete failure scenario: With thousands of GPS-visible photos, the accessible list below the map becomes thousands of links. Screen-reader and keyboard users pay the full cost of a data-heavy visual map even if they skip the map.
-
-Suggested fix: Add list pagination/virtualization and cluster/viewport loading. Announce total/truncated counts and expose filters before the map/list payload.
-
-### C30-UXR-05 - Generic route errors are not designed as public gallery states
-
-Severity: Low-Medium
-Confidence: Medium
-Region: `apps/web/src/app/[locale]/error.tsx:22-57`
-
-Concrete failure scenario: A visitor on a photo, topic, timeline, or map page sees "Something went wrong loading this page" with Home/Try Again, but no explanation related to gallery data, restore maintenance, search outage, or temporary database unavailability.
-
-Suggested fix: Add public route-level unavailable states with product-specific copy and keep normal public chrome when safe.
-
-## Accessibility Report
-
-- Positive evidence: skip link to `#main-content`, nav landmark labels, dialog focus trap, focus-visible rings, 44 px sampled controls, map skip link, localized status text, and Korean/English key parity.
-- Main WCAG risks: generic error messaging affects understandable recovery; map fallback can become an excessive keyboard/screen-reader burden; search failure prevents proving the combobox result path.
-- Reduced motion: source uses reduced-motion hooks in lightbox and CSS patterns exist in prior tests; no new issue found.
-- Color independence: P3 badges include text; no color-only critical state found in sampled public UI.
-
-## Responsive Review
-
-Live 1440x900 and 390x844 pages rendered without observed overlap. The mobile nav collapses topics and preserves search/theme/locale controls. Home masonry adapts column count. The map and semantic search risks are data-size/responsiveness risks rather than breakpoint CSS issues.
-
-## Loading, Empty, Error States
-
-- Good: `/en/map` empty state is clear; global loading has `role="status"`; photo loading has a lightbox-aware full-screen loader.
-- Weak: search failure and route error shell are generic. Share creation relies on transient toast feedback and lacks a persistent state view.
-
-## Product Scope Alignment
-
-GalleryKit does not claim culling/editing/scoring, and the UI does not accidentally introduce those workflows. Admin batch operations are metadata-oriented. The main product/UX mismatch is that search and sharing are marketed as core publishing features but their live/revocation experience is incomplete.
-
-## Rechecked Fixed Items
-
-- GPS public-map switch now prompts before publishing coordinates.
-- Privacy copy now states that short-lived full-IP rate-limit buckets may exist.
-- Theme control uses mounted state before reading client theme.
-- README/app README now warn about first-upload GPS-stripping decisions.
-
-## Skipped Areas
-
-- No production admin login or mutations.
-- No local seeded DB/browser run; live public pages and source were used.
-- No axe run in this turn; accessibility findings are DOM/source/manual-review based.
-
-## Final Verdict
-
-The UI helps casual public browsing today, but it still gets in the way of trust-critical workflows: finding photos, managing shared access, and browsing GPS data at scale. Fix search reliability first, then design share management as a first-class admin object and make map scale progressive.
+GalleryKit already has the fundamentals of a serious photographer-facing UI: color respect, strong touch targets, explicit states, and keyboard-aware viewer controls. The remaining design debt is concentrated in mobile hierarchy and assistive discoverability, not in visual styling. Fix the mobile filter presentation, keep modal controls discoverable, and repair search recovery before spending design time on new features.
