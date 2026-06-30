@@ -560,7 +560,7 @@ on expensive natural-language queries.
 
 ### Auto alt-text hints
 
-Auto alt-text (`auto_alt_text_enabled`) is an opt-in local hint pipeline, not a hosted AI captioning feature. The current caption generator derives suggested text from available EXIF/metadata context and stores it as `alt_text_suggested`; public display falls back through explicit alt text, title/description, suggested text, and localized photo labels. Existing rows are not rewritten merely by enabling the setting. Operators can copy suggestions into empty public alt-text fields from the admin bulk action or run `apps/web/scripts/backfill-alt-text.ts` intentionally for existing processed photos.
+Auto alt-text (`auto_alt_text_enabled`) is an opt-in local hint pipeline, not a hosted AI captioning feature. The current caption generator derives suggested text from available EXIF/metadata context and stores it as `alt_text_suggested`; public image alt text falls back through meaningful title, tag-derived labels, suggested text, and then the localized generic photo label. Existing rows are not rewritten merely by enabling the setting. Operators can copy suggestions into empty public title/description fields from the admin bulk action or run `apps/web/scripts/backfill-alt-text.ts` intentionally for existing processed photos.
 
 ### Production photographer-perspective audit history
 

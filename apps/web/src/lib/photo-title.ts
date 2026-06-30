@@ -88,7 +88,8 @@ export function getConcisePhotoAltText(
         tag_names?: string | null | undefined;
         tags?: TagInfo[] | null | undefined;
         // US-P52: EXIF-derived alt-text suggestion. Used as fallback when
-        // title and tags are absent. Admin-set alt always takes precedence.
+        // title and tags are absent; GalleryKit has no separate public
+        // admin-set alt-text column.
         alt_text_suggested?: string | null | undefined;
     },
     fallback: string,
