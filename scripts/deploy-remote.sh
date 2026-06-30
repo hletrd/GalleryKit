@@ -62,7 +62,7 @@ if [[ ! -O "$ENV_FILE" ]]; then
   echo "Warning: deploy env file is not owned by the current user: $ENV_FILE" >&2
 fi
 
-env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
+env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
 env_perms=$((10#$env_mode))
 env_group_perms=$(((env_perms / 10) % 10))
 env_world_perms=$((env_perms % 10))

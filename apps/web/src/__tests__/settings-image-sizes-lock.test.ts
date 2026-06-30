@@ -8,16 +8,22 @@ const settingsSource = readFileSync(
 );
 
 describe('settings image_sizes locking', () => {
-    const imageSizesBlock = settingsSource.slice(
-        settingsSource.indexOf("hasOwnProperty.call(sanitizedSettings, 'image_sizes')"),
-        settingsSource.indexOf('try {', settingsSource.indexOf("hasOwnProperty.call(sanitizedSettings, 'image_sizes')")),
-    );
+    it('tracks image-size changes explicitly before the existing-image guard', () => {
+        const changeMarkIndex = settingsSource.indexOf("changedUploadProcessingKeys.add('image_sizes')");
+        const guardIndex = settingsSource.indexOf("changedUploadProcessingKeys.has('image_sizes')");
 
-    it('locks output-size changes once any image row exists', () => {
-        expect(imageSizesBlock).toMatch(/from\(images\)[\s\S]*\.limit\(1\)/);
+        expect(changeMarkIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeGreaterThan(changeMarkIndex);
     });
 
-    it('does not only lock after processed images exist', () => {
-        expect(imageSizesBlock).not.toMatch(/images\.processed/);
+    it('does not scope the lock check to processed images only', () => {
+        const guardIndex = settingsSource.indexOf("changedUploadProcessingKeys.has('image_sizes')");
+        const stripGpsGuardIndex = settingsSource.indexOf("changedUploadProcessingKeys.has('strip_gps_on_upload')");
+        const imageSizesGuardBlock = settingsSource.slice(guardIndex, stripGpsGuardIndex);
+
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(stripGpsGuardIndex).toBeGreaterThan(guardIndex);
+        expect(imageSizesGuardBlock).toMatch(/from\(images\)[\s\S]*\.limit\(1\)/);
+        expect(imageSizesGuardBlock).not.toMatch(/images\.processed/);
     });
 });

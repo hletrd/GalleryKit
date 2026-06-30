@@ -25,7 +25,7 @@ if [ ! -O "$env_file" ]; then
     echo "Warning: runtime env file is not owned by the current user: $env_file" >&2
 fi
 
-env_mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+env_mode="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file")"
 env_perms=$((10#$env_mode))
 env_group_perms=$(((env_perms / 10) % 10))
 env_world_perms=$((env_perms % 10))

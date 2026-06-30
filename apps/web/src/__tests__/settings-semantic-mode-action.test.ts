@@ -7,6 +7,8 @@ const {
     txOnDuplicateKeyUpdateMock,
     txDeleteMock,
     txDeleteWhereMock,
+    dbSelectMock,
+    selectLimitResults,
     isAdminMock,
     getCurrentUserMock,
     getTranslationsMock,
@@ -16,28 +18,42 @@ const {
     requireSameOriginAdminMock,
     hasActiveUploadClaimsMock,
     acquireUploadProcessingContractLockMock,
-} = vi.hoisted(() => ({
-    transactionMock: vi.fn(),
-    txInsertMock: vi.fn(),
-    txInsertValuesMock: vi.fn(),
-    txOnDuplicateKeyUpdateMock: vi.fn(),
-    txDeleteMock: vi.fn(),
-    txDeleteWhereMock: vi.fn(),
-    isAdminMock: vi.fn(),
-    getCurrentUserMock: vi.fn(),
-    getTranslationsMock: vi.fn(),
-    revalidateAllAppDataMock: vi.fn(),
-    logAuditEventMock: vi.fn(),
-    maintenanceMessageMock: vi.fn(),
-    requireSameOriginAdminMock: vi.fn(),
-    hasActiveUploadClaimsMock: vi.fn(),
-    acquireUploadProcessingContractLockMock: vi.fn(),
-}));
+} = vi.hoisted(() => {
+    const selectLimitResults: Array<unknown[]> = [];
+    const dbSelectMock = vi.fn(() => ({
+        from: vi.fn(() => ({
+            where: vi.fn(() => ({
+                limit: vi.fn(() => Promise.resolve(selectLimitResults.shift() ?? [])),
+            })),
+            limit: vi.fn(() => Promise.resolve(selectLimitResults.shift() ?? [])),
+        })),
+    }));
+
+    return {
+        transactionMock: vi.fn(),
+        txInsertMock: vi.fn(),
+        txInsertValuesMock: vi.fn(),
+        txOnDuplicateKeyUpdateMock: vi.fn(),
+        txDeleteMock: vi.fn(),
+        txDeleteWhereMock: vi.fn(),
+        dbSelectMock,
+        selectLimitResults,
+        isAdminMock: vi.fn(),
+        getCurrentUserMock: vi.fn(),
+        getTranslationsMock: vi.fn(),
+        revalidateAllAppDataMock: vi.fn(),
+        logAuditEventMock: vi.fn(),
+        maintenanceMessageMock: vi.fn(),
+        requireSameOriginAdminMock: vi.fn(),
+        hasActiveUploadClaimsMock: vi.fn(),
+        acquireUploadProcessingContractLockMock: vi.fn(),
+    };
+});
 
 vi.mock('@/db', () => ({
     db: {
         transaction: transactionMock,
-        select: vi.fn(),
+        select: dbSelectMock,
         insert: vi.fn(),
         delete: vi.fn(),
     },
@@ -48,6 +64,11 @@ vi.mock('@/db', () => ({
     images: {
         id: 'images.id',
     },
+}));
+
+vi.mock('drizzle-orm', () => ({
+    eq: vi.fn((field: unknown, value: unknown) => ({ field, value })),
+    inArray: vi.fn((field: unknown, values: unknown[]) => ({ field, values })),
 }));
 
 vi.mock('@/app/actions/auth', () => ({
@@ -87,10 +108,13 @@ import { updateGallerySettings } from '@/app/actions/settings';
 
 describe('updateGallerySettings semantic_search_mode', () => {
     let persistedRows: Array<{ key: string; value: string }>;
+    let releaseUploadContractLockMock: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
         persistedRows = [];
+        selectLimitResults.length = 0;
         vi.clearAllMocks();
+        releaseUploadContractLockMock = vi.fn().mockResolvedValue(undefined);
         getTranslationsMock.mockResolvedValue((key: string) => key);
         maintenanceMessageMock.mockReturnValue(null);
         requireSameOriginAdminMock.mockResolvedValue(null);
@@ -99,7 +123,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
         logAuditEventMock.mockResolvedValue(undefined);
         revalidateAllAppDataMock.mockReset();
         hasActiveUploadClaimsMock.mockReturnValue(false);
-        acquireUploadProcessingContractLockMock.mockResolvedValue(null);
+        acquireUploadProcessingContractLockMock.mockResolvedValue({ release: releaseUploadContractLockMock });
         txOnDuplicateKeyUpdateMock.mockResolvedValue(undefined);
         txInsertValuesMock.mockImplementation((row: { key: string; value: string }) => {
             persistedRows.push(row);
@@ -139,5 +163,51 @@ describe('updateGallerySettings semantic_search_mode', () => {
         expect(txOnDuplicateKeyUpdateMock).toHaveBeenCalledTimes(1);
         expect(revalidateAllAppDataMock).toHaveBeenCalledTimes(1);
         expect(logAuditEventMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores semantically unchanged image sizes before active-upload checks', async () => {
+        selectLimitResults.push([{ value: '640,1536' }]);
+        hasActiveUploadClaimsMock.mockReturnValue(true);
+
+        await expect(updateGallerySettings({ image_sizes: '1536, 640' })).resolves.toEqual({
+            success: true,
+            settings: {},
+        });
+
+        expect(hasActiveUploadClaimsMock).not.toHaveBeenCalled();
+        expect(acquireUploadProcessingContractLockMock).not.toHaveBeenCalled();
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps changed image sizes locked once any image row exists', async () => {
+        selectLimitResults.push([{ value: '640,1536' }], [{ id: 42 }]);
+
+        await expect(updateGallerySettings({ image_sizes: '640,2048' })).resolves.toEqual({
+            error: 'imageSizesLocked',
+        });
+
+        expect(hasActiveUploadClaimsMock).toHaveBeenCalledTimes(1);
+        expect(acquireUploadProcessingContractLockMock).toHaveBeenCalledTimes(1);
+        expect(releaseUploadContractLockMock).toHaveBeenCalledTimes(1);
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
+    });
+
+    it('ignores semantically unchanged strip-gps payloads before active-upload checks', async () => {
+        selectLimitResults.push([{ value: 'false' }]);
+        hasActiveUploadClaimsMock.mockReturnValue(true);
+
+        await expect(updateGallerySettings({ strip_gps_on_upload: 'false' })).resolves.toEqual({
+            success: true,
+            settings: {},
+        });
+
+        expect(hasActiveUploadClaimsMock).not.toHaveBeenCalled();
+        expect(acquireUploadProcessingContractLockMock).not.toHaveBeenCalled();
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 });

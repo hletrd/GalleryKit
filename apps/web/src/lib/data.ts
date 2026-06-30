@@ -1041,7 +1041,10 @@ export async function getFailedImages(limit: number = FAILED_IMAGES_DASHBOARD_LI
         .limit(effectiveLimit);
 }
 
-export async function getImage(id: number) {
+async function getImageWithSelectFields(
+    id: number,
+    selectFields: typeof publicSelectFields | typeof adminSelectFields,
+) {
     if (!Number.isInteger(id) || id <= 0) {
         return null;
     }
@@ -1049,7 +1052,7 @@ export async function getImage(id: number) {
     // Only return explicitly processed images.
     // C5F-03: .limit(1) is defense-in-depth on a primary-key lookup.
     const [image] = await db.select({
-        ...publicSelectFields,
+        ...selectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label
     })
@@ -1192,6 +1195,14 @@ export async function getImage(id: number) {
         prevImage: prevImage ?? null,
         nextImage: nextImage ?? null,
     };
+}
+
+export async function getImage(id: number) {
+    return getImageWithSelectFields(id, publicSelectFields);
+}
+
+export async function getImageForViewer(id: number, includeAdminFields: boolean = false) {
+    return getImageWithSelectFields(id, includeAdminFields ? adminSelectFields : publicSelectFields);
 }
 
 // PRIVACY: This query serves the public /s/[key] route (unauthenticated).
@@ -1717,6 +1728,7 @@ export async function getMapImages() {
 }
 
 export const getImageCached = cache(getImage);
+export const getImageForViewerCached = cache(getImageForViewer);
 // AGG-R8c3-05: SSR-deduplicated minimal latest-image lookup for the home OG card.
 export const getLatestImageForOgCached = cache(getLatestImageForOg);
 export const getTopicBySlugCached = cache(getTopicBySlug);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
@@ -74,6 +76,7 @@ describe('deploy script safety contract', () => {
         const checkIndex = remoteDeployScript.indexOf('if (( env_group_perms != 0 || env_world_perms != 0 )); then');
         const sourceIndex = remoteDeployScript.indexOf('source "$ENV_FILE"');
 
+        expect(remoteDeployScript).toContain("env_mode=\"$(stat -c '%a' \"$ENV_FILE\" 2>/dev/null || stat -f '%Lp' \"$ENV_FILE\")\"");
         expect(remoteDeployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
         expect(remoteDeployScript).toContain('env_world_perms=$((env_perms % 10))');
         expect(checkIndex).toBeGreaterThan(-1);
@@ -87,13 +90,63 @@ describe('deploy script safety contract', () => {
         const composeIndex = deployScript.indexOf('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');
 
         expect(deployScript).toContain('env_file="apps/web/.env.local"');
-        expect(deployScript).toContain("env_mode=\"$(stat -f '%Lp' \"$env_file\" 2>/dev/null || stat -c '%a' \"$env_file\")\"");
+        expect(deployScript).toContain("env_mode=\"$(stat -c '%a' \"$env_file\" 2>/dev/null || stat -f '%Lp' \"$env_file\")\"");
         expect(deployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
         expect(deployScript).toContain('env_world_perms=$((env_perms % 10))');
         expect(checkIndex).toBeGreaterThan(-1);
         expect(composeIndex).toBeGreaterThan(-1);
         expect(checkIndex).toBeLessThan(composeIndex);
         expect(deployScript).toContain('Run: chmod 600 \\"$env_file\\"');
+    });
+
+    it('exits before sourcing an unsafe root deploy env file', () => {
+        const tempRoot = mkdtempSync(resolve(tmpdir(), 'gk-deploy-env-'));
+        const envFile = resolve(tempRoot, 'unsafe.env');
+        const sentinel = resolve(tempRoot, 'sourced');
+        writeFileSync(envFile, `DEPLOY_CMD='touch ${sentinel}'\n`, { mode: 0o644 });
+        chmodSync(envFile, 0o644);
+
+        const result = spawnSync('bash', [resolve(repoRoot, 'scripts/deploy-remote.sh')], {
+            cwd: repoRoot,
+            env: {
+                ...process.env,
+                DEPLOY_ENV_FILE: envFile,
+            },
+            encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Refusing to source deploy env file with unsafe permissions');
+        expect(result.stderr).toContain('Run: chmod 600');
+        expect(() => readFileSync(sentinel, 'utf8')).toThrow();
+    });
+
+    it('exits before Docker when the runtime env file is unsafe', () => {
+        const tempRoot = mkdtempSync(resolve(tmpdir(), 'gk-runtime-env-'));
+        const scriptPath = resolve(tempRoot, 'apps/web/deploy.sh');
+        const binPath = resolve(tempRoot, 'bin');
+        const dockerSentinel = resolve(tempRoot, 'docker-called');
+        mkdirSync(resolve(tempRoot, 'apps/web'), { recursive: true });
+        mkdirSync(binPath, { recursive: true });
+        writeFileSync(scriptPath, deployScript, { mode: 0o755 });
+        writeFileSync(resolve(tempRoot, 'apps/web/.env.local'), ['SESSION_SECRET=<placeholder>', ''].join('\n'), { mode: 0o644 });
+        chmodSync(resolve(tempRoot, 'apps/web/.env.local'), 0o644);
+        writeFileSync(resolve(binPath, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+        writeFileSync(resolve(binPath, 'docker'), `#!/bin/sh\ntouch '${dockerSentinel}'\nexit 0\n`, { mode: 0o755 });
+
+        const result = spawnSync('bash', [scriptPath], {
+            cwd: tempRoot,
+            env: {
+                ...process.env,
+                PATH: `${binPath}${delimiter}${process.env.PATH ?? ''}`,
+            },
+            encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Refusing to deploy with unsafe runtime env file permissions');
+        expect(result.stderr).toContain('Run: chmod 600');
+        expect(() => readFileSync(dockerSentinel, 'utf8')).toThrow();
     });
 
     it('feeds Docker Compose the runtime env file and forwards build-time upload limits', () => {

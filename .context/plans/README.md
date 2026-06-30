@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 55/100 Implementation Plan — active; Cycle 54 ledger closure, runtime env permission hardening, and Settings image-size diff fix scheduled (`cycle-55-2026-07-01-plan.md`)
-- Cycle 55/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-55-2026-07-01-deferred.md`)
+- Cycle 56/100 Implementation Plan — active; deploy stat portability, server settings contract filtering, admin photo audit data, and regression coverage scheduled (`cycle-56-2026-07-01-plan.md`)
+- Cycle 56/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-56-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 55/100 Implementation Plan — active; Cycle 54 ledger closure, runtime env permission hardening, and Settings image-size diff fix scheduled (`cycle-55-2026-07-01-plan.md`)
+- Cycle 56/100 Implementation Plan — active; deploy stat portability, server settings contract filtering, admin photo audit data, and regression coverage scheduled (`cycle-56-2026-07-01-plan.md`)
+- Cycle 56/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-56-2026-07-01-deferred.md`)
+- Cycle 55/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 56 started from deployed `e82311b9` (`cycle-55-2026-07-01-plan.md`)
 - Cycle 55/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-55-2026-07-01-deferred.md`)
 - Cycle 54/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 55 started from deployed `4dbbbf9b` (`cycle-54-2026-07-01-plan.md`)
 - Cycle 54/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-54-2026-07-01-deferred.md`)

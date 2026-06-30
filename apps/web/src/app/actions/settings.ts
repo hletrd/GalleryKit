@@ -68,20 +68,10 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         }
     }
 
-    const changesUploadProcessingContract = ['image_sizes', 'strip_gps_on_upload']
-        .some((key) => Object.prototype.hasOwnProperty.call(sanitizedSettings, key));
-    if (changesUploadProcessingContract && hasActiveUploadClaims()) {
-        return { error: t('uploadSettingsLocked') };
-    }
-
-    const uploadContractLock = changesUploadProcessingContract
-        ? await acquireUploadProcessingContractLock()
-        : null;
-    if (changesUploadProcessingContract && !uploadContractLock) {
-        return { error: t('uploadSettingsLocked') };
-    }
-
+    let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> | null = null;
     try {
+        const changedUploadProcessingKeys = new Set<GallerySettingKey>();
+
         if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'image_sizes')) {
             const requestedImageSizes = sanitizedSettings.image_sizes;
             const normalizedImageSizes = requestedImageSizes
@@ -104,14 +94,9 @@ export async function updateGallerySettings(settings: Record<string, string>) {
                 ?? defaults.image_sizes;
 
             if (normalizedImageSizes !== currentImageSizes) {
-                const [existingImage] = await db
-                    .select({ id: images.id })
-                    .from(images)
-                    .limit(1);
-
-                if (existingImage) {
-                    return { error: t('imageSizesLocked') };
-                }
+                changedUploadProcessingKeys.add('image_sizes');
+            } else {
+                delete sanitizedSettings.image_sizes;
             }
         }
 
@@ -125,15 +110,48 @@ export async function updateGallerySettings(settings: Record<string, string>) {
             const currentStripGps = currentStripGpsSetting?.value ?? defaults.strip_gps_on_upload;
 
             if (requestedStripGps !== currentStripGps) {
-                const [existingImage] = await db
-                    .select({ id: images.id })
-                    .from(images)
-                    .limit(1);
-
-                if (existingImage) {
-                    return { error: t('uploadSettingsLocked') };
-                }
+                changedUploadProcessingKeys.add('strip_gps_on_upload');
+            } else {
+                delete sanitizedSettings.strip_gps_on_upload;
             }
+        }
+
+        const changesUploadProcessingContract = changedUploadProcessingKeys.size > 0;
+        if (changesUploadProcessingContract && hasActiveUploadClaims()) {
+            return { error: t('uploadSettingsLocked') };
+        }
+
+        uploadContractLock = changesUploadProcessingContract
+            ? await acquireUploadProcessingContractLock()
+            : null;
+        if (changesUploadProcessingContract && !uploadContractLock) {
+            return { error: t('uploadSettingsLocked') };
+        }
+
+        if (changedUploadProcessingKeys.has('image_sizes')) {
+            const [existingImage] = await db
+                .select({ id: images.id })
+                .from(images)
+                .limit(1);
+
+            if (existingImage) {
+                return { error: t('imageSizesLocked') };
+            }
+        }
+
+        if (changedUploadProcessingKeys.has('strip_gps_on_upload')) {
+            const [existingImage] = await db
+                .select({ id: images.id })
+                .from(images)
+                .limit(1);
+
+            if (existingImage) {
+                return { error: t('uploadSettingsLocked') };
+            }
+        }
+
+        if (Object.keys(sanitizedSettings).length === 0) {
+            return { success: true as const, settings: sanitizedSettings };
         }
 
         // Upsert each setting atomically in a transaction to prevent partial writes on crash

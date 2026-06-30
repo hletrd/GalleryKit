@@ -1,4 +1,4 @@
-import { getImageCached, getSeoSettings } from '@/lib/data';
+import { getImageCached, getImageForViewerCached, getSeoSettings } from '@/lib/data';
 import { isAdmin } from '@/app/actions/auth';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -140,14 +140,14 @@ export default async function PhotoPage({ params }: {
         return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
-    const [locale, t, image, seo, config, isAdminUser] = await Promise.all([
+    const [locale, t, seo, config, isAdminUser] = await Promise.all([
         getLocale(),
         getTranslations('photo'),
-        getImageCached(imageId),
         getSeoSettings(),
         getGalleryConfig(),
         isAdmin(),
     ]);
+    const image = await getImageForViewerCached(imageId, isAdminUser);
 
     if (!image) return notFound();
 

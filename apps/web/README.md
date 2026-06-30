@@ -85,7 +85,7 @@ New uploads are embedded automatically (fire-and-forget, lower priority than der
 
 ## Auto alt-text hints
 
-Auto alt-text is default-off. When enabled, the current implementation derives suggestions from local EXIF/metadata context and stores them as suggested text; it is not a remote AI captioning service and it does not automatically rewrite existing rows. Use the admin bulk action to copy suggestions into empty alt-text fields, or run `scripts/backfill-alt-text.ts` when you intentionally want to populate suggestions for existing processed photos.
+Auto alt-text is default-off. When enabled, the current implementation derives suggestions from local EXIF/metadata context and stores them as suggested text; it is not a remote AI captioning service and it does not automatically rewrite existing rows. Use the admin bulk action to copy suggestions into empty public title/description fields, or run `scripts/backfill-alt-text.ts` when you intentionally want to populate suggestions for existing processed photos.
 
 ## Upload API contract
 
