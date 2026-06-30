@@ -604,7 +604,8 @@ export async function uploadImages(formData: FormData) {
         // Audit log for upload action
         logAuditEvent(currentUser.id, 'image_upload', 'image', undefined, undefined, {
             count: successCount,
-            failed: failedFiles.length,
+            failed: totalFailures,
+            rawRejected: rawRejectedCount,
             topic,
             tags: tagNames.join(','),
         }).catch(console.debug);

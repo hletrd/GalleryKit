@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
     statfsMock,
     mkdirMock,
+    chmodMock,
     insertMock,
     updateMock,
     isAdminMock,
@@ -28,6 +29,7 @@ const {
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
     mkdirMock: vi.fn(),
+    chmodMock: vi.fn(),
     insertMock: vi.fn(),
     updateMock: vi.fn(),
     isAdminMock: vi.fn(),
@@ -64,6 +66,7 @@ function makeInsertChain<T>(result: T) {
 vi.mock('fs/promises', () => ({
     statfs: statfsMock,
     mkdir: mkdirMock,
+    chmod: chmodMock,
     unlink: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -215,6 +218,8 @@ describe('uploadImages', () => {
         statfsMock.mockResolvedValue({ bavail: 2_000_000, bsize: 1024 });
         mkdirMock.mockReset();
         mkdirMock.mockResolvedValue(undefined);
+        chmodMock.mockReset();
+        chmodMock.mockResolvedValue(undefined);
         insertMock.mockReset();
         updateMock.mockReset();
         updateMock.mockReturnValue({
@@ -301,6 +306,7 @@ describe('uploadImages', () => {
         expect(logAuditEventMock).toHaveBeenCalledWith(1, 'image_upload', 'image', undefined, undefined, {
             count: 1,
             failed: 0,
+            rawRejected: 0,
             topic: 'travel',
             tags: '',
         });
@@ -318,6 +324,47 @@ describe('uploadImages', () => {
             autoAltTextEnabled: true,
             semanticSearchMode: 'production',
         }));
+    });
+
+    it('includes RAW rejections in upload audit failure metadata', async () => {
+        insertMock.mockReturnValue(makeInsertChain([{ insertId: 9 }]));
+        saveOriginalAndGetMetadataMock
+            .mockResolvedValueOnce({
+                filenameOriginal: 'original.jpg',
+                filenameWebp: 'photo.webp',
+                filenameAvif: 'photo.avif',
+                filenameJpeg: 'photo.jpg',
+                width: 1200,
+                height: 800,
+                originalWidth: 1200,
+                originalHeight: 800,
+                blurDataUrl: 'data:image/png;base64,abc',
+                exifData: {},
+            })
+            .mockImplementationOnce(async () => {
+                const { RawFileError } = await import('@/lib/process-image');
+                throw new RawFileError('raw unsupported');
+            });
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.append('files', new File(['raw'], 'raw.nef', { type: 'image/x-nikon-nef' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toMatchObject({
+            success: true,
+            count: 1,
+            rawRejectedCount: 1,
+            rawRejectedFiles: ['raw.nef'],
+        });
+        expect(logAuditEventMock).toHaveBeenCalledWith(1, 'image_upload', 'image', undefined, undefined, {
+            count: 1,
+            failed: 1,
+            rawRejected: 1,
+            topic: 'travel',
+            tags: '',
+        });
     });
 
     it('rejects upload tags whose generated slug would be empty', async () => {

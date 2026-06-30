@@ -165,12 +165,13 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
         addRangeError('image_quality_avif', settings.image_quality_avif, 1, 100);
         addRangeError('image_quality_jpeg', settings.image_quality_jpeg, 1, 100);
         addRangeError('wide_gamut_max_source_pixels', settings.wide_gamut_max_source_pixels, 10000000, 200000000);
+        addRangeError('slideshow_interval_seconds', settings.slideshow_interval_seconds, SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX);
         if (!hasExistingImages && settings.image_sizes?.trim() && normalizeConfiguredImageSizes(settings.image_sizes) === null) {
             nextErrors.image_sizes = t('settings.imageSizesError');
         }
         setFieldErrors(nextErrors);
         return nextErrors;
-    }, [hasExistingImages, settings.image_quality_avif, settings.image_quality_jpeg, settings.image_quality_webp, settings.image_sizes, settings.wide_gamut_max_source_pixels, t]);
+    }, [hasExistingImages, settings.image_quality_avif, settings.image_quality_jpeg, settings.image_quality_webp, settings.image_sizes, settings.slideshow_interval_seconds, settings.wide_gamut_max_source_pixels, t]);
 
     // R10-M14: track whether any backfill-relevant field is dirty (current
     // value differs from the last committed baseline snapshot). The
@@ -702,8 +703,14 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             value={settings.slideshow_interval_seconds || ''}
                             onChange={(e) => handleChange('slideshow_interval_seconds', e.target.value)}
                             placeholder={getPlaceholder('slideshow_interval_seconds')}
-                            aria-describedby="slideshow-interval-help"
+                            aria-invalid={!!fieldErrors.slideshow_interval_seconds}
+                            aria-describedby={fieldErrors.slideshow_interval_seconds ? 'slideshow-interval-error slideshow-interval-help' : 'slideshow-interval-help'}
                         />
+                        {fieldErrors.slideshow_interval_seconds && (
+                            <p id="slideshow-interval-error" className="text-sm text-destructive-text" role="alert">
+                                {fieldErrors.slideshow_interval_seconds}
+                            </p>
+                        )}
                         <p id="slideshow-interval-help" className="text-xs text-muted-foreground">{t('settings.slideshowIntervalHint')}</p>
                     </div>
                 </CardContent>

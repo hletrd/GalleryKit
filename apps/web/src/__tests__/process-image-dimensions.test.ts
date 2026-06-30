@@ -36,6 +36,7 @@ vi.mock('@/lib/upload-paths', () => ({
   UPLOAD_DIR_WEBP: '/tmp/test/webp',
   UPLOAD_DIR_AVIF: '/tmp/test/avif',
   UPLOAD_DIR_JPEG: '/tmp/test/jpeg',
+  ensurePrivateOriginalUploadDirectory: vi.fn(async () => undefined),
 }));
 
 // Mock gallery-config-shared

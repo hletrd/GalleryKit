@@ -26,7 +26,7 @@
 
 ---
 
-GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions as far as browser color management allows, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
+GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions within browser and codec limits, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
 
 **For:** finished-photo publishing, private original storage, self-hosted sharing, browser-managed color-faithful delivery, and operator-controlled search.  
 **Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
@@ -115,7 +115,7 @@ npm run init --workspace=apps/web
 npm run dev
 ```
 
-After the dev server starts, log in at `/en/admin`, create a category, upload one photo, and confirm the public homepage renders it.
+After the dev server starts, log in at `/en/admin`, review Settings before the first upload (especially GPS stripping and output sizes), create a category, upload one photo, and confirm the public homepage renders it.
 
 ### Remote Deploy Helper
 

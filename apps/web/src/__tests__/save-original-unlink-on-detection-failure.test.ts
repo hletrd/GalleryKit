@@ -46,6 +46,9 @@ vi.mock('@/lib/upload-paths', async () => {
         get UPLOAD_DIR_WEBP() { return uploadOriginalDir; },
         get UPLOAD_DIR_AVIF() { return uploadOriginalDir; },
         get UPLOAD_DIR_JPEG() { return uploadOriginalDir; },
+        ensurePrivateOriginalUploadDirectory: vi.fn(async () => {
+            await fs.mkdir(uploadOriginalDir, { recursive: true, mode: 0o700 });
+        }),
         ensureUploadDirectories: vi.fn(),
         deleteOriginalUploadFile: vi.fn(),
         resolveOriginalUploadPath: vi.fn(async (n: string) => path.join(uploadOriginalDir, n)),

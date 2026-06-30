@@ -13,6 +13,8 @@ import { safeJsonLd } from '@/lib/safe-json-ld';
 import { GridPicture } from '@/components/grid-picture';
 import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import type { Metadata } from 'next';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 export const revalidate = 0;
 
@@ -75,6 +77,10 @@ export default async function YearInReviewPage({
 
     if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
         return notFound();
+    }
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
     const [locale, t, tCommon, tAria, yearInReview, config, seo, nonce] = await Promise.all([

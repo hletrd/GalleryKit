@@ -10,6 +10,8 @@ import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 export const revalidate = 0;
 
@@ -77,6 +79,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function SmartCollectionPage({ params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
+    }
     const collection = await getSmartCollectionBySlugCached(slug);
 
     if (!collection || !collection.is_public) {

@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, ensurePrivateOriginalUploadDirectory } from '@/lib/upload-paths';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
@@ -344,7 +344,7 @@ async function _verifyWebpIccChunk(filePath: string): Promise<void> {
 
 // R20C20: Number(), not parseInt(..., 10). parseInt('256e6') === 256, which would
 // pass the `> 0` guard and set limitInputPixels to 256 px — rejecting EVERY upload
-// larger than ~16x16 as a decompression bomb. Number('256e6') === 268435456.
+// larger than ~16x16 as a decompression bomb. Number('256e6') === 256000000.
 // R22C22 T5 (TEST21-01): exported (mirroring MAX_INPUT_PIXELS_TOPIC) so the
 // env-parse guard on the full-image decompression-bomb cap is directly
 // regression-testable. The internal `maxInputPixels` alias preserves the
@@ -443,7 +443,7 @@ let dirsPromise: Promise<void> | null = null;
 const ensureDirs = () => {
     if (!dirsPromise) {
         dirsPromise = Promise.all([
-            fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true }),
+            ensurePrivateOriginalUploadDirectory(),
             fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true }),
             fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true }),
             fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true }),

@@ -21,6 +21,8 @@ import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
 import { getCspNonce } from '@/lib/csp-nonce';
 import { recordPhotoView } from '@/app/actions/public';
 import { parseSafePositiveInteger } from '@/lib/validation';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <PhotoViewerLoading />,
@@ -128,6 +130,10 @@ export default async function PhotoPage({ params }: {
     const imageId = parseSafePositiveInteger(id);
     if (imageId === null) {
         return notFound();
+    }
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
     const [locale, t, image, seo, config, isAdminUser] = await Promise.all([

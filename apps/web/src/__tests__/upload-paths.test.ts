@@ -56,6 +56,15 @@ afterEach(async () => {
 });
 
 describe('resolveOriginalUploadPath', () => {
+    it('creates the private original directory with owner-only permissions', async () => {
+        await fs.rm(primaryDir, { recursive: true, force: true });
+
+        await mod.ensurePrivateOriginalUploadDirectory();
+
+        const stat = await fs.stat(primaryDir);
+        expect(stat.mode & 0o777).toBe(0o700);
+    });
+
     it('returns the PRIMARY path when the file exists there', async () => {
         await fs.writeFile(path.join(primaryDir, 'photo.jpg'), 'x');
         const resolved = await mod.resolveOriginalUploadPath('photo.jpg');

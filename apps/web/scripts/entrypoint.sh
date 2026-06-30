@@ -17,6 +17,7 @@ ensure_node_writable_dir /app/data
 ensure_node_writable_dir /app/data/backups
 ensure_node_writable_dir /app/data/uploads
 ensure_node_writable_dir /app/data/uploads/original
+chmod 700 /app/data/uploads/original
 ensure_node_writable_dir /app/apps/web/public/uploads
 ensure_node_writable_dir /app/apps/web/public/uploads/avif
 ensure_node_writable_dir /app/apps/web/public/uploads/jpeg

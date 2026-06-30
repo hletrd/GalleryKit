@@ -17,6 +17,8 @@ import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 import { isBase56 } from '@/lib/base56';
 import { parseSafePositiveInteger } from '@/lib/validation';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 export const revalidate = 0;
 
@@ -89,6 +91,10 @@ export default async function SharedGroupPage({ params, searchParams }: { params
 
     if (!isBase56(key, 10)) {
         return notFound();
+    }
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
     // Rate-limit share-key lookups to prevent automated key enumeration

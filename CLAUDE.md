@@ -464,7 +464,7 @@ Compare against `apps/web/drizzle/meta/_journal.json` entries × `SHA256` of eac
 
 ### Per-iteration deploy directive
 
-`npm run deploy` from the repo root reads gitignored `.env.deploy`, connects to the configured deploy host, and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The current production target is `gallery.atik.kr`. The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
+`npm run deploy` from the repo root reads gitignored `.env.deploy`, connects to the configured deploy host, and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The deploy target is configuration-owned by `.env.deploy`, not hardcoded in documentation. The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
 
 ### Disk hygiene
 
@@ -530,12 +530,13 @@ docker run --rm \
   -v <deploy-root>/apps/web/scripts:/app/apps/web/scripts:ro \
   -v <deploy-root>/apps/web/data:/app/data \
   --env-file <deploy-root>/apps/web/.env.local \
+  -e SEMANTIC_SEARCH_ALLOW_PRODUCTION=true \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
   sh -c "npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
 ```
 
-The `--force` flag is required in the documented pre-enable flow because a fresh DB still stores `semantic_search_mode='disabled'`; without `--force`, the backfill exits successfully without processing. After the DB mode is already set to `stub` or `production`, `--force` is only needed when intentionally re-embedding existing rows.
+The `--force` flag is required in the documented pre-enable flow because a fresh DB still stores `semantic_search_mode='disabled'`; without `--force`, the backfill exits successfully without processing. The script still requires `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` for every `--production` run, including forced pre-enable backfills. After the DB mode is already set to `stub` or `production`, `--force` is only needed when intentionally re-embedding existing rows.
 
 The backfill processes at most `SEMANTIC_SCAN_LIMIT` candidate rows per run and logs `Reached SEMANTIC_SCAN_LIMIT (...)` when more rows may remain. For galleries larger than that limit, repeat the same sidecar command until it finishes without that message and reports no remaining rows to process.
 

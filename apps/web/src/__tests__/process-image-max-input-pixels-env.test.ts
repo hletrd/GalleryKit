@@ -63,7 +63,7 @@ describe('IMAGE_MAX_INPUT_PIXELS_TOPIC env parsing (R21C21 T5)', () => {
 });
 
 describe('IMAGE_MAX_INPUT_PIXELS env parsing — full-image decompression-bomb cap (R22C22 T5)', () => {
-    it('parses scientific notation in full (256e6 -> 268_435_456, not 256)', async () => {
+    it('parses scientific notation in full (256e6 -> 256_000_000, not 256)', async () => {
         // parseInt('256e6', 10) === 256 would cap the full-image decode at 256
         // pixels, rejecting EVERY non-topic upload as a decompression bomb.
         expect(await loadFullCap('256e6')).toBe(256_000_000);

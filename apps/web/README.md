@@ -37,7 +37,7 @@ After the dev server starts, log in at `/en/admin`, create a category, upload on
 | `npm run typecheck` | Type gate (app + scripts) |
 | `npm run test:e2e` | Playwright end-to-end tests |
 | `npx tsx scripts/download-clip-models.ts` | Seed CLIP model weights into the models volume (sidecar) |
-| `npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Pre-enable production CLIP backfill for existing photos (sidecar); omit `--force` only after semantic search mode is already active |
+| `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Pre-enable production CLIP backfill for existing photos (sidecar); omit `--force` only after semantic search mode is already active |
 | `npx tsx scripts/backfill-color-pipeline.ts` | Re-encode stale pipeline-version derivatives (sidecar); add `--force-reencode` for settings-only byte changes |
 
 ## Environment notes
@@ -73,7 +73,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 The resolver heals a stored `semantic_search_mode='production'` back to `disabled` **unless** the env opt-in is set — there is intentionally no one-click production toggle in the admin UI (it offers only Disabled/Stub). To activate:
 
 1. **Seed weights** (sidecar `--rm`): `scripts/download-clip-models.ts` with `CLIP_MODELS_ROOT` set to the bind-mount path.
-2. **Backfill embeddings** for existing photos: `scripts/backfill-clip-embeddings.ts --production --force` (the `--force` flag skips the mode gate so you can pre-populate embeddings before flipping the admin setting). If the script logs that it reached `SEMANTIC_SCAN_LIMIT`, repeat the same command until it completes without that message.
+2. **Backfill embeddings** for existing photos: run `scripts/backfill-clip-embeddings.ts --production --force` in a sidecar with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and `CLIP_MODELS_ROOT=/app/data/models/clip`. The `--force` flag skips the DB mode gate so you can pre-populate embeddings before flipping the admin setting, but the script still requires the explicit production env opt-in. If the script logs that it reached `SEMANTIC_SCAN_LIMIT`, repeat the same command until it completes without that message.
 3. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
 4. Set the DB row `admin_settings.semantic_search_mode='production'`.
 

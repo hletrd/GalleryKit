@@ -5,6 +5,8 @@ import { Metadata } from 'next';
 import { MapLoader } from '@/components/map/map-loader';
 import Link from 'next/link';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 // Public map pages must reflect GPS data immediately as topics are toggled.
 export const revalidate = 0;
@@ -25,6 +27,10 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function MapPage() {
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
+    }
     // PERF-R4C15-02: getGalleryConfig is React cache()-wrapped, so this
     // costs nothing extra in a request where Nav already resolved it; the
     // configured image_sizes drive sized popup thumbnails in MapClient.

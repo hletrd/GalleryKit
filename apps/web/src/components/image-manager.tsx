@@ -421,7 +421,7 @@ export function ImageManager({
                 </div>
             )}
 
-            <div className="min-w-0 rounded-md border">
+            <div className="min-w-0 overflow-x-auto rounded-md border">
                 <Table>
                     <TableHeader>
                         <TableRow>
@@ -439,10 +439,10 @@ export function ImageManager({
                                 </label>
                             </TableHead>
                             <TableHead>{t('imageManager.preview')}</TableHead>
-                            <TableHead>{t('imageManager.title')}</TableHead>
-                            <TableHead>{t('imageManager.filename')}</TableHead>
-                            <TableHead>{t('imageManager.topic')}</TableHead>
-                            <TableHead>{t('imageManager.tags')}</TableHead>
+                            <TableHead className="min-w-[180px]">{t('imageManager.title')}</TableHead>
+                            <TableHead className="min-w-[140px]">{t('imageManager.filename')}</TableHead>
+                            <TableHead className="min-w-[120px]">{t('imageManager.topic')}</TableHead>
+                            <TableHead className="min-w-[220px]">{t('imageManager.tags')}</TableHead>
                             <TableHead>{t('imageManager.gamut')}</TableHead>
                             <TableHead>{t('imageManager.date')}</TableHead>
                             <TableHead className="text-right">{t('imageManager.actions')}</TableHead>

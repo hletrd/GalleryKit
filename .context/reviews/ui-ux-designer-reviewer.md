@@ -1,148 +1,251 @@
-# UI/UX Designer Reviewer - Cycle 27
+# UI/UX Designer Reviewer - Cycle 28
 
 Date: 2026-06-30
-Repo: GalleryKit (`/Users/hletrd/flash-shared/gallery`)
-HEAD reviewed: `1e8bba0298ea`
-Scope note: applied the local `ui-ux-designer-reviewer` lens to GalleryKit, a Next.js web photo gallery. BurstPick/Swift-specific file requirements were intentionally ignored per task instruction.
+Repo: `/Users/hletrd/flash-shared/gallery`
+Mode: Prompt 1 review only. No fixes implemented.
+Reviewer surface: local `ui-ux-designer-reviewer` prompt applied under `AGENTS.md` and `CLAUDE.md` authority.
 
-## Inventory
+## Inventory First
 
-Review-relevant project guidance read:
+### Instructions and Project Context Examined
 
-- `AGENTS.md` project instructions from the prompt, including the Gallery workspace rules.
-- `CLAUDE.md` architecture/security/UX guidance, including GalleryKit product constraints, public/admin route model, i18n, color/HDR policy, touch-target policy, and permanently deferred items.
-- Prior context in `.context/reviews/photographer-r27/ui-ux.md` and `.context/reviews/photographer-r28/ui-ux.md` to avoid duplicating already-addressed or permanently deferred items.
-- Local reviewer prompt at `~/.codex/agents/ui-ux-designer-reviewer.md`, adapted to this repo.
+- `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md`
+- `AGENTS.md` instructions supplied in the prompt
+- `CLAUDE.md` architecture, UI, i18n, privacy, color/HDR, and operational guidance
+- `.context/reviews/ui-ux-designer-reviewer.md` existing cycle 27 report
+- `.context/reviews/photographer-r27/` and `.context/reviews/photographer-r28/` review history inventory
+- `.context/plans/README.md` and current `.context/plans/photographer-*` plan inventory
 
-Primary files/categories examined:
+### Current UI Source Examined
 
-- Global shell, i18n, theme, motion, and landmarks: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/(public)/layout.tsx`, `apps/web/src/app/globals.css`, locale message files.
-- Public IA and photo surfaces: `nav-client.tsx`, `nav.tsx`, `footer.tsx`, `home-client.tsx`, public route pages under `apps/web/src/app/[locale]/(public)/**`, `photo-viewer.tsx`, `photo-navigation.tsx`, `image-zoom.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `color-details-section.tsx`, `lightbox-color-pip.tsx`, `histogram.tsx`.
-- Admin IA and forms: admin protected pages, `login-form.tsx`, `admin-header.tsx`, `admin-nav.tsx`, `dashboard-client.tsx`, `upload-dropzone.tsx`, `image-manager.tsx`, `settings-client.tsx`, `analytics-client.tsx`, `tokens-client.tsx`, `admin-user-manager.tsx`, topic/tag manager components.
-- Accessibility and UX contracts/tests: `touch-target-audit.test.ts`, focus-visible scans, privacy landmark test, lightbox controls contract, modal-isolation source contract tests, search tests, upload/dashboard tests.
+I inventoried and reviewed the current route/component/style/message/test surfaces that affect UI behavior: 16,713 lines across public pages, admin pages, shared components, UI primitives, translations, styles, and UI-focused tests.
 
-## Runtime Evidence
+Public app route files examined:
 
-Local app server started with `npm run dev --workspace=apps/web -- --port 3001`.
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx`
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx`
+- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
 
-Reachable browser checks:
+Admin route files examined:
 
-- `http://localhost:3001/en/privacy` loaded as `Privacy | GalleryKit`. Accessibility snapshot exposed skip link, `navigation "Main navigation"`, `main` with `heading "Privacy"`, footer/contentinfo, theme and language controls, and notification region.
-- Opening public search from the privacy page produced `#search-dialog` with `aria-modal="true"` and an accessibility snapshot containing only `dialog "Search photos"`, combobox search input, close button, status/help text. Active element was the search input. This confirms the older background-exposed-modal issue is not currently present on this path.
-- `http://localhost:3001/en/admin` loaded as `Admin | GalleryKit`. Accessibility snapshot exposed heading `Admin`, username/password labels, show-password button, and sign-in button. Submitting invalid credentials produced role `alert` text `Authentication failed. Please try again.`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/images/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx`
+
+Shared UI and interaction components examined:
+
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/components/bulk-edit-dialog.tsx`
+- `apps/web/src/components/color-details-section.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/grid-picture.tsx`
+- `apps/web/src/components/grid-picture-fallback.tsx`
+- `apps/web/src/components/histogram.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/lazy-focus-trap.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/lightbox-color-pip.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/photo-viewer-color-pip.tsx`
+- `apps/web/src/components/photo-viewer-shell.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/similar-photos.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/theme-provider.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/wide-gamut-hint.tsx`
+- `apps/web/src/components/map/*`
+- `apps/web/src/components/ui/*`
+
+Localization and UI test surfaces examined:
+
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/src/__tests__/touch-target-audit.test.ts`
+- `apps/web/src/__tests__/focus-visible-links-scan.test.ts`
+- `apps/web/src/__tests__/a11y-us-p15.test.ts`
+- `apps/web/src/__tests__/privacy-page-landmark.test.ts`
+- `apps/web/src/__tests__/lightbox-controls-contract.test.ts`
+- `apps/web/src/__tests__/i18n-key-parity.test.ts`
+- `apps/web/src/__tests__/theme-token-contract.test.ts`
+- `apps/web/src/__tests__/hdr-badge-contrast.test.ts`
+
+## Runtime and Validation Evidence
+
+Browser/runtime inspection was feasible against an already-running local dev server on `http://localhost:3001`.
+
+Validated in browser:
+
+- `/en/privacy` loaded successfully with title `Privacy | GalleryKit`.
+- Privacy page exposed `html lang="en" dir="ltr"`, a `main` landmark with `id="main-content"`, a `Main navigation` landmark, and a footer landmark.
+- `/en/admin` loaded the login UI with labeled username and password fields.
+- Search dialog on `/en/privacy` moved focus to the combobox after open and restored focus to the Search trigger after Escape.
 
 Runtime blocker:
 
-- DB-backed routes could not be fully exercised because local MySQL refused connections: server logs repeatedly showed `connect ECONNREFUSED 127.0.0.1:3306`, `Could not connect to database to bootstrap queue`, and failed DB queries for home/gallery metadata. I therefore did not make runtime-only claims about populated gallery, image detail, authenticated admin, map/timeline, or real topic datasets.
+- `/en` rendered the app error boundary because the local DB was unavailable. Console/server evidence showed failed queries against `admin_settings` and `topics`. This blocked populated home/gallery/admin-protected runtime evaluation, so those flows were reviewed through source, DOM-capable static evidence, and focused tests.
 
-Focused verification command:
+Focused validation run:
 
-```sh
-npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/lightbox-controls-contract.test.ts
-```
+- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/lightbox-controls-contract.test.ts`
+  - 5 files passed, 48 tests passed.
+- `npm test --workspace=apps/web -- --run src/__tests__/i18n-key-parity.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/hdr-badge-contrast.test.ts`
+  - 3 files passed, 15 tests passed.
 
-Result: 5 files passed, 48 tests passed.
+Total focused validation: 8 UI/a11y/i18n/theme test files passed, 63 tests passed.
 
-## Confirmed Issues
+## Confirmed Findings
 
-### C27-UX-01 - Desktop public navigation can clip topic links when the topic list wraps
+### C28-UX-01 - Admin image table lacks a contained horizontal overflow strategy
 
 Severity: Medium
 Confidence: High
-Area: Public information architecture, responsive navigation, keyboard visibility
 
-Evidence:
+File and region:
 
-- The nav container is fixed to `h-16 overflow-hidden` whenever `isExpanded` is false: `apps/web/src/components/nav-client.tsx:85-89`.
-- The only expand/collapse control is mobile-only (`md:hidden`): `apps/web/src/components/nav-client.tsx:100-117`.
-- The topic list is forced visible at desktop and allowed to wrap with `md:flex md:flex-1 ... md:flex-wrap`: `apps/web/src/components/nav-client.tsx:120-126`.
-- Individual topic links are non-shrinking pills with `whitespace-nowrap shrink-0`: `apps/web/src/components/nav-client.tsx:131-153`.
+- `apps/web/src/components/image-manager.tsx:424-595`
+- Comparison pattern: `apps/web/src/components/admin-user-manager.tsx:135-136`
 
-Failure scenario:
+Problem:
 
-A gallery with many public topics, long localized Korean topic labels, or topic thumbnails can wrap the desktop topic row onto a second line. Because the parent remains `h-16 overflow-hidden` and the desktop expand button is hidden, wrapped topic links can be visually clipped. Keyboard users may still tab into a clipped link because the link remains in the DOM and is not hidden from focus, creating a visible-focus/focus-context failure. Pointer users lose direct access to lower-row topics.
+The admin image manager renders a dense 9-column table inside `<div className="min-w-0 rounded-md border">` with a plain `<Table>`, but the table has no horizontal scroll container, no explicit minimum width, and no responsive card fallback. The columns include checkbox, preview, title, filename, topic, tags, gamut, date, and actions. Several cells have fixed or minimum width pressure, including preview media, a `min-w-[200px]` tags area, and edit/delete action buttons.
+
+Concrete failure scenario:
+
+On a phone, tablet, split-screen laptop, or narrow admin sidebar viewport, the table either compresses controls into unreadable cells or creates page-level horizontal overflow. Keyboard users tabbing through the row actions can land on controls outside the visible viewport without a contained scroll context. Touch users may not reliably reach the date/actions side of the table, and screen magnifier users lose row context while panning.
+
+Why this is a repo-consistency issue:
+
+`admin-user-manager.tsx` already uses the safer project pattern at `135-136`: `overflow-x-auto rounded-md border` plus `Table className="min-w-[520px]"`. The image manager is wider and riskier, but does not apply that pattern.
 
 Suggested fix:
 
-Choose one desktop overflow model and make it explicit:
+Wrap the image table in a contained horizontal scroller, for example `overflow-x-auto rounded-md border`, and give the table an explicit minimum width sized for its actual columns. For smaller admin breakpoints, consider a responsive card/list layout that preserves preview, title, status, topic/tags, and primary actions without horizontal panning. Add a regression test or source contract so dense admin tables keep a contained overflow strategy.
 
-- Allow the desktop nav to grow: add a desktop override such as `md:h-auto md:min-h-16 md:overflow-visible` when topics are visible, and verify sticky header overlap.
-- Or keep a single-line desktop nav with horizontal scrolling or a `More` menu, and ensure focused links scroll into view.
-- Add a responsive fixture/test with 10-12 topics plus long KO labels to assert that all topic links have non-zero visible boxes and focus rings are not clipped.
+### C28-UX-02 - Slideshow interval validation is not surfaced at field level
 
-Text-extractable evidence:
-
-```tsx
-// nav-client.tsx
-isExpanded ? "h-auto py-3 flex-wrap items-start" : "h-16 overflow-hidden"
-...
-className="... md:flex ... md:flex-wrap ..."
-...
-className="... whitespace-nowrap shrink-0 ..."
-```
-
-### C27-UX-02 - Create-user password length instruction is visible but not programmatically associated
-
-Severity: Low
+Severity: Medium
 Confidence: High
-Area: Admin form validation UX, WCAG 2.2 3.3.2 Labels or Instructions
 
-Evidence:
+File and region:
 
-- The create-user password input has `required minLength={12}` but no `aria-describedby`: `apps/web/src/components/admin-user-manager.tsx:113-114`.
-- The visible instruction `t('password.minLength')` is rendered in a following paragraph without an id: `apps/web/src/components/admin-user-manager.tsx:115`.
-- The confirm-password field does use `aria-describedby` for its error path, which shows this component already has the expected pattern available: `apps/web/src/components/admin-user-manager.tsx:118-123`.
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:154-173`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:695-707`
+- `apps/web/src/app/actions/settings.ts:60-65`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:263-265`
 
-Failure scenario:
+Problem:
 
-A screen-reader admin opens the create-user dialog and lands on the password field. The field is announced as a required password input, but the minimum-length instruction is not part of the accessible description. The admin may only discover the 12-character requirement after browser/server validation rejects the value, adding avoidable trial-and-error to a security-sensitive workflow.
+The settings page defines a numeric slideshow interval input with `min={SLIDESHOW_INTERVAL_MIN}` and `max={SLIDESHOW_INTERVAL_MAX}`, but the custom client-side `validateSettings` function does not validate `slideshow_interval_seconds`. The Save action is driven by a custom button handler, not native form submission, so browser constraint validation is not enough to reliably block invalid values or announce the problem. If the server rejects the value, the client shows only a generic toast from `result.error`, with no `aria-invalid`, no field-specific error message, and no error text associated through `aria-describedby`.
+
+Concrete failure scenario:
+
+An admin enters `0`, `999`, or another out-of-range slideshow interval and presses Save. The page attempts to save, receives a generic invalid-value failure, and leaves the field visually and programmatically unchanged. A screen reader user hears the toast but is not told which field needs correction. A sighted keyboard user must infer the offending field by scanning the settings page.
+
+WCAG impact:
+
+This weakens WCAG 2.2 error identification and correction support, especially 3.3.1 Error Identification and 3.3.3 Error Suggestion, because the invalid control is not marked or described when the app already knows the accepted range.
 
 Suggested fix:
 
-Give the hint a stable id and reference it from the password input:
+Add `slideshow_interval_seconds` to the same client-side range validation path used for image quality and wide-gamut pixel settings. When invalid, render a field-level message with an `id`, set `aria-invalid="true"` on the input, and include both the help text and error id in `aria-describedby`. Consider moving the settings save interaction into a real `<form onSubmit>` so native number validation and custom validation reinforce each other.
 
-```tsx
-<Input
-  id="create-password"
-  aria-describedby="create-password-help"
-  ...
-/>
-<p id="create-password-help" className="text-xs text-muted-foreground">
-  {t('password.minLength')}
-</p>
-```
+## Coverage Notes by Review Area
 
-If confirm password should repeat the same rule, include both the help id and the conditional error id in its `aria-describedby`.
+Information architecture:
 
-## Likely Issues
+- Public navigation, topic navigation, map/timeline/year/detail routes, privacy, and admin route grouping were reviewed. The current structure is understandable and avoids exposing admin-only data in public components. The main source-backed IA issue found is the responsive handling of dense admin image management.
 
-No additional likely issues are being raised beyond C27-UX-01. The navigation issue is source-confirmed, but its exact visible severity depends on live topic count, label length, thumbnail use, and viewport width; it should be manually validated with production-like topic data after DB access is restored.
+Affordances:
 
-## Risks Needing Manual Validation
+- Public cards, search, lightbox controls, bottom sheet, zoom controls, upload dropzone, admin buttons, and table actions were reviewed. Button labels and icon-only controls generally have accessible names. The image manager table density issue remains the main affordance risk at narrow widths.
 
-- Populated gallery masonry, photo detail, lightbox, bottom sheet, color/HDR indicators, map, timeline, shared gallery, and collection flows need a DB-backed browser pass. Source review found strong modal/focus/reduced-motion coverage, but the live data-dependent layouts were not reachable.
-- Authenticated admin dashboard/settings/images/tokens/users need a real admin session and database to validate empty/loading/error state transitions, slow mutations, long localized strings, and table overflow behavior end to end.
-- Dark/light/OLED visual contrast looks covered by token choices and tests, but full visual inspection should be repeated with actual photo content because image overlays, badges, and metadata pills are content-dependent.
-- RTL is structurally future-proofed with `dir={getLocaleDirection(locale)}`, but no RTL locale is currently shipped; any future RTL launch needs manual route-by-route layout validation.
+Focus and keyboard navigation:
 
-## Positive Coverage / Not Re-raised
+- Skip link, privacy landmarks, search modal open/close focus behavior, lightbox keyboard shortcuts, bottom sheet focus trap, upload controls, and admin login were reviewed. Existing focused tests passed for touch targets, focus-visible links, and lightbox control contracts. No new focus trap defect was confirmed in the feasible runtime paths.
 
-- Global document language and direction are set on `<html>` (`lang={locale}`, `dir={getLocaleDirection(locale)}`), and the skip link is the first focusable element: `apps/web/src/app/[locale]/layout.tsx:94-128`.
-- Theme support includes system/light/dark/OLED and disables theme-change transitions: `apps/web/src/app/[locale]/layout.tsx:130-137`.
-- Search modal uses `FocusTrap`, `role="dialog"`, `aria-modal="true"`, labelled combobox semantics, keyboard instructions, and a polite status live region: `apps/web/src/components/search.tsx:373-454`.
-- Modal tree isolation now applies `aria-hidden` and `inert` to non-modal sibling subtrees and restores state on cleanup: `apps/web/src/components/use-modal-tree-isolation.ts:19-65`.
-- The touch-target audit now explicitly scans the public route group and app-level route shells: `apps/web/src/__tests__/touch-target-audit.test.ts:45-83`.
-- Focus/touch/lightbox/privacy contracts passed in the focused test slice: 5 test files, 48 tests.
+WCAG 2.2 accessibility:
 
-## Final Sweep
+- Landmarks, focus visibility, touch target tests, dialog semantics, input labels, live regions, and validation flows were reviewed. The confirmed WCAG concern is field-level validation for slideshow interval settings.
 
-Confirmed: app code was not edited. The review artifact itself is the only intended output from this pass.
+Contrast and color:
 
-Files/categories reviewed:
+- Theme tokens, HDR badge contrast tests, forced-colors CSS, dark/light/OLED theme support, and color-gamut labels were reviewed. Focused contrast/token tests passed. No new source-backed contrast failure was found.
 
-- Project docs and prior UX review context.
-- Public route shells, privacy page, home/gallery source, nav/footer, search, photo viewer, lightbox, zoom, metadata, color/HDR surfaces, loading/empty/error states.
-- Admin login source/runtime, protected admin page/component source, user/tokens/settings/analytics/upload/image management forms and dialogs.
-- UI primitives, modal isolation helper, theme/global CSS, reduced-motion handling, i18n/locale direction, and test contracts for touch targets/focus/landmarks/lightbox.
+ARIA:
 
-Stop condition met: findings are source-cited, runtime/test evidence is recorded, DB-dependent validation gaps are documented, and stale/permanently deferred items were not duplicated.
+- Search combobox/dialog, bottom sheet dialog, upload progress, tag combobox/listbox, lightbox controls, navigation labels, and settings inputs were reviewed. The confirmed ARIA gap is missing invalid/error association for the slideshow interval field.
+
+Reduced motion:
+
+- Global reduced-motion CSS, home image hover suppression, photo viewer transition duration handling, photo navigation animation handling, and lightbox motion behavior were reviewed. No new reduced-motion failure was confirmed.
+
+Responsive breakpoints:
+
+- Public masonry/grid behavior, nav wrapping, photo viewer responsive layout, bottom sheet mobile behavior, admin shell, user table, and image manager table were reviewed. The confirmed responsive defect is the image manager table overflow strategy.
+
+Loading, empty, and error states:
+
+- Public loading for photo detail, protected admin loading/error, topic empty state, search empty/results, upload selected/progress/error states, and DB-triggered error boundary were reviewed. The DB blocker prevented populated gallery runtime validation, but source coverage did not reveal a new loading/empty/error-state defect beyond the settings validation UX issue.
+
+Form validation UX:
+
+- Admin login, upload form, tag input, user manager, password/settings forms, and settings save flow were reviewed. The confirmed defect is the missing field-level slideshow interval validation.
+
+Dark/light mode:
+
+- Theme provider, token contract tests, forced colors, dark/OLED selectors, and representative component classes were reviewed. No new dark/light mode issue was confirmed.
+
+i18n and RTL:
+
+- `en` and `ko` message parity tests passed. Root layout sets `lang` and `dir` from locale direction. No RTL locale is currently shipped, so RTL-specific visual behavior remains a future manual validation area rather than a confirmed current bug.
+
+Perceived performance:
+
+- Public masonry uses lazy loading and `content-visibility` support, search uses debouncing, image detail uses blur/priority handling, and reduced-motion paths are present. No new perceived-performance defect was confirmed in source. DB-backed runtime performance could not be assessed due to local DB unavailability.
+
+## Previously Reported Issues Rechecked
+
+- Cycle 27 desktop nav clipping issue was rechecked and is no longer present in current source. `apps/web/src/components/nav-client.tsx:84-91` now includes desktop auto height, min height, visible overflow, wrapping, and padding for expanded topic links.
+- Cycle 27 create-user password hint association was rechecked and is no longer present in current source. `apps/web/src/components/admin-user-manager.tsx:113-119` now associates the create password and confirmation inputs with `create-password-help`.
+
+## Final Missed-Issues Sweep
+
+No current review-relevant UI source category was intentionally skipped in the source pass: public routes, admin routes, shared interaction components, UI primitives, global styles, messages, and UI-focused tests were inventoried and reviewed. Runtime inspection of populated DB-backed gallery flows was blocked by the unavailable local database, and that is the only material validation gap. The final sweep did not identify additional source-backed findings with enough confidence to report.
+
+Finding count: 2

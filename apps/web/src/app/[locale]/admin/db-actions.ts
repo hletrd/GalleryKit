@@ -21,6 +21,7 @@ import { createBackupFilename } from "@/lib/backup-filename";
 import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
+import { drainBackgroundDbWritesForRestore } from "@/lib/background-db-writes";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
@@ -492,6 +493,7 @@ export async function restoreDatabase(formData: FormData) {
             try {
                 await flushBufferedSharedGroupViewCounts();
                 await quiesceImageProcessingQueueForRestore();
+                await drainBackgroundDbWritesForRestore();
                 imageQueueQuiesced = true;
             } catch (err) {
                 console.error('Failed to prepare restore maintenance window', err);
@@ -734,7 +736,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
                 // transient DB error doesn't prevent the success resolve.
                 try {
                     const currentUser = await getCurrentUser();
-                    logAuditEvent(currentUser?.id ?? null, 'db_restore', 'database', DB_NAME).catch(console.debug);
+                    await logAuditEvent(currentUser?.id ?? null, 'db_restore', 'database', DB_NAME);
                 } catch (err) {
                     console.debug('Failed to log audit event for restore:', err);
                 }

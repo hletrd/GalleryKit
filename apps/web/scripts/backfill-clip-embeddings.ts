@@ -14,10 +14,10 @@
  *   docker run --rm --network host \
  *     -v .../apps/web/src:/app/apps/web/src:ro \
  *     -v .../apps/web/scripts:/app/apps/web/scripts:ro \
- *     -v .../data/models/clip:/app/data/models/clip:ro \
+ *     -v .../apps/web/data:/app/data \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \
- *     sh -c "npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
+ *     sh -c "CLIP_MODELS_ROOT=/app/data/models/clip npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
  *
  * CLIP_INFERENCE_CONCURRENCY defaults to 1 and is capped by lib/clip-model.ts.
  * Raise it only after measuring CPU and RSS headroom on the deploy host.
@@ -98,6 +98,11 @@ async function main(): Promise<number> {
     const lockConn = await connection.getConnection();
     let semanticBackfillLockHeld = false;
     try {
+        if (PRODUCTION_FLAG && process.env.SEMANTIC_SEARCH_ALLOW_PRODUCTION !== 'true') {
+            console.error('[backfill-clip-embeddings] Refusing --production without SEMANTIC_SEARCH_ALLOW_PRODUCTION=true.');
+            return 1;
+        }
+
         const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
             'SELECT GET_LOCK(?, 0) AS acquired',
             [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
@@ -120,6 +125,7 @@ async function main(): Promise<number> {
 
         let processed = 0;
         let failed = 0;
+        const failedImageIds: number[] = [];
     // COR-R4C19-04: keyset pagination instead of LIMIT/OFFSET. Each upsert
     // removes its row from the notExists() WHERE set, so advancing an OFFSET
     // skipped ~half the backlog. A strictly-increasing id cursor survives
@@ -172,9 +178,9 @@ async function main(): Promise<number> {
                     try {
                         let embedding: Float32Array;
                         if (PRODUCTION_FLAG) {
-                            if (!filenameOriginal) { failed++; return; }
+                            if (!filenameOriginal) { failed++; failedImageIds.push(id); return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
-                            if (!originalPath) { failed++; return; }
+                            if (!originalPath) { failed++; failedImageIds.push(id); return; }
                             embedding = await embedImageReal(originalPath);
                         } else {
                             embedding = embedImageStub(id);
@@ -204,6 +210,7 @@ async function main(): Promise<number> {
                     } catch (err) {
                         console.error(`[backfill-clip-embeddings] Failed for image ${id}:`, err);
                         failed++;
+                        failedImageIds.push(id);
                     }
                 }));
             }
@@ -212,6 +219,9 @@ async function main(): Promise<number> {
         }
 
         console.log(`[backfill-clip-embeddings] Done. mode=${PRODUCTION_FLAG ? 'production' : 'stub'} processed=${processed} failed=${failed}`);
+        if (failedImageIds.length > 0) {
+            console.error(`[backfill-clip-embeddings] Failed image ids: ${failedImageIds.join(', ')}`);
+        }
         return failed > 0 ? 1 : 0;
     } finally {
         if (semanticBackfillLockHeld) {

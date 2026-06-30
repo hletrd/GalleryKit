@@ -46,9 +46,19 @@ export const UPLOAD_DIR_AVIF = path.join(UPLOAD_ROOT, 'avif');
 /** Directory for processed JPEG files. */
 export const UPLOAD_DIR_JPEG = path.join(UPLOAD_ROOT, 'jpeg');
 
+export async function ensurePrivateOriginalUploadDirectory() {
+    await fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true, mode: 0o700 });
+    await fs.chmod(UPLOAD_DIR_ORIGINAL, 0o700).catch((err) => {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EPERM' && code !== 'EACCES') {
+            throw err;
+        }
+    });
+}
+
 export async function ensureUploadDirectories() {
+    await ensurePrivateOriginalUploadDirectory();
     await Promise.all([
-        UPLOAD_DIR_ORIGINAL,
         UPLOAD_DIR_WEBP,
         UPLOAD_DIR_AVIF,
         UPLOAD_DIR_JPEG,

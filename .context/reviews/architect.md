@@ -1,147 +1,127 @@
-# Cycle 27 Architect Review
+# Cycle 28 Architect Review
 
-Reviewer: Codex architect
 Date: 2026-06-30
-Scope: coupling, layering, state boundaries, deploy/runtime contracts, restore lifecycle, data access, image processing, and UI component boundaries.
-Commit reviewed: `1e8bba0298eac45df45698f5162908005df501e8`
+Reviewer role: architect
+Repository head reviewed: `e08e6a34`
+Scope: repository-wide architecture/design review only. No fixes implemented.
 
-## Inventory First
+## Inventory Examined First
 
-I started by inventorying review-relevant surfaces rather than jumping straight to one subsystem.
+I reviewed the repo from the architecture concerns requested: layering, ownership boundaries, coupling, runtime topology, mutable storage contracts, migration/reconcile design, queue/restore coordination, data/public privacy boundaries, frontend architecture, and deployment architecture.
 
-- Project instructions: `AGENTS.md` supplied in-session, `CLAUDE.md`, and the local code-review skill.
-- Prior review context checked to avoid re-filing stale or permanently-deferred items: `.context/reviews/architect.md`, `.context/reviews/verifier.md`, `.context/reviews/debugger.md`, `.context/reviews/run9-cycle8/architect.md`, `.context/reviews/run9-cycle8/_aggregate.md`, `.context/plans/archive/73-deferred-cycle27.md`, and `.context/plans/archive/plan-73-cycle27-fixes.md`.
-- Tracked-file inventory by primary review area: app routes/actions `77`, components `58`, lib modules `98`, db schema modules `3`, scripts `28`, Drizzle migration files/meta `31`, e2e specs `8`, committed review artifacts `1678`, committed plans `97`.
-- Worktree note before this review: unrelated existing edits were present in `.context/reviews/perf-reviewer.md` and `.context/reviews/security-reviewer.md`; this review does not rely on or modify them.
+Full tracked review corpus was enumerated before findings. The enumerated review list contained 880 tracked, text, review-relevant files after excluding generated build output, dependency folders, binary/media fixtures, and transient test artifacts. Generated assets and media are not architecture/control-surface sources and were intentionally excluded.
 
-Known policy decisions intentionally not duplicated as new findings: the permanently-deferred 2FA/WebAuthn work and removed Stripe/paid-download paths.
+Documentation and review history examined:
+- `AGENTS.md` from the prompt and project rules.
+- `CLAUDE.md`, especially tech stack, runtime topology, mutable storage, migration/reconcile, restore, privacy, deploy, and operational sections.
+- `.context/reviews/architect.md` previous-cycle report.
+- `.context/reviews/_aggregate.md`.
+- `.context/reviews/archive/_aggregate-cycle27.md`.
+- `.context/plans/**` and `plan/**` were enumerated as historical planning context; the current architecture conclusions rely on the current source/config/docs plus the previous cycle aggregate/review summaries above.
 
-## Confirmed Issues
+Runtime and application source examined:
+- `apps/web/src/app/**`: 77 tracked app-route/action/page/layout files, including admin DB actions, public pages, public actions, admin actions, upload API, search API, health/live API, proxy, providers, and layouts.
+- `apps/web/src/lib/**`: 98 tracked library files, including data access, privacy field selection, image processing, upload paths, queue, restore maintenance, storage quarantine, rate limiting, auth/session, CSP, semantic search, settings, backup/restore helpers, and deployment-facing runtime helpers.
+- `apps/web/src/components/**`: 58 tracked frontend component files, reviewed for client/server boundaries, public/admin ownership, data-shape expectations, and direct mutable-storage coupling.
+- `apps/web/src/types/**`, `apps/web/src/i18n/**`, `apps/web/src/hooks/**`, and other tracked source support files included by the corpus enumeration.
 
-### C27-ARCH-HIGH-01: Restore-maintenance recovery is documented as an operator runbook, but the production runtime cannot execute the documented recovery contract
+Schema, migrations, scripts, deployment, and tests examined:
+- `apps/web/src/db/schema.ts`.
+- `apps/web/drizzle/**`: 31 tracked migration and metadata files, including `meta/_journal.json` and SQL migrations `0000` through `0027`.
+- `apps/web/scripts/**`: 29 tracked operational scripts, including `migrate.js`, restore maintenance recovery scripts, entrypoint, seed/backfill utilities, and deploy-adjacent scripts.
+- `scripts/deploy-remote.sh`.
+- Deployment/config files: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`, package manifests, tsconfig/eslint/vitest/playwright configs, and root workspace config.
+- Tests: 273 tracked `apps/web/src/__tests__/**` files and 6 tracked `apps/web/e2e/**` files, reviewed for architectural tripwires and coverage of the contracts above.
 
-Severity: High
-Confidence: High
-Category: restore lifecycle, deploy/runtime contract, state boundary
+Architecture hotspots read in detail:
+- Restore and backup: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.ts`, `apps/web/scripts/restore-maintenance-recovery.mjs`.
+- Queue/restore/shutdown: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/instrumentation.ts`, queue and restore tests.
+- Upload/storage: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/storage/**`, upload/storage tests.
+- Migration/reconcile: `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/**`, migration journal and reconcile coverage tests.
+- Privacy/public data: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, public search routes, timeline/map code, privacy/search/map tests.
+- Frontend architecture: public/admin route trees, client components, gallery/detail/shared-group/topic/map pages, admin pages, providers, i18n, and client/server boundary tests.
+- Deployment topology: Dockerfile, entrypoint, compose file, nginx config, deploy scripts, Next standalone config, CSP/proxy config, and CLAUDE deploy runbook.
 
-Evidence:
+## Findings
 
-- The durable helper stores restore maintenance in two places: a marker file and process-local `globalThis` state. `beginDurableRestoreMaintenance()` sets process state before writing the marker, with rollback on marker-write failure (`apps/web/src/lib/restore-maintenance-durable.ts:80`-`90`), while `endDurableRestoreMaintenance()` removes the marker and then always clears process state in the current process (`apps/web/src/lib/restore-maintenance-durable.ts:93`-`99`).
-- The underlying process flag is explicitly process-local global state (`apps/web/src/lib/restore-maintenance.ts:1`-`26`), not shared IPC state.
-- Startup sync reads the marker once during instrumentation and applies it to the current process (`apps/web/src/instrumentation.ts:1`-`8`). There is no ongoing watcher or cross-process control plane.
-- The recovery script calls `clearDurableRestoreMaintenanceForRecovery()` from its own Node process (`apps/web/scripts/restore-maintenance-recovery.ts:1`-`5`, `apps/web/scripts/restore-maintenance-recovery.ts:32`-`41`). That can remove the marker, but it cannot mutate `globalThis` inside an already-running Next server process.
-- The documented package command is `restore:maintenance` (`apps/web/package.json:20`), implemented with `tsx`; `tsx` is only a dev dependency (`apps/web/package.json:70`-`85`).
-- The production Docker runner copies `apps/web/scripts/migrate.js`, `apps/web/scripts/mysql-connection-options.js`, and `apps/web/scripts/entrypoint.sh`, but not `restore-maintenance-recovery.ts` (`apps/web/Dockerfile:122`-`125`). The runner then starts only migration plus `server.js` (`apps/web/Dockerfile:157`).
-- CLAUDE.md says operators can clear a stale marker with `npm run restore:maintenance --workspace=apps/web -- clear --confirm-clear-restore-maintenance`, and warns not to remove the marker manually because the script also resets process-local state (`CLAUDE.md:401`).
-
-Concrete failure scenario:
-
-1. An admin restore starts and `beginDurableRestoreMaintenance({ allowExisting: true })` succeeds (`apps/web/src/app/[locale]/admin/db-actions.ts:448`-`489`).
-2. The restore import or post-restore migration fails; the restore path deliberately keeps maintenance enabled (`apps/web/src/app/[locale]/admin/db-actions.ts:684`-`693`, `apps/web/src/app/[locale]/admin/db-actions.ts:729`-`744`).
-3. The operator follows the documented recovery command in production. In the shipped image, the TypeScript recovery script and dev-only `tsx` runtime are not part of the runner. If the operator runs an equivalent command outside the Next process, it can clear the marker file but cannot clear the live process-local maintenance flag.
-4. The site remains in restore maintenance until a process restart or an in-process clear occurs. If the marker was removed externally before restart, startup sync no longer represents the real previous state either.
-
-Suggested fix:
-
-Make restore-maintenance recovery a production-real contract, not just a dev workspace script. Two viable shapes:
-
-- Preferred: add an authenticated, same-origin, admin-only in-process recovery action/route that verifies the stale marker condition, clears the durable marker, clears process state in the running server, resumes the image queue if safe, writes an audit log, and revalidates relevant admin/public surfaces.
-- Alternative: ship a compiled production recovery CLI in the Docker runner and update the runbook to require a controlled app restart after marker clear, because a separate CLI cannot clear live `globalThis` state.
-
-Either path should update CLAUDE.md and add a test that proves the operator recovery path matches the deployed artifact, not only the local TypeScript workspace.
-
-### C27-ARCH-MED-01: Restore SQL validation can be bypassed with valid cross-schema statement shapes
-
-Severity: Medium
-Confidence: High
-Category: restore lifecycle, data access boundary, database blast radius
-
-Evidence:
-
-- Restore scans SQL chunks with `containsDangerousSql()` before feeding them to `mysql` (`apps/web/src/app/[locale]/admin/db-actions.ts:618`-`647`).
-- The import command uses `mysql --one-database ${DB_NAME}` (`apps/web/src/app/[locale]/admin/db-actions.ts:672`-`675`). That is a helpful guard, but the app-level scanner is the architectural boundary being relied on for dangerous statements.
-- The scanner's write-target regex recognizes a narrow subset of `INSERT`: `INSERT` plus optional `IGNORE` then `INTO` (`apps/web/src/lib/sql-restore-scan.ts:39`-`55`).
-- It rejects schema-qualified or unknown write targets only after that regex matches a write statement (`apps/web/src/lib/sql-restore-scan.ts:190`-`207`).
-- The fallback dangerous-pattern list does not generally reject schema-qualified read sources or all valid `INSERT` modifiers (`apps/web/src/lib/sql-restore-scan.ts:57`-`123`, `apps/web/src/lib/sql-restore-scan.ts:212`-`221`).
-- Tests cover basic schema-qualified write targets and ordinary app-table writes, but not priority-modified inserts, `INSERT ... SELECT`, or `CREATE TABLE ... AS SELECT` from another schema (`apps/web/src/__tests__/sql-restore-scan.test.ts:53`-`96`).
-
-Targeted parser probe:
-
-```text
-containsDangerousSql('INSERT LOW_PRIORITY INTO otherdb.images VALUES (1);') => false
-containsDangerousSql('INSERT DELAYED INTO otherdb.images VALUES (1);') => false
-containsDangerousSql('INSERT HIGH_PRIORITY INTO otherdb.images VALUES (1);') => false
-containsDangerousSql('INSERT INTO images SELECT * FROM otherdb.images;') => false
-containsDangerousSql('CREATE TABLE images AS SELECT * FROM otherdb.images;') => false
-```
-
-Concrete failure scenario:
-
-If the configured MySQL user has privileges beyond the gallery schema, a crafted restore file can use a valid `INSERT` modifier to avoid the write-target parser, or can read from another schema into allowed app tables through `INSERT INTO images SELECT ... FROM otherdb.images`. In the first case, the restore can affect data outside the gallery schema. In the second, it can import cross-schema data into the gallery schema while passing the current scanner.
-
-Suggested fix:
-
-Replace the scanner with a real SQL parser or narrow the accepted restore language to the exact mysqldump shapes this app generates. At minimum:
-
-- Recognize all valid `INSERT` modifier forms before `INTO`.
-- Reject schema-qualified identifiers anywhere in executable statements, including `SELECT` sources and `CREATE TABLE ... AS SELECT`.
-- Add explicit tests for priority modifiers, `INSERT ... SELECT`, `CREATE TABLE ... AS SELECT`, comments around tokens, and schema-qualified reads.
-- Keep `--one-database`, but do not treat it as the sole application-layer boundary.
-
-## Likely Issues
-
-### C27-ARCH-MED-02: Fire-and-forget public analytics writes are not drained before restore import
+### C28-ARCH-01: Public analytics writes are outside the restore quiesce/drain contract
 
 Severity: Medium
 Confidence: Medium
-Category: state boundary, restore lifecycle, data access
+Classification: Likely issue
 
 Evidence:
+- `apps/web/src/app/actions/public.ts:408-437` documents `recordPhotoView` as intentionally fire-and-forget and starts `db.insert(imageViews).values(...).catch(...)` without awaiting it.
+- `apps/web/src/app/actions/public.ts:443-469` does the same for `topicViews`.
+- `apps/web/src/app/actions/public.ts:475-504` does the same for `sharedGroupViews`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:491-495` prepares the restore window by flushing `flushBufferedSharedGroupViewCounts()` and quiescing `quiesceImageProcessingQueueForRestore()`, but it does not drain or pause the three public analytics insert promises.
+- `apps/web/src/lib/image-queue.ts:1060-1088` shows the image queue has an explicit restore drain, including queue side effects. The public analytics path has no equivalent tracked side-effect set.
+- `apps/web/src/instrumentation.ts:36-42` drains image processing and buffered shared-group counts on shutdown, but not the public view-event inserts.
 
-- `recordPhotoView()` checks restore maintenance before and after validation, then starts an unawaited `db.insert(imageViews)` promise (`apps/web/src/app/actions/public.ts:416`-`441`).
-- `recordTopicView()` follows the same pattern for `topicViews` (`apps/web/src/app/actions/public.ts:444`-`473`).
-- `recordSharedGroupView()` follows the same pattern for `sharedGroupViews` (`apps/web/src/app/actions/public.ts:476`-`509`).
-- Restore prep flushes the buffered shared-group aggregate counter and quiesces the image processing queue (`apps/web/src/app/[locale]/admin/db-actions.ts:491`-`505`), but there is no equivalent drain for these analytics insert promises.
-- The aggregate shared-group view-count buffer has a tracked flush/drain path (`apps/web/src/lib/data.ts:222`-`249`), but that drain does not cover the three public analytics insert tables above.
+Problem:
+The restore design assumes mutable DB writers are stopped or drained before `runRestore` imports SQL. Image processing has a clear quiesce path, and shared-group count buffering has an explicit flush. Public analytics view-event inserts are a separate mutable writer class. The maintenance checks at `public.ts:418`, `public.ts:428`, `public.ts:451`, `public.ts:461`, `public.ts:480`, and `public.ts:497` reduce the race, but they do not close it: after the second check, each function can hand an untracked insert promise to the event loop while the restore action enters maintenance and starts importing.
 
 Concrete failure scenario:
-
-A public request enters `recordPhotoView()`, passes the late restore-maintenance check, and starts the untracked insert. A restore begins immediately after and reaches SQL import while the insert is still waiting on the pool or committing. Depending on timing, the write can fail against a dropped/recreated table, appear as noisy restore-era errors, or commit a pre-restore analytics event into the freshly restored database after the operator expected a clean snapshot.
+1. A public photo/detail/topic/shared page calls `void recordPhotoView(...)`, `void recordTopicView(...)`, or `void recordSharedGroupView(...)`.
+2. The action passes validation and the second `isRestoreMaintenanceActive()` check.
+3. Before the unawaited `db.insert(...Views)` finishes, an admin starts restore.
+4. `restoreDatabase` begins durable maintenance and drains the image queue plus shared-group count buffer, but it has no handle for the in-flight analytics insert.
+5. The analytics insert commits into a just-restored database, races with table truncate/drop/import state, or fails after restore logging has already moved on. Since errors are swallowed, operators may not notice that the restore boundary admitted a post-backup write.
 
 Suggested fix:
+Create a small analytics writer module with the same ownership pattern as queue side effects: track public view-event insert promises in a bounded `Set`, reject or no-op new analytics writes while restore maintenance is active, and expose `quiescePublicAnalyticsForRestore()` plus shutdown drain. Call that helper from `restoreDatabase` before `runRestore`, alongside `flushBufferedSharedGroupViewCounts()` and `quiesceImageProcessingQueueForRestore()`. Add a regression test that starts a delayed analytics insert, enters restore preparation, and proves restore preparation waits for or cancels the insert before import begins.
 
-Move public analytics writes behind a small tracked writer boundary. The restore path should call a `pauseAndDrainPublicAnalyticsWritesForRestore()` helper before SQL import and a matching resume helper after verified restore completion. A simpler but less scalable option is to await these inserts directly so each request owns its write lifecycle. Either way, restore should have one named quiesce contract for all DB writers, not just image processing and the aggregate view-count buffer.
+Notes:
+Analytics can remain best-effort for page rendering. The missing contract is not that page rendering should await view events; it is that restore/shutdown need an authoritative drain for every background DB writer.
 
-## Risks Needing Manual Validation
+### C28-ARCH-02: Private original-upload directory mode is not enforced on normal runtime creation paths
 
-- The SQL scanner blast radius depends on the production MySQL user's actual privileges. If the user is schema-confined, cross-schema writes/reads should fail at MySQL authorization even though the app scanner allows the statement shapes.
-- The restore recovery issue should be validated against the actual deployed image and operator shell path. Static evidence shows the documented command is not shipped as a runnable production artifact and that an external Node process cannot clear live process-local state.
-- The analytics race needs runtime timing validation under load during a restore. The architecture issue is confirmed at the boundary level, but the observed production symptom depends on pool scheduling and restore timing.
-- This review did not run a full browser QA sweep. UI component boundaries were inspected statically for ownership and data-flow problems; no new UI boundary finding met the evidence bar.
+Severity: Low
+Confidence: High
+Classification: Confirmed hardening gap with environment-dependent impact
 
-## Architectural Non-Findings
+Evidence:
+- `apps/web/src/lib/upload-paths.ts:49-55` creates `UPLOAD_DIR_ORIGINAL`, `UPLOAD_DIR_WEBP`, `UPLOAD_DIR_AVIF`, and `UPLOAD_DIR_JPEG` with `fs.mkdir(dir, { recursive: true })`, using default process umask behavior.
+- `apps/web/src/lib/process-image.ts:443-450` duplicates directory creation and also creates `UPLOAD_DIR_ORIGINAL` without an explicit mode or chmod.
+- `apps/web/Dockerfile:132-135` creates `/app/data/uploads/original` but only applies ownership with `chown`; it does not set owner-only directory permissions.
+- `apps/web/scripts/entrypoint.sh:16-24` ensures `/app/data/uploads/original` exists and is writable by `node`, but it does not tighten permissions.
+- By contrast, `apps/web/scripts/migrate.js:77-82` explicitly creates and chmods the private original root to `0700` during legacy migration, and `apps/web/src/lib/process-image.ts:905-910` writes original files with `0600`.
 
-- Public/admin data field layering is intentionally centralized. `adminSelectFields`, `publicSelectFields`, and `publicMapSelectFields` are derived in one module, with sensitive fields omitted from public surfaces and map latitude/longitude explicitly constrained to the map-visible path (`apps/web/src/lib/data.ts:251`-`327`, `apps/web/src/lib/data.ts:368`-`445`, `apps/web/src/lib/data.ts:459`-`470`).
-- Upload and image processing settings are snapshot at upload time and carried into the queue, while bootstrap/legacy queue jobs fall back to current config (`apps/web/src/app/actions/images.ts:183`-`190`, `apps/web/src/app/api/admin/lr/upload/route.ts:264`-`275`, `apps/web/src/lib/image-queue.ts:599`-`661`).
-- Image processing uses bounded global Sharp settings, per-format fresh Sharp instances, temp-file writes, verification before marking processed, and rollback of replaced derivatives (`apps/web/src/lib/process-image.ts:36`-`57`, `apps/web/src/lib/process-image.ts:1045`-`1064`, `apps/web/src/lib/process-image.ts:1147`-`1218`).
-- Deploy disk hygiene preserves the documented runtime contract: build/up/health-check before prune, with persistent directories bind-mounted by Compose (`apps/web/deploy.sh:32`-`81`, `apps/web/docker-compose.yml:12`-`28`).
-- Migration bootstrap/reconcile still has a loud post-condition for silently skipped Drizzle journal entries (`apps/web/scripts/migrate.js:748`-`785`, `apps/web/scripts/migrate.js:787`-`807`).
+Problem:
+The design contract says originals live in a private data volume, outside the public web root. The file bytes are well protected by `0600` writes and by nginx blocking public `/uploads/original`. However, normal fresh-runtime and deploy paths do not enforce owner-only permissions on the original directory itself. On common umasks, a freshly created directory can be `0755`; on a multi-user host, shared volume, or sidecar container with host access, that can expose filename/ext/stat metadata and allow directory traversal/listing even though file reads remain blocked.
 
-## Final Sweep Confirmation
+Concrete failure scenario:
+1. A fresh host bind-mounts `./data` and starts the container before any legacy migration path tightens the directory mode.
+2. Dockerfile or entrypoint creates `/app/data/uploads/original` with default directory permissions.
+3. Original files are saved as random UUID filenames with `0600`, but the directory remains listable/traversable by non-owner principals on the same host namespace or an over-broad sidecar mount.
+4. An operator or compromised low-privilege process cannot read file bytes, but can enumerate private-original inventory, extensions, counts, and timestamps, weakening the intended private-storage boundary.
 
-Reviewed categories:
+Suggested fix:
+Centralize upload-directory creation so derivative/public directories can remain normal web-readable directories while `UPLOAD_DIR_ORIGINAL` is always created and chmodded to `0700`. Use that helper from both `ensureUploadDirectories()` and `process-image`'s `ensureDirs()` path, or remove the duplicate creator. Tighten `/app/data/uploads/original` in `entrypoint.sh` and/or Dockerfile after `mkdir -p`. Add a source or unit test that asserts the original directory creation path includes `mode: 0o700` plus a chmod fallback, mirroring `migrate.js`.
 
-- Instructions and architecture docs: `AGENTS.md`, `CLAUDE.md`.
-- Restore lifecycle: durable marker/process state, admin restore action, recovery script, restore tests, image queue quiesce/resume.
-- Deploy/runtime contracts: Dockerfile runner contents, Compose mounts, entrypoint, deploy helper, Next config, CI quality workflow.
-- Data access and privacy boundaries: schema, public/admin select fields, map field path, auth/origin/rate-limit patterns, SQL restore scanner.
-- Image processing: upload paths, Lightroom upload route, browser upload action, queue ownership, Sharp processing, upload serving/path containment.
-- UI/component boundaries: admin/public routes, API route structure, component ownership by feature area, static interaction with data/action layers.
-- Tests and prior review context: restore-maintenance tests, restore upload-lock tests, SQL restore scanner tests, privacy/touch-target conventions, current verifier/debugger review context, and run9 drift-sweep artifacts.
+Notes:
+This is low severity because original file contents are created with `0600`, the public web path is blocked, and the primary risk is same-host metadata exposure. It is still an architecture gap because the private storage contract is currently enforced inconsistently across migration, runtime, and deploy layers.
 
-Validation evidence:
+## Verified Non-Findings And Architecture Notes
 
-- Static cross-file inspection with exact citations above.
-- Targeted `npx tsx` probe against `containsDangerousSql()` for the restore scanner bypass shapes.
-- No app code was edited.
-- No commit was made.
+- SQL restore scanning is substantially hardened in `apps/web/src/lib/sql-restore-scan.ts`: backup-table allowlisting, schema-qualified write-target handling, dangerous temp-table patterns, comment stripping, and scan tests close the prior broad restore-injection class.
+- Restore maintenance has a durable marker in `apps/web/src/lib/restore-maintenance-durable.ts` and the production Dockerfile copies the runnable `.mjs` recovery helper. `CLAUDE.md` documents that an external clear needs restart/redeploy because the JS helper cannot mutate another running process' in-memory state.
+- Image processing queue restore coordination is explicit: `quiesceImageProcessingQueueForRestore()` pauses, clears queued jobs, waits for in-flight jobs, drains queue side effects, clears queue state, and forces post-restore bootstrap.
+- Migration/reconcile design is intentionally idempotent. `apps/web/scripts/migrate.js` reconciles legacy/fresh schema, baselines every journal hash, and verifies postconditions. Tests cover journal monotonicity, schema/index mirrors, and removed-schema drops.
+- Public/admin data privacy boundaries are strongly guarded. `publicSelectFields`, `publicMapSelectFields`, `searchEnrichmentSelectFields`, and timeline fields use explicit sensitive-key guards and matching tests. Search routes use the enrichment field set instead of ad hoc admin fields.
+- The storage abstraction remains quarantined. Production upload paths still use `upload-paths`/`process-image`; scans found only tests importing `lib/storage`, and `storage-quarantine.test.ts` guards against wiring the incomplete abstraction into actions.
+- Public API topology is narrow: admin routes use `withAdminAuth`, search routes are public but rate-limited/pre-incremented, and health/live routes are read-only.
+- Deployment topology matches the documented single web container plus external MySQL model: Next standalone server, bind-mounted mutable stores, nginx fronting public assets/API, and deploy script health checks plus post-up pruning.
+
+## Final Missed-Issues Sweep
+
+Final sweep commands covered route auth/rate-limit shape, background DB writers, upload original storage modes, storage abstraction imports, privacy selector guards, migration/reconcile tripwires, restore queue drain, and deployment entrypoints. No additional architecture findings rose above the reporting threshold.
+
+No relevant runtime source, schema/migration, deploy/config, test, or documentation control-surface file from the enumerated review corpus was intentionally skipped. Generated output, dependency folders, binary fixtures, and media assets were excluded as non-review-relevant artifacts.
+
+## Summary
+
+Finding count: 2
+
+- Medium: 1 likely restore/analytics coordination issue.
+- Low: 1 confirmed private-storage permission hardening gap.

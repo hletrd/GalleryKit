@@ -10,7 +10,8 @@
  *
  * Key conventions:
  * - `key` is a relative path like `original/abc.jpg` or `webp/abc.webp`
- * - The current local backend maps keys to `UPLOAD_ROOT/<key>`
+ * - The current local backend maps derivative/resource keys to `UPLOAD_ROOT/<key>`
+ *   and maps `original/*` to the private `UPLOAD_DIR_ORIGINAL` root.
  * - Do not assume every upload/serve path uses this abstraction yet
  */
 

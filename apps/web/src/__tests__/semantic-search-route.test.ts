@@ -105,6 +105,14 @@ function mockRawRequest(rawBody: string, headersInit: Record<string, string> = {
     } as unknown as NextRequest;
 }
 
+function embeddingBufferFrom(values: Record<number, number>): Buffer {
+    const buf = Buffer.alloc(2048);
+    for (let i = 0; i < 512; i++) {
+        buf.writeFloatLE(values[i] ?? 0, i * 4);
+    }
+    return buf;
+}
+
 describe('/api/search/semantic POST (C12-TE-01)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -395,6 +403,72 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(json.results[0].filename_jpeg).toBe('mountain.jpg');
         expect(json.results[0]).toHaveProperty('lens_model', 'FE 35mm f/1.4');
         expect(json.results[0]).toHaveProperty('capture_date', '2026-02-03 04:05:06');
+    });
+
+    it('orders semantic results by computed cosine score after enrichment', async () => {
+        const lowerRankedEmbedding = embeddingBufferFrom({ 0: 0.2, 1: Math.sqrt(1 - 0.2 ** 2) });
+        const higherRankedEmbedding = embeddingBufferFrom({ 0: 1 });
+        const mockEmbeddingRows = [
+            { imageId: 2, embedding: lowerRankedEmbedding },
+            { imageId: 1, embedding: higherRankedEmbedding },
+        ];
+        const mockImageRows = [
+            {
+                id: 2,
+                title: 'Lower',
+                description: '',
+                filename_jpeg: 'lower.jpg',
+                width: 1000,
+                height: 800,
+                topic: 'nature',
+                topic_label: 'Nature',
+                camera_model: null,
+                lens_model: null,
+                capture_date: null,
+            },
+            {
+                id: 1,
+                title: 'Higher',
+                description: '',
+                filename_jpeg: 'higher.jpg',
+                width: 1000,
+                height: 800,
+                topic: 'nature',
+                topic_label: 'Nature',
+                camera_model: null,
+                lens_model: null,
+                capture_date: null,
+            },
+        ];
+
+        dbSelectMock.mockImplementation(() => ({
+            from: (table: Record<string, unknown>) => {
+                if ('embedding' in table) {
+                    return {
+                        innerJoin: vi.fn().mockReturnValue({
+                            where: vi.fn().mockReturnValue({
+                                orderBy: vi.fn().mockReturnValue({
+                                    limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                                }),
+                            }),
+                        }),
+                    };
+                }
+                return {
+                    leftJoin: vi.fn().mockReturnValue({
+                        where: vi.fn().mockResolvedValue(mockImageRows),
+                    }),
+                };
+            },
+        }));
+        embedTextStubMock.mockReturnValue(new Float32Array([1, ...Array(511).fill(0)]));
+
+        const response = await POST(mockRequest({ query: 'mountain landscape', topK: 2 }));
+
+        expect(response.status).toBe(200);
+        const json = await response.json();
+        expect(json.results.map((result: { imageId: number }) => result.imageId)).toEqual([1, 2]);
+        expect(json.results[0].score).toBeGreaterThan(json.results[1].score);
     });
 
     it('skips malformed scanned embedding rows without failing the whole query', async () => {

@@ -10,6 +10,8 @@ import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { getCspNonce } from '@/lib/csp-nonce';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 // Public gallery pages must reflect asynchronous image processing as soon as
 // the background queue marks uploads processed; avoid ISR staleness here.
@@ -148,6 +150,10 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
+  if (isRestoreMaintenanceActive()) {
+    const tCommon = await getTranslations('common');
+    return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
+  }
   const [locale, seo, config, allTags, allTopics, tCommon] = await Promise.all([
     getLocale(),
     getSeoSettings(),

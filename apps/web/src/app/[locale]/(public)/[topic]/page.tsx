@@ -12,6 +12,8 @@ import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { getCspNonce } from '@/lib/csp-nonce';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 
 export const revalidate = 0;
@@ -136,6 +138,10 @@ export default async function TopicPage({
   const { topic } = await params;
   if (isReservedTopicSegment(topic)) {
     return notFound();
+  }
+  if (isRestoreMaintenanceActive()) {
+    const tCommon = await getTranslations('common');
+    return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
   }
   const { tags: tagsParam } = await searchParams;
   const [locale, topicData] = await Promise.all([

@@ -1,5 +1,6 @@
 import { db, auditLog } from '@/db';
 import { lt } from 'drizzle-orm';
+import { trackBackgroundDbWrite } from '@/lib/background-db-writes';
 
 // Security-relevant fields that should be preserved when truncating audit metadata.
 // These are prioritized so they appear first in the serialized JSON, making them
@@ -82,14 +83,14 @@ export async function logAuditEvent(
         }
     }
 
-    await db.insert(auditLog).values({
+    await trackBackgroundDbWrite(() => db.insert(auditLog).values({
         userId,
         action,
         targetType: targetType ?? null,
         targetId: targetId ?? null,
         ip: ip ?? null,
         metadata: serializedMetadata,
-    });
+    }));
 }
 
 /**

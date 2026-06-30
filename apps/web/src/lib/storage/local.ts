@@ -1,7 +1,8 @@
 /**
  * Local Filesystem Storage Backend
  *
- * Stores files on the local filesystem under UPLOAD_ROOT.
+ * Stores public derivatives/resources under UPLOAD_ROOT and private originals
+ * under UPLOAD_DIR_ORIGINAL.
  * This is the default backend and preserves backward compatibility.
  */
 
@@ -12,12 +13,12 @@ import type { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
 import type { StorageBackend, StorageWriteResult, StorageObjectInfo, PresignedUrlOptions } from './types';
-import { UPLOAD_ROOT } from '@/lib/upload-paths';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_ROOT, ensurePrivateOriginalUploadDirectory } from '@/lib/upload-paths';
 
 // Singleton promise — clears on failure so transient errors don't permanently break uploads.
 let dirsPromise: Promise<void> | null = null;
 
-const REQUIRED_DIRS = ['original', 'webp', 'avif', 'jpeg', 'resources'];
+const REQUIRED_PUBLIC_DIRS = ['webp', 'avif', 'jpeg', 'resources'];
 
 function normalizeStorageKey(key: string): string {
     const normalizedKey = key.trim().replace(/\\/g, '/');
@@ -37,21 +38,34 @@ function normalizeStorageKey(key: string): string {
 export class LocalStorageBackend implements StorageBackend {
     readonly name = 'local';
 
-    private resolve(key: string): string {
+    private resolve(key: string): { path: string; privateOriginal: boolean } {
         const normalizedKey = normalizeStorageKey(key);
+        const privateOriginal = normalizedKey === 'original' || normalizedKey.startsWith('original/');
+        if (normalizedKey === 'original') {
+            throw new Error('Original storage keys must include a filename');
+        }
+        if (privateOriginal) {
+            const relativeOriginalKey = normalizedKey.slice('original/'.length);
+            const resolved = path.resolve(UPLOAD_DIR_ORIGINAL, relativeOriginalKey);
+            if (!resolved.startsWith(path.resolve(UPLOAD_DIR_ORIGINAL) + path.sep)) {
+                throw new Error(`Path traversal blocked: ${key}`);
+            }
+            return { path: resolved, privateOriginal: true };
+        }
         // Prevent path traversal: normalize and ensure result stays within UPLOAD_ROOT
         const resolved = path.resolve(UPLOAD_ROOT, normalizedKey);
         if (!resolved.startsWith(path.resolve(UPLOAD_ROOT) + path.sep)) {
             throw new Error(`Path traversal blocked: ${key}`);
         }
-        return resolved;
+        return { path: resolved, privateOriginal: false };
     }
 
     async init(): Promise<void> {
         if (!dirsPromise) {
-            dirsPromise = Promise.all(
-                REQUIRED_DIRS.map(dir => fs.mkdir(path.join(UPLOAD_ROOT, dir), { recursive: true })),
-            ).then(() => {}).catch((e) => {
+            dirsPromise = Promise.all([
+                ensurePrivateOriginalUploadDirectory(),
+                ...REQUIRED_PUBLIC_DIRS.map(dir => fs.mkdir(path.join(UPLOAD_ROOT, dir), { recursive: true })),
+            ]).then(() => {}).catch((e) => {
                 dirsPromise = null;
                 throw e;
             });
@@ -60,10 +74,15 @@ export class LocalStorageBackend implements StorageBackend {
     }
 
     async writeStream(key: string, stream: Readable | import('stream/web').ReadableStream, contentType?: string): Promise<StorageWriteResult> {
-        const filePath = this.resolve(key);
+        const resolved = this.resolve(key);
+        const filePath = resolved.path;
         void contentType;
         // Ensure parent directory exists
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        if (resolved.privateOriginal) {
+            await ensurePrivateOriginalUploadDirectory();
+        } else {
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+        }
 
         const nodeStream = 'pipe' in stream
             ? stream as Readable
@@ -77,19 +96,24 @@ export class LocalStorageBackend implements StorageBackend {
     }
 
     async writeBuffer(key: string, data: Buffer, contentType?: string): Promise<StorageWriteResult> {
-        const filePath = this.resolve(key);
+        const resolved = this.resolve(key);
+        const filePath = resolved.path;
         void contentType;
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        if (resolved.privateOriginal) {
+            await ensurePrivateOriginalUploadDirectory();
+        } else {
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+        }
         await fs.writeFile(filePath, data, { mode: 0o600 });
         return { key, size: data.length };
     }
 
     async readBuffer(key: string): Promise<Buffer> {
-        return fs.readFile(this.resolve(key));
+        return fs.readFile(this.resolve(key).path);
     }
 
     async createReadStream(key: string): Promise<Readable> {
-        const filePath = this.resolve(key);
+        const filePath = this.resolve(key).path;
         // Verify file exists and is not a symlink
         const stats = await fs.lstat(filePath);
         if (stats.isSymbolicLink() || !stats.isFile()) {
@@ -100,7 +124,7 @@ export class LocalStorageBackend implements StorageBackend {
 
     async stat(key: string): Promise<StorageObjectInfo> {
         try {
-            const stats = await fs.stat(this.resolve(key));
+            const stats = await fs.stat(this.resolve(key).path);
             return { exists: true, size: stats.size };
         } catch {
             return { exists: false };
@@ -108,7 +132,7 @@ export class LocalStorageBackend implements StorageBackend {
     }
 
     async delete(key: string): Promise<void> {
-        await fs.unlink(this.resolve(key)).catch(() => {});
+        await fs.unlink(this.resolve(key).path).catch(() => {});
     }
 
     async deleteMany(keys: string[]): Promise<void> {
@@ -116,9 +140,14 @@ export class LocalStorageBackend implements StorageBackend {
     }
 
     async copy(srcKey: string, destKey: string): Promise<void> {
-        const srcPath = this.resolve(srcKey);
-        const destPath = this.resolve(destKey);
-        await fs.mkdir(path.dirname(destPath), { recursive: true });
+        const srcPath = this.resolve(srcKey).path;
+        const resolvedDest = this.resolve(destKey);
+        const destPath = resolvedDest.path;
+        if (resolvedDest.privateOriginal) {
+            await ensurePrivateOriginalUploadDirectory();
+        } else {
+            await fs.mkdir(path.dirname(destPath), { recursive: true });
+        }
         // Try hard link first (zero-copy), fall back to copy
         try {
             await fs.link(srcPath, destPath);

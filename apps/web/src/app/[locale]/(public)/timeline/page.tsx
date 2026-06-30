@@ -12,6 +12,8 @@ import { safeJsonLd } from '@/lib/safe-json-ld';
 import { GridPicture } from '@/components/grid-picture';
 import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import type { Metadata } from 'next';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 export const revalidate = 0;
 
@@ -58,6 +60,10 @@ export default async function TimelinePage({
     searchParams: Promise<{ year?: string }>;
 }) {
     const { year: yearParam } = await searchParams;
+    if (isRestoreMaintenanceActive()) {
+        const tCommon = await getTranslations('common');
+        return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
+    }
 
     const [locale, t, tCommon, tAria, years, config, seo, nonce] = await Promise.all([
         getLocale(),
