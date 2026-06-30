@@ -334,6 +334,7 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
 const VIEW_RECORD_WINDOW_MS = 60 * 1000;
 const VIEW_RECORD_MAX_REQUESTS = 120;
 const VIEW_RECORD_RATE_LIMIT_MAX_KEYS = 2000;
+const VIEW_RECORD_BUCKET_TYPE = 'view_record';
 const viewRecordRateLimit = createResetAtBoundedMap<string>(VIEW_RECORD_RATE_LIMIT_MAX_KEYS);
 
 function isViewRecordRateLimited(ip: string, now: number): boolean {
@@ -345,6 +346,51 @@ function isViewRecordRateLimited(ip: string, now: number): boolean {
     }
     viewRecordRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
     return entry.count + 1 > VIEW_RECORD_MAX_REQUESTS;
+}
+
+async function rollbackViewRecordAttempt(ip: string, bucketStart: number, dbIncremented: boolean) {
+    const currentEntry = viewRecordRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        viewRecordRateLimit.set(ip, { count: currentEntry.count - 1, resetAt: currentEntry.resetAt });
+    } else {
+        viewRecordRateLimit.delete(ip);
+    }
+    if (dbIncremented) {
+        await decrementRateLimit(ip, VIEW_RECORD_BUCKET_TYPE, VIEW_RECORD_WINDOW_MS, bucketStart).catch((err) => {
+            console.debug('Failed to roll back view_record DB rate limit:', err);
+        });
+    }
+}
+
+async function checkViewRecordRateLimit(
+    ip: string,
+    now: number,
+): Promise<{ status: 'ok' | 'rateLimited'; bucketStart: number; dbIncremented: boolean }> {
+    const bucketStart = getRateLimitBucketStart(now, VIEW_RECORD_WINDOW_MS);
+    const overLimitInMemory = isViewRecordRateLimited(ip, now);
+    let dbIncremented = false;
+
+    try {
+        await incrementRateLimit(ip, VIEW_RECORD_BUCKET_TYPE, VIEW_RECORD_WINDOW_MS, bucketStart);
+        dbIncremented = true;
+    } catch {
+        // DB unavailable: keep the in-memory pre-increment as the fallback authority.
+    }
+
+    try {
+        const dbLimit = await checkRateLimit(ip, VIEW_RECORD_BUCKET_TYPE, VIEW_RECORD_MAX_REQUESTS, VIEW_RECORD_WINDOW_MS, bucketStart);
+        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, VIEW_RECORD_MAX_REQUESTS, true)) {
+            await rollbackViewRecordAttempt(ip, bucketStart, dbIncremented);
+            return { status: 'rateLimited', bucketStart, dbIncremented };
+        }
+    } catch {
+        if (overLimitInMemory) {
+            await rollbackViewRecordAttempt(ip, bucketStart, dbIncremented);
+            return { status: 'rateLimited', bucketStart, dbIncremented };
+        }
+    }
+
+    return { status: 'ok', bucketStart, dbIncremented };
 }
 
 async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers>>) {
@@ -373,12 +419,13 @@ export async function recordPhotoView(imageId: number): Promise<void> {
     try {
         const requestHeaders = await headers();
         const params = await buildViewParams(requestHeaders);
-        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
         const [visibleImage] = await db.select({ id: images.id })
             .from(images)
             .where(and(eq(images.id, imageId), eq(images.processed, true)))
             .limit(1);
         if (!visibleImage) return;
+        if (isRestoreMaintenanceActive()) return;
         // Fire-and-forget: swallow errors so analytics never blocks page render
         db.insert(imageViews).values({
             imageId,
@@ -405,12 +452,13 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     try {
         const requestHeaders = await headers();
         const params = await buildViewParams(requestHeaders);
-        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
         const [visibleTopic] = await db.select({ slug: topics.slug })
             .from(topics)
             .where(eq(topics.slug, topicSlug))
             .limit(1);
         if (!visibleTopic) return;
+        if (isRestoreMaintenanceActive()) return;
         db.insert(topicViews).values({
             topic: topicSlug,
             referrer_host: params.referrer_host,
@@ -433,7 +481,7 @@ export async function recordSharedGroupView(groupId: number, groupKey: string): 
     try {
         const requestHeaders = await headers();
         const params = await buildViewParams(requestHeaders);
-        if (isViewRecordRateLimited(params.ip, Date.now())) return;
+        if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
         const [visibleGroup] = await db.select({ id: sharedGroups.id })
             .from(sharedGroups)
             .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))
@@ -446,6 +494,7 @@ export async function recordSharedGroupView(groupId: number, groupKey: string): 
             ))
             .limit(1);
         if (!visibleGroup) return;
+        if (isRestoreMaintenanceActive()) return;
         db.insert(sharedGroupViews).values({
             groupId,
             referrer_host: params.referrer_host,

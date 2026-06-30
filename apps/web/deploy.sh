@@ -31,6 +31,28 @@ echo "Building and Starting Containers..."
 # env in sync even when Docker Compose is launched from the repo root.
 docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build
 
+echo "Waiting for gallerykit-web health..."
+health_deadline=$((SECONDS + 90))
+health_ok=0
+while [ "$SECONDS" -lt "$health_deadline" ]; do
+    health_status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gallerykit-web 2>/dev/null || true)"
+    if [ "$health_status" = "healthy" ]; then
+        health_ok=1
+        break
+    fi
+    if command -v curl >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/live >/dev/null 2>&1; then
+        health_ok=1
+        break
+    fi
+    sleep 2
+done
+
+if [ "$health_ok" -ne 1 ]; then
+    echo "Error: gallerykit-web did not become healthy after deploy."
+    docker logs --tail 120 gallerykit-web || true
+    exit 1
+fi
+
 # --- Docker disk hygiene (run on EVERY deploy) -------------------------------
 # The deploy host has 124 G total; repeated rebuilds accumulate stale images +
 # BuildKit cache that have previously filled the disk to 100 % and broken the
@@ -46,7 +68,7 @@ docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up 
 #      Bind mounts are host directories; `docker volume prune` cannot touch them.
 #   2. MySQL runs on the host (network_mode: host, 127.0.0.1) — there is no DB
 #      Docker volume to prune.
-#   3. Pruning runs AFTER a successful `up -d` (set -e aborts earlier on failure),
+#   3. Pruning runs AFTER a successful `up -d` AND a bounded health check,
 #      so the live `gallerykit-web` container + its just-built image are "in use"
 #      and survive `image prune -a`. `volume prune` (no -a) only removes
 #      anonymous/dangling volumes, never named ones.

@@ -21,7 +21,8 @@ import { createBackupFilename } from "@/lib/backup-filename";
 import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
-import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
+import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
+import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
@@ -444,7 +445,7 @@ export async function restoreDatabase(formData: FormData) {
         }
         semanticBackfillLockHeld = true;
 
-        if (!beginRestoreMaintenance({ allowExisting: true })) {
+        if (!beginDurableRestoreMaintenance({ allowExisting: true })) {
             // C7R-RPL-02 / AGG7R-02: explicitly RELEASE_LOCK on this
             // early-return path. The original code skipped the inner
             // try/finally whose RELEASE_LOCK statement is the only one
@@ -494,7 +495,7 @@ export async function restoreDatabase(formData: FormData) {
             return restoreResult;
         } finally {
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
-                endRestoreMaintenance();
+                endDurableRestoreMaintenance();
                 if (restoreLifecycleVerified || imageQueueQuiesced) {
                     await resumeImageProcessingQueueAfterRestore().catch((err) => {
                         console.error('Failed to resume image-processing queue after restore', err);

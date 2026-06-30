@@ -1,5 +1,7 @@
 export async function register() {
     if (process.env.NEXT_RUNTIME === 'nodejs') {
+        const { syncRestoreMaintenanceFromDurable } = await import('@/lib/restore-maintenance-durable');
+        syncRestoreMaintenanceFromDurable();
         const { assertNoLegacyPublicOriginalUploads } = await import('@/lib/upload-paths');
         await assertNoLegacyPublicOriginalUploads({ failInProduction: true });
         const { bootstrapImageProcessingQueue } = await import('@/lib/image-queue');

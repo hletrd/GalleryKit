@@ -392,6 +392,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             id="search-input"
                             ref={inputRef}
 	                            aria-label={t('search.placeholder')}
+	                            aria-describedby={results.length > 0 ? 'search-keyboard-instructions' : undefined}
 	                            role="combobox"
 	                            aria-autocomplete="list"
 	                            aria-controls={results.length > 0 ? 'search-results' : undefined}
@@ -444,6 +445,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                         ? t('search.noResults')
                                         : ''}
                     </div>
+                    {results.length > 0 && (
+                        <p id="search-keyboard-instructions" className="sr-only">
+                            {t('search.keyboardInstructions')}
+                        </p>
+                    )}
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
                             <div className="p-2" id="search-results" role="listbox" aria-label={t('aria.searchPhotos')}>
@@ -473,6 +479,9 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     </div>
                     <div className="hidden sm:block p-2 border-t text-center">
                         <p className="text-xs text-muted-foreground">
+                            {results.length > 0 && (
+                                <span className="mr-2">{t('search.keyboardInstructions')}</span>
+                            )}
                             <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
                         </p>
                     </div>

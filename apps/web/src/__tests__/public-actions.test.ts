@@ -243,6 +243,8 @@ describe('searchImagesAction', () => {
         await recordTopicView('seoul');
         await recordSharedGroupView(11, '23456789AB');
 
+        expect(incrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'view_record', 60_000, 1_700_000_000);
+        expect(checkRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'view_record', 120, 60_000, 1_700_000_000);
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).toHaveBeenCalledTimes(3);
         expect(dbValuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 7 }));
@@ -301,20 +303,42 @@ describe('searchImagesAction', () => {
 
         expect(headersMock).not.toHaveBeenCalled();
         expect(getClientIpMock).not.toHaveBeenCalled();
+        expect(incrementRateLimitMock).not.toHaveBeenCalled();
+        expect(checkRateLimitMock).not.toHaveBeenCalled();
         expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
-    it('skips public analytics writes after the per-IP view recorder budget is exhausted', async () => {
+    it('skips public analytics writes after the durable view recorder budget is exhausted', async () => {
         getClientIpMock.mockReturnValue('198.51.100.200');
+        checkRateLimitMock.mockImplementation((_ip, bucketType) => (
+            bucketType === 'view_record'
+                ? Promise.resolve({ limited: true, count: 121 })
+                : Promise.resolve({ limited: false, count: 1 })
+        ));
 
-        for (let i = 0; i < 120; i++) {
-            await recordPhotoView(i + 1);
-        }
         await recordPhotoView(999);
 
-        expect(dbInsertMock).toHaveBeenCalledTimes(120);
-        expect(dbSelectMock).toHaveBeenCalledTimes(120);
+        expect(dbInsertMock).not.toHaveBeenCalled();
+        expect(dbSelectMock).not.toHaveBeenCalled();
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('198.51.100.200', 'view_record', 60_000, 1_700_000_000);
         expect(dbValuesMock).not.toHaveBeenCalledWith(expect.objectContaining({ imageId: 999 }));
+    });
+
+    it('skips public analytics writes when restore maintenance begins after target validation', async () => {
+        isRestoreMaintenanceActiveMock
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true);
+
+        await recordPhotoView(7);
+        await recordTopicView('seoul');
+        await recordSharedGroupView(11, '23456789AB');
+
+        expect(dbSelectMock).toHaveBeenCalledTimes(3);
+        expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
     it('swallows pre-insert analytics failures for all recorders', async () => {

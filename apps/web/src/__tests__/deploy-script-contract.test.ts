@@ -6,6 +6,7 @@ const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
 const remoteDeployScript = readFileSync(resolve(repoRoot, 'scripts/deploy-remote.sh'), 'utf8');
 const dockerfile = readFileSync(resolve(repoRoot, 'apps/web/Dockerfile'), 'utf8');
+const entrypointScript = readFileSync(resolve(repoRoot, 'apps/web/scripts/entrypoint.sh'), 'utf8');
 const composeConfig = readFileSync(resolve(repoRoot, 'apps/web/docker-compose.yml'), 'utf8');
 const rootDockerignore = readFileSync(resolve(repoRoot, '.dockerignore'), 'utf8');
 const appDockerignore = readFileSync(resolve(repoRoot, 'apps/web/.dockerignore'), 'utf8');
@@ -20,7 +21,9 @@ const deploymentDocs = [
 describe('deploy script safety contract', () => {
     it('starts the stack before pruning Docker artifacts', () => {
         const upIndex = deployScript.indexOf('docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build');
+        const healthIndex = deployScript.indexOf('Waiting for gallerykit-web health');
         expect(upIndex).toBeGreaterThan(-1);
+        expect(healthIndex).toBeGreaterThan(upIndex);
         for (const command of [
             'docker container prune -f',
             'docker image prune -af',
@@ -29,8 +32,22 @@ describe('deploy script safety contract', () => {
         ]) {
             const pruneIndex = deployScript.indexOf(command);
             expect(pruneIndex, command).toBeGreaterThan(-1);
-            expect(pruneIndex, command).toBeGreaterThan(upIndex);
+            expect(pruneIndex, command).toBeGreaterThan(healthIndex);
         }
+    });
+
+    it('fails deploy before prune when the new container is not healthy', () => {
+        const healthIndex = deployScript.indexOf('Waiting for gallerykit-web health');
+        const failureIndex = deployScript.indexOf('gallerykit-web did not become healthy');
+        const logsIndex = deployScript.indexOf('docker logs --tail 120 gallerykit-web');
+        const pruneIndex = deployScript.indexOf('docker image prune -af');
+
+        expect(healthIndex).toBeGreaterThan(-1);
+        expect(deployScript).toContain('docker inspect');
+        expect(deployScript).toContain('http://127.0.0.1:3000/api/live');
+        expect(failureIndex).toBeGreaterThan(healthIndex);
+        expect(logsIndex).toBeGreaterThan(failureIndex);
+        expect(pruneIndex).toBeGreaterThan(logsIndex);
     });
 
     it('never uses automatic all-volume pruning', () => {
@@ -85,6 +102,15 @@ describe('deploy script safety contract', () => {
         expect(rootDockerignore).toContain('apps/web/public/resources/**');
         expect(appDockerignore).toContain('public/uploads/**');
         expect(appDockerignore).toContain('public/resources/**');
+    });
+
+    it('does not recursively chown large bind-mounted data during normal startup', () => {
+        expect(entrypointScript).toContain('ensure_node_writable_dir');
+        expect(entrypointScript).toContain('gosu node sh -c "test -w');
+        expect(entrypointScript).not.toContain('chown -R node:node /app/data');
+        expect(entrypointScript).not.toContain('chown -R node:node /app/apps/web/public/uploads');
+        expect(entrypointScript).not.toContain('chown -R node:node /app/apps/web/public/resources');
+        expect(entrypointScript).not.toContain('chown -R node:node /app/apps/web/.next');
     });
 
     it('pins explicit Docker native optional dependency installs to lockfile versions', () => {

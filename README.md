@@ -39,7 +39,7 @@ GalleryKit is built for photographers and small teams who want to publish edited
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
-- **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. The demo has it operator-enabled; fresh installs do not.
+- **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. A production deployment may enable it after the runbook checks; fresh installs do not.
 - **Progressive Web App** -- installable PWA with a service worker for visited image caching and an offline HTML fallback; it is not a full offline gallery sync
 - **Sharing** -- per-photo and group share links with Base56 short keys
 - **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
@@ -136,9 +136,9 @@ Do this before `npm run init --workspace=apps/web`; the init script needs DB cre
 ```env
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_USER=your_user
+DB_USER=gallerykit
 DB_PASSWORD=<change-me>
-DB_NAME=gallery
+DB_NAME=gallerykit
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<openssl rand -hex 32>
 BASE_URL=http://localhost:3000
@@ -211,9 +211,9 @@ GalleryKit exposes a PAT-authenticated upload route for external publish clients
 - Required token scope: `lr:upload`
 - Body: `multipart/form-data`
 - File field: `file`
-- Metadata fields: `topic` plus optional `title`, `description`, `tags`, `camera_model`, `lens_model`, `capture_date`, and exposure fields accepted by the admin upload path.
+- Metadata fields: `topic` plus optional `title` and `description`. Camera/lens/date/exposure values are extracted from the uploaded file metadata; submitted metadata override fields such as `tags`, `camera_model`, `lens_model`, `capture_date`, and exposure values are not currently consumed by this route.
 - Limits: 200 MiB per file, 2 GiB per upload window, 100 files per window by default; the shipped nginx route cap is 216 MiB.
-- Response: JSON with the created image id and processed filenames on success, or an error JSON response with the matching HTTP status.
+- Response: `{ "success": true, "id": 123 }` on success, or an error JSON response with the matching HTTP status. Generated filenames are not returned by this route.
 
 ## Tech Stack
 

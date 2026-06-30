@@ -199,6 +199,30 @@ describe('loadMoreSmartCollectionImages (R4C5 COR-R4C5-01)', () => {
         expect(getImagesForSmartCollectionMock).not.toHaveBeenCalled();
         expect(decrementRateLimitMock).not.toHaveBeenCalled();
     });
+
+    it('returns hasMore=false from the helper without a duplicate terminal probe', async () => {
+        const finalPage = Array.from({ length: 12 }, (_, i) => ({ id: i + 1 }));
+        getImagesForSmartCollectionMock.mockResolvedValue({ images: finalPage, totalCount: 12, hasMore: false });
+
+        const result = await loadMoreSmartCollectionImages('street', 30, 30);
+
+        expect(getImagesForSmartCollectionMock).toHaveBeenCalledOnce();
+        expect(getImagesForSmartCollectionMock).toHaveBeenCalledWith(expect.anything(), 30, 30);
+        expect(result).toEqual({ status: 'ok', images: finalPage, hasMore: false });
+    });
+
+    it('returns the current error contract when query parsing fails', async () => {
+        getSmartCollectionBySlugCachedMock.mockResolvedValue({
+            ...PUBLIC_COLLECTION,
+            query_json: 'not json',
+        });
+
+        const result = await loadMoreSmartCollectionImages('street', 0, 30);
+
+        expect(result).toEqual({ status: 'error', images: [], hasMore: true });
+        expect(getImagesForSmartCollectionMock).not.toHaveBeenCalled();
+        expect(decrementRateLimitMock).toHaveBeenCalledWith(expect.stringMatching(/^203\.0\.113\.\d+$/), 'load_more', 60_000, 1_700_000_000);
+    });
 });
 
 describe('getImagesForSmartCollection source contract (single lookahead + cursor branch)', () => {

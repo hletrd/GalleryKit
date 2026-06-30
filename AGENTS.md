@@ -46,4 +46,4 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 ## Read CLAUDE.md for everything else
 
-`CLAUDE.md` carries the full architecture, security model, color & HDR pipeline, **CLIP semantic-search activation / weight-seeding (US-P51 — live in production)**, race-condition protections, migration runbook, operational playbook, and lint-gate / touch-target / Korean i18n details.
+`CLAUDE.md` carries the full architecture, security model, color & HDR pipeline, **CLIP semantic-search activation / weight-seeding (US-P51 operator runbook)**, race-condition protections, migration runbook, operational playbook, and lint-gate / touch-target / Korean i18n details.

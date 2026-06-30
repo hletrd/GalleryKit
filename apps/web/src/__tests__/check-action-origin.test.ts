@@ -651,9 +651,23 @@ describe('checkActionSource — public analytics actions', () => {
             export async function recordView(id) {
                 try {
                     const params = await buildViewParams(await headers());
-                    if (isViewRecordRateLimited(params.ip, Date.now())) return;
+                    if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
                     db.insert(imageViews).values({ imageId: id }).catch(console.debug);
                 } catch {}
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
+    it('allows an exempt public mutation when a DB-backed view limiter gates the insert', () => {
+        const src = `
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
             }
         `;
         const report = checkActionSource(src, 'src/app/actions/public.ts');

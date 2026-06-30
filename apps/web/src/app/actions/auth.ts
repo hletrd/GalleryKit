@@ -20,6 +20,10 @@ import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-o
 import { countCodePoints } from '@/lib/utils';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
+function getAuthErrorLogDetail(err: unknown) {
+    return { errorName: err instanceof Error ? err.name : typeof err };
+}
+
 export async function getSession() {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
@@ -240,12 +244,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
             redirect(localizePath(locale, '/admin/dashboard'));
         } catch (e) {
             unstable_rethrow(e);
-            console.error("Session creation failed after successful auth", e);
+            console.error("Session creation failed after successful auth", getAuthErrorLogDetail(e));
             return { error: t('authFailed') };
         }
     } catch (e) {
         unstable_rethrow(e);
-        console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
+        console.error("Login verification failed:", getAuthErrorLogDetail(e));
         // C1F-CR-04 / C1F-SR-01: do NOT roll back the pre-incremented rate-limit
         // counters on unexpected infrastructure errors. Rolling back reduces the
         // failed-attempt budget, giving an attacker extra attempts when they can
@@ -436,7 +440,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         // swallow the signal and the user would see a toast instead of the
         // intended redirect.
         unstable_rethrow(e);
-        console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
+        console.error("Failed to update password:", getAuthErrorLogDetail(e));
         // C1F-CR-04 / C1F-SR-01: do NOT roll back the pre-incremented rate-limit
         // counter on unexpected infrastructure errors, matching the login path above.
         // Rolling back reduces the failed-attempt budget. The attempt counts as

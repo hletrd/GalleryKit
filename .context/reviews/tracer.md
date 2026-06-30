@@ -1,123 +1,113 @@
-# Tracer Review - Cycle 24
+# Tracer Review - Cycle 25
 
-Review lane: `tracer`
+Review lane: `cycle-25 tracer`
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `a6efd6fd584fe44138be3729d90743ceb76dbfad`
-Mode: review-only. Source files were not modified. This report is the only intended file change from this lane.
+HEAD reviewed: `4cb1258ba0b2cca689846a85423264edc2d96b90`
+Mode: review-only. No commit or push was performed.
 
-## Method / Inventory
+## Required Context
 
-Required context read first:
+Read first, before tracing:
 
 - `AGENTS.md`
 - `CLAUDE.md`
 - `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-Trace-relevant inventory covered before reviewing flows:
+## File Inventory
 
-- 522 tracked files in the current trace surface were inventoried in `/tmp/gallery-trace-files.txt`: root/project instructions and package metadata, deploy/env/nginx/Docker files, `apps/web/src/app/**`, `apps/web/src/lib/**`, `apps/web/src/db/**`, `apps/web/scripts/**`, `apps/web/drizzle/**`, `apps/web/src/__tests__/**`, and `apps/web/e2e/**`.
-- Current app route/action surface was reviewed rather than sampled: admin DB actions/download, browser and Lightroom uploads, image/tag/topic/settings/SEO/collection/sharing/user/token actions, public load/search/view actions, semantic/similar/OG/health/live API routes, public share pages, and admin pages where they drive state transitions.
-- Current suspicious infrastructure surface was reviewed: deployment helper, compose file, nginx config, env examples, migration runner, restore scanner, queue/bootstrap/shutdown, upload path/serving helpers, rate-limit/auth/session/token helpers, audit/view retention, analytics, data projections, config/settings, processing/backfill helpers, and privacy/security tests adjacent to these flows.
+Tracked file inventory was built before the causal trace.
 
-Static causal traces performed:
+- Total tracked files: 2585.
+- Largest tracked buckets:
+  - `.context/reviews/archive/`: 954
+  - `apps/web/src/__tests__/`: 269
+  - `plan/`: 103
+  - `apps/web/src/lib/`: 94
+  - `plan/done/`: 75
+  - `.context/plans/done/`: 56
+  - `apps/web/src/components/`: 34
+  - `apps/web/drizzle/`: 28
+  - `.context/plans/`: 28
+  - `apps/web/scripts/`: 27
+- Trace surfaces reviewed for this report:
+  - Upload, processing, and serving: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/next.config.ts`.
+  - Public analytics and public reads: `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/analytics.ts`, `apps/web/src/lib/view-retention.ts`, `apps/web/src/lib/rate-limit.ts`, public route files under `apps/web/src/app/api/`.
+  - Auth/session/admin gates: `apps/web/src/lib/session.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/proxy.ts`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`, `apps/web/src/lib/api-auth.ts`.
+  - DB backup/restore/migrations: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/mysql-cli-ssl.ts`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/**`.
+  - Semantic search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/download-clip-models.ts`.
+  - Backfill: `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/app/actions/admin-backfill.ts`.
+  - Deploy: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/docker-compose.yml`, root deploy/env docs.
 
-- Deployment env handling and proxy/IP trust.
-- Admin auth, sessions, password changes, PAT/LR token creation, token scope/usage.
-- Mutating server actions and admin API wrappers.
-- Browser/LR uploads, quota tracking, original storage, GPS stripping, queue enqueue, delete races.
-- Image processing, foreground queue, in-app backfill, sidecar/backfill adjacency.
-- Public routes, share/view/search/semantic/OG flows, public rate limits.
-- DB backup/download/restore/import/migration, advisory locks, maintenance state.
-- UI state transitions around admin dashboards, upload/backfill/restore settings, and public navigation state where those routes mutate or report server state.
-
-Validation run:
+Validation commands run:
 
 - `npm run lint:api-auth --workspace=apps/web`: passed.
 - `npm run lint:action-origin --workspace=apps/web`: passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
 
-Full lint, typecheck, build, Vitest, and Playwright were not run; this was a static causal trace plus the three custom policy scanners above.
+Full lint, typecheck, build, Vitest, and Playwright were not run. This was a static causal trace plus the three policy scanners above.
 
-## Findings
+## Confirmed Findings
 
-### TRC24-01 - Foreground image processing can pin most of the shared MySQL pool across Sharp work
+### TRC25-01 - Failed DB restore safety is process-local while cross-process locks are released
 
-Severity: Medium
+Severity: High
 Confidence: High
-Status: Confirmed issue
 
-Evidence:
+Exact file/region:
 
-- The shared MySQL pool is fixed at 10 connections with a 20-request queue: `apps/web/src/db/index.ts:23-33`.
-- Foreground queue concurrency can be configured up to 8: `apps/web/src/lib/image-queue.ts:87-90`.
-- Each queued foreground job acquires a dedicated advisory-lock connection and returns that connection to the task on success: `apps/web/src/lib/image-queue.ts:446-455`.
-- The task keeps that connection while it verifies the row, resolves/accesses the original, optionally loads config, runs `processImageFormats`, verifies derivative files, updates the image row, and performs delete-race cleanup: `apps/web/src/lib/image-queue.ts:519-675`.
-- The advisory-lock connection is released only in the task `finally` block: `apps/web/src/lib/image-queue.ts:812-815`.
-- The backfill runner has explicit shared-pool reserve arithmetic and clamps effective concurrency to protect live traffic: `apps/web/src/lib/admin-backfill-runner.ts:96-141`. The foreground queue lacks equivalent reserve math.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:388-524`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:651-731`
+- `apps/web/src/lib/restore-maintenance.ts:1-56`
+- Cross-process sidecar examples that do not check restore maintenance: `apps/web/scripts/backfill-color-pipeline.ts:304-327`, `apps/web/scripts/backfill-clip-embeddings.ts:98-119`
 
-Causal chain / failure scenario:
+Causal chain:
 
-If an operator raises `QUEUE_CONCURRENCY=8` for a large upload/import, eight foreground jobs can hold eight of ten DB pool connections for encode-duration Sharp work. Live gallery/photo requests, admin session checks, public search/view actions, settings reads, and the queue's own transient DB updates then compete for two remaining connections and a 20-item wait queue. The failure mode is avoidable latency or 500/503 responses while CPU and MySQL may otherwise be healthy.
+1. `restoreDatabase` acquires DB restore, upload-processing, color-backfill, and semantic-backfill advisory locks before import: `apps/web/src/app/[locale]/admin/db-actions.ts:388-445`.
+2. It then calls `beginRestoreMaintenance`, which only sets process-local `globalThis` state: `apps/web/src/app/[locale]/admin/db-actions.ts:447-480`, `apps/web/src/lib/restore-maintenance.ts:1-56`.
+3. If `mysql` import or post-restore migration fails, `runRestore` returns `keepMaintenance: true`: `apps/web/src/app/[locale]/admin/db-actions.ts:670-731`.
+4. The outer `finally` correctly leaves process-local maintenance enabled when `keepMaintenance` is true, but still releases the DB restore, upload-processing, color-backfill, and semantic-backfill locks: `apps/web/src/app/[locale]/admin/db-actions.ts:496-524`.
+5. Because the remaining maintenance state is only in memory, a web process restart clears it. Sidecar scripts never consult it. After lock release, those sidecars can also acquire their own locks.
 
-Concrete fix:
+Concrete failure scenario:
 
-Do not hold a shared-pool connection across Sharp work. Prefer a short durable row-claim state or a short advisory lock for claim only, release before encoding, then use a conditional processed-state update and existing delete-race cleanup. If the long advisory lock is kept, move it to a dedicated small pool or clamp `QUEUE_CONCURRENCY` with the same live-connection reserve arithmetic used by `resolveBackfillConcurrency`. Add a regression test proving configured foreground concurrency cannot consume the live pool reserve.
+An admin uploads a restore dump that passes the SQL scanner but is truncated or fails midway after applying destructive dump statements such as allowed app-table drops/recreates. The restore action returns failure and keeps the current web process in maintenance. A deploy restart, crash restart, or manual container restart clears the in-memory flag. The restarted app begins accepting admin/public flows against a partially restored DB. Independently, a sidecar backfill can run after the locks are released and mutate image rows or embeddings on the partial schema/data set.
 
-### TRC24-02 - The single-writer runtime topology is documented but not enforced
+Suggested fix:
 
-Severity: Medium
-Confidence: Medium
-Status: Likely issue requiring deployment validation
+Persist restore maintenance outside the DB being restored, for example a host-mounted sentinel under `apps/web/data/restore-maintenance.json` or another durable store not overwritten by the import. Write it before invoking `mysql`, clear it only after successful import plus post-restore migrations, and have app startup, mutating actions, upload queue bootstrap, and sidecar backfill scripts check it. Keep advisory locks for concurrency, but do not rely on released locks or process-local memory as the durable failed-restore barrier. Add a regression test or integration harness that simulates a restore failure, restarts the app process, and proves uploads/backfills stay blocked until explicit recovery clears the sentinel.
 
-Evidence:
+## Refuted Hypotheses
 
-- `CLAUDE.md` documents that the shipped deployment is single web-instance/single-writer and that restore flags, upload quota tracking, queue state, rate-limit maps, backfill status, and shared-group view-count buffering are process-local: `CLAUDE.md:233-236`.
-- The shipped compose file defines one named `gallerykit-web` container and sets `TRUST_PROXY=true`: `apps/web/docker-compose.yml:1-28`. This supports the documented topology but does not enforce it outside that compose invocation.
-- Restore maintenance is process-local `globalThis` state: `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- Upload quota tracking is a process-local `globalThis` map, and active claims are checked only inside that process: `apps/web/src/lib/upload-tracker-state.ts:7-20` and `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- Queue bootstrap runs in every Node process: `apps/web/src/instrumentation.ts:1-6`.
-- Shared-group view counts are buffered in module-local memory: `apps/web/src/lib/data.ts:13-63`.
+- Upload quota claim leak after partial browser upload failure: refuted. `uploadImages` uses a single `settleClaim` closure and settles known post-claim failure exits, including topic lookup failure, save failure, DB insert failure, queue failure, and final success: `apps/web/src/app/actions/images.ts:191-627`.
+- Original upload path traversal or public original exposure: refuted. Originals are under the private upload root, filenames are safe-checked, realpath containment and symlink rejection are enforced, and public serving is restricted to derivative/resource directories: `apps/web/src/lib/upload-paths.ts:12-184`, `apps/web/src/lib/serve-upload.ts:126-195`.
+- Queue/delete race leaves orphaned processed files: refuted. The queue rechecks `processed=false`, performs a conditional update, and removes generated variants if the DB row was deleted or changed mid-process: `apps/web/src/lib/image-queue.ts:554-692`.
+- Middleware cookie shape check is an auth bypass: refuted. The middleware only rejects obviously unauthenticated admin page requests; protected admin layout and admin API routes perform cryptographic/session authorization: `apps/web/src/proxy.ts:52-105`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:12-15`, `apps/web/src/lib/api-auth.ts:58-144`.
+- Public analytics writes accept arbitrary target IDs: refuted. Photo, topic, and shared-group view actions validate IDs/keys and verify processed/non-expired target state before insert: `apps/web/src/app/actions/public.ts:370-460`.
+- Public semantic search is enabled accidentally in production: refuted. `getGalleryConfig` heals production semantic mode to disabled unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, and the route checks mode before parsing/running embeddings: `apps/web/src/lib/gallery-config.ts:123-142`, `apps/web/src/app/api/search/semantic/route.ts:186-204`.
+- Stub embeddings contaminate production semantic results: refuted. Semantic routes filter active rows by production model version; stub scoring is used only for stub mode: `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:132-180`.
+- Sidecar color backfill races normal foreground processing for the same pending image: refuted for the current code path. Sidecar candidates require `processed=TRUE`, while foreground queue and retry operate on `processed=FALSE`; in-app backfill also has a per-image processing lock: `apps/web/scripts/backfill-color-pipeline.ts:337-348`, `apps/web/src/app/actions/images.ts:1228`, `apps/web/src/lib/admin-backfill-runner.ts:348-423`.
+- Deploy prune removes live app data: refuted. Deploy runs `docker compose up -d --build` before pruning, persisted directories are bind-mounted, and volume prune is not run with `-a`: `apps/web/deploy.sh:28-59`, `apps/web/docker-compose.yml:1-28`.
+- Admin API or mutating server action missing provenance/auth wrappers: refuted by scanners. `lint:api-auth`, `lint:action-origin`, and `lint:public-route-rate-limit` all passed.
 
-Causal chain / failure scenario:
+## Residual Watchlist
 
-The documented Docker path is single-container, but nothing in application startup acquires an exclusive writer lease. If a second web process is started by a process manager, a manual recovery attempt, a future HA change, or an accidental overlapping deployment, process A can enter restore maintenance while process B cannot see A's maintenance flag, upload claims, queue state, or view-count buffer. B can accept uploads, run queue bootstrap, weaken per-process public rate limits, or buffer analytics during A's restore/import window. That violates the restore and filesystem/DB consistency assumptions the docs rely on.
+- The app still has several documented process-local assumptions: upload tracker state, restore maintenance, queue state, in-memory public rate limits, and shared-group view buffering. This review files only the failed-restore durability issue because it has a concrete partial-restore corruption path. If future deployment becomes multi-writer, these assumptions need a broader durable coordination pass.
+- Foreground image processing holds an advisory-lock DB connection across Sharp work in `apps/web/src/lib/image-queue.ts:446-815`. Cycle 24 already filed this as a pool-pressure risk. I did not re-file it as a new cycle-25 finding.
 
-Concrete fix:
+## Final Missed-Issue Sweep
 
-Make the topology executable. If GalleryKit remains single-writer, acquire a startup DB advisory lease and fail fast when another writer is active; include the lease name in ops docs and health output. If multi-process support is intended, move restore maintenance, upload quotas, queue ownership, abuse-relevant public rate limits, backfill status, and shared-group analytics buffering to shared durable coordination.
+Final sweep rechecked the requested competing flows: upload to process to serve, public analytics, auth/session, DB restore, semantic search, color and CLIP backfill, and deploy.
 
-## Confirmed Negative Traces
+Missed-issue probes performed:
 
-- Prior token insert-ID risk is fixed in current HEAD. `createToken` now accepts `number | bigint` insert IDs and calls `safeInsertId`: `apps/web/src/lib/admin-tokens.ts:229-238`.
-- Browser and Lightroom upload insert IDs also use `safeInsertId`: `apps/web/src/app/actions/images.ts:470-473` and `apps/web/src/app/api/admin/lr/upload/route.ts:458-462`.
-- Browser upload quota settlement now uses an idempotent `settleClaim` closure and covers known post-claim failure paths; the older manual-settle-only risk did not reproduce in current HEAD.
-- Browser/LR upload paths carry current processing snapshots into the queue, including quality, sizes, privacy/color/HDR settings, semantic mode, EXIF, ICC, and color signals.
-- Queue/delete races are fenced: pending-row check before processing, conditional processed-state update, and full variant cleanup if deletion wins mid-processing are present in `apps/web/src/lib/image-queue.ts:554-675`.
-- Upload fallback serving no longer reopens by pathname after validation; it uses `lstat`, `realpath`, `open`, descriptor `stat`, and `fileHandle.createReadStream({ autoClose: true })`: `apps/web/src/lib/serve-upload.ts:169-184` and `apps/web/src/lib/serve-upload.ts:273-313`.
-- Admin backup download also uses descriptor-backed streaming after realpath containment: `apps/web/src/app/api/admin/db/download/route.ts:42-93`.
-- Restore obtains DB restore/upload/backfill/semantic locks before import and uses the SQL scanner before invoking `mysql`; dangerous SQL scan entrypoint is `apps/web/src/lib/sql-restore-scan.ts:150`.
-- Restore failure can intentionally keep process-local maintenance active on partial import/migration failure: `apps/web/src/app/[locale]/admin/db-actions.ts:679`, `apps/web/src/app/[locale]/admin/db-actions.ts:716`, and `apps/web/src/app/[locale]/admin/db-actions.ts:730`. I am treating this as an operator recovery posture, not a defect, but it depends on the single-writer assumption above.
-- Public mutating API route policy scanner passed. Semantic search POST uses a rate-limit helper; GET-only health/live/OG/similar routes were reported non-mutating by the scanner.
-- Admin API auth scanner passed for the admin DB download route and Lightroom upload route.
-- Mutating server action same-origin scanner passed for all mutating actions; explicit read-only/public exemptions were reported by the scanner and reviewed in context.
-- OG fallback and internal photo fetch paths are constrained to canonical same-origin/public derivative fetches in current code; the older open redirect/SSRF hypothesis did not hold.
-- Smart collection, SEO, settings, topic, tag, and sharing admin inputs route through current validation/sanitization helpers; the format-character/display spoofing hypothesis did not hold for persisted admin names in current HEAD.
-- Audit retention is now batched with bounded loop constants; the prior unbounded-delete hypothesis did not hold in current HEAD.
-- Public data projections still omit filename/GPS/admin-only fields through the public select/privacy guard tests.
+- Re-read the full restore path after the initial finding to verify whether any durable flag, boot-time check, or sidecar check existed. None was found.
+- Rechecked upload cleanup, derivative serving, and original path containment after the restore finding to avoid overfitting on one subsystem.
+- Rechecked semantic production gates and model-version filters after reading both public search routes and CLIP scripts.
+- Rechecked backfill candidate predicates and affected-row cleanup for delete/race scenarios.
+- Ran the three custom policy scanners for admin API auth, server-action origin checks, and public mutating route rate limits.
 
-## Risks Needing Manual Validation
+Scope limits:
 
-- Confirm production never runs more than one web writer against the same DB/upload tree. The repo documents single-writer mode and compose supports it, but there is no runtime lease to make accidental scale-out self-detecting.
-- Confirm operator recovery expectations for restore failures that keep maintenance active. The code deliberately keeps maintenance on possible partial import/migration failure; runbook coverage should state how to inspect DB state and safely restart or recover.
-- Confirm any intentional `QUEUE_CONCURRENCY` increase is capped operationally until the foreground queue receives the same pool-budget protection as backfill.
-
-## Final Missed-Issues Sweep
-
-Final sweep rechecked the competing hypotheses named in the request: deployment env/proxy handling, auth/session/token flows, mutating action provenance, browser and Lightroom uploads, upload quota rollback, GPS stripping/original storage, queue/delete races, image processing/backfill pool usage, public routes and rate limits, backup/download/restore/import/migration, OG/internal image fetching, upload fallback serving, semantic/similar search, settings/SEO/collection validation, privacy projections, audit/view retention, and UI-visible admin/public state transitions.
-
-Skipped or intentionally limited:
-
-- I did not modify source files.
-- I did not inspect binary fixtures, screenshots, generated build output, `.next`, `node_modules`, local upload/data directories, or live production state.
-- I did not exhaustively re-read every historical plan/review artifact; current source, current docs, adjacent review context, and relevant tests/scripts were reviewed for the requested flows.
-- I did not run full lint, typecheck, build, Vitest, or Playwright. The three custom policy scanners listed above passed.
+- No production host, live DB, upload data, binary fixtures, screenshots, `.next`, or `node_modules` state was inspected.
+- No source code was changed.
+- No commit or push was performed.

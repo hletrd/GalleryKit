@@ -237,6 +237,7 @@ const PUBLIC_RATE_LIMIT_HELPER_NAMES = new Set([
     'rollbackLoadMoreAttempt',
     'rollbackSearchAttempt',
     'isViewRecordRateLimited',
+    'checkViewRecordRateLimit',
 ]);
 
 /**
@@ -296,7 +297,7 @@ function publicActionCallsRateLimitBeforeMutation(body: ts.Node): boolean {
     if (!ts.isBlock(body)) return false;
     let sawRateLimitGate = false;
     let sawMutationBeforeRateLimit = false;
-    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'preIncrementLoadMoreAttempt', 'checkLoadMoreRateLimit']);
+    const publicRateLimitNames = new Set(['isViewRecordRateLimited', 'checkViewRecordRateLimit', 'preIncrementLoadMoreAttempt', 'checkLoadMoreRateLimit']);
     const rateLimitResultNames = new Set<string>();
 
     const expressionCallsRateLimit = (node: ts.Node): boolean => {

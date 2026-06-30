@@ -1,8 +1,9 @@
 /**
  * Cycle 24: foreground image queue concurrency is capped against the shared DB
  * pool reserve. Each image-processing job can hold one advisory-lock
- * connection across Sharp work, so the effective queue size must keep live
- * request headroom.
+ * connection across Sharp work and can need one transient DB connection while
+ * that lock is still held, so the effective queue size must keep live request
+ * headroom.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -38,9 +39,9 @@ import { IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS, resolveImageQueueConcurrency } f
 
 describe('resolveImageQueueConcurrency', () => {
     it('clamps foreground queue requests to leave live DB headroom', () => {
-        expect(resolveImageQueueConcurrency(8, 10)).toBe(5);
-        expect(resolveImageQueueConcurrency(5, 10)).toBe(5);
-        expect(resolveImageQueueConcurrency(100, 10)).toBe(5);
+        expect(resolveImageQueueConcurrency(8, 10)).toBe(2);
+        expect(resolveImageQueueConcurrency(5, 10)).toBe(2);
+        expect(resolveImageQueueConcurrency(100, 10)).toBe(2);
     });
 
     it('passes through requests below the pool-budget cap', () => {
@@ -60,6 +61,6 @@ describe('resolveImageQueueConcurrency', () => {
         const cap = resolveImageQueueConcurrency(100, limit);
         const reserved = IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS(limit);
 
-        expect(limit - cap).toBeGreaterThanOrEqual(reserved);
+        expect(limit - cap * 2).toBeGreaterThanOrEqual(reserved);
     });
 });

@@ -1,11 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { beginRestoreMaintenance, cleanupOriginalIfRestoreMaintenanceBegan, endRestoreMaintenance, getRestoreMaintenanceMessage, isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { beginDurableRestoreMaintenance } from '@/lib/restore-maintenance-durable';
 
 describe('restore maintenance state', () => {
-    it('activates and clears the maintenance window', () => {
-        endRestoreMaintenance();
+    let tempDir: string;
 
+    beforeEach(() => {
+        tempDir = mkdtempSync(join(tmpdir(), 'gk-restore-maint-'));
+        vi.stubEnv('RESTORE_MAINTENANCE_MARKER_PATH', join(tempDir, 'restore-maintenance.json'));
+        endRestoreMaintenance();
+    });
+
+    afterEach(() => {
+        endRestoreMaintenance();
+        vi.unstubAllEnvs();
+        rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('activates and clears the maintenance window', () => {
         expect(isRestoreMaintenanceActive()).toBe(false);
         expect(beginRestoreMaintenance()).toBe(true);
         expect(isRestoreMaintenanceActive()).toBe(true);
@@ -15,16 +31,11 @@ describe('restore maintenance state', () => {
     });
 
     it('refuses overlapping maintenance windows', () => {
-        endRestoreMaintenance();
-
         expect(beginRestoreMaintenance()).toBe(true);
         expect(beginRestoreMaintenance()).toBe(false);
-
-        endRestoreMaintenance();
     });
 
     it('returns a caller-provided block message while the maintenance window is active', () => {
-        endRestoreMaintenance();
         expect(getRestoreMaintenanceMessage('blocked')).toBeNull();
 
         expect(beginRestoreMaintenance()).toBe(true);
@@ -35,7 +46,6 @@ describe('restore maintenance state', () => {
     });
 
     it('cleans up the saved original when restore begins before the upload write boundary', async () => {
-        endRestoreMaintenance();
         const cleanupCalls: string[] = [];
         const cleanup = async (filename: string) => {
             cleanupCalls.push(filename);
@@ -49,5 +59,20 @@ describe('restore maintenance state', () => {
         expect(cleanupCalls).toEqual(['file.jpg']);
 
         endRestoreMaintenance();
+    });
+
+    it('recovers durable maintenance after in-process state is cleared', async () => {
+        expect(beginDurableRestoreMaintenance()).toBe(true);
+
+        vi.resetModules();
+        const reloadedProcess = await import('@/lib/restore-maintenance');
+        const reloadedDurable = await import('@/lib/restore-maintenance-durable');
+
+        reloadedProcess.setRestoreMaintenanceActiveForProcess(false);
+        expect(reloadedProcess.isRestoreMaintenanceActive()).toBe(false);
+        expect(reloadedDurable.syncRestoreMaintenanceFromDurable()).toBe(true);
+        expect(reloadedProcess.isRestoreMaintenanceActive()).toBe(true);
+        reloadedDurable.endDurableRestoreMaintenance();
+        expect(reloadedProcess.isRestoreMaintenanceActive()).toBe(false);
     });
 });

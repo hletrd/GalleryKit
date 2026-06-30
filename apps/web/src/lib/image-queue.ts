@@ -94,7 +94,9 @@ export function resolveImageQueueConcurrency(
 ): number {
     const limit = Number.isFinite(poolLimit) ? poolLimit : DEFAULT_DB_POOL_CONNECTION_LIMIT;
     const reserved = IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS(limit);
-    const cap = Math.max(1, limit - reserved);
+    // Each worker can hold one advisory-lock connection while also needing a
+    // transient DB connection for row checks and updates.
+    const cap = Math.max(1, Math.floor((limit - reserved) / 2));
     const req = Math.max(1, Math.floor(requested) || 1);
     return Math.min(req, cap);
 }
@@ -353,6 +355,11 @@ async function storeImageEmbeddingForMode(
     originalPath: string,
     semanticMode: 'stub' | 'production',
 ) {
+    if (isRestoreMaintenanceActive()) {
+        console.debug(`[Queue] Skipping embedding generation for image ${imageId} during restore maintenance`);
+        return;
+    }
+
     let embedding: Float32Array;
     let modelVersion: string;
     if (semanticMode === 'production') {

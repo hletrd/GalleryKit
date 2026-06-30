@@ -66,7 +66,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 - **Concurrency:** `CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in code. Raise it only after measuring CPU/RSS headroom because each concurrent request runs an ONNX forward pass.
 - **Honesty gate:** `production` serves results only from rows matching the active `model_version`; if no real embeddings exist yet it returns 503 rather than serving stub or empty results under the production label.
 - **Scan scope:** searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill.
-- **Same posture as other public routes:** same-origin guard on the query endpoints + bounded per-IP rate limiting.
+- **Public route posture:** same-origin guard on the query endpoints plus bounded per-IP rate limiting. The semantic/similar limiter is process-local; use the shipped reverse-proxy limits or an edge limiter for stronger cross-restart abuse resistance.
 
 ### Going live (operator-only, deliberate)
 
@@ -84,8 +84,8 @@ New uploads are embedded automatically (fire-and-forget, lower priority than der
 - Endpoint: `POST /api/admin/lr/upload`
 - Auth header: `X-GalleryKit-Token: gk_...`
 - Required token scope: `lr:upload`
-- Body: `multipart/form-data` with `file`, `topic`, and optional metadata fields matching the dashboard upload form.
+- Body: `multipart/form-data` with `file`, `topic`, optional `title`, and optional `description`. Camera/lens/date/exposure metadata comes from the uploaded file; this route does not currently consume submitted `tags`, camera/lens overrides, capture-date overrides, or exposure override fields.
 - Limits: 200 MiB per file, 2 GiB per upload window, 100 files per window by default; the shipped nginx route cap is 216 MiB.
-- Response: JSON describing the created image and generated filenames, or JSON error payloads with the matching HTTP status.
+- Response: `{ "success": true, "id": 123 }`, or JSON error payloads with the matching HTTP status. Generated filenames are not returned.
 
 The route is compatible with external publish clients that can send multipart form data and the PAT header. GalleryKit does not bundle a Lightroom Classic plugin.

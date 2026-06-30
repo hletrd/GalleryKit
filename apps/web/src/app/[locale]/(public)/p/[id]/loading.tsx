@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
 
 function readLightboxFlag(): boolean {
@@ -14,6 +15,7 @@ function readLightboxFlag(): boolean {
 
 export default function PhotoLoading() {
     const [isLightbox] = useState(readLightboxFlag);
+    const t = useTranslations();
 
     if (isLightbox) {
         return (
@@ -21,8 +23,10 @@ export default function PhotoLoading() {
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black"
                 role="status"
                 aria-live="polite"
+                aria-label={t('photo.loading')}
             >
                 <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/80 border-t-transparent" aria-hidden="true" />
+                <span className="sr-only">{t('photo.loading')}</span>
             </div>
         );
     }

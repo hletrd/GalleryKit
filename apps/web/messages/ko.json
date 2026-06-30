@@ -412,6 +412,7 @@
     "placeholder": "사진, 태그, 카메라 검색…",
     "noResults": "검색 결과가 없습니다",
     "hint": "제목, 태그, 카메라, 설명으로 검색",
+    "keyboardInstructions": "화살표 키로 결과를 고르고 Enter 키로 여세요.",
     "toggleHint": "검색 열기/닫기",
     "searching": "검색 중…",
     "resultsCount": "검색 결과 {count}개",

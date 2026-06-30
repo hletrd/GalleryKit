@@ -1,28 +1,32 @@
 #!/bin/sh
 set -e
 
-# Fix permissions on data directory only if not already owned by node
-if [ "$(stat -c '%U' /app/data 2>/dev/null || echo root)" != "node" ]; then
-    chown -R node:node /app/data
-fi
-if [ "$(stat -c '%U' /app/apps/web/public/uploads 2>/dev/null || echo root)" != "node" ]; then
-    chown -R node:node /app/apps/web/public/uploads
-fi
-if [ "$(stat -c '%U' /app/apps/web/public/resources 2>/dev/null || echo root)" != "node" ]; then
-    chown -R node:node /app/apps/web/public/resources
-fi
+ensure_node_writable_dir() {
+    dir="$1"
+    mkdir -p "$dir"
+    if [ "$(stat -c '%U' "$dir" 2>/dev/null || echo root)" != "node" ]; then
+        chown node:node "$dir"
+    fi
+    if ! gosu node sh -c "test -w \"\$1\"" sh "$dir"; then
+        echo "Error: $dir is not writable by node. Fix host ownership before deploy, for example: chown -R 3000:3000 $dir" >&2
+        exit 1
+    fi
+}
+
+ensure_node_writable_dir /app/data
+ensure_node_writable_dir /app/data/backups
+ensure_node_writable_dir /app/data/uploads
+ensure_node_writable_dir /app/data/uploads/original
+ensure_node_writable_dir /app/apps/web/public/uploads
+ensure_node_writable_dir /app/apps/web/public/uploads/avif
+ensure_node_writable_dir /app/apps/web/public/uploads/jpeg
+ensure_node_writable_dir /app/apps/web/public/uploads/webp
+ensure_node_writable_dir /app/apps/web/public/resources
 
 # Ensure .next folder exists and has correct permissions
 # Create cache directory explicitly to avoid runtime EACCES
 # Ensure .next/cache exists (Next.js needs this to be writable)
-mkdir -p /app/apps/web/.next/cache
-
-# Fix permissions for the entire .next directory
-# This is crucial because standard COPY commands might leave some files as root
-# or the cache directory created above constitutes a new permission requirement
-if [ -d "/app/apps/web/.next" ]; then
-    chown -R node:node /app/apps/web/.next
-fi
+ensure_node_writable_dir /app/apps/web/.next/cache
 
 # Set UV_THREADPOOL_SIZE to CPU count if not set
 if [ -z "$UV_THREADPOOL_SIZE" ]; then

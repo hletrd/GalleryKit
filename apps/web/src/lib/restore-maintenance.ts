@@ -22,6 +22,10 @@ export function isRestoreMaintenanceActive() {
     return getRestoreMaintenanceState().active;
 }
 
+export function setRestoreMaintenanceActiveForProcess(active: boolean) {
+    getRestoreMaintenanceState().active = active;
+}
+
 export function getRestoreMaintenanceMessage(message: string) {
     return isRestoreMaintenanceActive() ? message : null;
 }

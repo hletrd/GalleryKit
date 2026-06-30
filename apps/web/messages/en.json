@@ -412,6 +412,7 @@
     "placeholder": "Search photos, tags, cameras…",
     "noResults": "No results",
     "hint": "Search by title, tag, camera, or description",
+    "keyboardInstructions": "Use arrow keys to choose a result, then press Enter to open.",
     "toggleHint": "to toggle search",
     "searching": "Searching…",
     "resultsCount": "{count, plural, one {# result} other {# results}}",

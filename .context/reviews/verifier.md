@@ -1,77 +1,63 @@
-# Verifier Review - Cycle 24/100
+# Verifier Review - Cycle 25
 
-Role: verifier  
-Review target: current HEAD `0cc094dd76d51e88fe163c0b7075e3f0b341f74c` (`fix(deploy): allow mounted deploy env ownership`)  
-Workspace: `/Users/hletrd/flash-shared/gallery`  
+Role: cycle-25 verifier
+Workspace: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-06-30
+Instruction constraints: read `AGENTS.md` and `CLAUDE.md`; do not commit or push; write this report to `.context/reviews/verifier.md`.
 
-## Scope And Inventory
+## Scope And File Inventory
 
-I reviewed current HEAD, not prior-cycle assumptions. `git status --short` was clean before the review artifact edit.
+I reviewed the current workspace for correctness drift between stated behavior and actual support in docs, scripts, tests, and source. I built the inventory first with `rg --files`; current tracked inventory is 801 files. I then inspected the high-risk support surfaces rather than sampling randomly:
 
-Relevant behavior under review: the repo-level deploy helper must read the gitignored root `.env.deploy` when present, allow this checkout's mounted env file even when its numeric owner differs from the local user, keep unsafe permission refusal before sourcing, derive the SSH deploy command from config, and delegate production deploy to `apps/web/deploy.sh` without weakening the documented Docker prune/data-persistence invariants.
+- Workspace rules/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
+- Package/script contract: `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`, `.nvmrc`.
+- Deploy/runtime: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `.env.deploy.example`, `apps/web/.env.local.example`.
+- Migration/schema: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/db/schema.ts`.
+- Security/privacy gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`.
+- Semantic-search and CLIP support: `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`.
+- Contract tests inspected or executed: migration journal/reconcile, privacy fields, settings hash, semantic routes/config, deploy script, site-config guard, and the three security lint scanners.
 
-Relevant files inventoried and examined:
+## Confirmed Findings
 
-- Deploy helper and direct entrypoint: `scripts/deploy-remote.sh`, `package.json`.
-- Deploy docs/contracts: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.env.deploy.example`.
-- Host deploy/runtime config: `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`.
-- Build-context persistence guards: `.dockerignore`, `apps/web/.dockerignore`.
-- Test contracts directly covering this surface: `apps/web/src/__tests__/deploy-script-contract.test.ts`, plus related source-contract references in `apps/web/src/__tests__/cycle-21-source-contracts.test.ts` and `apps/web/src/__tests__/client-source-contracts.test.ts`.
+### 1. Medium - Production semantic-search/live-demo claims are operational assertions with no repo-backed verification
 
-I also ran repo-wide targeted searches for deploy/env/prune terms across tracked docs, plans, reviews, tests, and scripts to avoid sampling only the changed file.
+Severity: Medium
+Confidence: High
+Exact regions: `AGENTS.md:49`, `CLAUDE.md:159`, `README.md:42`, `apps/web/README.md:73-80`, `apps/web/.env.local.example:75-84`, `apps/web/docker-compose.yml:18-23`, `apps/web/Dockerfile:98-102`, `apps/web/src/lib/gallery-config.ts:123-141`
 
-## Confirmed Issues
+Finding: The docs state that CLIP semantic search is "live in production", that the production deployment runs `semantic_search_mode=production` with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, and that it has "~445" real embeddings. The repository only proves the code path and operator gate. It does not prove current production state, model-weight presence, DB setting, or embedding count. The shipped/default configuration keeps production disabled: `.env.local.example` only comments the opt-in, compose merely loads `.env.local`, Docker only sets `CLIP_MODELS_ROOT`, and `gallery-config.ts` heals stored `production` back to `disabled` unless the env flag is set.
 
-None.
+Concrete failure scenario: An operator or future verifier trusts `CLAUDE.md:159` during an incident and assumes natural-language/similar search is active with real embeddings. The repo can still build, test, and deploy with semantic search disabled, missing weights, or an empty production embedding table. The route then returns 503 (`semantic_not_configured` or `semantic_no_embeddings`) despite docs saying the production deployment is active.
 
-The HEAD diff is limited to `scripts/deploy-remote.sh:61-63`, changing the prior non-owner hard failure into a warning. The surrounding checks still reject group/world write or execute bits before sourcing the env file at `scripts/deploy-remote.sh:65-73`, and the file is sourced only after those checks at `scripts/deploy-remote.sh:75-78`.
+Suggested fix: Rephrase the "live in production" and "~445 embeddings" statements as a dated operational note, or add a repo-backed verification command/script such as `npm run verify:semantic-production` that checks env opt-in, DB `admin_settings.semantic_search_mode`, model-weight manifest, and `image_embeddings` count for `PRODUCTION_MODEL_VERSION`. Link that command from the docs and make the docs say "verified by ..." instead of carrying an untestable static production claim.
 
-Why this matches the contract:
+Supporting evidence:
 
-- Root `.env.deploy` precedence and fallback are implemented at `scripts/deploy-remote.sh:22-29`, matching `CLAUDE.md:662-671`, `README.md:120-130`, `AGENTS.md:17-18`, and `.env.deploy.example:1-4`.
-- The deploy command remains config-derived from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `DEPLOY_PATH`, and optional `DEPLOY_REMOTE_SCRIPT` at `scripts/deploy-remote.sh:31-52`; `DEPLOY_CMD` remains the explicit escape hatch at `scripts/deploy-remote.sh:80-83`.
-- `package.json:11-22` routes `npm run deploy` to `./scripts/deploy-remote.sh`.
-- Host deploy still starts the stack before pruning at `apps/web/deploy.sh:28-59`, and `docker volume prune` remains `-f` only, not `-a`.
-- Compose persistence still uses narrow bind mounts for data, uploads, resources, and read-only site config at `apps/web/docker-compose.yml:24-28`, matching the persistence guarantees in `AGENTS.md:19`, `CLAUDE.md:471-473`, and `README.md:196-198`.
-- Build contexts still exclude mutable runtime public data at `.dockerignore:16-20` and `apps/web/.dockerignore:7-10`.
+- Code gate exists and is tested: `gallery-config.ts:123-141` resolves `production` only when `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`; `gallery-config.test.ts` covers both healing and opt-in pass-through.
+- Route behavior exists and is tested: semantic route requires `production` rows before serving production results; similar route is production-only.
+- Missing support: no tracked deploy config sets `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, no repo test or CI job probes the live demo, and no source-backed check verifies the claimed "~445" row count.
 
-## Likely Issues
+## No Finding After Inspection
 
-None identified.
+The following claims had code/test support or explicit scope limits:
 
-The only subtle area is local secret-file hygiene: `scripts/deploy-remote.sh:69` intentionally rejects group/world write or execute bits, not group/world read bits. That is consistent with the HEAD commit's stated constraint and preserves the pre-existing permission model. I did not classify it as a current defect because the docs describe `.env.deploy` as gitignored SSH target configuration, not as a private-key material file, and the current local mounted `.env.deploy` is `0644`, non-owner, and readable.
-
-## Risks Needing Manual Validation
-
-1. Live remote deploy was not exercised in this verifier pass.
-   - Severity: Low
-   - Confidence: High
-   - Code/docs region: `scripts/deploy-remote.sh:85-86`, `CLAUDE.md:463-473`, `apps/web/deploy.sh:10-32`.
-   - Scenario: local helper validation passes, but the remote host rejects SSH, `git pull --ff-only`, Docker build, or runtime startup for environment-specific reasons.
-   - Fix/validation: run `npm run deploy` only in an authorized deploy iteration, then probe `/api/live` and inspect deploy output for the post-`up -d` prune/`df -h /` lines.
-
-2. Non-owner env behavior depends on the mounted file being readable by the current user.
-   - Severity: Low
-   - Confidence: High
-   - Code/docs region: warning at `scripts/deploy-remote.sh:61-63`, source at `scripts/deploy-remote.sh:75-78`.
-   - Scenario: another checkout has a non-owned `.env.deploy` with mode `0600`; the helper no longer fails at the owner check, but `source "$ENV_FILE"` fails with permission denied.
-   - Fix/validation: keep the mounted file readable by the local user or set `DEPLOY_ENV_FILE` to a readable path. If future policy requires non-owner `0600` support, use filesystem ownership/ACLs outside this script rather than weakening the source-time permission boundary.
+- Deploy pruning/data safety: `apps/web/deploy.sh:32-59`, compose bind mounts at `apps/web/docker-compose.yml:24-28`, and `deploy-script-contract.test.ts` cover prune-after-up, no `docker volume prune -a`, narrow mutable public mounts, config-driven deploy helper, and build-arg forwarding.
+- Migration runbook: `migrate.js:731-807` baselines per journal hash and throws on missing hashes; migration tests cover monotonicity, journal tag/file presence, reconcile table/column/index mirrors, and known drop mirrors.
+- Privacy field separation: `data.ts` public/admin select split, `search-enrichment-fields.ts:29-46`, and `privacy-fields.test.ts` cover the symmetric sensitive-key contract.
+- Security lint gates: scanner scripts match the documented scope, CI runs them, and local execution passed.
+- Semantic route gates: same-origin checks, per-IP pre-increment rate limiting, model-version filtering, disabled/stub/production behavior, and client UI gating all have source and test support.
 
 ## Validation Evidence
 
-- `bash -n scripts/deploy-remote.sh && bash -n apps/web/deploy.sh` passed.
-- Temporary-env smoke: `DEPLOY_ENV_FILE=<0600 temp file>` with `DEPLOY_CMD='printf helper-ok'` executed successfully.
-- Temporary-env permission checks: mode `0622` and mode `0611` both refused before sourcing with "Refusing to source deploy env file with unsafe permissions".
-- Temporary-env read-permitted check: mode `0644` executed successfully, matching the intended local mounted `.env.deploy` behavior.
-- `npm test --workspace=apps/web -- --run src/__tests__/deploy-script-contract.test.ts` passed: 1 file, 8 tests.
-- `npm run typecheck --workspace=apps/web -- --help` unintentionally ran the app typecheck prerequisite before printing npm help for the second script; the app typecheck portion passed through Next route type generation and `tsc -p tsconfig.typecheck.json --noEmit`. I did not count this as full typecheck coverage because `typecheck:scripts` was not run normally.
-- Local `.env.deploy` metadata was checked without reading secret values: regular file, mode `644`, uid/gid `3000`, readable by current user, not owned by current user. `.env.deploy` is gitignored by `.gitignore:18`.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- Targeted tests passed: `npm test --workspace=apps/web -- --run src/__tests__/privacy-fields.test.ts src/__tests__/settings-hash.test.ts src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/gallery-config.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/ensure-site-config.test.ts` returned 10 test files passed, 157 tests passed.
 
-## Final Sweep And Skipped Files
+I did not run the full Vitest suite, Playwright suite, build, typecheck, or a live deploy; the review target was evidence-based doc/source/test correctness, and the targeted gates above directly covered the inspected invariants.
 
-Final sweep covered deploy helper command construction, env-file precedence, unsafe permission checks, config-driven SSH derivation, docs alignment, Docker deploy prune ordering, bind-mount persistence guarantees, Docker build-context excludes, and direct test contracts for those invariants.
+## Final Missed-Issue Sweep
 
-Skipped as not relevant to this HEAD behavior: application feature source under `apps/web/src/**` outside the deploy/source-contract tests, migrations, binary/image fixtures, generated `.next` output, screenshots, local `.omx`/`.omc` state, and historical `.context` artifacts except where targeted searches established deploy-contract context. I did not read secret contents from `.env.deploy` or `apps/web/.env.local`.
+Final sweep searches covered unverified terms and brittle claims across `AGENTS.md`, `CLAUDE.md`, both READMEs, source, scripts, Docker/compose/nginx config, and tests: `live in production`, `~445`, `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, `guarantee`, `MUST`, `blocking in CI`, `no role`, `Storage Backend`, `Stripe/payment`, `Lightroom Classic plugin`, deployment prune, and migration-skip terms.
 
-Verdict: no confirmed or likely correctness issue in current HEAD for the deploy-helper ownership change.
+No critical or high-severity mismatch was found. The one confirmed issue is documentation/operations drift: repo tests prove the semantic-search implementation contract, but not the live-production state claimed by the docs.

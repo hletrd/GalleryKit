@@ -1,167 +1,116 @@
-# Cycle 24 Critic Review
+# Cycle 25 Critic Review
 
-Reviewer: cycle 24 critic  
-Repository: `/Users/hletrd/flash-shared/gallery`  
-HEAD reviewed: `0cc094dd76d51e88fe163c0b7075e3f0b341f74c` on `master`  
-Change surface reviewed: HEAD commit `fix(deploy): 🐛 allow mounted deploy env ownership`, which changes only `scripts/deploy-remote.sh`.  
-Source edits: none. This review artifact is the only file written by this critic pass.
+Reviewer: cycle-25 critic
+Repository: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `4cb1258ba0b2cca689846a85423264edc2d96b90` on `master`
+Source edits: none. This review artifact is the only file intentionally written by this critic pass.
+Commit/push: not performed, per user instruction.
 
 ## Inventory First
 
-Review-relevant tracked files were inventoried before findings:
+I read `AGENTS.md` and `CLAUDE.md` first, then built a fresh inventory before inspecting source. The raw workspace contains 45,379 files, dominated by generated/vendor/history surfaces: `node_modules` 34,134 files, `apps/web` 5,410 files, `.context` 2,343 files, `.claude` 2,291 files, `.omc` 609 files, `.omx` 392 files, and `plan` 180 files.
 
-- Live source/config/docs set: 590 tracked files across `apps/web/src`, `apps/web/e2e`, `apps/web/scripts`, root `scripts`, `apps/web/drizzle`, manifests, deploy files, CI, `README.md`, `CLAUDE.md`, and `AGENTS.md`.
-- Runtime app breadth examined: app routes/pages, API routes, server actions, auth/session/origin guards, public search/share routes, data selectors/privacy guards, upload ingest, image queue, image processing, restore/backup, migrations, deployment, Docker, settings, rate limits, CLIP activation, nav/search/photo-viewer UI surfaces, unit tests, and e2e tests.
-- Historical `.context/` and `plan/` archives were inventoried as context but not treated as live product code. The current review output file is the only `.context` file intentionally modified.
+Review-relevant live surfaces inspected:
 
-Current worktree note: `git status --short` showed an unrelated modified `.context/reviews/verifier.md` before this file write. It was not read as source-of-truth for this review and was not modified.
+- Manifests and runtime config: root `package.json`, `apps/web/package.json`, `.nvmrc`, `next.config.ts`, Dockerfile, compose, nginx, entrypoint, deploy helpers.
+- App code: public/admin routes, API routes, server actions, auth/session/origin gates, rate limits, analytics, search/semantic search, sharing, data selectors, SEO/settings, migrations, image processing/queue, CLIP inference/model loading.
+- UI/product surfaces: public layouts/pages, search UI, similar photos, photo viewer, topic/share pages, metadata/OG routes.
+- Tests/scripts: auth/action-origin/API-auth/public-route-rate-limit guardrails, public actions, semantic/similar routes, rate-limit DB tests, migration reconcile tests, deploy contracts, touch/nav-related source-contract tests.
+- Docs/current assumptions: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, and current `.context` review/plan inventory only as history, not as source-of-truth.
+
+Worktree note: `git status --short --branch` showed an unrelated modified `.context/reviews/verifier.md` before this report write. I did not modify it.
 
 ## Validation Evidence
 
-- `git rev-parse --short HEAD` -> `0cc094dd`.
-- `git show --stat --name-only HEAD` confirmed the HEAD change surface is only `scripts/deploy-remote.sh`.
-- `bash -n scripts/deploy-remote.sh` passed.
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm test --workspace=apps/web -- deploy-script-contract.test.ts` passed: 1 file, 8 tests.
-- Full `lint`, `typecheck`, `build`, full Vitest, and Playwright were not rerun in this critic pass because the task was read-only except for this review artifact.
+- Full lint/typecheck/build/Vitest/Playwright were not rerun because this was a critique pass with no product-code edits.
 
-## Confirmed Issues
+## Confirmed Findings
 
-### CRIT24-01 - Deploy env files can be group/world-readable and still get sourced
+### C25-01 - Public analytics writes have only a per-process limiter and no global write ceiling
 
-Severity: High  
-Confidence: High  
-Area: operational risk, credential handling, documentation drift  
-
-Evidence:
-
-- The deploy helper sources the selected deploy env file after a permissions check in `scripts/deploy-remote.sh:65-77`.
-- The check splits group/world permission digits but rejects only write/execute bits: `((env_group_perms & 3) != 0 || (env_world_perms & 3) != 0)` at `scripts/deploy-remote.sh:67-72`. Read bit `4` is accepted.
-- The same error message tells operators to run `chmod 600` at `scripts/deploy-remote.sh:70-71`, but modes such as `0644` and `0640` pass the current predicate.
-- The env file carries deploy target and SSH material references: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, `DEPLOY_PATH`, and optional full `DEPLOY_CMD` in `.env.deploy.example:7-14`.
-- HEAD intentionally relaxed ownership failure to a warning in `scripts/deploy-remote.sh:61-63`, so the permission predicate is now the remaining hard local guard.
-
-Concrete failure scenario:
-
-An operator copies `.env.deploy.example` to `.env.deploy` and leaves the file at a common default mode such as `0644`. `npm run deploy` accepts and sources it. On a shared workstation, mounted checkout, backup agent, or compromised low-privilege local account, another user can read deploy host/user/key path or a full custom `DEPLOY_CMD`, weakening the deploy boundary. The script says `chmod 600` is required, but the code does not enforce it.
-
-Suggested fix:
-
-Reject any group/world permission bits before sourcing, for example by checking `((env_perms & 77) != 0)` after parsing the octal mode, or equivalently rejecting group/world read/write/execute. Keep the non-owner warning only if mounted env files are required, but make readability strict. Add tests proving `0600` passes and `0644`, `0640`, `0660`, and `0755` fail.
-
-### CRIT24-02 - Deploy helper tests do not cover the credential-file permission contract
-
-Severity: Medium  
-Confidence: High  
-Area: testing adequacy, operational regression prevention  
+Severity: Medium
+Confidence: High
+Perspectives: product correctness, operational risk, hidden assumptions, testing adequacy
 
 Evidence:
 
-- `apps/web/src/__tests__/deploy-script-contract.test.ts:47-54` verifies that the deploy target is config-driven and does not hardcode an SSH target.
-- The same test file covers Docker prune ordering, mutable mounts, build args, and native dependency pinning in `apps/web/src/__tests__/deploy-script-contract.test.ts:20-89`.
-- There is no test in that file for the permission-mode behavior around `scripts/deploy-remote.sh:65-72`.
-- The targeted test still passes on current HEAD: `npm test --workspace=apps/web -- deploy-script-contract.test.ts` -> 8/8 tests passed, despite CRIT24-01.
+- `apps/web/src/app/actions/public.ts:329-348` implements `VIEW_RECORD_MAX_REQUESTS = 120` with a `createResetAtBoundedMap` in memory only.
+- The public recorders then do durable DB work: `recordPhotoView` validates and inserts at `apps/web/src/app/actions/public.ts:370-389`, `recordTopicView` at `apps/web/src/app/actions/public.ts:397-420`, and `recordSharedGroupView` at `apps/web/src/app/actions/public.ts:428-455`.
+- The repo already has a durable shared rate-limit bucket table in `apps/web/src/db/schema.ts:212-219`.
+- Comparable public search/load-more paths use DB-backed rate-limit checks: `apps/web/src/app/actions/public.ts:83-118` and `apps/web/src/app/actions/public.ts:276-295`.
+- `apps/web/src/lib/view-retention.ts:5-14` explicitly documents that these anonymous public endpoints have no global write ceiling and can grow analytics tables until the retention sweep catches up.
+- Existing analytics tests only prove the in-memory 120-request budget (`apps/web/src/__tests__/public-actions.test.ts:307-317`); DB-backed rollback coverage exists for search instead (`apps/web/src/__tests__/public-actions.test.ts:345-354`).
 
-Concrete failure scenario:
+Failure scenario:
 
-A future change again weakens the deploy env guard, or preserves the current read-bit gap, and CI remains green because the contract test only checks script text for config-driven deployment. The regression is found only at operation time or by manual review.
+A scripted client or rotating-IP scraper repeatedly calls pages that trigger the server actions. Each accepted view performs a target lookup and then appends to `image_views`, `topic_views`, or `shared_group_views`. The limiter resets on process restart and multiplies if a second web process is ever started. Even on the documented single-writer deployment, a botnet can create sustained MySQL write/index pressure and pollute photographer-facing analytics for up to the 395-day default retention window.
 
 Suggested fix:
 
-Refactor the permission decision into a small shell-testable function or add a lightweight shell harness that creates temp env files at specific modes and invokes the helper with a harmless `DEPLOY_CMD='true'`. Assert `0600` succeeds and group/world readable/writable/executable modes fail before `source`.
+Move view-recording to the shared `rate_limit_buckets` path with a dedicated bucket type such as `view_record`, using the same pre-increment/check/rollback pattern as search and load-more. Consider adding a coarser global bucket and/or per-target/IP/day dedupe so one client cannot inflate a single photo/topic/share indefinitely. Add tests proving the analytics recorders consult the DB bucket before any SELECT/INSERT and fall back deliberately if the DB limiter is unavailable.
 
-### CRIT24-03 - Foreground image queue can starve the shared MySQL pool when concurrency is raised
+### C25-02 - Semantic search docs imply parity while the expensive CLIP endpoints remain process-local
 
-Severity: Medium  
-Confidence: High  
-Area: failure modes, operational risk  
+Severity: Low-Medium
+Confidence: High
+Perspectives: docs, operational risk, maintainability
 
 Evidence:
 
-- The shared MySQL pool is fixed at 10 connections with queue limit 20 in `apps/web/src/db/index.ts:23-33`.
-- `QUEUE_CONCURRENCY` is operator-configurable up to 8 in `apps/web/src/lib/image-queue.ts:87-90`.
-- Each image job acquires a MySQL advisory-lock connection and returns the connection as the claim handle in `apps/web/src/lib/image-queue.ts:446-455`.
-- That lock connection remains held while the job checks DB state, resolves the original, runs Sharp processing, verifies derivatives, and updates the row in `apps/web/src/lib/image-queue.ts:554-657`.
-- The lock is released only in final cleanup at `apps/web/src/lib/image-queue.ts:812-815`.
-- The admin backfill path already contains the missing pool-budget pattern: it documents the pinned-connection arithmetic in `apps/web/src/lib/admin-backfill-runner.ts:108-127` and clamps requested concurrency in `apps/web/src/lib/admin-backfill-runner.ts:667-678`.
+- `apps/web/README.md:61-69` describes semantic search as CPU-backed and says it has the "same posture as other public routes" with same-origin plus bounded per-IP rate limiting.
+- The route-level comment is more precise: `apps/web/src/app/api/search/semantic/route.ts:6-8` says the limiter is in-memory.
+- The implementation charges `preIncrementSemanticAttempt` at `apps/web/src/app/api/search/semantic/route.ts:173-184`.
+- `preIncrementSemanticAttempt` is backed only by a module-local bounded map in `apps/web/src/lib/rate-limit.ts:350-372`; it does not use `rateLimitBuckets`.
+- `CLAUDE.md:234-235` documents the single-web-instance assumption and says OG/share/search/semantic fast-path buckets weaken under scale-out, but that sentence is now too coarse because regular keyword search has a DB-backed bucket while semantic still does not.
 
-Concrete failure scenario:
+Failure scenario:
 
-An operator raises `QUEUE_CONCURRENCY=8` during a large upload/import. Eight foreground queue jobs can pin eight of ten shared DB connections across long image processing work. Page renders, session checks, admin actions, public search, and queue state writes then compete for two connections and a 20-item wait queue, causing avoidable 500s even while the DB itself is healthy.
+An operator reads the app README and assumes semantic search has the same durable protection as the DB-backed public search action. In production mode, a scripted same-origin-looking client can repeatedly hit the CLIP text encoder and bounded embedding scan until the per-process bucket fills; a restart clears the budget, and any accidental scale-out multiplies it. The product keeps serving correctly, but CPU/RSS protection and operator expectations diverge.
 
 Suggested fix:
 
-Apply the same pool-budget cap used by admin backfill to the foreground queue, reserving live request headroom. A conservative fix is a `resolveImageQueueConcurrency(requested, POOL_CONNECTION_LIMIT)` helper plus a test proving configured queue concurrency cannot consume the live traffic budget. A stronger fix is to avoid holding shared-pool advisory-lock connections across Sharp work.
+Either make semantic/similar search use a DB-backed `semantic` bucket before model lookup/embedding work, or update the docs to explicitly say semantic and similar search are process-local protections that require edge/container-level rate limiting for stronger abuse resistance. Split the `CLAUDE.md` topology note by bucket type so DB-backed `search` is not grouped with process-only `semantic`.
 
-## Likely Issues / Risks Needing Manual Validation
+### C25-03 - Container startup recursively chowns large bind mounts on owner mismatch
 
-### CRIT24-04 - Single-process topology is documented but not enforced
-
-Severity: Medium  
-Confidence: High for architecture state, Medium for likelihood  
-Area: product correctness, failure modes, operational risk  
+Severity: Low-Medium
+Confidence: Medium
+Perspectives: operational risk, maintainability
 
 Evidence:
 
-- `CLAUDE.md:233-236` states the shipped deployment is single web-instance/single-writer and warns that restore maintenance, upload quota tracking, image queue state, and several rate-limit buckets are process-local.
-- Restore maintenance is a `globalThis` flag in `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- Upload quota tracking is a `globalThis` `Map` in `apps/web/src/lib/upload-tracker-state.ts:7-20`, and active-claim checks are process-local in `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- Image queue state is also process-local around `apps/web/src/lib/image-queue.ts:76-90`.
-- The shipped compose file declares one service/container in `apps/web/docker-compose.yml:1-28`, but there is no startup lease or DB-backed process-count assertion that fails if a second web process points at the same DB/uploads tree.
+- `apps/web/docker-compose.yml:24-28` bind-mounts persistent mutable stores: `./data`, `./public/uploads`, and `./public/resources`.
+- `apps/web/scripts/entrypoint.sh:4-13` runs `chown -R node:node` over each of those mounts when the top-level directory owner is not `node`.
+- The same entrypoint recursively chowns `.next` on every startup in `apps/web/scripts/entrypoint.sh:15-25`.
+- `CLAUDE.md:234-237` frames the shipped deployment as a single web-instance/single-writer production topology where availability depends on one container coming up cleanly.
 
-Concrete failure scenario:
+Failure scenario:
 
-A future operator or deploy script starts a second web process for availability. Process A begins a restore and sets only its own maintenance flag. Process B continues to accept uploads, maintains separate upload/rate-limit maps, and runs its own queue bootstrap. The product silently violates the documented single-writer assumptions.
-
-Suggested fix:
-
-If single-writer remains the contract, make it executable: acquire a startup MySQL advisory lease for the web writer and fail fast if another writer is active. If scale-out is desired, move restore state, upload quota tracking, queue ownership, and public rate-limit buckets to shared durable coordination first.
-
-### CRIT24-05 - Nav visual e2e tests save screenshots but do not assert visual regressions
-
-Severity: Low-Medium  
-Confidence: High  
-Area: UX consistency, testing adequacy  
-
-Evidence:
-
-- `apps/web/e2e/nav-visual-check.spec.ts:40-79` is named `Nav visual checks` and has screenshot-oriented test names.
-- The tests assert visibility, touch target dimensions, and non-overlap via `expectVisibleNavTargetsAreStable` in `apps/web/e2e/nav-visual-check.spec.ts:6-38`.
-- The screenshot calls at `apps/web/e2e/nav-visual-check.spec.ts:51`, `:65`, and `:78` only write PNG artifacts under `test-results`; they do not use `expect(page).toHaveScreenshot(...)` or compare against a baseline.
-- Repo-wide search found no `toHaveScreenshot` assertions in `apps/web/e2e` or `apps/web/src/__tests__`.
-
-Concrete failure scenario:
-
-Nav spacing, color contrast, wrapping, z-index, or theme styling regresses while basic visibility/touch-target/non-overlap checks still pass. CI produces screenshot artifacts, but it does not fail unless a human manually inspects them every run.
+After a host restore, rsync, root-run sidecar, or manual maintenance, the top-level `data` or uploads directory can become root-owned even if it contains a large gallery, CLIP model tree, or many generated derivatives. The next deploy/startup walks the entire bind mount before dropping privileges. On a disk-constrained host, this can extend downtime or make the container appear wedged even though the application code is healthy.
 
 Suggested fix:
 
-Either convert these to real visual regression tests with `toHaveScreenshot` and controlled fixtures/viewports, or rename/document them as artifact-capture smoke tests and add explicit assertions for the visual properties the product cares about, such as no horizontal overflow, active theme state, collapsed/expanded density, and contrast-sensitive states.
+Avoid recursive ownership repair on large persistent stores during normal startup. Prefer a deploy/preflight check that verifies writability of the specific mutable subdirectories and fails with a clear remediation command, or chown only known small directories that the container creates. For `.next`, copy/build artifacts with the intended owner and limit startup repair to `.next/cache`. Add a source-contract test so future entrypoint changes do not reintroduce broad recursive chown over bind-mounted photo/model data.
 
 ## Cleared Checks And Non-Findings
 
-- Current public share pages avoid the earlier enumeration class: metadata is generic and intentionally avoids share-key DB lookup in `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:36-79` and `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:41-84`; the body rate-limits lookup before DB access in `s/[key]/page.tsx:81-103` and `g/[key]/page.tsx:86-111`.
-- Public semantic search and similar routes have same-origin, maintenance, rate-limit, mode, scan-limit, and ID/body gates in inspected current code. The security lint gates also passed.
-- Docs and package versions are aligned for the major stack claims checked in this pass: `.nvmrc` is `24`; `apps/web/package.json` declares Node `>=24`, Next `^16.2.9`, React `^19.2.5`, TypeScript `^6`, and `CLAUDE.md`/`README.md` describe Node 24+, Next 16, React 19, and TypeScript 6.
-- Migration/journal guidance was inspected; no new schema migration is present in HEAD, and the current deploy change does not touch Drizzle artifacts.
-- Docker deploy pruning still runs after `up -d --build`, and the automatic volume prune remains `docker volume prune -f` without `-a` in `apps/web/deploy.sh:27-63`.
+- Product correctness: public share pages avoid metadata lookup enumeration and rate-limit body lookups before DB access; current source did not show a new share-key leak.
+- Auth/security: the project guardrails passed for admin API wrappers, mutating server-action origin checks, and public mutating API route rate-limit checks.
+- Privacy: `publicSelectFields`/search enrichment and analytics schemas were inspected; no new full-IP storage or admin-only field exposure was found in current code.
+- Migrations: Drizzle journal/schema/reconcile patterns were inspected; no current migration drift was found.
+- UX: public layout, search, similar-photos, photo viewer, topic/share pages, and nav-related tests were inspected. I did not find an actionable current UX defect with source evidence in this pass.
+- Docs: stack-version claims are aligned across manifests and docs for Node 24, Next 16, React 19, and TypeScript 6. The actionable docs issue found is the semantic rate-limit wording above.
+- Deployment: deploy helpers, Docker pruning order, nginx body-size alignment, and host-network assumptions were inspected. I did not run deployment or modify production state.
 
-## Final Sweep
+## Final Missed-Issue Sweep
 
-Commonly missed issue sweep:
+I re-swept for common missed categories before writing:
 
-- Secrets: found one confirmed local-readable deploy env gap (CRIT24-01); no plaintext deploy secret values were printed by commands.
-- Auth/origin/rate limits: focused project lint gates passed; no unwrapped admin API route or mutating server action origin omission was found.
-- Privacy fields: public selectors and search enrichment were inspected; no new admin-only field exposure found in the reviewed current code.
-- Migration drift: no HEAD migration change; no new journal/schema drift found.
-- Production operations: single-writer and foreground queue pool-budget risks remain the highest non-HEAD operational risks.
-- UX/a11y: touch target and overlap checks exist for nav, but true visual regression coverage is not enforced.
-- Documentation drift: stack-version docs are current; deploy permission message says `chmod 600` but the code does not enforce that exact safety posture.
-
-Skipped-file confirmation:
-
-- I did not intentionally skip any live review-relevant source/config/test/docs area in the inventory above.
-- I did not line-review every historical `.context/` and `plan/` archive because those are prior review/plan history, not current executable product surface.
-- I did not inspect generated/runtime outputs such as `.next`, `node_modules`, or `test-results` as source.
+- Secrets and destructive ops: no secrets were printed; no destructive commands, commits, pushes, deploys, or container actions were run.
+- Rate-limit/origin blind spots: guardrail scripts passed, but they check presence/order of limiters, not durability or global ceilings; C25-01 and C25-02 are therefore still valid.
+- Scale assumptions: the single-instance topology is documented, but public analytics and semantic search still have failure modes if restarted, abused from many IPs, or accidentally scaled.
+- Data retention: analytics retention exists and is chunked, but it mitigates long-term growth after writes land; it does not cap accepted public writes.
+- Generated/vendor/history surfaces: `.next`, `node_modules`, runtime outputs, and historical `.context`/`plan` archives were inventoried but not treated as live product source.

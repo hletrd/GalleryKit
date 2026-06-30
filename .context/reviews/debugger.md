@@ -1,140 +1,143 @@
-# Debugger Review - Cycle 24
+# Debugger Review - Cycle 25
 
-Review role: debugger  
-Repository: `/Users/hletrd/flash-shared/gallery`  
-HEAD reviewed: `a6efd6fd584fe44138be3729d90743ceb76dbfad`  
-Date: 2026-06-30 KST  
-Mode: review-only. I modified only this report file.
+Review role: debugger
+Repository: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `4cb1258ba0b2cca689846a85423264edc2d96b90`
+Date: 2026-06-30 KST
+Mode: review-only. I modified only this report file. Per user instruction, I did not commit or push.
 
-## Bug-Prone Inventory First
+## File Inventory First
 
-Read before findings:
+Required project instructions read first:
 
-- `AGENTS.md` instructions from the prompt, plus project rules embedded there.
-- `CLAUDE.md` for architecture, security, deployment, migration, color/HDR, upload, and semantic-search contracts.
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md` for the review output contract.
+- `AGENTS.md`
+- `CLAUDE.md`
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-Inventoried and reviewed current HEAD source/docs across these high-risk surfaces:
+Tracked inventory from `git ls-files`:
 
-- Ingest and image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/storage/*`, `apps/web/src/lib/serve-upload.ts`.
-- Auth, origin, abuse, and privacy gates: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, public/admin API routes, public server actions, share/group pages, privacy-sensitive data projections.
-- Data, search, and schema behavior: `apps/web/src/lib/data.ts`, `apps/web/src/lib/smart-collections.ts`, `apps/web/src/app/actions/collections.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/tags.ts`, semantic search/similar routes, embeddings, migrations, `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`.
-- Operational/destructive workflows: admin DB backup/restore, SQL restore scanning, migration reconciliation, deploy documented contracts, queue shutdown/bootstrap, retention/GC.
-- Client async/interaction failure modes: search, similar photos, photo navigation, photo viewer, lightbox, image zoom, upload dropzone, histogram, settings backfill UI, load-more, home scroll restoration, map rendering.
-- Static sweeps included raw SQL, file operations, spawns, unhandled promises/catches, timers/listeners, auth wrappers, same-origin guards, public mutating route rate limits, `dangerouslySetInnerHTML`, CSP, TODO/FIXME/unsafe/exempt comments.
+- 2,585 tracked files total.
+- Main runtime tree: `apps/` with 616 tracked files.
+- Review/plan/history tree: `.context/` with 1,771 tracked files and `plan/` with 180 tracked files.
+- Dominant file types: 1,825 Markdown, 433 TypeScript, 104 TSX, 81 PNG, 28 SQL migrations, 22 JSON, 20 logs, 16 text files, 12 PID files, 6 JS, 6 MJS, 6 JPG, 5 ICC profiles, 3 shell scripts, 3 GitHub workflow files.
 
-## Findings Summary
+Runtime surfaces inventoried and reviewed:
 
-- Critical: 0
-- High: 0
-- Medium: 0
-- Low: 2 confirmed issues
-- Risks needing manual validation: 1
+- Upload/process/serve: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, upload routes, storage helpers, queue shutdown, backfill runners.
+- Restore: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/sql-restore-scan.ts`, MySQL SSL helpers, migration scripts, restore/upload lock tests.
+- Auth/session: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, admin token flows, origin/rate-limit guards.
+- Semantic search: semantic and similar API routes, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/gallery-config*.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, CLIP path/model contracts.
+- Analytics: public view-recording actions, analytics reporting, retention GC, view count buffers.
+- Deploy: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, Dockerfile, compose, dockerignore, deploy-script contract tests.
 
-## Confirmed Issues
+Skipped by design: dependency/build artifacts, generated `.next` output, binary image fixtures except where route or filename contracts mattered, and historical review files as evidence for runtime behavior.
 
-### DBG24-01 - Photo swipe state is not reset when the browser cancels a touch
+## Confirmed Findings
 
-Severity: Low  
-Confidence: High  
-Status: Confirmed issue  
-File/region: `apps/web/src/components/photo-navigation.tsx:60-151`
+### DBG25-01 - Failed restore can leave the app in an unrecoverable in-process maintenance state
 
-Evidence:
+Severity: High
+Confidence: Medium-high
+File/region: `apps/web/src/app/[locale]/admin/db-actions.ts:447-503`, `apps/web/src/app/[locale]/admin/db-actions.ts:670-730`, `apps/web/src/lib/restore-maintenance.ts:1-56`, `apps/web/src/app/actions/auth.ts:70-75`
 
-- Touch start resets `isSwiping`/snap state: `apps/web/src/components/photo-navigation.tsx:60-65`.
-- Touch move can set `isSwiping.current = true` and a non-zero `swipeOffset`: `apps/web/src/components/photo-navigation.tsx:67-107`.
-- Touch end is the only path that navigates or snaps back: `apps/web/src/components/photo-navigation.tsx:109-142`.
-- The component registers `touchstart`, `touchmove`, and `touchend`, but no `touchcancel`: `apps/web/src/components/photo-navigation.tsx:144-151`.
+Root cause:
 
-Failure scenario / reproduction idea:
+Restore maintenance is a process-local `globalThis` boolean (`restore-maintenance.ts:1-56`). `restoreDatabase` intentionally keeps that flag active when the mysql import exits non-zero or post-restore migrations fail (`db-actions.ts:670-730`), because the database may be partially rewritten. The outer finally only calls `endRestoreMaintenance()` when the restore succeeded or `keepMaintenance` is false (`db-actions.ts:496-503`). At the same time, the login action rejects all login attempts while maintenance is active (`auth.ts:70-75`).
 
-On a touch device, begin a horizontal swipe on the photo page and trigger a browser-level cancel before `touchend` fires, for example an interrupted gesture, page visibility interruption, or a synthetic `touchcancel` in a browser test after `touchmove`. The component can keep the photo container translated because `swipeOffset` and `isSwiping.current` are not reset until a future touch sequence or rerender.
+Concrete failure scenario:
 
-Concrete fix:
+An admin uploads a dump that passes header and dangerous-SQL scanning but fails halfway through mysql import, or imports successfully and then fails post-restore migration. The action returns failure with `keepMaintenance: true`; the image queue stays paused and in-process maintenance remains active. If the session table was replaced or the current cookie is no longer valid against the restored/partial DB, the operator cannot log in because login returns `restoreInProgress`. A container restart clears the process-local flag, but that may resume traffic against a partially restored database, which is exactly the state maintenance was trying to protect.
 
-Add a `handleTouchCancel` that sets `isSnapping(true)`, `setSwipeOffset(0)`, and `isSwiping.current = false`, then register/remove it alongside `touchend`. Add a focused interaction test that dispatches `touchstart`, horizontal `touchmove`, then `touchcancel` and asserts the transform snaps back.
+Suggested fix:
 
-### DBG24-02 - Similar-photos fetch can update state after unmount and cannot be aborted
+Add a durable restore recovery mode with an explicit, narrow recovery surface. Options: persist restore state in a small durable flag/table or host-side marker, allow a restore-only recovery endpoint while maintenance is active, and permit already-authenticated or recovery-token-authenticated operators to upload another dump or explicitly mark recovery complete. Avoid relying on process restart as the only escape hatch. Add tests for failed mysql import, failed post-restore migration, login behavior during recovery mode, and queue resume only after verified recovery.
 
-Severity: Low  
-Confidence: High  
-Status: Confirmed issue  
-File/region: `apps/web/src/components/similar-photos.tsx:69-90`
+### DBG25-02 - Public analytics view writes can race into the database during restore
 
-Evidence:
+Severity: Medium
+Confidence: High
+File/region: `apps/web/src/app/actions/public.ts:370-390`, `apps/web/src/app/actions/public.ts:397-421`, `apps/web/src/app/actions/public.ts:428-456`, `apps/web/src/app/[locale]/admin/db-actions.ts:481-489`
 
-- Expanding the panel starts an async fetch: `apps/web/src/components/similar-photos.tsx:69-77`.
-- After the awaited network/body work, every branch calls `setResults(...)` and the `finally` calls `setLoading(false)`: `apps/web/src/components/similar-photos.tsx:78-90`.
-- The component imports only `useState` and `useRef`, with no unmount cleanup or abort controller: `apps/web/src/components/similar-photos.tsx:3`, `apps/web/src/components/similar-photos.tsx:67`.
+Root cause:
 
-Failure scenario / reproduction idea:
+`recordPhotoView`, `recordTopicView`, and `recordSharedGroupView` check `isRestoreMaintenanceActive()` only before async work starts (`public.ts:372`, `404`, `432`). Each then awaits headers, rate-limit derivation, and target validation queries before scheduling a fire-and-forget insert (`public.ts:383-390`, `414-421`, `449-456`). Restore preparation flushes shared-group count buffers and quiesces the image queue (`db-actions.ts:481-489`), but it does not track, drain, or block these public analytics insert promises.
 
-In production semantic-search mode, open a photo, expand "Similar photos", then navigate to another photo or close the viewer while `/api/search/similar/[id]` is still pending. When the response resolves, the old component attempts to set state after unmount and the request keeps running even though its UI owner is gone.
+Concrete failure scenario:
 
-Concrete fix:
+A public photo page starts `recordPhotoView` just before an admin begins restore. The action passes the early maintenance check, awaits headers and a `visibleImage` SELECT, then restore enters maintenance and imports a new DB. After the awaited work resumes, the action schedules `db.insert(imageViews)` with an image ID from the pre-restore request. Depending on timing and restored IDs, the insert either fails noisily on a foreign key, or succeeds against a different/restored image and pollutes post-restore analytics with a pre-restore event. The same race exists for topic and shared-group views.
 
-Track an `AbortController` and mounted flag in `useEffect` cleanup. Pass `signal` to `fetch`, abort on unmount, and guard all post-await state commits. Consider resetting `fetchedRef` on abort so a remounted panel can retry rather than caching an aborted attempt as fetched.
+Suggested fix:
 
-## Likely Issues
+Add a late maintenance gate immediately before each insert and track analytics write promises so restore can drain them, or route view recording through a small queue/buffer with pause/drain semantics similar to image side effects. A minimal patch should re-check `isRestoreMaintenanceActive()` after target validation and before `db.insert(...)`; the robust fix should also make restore wait for already-started analytics writes to settle.
 
-No additional likely source bugs survived this pass. Candidate issues in upload quota settlement, settings backfill timers, histogram worker cleanup, semantic search stale-response handling, CSP production sources, and DB restore stream cleanup were checked against current HEAD and had matching guards or compensating tests/comments.
+### DBG25-03 - Deploy reports success without proving the new container is healthy
 
-## Risks Needing Manual Validation
+Severity: Medium
+Confidence: High
+File/region: `apps/web/deploy.sh:28-63`, `apps/web/Dockerfile:139-142`, `apps/web/src/__tests__/deploy-script-contract.test.ts:20-101`
 
-### DBG24-RISK-01 - Reverse-proxy IP trust remains configuration-dependent
+Root cause:
 
-Severity: Medium if misconfigured, otherwise none  
-Confidence: High  
-Status: Manual deployment validation risk, not a confirmed source bug  
-File/region: `apps/web/src/lib/rate-limit.ts:164-192`, `CLAUDE.md:97`, `CLAUDE.md:660`
+The deploy script runs `docker compose ... up -d --build` and then immediately prunes old Docker artifacts and prints `Deployment Complete!` (`deploy.sh:28-63`). The Dockerfile defines a health check against `/api/live` (`Dockerfile:139-142`), but the script does not wait for Docker health or curl a readiness/liveness endpoint. Existing deploy contract tests assert start-before-prune and env/build contracts, but they do not require any post-start health gate (`deploy-script-contract.test.ts:20-101`).
 
-Evidence:
+Concrete failure scenario:
 
-- `getClientIp` trusts forwarded headers only when `TRUST_PROXY === 'true'`: `apps/web/src/lib/rate-limit.ts:164-178`.
-- Without that flag, proxy traffic with forwarded headers falls back to the shared `"unknown"` bucket and logs once: `apps/web/src/lib/rate-limit.ts:190-192`.
-- The docs require `TRUST_PROXY=true` behind nginx/reverse proxy: `CLAUDE.md:97`, `CLAUDE.md:660`.
+A deployment builds and starts a container, but the Next server crashes on startup, fails to bind, lacks a runtime native dependency, or returns 500 due to bad environment. `docker compose up -d --build` can still exit successfully once the container is created. The script then prunes old images and prints success, giving the operator a false green deploy and reducing rollback material before the failure is surfaced externally.
 
-Failure scenario / reproduction idea:
+Suggested fix:
 
-Deploy behind nginx without `TRUST_PROXY=true`. All public users share one rate-limit identity. A few failed logins or public search/load-more bursts from any client can rate-limit unrelated users until the window expires.
+After `up -d --build`, wait with a bounded timeout for either Docker health status `healthy` on `gallerykit-web` or an explicit HTTP 200 from `http://localhost:3000/api/live`. On failure, print recent container logs and exit non-zero. Prefer moving prune after the health gate, or at least keep enough rollback material until health has passed. Add a deploy-script contract test that fails if no health wait/check exists between compose up and prune/success output.
 
-Concrete fix:
+### DBG25-04 - CLIP image embedding generation still runs after restore maintenance has begun
 
-Validate production deploy env explicitly: fail startup or health-check loudly when proxy headers are present but `TRUST_PROXY` is missing in a reverse-proxy deployment. At minimum, include this in deploy smoke checks.
+Severity: Low
+Confidence: High
+File/region: `apps/web/src/lib/image-queue.ts:351-385`, `apps/web/src/lib/image-queue.ts:1053-1080`
 
-## Confirmed Non-Findings / Revalidated Areas
+Root cause:
 
-- Lightroom multipart upload quota settlement is correct: it preclaims declared bytes, then `settleUploadTrackerClaim` subtracts claimed bytes and adds actual successful file bytes (`apps/web/src/lib/upload-tracker.ts:19-32`; LR settlement region `apps/web/src/app/api/admin/lr/upload/route.ts:139-151`, `apps/web/src/app/api/admin/lr/upload/route.ts:477-485`).
-- Admin API auth scanner passed for current routes.
-- Mutating server-action same-origin scanner passed; read-only/public exemptions were explicit.
-- Public mutating route rate-limit scanner passed.
-- Production CSP does not include development `unsafe-eval`; dev relaxations are isolated to `isDev` (`apps/web/src/lib/content-security-policy.ts:87-123`).
-- Settings backfill post-trigger timers have unmount cleanup and a mounted guard (`apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:90-143`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:203-211`).
-- Search and histogram async paths already use request ids, abort controllers, or mounted/aborted guards (`apps/web/src/components/search.tsx:143-260`, `apps/web/src/components/histogram.tsx:549-590`).
-- Server-side upload, queue, restore, migration, privacy projection, semantic search, and smart-collection paths contain current guard logic for the prior classes I checked: quota rollback, advisory locks, restore SQL scanning, migration postconditions, public data omission, same-origin/rate-limit gates, and query validation.
+`storeImageEmbeddingForMode` performs the expensive embedding generation first (`embedImageReal(originalPath)` at `image-queue.ts:358-360`) and checks `isRestoreMaintenanceActive()` only afterward (`image-queue.ts:367-370`). Restore quiesce pauses and clears the queue, waits for in-flight work, then drains side effects (`image-queue.ts:1053-1080`). If a semantic side effect is already running when restore begins, quiesce waits for the real CLIP inference to finish even though the subsequent DB write will be skipped.
+
+Concrete failure scenario:
+
+Production semantic mode is enabled and an upload has just queued an embedding side effect. An admin starts restore while ONNX inference is still running. Restore maintenance is active, but the model inference continues to consume CPU and delay `drainQueueSideEffects`. On a large image or constrained host, restore start latency can become much longer for work whose result will be discarded.
+
+Suggested fix:
+
+Move the maintenance check to the top of `storeImageEmbeddingForMode`, before `embedImageReal`, and keep the existing late check before the DB write. Optionally pass an abort signal or generation token into embedding side effects so restore can cancel pending inference rather than merely wait for it.
+
+## Refuted Hypotheses
+
+- Upload/restore interleaving across browser uploads: refuted. Browser upload acquires the upload-processing contract lock before config, disk, original-save, insert, and enqueue work; restore acquires the same lock before beginning maintenance. Late restore cleanup also exists after original save.
+- Lightroom upload/restore interleaving: mostly refuted. The LR route has the same restore gates, size/body checks, upload tracker settlement, original cleanup paths, and contract lock around the critical save/insert/enqueue region.
+- Duplicate queue processing after concurrent enqueue/bootstrap: refuted. The queue uses in-memory `enqueued`, MySQL per-image advisory locks, row re-checks, and `processed=false` conditional updates before marking processed.
+- Serve-upload traversal, symlink, and open/stat TOCTOU: refuted. `serve-upload.ts` validates allowed directories/extensions/path segments, rejects symlinks with `lstat`, checks realpath containment, opens the file descriptor, and stats the same descriptor before streaming.
+- Semantic stub/production result mixing: refuted. Search routes filter embeddings by `modelVersion`, production mode heals to disabled without the explicit environment opt-in, and similar-photo search is production-only.
+- Admin API auth wrapper bypass: refuted in reviewed routes. Admin API handlers route through `withAdminAuth`; token and cookie paths have separate scope/origin checks and response hardening.
+- Unbounded analytics retention: refuted. Retention GC and chunked purge logic exist. The confirmed analytics issue is restore-time write interleaving, not retention.
+- Dangerous SQL restore primitives such as `DROP DATABASE`, `CREATE DATABASE`, and cross-schema `USE`: refuted for the scanner path inspected. The restore code streams to disk, scans chunks with tail carryover, invokes mysql with `--one-database`, and uses TLS helper checks.
+
+## Final Sweep
+
+Final pass focused on stale assumptions and latent failure modes in the requested surfaces:
+
+- Upload/process/serve: checked original-save cleanup, HDR rejection, GPS-strip replacement cleanup, strict derivative generation rollback, delete-mid-processing cleanup, advisory locks, queue bootstrap, failed-image retry, and upload tracker settlement.
+- Restore: checked same-origin/admin gates, advisory lock release paths, upload-processing lock, color/semantic backfill locks, restore SQL scan, mysql child process watchdog, temp file cleanup, post-restore migrations, queue quiesce/resume, and recovery behavior after partial failure.
+- Auth/session: checked session secret behavior, token verification, login/update-password maintenance gates, admin token verification, API auth wrapper, proxy cookie pre-check, and origin/rate-limit ordering.
+- Semantic search: checked content-length and chunked rejection, query validation, rate limits, stub vs production gating, model-version filters, CLIP lazy loading, embedding normalization, similar route production gating, and backfill lock/scan limits.
+- Analytics: checked bot/referrer/IP sanitization, rate limiting, retention purge, shared view count buffering, and restore-time behavior.
+- Deploy: checked local and remote deploy scripts, Dockerfile native dependency/health contracts, compose mounts/env forwarding, dockerignore protection, and deploy tests.
 
 ## Validation Evidence
 
-Commands run:
+Commands and inspections used:
 
-- `npm run lint:api-auth --workspace=apps/web` - passed.
-- `npm run lint:action-origin --workspace=apps/web` - passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-- `git status --short` - showed pre-existing modified review files only before this report edit; no source files were changed.
+- `git ls-files` inventory and file-type/top-level summaries.
+- Targeted `nl -ba` reads for all confirmed line references.
+- `rg --files` and targeted `rg` sweeps over upload, restore, auth/session, semantic search, analytics, deploy, advisory locks, raw SQL, child processes, file operations, fire-and-forget promises, rate limits, origin/auth guards, and maintenance gates.
+- No source tests were run because this was a review-only task and no runtime code changed. The validation evidence is static source inspection plus the requested report artifact.
 
-Static review sweeps:
+Working tree note:
 
-- `rg --files`, `git ls-files`, and targeted `nl -ba` reads over app source, scripts, migrations, config, docs, tests related to the inspected surfaces.
-- Grep sweeps for async cleanup, timers/listeners, fetches, file operations, child processes, raw SQL, dangerous HTML, auth wrappers, origin guards, public mutating API handlers, CSP, upload tracker settlement, `TRUST_PROXY`, and TODO/FIXME/unsafe/exempt markers.
-
-## Missed-Bug Sweep
-
-Final pass re-checked the newest HEAD for stale assumptions from earlier cycles. The two reported issues are current in HEAD. I intentionally did not repeat old findings already addressed by current code comments/tests unless current code still exhibited the failure mode.
-
-Skipped-file confirmation:
-
-- Skipped generated/build/dependency artifacts: `apps/web/.next/**`, `node_modules/**`, `*.tsbuildinfo`, Playwright/test output artifacts, and built static outputs.
-- Skipped binary media/screenshot fixtures except where filenames or routing behavior mattered.
-- Skipped historical archived review/plan files as evidence sources except for current project instructions; they are not runtime source.
-- Did not modify source files, tests, migrations, configs, or docs other than this review report.
+- Before this report edit, unrelated `.context/reviews/*` modifications/deletions were already present. I did not revert or touch them.
+- Only `.context/reviews/debugger.md` was intentionally modified for this cycle-25 report.

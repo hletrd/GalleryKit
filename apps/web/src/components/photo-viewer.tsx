@@ -39,12 +39,27 @@ import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 import { getAvifSupportPromise } from '@/lib/avif-support';
 
-/** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
+/** Check if a keyboard event target belongs to an interactive element. */
 export function isEditableTarget(e: KeyboardEvent): boolean {
     const target = e.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-    if (target instanceof HTMLElement && target.isContentEditable) return true;
-    if (target instanceof HTMLElement && target.getAttribute('role') === 'textbox') return true;
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    if (target.closest([
+        'a',
+        'button',
+        'select',
+        'textarea',
+        'summary',
+        '[contenteditable="true"]',
+        '[role="button"]',
+        '[role="link"]',
+        '[role="menuitem"]',
+        '[role="option"]',
+        '[role="textbox"]',
+        '[role="switch"]',
+        '[data-radix-popper-content-wrapper]',
+    ].join(','))) return true;
     return false;
 }
 

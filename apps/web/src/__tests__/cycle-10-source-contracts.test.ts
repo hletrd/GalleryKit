@@ -14,8 +14,8 @@ describe('cycle 10 source contracts', () => {
             const start = code.indexOf(`export async function ${fnName}`);
             const end = code.indexOf('\n}\n', start);
             const body = code.slice(start, end);
-            expect(body.indexOf('isViewRecordRateLimited')).toBeGreaterThan(0);
-            expect(body.indexOf('isViewRecordRateLimited')).toBeLessThan(body.indexOf('db.select'));
+            expect(body.indexOf('checkViewRecordRateLimit')).toBeGreaterThan(0);
+            expect(body.indexOf('checkViewRecordRateLimit')).toBeLessThan(body.indexOf('db.select'));
         }
     });
 
