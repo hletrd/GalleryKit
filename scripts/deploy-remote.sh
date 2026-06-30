@@ -62,7 +62,14 @@ if [[ ! -O "$ENV_FILE" ]]; then
   echo "Warning: deploy env file is not owned by the current user: $ENV_FILE" >&2
 fi
 
-env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
+env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+if [[ -z "$env_mode" ]]; then
+  env_mode="$(stat -f '%Lp' "$ENV_FILE")"
+fi
+if [[ ! "$env_mode" =~ ^[0-7]+$ ]]; then
+  echo "Error: could not determine numeric deploy env file permissions ($env_mode): $ENV_FILE" >&2
+  exit 1
+fi
 env_perms=$((10#$env_mode))
 env_group_perms=$(((env_perms / 10) % 10))
 env_world_perms=$((env_perms % 10))

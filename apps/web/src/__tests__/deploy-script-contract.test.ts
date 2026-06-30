@@ -76,7 +76,10 @@ describe('deploy script safety contract', () => {
         const checkIndex = remoteDeployScript.indexOf('if (( env_group_perms != 0 || env_world_perms != 0 )); then');
         const sourceIndex = remoteDeployScript.indexOf('source "$ENV_FILE"');
 
-        expect(remoteDeployScript).toContain("env_mode=\"$(stat -c '%a' \"$ENV_FILE\" 2>/dev/null || stat -f '%Lp' \"$ENV_FILE\")\"");
+        expect(remoteDeployScript).toContain("env_mode=\"$(stat -c '%a' \"$ENV_FILE\" 2>/dev/null || true)\"");
+        expect(remoteDeployScript).toContain('if [[ -z "$env_mode" ]]; then');
+        expect(remoteDeployScript).toContain("env_mode=\"$(stat -f '%Lp' \"$ENV_FILE\")\"");
+        expect(remoteDeployScript).toContain('[[ ! "$env_mode" =~ ^[0-7]+$ ]]');
         expect(remoteDeployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
         expect(remoteDeployScript).toContain('env_world_perms=$((env_perms % 10))');
         expect(checkIndex).toBeGreaterThan(-1);
@@ -90,7 +93,10 @@ describe('deploy script safety contract', () => {
         const composeIndex = deployScript.indexOf('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');
 
         expect(deployScript).toContain('env_file="apps/web/.env.local"');
-        expect(deployScript).toContain("env_mode=\"$(stat -c '%a' \"$env_file\" 2>/dev/null || stat -f '%Lp' \"$env_file\")\"");
+        expect(deployScript).toContain("env_mode=\"$(stat -c '%a' \"$env_file\" 2>/dev/null || true)\"");
+        expect(deployScript).toContain('if [[ -z "$env_mode" ]]; then');
+        expect(deployScript).toContain("env_mode=\"$(stat -f '%Lp' \"$env_file\")\"");
+        expect(deployScript).toContain('[[ ! "$env_mode" =~ ^[0-7]+$ ]]');
         expect(deployScript).toContain('env_group_perms=$(((env_perms / 10) % 10))');
         expect(deployScript).toContain('env_world_perms=$((env_perms % 10))');
         expect(checkIndex).toBeGreaterThan(-1);
@@ -147,6 +153,70 @@ describe('deploy script safety contract', () => {
         expect(result.stderr).toContain('Refusing to deploy with unsafe runtime env file permissions');
         expect(result.stderr).toContain('Run: chmod 600');
         expect(() => readFileSync(dockerSentinel, 'utf8')).toThrow();
+    });
+
+    it('falls back when GNU stat exits without permission output in the root deploy wrapper', () => {
+        const tempRoot = mkdtempSync(resolve(tmpdir(), 'gk-deploy-stat-'));
+        const envFile = resolve(tempRoot, 'safe.env');
+        const binPath = resolve(tempRoot, 'bin');
+        const sentinel = resolve(tempRoot, 'deploy-ran');
+        mkdirSync(binPath, { recursive: true });
+        writeFileSync(envFile, `DEPLOY_CMD='touch ${sentinel}'\n`, { mode: 0o600 });
+        chmodSync(envFile, 0o600);
+        writeFileSync(resolve(binPath, 'stat'), [
+            '#!/bin/sh',
+            'if [ "$1" = "-c" ]; then exit 0; fi',
+            'if [ "$1" = "-f" ]; then echo 600; exit 0; fi',
+            'exit 1',
+            '',
+        ].join('\n'), { mode: 0o755 });
+
+        const result = spawnSync('bash', [resolve(repoRoot, 'scripts/deploy-remote.sh')], {
+            cwd: repoRoot,
+            env: {
+                ...process.env,
+                DEPLOY_ENV_FILE: envFile,
+                PATH: `${binPath}${delimiter}${process.env.PATH ?? ''}`,
+            },
+            encoding: 'utf8',
+        });
+
+        expect(result.status).toBe(0);
+        expect(result.stderr).not.toContain('invalid integer constant');
+        expect(readFileSync(sentinel, 'utf8')).toBe('');
+    });
+
+    it('falls back when GNU stat exits without permission output in the runtime deploy script', () => {
+        const tempRoot = mkdtempSync(resolve(tmpdir(), 'gk-runtime-stat-'));
+        const scriptPath = resolve(tempRoot, 'apps/web/deploy.sh');
+        const binPath = resolve(tempRoot, 'bin');
+        mkdirSync(resolve(tempRoot, 'apps/web'), { recursive: true });
+        mkdirSync(binPath, { recursive: true });
+        writeFileSync(scriptPath, deployScript, { mode: 0o755 });
+        writeFileSync(resolve(tempRoot, 'apps/web/.env.local'), ['SESSION_SECRET=<placeholder>', ''].join('\n'), { mode: 0o600 });
+        chmodSync(resolve(tempRoot, 'apps/web/.env.local'), 0o600);
+        writeFileSync(resolve(binPath, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+        writeFileSync(resolve(binPath, 'stat'), [
+            '#!/bin/sh',
+            'if [ "$1" = "-c" ]; then exit 0; fi',
+            'if [ "$1" = "-f" ]; then echo 600; exit 0; fi',
+            'exit 1',
+            '',
+        ].join('\n'), { mode: 0o755 });
+
+        const result = spawnSync('bash', [scriptPath], {
+            cwd: tempRoot,
+            env: {
+                ...process.env,
+                PATH: `${binPath}${delimiter}${process.env.PATH ?? ''}`,
+            },
+            encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(result.stdout).toContain('apps/web/src/site-config.json file not found');
+        expect(result.stderr).not.toContain('invalid integer constant');
+        expect(result.stderr).not.toContain('Refusing to deploy with unsafe runtime env file permissions');
     });
 
     it('feeds Docker Compose the runtime env file and forwards build-time upload limits', () => {
