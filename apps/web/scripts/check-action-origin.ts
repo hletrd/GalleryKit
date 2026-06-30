@@ -498,11 +498,12 @@ function functionCallsAuthSameOriginGuard(
         return false;
     }
 
-    const expressionIsTrustedOriginCheck = (expression: ts.Expression): boolean => {
+    const expressionIsUntrustedOriginCheck = (expression: ts.Expression): boolean => {
         const unwrapped = unwrapExpression(expression);
-        const target = ts.isPrefixUnaryExpression(unwrapped) && unwrapped.operator === ts.SyntaxKind.ExclamationToken
-            ? unwrapExpression(unwrapped.operand)
-            : unwrapped;
+        if (!ts.isPrefixUnaryExpression(unwrapped) || unwrapped.operator !== ts.SyntaxKind.ExclamationToken) {
+            return false;
+        }
+        const target = unwrapExpression(unwrapped.operand);
         return (
             ts.isCallExpression(target)
             && ts.isIdentifier(target.expression)
@@ -512,7 +513,7 @@ function functionCallsAuthSameOriginGuard(
 
     for (let index = 0; index < body.statements.length; index++) {
         const statement = body.statements[index];
-        if (!ts.isIfStatement(statement) || !expressionIsTrustedOriginCheck(statement.expression)) {
+        if (!ts.isIfStatement(statement) || !expressionIsUntrustedOriginCheck(statement.expression)) {
             continue;
         }
 

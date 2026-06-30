@@ -127,14 +127,6 @@ export const POST = withAdminAuth(
             );
         }
 
-        const releaseMultipartParseSlot = tryAcquireLrMultipartParseSlot();
-        if (!releaseMultipartParseSlot) {
-            return NextResponse.json(
-                { error: 'Another Lightroom upload is being parsed; retry shortly' },
-                { status: 429, headers: NO_CACHE },
-            );
-        }
-
         const trackerKey = `lr:${actorUserId ?? ip}`;
         const uploadTracker = getUploadTracker();
         pruneUploadTracker();
@@ -156,6 +148,15 @@ export const POST = withAdminAuth(
                 { status: 429, headers: NO_CACHE },
             );
         }
+
+        const releaseMultipartParseSlot = tryAcquireLrMultipartParseSlot();
+        if (!releaseMultipartParseSlot) {
+            return NextResponse.json(
+                { error: 'Another Lightroom upload is being parsed; retry shortly' },
+                { status: 429, headers: NO_CACHE },
+            );
+        }
+
         tracker.count += 1;
         tracker.bytes += declaredUploadBytes;
         uploadTracker.set(trackerKey, tracker);

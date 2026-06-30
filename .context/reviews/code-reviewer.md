@@ -1,152 +1,103 @@
-# Cycle 33 Code Reviewer Review
+# Cycle 34 Code Reviewer Review
 
 Reviewer: code-reviewer
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `168c3837`
+HEAD reviewed: `e1f124a265998ea51297d6716df6c03a2056a96c`
 Date: 2026-06-30 KST
-Scope: full-repository review lane. Report artifact only; no app/source files were edited by this lane.
+Scope: read-only review lane. No source, test, plan, git, or commit changes were made.
 
-## Inventory And Method
+## Inventory
 
-I read the workspace instructions from `AGENTS.md` and `CLAUDE.md`, then built a repository inventory before line-level review.
+Required context read:
 
-Inventory from this checkout:
+- `AGENTS.md`
+- Relevant `CLAUDE.md` sections: project structure, security architecture, privacy, runtime topology, permanently deferred items, quality gates, lint gates, touch-target policy
+- Current Cycle 33 plan and deferred ledger:
+  - `.context/plans/cycle-33-2026-06-30-plan.md`
+  - `.context/plans/cycle-33-2026-06-30-deferred.md`
+- Current and archived review baselines:
+  - `.context/reviews/_aggregate.md`
+  - `.context/reviews/archive/_aggregate-cycle33.md`
+  - `.context/reviews/archive/cycle33-comprehensive-review.md`
 
-- `rg --files -g '!node_modules' -g '!.next' -g '!dist' -g '!coverage'`: 816 tracked/unignored workspace files.
-- `apps/web/src` TypeScript/TSX files: 519.
-- `apps/web/src/__tests__` plus `apps/web/e2e` TypeScript/TSX files: 283.
-- App route/page/action/db-action entry files under `apps/web/src/app`: 35.
-- Library/component/db/script TypeScript/JavaScript files under `apps/web/src/lib`, `apps/web/src/components`, `apps/web/src/db`, and `apps/web/scripts`: 190.
-- `apps/web/scripts` top-level scripts: 29.
-- `apps/web/drizzle` migration/meta files: 32.
+Repository state:
 
-Primary surfaces examined:
+- `git rev-parse HEAD`: `e1f124a265998ea51297d6716df6c03a2056a96c`
+- `git status --short`: clean
+- Current HEAD is `fix(cycle-33): 🐛 close reviewed production gaps`
 
-- Admin and public routes: auth/session flows, `api/admin/*`, Lightroom upload, semantic/similar search, OG routes, health/live, public collection and photo pages.
-- Server actions: images, tags, topics, collections, sharing, users, settings, SEO, embeddings, public analytics/load-more/search, database backup/restore.
-- Core libraries: data access/privacy selections, rate limits, API auth, request-origin checks, session signing, image queue, Sharp processing, upload/storage paths, caption/alt-text flow, smart collections, CLIP/semantic search, SQL restore scanner, restore maintenance, config/env helpers.
-- Scripts and migrations: `migrate.js`, Drizzle journal/meta, backup/restore helpers, semantic/color backfills, deploy/build/e2e helpers.
-- Tests and contracts: action/API lint scanners, privacy guards, upload/restore locks, smart collection pagination, migration journal, alt-text fallback/stub-prefix behavior, sanitize/validation tests, source-contract tests.
+Files and subsystems inspected:
 
-Validation commands run:
+- Cycle 33 touched implementation files:
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/app/api/admin/lr/upload/route.ts`
+  - `apps/web/src/lib/caption-generator.ts`
+  - `apps/web/scripts/check-action-origin.ts`
+  - `apps/web/scripts/check-public-route-rate-limit.ts`
+  - `apps/web/src/app/feed.xml/route.ts`
+  - `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`
+  - `apps/web/src/app/[locale]/admin/layout.tsx`
+  - `apps/web/src/app/[locale]/admin/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
+  - `apps/web/src/app/actions/auth.ts`
+  - `apps/web/src/db/schema.ts`
+- Regression tests/source contracts inspected:
+  - `apps/web/src/__tests__/bulk-update-images.test.ts`
+  - `apps/web/src/__tests__/caption-generator.test.ts`
+  - `apps/web/src/__tests__/check-action-origin.test.ts`
+  - `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
+  - `apps/web/src/__tests__/feed-sized-derivative.test.ts`
+  - `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts`
+  - `apps/web/src/__tests__/cycle-21-source-contracts.test.ts`
+  - `apps/web/src/__tests__/cycle-22-source-contracts.test.ts`
 
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+Cycle 33 deferred findings were treated as baseline and not re-raised. This review only reports new evidence from the current HEAD.
 
-Full lint/typecheck/build/Vitest/e2e were not run in this review-only lane.
+## Findings
 
-## Summary
+### C34-CODE-01 - Lightroom multipart parse slot leaks on quota early returns
 
-No critical or high-severity confirmed issue was found. The strongest confirmed issue is a medium-severity persistence-path gap where machine-derived `alt_text_suggested` can be copied into admin-managed title/description without the same sanitization and length checks used by normal admin metadata writes.
-
-## Confirmed Issues
-
-### C33-CODE-01 - Bulk applying suggested alt text bypasses admin string sanitization and field-length validation
-
-Severity: Medium
+Severity: High
 Confidence: High
 
-Exact citations:
+Region:
 
-- `apps/web/src/app/actions/images.ts:1102-1135`
-- `apps/web/src/app/actions/images.ts:1138-1147`
-- `apps/web/src/app/actions/images.ts:928-929`
-- `apps/web/src/lib/sanitize.ts:161-190`
-- `apps/web/src/lib/validation.ts:103-106`
-- `apps/web/src/db/schema.ts:82-86`
-- `apps/web/src/__tests__/bulk-update-images.test.ts:471-518`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:60-73`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:130-185`
+- `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:267-278`
 
 Issue:
 
-`bulkUpdateImages()` has a special path for `applyAltSuggested === 'title' || 'description'`. It reads `images.alt_text_suggested`, strips the `[AUTO]` prefix plus Unicode formatting characters, trims, and then writes the result directly to `images.title` or `images.description`.
+The new LR/PAT upload pre-parse guard acquires the single multipart parse slot at `route.ts:130`, but the slot is only released in the `finally` around `request.formData()` at `route.ts:177-185`. Two quota branches return before reaching that `finally`:
 
-That path does not use `sanitizeAdminString()` and does not enforce the normal title/description limits before persistence. The manual metadata paths in the same action sanitize admin strings before storing them (`images.ts:928-929`), and `sanitizeAdminString()` rejects C0/C1 controls plus Unicode formatting by returning `{ value: null, rejected: true }` (`sanitize.ts:161-190`). The apply-suggestion path only calls `stripUnicodeFormatting()` (`validation.ts:103-106`), which removes bidi/zero-width formatting but does not reject or strip control characters.
+- `tracker.count + 1 > UPLOAD_MAX_FILES_PER_WINDOW` at `route.ts:147-151`
+- `tracker.bytes + declaredUploadBytes > MAX_TOTAL_UPLOAD_BYTES` at `route.ts:153-157`
 
-The length mismatch is also real: `alt_text_suggested` is a `text` column, while `title` is `varchar(255)` (`schema.ts:82-86`). Existing tests cover prefix stripping and empty suggestions, but not control-character rejection or overlong suggestion handling (`bulk-update-images.test.ts:471-518`).
-
-Concrete failure scenario:
-
-1. A legacy/restored row, future real caption producer, or producer bug leaves `alt_text_suggested` containing a C0/C1 control character, newlines/tabs, or more than 255 code points after prefix stripping.
-2. An admin uses bulk edit to apply suggested alt text to `title` or `description`.
-3. For `title`, MySQL may reject/truncate the value or fail the transaction because the source is `TEXT` and the destination is `varchar(255)`. For either field, control characters can be persisted into admin-managed metadata even though direct admin entry rejects them.
-
-Suggested fix:
-
-Run the stripped suggestion through the same admin metadata contract before copying it. For example, apply `sanitizeAdminString(stripped)` and skip or return a field-specific validation error when `rejected` is true. Enforce `countCodePoints(caption) <= 255` for `title` and the existing description limit for `description` before queuing the per-row update, or define an explicit safe-truncation policy for machine suggestions. Add focused Vitest coverage for C0 controls, overlong title suggestions, and one bad suggestion not rolling back unrelated valid rows unless that all-or-nothing behavior is intentional.
-
-### C33-CODE-02 - Caption stub truncates by UTF-16 code units, which can split surrogate pairs
-
-Severity: Low
-Confidence: Medium
-
-Exact citations:
-
-- `apps/web/src/lib/caption-generator.ts:29-38`
-- `apps/web/src/db/schema.ts:82-86`
-
-Issue:
-
-`generateCaptionStub()` limits generated suggestions with `raw.length <= ALT_TEXT_MAX_CHARS ? raw : raw.slice(0, ALT_TEXT_MAX_CHARS)`. JavaScript string length and `slice()` operate on UTF-16 code units, not Unicode code points. If a camera model contains supplementary characters near the 140-character boundary, this can split a surrogate pair and persist a malformed string into `alt_text_suggested`.
-
-This is lower severity because the current stub is deterministic, short, and sourced from cleaned EXIF camera metadata. It is still inconsistent with the repo's broader Unicode handling, where field limits and validation usually reason in code points.
+Because `tryAcquireLrMultipartParseSlot()` increments the module-level `lrMultipartParseInFlight` counter, either early return leaves the counter at 1 for the lifetime of the process. Every later LR upload then fails at `route.ts:130-135` with "Another Lightroom upload is being parsed; retry shortly", even though no parse is active.
 
 Concrete failure scenario:
 
-1. EXIF `camera_model` contains an emoji or other supplementary-plane character at the truncation boundary.
-2. The stub slices midway through the surrogate pair.
-3. The persisted suggestion contains a lone surrogate, causing replacement-character rendering, mojibake, or driver/database encoding surprises in downstream alt text and bulk-copy flows.
+1. An authenticated Lightroom/PAT client reaches the per-window file or byte quota.
+2. The next upload attempt acquires `releaseMultipartParseSlot`, then returns 429 from the quota check before `request.formData()`.
+3. `lrMultipartParseInFlight` remains permanently incremented.
+4. All subsequent Lightroom uploads in that web process return 429 from the parse-slot guard until process restart.
+
+This is especially actionable because Cycle 33's own plan required "Ensure every early return releases the pre-parse slot", and the source-contract test only asserts that some later `finally` calls `releaseMultipartParseSlot()`; it does not cover returns between acquisition and parsing.
 
 Suggested fix:
 
-Use a code-point-safe truncation helper, for example `Array.from(raw).slice(0, ALT_TEXT_MAX_CHARS).join('')`, or centralize truncation alongside the existing code-point counting helpers. Add a unit test with `139` ASCII characters plus an emoji to assert no lone surrogate is produced.
+Move `tryAcquireLrMultipartParseSlot()` to immediately after the tracker quota checks and immediately before `request.formData()`, or wrap the whole post-acquire block in a `try/finally` that dominates every return. The simpler fix is to acquire the slot only once all pre-parse quota checks have passed. Add a focused regression test or source-contract assertion that no `return NextResponse` exists between slot acquisition and the release-dominated `request.formData()` block, or preferably a mocked route test that hits the quota-exceeded branch and proves the next request can still acquire the slot.
 
-### C33-CODE-03 - Bulk image update rejects duplicated ID payloads before de-duplicating
+## Final sweep
 
-Severity: Low
-Confidence: High
+No other new actionable findings were confirmed in the inspected Cycle 33 changes. In particular:
 
-Exact citations:
+- Bulk alt-suggestion copying now sanitizes and length-checks copied suggestions.
+- Caption stub truncation is now code-point safe.
+- Bulk image ID limits are applied after ID de-duplication.
+- Auth action and public route scanner discovery changes were inspected; no new fail-open path was confirmed in the current implementation.
+- Feed ETag route behavior and admin login/layout outage handling were inspected without a new actionable finding.
+- Settings invalid-field focus and token clipboard fallback changes were inspected without a new actionable finding.
 
-- `apps/web/src/app/actions/images.ts:997-1008`
-
-Issue:
-
-`bulkUpdateImages()` validates `ids.length > 100` before creating `requestedIds = [...new Set(ids)]`. A payload containing 101 entries but only one unique image ID is rejected as `tooManyImages`, even though the effective mutation scope is one row.
-
-This is not currently a security issue, and the UI likely sends unique IDs. It is a brittle API edge case that can surface from client replay, stale selection state, or a future caller that appends selected IDs without de-duplicating first.
-
-Concrete failure scenario:
-
-1. The client sends a bulk-edit request with repeated selected IDs, such as 101 copies of the same image ID.
-2. The server rejects the request before normalizing to the actual unique mutation set.
-3. The user sees a misleading "too many images" failure even though the requested mutation would touch one row.
-
-Suggested fix:
-
-Normalize and validate numeric IDs first, de-duplicate second, then apply the 100-image cap to the unique ID set. If raw payload size needs its own anti-abuse cap, enforce it separately with a distinct error message.
-
-## Positive Cross-File Checks
-
-- Admin API route exports are covered by `withAdminAuth(...)`; the auth lint gate passed.
-- Mutating server actions return early on `requireSameOriginAdmin()` or carry explicit exemptions; the action-origin lint gate passed.
-- Public mutating/expensive routes are rate-limited or explicitly exempted; the public-route rate-limit lint gate passed.
-- Public image select fields and privacy guards are centralized in `apps/web/src/lib/data.ts` and backed by the symmetric privacy test fixture.
-- Upload, restore, image-processing, and backfill flows share maintenance/advisory lock boundaries; I did not find an unguarded restore/upload race in the inspected surfaces.
-- Smart collection public pages check publication state at both metadata and render paths, and the query compiler validates depth, operators, fields, and budget before SQL generation.
-- SQL restore scanning uses an app-table allowlist and blocks dangerous statements outside the allowed restore envelope.
-- The Lightroom upload route has layered validation for auth, content length, extension/MIME, filename/topic/title input, disk budget, contract locking, and cleanup/maintenance restoration.
-
-## Final Missed-Issues Sweep
-
-Final sweeps covered:
-
-- Raw SQL, restore scanner, migration/reconcile, and journal paths.
-- Filesystem boundaries around upload, processing, delete, backup, restore, and generated public assets.
-- Auth/session/token/env/proxy/rate-limit code paths.
-- Public-route and server-action exemption scanners.
-- Privacy-sensitive field selection and map/search/public listing surfaces.
-- Caption/alt-text generation, fallback, bulk-copy, and tests.
-- TODO/FIXME/HACK markers, catch/log paths, and pagination/cursor guards.
-
-No additional confirmed critical or high-severity issues were found in that sweep. The primary fix I recommend for the next implementation lane is C33-CODE-01, with C33-CODE-02 and C33-CODE-03 as small hardening follow-ups.
+No tests were run in this read-only review lane; validation evidence is static inspection of the cited files at HEAD `e1f124a2`.

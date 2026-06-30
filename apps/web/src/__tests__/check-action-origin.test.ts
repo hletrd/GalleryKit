@@ -542,6 +542,22 @@ describe('checkActionSource — auth action origin guard', () => {
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
+
+    it('fails auth mutators with inverted same-origin early exits', () => {
+        const src = withApprovedAuthGuard(`
+            export async function updatePassword() {
+                const requestHeaders = await headers();
+                if (hasTrustedSameOrigin(requestHeaders)) {
+                    return { error: 'trusted users should not exit here' };
+                }
+                await db.update(adminUsers).set({ ok: true });
+            }
+        `);
+        const report = checkActionSource(src, 'app/actions/auth.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
 });
 
 describe('checkActionSource — mixed file', () => {
