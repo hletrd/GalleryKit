@@ -17,8 +17,11 @@ describe('search disclaimer', () => {
   });
 
   it('normalizes result labels through the shared photo-title helper', () => {
+    const itemBody = src.slice(src.indexOf('function SearchResultItem'), src.indexOf('interface SearchResult {'));
+
     expect(src).toMatch(/import\s+\{\s*getPhotoResultLabel\s*\}\s+from '@\/lib\/photo-title'/);
-    expect(src).toContain('const label = getPhotoResultLabel(image, `${t(\'common.photo\')} ${image.id}`)');
-    expect(src).not.toContain('image.title || image.description');
+    expect(itemBody).toContain('const label = getPhotoResultLabel(image, `${t(\'common.photo\')} ${image.id}`)');
+    expect(itemBody).toMatch(/<p className="font-medium text-sm truncate">\s*\{label\}\s*<\/p>/);
+    expect(itemBody).not.toContain('image.title || image.description');
   });
 });

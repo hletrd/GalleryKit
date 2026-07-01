@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 82/100 Implementation Plan - active; schedules search/similar result-label normalization, failed-image retry accessible names, and Cycle 81 release-ledger closure (`cycle-82-2026-07-01-plan.md`)
-- Cycle 82/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-82-2026-07-01-deferred.md`)
+- Cycle 83/100 Implementation Plan - active; schedules Cycle 82 release-ledger closure and search/similar result-label source-contract hardening (`cycle-83-2026-07-01-plan.md`)
+- Cycle 83/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-83-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 82/100 Implementation Plan - implementation committed/pushed/deployed as `cc46b1d6`; Cycle 83 started from deployed `cc46b1d6` (`cycle-82-2026-07-01-plan.md`)
+- Cycle 82/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-82-2026-07-01-deferred.md`)
 - Cycle 81/100 Implementation Plan - implementation committed/pushed/deployed as `c272c521`; Cycle 82 started from deployed `c272c521` (`cycle-81-2026-07-01-plan.md`)
 - Cycle 81/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-81-2026-07-01-deferred.md`)
 - Cycle 80/100 Implementation Plan - implementation committed/pushed as `4733d475`; no committed Cycle 80 deploy transcript was found during Cycle 81 review, so Cycle 81 deploy supersedes production state after its pushed fix (`cycle-80-2026-07-01-plan.md`)

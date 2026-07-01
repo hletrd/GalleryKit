@@ -8,11 +8,18 @@ const readRoot = (rel: string) => readFileSync(resolve(__dirname, '..', '..', re
 describe('cycle 21 source contracts', () => {
     it('similar photo fallback labels include the image id, not repeated generic Photo text', () => {
         const src = readSrc('components/similar-photos.tsx');
+        const resultMapBody = src.slice(src.indexOf('{results.map((item)'), src.indexOf('interface SimilarThumbProps'));
+        const thumbBody = src.slice(src.indexOf('function SimilarThumb'), src.length);
+
         expect(src).toMatch(/import\s+\{\s*getPhotoResultLabel\s*\}\s+from '@\/lib\/photo-title'/);
-        expect(src).toContain('const label = getPhotoResultLabel(item, `${tCommon(\'photo\')} ${item.imageId}`)');
-        expect(src).toContain('`${tCommon(\'photo\')} ${item.imageId}`');
-        expect(src).not.toContain("?? tCommon('photo');");
-        expect(src).not.toContain('item.title ?? item.description');
+        expect(resultMapBody).toContain('const label = getPhotoResultLabel(item, `${tCommon(\'photo\')} ${item.imageId}`)');
+        expect(resultMapBody).toContain('label={label}');
+        expect(resultMapBody).toContain('`${tCommon(\'photo\')} ${item.imageId}`');
+        expect(thumbBody).toContain('title={label}');
+        expect(thumbBody).toContain('aria-label={label}');
+        expect(thumbBody).toContain('alt={label}');
+        expect(resultMapBody).not.toContain("?? tCommon('photo');");
+        expect(resultMapBody).not.toContain('item.title ?? item.description');
     });
 
     it('settings client renders persistent field errors tied to invalid inputs', () => {

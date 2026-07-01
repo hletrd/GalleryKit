@@ -1,11 +1,10 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-82/_aggregate.md`
+Current aggregate: `cycle-83-2026-07-01/_aggregate.md`
 
-Cycle 82 produced three deduplicated findings:
+Cycle 83 produced two deduplicated findings:
 
-- `C82-01` - Cycle 81 release ledger still reads active and deploy-unchecked after its pushed/deployed HEAD.
-- `C82-02` - Search and similar-photo result labels bypass meaningful photo-title fallback.
-- `C82-03` - Failed-image retry buttons have repeated accessible names.
+- `C83-01` - Cycle 82 release ledger remains active and deploy-unclosed after its pushed HEAD.
+- `C83-02` - Search/similar source-contract tests can pass while normalized labels stop reaching rendered/accessibility output.
 
-Cycle 82 schedules all three findings. No new findings are deferred. `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
+Cycle 83 schedules both findings. No new findings are deferred. `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
