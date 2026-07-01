@@ -47,6 +47,14 @@ export function isDurableRestoreMaintenanceMarked() {
     return readDurableRestoreMaintenance();
 }
 
+export function assertNoDurableRestoreMaintenanceForScript(scriptName: string) {
+    if (!isDurableRestoreMaintenanceMarked()) return;
+
+    throw new Error(
+        `[${scriptName}] Restore maintenance is active. Refusing sidecar writes until the restore marker is cleared with the documented recovery command.`,
+    );
+}
+
 function writeDurableRestoreMaintenance() {
     const markerLocation = getRestoreMaintenanceMarkerLocation();
     fs.mkdirSync(/* turbopackIgnore: true */ markerLocation.dir, { recursive: true, mode: 0o700 });

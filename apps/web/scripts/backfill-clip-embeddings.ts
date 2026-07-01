@@ -75,7 +75,9 @@ import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANT
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
 import { resolveSemanticSearchMode } from '../src/lib/gallery-config-shared';
+import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable';
 
+const SCRIPT_NAME = 'backfill-clip-embeddings';
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 2;
 const FORCE_FLAG = process.argv.includes('--force');
@@ -104,6 +106,8 @@ async function checkSemanticModeEnabled(): Promise<boolean> {
 async function main(): Promise<number> {
     console.log(`[backfill-clip-embeddings] Starting… mode=${PRODUCTION_FLAG ? 'production' : 'stub'} targetModelVersion=${TARGET_MODEL_VERSION}`);
 
+    assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+
     const lockConn = await connection.getConnection();
     let semanticBackfillLockHeld = false;
     try {
@@ -121,6 +125,7 @@ async function main(): Promise<number> {
             return 1;
         }
         semanticBackfillLockHeld = true;
+        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
 
         if (!FORCE_FLAG) {
             const enabled = await checkSemanticModeEnabled();
@@ -145,6 +150,8 @@ async function main(): Promise<number> {
         let cursor = 0;
 
         for (;;) {
+            assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+
             const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
             if (remainingScanBudget === 0) {
                 logScanLimitReached();
@@ -185,6 +192,7 @@ async function main(): Promise<number> {
                 const chunk = rows.slice(i, i + BATCH_CONCURRENCY);
                 await Promise.all(chunk.map(async ({ id, filenameOriginal }) => {
                     try {
+                        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
                         let embedding: Float32Array;
                         if (PRODUCTION_FLAG) {
                             if (!filenameOriginal) { failed++; failedImageIds.push(id); return; }
@@ -200,6 +208,7 @@ async function main(): Promise<number> {
                         // Buffer is cast through `unknown` at this single write site.
                         const buf = embeddingToBuffer(embedding);
                         const embeddingValue = buf as unknown as string;
+                        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
                         await db.insert(imageEmbeddings)
                             .values({
                                 imageId: id,

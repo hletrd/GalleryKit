@@ -21,14 +21,25 @@
  * (the job-supplied values would be ignored).
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queueAddMock, getConnectionMock, processImageFormatsMock, getGalleryConfigMock } =
+const {
+    queueAddMock,
+    getConnectionMock,
+    processImageFormatsMock,
+    getGalleryConfigMock,
+    embedImageRealMock,
+    embedImageStubMock,
+    embeddingToBufferMock,
+} =
     vi.hoisted(() => ({
         queueAddMock: vi.fn(),
         getConnectionMock: vi.fn(),
         processImageFormatsMock: vi.fn(),
         getGalleryConfigMock: vi.fn(),
+        embedImageRealMock: vi.fn(),
+        embedImageStubMock: vi.fn(),
+        embeddingToBufferMock: vi.fn(),
     }));
 
 vi.mock('p-queue', () => ({
@@ -75,6 +86,13 @@ vi.mock('@/lib/upload-paths', () => ({
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
 }));
+vi.mock('@/lib/clip-model', () => ({ embedImageReal: embedImageRealMock }));
+vi.mock('@/lib/clip-inference', () => ({ embedImageStub: embedImageStubMock }));
+vi.mock('@/lib/clip-embeddings', () => ({
+    embeddingToBuffer: embeddingToBufferMock,
+    PRODUCTION_MODEL_VERSION: 'jina-clip-v2-d512-q8',
+    STUB_MODEL_VERSION: 'stub-sha256-v1',
+}));
 
 vi.mock('@/lib/queue-shutdown', () => ({
     drainProcessingQueueForShutdown: vi.fn(),
@@ -105,6 +123,10 @@ vi.mock('fs/promises', async () => {
 
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 
+afterEach(() => {
+    vi.unstubAllEnvs();
+});
+
 // A lock connection whose advisory GET_LOCK returns 1 (claim acquired).
 function makeLockConnection() {
     return {
@@ -128,6 +150,12 @@ describe('CR-R9C6-01: upload-path processing settings reach processImageFormats'
         queueAddMock.mockReset();
         processImageFormatsMock.mockReset();
         processImageFormatsMock.mockResolvedValue({ wasDownscaled: false, avif10bit: false });
+        embedImageRealMock.mockReset();
+        embedImageRealMock.mockResolvedValue(new Float32Array([1, 0]));
+        embedImageStubMock.mockReset();
+        embedImageStubMock.mockReturnValue(new Float32Array([0, 1]));
+        embeddingToBufferMock.mockReset();
+        embeddingToBufferMock.mockReturnValue(Buffer.from([0, 0, 0, 0]));
         getGalleryConfigMock.mockReset();
         // Default config (used by the fire-and-forget embedding hook at the end
         // of the handler, which calls getGalleryConfig for semanticSearchMode).
@@ -233,5 +261,48 @@ describe('CR-R9C6-01: upload-path processing settings reach processImageFormats'
         expect(args[11], 'avifEffort (from config)').toBe(4);
         expect(args[12], 'sdrJpegChroma (from config)').toBe('4:2:0');
         expect(args[13], 'wideGamutMaxSourcePixels (from config)').toBe(30_000_000);
+    });
+
+    it('uses current runtime semantic mode rather than a production job snapshot for embedding writes', async () => {
+        vi.stubEnv('SEMANTIC_SEARCH_ALLOW_PRODUCTION', 'false');
+        getGalleryConfigMock.mockResolvedValue({
+            semanticSearchMode: 'production',
+            imageQualityWebp: 50,
+            imageQualityAvif: 50,
+            imageQualityJpeg: 50,
+            imageSizes: [999],
+            autoAltTextEnabled: false,
+            forceSrgbDerivatives: false,
+            wideGamutJpegChroma: '4:4:4',
+            avifEffort: 9,
+            sdrJpegChroma: '4:4:4',
+            wideGamutMaxSourcePixels: 99_000_000,
+        });
+
+        enqueueImageProcessing({
+            id: 42,
+            filenameOriginal: 'orig.jpg',
+            filenameWebp: 'out.webp',
+            filenameAvif: 'out.avif',
+            filenameJpeg: 'out.jpg',
+            width: 1200,
+            quality: { webp: 80, avif: 70, jpeg: 88 },
+            imageSizes: [640, 1536],
+            forceSrgbDerivatives: true,
+            wideGamutJpegChroma: '4:2:0',
+            avifEffort: 3,
+            sdrJpegChroma: '4:2:2',
+            wideGamutMaxSourcePixels: 20_000_000,
+            autoAltTextEnabled: false,
+            semanticSearchMode: 'production',
+        });
+
+        await runQueuedTask();
+        const state = getProcessingQueueState();
+        await Promise.allSettled(Array.from(state.sideEffects));
+
+        expect(getGalleryConfigMock).toHaveBeenCalled();
+        expect(embedImageRealMock).not.toHaveBeenCalled();
+        expect(embedImageStubMock).not.toHaveBeenCalled();
     });
 });

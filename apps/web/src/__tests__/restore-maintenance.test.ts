@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { beginRestoreMaintenance, cleanupOriginalIfRestoreMaintenanceBegan, endRestoreMaintenance, getRestoreMaintenanceMessage, isRestoreMaintenanceActive, setRestoreMaintenanceActiveForProcess } from '@/lib/restore-maintenance';
 import {
+    assertNoDurableRestoreMaintenanceForScript,
     beginDurableRestoreMaintenance,
     clearDurableRestoreMaintenanceForRecovery,
     endDurableRestoreMaintenance,
@@ -106,5 +107,15 @@ describe('restore maintenance state', () => {
 
         expect(isDurableRestoreMaintenanceMarked()).toBe(false);
         expect(isRestoreMaintenanceActive()).toBe(false);
+    });
+
+    it('fails sidecar script guards closed while durable maintenance is marked', () => {
+        expect(() => assertNoDurableRestoreMaintenanceForScript('backfill-test')).not.toThrow();
+
+        expect(beginDurableRestoreMaintenance()).toBe(true);
+
+        expect(() => assertNoDurableRestoreMaintenanceForScript('backfill-test')).toThrow(
+            '[backfill-test] Restore maintenance is active',
+        );
     });
 });

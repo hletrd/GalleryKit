@@ -4,12 +4,12 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 70/100 Implementation Plan - active; schedules admin API scanner star-export hardening, service-worker same-ETag cached-size scope fix, auto-alt-text copy drift, and cache docs drift (`cycle-70-2026-07-01-plan.md`)
-- Cycle 70/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-70-2026-07-01-deferred.md`)
+- Cycle 71/100 Implementation Plan - active; schedules sidecar restore-maintenance guards, deploy/env docs drift fixes, semantic snapshot contract hardening, and Cycle 70 ledger closure (`cycle-71-2026-07-01-plan.md`)
+- Cycle 71/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-71-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 70/100 Implementation Plan - active; schedules admin API scanner star-export hardening, service-worker same-ETag cached-size scope fix, auto-alt-text copy drift, and cache docs drift (`cycle-70-2026-07-01-plan.md`)
+- Cycle 70/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 71 started from deployed `bf86f7c1` (`cycle-70-2026-07-01-plan.md`)
 - Cycle 70/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-70-2026-07-01-deferred.md`)
 - Cycle 69/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 70 started from deployed `6e3e54e9` (`cycle-69-2026-07-01-plan.md`)
 - Cycle 69/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-69-2026-07-01-deferred.md`)

@@ -540,9 +540,9 @@ export async function uploadImages(formData: FormData) {
                         sdrJpegChroma: processingSettingsSnapshot.sdrJpegChroma,
                         wideGamutMaxSourcePixels: processingSettingsSnapshot.wideGamutMaxSourcePixels,
                         autoAltTextEnabled: processingSettingsSnapshot.autoAltTextEnabled,
-                        // R17C17 PERF-17-04: snapshot the semantic-search mode so the
-                        // queue worker's embedding hook reuses it instead of issuing a
-                        // redundant per-image SELECT admin_settings.
+                        // Historical snapshot field retained for pending-row
+                        // compatibility. The queue worker resolves the current
+                        // runtime semantic mode before embedding writes.
                         semanticSearchMode: processingSettingsSnapshot.semanticSearchMode,
                         camera_model: exifDb.camera_model,
                         capture_date: exifDb.capture_date,

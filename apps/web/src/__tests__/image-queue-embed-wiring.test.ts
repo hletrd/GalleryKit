@@ -35,7 +35,7 @@ describe('upload embedding hook wiring', () => {
     expect(src).not.toContain('job.semanticSearchMode ??');
   });
 
-  it('runtime-gates production semantic snapshots behind SEMANTIC_SEARCH_ALLOW_PRODUCTION', () => {
+  it('runtime-gates production semantic mode behind SEMANTIC_SEARCH_ALLOW_PRODUCTION', () => {
     expect(src).toContain('SEMANTIC_SEARCH_ALLOW_PRODUCTION');
     expect(src).toMatch(/mode === 'production'[\s\S]*SEMANTIC_SEARCH_ALLOW_PRODUCTION/);
     expect(src).toMatch(/return 'disabled'/);
@@ -54,9 +54,11 @@ describe('upload embedding hook wiring', () => {
   });
 });
 
-describe('upload enqueue snapshots semanticSearchMode (R17C17 PERF-17-04)', () => {
+describe('upload enqueue carries legacy semanticSearchMode snapshot', () => {
   const actionSrc = readFileSync(join(process.cwd(), 'src/app/actions/images.ts'), 'utf8');
-  it('passes the persisted processing snapshot semanticSearchMode on the upload enqueue', () => {
+  it('keeps the persisted processing snapshot field for pending-row compatibility', () => {
     expect(actionSrc).toContain('semanticSearchMode: processingSettingsSnapshot.semanticSearchMode');
+    expect(actionSrc).toContain('queue worker resolves the current');
+    expect(actionSrc).not.toContain("queue worker's embedding hook reuses it");
   });
 });

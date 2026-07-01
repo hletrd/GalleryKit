@@ -479,7 +479,8 @@ The deploy host has 124 G total. Repeated deploys accumulate Docker images + bui
 If the host is ALREADY wedged at 100 % (so a deploy can't even `git pull`), free disk manually first, then re-deploy:
 
 ```bash
-ssh ubuntu@atik.kr
+# SSH to the configured DEPLOY_USER@DEPLOY_HOST from .env.deploy
+# (or $HOME/.gallerykit-secrets/gallery-deploy.env), using DEPLOY_KEY when set.
 docker container prune -f
 docker image prune -af          # only removes images not referenced by a running container
 docker builder prune -af        # frees BuildKit cache (often 10-20 G)

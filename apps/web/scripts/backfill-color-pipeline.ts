@@ -54,6 +54,9 @@ import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '../src/lib
 import { parseBoundedPositiveInteger } from '../src/lib/env';
 import { getGalleryConfig } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
+import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable';
+
+const SCRIPT_NAME = 'backfill-color-pipeline';
 
 // ---------------------------------------------------------------------------
 // Minimal type for DB rows we need
@@ -304,6 +307,8 @@ const BATCH_SIZE = 100;
 async function main() {
     const forceReencode = process.argv.includes('--force-reencode');
 
+    assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+
     const { db, connection } = await import('../src/db');
     const { sql } = await import('drizzle-orm');
 
@@ -349,7 +354,10 @@ async function main() {
         process.exit(1);
     }
 
+    assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+
     console.log('[backfill-color-pipeline] Lock acquired. Fetching candidate rows…');
+    assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
 
     // R5-M3: Fetch processed images whose pipeline_version is behind
     // (or NULL). Pipeline version mismatch alone is sufficient to trigger
@@ -436,6 +444,7 @@ async function main() {
 
     async function flushBatch(): Promise<void> {
         if (pendingUpdates() === 0) return;
+        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
         const items = updateBatch.splice(0, updateBatch.length);
         const derivativeItems = derivativeBatch.splice(0, derivativeBatch.length);
         // Collect rows whose UPDATE matched 0 rows (deleted mid-reencode). The
@@ -503,6 +512,7 @@ async function main() {
     const queuedTasks: Promise<void>[] = [];
     for (const [index, row] of rows.entries()) {
         queuedTasks.push(queue.add(async () => {
+            assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
             const result = await reprocessRow(row, backfillSettings, rowExists);
             if (result.outcome === 'processed') {
                 processed++;
