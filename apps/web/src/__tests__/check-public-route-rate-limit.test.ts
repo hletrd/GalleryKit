@@ -443,6 +443,73 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
     });
 
+    it('fails expensive public GET handlers when ImageResponse is called through a namespace', () => {
+        const source = `
+            import * as og from 'next/og';
+            export async function GET() {
+                return new og.ImageResponse(<div>hi</div>);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/og/route.tsx');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes namespace ImageResponse calls after a limiter gate', () => {
+        const source = `
+            import * as og from 'next/og';
+            import { preIncrementOgAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                if (preIncrementOgAttempt('203.0.113.10', Date.now())) return new Response('limited', { status: 429 });
+                return new og.ImageResponse(<div>hi</div>);
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/og/route.tsx');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails expensive public GET handlers when sharp is imported under a default alias', () => {
+        const source = `
+            import imageProcessor from 'sharp';
+            export async function GET() {
+                const image = imageProcessor(Buffer.from(''));
+                return Response.json({ ok: Boolean(image) });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/thumb/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('fails expensive public GET handlers when filesystem work is called through a namespace', () => {
+        const source = `
+            import * as files from 'node:fs/promises';
+            export async function GET() {
+                const text = await files.readFile('/tmp/gallerykit.txt', 'utf8');
+                return Response.json({ text });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/file/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes named-aliased filesystem reads after a limiter gate', () => {
+        const source = `
+            import { readFile as loadFile } from 'node:fs/promises';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                const text = await loadFile('/tmp/gallerykit.txt', 'utf8');
+                return Response.json({ text });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/file/route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
     it('fails expensive public GET handlers when DB-backed data helpers are imported relatively', () => {
         const source = `
             import { getTopicBySlug } from '../../../lib/data';

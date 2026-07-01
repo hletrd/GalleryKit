@@ -138,8 +138,9 @@ COPY --from=builder --chown=node:node /app/apps/web/scripts/mysql-connection-opt
 COPY --from=builder --chown=node:node /app/apps/web/scripts/restore-maintenance-recovery.mjs ./apps/web/scripts/restore-maintenance-recovery.mjs
 COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 
-# Production dependencies for migrate.js (needs argon2, mysql2, drizzle-orm natively).
-# Standalone output already bundles runtime deps — this is only for the migration script.
+# Production dependencies outside standalone output: migrate.js needs argon2,
+# mysql2, and drizzle-orm, while runtime paths need externalized native packages
+# such as sharp for uploads, topic covers, CLIP image embedding, and OG cards.
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 
 # Create persistence directories and cache.

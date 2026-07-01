@@ -274,4 +274,13 @@ describe('deploy script safety contract', () => {
         expect(prodDepsBlock).toContain('@img/sharp-linux-${npm_arch}@0.34.5');
         expect(prodDepsBlock).toContain('node -e "require(\'sharp\')"');
     });
+
+    it('documents the prod-deps copy as serving migration and runtime external deps', () => {
+        const prodDepsCopyBlock = dockerfile.match(/# Production dependencies[\s\S]*?COPY --from=prod-deps/)?.[0] ?? '';
+        expect(prodDepsCopyBlock).toContain('migrate.js');
+        expect(prodDepsCopyBlock).toContain('runtime paths');
+        expect(prodDepsCopyBlock).toContain('externalized native packages');
+        expect(prodDepsCopyBlock).toContain('sharp');
+        expect(prodDepsCopyBlock).not.toContain('only for the migration script');
+    });
 });

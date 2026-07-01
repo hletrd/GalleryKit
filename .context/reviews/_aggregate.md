@@ -1,12 +1,11 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-78-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-79-2026-07-01/_aggregate.md`
 
-Cycle 78 produced four deduplicated findings:
+Cycle 79 produced three deduplicated findings:
 
-- `C78-01` - Cycle 77 verification ledger still reads active and undeployed.
-- `C78-02` - Public-route rate-limit scanner false-positives on marker text in strings/comments.
-- `C78-03` - Sidecar timestamp regression lock is source-count brittle.
-- `C78-04` - Runtime Docker dependency stage does not carry the native optional-dependency workaround.
+- `C79-01` - Public-route expensive-read scanner misses namespace and import-alias expensive work.
+- `C79-02` - Cycle 78 release ledger still reads active and undeployed.
+- `C79-03` - Dockerfile runner-stage prod-deps comment is stale after the runtime Sharp externalization fix.
 
-Cycle 78 schedules `C78-01` through `C78-04`. `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
+Cycle 79 schedules `C79-01` through `C79-03`. `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.

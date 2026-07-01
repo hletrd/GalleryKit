@@ -85,6 +85,11 @@ const EXPENSIVE_READ_IMPORT_MODULES = new Set([
     '@/lib/gallery-config',
     '@/lib/og-photo-fetch',
     '@/lib/serve-upload',
+    'fs',
+    'fs/promises',
+    'node:fs',
+    'node:fs/promises',
+    'sharp',
 ]);
 
 const EXPENSIVE_READ_MODULE_PATHS = new Set([
@@ -632,7 +637,10 @@ function bodyContainsExpensiveGetWork(
         }
         if (ts.isPropertyAccessExpression(callee)) {
             const rootName = rootIdentifierName(callee);
-            return rootName !== null && propertyRootMarkers.has(rootName);
+            return (
+                identifierMarkers.has(callee.name.text)
+                || (rootName !== null && propertyRootMarkers.has(rootName))
+            );
         }
         return false;
     };
