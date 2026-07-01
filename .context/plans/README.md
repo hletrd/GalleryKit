@@ -4,7 +4,7 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 90/100 Implementation Plan - active; schedules Cycle 89 release-ledger closure after signed deployed HEAD `baefb42` (`cycle-90-2026-07-01-plan.md`)
+- Cycle 90/100 Implementation Plan - active; release-ledger closure committed/pushed/deployed as signed `dcc8055`, with a docs-only terminal-evidence sync in progress (`cycle-90-2026-07-01-plan.md`)
 - Cycle 90/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-90-2026-07-01-deferred.md`)
 
 ## Recent Plans
