@@ -153,6 +153,8 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         requestIdRef.current++;
         semanticAbortRef.current?.abort();
         semanticAbortRef.current = null;
+        resultRefs.current = [];
+        setActiveIndex(-1);
         setLoading(false);
         setResults([]);
         setSearchStatus(null);

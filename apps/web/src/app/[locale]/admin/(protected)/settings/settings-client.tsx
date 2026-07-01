@@ -45,10 +45,10 @@ interface SettingsClientProps {
 // R10-M14: settings keys whose change actually requires re-running the
 // color-pipeline backfill so existing photo derivatives reflect the new
 // encoder behavior. Changing e.g. the slideshow interval or the
-// quality settings doesn't change color-pipeline output, so the
-// backfill warning should NOT fire on those edits. Without this gate
-// admins learn to ignore the amber banner because it shows on every
-// edit, and then miss it when it actually matters.
+// semantic-search mode doesn't change derivative bytes, so the backfill
+// warning should NOT fire on those edits. Without this gate admins learn
+// to ignore the amber banner because it shows on every edit, and then
+// miss it when it actually matters.
 const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
     'force_srgb_derivatives',
     'allow_hdr_ingest',
@@ -86,6 +86,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [showBackfillConfirm, setShowBackfillConfirm] = useState(false);
+    const [hasSavedBackfillPending, setHasSavedBackfillPending] = useState(false);
     // R10-M14: also keep the last-committed values in component STATE
     // (parallel to the existing `initialRef` snapshot used inside the
     // save callback) so render can compare current vs. baseline without
@@ -205,6 +206,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     const hasDirtyBackfillField = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
         (key) => (settings[key] ?? '') !== (baseline[key] ?? ''),
     );
+    const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending);
 
     // R27-UX-HIGH-1: Path A — fire the in-app backfill server action when
     // the photographer clicks "Re-encode existing photos". The action
@@ -267,6 +269,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     toast.info(t('settings.noChanges'));
                     return;
                 }
+                const savedBackfillRelevantChange = Object.keys(changed).some((key) => COLOR_HDR_BACKFILL_KEYS.has(key));
                 const result = await updateGallerySettings(changed);
                 if (result.success) {
                     // C1R-04: rehydrate from the server-returned normalized
@@ -277,6 +280,9 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     setSettings(nextSettings);
                     initialRef.current = nextSettings;
                     setBaseline(nextSettings);
+                    if (hasExistingImages && savedBackfillRelevantChange) {
+                        setHasSavedBackfillPending(true);
+                    }
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
@@ -325,7 +331,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     <CardDescription>{t('settings.imageProcessingDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {hasExistingImages && hasDirtyBackfillField && (
+                    {showBackfillRequired && (
                         /* DES-R4C16-05: role="status" (polite live region) — this
                            banner appears dynamically when a color-impacting field
                            goes dirty; without it a screen-reader admin edits

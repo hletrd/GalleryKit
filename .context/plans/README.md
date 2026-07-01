@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 63/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-63-2026-07-01-plan.md`)
-- Cycle 63/100 Deferred Findings — no new deferred findings; `C62-04` superseded by scheduled `C63-01`; carry-forward items repeated (`cycle-63-2026-07-01-deferred.md`)
+- Cycle 64/100 Implementation Plan — active; schedules search reset, GPS/select touch targets, and post-save backfill-warning persistence (`cycle-64-2026-07-01-plan.md`)
+- Cycle 64/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-64-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 64/100 Implementation Plan — active; schedules search reset, GPS/select touch targets, and post-save backfill-warning persistence (`cycle-64-2026-07-01-plan.md`)
+- Cycle 64/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-64-2026-07-01-deferred.md`)
 - Cycle 63/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-63-2026-07-01-plan.md`)
 - Cycle 63/100 Deferred Findings — no new deferred findings; `C62-04` superseded by scheduled `C63-01`; carry-forward items repeated (`cycle-63-2026-07-01-deferred.md`)
 - Cycle 62/100 Implementation Plan — implementation committed/pushed/deployed; public search smoke passed after deploy (`cycle-62-2026-07-01-plan.md`)

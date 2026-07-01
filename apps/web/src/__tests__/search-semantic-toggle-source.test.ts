@@ -17,4 +17,14 @@ describe('search semantic toggle request ownership', () => {
         expect(handler).not.toContain('performSearch(query, checked)');
         expect(source).toContain('}, [query, useSemanticSearch, performSearch, clearSearchState]);');
     });
+
+    it('resets active result selection when changing search mode', () => {
+        const source = readFileSync(searchPath, 'utf8');
+        const resetStart = source.indexOf('const clearSearchState = useCallback');
+        expect(resetStart).toBeGreaterThan(-1);
+        const reset = source.slice(resetStart, source.indexOf('}, []);', resetStart));
+
+        expect(reset).toContain('resultRefs.current = []');
+        expect(reset).toContain('setActiveIndex(-1)');
+    });
 });

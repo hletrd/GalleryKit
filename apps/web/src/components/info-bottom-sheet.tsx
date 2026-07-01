@@ -459,7 +459,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             aria-label={`${image.latitude.toFixed(4)}, ${image.longitude.toFixed(4)} ${t('common.opensInNewWindow')}`}
-                                            className="font-medium text-primary hover:underline flex items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                            className="-mx-2 inline-flex min-h-11 min-w-11 items-center gap-1 rounded px-2 font-medium text-primary hover:underline outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                         >
                                             <MapPin className="h-3 w-3" />
                                             {image.latitude.toFixed(4)}, {image.longitude.toFixed(4)}
