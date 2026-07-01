@@ -1,9 +1,11 @@
 /**
- * R19-M1: RFC 7232 §3.3 If-Modified-Since helper for the feed routes.
+ * R19-M1 legacy helper: RFC 7232 §3.3 If-Modified-Since comparison.
  *
- * Shared by `app/feed.xml/route.ts` and
- * `app/[locale]/(public)/[topic]/feed.xml/route.ts` so the second-precision
- * compare is consistent across both surfaces.
+ * C74-01: current feed routes intentionally do NOT import this helper.
+ * Their 304 decisions are ETag-only because rendered feed XML depends on
+ * SEO/feed-shaping settings that do not have a reliable Last-Modified
+ * timestamp. Keep this helper only as a legacy parser for future route-level
+ * work that can preserve that invalidation contract.
  *
  * Returns `true` when the response should be a 304 Not Modified (the
  * request carried a valid `If-Modified-Since` whose value is at or

@@ -2,8 +2,9 @@
  * Cycle 73: route-level Atom feed conditional-request coverage.
  *
  * The feed routes now use content-derived ETags. These tests exercise the
- * actual route handlers so the 200/304 behavior, SEO/config dependencies, and
- * topic locale guards cannot drift behind source-grep fixtures.
+ * actual route handlers so the 200/304 behavior, SEO/config dependencies,
+ * ETag-only conditional contract, and topic locale guards cannot drift behind
+ * source-grep fixtures.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -110,6 +111,20 @@ describe('root /feed.xml route conditional requests', () => {
         expect(await second.text()).toBe('');
     });
 
+    it('keeps If-Modified-Since informational unless If-None-Match matches', async () => {
+        const first = await getRootFeed(feedRequest('/feed.xml'));
+        const lastModified = first.headers.get('Last-Modified');
+        expect(lastModified).toBe('Sun, 17 May 2026 10:00:00 GMT');
+
+        const second = await getRootFeed(feedRequest('/feed.xml', {
+            'if-modified-since': lastModified ?? '',
+        }));
+
+        expect(second.status).toBe(200);
+        expect(second.headers.get('ETag')).toBe(first.headers.get('ETag'));
+        expect(await second.text()).toContain('<title type="text">Gallery Feed</title>');
+    });
+
     it('changes ETag when SEO/feed content changes even if image timestamps do not', async () => {
         const first = await getRootFeed(feedRequest('/feed.xml'));
         const firstEtag = first.headers.get('ETag');
@@ -194,5 +209,25 @@ describe('topic /[locale]/[topic]/feed.xml route conditional requests', () => {
         expect(second.status).toBe(304);
         expect(second.headers.get('ETag')).toBe(etag);
         expect(await second.text()).toBe('');
+    });
+
+    it('keeps topic If-Modified-Since informational unless If-None-Match matches', async () => {
+        const first = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml'),
+            topicParams('en', 'landscape'),
+        );
+        const lastModified = first.headers.get('Last-Modified');
+        expect(lastModified).toBe('Sun, 17 May 2026 10:00:00 GMT');
+
+        const second = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml', {
+                'if-modified-since': lastModified ?? '',
+            }),
+            topicParams('en', 'landscape'),
+        );
+
+        expect(second.status).toBe(200);
+        expect(second.headers.get('ETag')).toBe(first.headers.get('ETag'));
+        expect(await second.text()).toContain('<title type="text">Landscape | Gallery Feed</title>');
     });
 });

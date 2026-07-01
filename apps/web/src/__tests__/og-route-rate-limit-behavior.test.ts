@@ -179,4 +179,20 @@ describe('OG route rate-limit behavior', () => {
         expect(getImageProcessingStateCachedMock).toHaveBeenCalledWith(42);
         expect(pickFirstAvailablePhotoBufferMock).not.toHaveBeenCalled();
     });
+
+    it('keeps permanent photo misses cacheable while pending misses stay no-store', async () => {
+        getImageCachedMock.mockResolvedValue(null);
+        getImageProcessingStateCachedMock.mockResolvedValue(null);
+
+        const response = await photoOgGet(
+            new NextRequest('https://example.test/api/og/photo/404'),
+            { params: Promise.resolve({ id: '404' }) },
+        );
+
+        expect(response.status).toBe(302);
+        expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400');
+        expect(response.headers.get('Location')).toBe('https://gallery.example/api/og');
+        expect(getImageProcessingStateCachedMock).toHaveBeenCalledWith(404);
+        expect(pickFirstAvailablePhotoBufferMock).not.toHaveBeenCalled();
+    });
 });

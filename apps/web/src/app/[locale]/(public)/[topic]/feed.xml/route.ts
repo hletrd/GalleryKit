@@ -148,7 +148,9 @@ export async function GET(
         entries,
     });
 
-    // R18-L3: emit Last-Modified for RSS-reader conditional GETs.
+    // R18-L3/C74-01: emit Last-Modified as syndication metadata. 304
+    // decisions are intentionally ETag-only because the rendered XML also
+    // depends on SEO/feed-shaping settings without a reliable updated_at.
     let lastModifiedHeader: string;
     try {
         lastModifiedHeader = new Date(feedUpdated).toUTCString();
@@ -180,7 +182,7 @@ export async function GET(
             'Cache-Control': CACHE_CONTROL,
             // R17-L3: pre-emptive Vary for future locale-aware feeds.
             'Vary': 'Accept-Language',
-            // R18-L3: Last-Modified for client-side conditional GETs.
+            // R18-L3/C74-01: Last-Modified is informational; ETag drives 304s.
             'Last-Modified': lastModifiedHeader,
             'ETag': etag,
         },

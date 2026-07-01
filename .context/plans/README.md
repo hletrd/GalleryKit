@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 73/100 Implementation Plan - active; schedules per-photo OG pending-row cache hardening, feed/OG route-level coverage, and Cycle 72 ledger closure (`cycle-73-2026-07-01-plan.md`)
-- Cycle 73/100 Deferred Findings - sidecar write-boundary behavior test and Settings UI persistence smoke deferred with exit criteria; carry-forward items repeated (`cycle-73-2026-07-01-deferred.md`)
+- Cycle 74/100 Implementation Plan - active; schedules feed ETag-only contract docs/tests, OG processing-state predicate coverage, Cycle 73 ledger closure, and password help accessibility wiring (`cycle-74-2026-07-01-plan.md`)
+- Cycle 74/100 Deferred Findings - no new deferred findings; Cycle 73 deferred behavior-coverage items and carry-forward register remain referenced (`cycle-74-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 73/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 74 started from deployed `92924220` (`cycle-73-2026-07-01-plan.md`)
+- Cycle 73/100 Deferred Findings - sidecar write-boundary behavior test and Settings UI persistence smoke deferred with exit criteria; carry-forward items repeated (`cycle-73-2026-07-01-deferred.md`)
 - Cycle 72/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 73 started from deployed `96459b7a` (`cycle-72-2026-07-01-plan.md`)
 - Cycle 72/100 Deferred Findings - feed conditional route tests superseded by scheduled Cycle 73 coverage; browser-matrix smokes and carry-forward items repeated (`cycle-72-2026-07-01-deferred.md`)
 - Cycle 71/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 72 started from deployed `363dc1c9` (`cycle-71-2026-07-01-plan.md`)

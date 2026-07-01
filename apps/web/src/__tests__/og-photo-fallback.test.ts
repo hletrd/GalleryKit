@@ -34,6 +34,9 @@ const ROUTE_PATH = resolve(
 );
 const source = readFileSync(ROUTE_PATH, 'utf8');
 
+const DATA_PATH = resolve(__dirname, '..', 'lib', 'data.ts');
+const dataSource = readFileSync(DATA_PATH, 'utf8');
+
 const HELPER_PATH = resolve(__dirname, '..', 'lib', 'og-photo-fetch.ts');
 const helperSource = readFileSync(HELPER_PATH, 'utf8');
 
@@ -90,6 +93,20 @@ describe('/api/og/photo/[id] R24-M1 fallback contract (route source)', () => {
         expect(source).toContain('if (!fetched) {');
         expect(source).toContain('return buildFallbackResponse(seo.url, OG_TEMPORARY_FALLBACK_CACHE_CONTROL');
         expect(source).not.toContain('return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);\n        }\n        const photoDataUrl');
+    });
+
+    it('distinguishes existing pending rows from permanent misses via an unprocessed-safe data helper (C74-TE-01)', () => {
+        expect(source).toContain('getImageProcessingStateCached(imageId)');
+        expect(source).toContain('state ? OG_TEMPORARY_FALLBACK_CACHE_CONTROL : OG_SUCCESS_CACHE_CONTROL');
+
+        const helperMatch = dataSource.match(
+            /export async function getImageProcessingState\([\s\S]*?\n\}/,
+        );
+        expect(helperMatch).not.toBeNull();
+        const helper = helperMatch?.[0] ?? '';
+        expect(helper).toContain('processed: images.processed');
+        expect(helper).toContain('.where(eq(images.id, id))');
+        expect(helper).not.toContain('eq(images.processed, true)');
     });
 });
 

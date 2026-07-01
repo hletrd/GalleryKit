@@ -138,10 +138,10 @@ export async function GET(request: NextRequest) {
         entries,
     });
 
-    // R18-L3: emit Last-Modified so RSS readers honor conditional requests
-    // (If-Modified-Since) and avoid full-body refetch on every poll. The
-    // value derives from the max entry updated timestamp computed above;
-    // bad ISO strings degrade to the current date rather than throwing.
+    // R18-L3/C74-01: emit Last-Modified as syndication metadata. 304
+    // decisions are intentionally ETag-only because the rendered XML also
+    // depends on SEO/feed-shaping settings without a reliable updated_at.
+    // Bad ISO strings degrade to the current date rather than throwing.
     let lastModifiedHeader: string;
     try {
         lastModifiedHeader = new Date(feedUpdated).toUTCString();
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
             // R17-L3: pre-emptive Vary so a future locale-aware feed
             // does not poison CDN caches with the wrong locale's titles.
             'Vary': 'Accept-Language',
-            // R18-L3: Last-Modified for client-side conditional GETs.
+            // R18-L3/C74-01: Last-Modified is informational; ETag drives 304s.
             'Last-Modified': lastModifiedHeader,
             'ETag': etag,
         },

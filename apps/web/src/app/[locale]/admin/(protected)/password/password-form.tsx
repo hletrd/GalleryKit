@@ -25,6 +25,10 @@ export function PasswordForm() {
     const [state, formAction, isPending] = useActionState(updatePassword, startState);
     const { t } = useTranslation();
     const [confirmError, setConfirmError] = useState<string | null>(null);
+    const passwordHelpId = 'password-min-length-help';
+    const confirmPasswordDescription = confirmError
+        ? `${passwordHelpId} confirmPassword-error`
+        : passwordHelpId;
 
     const handleSubmit = (formData: FormData) => {
         const newPw = formData.get('newPassword') as string;
@@ -79,9 +83,11 @@ export function PasswordForm() {
                     minLength={12}
                     maxLength={1024}
                     autoComplete="new-password"
+                    aria-describedby={passwordHelpId}
                 />
-                <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
-
+                <p id={passwordHelpId} className="text-xs text-muted-foreground">
+                    {t('password.minLength')}
+                </p>
             </div>
 
             <div className="space-y-2">
@@ -96,7 +102,7 @@ export function PasswordForm() {
                     maxLength={1024}
                     autoComplete="new-password"
                     aria-invalid={confirmError ? 'true' : undefined}
-                    aria-describedby={confirmError ? 'confirmPassword-error' : undefined}
+                    aria-describedby={confirmPasswordDescription}
                 />
                 {confirmError && (
                     <p id="confirmPassword-error" className="text-sm text-destructive-text">
