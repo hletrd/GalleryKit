@@ -13,6 +13,8 @@ import siteConfig from '@/site-config.json';
 import { parseSafePositiveInteger } from '@/lib/validation';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { ifNoneMatchMatches } from '@/lib/http-etag';
+import { getColorSettingsHash } from '@/lib/settings-hash';
+import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 
 export const runtime = 'nodejs';
 
@@ -59,6 +61,8 @@ function createPhotoOgEtag(input: {
     updatedAt: unknown;
     createdAt: unknown;
     imageSizes: number[];
+    settingsHash: string;
+    pipelineVersion: number;
 }): string {
     const freshness = toStableEtagTimestamp(input.updatedAt)
         || toStableEtagTimestamp(input.createdAt);
@@ -69,6 +73,8 @@ function createPhotoOgEtag(input: {
             input.filenameJpeg,
             freshness,
             sizes,
+            input.settingsHash,
+            input.pipelineVersion,
             input.displayTitle,
             input.siteTitle,
         ].join('\0'))
@@ -130,6 +136,7 @@ export async function GET(
         const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
         const rawTitle = getPhotoDisplayTitle(image, `Photo #${image.id}`);
         const displayTitle = sanitizeForOg(rawTitle);
+        const settingsHash = await getColorSettingsHash(config);
         const etag = createPhotoOgEtag({
             id: image.id,
             filenameJpeg: image.filename_jpeg,
@@ -138,6 +145,8 @@ export async function GET(
             updatedAt: image.updated_at,
             createdAt: image.created_at,
             imageSizes: config.imageSizes,
+            settingsHash,
+            pipelineVersion: IMAGE_PIPELINE_VERSION,
         });
         if (ifNoneMatchMatches(req.headers.get('if-none-match'), etag)) {
             return new Response(null, {

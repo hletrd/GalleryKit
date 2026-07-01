@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 75/100 Implementation Plan - active; schedules OG/feed/upload ETag revalidation fixes, direct processing-state coverage, Cycle 74 ledger closure, and mobile bottom-sheet dropdown containment (`cycle-75-2026-07-01-plan.md`)
-- Cycle 75/100 Deferred Findings - defers low-risk bulk-edit validation field association; carry-forward register remains referenced (`cycle-75-2026-07-01-deferred.md`)
+- Cycle 76/100 Implementation Plan - active; schedules backfill row-existence confirmation, per-photo OG derivative freshness, and Cycle 75 ledger closure (`cycle-76-2026-07-01-plan.md`)
+- Cycle 76/100 Deferred Findings - defers low-risk behavior-test hardening items; carry-forward register remains referenced (`cycle-76-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 75/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 76 started from deployed `a295ae44` (`cycle-75-2026-07-01-plan.md`)
+- Cycle 75/100 Deferred Findings - bulk-edit validation field association deferred; carry-forward register remains referenced (`cycle-75-2026-07-01-deferred.md`)
 - Cycle 74/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 75 started from deployed `29f4176d` (`cycle-74-2026-07-01-plan.md`)
 - Cycle 74/100 Deferred Findings - no new deferred findings; Cycle 73 deferred behavior-coverage items and carry-forward register remain referenced (`cycle-74-2026-07-01-deferred.md`)
 - Cycle 73/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 74 started from deployed `92924220` (`cycle-73-2026-07-01-plan.md`)

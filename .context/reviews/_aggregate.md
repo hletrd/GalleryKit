@@ -1,16 +1,13 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-75-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-76-2026-07-01/_aggregate.md`
 
-Cycle 75 produced eight deduplicated findings:
+Cycle 76 produced five deduplicated findings:
 
-- `C75-01` - Per-photo OG generation lacks conditional caching.
-- `C75-02` - If-None-Match comparisons use exact string matching instead of weak comparison.
-- `C75-03` - Pending-photo OG helper remains mostly source-locked.
-- `C75-04` - Cycle 74 deployment/status docs are still open.
-- `C75-05` - Mobile bottom-sheet download menu portals outside the modal focus trap.
-- `C75-06` - Empty Atom feeds churn content ETags.
-- `C75-07` - OG rate-limit rollback comment has stale count.
-- `C75-08` - Bulk-edit validation alert is not associated with the failing field.
+- `C76-01` - Backfill same-value updates can be misclassified as deleted rows.
+- `C76-02` - Per-photo OG validators can miss derivative-byte changes.
+- `C76-03` - Cycle 75 ledger still marks terminal steps open.
+- `C76-04` - Bottom-sheet dropdown portal coverage is source-shaped only.
+- `C76-05` - `getImageProcessingState` test would miss a processed-predicate drift.
 
-Cycle 75 schedules `C75-01` through `C75-07`. `C75-08` is deferred with original severity/confidence, reason, and exit criterion in the Cycle 75 deferred artifact.
+Cycle 76 schedules `C76-01` through `C76-03`. `C76-04` and `C76-05` are deferred with original severity/confidence, reason, and exit criterion in the Cycle 76 deferred artifact. `C75-08` remains a carry-forward deferred item.

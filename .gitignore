@@ -48,6 +48,8 @@ test
 !.context/plans/cycle-60-2026-07-01-deferred.md
 !.context/plans/cycle-62-2026-07-01-plan.md
 !.context/plans/cycle-62-2026-07-01-deferred.md
+!.context/plans/cycle-76-2026-07-01-plan.md
+!.context/plans/cycle-76-2026-07-01-deferred.md
 # Re-ignore transient gate/run logs under reviews — the `!.context/reviews/**`
 # negation above otherwise overrides the global `*.log` rule and tracks them.
 .context/reviews/**/*.log

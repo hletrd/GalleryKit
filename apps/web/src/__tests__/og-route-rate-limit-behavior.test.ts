@@ -8,6 +8,7 @@ const {
     getImageCachedMock,
     getImageProcessingStateCachedMock,
     getGalleryConfigMock,
+    getColorSettingsHashMock,
     pickFirstAvailablePhotoBufferMock,
     isRestoreMaintenanceActiveMock,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
     getImageCachedMock: vi.fn(),
     getImageProcessingStateCachedMock: vi.fn(),
     getGalleryConfigMock: vi.fn(),
+    getColorSettingsHashMock: vi.fn(),
     pickFirstAvailablePhotoBufferMock: vi.fn(),
     isRestoreMaintenanceActiveMock: vi.fn(() => false),
 }));
@@ -29,6 +31,10 @@ vi.mock('@/lib/data', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
+}));
+
+vi.mock('@/lib/settings-hash', () => ({
+    getColorSettingsHash: getColorSettingsHashMock,
 }));
 
 vi.mock('@/lib/og-photo-fetch', () => ({
@@ -49,6 +55,7 @@ vi.mock('@/lib/constants', async () => {
 
 import { GET as topicOgGet } from '@/app/api/og/route';
 import { GET as photoOgGet } from '@/app/api/og/photo/[id]/route';
+import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 import { OG_MAX_REQUESTS, preIncrementOgAttempt, resetOgRateLimitForTests } from '@/lib/rate-limit';
 
 function saturateUnknownOgBucket(now = Date.now()) {
@@ -72,6 +79,8 @@ function createPhotoOgEtag(input: {
     updatedAt: Date;
     createdAt: Date;
     imageSizes?: number[];
+    settingsHash?: string;
+    pipelineVersion?: number;
 }) {
     const sizes = [...(input.imageSizes ?? [640, 1536])].sort((a, b) => a - b).join(',');
     const hash = createHash('sha256')
@@ -80,6 +89,8 @@ function createPhotoOgEtag(input: {
             input.filenameJpeg,
             input.updatedAt.toISOString() || input.createdAt.toISOString(),
             sizes,
+            input.settingsHash ?? 'settings-a',
+            input.pipelineVersion ?? IMAGE_PIPELINE_VERSION,
             input.displayTitle,
             input.siteTitle ?? 'Gallery',
         ].join('\0'))
@@ -97,6 +108,7 @@ beforeEach(() => {
         og_image_url: '/api/og',
     });
     getGalleryConfigMock.mockResolvedValue({ imageSizes: [640, 1536] });
+    getColorSettingsHashMock.mockResolvedValue('settings-a');
 });
 
 afterEach(() => {
@@ -217,6 +229,44 @@ describe('OG route rate-limit behavior', () => {
         expect(response.headers.get('ETag')).toBe(etag);
         expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400');
         expect(pickFirstAvailablePhotoBufferMock).not.toHaveBeenCalled();
+    });
+
+    it('does not 304 the photo OG route when derivative byte-impact settings changed', async () => {
+        const updatedAt = new Date('2026-06-01T10:00:00.000Z');
+        const createdAt = new Date('2026-05-01T10:00:00.000Z');
+        getImageCachedMock.mockResolvedValue({
+            id: 42,
+            title: 'Mountain',
+            filename_jpeg: 'mountain.jpg',
+            tag_names: null,
+            updated_at: updatedAt,
+            created_at: createdAt,
+        });
+        getColorSettingsHashMock.mockResolvedValue('settings-b');
+        pickFirstAvailablePhotoBufferMock.mockResolvedValue(null);
+        const staleEtag = createPhotoOgEtag({
+            id: 42,
+            filenameJpeg: 'mountain.jpg',
+            displayTitle: 'Mountain',
+            updatedAt,
+            createdAt,
+            settingsHash: 'settings-a',
+        });
+
+        const response = await photoOgGet(
+            new NextRequest('https://example.test/api/og/photo/42', {
+                headers: { 'if-none-match': staleEtag },
+            }),
+            { params: Promise.resolve({ id: '42' }) },
+        );
+
+        expect(response.status).toBe(302);
+        expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
+        expect(pickFirstAvailablePhotoBufferMock).toHaveBeenCalledWith(
+            expect.any(String),
+            'mountain.jpg',
+            [640, 1536],
+        );
     });
 
     it('uses no-store redirects when a processed photo has no available derivative yet', async () => {

@@ -138,6 +138,8 @@ vi.mock('fs/promises', async (importOriginal) => {
 
 import { triggerAdminBackfill, readAdminBackfillState } from '@/lib/admin-backfill-runner';
 
+let rowExistsAfterUpdate = false;
+
 function staticSqlText(arg: unknown): string {
     const chunks = (arg as { queryChunks?: Array<{ value?: unknown }> })?.queryChunks;
     if (!Array.isArray(chunks)) return '';
@@ -160,6 +162,7 @@ describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reenco
         executeMock.mockReset();
         processImageFormatsMock.mockClear();
         deleteImageVariantsMock.mockClear();
+        rowExistsAfterUpdate = false;
 
         queryMock.mockImplementation(async (sqlText: string) => {
             if (typeof sqlText === 'string' && sqlText.includes('GET_LOCK')) return [[{ acquired: 1 }]];
@@ -171,6 +174,9 @@ describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reenco
         // (simulating the row being deleted mid-re-encode).
         executeMock.mockImplementation(async (arg: unknown) => {
             const text = staticSqlText(arg);
+            if (text.includes('SELECT id FROM images WHERE id')) {
+                return [rowExistsAfterUpdate ? [{ id: 1 }] : []];
+            }
             if (text.includes('SELECT')) {
                 return [
                     [
@@ -226,6 +232,32 @@ describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reenco
         expect(state.detectionFailures).toBe(0);
         expect(state.errors).toBe(0);
         // deleted-mid-reencode must NOT flip the WITH-FAILURES banner.
+        expect(state.lastRunHadFailures).toBe(false);
+        expect(state.running).toBe(false);
+    });
+
+    it('does not delete variants when a same-value UPDATE reports 0 changed rows for a live row', async () => {
+        rowExistsAfterUpdate = true;
+
+        const result = await triggerAdminBackfill();
+        expect(result.status).toBe('queued');
+
+        await vi.waitFor(
+            () => {
+                if (readAdminBackfillState().running) {
+                    throw new Error('backfill runner still draining');
+                }
+            },
+            { timeout: 20_000, interval: 25 },
+        );
+
+        expect(processImageFormatsMock).toHaveBeenCalled();
+        expect(deleteImageVariantsMock).not.toHaveBeenCalled();
+
+        const state = readAdminBackfillState();
+        expect(state.deletedMidReencode).toBe(0);
+        expect(state.processed).toBe(1);
+        expect(state.errors).toBe(0);
         expect(state.lastRunHadFailures).toBe(false);
         expect(state.running).toBe(false);
     });

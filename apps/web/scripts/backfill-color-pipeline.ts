@@ -150,33 +150,32 @@ function rowFilenames(row: ImageRow): BatchFilenames {
 }
 
 /**
- * AGG-C5-01: pure decision helper — given each batched UPDATE's affectedRows and
- * the per-row filenames, return the files whose row was deleted mid-reencode
- * (affectedRows===0) and must have their just-written derivatives cleaned up.
- * Extracted so the sidecar's delete-race partitioning is testable without a live
- * DB; `flushBatch` feeds it the ResultSetHeader.affectedRows it reads back.
+ * AGG-C5-01/C76-01: pure decision helper — given each batched UPDATE's
+ * affectedRows, confirmed row-existence state, and per-row filenames, return the
+ * files whose row was deleted mid-reencode and must have their just-written
+ * derivatives cleaned up. MySQL affectedRows counts changed rows by default, so
+ * affectedRows===0 is not enough; the caller must confirm the row is absent.
  */
 export function collectDeletedMidReencodeFiles(
-    results: { affectedRows: number; files: BatchFilenames }[],
+    results: { affectedRows: number; rowStillExists: boolean; files: BatchFilenames }[],
 ): BatchFilenames[] {
-    return results.filter((r) => r.affectedRows === 0).map((r) => r.files);
+    return results
+        .filter((r) => r.affectedRows === 0 && !r.rowStillExists)
+        .map((r) => r.files);
 }
 
 /**
  * AGG-C4-04 (run-6 cycle-4, tracer TRC-C4-01): of the detection-failure rows in
  * a batch (the `derivativeBatch` entries — the ones that incremented
- * `detectionFailures`), count how many were actually deleted mid-reencode
- * (their UPDATE matched 0 rows). Those rows no longer exist, so they must NOT
- * keep `detectionFailures` elevated — otherwise the sidecar exits non-zero for a
- * row that is gone, needlessly retriggering an idempotent backfill from a
- * CI/cron wrapper. `flushBatch` passes ONLY the derivative-slice UPDATE results
- * here so the count is exactly the detection-failure∩deleted overlap. Pure +
- * exported for unit testing (the in-`main` flushBatch is a closure).
+ * `detectionFailures`), count how many were actually deleted mid-reencode. Those
+ * rows no longer exist, so they must NOT keep `detectionFailures` elevated.
+ * A zero changed-row update on a still-existing row is not deleted; keep it
+ * counted as a detection failure so a later run retries color metadata.
  */
 export function countDeletedMidReencodeDetectionFailures(
-    derivativeResults: { affectedRows: number }[],
+    derivativeResults: { affectedRows: number; rowStillExists: boolean }[],
 ): number {
-    return derivativeResults.filter((r) => r.affectedRows === 0).length;
+    return derivativeResults.filter((r) => r.affectedRows === 0 && !r.rowStillExists).length;
 }
 
 /**
@@ -452,7 +451,7 @@ async function main() {
         // filesystem cleanup runs AFTER the transaction commits so a best-effort
         // unlink error can never roll back legitimate sibling-row updates in the
         // same batch.
-        const updateResults: { affectedRows: number; files: BatchFilenames }[] = [];
+        const updateResults: { id: number; affectedRows: number; files: BatchFilenames }[] = [];
         await db.transaction(async (tx) => {
             for (const item of items) {
                 const [res] = await tx.execute(sql`
@@ -466,24 +465,30 @@ async function main() {
                         has_gain_map = ${item.signals.has_gain_map},
                         color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null},
                         was_downscaled = ${item.signals.was_downscaled},
-                        avif_10bit = ${item.signals.avif_10bit}
+                        avif_10bit = ${item.signals.avif_10bit},
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ${item.id}
                 `);
-                updateResults.push({ affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
+                updateResults.push({ id: item.id, affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
             }
             for (const item of derivativeItems) {
                 const [res] = await tx.execute(sql`
                     UPDATE images SET
                         was_downscaled = ${item.derivative.was_downscaled},
-                        avif_10bit = ${item.derivative.avif_10bit}
+                        avif_10bit = ${item.derivative.avif_10bit},
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ${item.id}
                 `);
-                updateResults.push({ affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
+                updateResults.push({ id: item.id, affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
             }
         });
+        const confirmedUpdateResults = await Promise.all(updateResults.map(async (result) => ({
+            ...result,
+            rowStillExists: result.affectedRows === 0 ? await rowExists(result.id) : true,
+        })));
         // AGG-C5-01: partition + cleanup via the module-level exported helpers
         // (unit-tested in backfill-color-pipeline-deleted-mid-reencode.test.ts).
-        const deletedMidReencodeFiles = collectDeletedMidReencodeFiles(updateResults);
+        const deletedMidReencodeFiles = collectDeletedMidReencodeFiles(confirmedUpdateResults);
         if (deletedMidReencodeFiles.length > 0) {
             // The row was deleted while we re-encoded it. The deletion already
             // unlinked the original variants; deleteImageVariants is
@@ -501,7 +506,7 @@ async function main() {
             // results in updateResults (derivativeItems are pushed last), so
             // slice from items.length to recover exactly the detection-failure
             // UPDATE outcomes and subtract their deleted overlap.
-            const derivativeResults = updateResults.slice(items.length);
+            const derivativeResults = confirmedUpdateResults.slice(items.length);
             detectionFailures -= countDeletedMidReencodeDetectionFailures(derivativeResults);
             await Promise.all(deletedMidReencodeFiles.map(cleanupDeletedMidReencodeVariants));
             console.log(`  [batch-flush] ${deletedMidReencodeFiles.length} row(s) deleted mid-reencode — orphaned derivatives cleaned up`);

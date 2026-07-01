@@ -15,8 +15,8 @@
  * `collectDeletedMidReencodeFiles` (the affectedRows===0 partition) and
  * `cleanupDeletedMidReencodeVariants` (the dir-scan unlink) — so the contract is
  * now unit-testable in isolation. This file pins:
- *   1. the partition: only rows with affectedRows===0 are selected for cleanup,
- *      preserving per-row file association and order;
+ *   1. the partition: only rows with affectedRows===0 AND confirmed absence are
+ *      selected for cleanup, preserving per-row file association and order;
  *   2. the cleanup: webp/avif/jpeg are ALL unlinked with `[]` sizes (full
  *      directory scan, so every variant is removed regardless of the configured
  *      image_sizes list — the non-default-size orphan case).
@@ -63,14 +63,14 @@ function files(prefix: string): BatchFilenames {
 }
 
 describe('sidecar backfill delete-mid-reencode partition (collectDeletedMidReencodeFiles)', () => {
-    it('selects ONLY rows whose UPDATE matched 0 rows (deleted mid-reencode)', () => {
+    it('selects ONLY rows whose UPDATE changed 0 rows and no longer exist', () => {
         const a = files('aaa');
         const b = files('bbb');
         const c = files('ccc');
         const result = collectDeletedMidReencodeFiles([
-            { affectedRows: 1, files: a }, // alive — must NOT be cleaned up
-            { affectedRows: 0, files: b }, // deleted mid-reencode — MUST be cleaned up
-            { affectedRows: 1, files: c }, // alive — must NOT be cleaned up
+            { affectedRows: 1, rowStillExists: true, files: a }, // alive — must NOT be cleaned up
+            { affectedRows: 0, rowStillExists: false, files: b }, // deleted mid-reencode — MUST be cleaned up
+            { affectedRows: 1, rowStillExists: true, files: c }, // alive — must NOT be cleaned up
         ]);
         expect(result).toEqual([b]);
         // Non-vacuity guard: if the filter were dropped (select-all), this would
@@ -81,8 +81,11 @@ describe('sidecar backfill delete-mid-reencode partition (collectDeletedMidReenc
     it('returns an empty array when every row is alive (the common case — no cleanup)', () => {
         expect(
             collectDeletedMidReencodeFiles([
-                { affectedRows: 1, files: files('x') },
-                { affectedRows: 1, files: files('y') },
+                { affectedRows: 1, rowStillExists: true, files: files('x') },
+                { affectedRows: 1, rowStillExists: true, files: files('y') },
+                // C76-01: MySQL reports changed rows by default; a same-value
+                // UPDATE can report 0 while the row still exists.
+                { affectedRows: 0, rowStillExists: true, files: files('same-value') },
             ]),
         ).toEqual([]);
     });
@@ -92,8 +95,8 @@ describe('sidecar backfill delete-mid-reencode partition (collectDeletedMidReenc
         const y = files('y');
         expect(
             collectDeletedMidReencodeFiles([
-                { affectedRows: 0, files: x },
-                { affectedRows: 0, files: y },
+                { affectedRows: 0, rowStillExists: false, files: x },
+                { affectedRows: 0, rowStillExists: false, files: y },
             ]),
         ).toEqual([x, y]);
     });
@@ -150,7 +153,7 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
     );
 
     it('flushBatch calls collectDeletedMidReencodeFiles to partition the UPDATE results', () => {
-        expect(scriptSrc).toMatch(/collectDeletedMidReencodeFiles\(\s*updateResults\s*\)/);
+        expect(scriptSrc).toMatch(/collectDeletedMidReencodeFiles\(\s*confirmedUpdateResults\s*\)/);
     });
 
     it('flushBatch maps the deleted-row files through cleanupDeletedMidReencodeVariants', () => {
@@ -196,16 +199,20 @@ describe('countDeletedMidReencodeDetectionFailures (AGG-C4-04 — detection-fail
         // keep detectionFailures elevated.
         expect(
             countDeletedMidReencodeDetectionFailures([
-                { affectedRows: 1 }, // detection-failed row still alive — keep counted
-                { affectedRows: 0 }, // detection-failed AND deleted — walk back
-                { affectedRows: 0 }, // detection-failed AND deleted — walk back
+                { affectedRows: 1, rowStillExists: true }, // detection-failed row still alive — keep counted
+                { affectedRows: 0, rowStillExists: false }, // detection-failed AND deleted — walk back
+                { affectedRows: 0, rowStillExists: false }, // detection-failed AND deleted — walk back
+                { affectedRows: 0, rowStillExists: true }, // same-value update — keep counted
             ]),
         ).toBe(2);
     });
 
     it('returns 0 when every detection-failure row is still alive (the common case)', () => {
         expect(
-            countDeletedMidReencodeDetectionFailures([{ affectedRows: 1 }, { affectedRows: 1 }]),
+            countDeletedMidReencodeDetectionFailures([
+                { affectedRows: 1, rowStillExists: true },
+                { affectedRows: 0, rowStillExists: true },
+            ]),
         ).toBe(0);
     });
 

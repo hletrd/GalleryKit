@@ -465,6 +465,25 @@ async function imageRowStillExists(id: number): Promise<boolean> {
     return Array.isArray(rows) && rows.length > 0;
 }
 
+async function cleanupIfUpdateMissedDeletedRow(
+    updateResult: unknown,
+    row: CandidateRow,
+): Promise<boolean> {
+    if ((updateResult as { affectedRows?: number } | undefined)?.affectedRows !== 0) {
+        return false;
+    }
+
+    // MySQL's default affectedRows for UPDATE is changed rows, not matched rows.
+    // A same-value re-encode update can report 0 while the image still exists, so
+    // only treat it as deleted-mid-reencode after a fresh existence probe.
+    if (await imageRowStillExists(row.id)) {
+        return false;
+    }
+
+    await cleanupDeletedMidReencodeVariants(row);
+    return true;
+}
+
 async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     if (!originalPath) {
@@ -602,13 +621,13 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
                     has_gain_map = ${signals.has_gain_map},
                     color_pipeline_decision = ${signals.color_pipeline_decision ?? null},
                     was_downscaled = ${wasDownscaled},
-                    avif_10bit = ${avif10bit}
+                    avif_10bit = ${avif10bit},
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ${row.id}
             `);
-            // AGG-R8c3-03: 0 rows affected ⇒ deleted mid-re-encode. Clean up the
-            // derivatives processImageFormats just wrote so they don't orphan.
-            if ((updateResult as { affectedRows?: number } | undefined)?.affectedRows === 0) {
-                await cleanupDeletedMidReencodeVariants(row);
+            // C76-01: affectedRows can be 0 for same-value updates on live rows;
+            // cleanup only when a follow-up existence probe confirms deletion.
+            if (await cleanupIfUpdateMissedDeletedRow(updateResult, row)) {
                 return { ok: false, reason: 'deleted-mid-reencode' };
             }
             return { ok: true };
@@ -631,16 +650,15 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         const [updateResult] = await db.execute(sql`
             UPDATE images SET
                 was_downscaled = ${wasDownscaled},
-                avif_10bit = ${avif10bit}
+                avif_10bit = ${avif10bit},
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ${row.id}
         `);
-        // AGG-R8c3-03: the encode succeeded and wrote derivatives even though
-        // detection failed; if the row vanished mid-re-encode the new files
-        // would orphan exactly as in the success branch. Clean up and report
-        // deleted-mid-reencode (the row is gone, so detection-failed retry is
-        // moot).
-        if ((updateResult as { affectedRows?: number } | undefined)?.affectedRows === 0) {
-            await cleanupDeletedMidReencodeVariants(row);
+        // AGG-R8c3-03/C76-01: the encode succeeded and wrote derivatives even
+        // though detection failed. If the row is confirmed gone, clean those
+        // files; if the row still exists and the UPDATE was a same-value no-op,
+        // keep the derivatives and report detection-failed so the row retries.
+        if (await cleanupIfUpdateMissedDeletedRow(updateResult, row)) {
             return { ok: false, reason: 'deleted-mid-reencode' };
         }
         return { ok: false, reason: 'detection-failed', error: detectionError };
