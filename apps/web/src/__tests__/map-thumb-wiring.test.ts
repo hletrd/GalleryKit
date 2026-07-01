@@ -58,6 +58,20 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         expect(page).toMatch(/loadingLabel=\{t\('loading'\)\}/);
     });
 
+    it('map markers use localized display titles instead of raw numeric accessible fallbacks', async () => {
+        const client = await read('components/map/map-client.tsx');
+        const page = await read('app/[locale]/(public)/map/page.tsx');
+        expect(client).toMatch(/displayTitle:\s*string/);
+        expect(client).toContain('alt={marker.displayTitle}');
+        expect(client).toContain('aria-label={`${openPhotoLabel}: ${marker.displayTitle}`}');
+        expect(client).not.toContain('String(marker.id)');
+        expect(client).not.toContain('marker.title ?? marker.id');
+        expect(page).toContain("const tPhoto = await getTranslations('photo')");
+        expect(page).toContain("displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id })");
+        expect(page).toContain('{marker.displayTitle}');
+        expect(page).not.toContain("`${t('openPhoto')} ${marker.id}`");
+    });
+
     it('map-loader provides a localized status fallback for the dynamic chunk', async () => {
         const loader = await read('components/map/map-loader.tsx');
         expect(loader).toContain('Suspense');

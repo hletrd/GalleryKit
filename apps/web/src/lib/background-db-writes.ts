@@ -25,11 +25,13 @@ export function trackBackgroundDbWrite<T>(write: () => Promise<T>): Promise<T | 
     return promise;
 }
 
-export async function drainBackgroundDbWritesForRestore() {
+export async function drainBackgroundDbWrites() {
     while (backgroundDbWrites.size > 0) {
         await Promise.allSettled([...backgroundDbWrites]);
     }
 }
+
+export const drainBackgroundDbWritesForRestore = drainBackgroundDbWrites;
 
 export function getBackgroundDbWriteCountForTests() {
     return backgroundDbWrites.size;

@@ -30,6 +30,22 @@ describe('cycle 71 sidecar restore-maintenance guards', () => {
             expect(source.match(/assertNoDurableRestoreMaintenanceForScript\(SCRIPT_NAME\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
         }
     });
+
+    it('guards the alt-text DB-mutating sidecar before reads and write batches', () => {
+        const source = readApp('scripts/backfill-alt-text.ts');
+        expect(source).toContain("import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable'");
+        expect(source).toContain("const SCRIPT_NAME = 'backfill-alt-text'");
+        const firstGuard = source.indexOf('assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME)');
+        const settingsRead = source.indexOf('const enabled = await checkAutoAltTextEnabled()');
+        const candidateRead = source.indexOf('id: images.id');
+        const writeBatch = source.indexOf('await Promise.all(chunk.map');
+        expect(firstGuard).toBeGreaterThanOrEqual(0);
+        expect(settingsRead).toBeGreaterThan(firstGuard);
+        expect(candidateRead).toBeGreaterThan(firstGuard);
+        expect(source.lastIndexOf('assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME)', writeBatch))
+            .toBeGreaterThan(candidateRead);
+        expect(source.match(/assertNoDurableRestoreMaintenanceForScript\(SCRIPT_NAME\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    });
 });
 
 describe('cycle 71 deploy/env documentation contracts', () => {

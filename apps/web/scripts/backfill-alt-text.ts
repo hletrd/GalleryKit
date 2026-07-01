@@ -30,7 +30,9 @@ dotenv.config({ path: '.env.local' });
 import { db, images, adminSettings } from '../src/db';
 import { eq, isNull, and, gt, asc } from 'drizzle-orm';
 import { generateCaption } from '../src/lib/caption-generator';
+import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable';
 
+const SCRIPT_NAME = 'backfill-alt-text';
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 1;
 const FORCE_FLAG = process.argv.includes('--force');
@@ -48,6 +50,8 @@ async function checkAutoAltTextEnabled(): Promise<boolean> {
 
 async function main() {
     console.log('[backfill-alt-text] Starting…');
+
+    assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
 
     if (!FORCE_FLAG) {
         const enabled = await checkAutoAltTextEnabled();
@@ -72,6 +76,7 @@ async function main() {
     let cursor = 0;
 
     for (;;) {
+        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
         const rows = await db.select({
             id: images.id,
             camera_model: images.camera_model,
@@ -94,6 +99,7 @@ async function main() {
         // Process BATCH_CONCURRENCY rows at a time (cap=1 for stub/heavy inference)
         for (let i = 0; i < rows.length; i += BATCH_CONCURRENCY) {
             const chunk = rows.slice(i, i + BATCH_CONCURRENCY);
+            assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
             await Promise.all(chunk.map(async (row) => {
                 try {
                     const caption = await generateCaption(

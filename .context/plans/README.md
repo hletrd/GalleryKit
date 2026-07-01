@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 79/100 Implementation Plan - active; schedules public-route scanner import-alias hardening, Cycle 78 ledger closure, and Dockerfile runtime-deps comment correction (`cycle-79-2026-07-01-plan.md`)
-- Cycle 79/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-79-2026-07-01-deferred.md`)
+- Cycle 80/100 Implementation Plan - active; schedules dynamic expensive-import scanner hardening, graceful background DB write shutdown drain, Cycle 79 ledger closure, alt-text sidecar restore guard, and map accessible-label fallback (`cycle-80-2026-07-01-plan.md`)
+- Cycle 80/100 Deferred Findings - defers the site-config runtime/build-time contract decision with an exit criterion; carry-forward register remains referenced (`cycle-80-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 79/100 Implementation Plan - implementation committed/pushed/deployed as `8c4999c9`; Cycle 80 started from deployed `8c4999c9` (`cycle-79-2026-07-01-plan.md`)
+- Cycle 79/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-79-2026-07-01-deferred.md`)
 - Cycle 78/100 Implementation Plan - implementation committed/pushed/deployed as `9cc143d0`; Cycle 79 started from deployed `9cc143d0` (`cycle-78-2026-07-01-plan.md`)
 - Cycle 78/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-78-2026-07-01-deferred.md`)
 - Cycle 77/100 Implementation Plan - implementation committed/pushed as `9286bef1`; no committed Cycle 77 deploy transcript was present at Cycle 78 review time, so Cycle 78 deploy supersedes production state after its pushed fix (`cycle-77-2026-07-01-plan.md`)

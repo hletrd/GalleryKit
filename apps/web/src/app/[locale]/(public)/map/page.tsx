@@ -44,6 +44,7 @@ export default async function MapPage() {
         getMapImages(),
         getGalleryConfig(),
     ]);
+    const tPhoto = await getTranslations('photo');
 
     // Only pass images that have non-null lat/lng (type-narrowed for the client).
     const markers = mapImages
@@ -55,6 +56,7 @@ export default async function MapPage() {
             latitude: img.latitude,
             longitude: img.longitude,
             title: img.title ?? null,
+            displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id }),
             filename_jpeg: img.filename_jpeg,
             topic: img.topic,
         }));
@@ -91,7 +93,7 @@ export default async function MapPage() {
                                     href={localizePath(locale, `/p/${marker.id}`)}
                                     className="block min-h-11 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 >
-                                    <span className="font-medium">{marker.title ?? `${t('openPhoto')} ${marker.id}`}</span>
+                                    <span className="font-medium">{marker.displayTitle}</span>
                                     <span className="block text-xs text-muted-foreground">{marker.topic}</span>
                                 </Link>
                             </li>

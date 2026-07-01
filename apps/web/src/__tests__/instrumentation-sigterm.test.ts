@@ -40,4 +40,11 @@ describe('graceful-shutdown invariant (R15C15 TE-15-04 / A15-03)', () => {
         // SIGTERM/SIGINT → process.exit(143) handler that races the app flush.
         expect(DOCKERFILE_SRC).toMatch(/ENV\s+NEXT_MANUAL_SIG_HANDLE=true/);
     });
+
+    it('instrumentation.ts drains tracked background DB writes before exiting', () => {
+        expect(INSTRUMENTATION_SRC).toContain("await import('@/lib/background-db-writes')");
+        expect(INSTRUMENTATION_SRC).toContain('drainBackgroundDbWrites()');
+        expect(INSTRUMENTATION_SRC.indexOf('drainBackgroundDbWrites()'))
+            .toBeGreaterThan(INSTRUMENTATION_SRC.indexOf('Promise.all(['));
+    });
 });

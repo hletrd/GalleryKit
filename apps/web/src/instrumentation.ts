@@ -35,10 +35,12 @@ export async function register() {
             try {
                 const { shutdownImageProcessingQueue } = await import('@/lib/image-queue');
                 const { flushBufferedSharedGroupViewCounts } = await import('@/lib/data');
+                const { drainBackgroundDbWrites } = await import('@/lib/background-db-writes');
                 await Promise.race([
                     Promise.all([
                         shutdownImageProcessingQueue(),
                         flushBufferedSharedGroupViewCounts(),
+                        drainBackgroundDbWrites(),
                     ]).then(() => { completed = true; }),
                     shutdownTimeout,
                 ]);

@@ -510,6 +510,60 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
     });
 
+    it('fails expensive public GET handlers when sharp is dynamically imported', () => {
+        const source = `
+            export async function GET() {
+                const imageProcessor = (await import('sharp')).default;
+                const image = imageProcessor(Buffer.from(''));
+                return Response.json({ ok: Boolean(image) });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/thumb/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('fails expensive public GET handlers when filesystem work is dynamically imported', () => {
+        const source = `
+            export async function GET() {
+                const files = await import('node:fs/promises');
+                const text = await files.readFile('/tmp/gallerykit.txt', 'utf8');
+                return Response.json({ text });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/file/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
+    it('passes dynamic expensive imports after a limiter gate', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function GET() {
+                if (preIncrementSemanticAttempt('203.0.113.10', Date.now())) return Response.json({}, { status: 429 });
+                const files = await import('node:fs/promises');
+                const text = await files.readFile('/tmp/gallerykit.txt', 'utf8');
+                return Response.json({ text });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/file/route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('expensive GET uses rate-limit helper'))).toBe(true);
+    });
+
+    it('fails closed on computed dynamic imports in public GET handlers', () => {
+        const source = `
+            export async function GET() {
+                const moduleName = 'sharp';
+                const mod = await import(moduleName);
+                return Response.json({ ok: Boolean(mod) });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'src/app/api/dynamic/route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('expensive GET');
+    });
+
     it('fails expensive public GET handlers when DB-backed data helpers are imported relatively', () => {
         const source = `
             import { getTopicBySlug } from '../../../lib/data';

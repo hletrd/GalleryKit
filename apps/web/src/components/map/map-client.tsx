@@ -17,6 +17,7 @@ export interface MapMarker {
     latitude: number;
     longitude: number;
     title: string | null;
+    displayTitle: string;
     filename_jpeg: string;
     topic: string;
 }
@@ -58,7 +59,7 @@ function MarkerThumb({ marker, imageSizes }: { marker: MapMarker; imageSizes: nu
         // eslint-disable-next-line @next/next/no-img-element
         <img
             src={imgSrc}
-            alt={marker.title ?? String(marker.id)}
+            alt={marker.displayTitle}
             width={120}
             height={80}
             style={{ objectFit: 'cover', borderRadius: '4px' }}
@@ -126,14 +127,12 @@ export function MapClient({ markers, locale, openPhotoLabel, imageSizes }: MapCl
                             type="button"
                             onClick={() => handleMarkerClick(marker.id)}
                             className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                            aria-label={`${openPhotoLabel}: ${marker.title ?? marker.id}`}
+                            aria-label={`${openPhotoLabel}: ${marker.displayTitle}`}
                         >
                             <MarkerThumb marker={marker} imageSizes={imageSizes} />
-                            {marker.title && (
-                                <span className="text-xs font-medium text-center max-w-[120px] truncate">
-                                    {marker.title}
-                                </span>
-                            )}
+                            <span className="text-xs font-medium text-center max-w-[120px] truncate">
+                                {marker.displayTitle}
+                            </span>
                         </button>
                     </Popup>
                 </Marker>

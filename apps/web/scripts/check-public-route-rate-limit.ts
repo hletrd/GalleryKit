@@ -317,6 +317,26 @@ function isExpensiveReadModuleSpecifier(moduleSpecifier: string, relative: strin
     return modulePathMatches(normalizeModuleSpecifier(moduleSpecifier, relative), EXPENSIVE_READ_MODULE_PATHS);
 }
 
+function dynamicImportModuleSpecifier(node: ts.CallExpression): string | null | undefined {
+    if (node.expression.kind !== ts.SyntaxKind.ImportKeyword) return undefined;
+    const [specifier] = node.arguments;
+    if (!specifier) return null;
+    if (ts.isStringLiteral(specifier) || ts.isNoSubstitutionTemplateLiteral(specifier)) {
+        return specifier.text;
+    }
+    return null;
+}
+
+function isExpensiveDynamicImport(node: ts.CallExpression, relative: string): boolean {
+    const moduleSpecifier = dynamicImportModuleSpecifier(node);
+    if (moduleSpecifier === undefined) return false;
+    // Dynamic import expressions with non-literal specifiers hide the module
+    // graph from this static lint gate. Fail closed so public GET/HEAD routes
+    // cannot smuggle expensive work behind computed imports.
+    if (moduleSpecifier === null) return true;
+    return isExpensiveReadModuleSpecifier(moduleSpecifier, relative);
+}
+
 function isDbModuleSpecifier(moduleSpecifier: string, relative: string): boolean {
     if (moduleSpecifier === '@/db') return true;
     return modulePathMatches(normalizeModuleSpecifier(moduleSpecifier, relative), new Set(['src/db']));
@@ -650,6 +670,10 @@ function bodyContainsExpensiveGetWork(
         if (found) return;
         if (ts.isFunctionLike(node) && node !== body) return;
         if (ts.isCallExpression(node)) {
+            if (isExpensiveDynamicImport(node, sourceFile.fileName)) {
+                found = true;
+                return;
+            }
             const callee = node.expression;
             if (calleeMatchesMarker(callee)) {
                 found = true;
