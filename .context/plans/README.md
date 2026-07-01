@@ -4,12 +4,12 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 63/100 Implementation Plan — implementation in progress from deployed `ecfda466` (`cycle-63-2026-07-01-plan.md`)
+- Cycle 63/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-63-2026-07-01-plan.md`)
 - Cycle 63/100 Deferred Findings — no new deferred findings; `C62-04` superseded by scheduled `C63-01`; carry-forward items repeated (`cycle-63-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 63/100 Implementation Plan — implementation in progress from deployed `ecfda466` (`cycle-63-2026-07-01-plan.md`)
+- Cycle 63/100 Implementation Plan — implementation committed/pushed/deployed; deploy evidence recorded in plan (`cycle-63-2026-07-01-plan.md`)
 - Cycle 63/100 Deferred Findings — no new deferred findings; `C62-04` superseded by scheduled `C63-01`; carry-forward items repeated (`cycle-63-2026-07-01-deferred.md`)
 - Cycle 62/100 Implementation Plan — implementation committed/pushed/deployed; public search smoke passed after deploy (`cycle-62-2026-07-01-plan.md`)
 - Cycle 62/100 Deferred Findings — search status announcement polish deferred; carry-forward items repeated (`cycle-62-2026-07-01-deferred.md`)
