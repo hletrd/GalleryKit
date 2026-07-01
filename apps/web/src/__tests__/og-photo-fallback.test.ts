@@ -84,6 +84,13 @@ describe('/api/og/photo/[id] R24-M1 fallback contract (route source)', () => {
         expect(source).not.toContain('const origin = new URL(req.url).origin');
         expect(source).not.toContain('Location: `${origin}/`');
     });
+
+    it('uses a non-cacheable policy for temporary all-derivative-miss redirects (C72-03)', () => {
+        expect(source).toContain("const OG_TEMPORARY_FALLBACK_CACHE_CONTROL = 'no-store, no-cache, must-revalidate'");
+        expect(source).toContain('if (!fetched) {');
+        expect(source).toContain('return buildFallbackResponse(seo.url, OG_TEMPORARY_FALLBACK_CACHE_CONTROL');
+        expect(source).not.toContain('return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);\n        }\n        const photoDataUrl');
+    });
 });
 
 describe('lib/og-photo-fetch.ts R24-M1 contract (helper source)', () => {

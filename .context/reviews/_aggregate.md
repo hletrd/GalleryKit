@@ -1,13 +1,17 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-71-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-72-2026-07-01/_aggregate.md`
 
-Cycle 71 produced five deduplicated findings:
+Cycle 72 produced nine deduplicated findings:
 
-- `C71-01` - Sidecar backfills can mutate the DB while durable restore maintenance is active.
-- `C71-02` - Disk-recovery runbook hardcodes the deploy SSH target.
-- `C71-03` - Runtime env template omits `DB_SSL_CA`.
-- `C71-04` - Semantic embedding snapshot contract is stale and mostly source-string based.
-- `C71-05` - Cycle 70 plan/index still mark a completed pushed/deployed cycle as active.
+- `C72-01` - Durable restore-maintenance marker can fail open on unreadable paths.
+- `C72-02` - Color sidecar can rewrite derivative files after restore maintenance starts mid-row.
+- `C72-03` - Temporary per-photo OG fallback redirects are cached as long-lived successes.
+- `C72-04` - Feed conditional tests are stale and do not prove route behavior.
+- `C72-05` - Shipped restore-maintenance recovery command is only syntax/source-contract tested.
+- `C72-06` - Browser matrix invariants are mostly mocked, not engine-smoked.
+- `C72-07` - Settings validation ignores reduced-motion preference.
+- `C72-08` - Swipe navigation haptics do not respect reduced-motion preference.
+- `C72-09` - Cycle 71 plan/index still mark completed work as active.
 
-Cycle 71 schedules all five findings. No new Cycle 71 findings are deferred. `C65-02`, `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.
+Cycle 72 schedules `C72-01`, `C72-02`, `C72-03`, `C72-05`, `C72-07`, `C72-08`, and `C72-09`. `C72-04` and `C72-06` are explicitly deferred with exit criteria. Carry-forward deferred items remain explicitly recorded in the Cycle 72 deferred artifact.

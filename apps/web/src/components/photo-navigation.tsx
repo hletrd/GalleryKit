@@ -44,6 +44,11 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         router.push(getPhotoPath(id));
     }, [getPhotoPath, onSelectId, router]);
 
+    const vibrateForSwipe = useCallback(() => {
+        if (shouldReduceMotion || typeof navigator.vibrate !== 'function') return;
+        navigator.vibrate(10);
+    }, [shouldReduceMotion]);
+
     useEffect(() => {
         const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
         const handler = (event: MediaQueryListEvent) => setShouldReduceMotion(event.matches);
@@ -126,15 +131,11 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
 
             if (deltaX < -SWIPE_THRESHOLD && nextId) {
                 // Swipe left -> next photo
-                if (typeof navigator.vibrate === 'function') {
-                    navigator.vibrate(10);
-                }
+                vibrateForSwipe();
                 goToPhoto(nextId);
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
                 // Swipe right -> prev photo
-                if (typeof navigator.vibrate === 'function') {
-                    navigator.vibrate(10);
-                }
+                vibrateForSwipe();
                 goToPhoto(prevId);
             } else {
                 // Snap back
@@ -162,7 +163,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             swipeTarget.removeEventListener('touchend', handleTouchEnd);
             swipeTarget.removeEventListener('touchcancel', handleTouchCancel);
         };
-    }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef]);
+    }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef, vibrateForSwipe]);
 
     // Opacity of swipe indicators proportional to displacement
     const prevIndicatorOpacity = swipeOffset > 0

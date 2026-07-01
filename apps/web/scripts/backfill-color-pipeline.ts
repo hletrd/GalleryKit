@@ -239,6 +239,7 @@ export async function reprocessRow(
             settings?.avifEffort,
             settings?.sdrJpegChroma,
             settings?.wideGamutMaxSourcePixels,
+            { assertWritable: () => assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME) },
         );
         wasDownscaled = result.wasDownscaled;
         // AGG-02: capture the delivered AVIF bit depth so the UPDATE below

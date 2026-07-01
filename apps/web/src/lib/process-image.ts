@@ -1042,6 +1042,10 @@ export interface ImageQualitySettings {
     jpeg?: number;
 }
 
+export interface ProcessImageFormatsWriteGuard {
+    assertWritable?: () => void | Promise<void>;
+}
+
 export async function processImageFormats(
     inputPath: string,
     filenameWebp: string,
@@ -1057,6 +1061,7 @@ export async function processImageFormats(
     avifEffort?: number, // P3-21 / R28-CP-LOW-1: AVIF encoding effort (0-9, default 6)
     sdrJpegChroma?: JpegChromaSubsampling, // C2-A5 / C3-A6: chroma subsampling for SDR / non-wide-gamut JPEG
     wideGamutMaxSourcePixels?: number, // C2-A6: max source pixel count before WI-15 downscale
+    writeGuard?: ProcessImageFormatsWriteGuard, // Sidecar-only guard before final derivative writes
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -1186,7 +1191,9 @@ export async function processImageFormats(
         const tmpPath = `${outputPath}.${randomUUID()}.tmp`;
         try {
             await writeTemp(tmpPath);
+            await writeGuard?.assertWritable?.();
             const backupPath = await backupExistingFinalPath(outputPath);
+            await writeGuard?.assertWritable?.();
             await fs.rename(tmpPath, outputPath);
             if (!backupPath) {
                 createdFinalPaths.add(outputPath);
@@ -1407,7 +1414,9 @@ export async function processImageFormats(
                         ? (err as { code?: string }).code
                         : null;
                     if (code === 'EXDEV' || code === 'EPERM' || code === 'EACCES') {
+                        await writeGuard?.assertWritable?.();
                         const backupPath = await backupExistingFinalPath(basePath);
+                        await writeGuard?.assertWritable?.();
                         console.warn(`[process-image] Atomic rename fallback reached for ${basePath} — using non-atomic copyFile`);
                         await fs.copyFile(outputPath, basePath);
                         if (!backupPath) {
@@ -1460,6 +1469,7 @@ export async function processImageFormats(
         if (targetIcc === 'p3') {
             await _verifyWebpIccChunk(webpPath);
         }
+        await writeGuard?.assertWritable?.();
     } catch (err) {
         await restorePreviousFinalPaths();
         throw err;

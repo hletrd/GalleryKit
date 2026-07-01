@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ describe('restore maintenance state', () => {
     });
 
     afterEach(() => {
+        vi.restoreAllMocks();
         endRestoreMaintenance();
         vi.unstubAllEnvs();
         rmSync(tempDir, { recursive: true, force: true });
@@ -114,6 +115,17 @@ describe('restore maintenance state', () => {
 
         expect(beginDurableRestoreMaintenance()).toBe(true);
 
+        expect(() => assertNoDurableRestoreMaintenanceForScript('backfill-test')).toThrow(
+            '[backfill-test] Restore maintenance is active',
+        );
+    });
+
+    it('fails marker reads closed on non-ENOENT filesystem errors', () => {
+        const notDirectory = join(tempDir, 'not-a-directory');
+        writeFileSync(notDirectory, 'not a directory');
+        vi.stubEnv('RESTORE_MAINTENANCE_MARKER_PATH', join(notDirectory, 'restore-maintenance.json'));
+
+        expect(isDurableRestoreMaintenanceMarked()).toBe(true);
         expect(() => assertNoDurableRestoreMaintenanceForScript('backfill-test')).toThrow(
             '[backfill-test] Restore maintenance is active',
         );

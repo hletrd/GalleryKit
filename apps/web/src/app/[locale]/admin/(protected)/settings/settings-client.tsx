@@ -170,7 +170,11 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
         if (!id) return;
         requestAnimationFrame(() => {
             const field = document.getElementById(id);
-            field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            field?.scrollIntoView({
+                block: 'center',
+                behavior: prefersReducedMotion ? 'auto' : 'smooth',
+            });
             if (field instanceof HTMLElement) {
                 field.focus({ preventScroll: true });
             }

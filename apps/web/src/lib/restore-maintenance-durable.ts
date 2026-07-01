@@ -36,8 +36,15 @@ export function getDurableRestoreMaintenanceMarkerPath() {
 function readDurableRestoreMaintenance() {
     const markerPath = getRestoreMaintenanceMarkerLocation().path;
     try {
-        return fs.existsSync(/* turbopackIgnore: true */ markerPath);
+        fs.statSync(/* turbopackIgnore: true */ markerPath);
+        return true;
     } catch (err) {
+        const code = err && typeof err === 'object' && 'code' in err
+            ? (err as { code?: unknown }).code
+            : null;
+        if (code === 'ENOENT') {
+            return false;
+        }
         console.error('[restore] Failed to read restore maintenance marker; failing closed:', err);
         return true;
     }

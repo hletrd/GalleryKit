@@ -18,16 +18,22 @@ function getMarkerLocation() {
         };
     }
 
+    const configuredDir = process.env.RESTORE_MAINTENANCE_DIR?.trim();
+    const dir = configuredDir || (process.env.NODE_ENV === 'production' ? '/app/data' : 'data');
     return {
-        dir: 'data',
-        path: `data/${MARKER_FILENAME}`,
+        dir,
+        path: `${dir}/${MARKER_FILENAME}`,
     };
 }
 
 function markerExists() {
     try {
-        return fs.existsSync(getMarkerLocation().path);
+        fs.statSync(getMarkerLocation().path);
+        return true;
     } catch (err) {
+        if (err && typeof err === 'object' && err.code === 'ENOENT') {
+            return false;
+        }
         console.error('[restore] Failed to read restore maintenance marker; failing closed:', err);
         return true;
     }

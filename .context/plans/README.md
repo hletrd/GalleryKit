@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 71/100 Implementation Plan - active; schedules sidecar restore-maintenance guards, deploy/env docs drift fixes, semantic snapshot contract hardening, and Cycle 70 ledger closure (`cycle-71-2026-07-01-plan.md`)
-- Cycle 71/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-71-2026-07-01-deferred.md`)
+- Cycle 72/100 Implementation Plan - active; schedules restore-maintenance fail-closed/write-boundary hardening, OG fallback cache correction, recovery-command coverage, reduced-motion fixes, and Cycle 71 ledger closure (`cycle-72-2026-07-01-plan.md`)
+- Cycle 72/100 Deferred Findings - feed conditional route tests and browser-matrix smokes deferred with exit criteria; carry-forward items repeated (`cycle-72-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 71/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 72 started from deployed `363dc1c9` (`cycle-71-2026-07-01-plan.md`)
+- Cycle 71/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-71-2026-07-01-deferred.md`)
 - Cycle 70/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 71 started from deployed `bf86f7c1` (`cycle-70-2026-07-01-plan.md`)
 - Cycle 70/100 Deferred Findings - no new deferred findings; carry-forward items repeated (`cycle-70-2026-07-01-deferred.md`)
 - Cycle 69/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 70 started from deployed `6e3e54e9` (`cycle-69-2026-07-01-plan.md`)

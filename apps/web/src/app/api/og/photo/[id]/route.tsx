@@ -18,6 +18,7 @@ export const runtime = 'nodejs';
 // Cache-Control spec: public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400
 const OG_SUCCESS_CACHE_CONTROL = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400';
 const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
+const OG_TEMPORARY_FALLBACK_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
 
 // sanitizeForOg now lives in @/lib/og-sanitize (AGG-R8-13) so this route and
 // the home/site OG route share one Unicode-format + C0-control strip. See that
@@ -133,7 +134,7 @@ export async function GET(
             // to |imageSizes| internal fetch attempts (10 s timeout / 1 MB
             // cap each); refunding it let one legacy photo in a backfill
             // window become an unmetered internal-fetch amplifier.
-            return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+            return buildFallbackResponse(seo.url, OG_TEMPORARY_FALLBACK_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoDataUrl = `data:image/jpeg;base64,${fetched.buffer.toString('base64')}`;
 

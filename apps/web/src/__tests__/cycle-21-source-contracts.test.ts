@@ -20,7 +20,8 @@ describe('cycle 21 source contracts', () => {
         expect(src).toContain("toast.error(t('settings.validationFailed'))");
         expect(src).toContain('const SETTINGS_FIELD_IDS');
         expect(src).toContain('focusFirstInvalidSetting(validationErrors)');
-        expect(src).toContain("field?.scrollIntoView({ block: 'center', behavior: 'smooth' })");
+        expect(src).toContain("window.matchMedia('(prefers-reduced-motion: reduce)').matches");
+        expect(src).toContain("behavior: prefersReducedMotion ? 'auto' : 'smooth'");
     });
 
     it('admin users page has one card chrome instead of nesting the manager in another Card', () => {
