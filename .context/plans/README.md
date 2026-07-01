@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 93/100 Implementation Plan - active; scheduled safe narrow fixes for load-more live-region failures, Lightroom token inline validation, GPS-toggle E2E cleanup, and stale Cycle 92 ledger evidence (`cycle-93-2026-07-01-plan.md`)
-- Cycle 93/100 Deferred Findings - active; broad restore/schema/E2E/sitemap/coverage/UI redesign findings preserved with exit criteria (`cycle-93-2026-07-01-deferred.md`)
+- Cycle 94/100 Implementation Plan - active; scheduled safe narrow fixes for Cycle 93 terminal ledger evidence, server-side Lightroom token label validation feedback, and token-list load-error state (`cycle-94-2026-07-01-plan.md`)
+- Cycle 94/100 Deferred Findings - active; broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-94-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 93/100 Implementation Plan - committed/pushed/deployed as `33eca7b5`; Cycle 94 started from user-provided deployed `master` HEAD `33eca7b5e4102bd5097777dbb926ee2cb94c6d71` (`cycle-93-2026-07-01-plan.md`)
+- Cycle 93/100 Deferred Findings - broad restore/schema/E2E/sitemap/coverage/UI redesign findings preserved with exit criteria (`cycle-93-2026-07-01-deferred.md`)
 - Cycle 92/100 Implementation Plan - committed/pushed/deployed as `2571d8a8`; Cycle 93 started from user-provided deployed `master` HEAD `2571d8a8c27e2d2a7bc95ed5e6a72e26487093dc` (`cycle-92-2026-07-01-plan.md`)
 - Cycle 92/100 Deferred Findings - broad restore/schema/performance/E2E/UI/operational findings preserved with exit criteria (`cycle-92-2026-07-01-deferred.md`)
 - Cycle 91/100 Implementation Plan - committed/pushed/deployed as signed `aacccbc`; fixed terminal-ledger and lightbox accessibility source-contract coverage from deployed `c648634` (`cycle-91-2026-07-01-plan.md`)

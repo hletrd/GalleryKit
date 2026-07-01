@@ -175,6 +175,7 @@ describe('client component source contracts', () => {
 
   it('associates token label validation with the label input', () => {
     const code = source('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+    const action = source('app/actions/lr-tokens.ts');
     expect(code).toContain("const [labelError, setLabelError] = useState('')");
     expect(code).toContain("const labelErrorId = 'token-label-error'");
     expect(code).toContain('aria-invalid={!!labelError}');
@@ -182,5 +183,21 @@ describe('client component source contracts', () => {
     expect(code).toContain('<p id={labelErrorId} role="alert"');
     expect(code).toMatch(/onOpenChange=\{\(open\) => \{[\s\S]{0,120}if \(!open\) setLabelError\(''\);/);
     expect(code).toMatch(/onChange=\{\(e\) => \{[\s\S]{0,120}if \(labelError\) setLabelError\(''\);/);
+    expect(code).toMatch(/if \(result\.field === 'label'\) \{[\s\S]{0,80}setLabelError\(result\.error\);/);
+    expect(action).toContain("field?: 'label'");
+    expect(action).toMatch(/return \{ error: t\('lrTokenInvalidLabel'\), field: 'label' \};/);
+  });
+
+  it('renders token-list load failures as a persistent retryable alert', () => {
+    const code = source('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+    expect(code).toContain("const [loadError, setLoadError] = useState('')");
+    expect(code).toContain("const loadErrorId = 'token-list-error'");
+    expect(code).toMatch(/setLoading\(true\);[\s\S]{0,80}setLoadError\(''\);/);
+    expect(code).toMatch(/setLoadError\(result\.error\);[\s\S]{0,80}toast\.error\(result\.error\);/);
+    expect(code).toContain(') : loadError ? (');
+    expect(code).toContain('id={loadErrorId} role="alert"');
+    expect(code).toContain("t('common.tryAgain')");
+    expect(code).toContain('onClick={fetchTokens}');
+    expect(code).not.toMatch(/tokens\.length === 0[\s\S]{0,80}loadError/);
   });
 });

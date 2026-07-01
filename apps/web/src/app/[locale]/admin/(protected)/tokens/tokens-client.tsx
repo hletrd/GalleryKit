@@ -23,6 +23,7 @@ export function TokensClient() {
     const { t, locale } = useTranslation();
     const [tokens, setTokens] = useState<LrTokenListItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [isPending, startTransition] = useTransition();
     const [showCreate, setShowCreate] = useState(false);
     const [newLabel, setNewLabel] = useState('');
@@ -31,20 +32,33 @@ export function TokensClient() {
     const [plaintextAcknowledged, setPlaintextAcknowledged] = useState(false);
     const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
     const labelErrorId = 'token-label-error';
+    const loadErrorId = 'token-list-error';
+
+    const loadTokens = async () => {
+        const result = await listLrTokens();
+        if (Array.isArray(result)) {
+            setTokens(result);
+            setLoadError('');
+        } else {
+            setLoadError(result.error);
+            toast.error(result.error);
+        }
+        setLoading(false);
+    };
 
     const fetchTokens = () => {
-        startTransition(async () => {
-            const result = await listLrTokens();
-            if (Array.isArray(result)) {
-                setTokens(result);
-            } else {
-                toast.error(result.error);
-            }
-            setLoading(false);
+        setLoading(true);
+        setLoadError('');
+        startTransition(() => {
+            void loadTokens();
         });
     };
 
-    useEffect(() => { fetchTokens(); }, []);
+    useEffect(() => {
+        startTransition(() => {
+            void loadTokens();
+        });
+    }, []);
 
     const handleCreate = () => {
         // R4C4 UX-R4C4-04: the Create button disables on isPending, but the
@@ -67,6 +81,9 @@ export function TokensClient() {
                 scopes: ['lr:upload'],
             });
             if ('error' in result) {
+                if (result.field === 'label') {
+                    setLabelError(result.error);
+                }
                 toast.error(result.error);
             } else {
                 setCreatedPlaintext(result.plaintext);
@@ -125,6 +142,19 @@ export function TokensClient() {
                 <div className="flex items-center justify-center py-8" role="status" aria-live="polite">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
                     <span className="sr-only">{t('lrToken.loading')}</span>
+                </div>
+            ) : loadError ? (
+                <div id={loadErrorId} role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                    <p className="text-destructive-text">{loadError}</p>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="mt-3 min-h-[44px]"
+                        onClick={fetchTokens}
+                        disabled={isPending}
+                    >
+                        {t('common.tryAgain')}
+                    </Button>
                 </div>
             ) : tokens.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">

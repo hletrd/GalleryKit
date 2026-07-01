@@ -29,7 +29,7 @@ export async function createLrToken(opts: {
     label: string;
     scopes: string[];
     expiresAt?: string | null;
-}): Promise<{ plaintext: string; id: number } | { error: string }> {
+}): Promise<{ plaintext: string; id: number } | { error: string; field?: 'label' }> {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
@@ -54,7 +54,7 @@ export async function createLrToken(opts: {
     // a spoofable label on a credential-management surface.
     const { value: label, rejected: labelRejected } = sanitizeAdminString(opts.label);
     if (labelRejected || !label) {
-        return { error: t('lrTokenInvalidLabel') };
+        return { error: t('lrTokenInvalidLabel'), field: 'label' };
     }
 
     // R4C2 COR-R4C2-04: validate by Unicode code points and reject loudly,
@@ -65,7 +65,7 @@ export async function createLrToken(opts: {
     // surface where label accuracy decides WHICH token an admin revokes.
     // The UI's maxLength={128} already aligns with this bound.
     if (countCodePoints(label) > 128) {
-        return { error: t('lrTokenInvalidLabel') };
+        return { error: t('lrTokenInvalidLabel'), field: 'label' };
     }
 
     // R4C1 SEC-R4C1-01: validate the expiry. `new Date('garbage')` yields an

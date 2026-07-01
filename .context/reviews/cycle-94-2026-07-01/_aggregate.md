@@ -1,17 +1,14 @@
-# Latest Aggregate Review
+# Cycle 94 Aggregate Review
 
-Current aggregate: `cycle-94-2026-07-01/`
-
-Cycle 94 reviewed user-provided deployed `master` at `33eca7b5e4102bd5097777dbb926ee2cb94c6d71`.
+Start HEAD: `33eca7b5e4102bd5097777dbb926ee2cb94c6d71`.
 
 ## Agent Coverage
 
-- Completed artifacts: `code-reviewer`, `security-reviewer`, `test-engineer`, `perf-architect`, `designer`.
-- Security review found no confirmed security vulnerability.
+- Completed reviewer artifacts: `code-reviewer`, `security-reviewer`, `test-engineer`, `perf-architect`, `designer`.
+- Security/auth review found no confirmed security vulnerability and validated the admin API auth, action-origin, public-route rate-limit, tracked-secret, and production-audit checks in its lane.
+- Findings below dedupe repeated carry-forward items while preserving the highest severity/confidence reported this cycle.
 
-## Deduplicated Confirmed Findings
-
-See `.context/reviews/cycle-94-2026-07-01/_aggregate.md` for the full evidence ledger. Confirmed findings this cycle:
+## Confirmed Findings
 
 1. `C94-01` Cycle 93 release ledger is stale after the pushed/deployed `33eca7b5` commit - Medium / High; scheduled.
 2. `C94-02` Server-side invalid Lightroom token labels still report as toast-only feedback - Medium / High; scheduled.
@@ -25,14 +22,10 @@ See `.context/reviews/cycle-94-2026-07-01/_aggregate.md` for the full evidence l
 10. `C94-10 / C88-03` `image_embeddings` cannot stage or retain multiple model versions per image - Medium / High; carry-forward deferred.
 11. `C94-11` First-page public listing forces an exact `COUNT(*) OVER()` through grouped tag-join queries - Medium / High; deferred.
 
-## Likely Issues And Manual-Validation Risks
+## Plan Disposition
 
-Likely and manual items remain recorded in earlier aggregates and deferred ledgers. Cycle 94 did not add new likely/manual-only findings beyond the confirmed list above.
+Cycle 94 schedules safe narrow fixes for `C94-01`, `C94-02`, and `C94-03`. The remaining findings require route-level multipart harnesses, broader E2E route assertions, keyboard zoom interaction design, mobile admin redesign, restore architecture, schema migration, or listing-query policy changes and are recorded in `.context/plans/cycle-94-2026-07-01-deferred.md` with severity/confidence preserved and exit criteria.
 
 ## Agent Failures
 
-None for `/tmp/gallery-recovery-check`.
-
-## Plan Disposition
-
-Cycle 94 schedules safe narrow fixes for `C94-01`, `C94-02`, and `C94-03`. All other findings are recorded in `.context/plans/cycle-94-2026-07-01-deferred.md` with severity/confidence preserved and exit criteria.
+None for `/tmp/gallery-recovery-check`. Some subagents reported accidental duplicate untracked artifacts in the disallowed canonical checkout before correcting their target path; those files were outside this fallback repo and were not used for this cycle.

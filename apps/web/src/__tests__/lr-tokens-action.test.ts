@@ -102,25 +102,25 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
 
     it('rejects labels containing bidi override characters', async () => {
         const result = await createLrToken({ label: 'demo\u202Etoken', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel', field: 'label' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects labels containing zero-width characters', async () => {
         const result = await createLrToken({ label: 'demo\u200Btoken', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel', field: 'label' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects labels containing C0 control characters', async () => {
         const result = await createLrToken({ label: 'demo\u0007token', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel', field: 'label' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects empty / whitespace-only labels', async () => {
         const result = await createLrToken({ label: '   ', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel', field: 'label' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
@@ -129,7 +129,7 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
     // credential-management surface.
     it('rejects labels longer than 128 code points', async () => {
         const result = await createLrToken({ label: '📷'.repeat(129), scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel', field: 'label' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
