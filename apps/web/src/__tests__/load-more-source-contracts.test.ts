@@ -21,4 +21,11 @@ describe('load-more source contracts (R2C10-LOW-01)', () => {
         expect(source).toMatch(/if\s*\(\s*transientRetryAfterRef\.current\s*>\s*retryNow\s*\)\s*return;/);
         expect(source).toMatch(/page\.status === 'rateLimited' \|\| page\.status === 'maintenance' \|\| page\.status === 'error'/);
     });
+
+    it('announces load-more failures in the live region instead of toast-only feedback', () => {
+        expect(source).toMatch(/page\.status === 'rateLimited'[\s\S]{0,120}setStatusMessage\(t\('home\.loadMoreRateLimited'\)\)/);
+        expect(source).toMatch(/page\.status === 'maintenance'[\s\S]{0,120}setStatusMessage\(t\('home\.loadMoreMaintenance'\)\)/);
+        expect(source).toMatch(/page\.status === 'error' \|\| page\.status === 'invalid'[\s\S]{0,260}setStatusMessage\(t\('home\.loadMoreFailed'\)\)/);
+        expect(source).toMatch(/catch \(error\)[\s\S]{0,260}setStatusMessage\(t\('home\.loadMoreFailed'\)\)/);
+    });
 });

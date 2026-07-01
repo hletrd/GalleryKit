@@ -172,4 +172,15 @@ describe('client component source contracts', () => {
     // The Enter handler must preventDefault and route through handleCreate.
     expect(code).toMatch(/e\.key === 'Enter'\)\s*\{\s*e\.preventDefault\(\);\s*handleCreate\(\);/);
   });
+
+  it('associates token label validation with the label input', () => {
+    const code = source('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+    expect(code).toContain("const [labelError, setLabelError] = useState('')");
+    expect(code).toContain("const labelErrorId = 'token-label-error'");
+    expect(code).toContain('aria-invalid={!!labelError}');
+    expect(code).toContain('aria-describedby={labelError ? labelErrorId : undefined}');
+    expect(code).toContain('<p id={labelErrorId} role="alert"');
+    expect(code).toMatch(/onOpenChange=\{\(open\) => \{[\s\S]{0,120}if \(!open\) setLabelError\(''\);/);
+    expect(code).toMatch(/onChange=\{\(e\) => \{[\s\S]{0,120}if \(labelError\) setLabelError\(''\);/);
+  });
 });

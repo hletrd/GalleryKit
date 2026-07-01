@@ -79,8 +79,10 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
                 transientRetryAfterRef.current = Date.now() + TRANSIENT_RETRY_COOLDOWN_MS;
             }
             if (page.status === 'rateLimited') {
+                setStatusMessage(t('home.loadMoreRateLimited'));
                 toast.error(t('home.loadMoreRateLimited'));
             } else if (page.status === 'maintenance') {
+                setStatusMessage(t('home.loadMoreMaintenance'));
                 const now = Date.now();
                 if (now - maintenanceCooldownRef.current > MAINTENANCE_COOLDOWN_MS) {
                     maintenanceCooldownRef.current = now;
@@ -90,11 +92,15 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
                 // R15C15 CR-15: 'invalid' (malformed cursor, e.g. a corrupted
                 // deep-link) previously fell through with no feedback — surface
                 // the same generic failure toast as 'error'.
+                setStatusMessage(t('home.loadMoreFailed'));
                 toast.error(t('home.loadMoreFailed'));
             }
         } catch (error) {
             console.error('Failed to load more images:', error);
             transientRetryAfterRef.current = Date.now() + TRANSIENT_RETRY_COOLDOWN_MS;
+            if (version === queryVersionRef.current && mountedRef.current) {
+                setStatusMessage(t('home.loadMoreFailed'));
+            }
             toast.error(t('home.loadMoreFailed'));
         } finally {
             if (version === queryVersionRef.current && mountedRef.current) {

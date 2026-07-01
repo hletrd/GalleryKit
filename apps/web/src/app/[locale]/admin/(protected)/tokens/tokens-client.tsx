@@ -26,9 +26,11 @@ export function TokensClient() {
     const [isPending, startTransition] = useTransition();
     const [showCreate, setShowCreate] = useState(false);
     const [newLabel, setNewLabel] = useState('');
+    const [labelError, setLabelError] = useState('');
     const [createdPlaintext, setCreatedPlaintext] = useState<string | null>(null);
     const [plaintextAcknowledged, setPlaintextAcknowledged] = useState(false);
     const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
+    const labelErrorId = 'token-label-error';
 
     const fetchTokens = () => {
         startTransition(async () => {
@@ -53,9 +55,12 @@ export function TokensClient() {
         // topic-manager.tsx.
         if (isPending) return;
         if (!newLabel.trim()) {
-            toast.error(t('lrToken.labelRequired'));
+            const error = t('lrToken.labelRequired');
+            setLabelError(error);
+            toast.error(error);
             return;
         }
+        setLabelError('');
         startTransition(async () => {
             const result = await createLrToken({
                 label: newLabel.trim(),
@@ -68,6 +73,7 @@ export function TokensClient() {
                 setPlaintextAcknowledged(false);
                 setShowCreate(false);
                 setNewLabel('');
+                setLabelError('');
                 fetchTokens();
             }
         });
@@ -156,7 +162,13 @@ export function TokensClient() {
             )}
 
             {/* Create dialog */}
-            <Dialog open={showCreate} onOpenChange={setShowCreate}>
+            <Dialog
+                open={showCreate}
+                onOpenChange={(open) => {
+                    setShowCreate(open);
+                    if (!open) setLabelError('');
+                }}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{t('lrToken.createTitle')}</DialogTitle>
@@ -167,13 +179,23 @@ export function TokensClient() {
                         <Input
                             id="token-label"
                             value={newLabel}
-                            onChange={(e) => setNewLabel(e.target.value)}
+                            onChange={(e) => {
+                                setNewLabel(e.target.value);
+                                if (labelError) setLabelError('');
+                            }}
                             placeholder={t('lrToken.labelPlaceholder')}
                             maxLength={128}
+                            aria-invalid={!!labelError}
+                            aria-describedby={labelError ? labelErrorId : undefined}
                             // R4C6 COR-R4C6-01: the IME composition-commit Enter
                             // must not create a token with a half-composed label.
                             onKeyDown={(e) => { if (isImeComposingReactEvent(e)) return; if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
                         />
+                        {labelError && (
+                            <p id={labelErrorId} role="alert" className="text-sm text-destructive-text">
+                                {labelError}
+                            </p>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setShowCreate(false)} className="min-h-[44px]">

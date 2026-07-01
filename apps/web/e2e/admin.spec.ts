@@ -86,13 +86,18 @@ test.describe('admin workflows (opt-in)', () => {
       return;
     }
 
-    // Flip the toggle; the switch updates its data-state synchronously after click.
-    await gpsToggle.click();
-    const flippedState = await gpsToggle.getAttribute('data-state');
-    expect(flippedState).not.toBe(initialState);
-
-    // Flip it back so we don't leave the seeded environment mutated.
-    await gpsToggle.click();
+    let flipped = false;
+    try {
+      // Flip the toggle; the switch updates its data-state synchronously after click.
+      await gpsToggle.click();
+      flipped = true;
+      const flippedState = await gpsToggle.getAttribute('data-state');
+      expect(flippedState).not.toBe(initialState);
+    } finally {
+      if (flipped && await gpsToggle.getAttribute('data-state') !== initialState) {
+        await gpsToggle.click();
+      }
+    }
     const restoredState = await gpsToggle.getAttribute('data-state');
     expect(restoredState).toBe(initialState);
   });
