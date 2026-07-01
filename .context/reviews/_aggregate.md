@@ -26,4 +26,4 @@ None for `/tmp/gallery-recovery-check`.
 
 ## Plan Disposition
 
-Cycle 95 schedules the safe narrow release-ledger fix for `C95-01`. All carry-forward deferred findings are recorded in `.context/plans/cycle-95-2026-07-01-deferred.md` with severity/confidence preserved and exit criteria.
+Cycle 95 closed the safe narrow release-ledger fix for `C95-01` in signed, pushed, deployed commit `2178046587484fb301bc731f855699e44888d2e6`. All carry-forward deferred findings are recorded in `.context/plans/cycle-95-2026-07-01-deferred.md` with severity/confidence preserved and exit criteria.

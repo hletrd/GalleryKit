@@ -4,8 +4,8 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 95/100 Implementation Plan - active; scheduled safe narrow release-ledger closure for Cycle 94 terminal evidence (`cycle-95-2026-07-01-plan.md`)
-- Cycle 95/100 Deferred Findings - active; no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
+- Cycle 95/100 Implementation Plan - committed/pushed/deployed as `2178046587484fb301bc731f855699e44888d2e6`; closed safe narrow release-ledger evidence for Cycle 94 (`cycle-95-2026-07-01-plan.md`)
+- Cycle 95/100 Deferred Findings - no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
