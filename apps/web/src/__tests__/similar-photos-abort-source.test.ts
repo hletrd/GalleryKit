@@ -13,6 +13,7 @@ describe('SimilarPhotos fetch cancellation contract', () => {
         expect(SOURCE).toContain('fetchedRef.current = false');
         expect(SOURCE).toContain('requestIdRef.current += 1');
         expect(SOURCE).toContain('setLoading(false)');
+        expect(SOURCE).toContain('const res = await fetch(`/api/search/similar/${imageId}`, { signal: controller.signal });');
     });
 
     it('guards late fetch responses against closed or stale requests', () => {

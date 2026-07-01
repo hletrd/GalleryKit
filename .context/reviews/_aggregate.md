@@ -1,13 +1,13 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-65-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-66-2026-07-01/_aggregate.md`
 
-Cycle 65 produced five deduplicated findings:
+Cycle 66 produced five deduplicated findings:
 
-- `C65-01` - saved backfill warning stays visible after reverting byte-impacting settings to the baseline.
-- `C65-02` - settings-only re-encode obligation disappears after page reload.
-- `C65-03` - Radix Select scroll controls remain below the 44 px touch-target floor.
-- `C65-04` - abbreviated sidecar commands can write CLIP/backfill data to the wrong paths.
-- `C65-05` - similar-photo fetch keeps running after the panel is closed.
+- `C66-01` - Settings re-encode warning compares raw stored values instead of effective defaults.
+- `C66-02` - plan index advertises Cycle 64 as active during Cycle 66.
+- `C66-03` - Cycle 65 ledger leaves commit/push/deploy unresolved.
+- `C66-04` - Similar Photos abort source test does not prove fetch signal wiring.
+- `C66-05` - Settings source test does not prove baseline-capture ordering or default-aware comparison.
 
-Cycle 65 schedules `C65-01`, `C65-03`, `C65-04`, and `C65-05`. `C65-02` is deferred pending a durable settings-hash/clear contract. `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.
+Cycle 66 schedules all five findings. No new Cycle 66 findings are deferred. `C65-02`, `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.

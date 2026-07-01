@@ -65,6 +65,17 @@ const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
     'image_quality_jpeg',
 ]);
 
+function getEffectiveBackfillSettingValue(
+    settings: Record<string, string>,
+    defaults: Record<GallerySettingKey, string>,
+    key: string,
+): string {
+    const defaultValue = defaults[key as GallerySettingKey] ?? '';
+    const rawValue = settings[key];
+    const value = rawValue?.trim() ? rawValue : defaultValue;
+    return key === 'image_sizes' ? (normalizeConfiguredImageSizes(value) ?? value) : value;
+}
+
 const SETTINGS_FIELD_IDS: Record<string, string> = {
     image_quality_webp: 'image-quality-webp',
     image_quality_avif: 'image-quality-avif',
@@ -205,7 +216,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     // amber warning above the image-processing fields surfaces only when
     // at least one such field has been edited.
     const hasDirtyBackfillField = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
-        (key) => (settings[key] ?? '') !== (baseline[key] ?? ''),
+        (key) => getEffectiveBackfillSettingValue(settings, defaults, key) !== getEffectiveBackfillSettingValue(baseline, defaults, key),
     );
     const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending);
 
@@ -288,7 +299,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     if (hasExistingImages && backfillPendingBaselineRef.current) {
                         const pendingBaseline = backfillPendingBaselineRef.current;
                         const stillNeedsReencode = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
-                            (key) => (nextSettings[key] ?? '') !== (pendingBaseline[key] ?? ''),
+                            (key) => getEffectiveBackfillSettingValue(nextSettings, defaults, key) !== getEffectiveBackfillSettingValue(pendingBaseline, defaults, key),
                         );
                         setHasSavedBackfillPending(stillNeedsReencode);
                         if (!stillNeedsReencode) {
