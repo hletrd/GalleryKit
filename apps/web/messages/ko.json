@@ -751,7 +751,7 @@
     "slideshowInterval": "슬라이드쇼 간격 (초)",
     "slideshowIntervalHint": "2~30초. 슬라이드쇼 모드에서 각 사진이 표시되는 시간입니다.",
     "autoAltTextTitle": "EXIF 대체 텍스트 힌트",
-    "autoAltTextDesc": "처리 후 EXIF 기반 대체 텍스트 자리표시자를 만듭니다. 로컬 Florence-2 추론은 아직 구현되지 않았습니다.",
+    "autoAltTextDesc": "처리 후 EXIF 기반 대체 텍스트 자리표시자를 만듭니다. 모델 기반 설명 생성은 구현되지 않았습니다.",
     "autoAltTextEnabled": "EXIF 대체 텍스트 힌트 사용",
     "autoAltTextEnabledHint": "활성화하면 각 이미지 처리 후 기본 EXIF 기반 힌트를 만듭니다. 모델 기반 설명 생성은 향후 기능입니다.",
     "semanticSearchTitle": "시맨틱 검색",

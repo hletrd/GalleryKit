@@ -122,6 +122,14 @@ export function checkRouteSource(content: string, relative: string = 'route.ts')
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
         const isExported = !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
 
+        if (ts.isExportDeclaration(statement) && !statement.isTypeOnly && !statement.exportClause) {
+            fileHadFailure = true;
+            report.failed.push(
+                `STAR RE-EXPORT: ${relative}:${getLineNumber(sourceFile, statement)} must not use export * from another module; export each HTTP handler directly as METHOD = withAdminAuth(...)`,
+            );
+            continue;
+        }
+
         if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
             for (const element of statement.exportClause.elements) {
                 if (statement.isTypeOnly || element.isTypeOnly) continue;

@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '4e423156-p7';
+const SW_VERSION = '8fadda29-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -312,9 +312,9 @@ async function staleWhileRevalidateImage(request) {
           headers: { 'If-None-Match': cachedEtag },
           signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS),
         });
+        const cachedSize = Number(cached.headers.get('Content-Length')) || 0;
         if (head.status === 304) {
           // Server confirms cache is fresh — serve cached, no body fetch.
-          const cachedSize = Number(cached.headers.get('Content-Length')) || 0;
           const refreshedCached = await refreshCachedImageTimestamp(imageCache, cacheKey, cached);
           touchMeta(request.url, cachedSize).catch(() => {});
           return refreshedCached;

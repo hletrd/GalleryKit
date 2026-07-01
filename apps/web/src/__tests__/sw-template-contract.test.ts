@@ -235,7 +235,14 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
 
     it('a 200 HEAD with the same ETag serves cached with no body fetch', () => {
         const fn = imageFn();
+        const headFetch = fn.indexOf('const head = await fetch(request.url');
+        const firstHeadStatusBranch = fn.indexOf('if (head.status === 304)');
+        const cachedSizeDeclaration = fn.indexOf("const cachedSize = Number(cached.headers.get('Content-Length')) || 0;");
         const sameEtag = fn.indexOf('networkEtag && networkEtag === cachedEtag');
+        expect(headFetch).toBeGreaterThan(-1);
+        expect(firstHeadStatusBranch).toBeGreaterThan(headFetch);
+        expect(cachedSizeDeclaration).toBeGreaterThan(headFetch);
+        expect(cachedSizeDeclaration).toBeLessThan(firstHeadStatusBranch);
         expect(sameEtag).toBeGreaterThan(-1);
         const branchEnd = fn.indexOf('return refreshedCached;', sameEtag);
         expect(branchEnd).toBeGreaterThan(sameEtag);

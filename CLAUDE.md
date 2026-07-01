@@ -406,7 +406,7 @@ docker run --rm \
 
 ## Performance Optimizations
 
-- **React `cache()`** wraps 10 data-access functions for SSR deduplication — every `data.ts` export ending in `Cached` (`getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`) plus `getSeoSettings`
+- **React `cache()`** wraps request-scoped data access for SSR deduplication — `data.ts` exports cached wrappers for image detail/viewer lookups, latest OG image, topics/tags/aliases, image-by-share-key, shared groups, smart collections, and SEO settings (`getSeoSettings`)
 - **`Promise.all`** parallelizes independent DB queries in `getImage()` (tags + prev + next)
 - **Public route freshness**: public home, topic, photo, shared single/group, smart collection, timeline, year-in-review, and GPS map pages currently set `revalidate = 0` so asynchronous image processing, metadata updates, share state, archive data, and map-visibility changes are visible immediately; static policy pages such as privacy do not need that dynamic contract. Admin pages remain dynamic. Reintroduce ISR on gallery/photo/archive/map surfaces only with an explicit invalidation/freshness plan
 - **Masonry grid**: pure CSS multi-column layout (`columns-1 sm:columns-2 … 2xl:columns-5` + `break-inside-avoid`) — no JS reorder pass; `requestAnimationFrame`-debounced resize handler for column-count-dependent sizing

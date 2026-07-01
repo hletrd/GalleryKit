@@ -751,7 +751,7 @@
     "slideshowInterval": "Slideshow Interval (seconds)",
     "slideshowIntervalHint": "2–30 seconds. How long each photo is shown in slideshow mode.",
     "autoAltTextTitle": "EXIF Alt-Text Hints",
-    "autoAltTextDesc": "Create EXIF-derived alt-text placeholders after processing. Local Florence-2 inference is not implemented yet.",
+    "autoAltTextDesc": "Create EXIF-derived alt-text placeholders after processing. Model-generated descriptions are not implemented.",
     "autoAltTextEnabled": "Enable EXIF alt-text hints",
     "autoAltTextEnabledHint": "When enabled, creates a basic EXIF-derived hint after each image is processed. Real model-generated descriptions are a future feature.",
     "semanticSearchTitle": "Semantic Search",

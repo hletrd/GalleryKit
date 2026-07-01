@@ -79,6 +79,18 @@ describe('checkRouteSource — .ts route files', () => {
         expect(report.failed[0]).toContain('must export GET directly');
     });
 
+    it('fails closed for star re-exports even when direct handlers are wrapped', () => {
+        const src = `
+            import { withAdminAuth } from '@/lib/api-auth';
+            export const GET = withAdminAuth(async (req) => new Response('ok'));
+            export * from './impl';
+        `;
+        const report = checkRouteSource(src, 'api/admin/foo/route.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('STAR RE-EXPORT');
+    });
+
     it('fails when a local function spoofs withAdminAuth', () => {
         const src = `
             function withAdminAuth(handler) { return handler; }
