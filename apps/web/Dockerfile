@@ -64,7 +64,20 @@ FROM build-base AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
-RUN npm ci --omit=dev --workspace=apps/web
+ARG TARGETARCH
+# Runtime deps need the same Linux-native Sharp workaround as the build deps:
+# `sharp` is externalized from the standalone bundle and is required by uploads,
+# topic covers, CLIP image embedding, and per-photo OG generation at runtime.
+RUN npm ci --omit=dev --workspace=apps/web && \
+    case "${TARGETARCH:-arm64}" in \
+        amd64) npm_arch="x64" ;; \
+        arm64) npm_arch="arm64" ;; \
+        *) echo "Unsupported TARGETARCH=${TARGETARCH:-unset}; expected amd64 or arm64" >&2; exit 1 ;; \
+    esac && \
+    npm install --workspace=apps/web --omit=dev --include=optional --no-save \
+        @img/sharp-libvips-linux-${npm_arch}@1.2.4 \
+        @img/sharp-linux-${npm_arch}@0.34.5 && \
+    node -e "require('sharp')"
 
 FROM build-base AS builder
 ARG BASE_URL

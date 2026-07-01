@@ -204,8 +204,20 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
     });
 
     it('both sidecar UPDATE branches advance updated_at for freshness validators', () => {
-        const occurrences = scriptSrc.match(/updated_at\s*=\s*CURRENT_TIMESTAMP/g) ?? [];
-        expect(occurrences.length).toBeGreaterThanOrEqual(2);
+        const flushBatchSrc = scriptSrc.match(
+            /async function flushBatch\(\): Promise<void> \{[\s\S]*?const confirmedUpdateResults = await confirmBackfillUpdateResults/,
+        )?.[0] ?? '';
+        expect(flushBatchSrc).toBeTruthy();
+
+        const fullMetadataUpdate = flushBatchSrc.match(
+            /UPDATE images SET[\s\S]*?pipeline_version = \$\{IMAGE_PIPELINE_VERSION\}[\s\S]*?WHERE id = \$\{item\.id\}/,
+        )?.[0] ?? '';
+        expect(fullMetadataUpdate).toContain('updated_at = CURRENT_TIMESTAMP');
+
+        const derivativeOnlyUpdate = flushBatchSrc.match(
+            /for \(const item of derivativeItems\)[\s\S]*?UPDATE images SET[\s\S]*?was_downscaled = \$\{item\.derivative\.was_downscaled\}[\s\S]*?WHERE id = \$\{item\.id\}/,
+        )?.[0] ?? '';
+        expect(derivativeOnlyUpdate).toContain('updated_at = CURRENT_TIMESTAMP');
     });
 
     it('flushBatch maps the deleted-row files through cleanupDeletedMidReencodeVariants', () => {

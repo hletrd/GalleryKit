@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 77/100 Implementation Plan - active; schedules per-photo OG pipeline-version coverage, re-encode timestamp assertions, and sidecar row-existence confirmation coverage (`cycle-77-2026-07-01-plan.md`)
-- Cycle 77/100 Deferred Findings - defers the cross-action restore foreground mutation barrier with a dedicated exit criterion; carry-forward register remains referenced (`cycle-77-2026-07-01-deferred.md`)
+- Cycle 78/100 Implementation Plan - active; schedules Cycle 77 ledger closure, public-route scanner false-positive hardening, sidecar timestamp test hardening, and Docker runtime native dependency coverage (`cycle-78-2026-07-01-plan.md`)
+- Cycle 78/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-78-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 77/100 Implementation Plan - implementation committed/pushed as `9286bef1`; no committed Cycle 77 deploy transcript was present at Cycle 78 review time, so Cycle 78 deploy supersedes production state after its pushed fix (`cycle-77-2026-07-01-plan.md`)
+- Cycle 77/100 Deferred Findings - defers the cross-action restore foreground mutation barrier with a dedicated exit criterion; carry-forward register remains referenced (`cycle-77-2026-07-01-deferred.md`)
 - Cycle 76/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 77 started from deployed `8aefc365` (`cycle-76-2026-07-01-plan.md`)
 - Cycle 76/100 Deferred Findings - defers low-risk behavior-test hardening items; carry-forward register remains referenced (`cycle-76-2026-07-01-deferred.md`)
 - Cycle 75/100 Implementation Plan - implementation committed/pushed/deployed; Cycle 76 started from deployed `a295ae44` (`cycle-75-2026-07-01-plan.md`)

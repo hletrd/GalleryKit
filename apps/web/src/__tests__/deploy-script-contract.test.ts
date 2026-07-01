@@ -264,4 +264,14 @@ describe('deploy script safety contract', () => {
             expect(token, token).toMatch(/@\d+\.\d+\.\d+$/);
         }
     });
+
+    it('installs and smokes runtime Sharp native deps in the prod-deps stage', () => {
+        const prodDepsBlock = dockerfile.match(/FROM build-base AS prod-deps[\s\S]*?\n\nFROM build-base AS builder/)?.[0] ?? '';
+        expect(prodDepsBlock).toContain('ARG TARGETARCH');
+        expect(prodDepsBlock).toContain('npm ci --omit=dev --workspace=apps/web');
+        expect(prodDepsBlock).toContain('npm install --workspace=apps/web --omit=dev --include=optional --no-save');
+        expect(prodDepsBlock).toContain('@img/sharp-libvips-linux-${npm_arch}@1.2.4');
+        expect(prodDepsBlock).toContain('@img/sharp-linux-${npm_arch}@0.34.5');
+        expect(prodDepsBlock).toContain('node -e "require(\'sharp\')"');
+    });
 });

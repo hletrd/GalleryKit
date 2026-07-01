@@ -419,6 +419,30 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('expensive GET');
     });
 
+    it('does not treat expensive marker words inside string literals as expensive GET work', () => {
+        const source = `
+            export async function GET() {
+                const note = 'ImageResponse and sharp are documented here, not executed';
+                return Response.json({ note });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
+    });
+
+    it('does not treat expensive marker words inside comments as expensive GET work', () => {
+        const source = `
+            export async function GET() {
+                // Future ImageResponse work belongs in a different route.
+                return Response.json({ ok: true });
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('no mutating or expensive GET handlers'))).toBe(true);
+    });
+
     it('fails expensive public GET handlers when DB-backed data helpers are imported relatively', () => {
         const source = `
             import { getTopicBySlug } from '../../../lib/data';

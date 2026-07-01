@@ -619,10 +619,23 @@ function bodyContainsExpensiveGetWork(
     importedExpensiveReadFunctions: ImportedExpensiveReadFunctions = emptyImportedExpensiveReadFunctions(),
 ): boolean {
     if (!body) return false;
-    const text = body.getText(sourceFile);
-    if (EXPENSIVE_GET_MARKERS.some((marker) => text.includes(marker))) {
-        return true;
-    }
+    const identifierMarkers = new Set(EXPENSIVE_GET_MARKERS.filter((marker) => !marker.endsWith('.')));
+    const propertyRootMarkers = new Set(
+        EXPENSIVE_GET_MARKERS
+            .filter((marker) => marker.endsWith('.'))
+            .map((marker) => marker.slice(0, -1)),
+    );
+
+    const calleeMatchesMarker = (callee: ts.Expression): boolean => {
+        if (ts.isIdentifier(callee)) {
+            return identifierMarkers.has(callee.text);
+        }
+        if (ts.isPropertyAccessExpression(callee)) {
+            const rootName = rootIdentifierName(callee);
+            return rootName !== null && propertyRootMarkers.has(rootName);
+        }
+        return false;
+    };
 
     let found = false;
     const visit = (node: ts.Node) => {
@@ -630,6 +643,10 @@ function bodyContainsExpensiveGetWork(
         if (ts.isFunctionLike(node) && node !== body) return;
         if (ts.isCallExpression(node)) {
             const callee = node.expression;
+            if (calleeMatchesMarker(callee)) {
+                found = true;
+                return;
+            }
             if (
                 ts.isIdentifier(callee)
                 && (
@@ -651,6 +668,10 @@ function bodyContainsExpensiveGetWork(
                 found = true;
                 return;
             }
+        }
+        if (ts.isNewExpression(node) && calleeMatchesMarker(node.expression)) {
+            found = true;
+            return;
         }
         ts.forEachChild(node, visit);
     };
