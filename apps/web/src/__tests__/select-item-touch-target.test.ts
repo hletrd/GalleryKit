@@ -15,4 +15,19 @@ describe('Radix SelectItem touch target contract', () => {
         expect(selectItemSource).toContain('data-slot="select-item"');
         expect(selectItemSource).toContain('min-h-11');
     });
+
+    it('keeps custom select scroll buttons at least 44 px tall', () => {
+        for (const [name, nextName] of [
+            ['SelectScrollUpButton', 'SelectScrollDownButton'],
+            ['SelectScrollDownButton', 'export {'],
+        ] as const) {
+            const functionStart = SOURCE.indexOf(`function ${name}`);
+            expect(functionStart, `${name} should exist`).toBeGreaterThanOrEqual(0);
+            const functionEnd = SOURCE.indexOf(nextName === 'export {' ? nextName : `function ${nextName}`, functionStart + 1);
+            expect(functionEnd, `${name} source should be bounded`).toBeGreaterThan(functionStart);
+            const scrollButtonSource = SOURCE.slice(functionStart, functionEnd);
+
+            expect(scrollButtonSource).toContain('min-h-11');
+        }
+    });
 });

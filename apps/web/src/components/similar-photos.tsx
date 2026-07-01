@@ -66,46 +66,70 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
     const fetchedRef = useRef(false);
     const mountedRef = useRef(true);
     const abortRef = useRef<AbortController | null>(null);
+    const openRef = useRef(false);
+    const requestIdRef = useRef(0);
 
     useEffect(() => {
         return () => {
             mountedRef.current = false;
+            openRef.current = false;
             abortRef.current?.abort();
         };
     }, []);
 
     async function handleToggle() {
         const nextOpen = !open;
+        openRef.current = nextOpen;
         setOpen(nextOpen);
+
+        if (!nextOpen) {
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+                fetchedRef.current = false;
+                requestIdRef.current += 1;
+            }
+            setLoading(false);
+            return;
+        }
 
         if (nextOpen && !fetchedRef.current) {
             fetchedRef.current = true;
             setLoading(true);
             const controller = new AbortController();
             abortRef.current = controller;
+            const requestId = requestIdRef.current + 1;
+            requestIdRef.current = requestId;
+            const isCurrentOpenRequest = () => (
+                mountedRef.current
+                && openRef.current
+                && requestIdRef.current === requestId
+                && abortRef.current === controller
+                && !controller.signal.aborted
+            );
             try {
                 const res = await fetch(`/api/search/similar/${imageId}`, { signal: controller.signal });
                 if (!res.ok) {
                     // 503 (setup/backfill), 404 (no embedding), 429, etc.
-                    fetchedRef.current = false;
-                    if (mountedRef.current) setResults('error');
+                    if (requestIdRef.current === requestId) fetchedRef.current = false;
+                    if (isCurrentOpenRequest()) setResults('error');
                     return;
                 }
                 const json = await res.json() as { results?: SimilarResult[] };
-                if (mountedRef.current) setResults(json.results ?? []);
+                if (isCurrentOpenRequest()) setResults(json.results ?? []);
             } catch {
                 if (controller.signal.aborted) {
-                    fetchedRef.current = false;
+                    if (requestIdRef.current === requestId) fetchedRef.current = false;
                     return;
                 }
                 // Network error — keep panel visible with localized feedback.
-                fetchedRef.current = false;
-                if (mountedRef.current) setResults('error');
+                if (requestIdRef.current === requestId) fetchedRef.current = false;
+                if (isCurrentOpenRequest()) setResults('error');
             } finally {
                 if (abortRef.current === controller) {
                     abortRef.current = null;
                 }
-                if (mountedRef.current) setLoading(false);
+                if (mountedRef.current && openRef.current && requestIdRef.current === requestId) setLoading(false);
             }
         }
     }

@@ -37,9 +37,9 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 | `npm test` | Vitest unit suite (2000+ tests) |
 | `npm run typecheck` | Type gate (app + scripts) |
 | `npm run test:e2e` | Playwright end-to-end tests |
-| `npx tsx scripts/download-clip-models.ts` | Seed CLIP model weights into the models volume (sidecar) |
-| `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Pre-enable production CLIP backfill for existing photos (sidecar); omit `--force` only after semantic search mode is already active |
-| `npx tsx scripts/backfill-color-pipeline.ts` | Re-encode stale pipeline-version derivatives (sidecar); add `--force-reencode` for settings-only byte changes |
+| `npx tsx scripts/download-clip-models.ts` | Local/dev CLIP weight seed helper; production sidecars must use the full mounted command in `CLAUDE.md` so `CLIP_MODELS_ROOT` points at persistent storage |
+| `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Local/dev production-CLIP backfill helper; production sidecars must use the full mounted command in `CLAUDE.md` |
+| `npx tsx scripts/backfill-color-pipeline.ts` | Local/dev stale-derivative re-encode helper; production sidecars must use the full mounted command in `CLAUDE.md` with `UPLOAD_ORIGINAL_ROOT` and persisted upload/resource mounts |
 
 ## Environment notes
 

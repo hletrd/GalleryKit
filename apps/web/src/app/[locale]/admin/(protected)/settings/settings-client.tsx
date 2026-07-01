@@ -87,6 +87,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [showBackfillConfirm, setShowBackfillConfirm] = useState(false);
     const [hasSavedBackfillPending, setHasSavedBackfillPending] = useState(false);
+    const backfillPendingBaselineRef = useRef<Record<string, string> | null>(null);
     // R10-M14: also keep the last-committed values in component STATE
     // (parallel to the existing `initialRef` snapshot used inside the
     // save callback) so render can compare current vs. baseline without
@@ -272,6 +273,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                 const savedBackfillRelevantChange = Object.keys(changed).some((key) => COLOR_HDR_BACKFILL_KEYS.has(key));
                 const result = await updateGallerySettings(changed);
                 if (result.success) {
+                    const previousBaseline = initialRef.current;
                     // C1R-04: rehydrate from the server-returned normalized
                     // values (including the canonicalized image_sizes string)
                     // so the UI matches what was actually persisted.
@@ -280,8 +282,18 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     setSettings(nextSettings);
                     initialRef.current = nextSettings;
                     setBaseline(nextSettings);
-                    if (hasExistingImages && savedBackfillRelevantChange) {
-                        setHasSavedBackfillPending(true);
+                    if (hasExistingImages && savedBackfillRelevantChange && !backfillPendingBaselineRef.current) {
+                        backfillPendingBaselineRef.current = previousBaseline;
+                    }
+                    if (hasExistingImages && backfillPendingBaselineRef.current) {
+                        const pendingBaseline = backfillPendingBaselineRef.current;
+                        const stillNeedsReencode = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
+                            (key) => (nextSettings[key] ?? '') !== (pendingBaseline[key] ?? ''),
+                        );
+                        setHasSavedBackfillPending(stillNeedsReencode);
+                        if (!stillNeedsReencode) {
+                            backfillPendingBaselineRef.current = null;
+                        }
                     }
                     toast.success(t('settings.saveSuccess'));
                 } else {

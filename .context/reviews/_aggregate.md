@@ -1,12 +1,13 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-64-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-65-2026-07-01/_aggregate.md`
 
-Cycle 64 produced four scheduled findings:
+Cycle 65 produced five deduplicated findings:
 
-- `C64-01` - search mode reset leaves stale active result selection.
-- `C64-02` - admin GPS map links do not meet the 44 px touch-target floor.
-- `C64-03` - Radix Select options are compact despite compliant Select triggers.
-- `C64-04` - saved color/quality setting changes can lose their backfill warning before existing derivatives are actually updated.
+- `C65-01` - saved backfill warning stays visible after reverting byte-impacting settings to the baseline.
+- `C65-02` - settings-only re-encode obligation disappears after page reload.
+- `C65-03` - Radix Select scroll controls remain below the 44 px touch-target floor.
+- `C65-04` - abbreviated sidecar commands can write CLIP/backfill data to the wrong paths.
+- `C65-05` - similar-photo fetch keeps running after the panel is closed.
 
-Cycle 64 schedules `C64-01` through `C64-04`. No new Cycle 64 findings are deferred. `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.
+Cycle 65 schedules `C65-01`, `C65-03`, `C65-04`, and `C65-05`. `C65-02` is deferred pending a durable settings-hash/clear contract. `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.
