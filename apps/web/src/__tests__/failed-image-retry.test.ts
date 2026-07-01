@@ -151,9 +151,16 @@ describe('R10-H2: failed image persistence and retry', () => {
 
     describe('dashboard retry accessibility', () => {
         it('labels each retry button with the failed image row label', () => {
+            const failedImageRowBody = dashboardSource.slice(
+                dashboardSource.indexOf('failedImages.map((img) => {'),
+                dashboardSource.indexOf('<UploadDropzone', dashboardSource.indexOf('failedImages.map((img) => {')),
+            );
+
             expect(dashboardSource).toContain('function getFailedImageLabel(img: FailedImage): string');
             expect(dashboardSource).toContain("img.title?.trim() || img.user_filename?.trim() || `ID ${img.id}`");
-            expect(dashboardSource).toContain("aria-label={t(retrying ? 'dashboard.retryingImageAria' : 'dashboard.retryImageAria', { label })}");
+            expect(failedImageRowBody).toContain('const label = getFailedImageLabel(img);');
+            expect(failedImageRowBody).toMatch(/<p id=\{labelId\} className="truncate text-sm font-medium">\s*\{label\}\s*<\/p>/);
+            expect(failedImageRowBody).toContain("aria-label={t(retrying ? 'dashboard.retryingImageAria' : 'dashboard.retryImageAria', { label })}");
         });
 
         it('describes retry buttons with the processing error when present', () => {
