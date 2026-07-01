@@ -1,9 +1,11 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-87-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-88-2026-07-01/_aggregate.md`
 
-Cycle 87 produced one deduplicated finding:
+Cycle 88 produced three deduplicated findings:
 
-- `C87-01` - Cycle 86 release ledger still marks commit/push/deploy incomplete after signed deployed HEAD `ee83c13`.
+- `C88-01` - Cycle 87 release ledger still marks commit/push/deploy incomplete after signed deployed HEAD `afc2bf5`.
+- `C88-02` - Retry enqueue source-contract test can pass from the unrelated upload enqueue block.
+- `C88-03` - Semantic embeddings are model-version filtered but stored as one row per image.
 
-Cycle 87 schedules `C87-01`. No new findings are deferred. `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
+Cycle 88 schedules `C88-01` and `C88-02`. `C88-03` is newly deferred because it requires a dedicated schema/data migration plan. `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.

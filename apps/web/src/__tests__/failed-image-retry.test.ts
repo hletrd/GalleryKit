@@ -19,6 +19,7 @@ const dataSource = fs.readFileSync(dataPath, 'utf8');
 
 const actionsPath = path.join(__dirname, '..', 'app', 'actions', 'images.ts');
 const actionsSource = fs.readFileSync(actionsPath, 'utf8');
+const retryFailedImageBody = extractFnBody(actionsSource, 'export async function retryFailedImage');
 
 const dashboardPath = path.join(__dirname, '..', 'app', '[locale]', 'admin', '(protected)', 'dashboard', 'dashboard-client.tsx');
 const dashboardSource = fs.readFileSync(dashboardPath, 'utf8');
@@ -85,39 +86,40 @@ describe('R10-H2: failed image persistence and retry', () => {
     describe('actions/images.ts retry server action', () => {
         it('exports retryFailedImage server action', () => {
             expect(actionsSource).toMatch(/export\s+async\s+function\s+retryFailedImage/);
+            expect(retryFailedImageBody, 'retryFailedImage body must be findable').toBeTruthy();
         });
 
         it('requires same-origin admin before proceeding', () => {
             // R10-H2: mutating server action must guard with requireSameOriginAdmin.
-            expect(actionsSource).toMatch(/await\s+requireSameOriginAdmin\s*\(\s*\)/);
+            expect(retryFailedImageBody!).toMatch(/await\s+requireSameOriginAdmin\s*\(\s*\)/);
         });
 
         it('selects image with processed=false AND processing_error IS NOT NULL', () => {
             // Must only retry images in the failed state.
-            expect(actionsSource).toContain('const failedStatePredicate = and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error))');
-            expect(actionsSource).toMatch(/eq\s*\(\s*images\.processed\s*,\s*false\s*\)/);
-            expect(actionsSource).toMatch(/isNotNull\s*\(\s*images\.processing_error\s*\)/);
+            expect(retryFailedImageBody!).toContain('const failedStatePredicate = and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error))');
+            expect(retryFailedImageBody!).toMatch(/eq\s*\(\s*images\.processed\s*,\s*false\s*\)/);
+            expect(retryFailedImageBody!).toMatch(/isNotNull\s*\(\s*images\.processing_error\s*\)/);
         });
 
         it('rebuilds a fresh processing snapshot before re-enqueue', () => {
-            expect(actionsSource).toContain('getGalleryConfigStrict');
-            expect(actionsSource).toContain('createProcessingSettingsSnapshot(retryConfig)');
-            expect(actionsSource).toContain('const serializedSnapshot = serializeProcessingSettingsSnapshot(processingSettingsSnapshot)');
-            expect(actionsSource).toMatch(/processing_settings_json:\s*serializedSnapshot/);
+            expect(retryFailedImageBody!).toContain('getGalleryConfigStrict');
+            expect(retryFailedImageBody!).toContain('createProcessingSettingsSnapshot(retryConfig)');
+            expect(retryFailedImageBody!).toContain('const serializedSnapshot = serializeProcessingSettingsSnapshot(processingSettingsSnapshot)');
+            expect(retryFailedImageBody!).toMatch(/processing_settings_json:\s*serializedSnapshot/);
         });
 
         it('removes ID from permanentlyFailedIds before re-enqueue', () => {
             // Must clear the in-memory exclusion so bootstrap finds the image.
-            expect(actionsSource).toMatch(/state\.permanentlyFailedIds\.delete\s*\(\s*id\s*\)/);
+            expect(retryFailedImageBody!).toMatch(/state\.permanentlyFailedIds\.delete\s*\(\s*id\s*\)/);
         });
 
         it('does not clear in-memory failure state or enqueue when no failed row was updated', () => {
-            const clearIdx = actionsSource.indexOf('const clearResult = await db.update(images)');
-            const failedPredicateIdx = actionsSource.indexOf('.where(failedStatePredicate)', clearIdx);
-            const affectedIdx = actionsSource.indexOf('affectedRows', clearIdx);
-            const notFailedReturnIdx = actionsSource.indexOf("return { error: t('imageNotInFailedState') }", affectedIdx);
-            const stateIdx = actionsSource.indexOf('const state = getProcessingQueueState()');
-            const enqueueIdx = actionsSource.indexOf('const enqueued = enqueueImageProcessing');
+            const clearIdx = retryFailedImageBody!.indexOf('const clearResult = await db.update(images)');
+            const failedPredicateIdx = retryFailedImageBody!.indexOf('.where(failedStatePredicate)', clearIdx);
+            const affectedIdx = retryFailedImageBody!.indexOf('affectedRows', clearIdx);
+            const notFailedReturnIdx = retryFailedImageBody!.indexOf("return { error: t('imageNotInFailedState') }", affectedIdx);
+            const stateIdx = retryFailedImageBody!.indexOf('const state = getProcessingQueueState()');
+            const enqueueIdx = retryFailedImageBody!.indexOf('const enqueued = enqueueImageProcessing');
 
             expect(clearIdx).toBeGreaterThan(0);
             expect(failedPredicateIdx).toBeGreaterThan(clearIdx);
@@ -129,34 +131,34 @@ describe('R10-H2: failed image persistence and retry', () => {
         });
 
         it('calls enqueueImageProcessing with the full job payload', () => {
-            expect(actionsSource).toMatch(/enqueueImageProcessing\s*\(\s*\{/);
-            expect(actionsSource).toMatch(/filenameOriginal:\s*image\.filename_original/);
-            expect(actionsSource).toMatch(/quality:\s*processingSettingsSnapshot\.quality/);
-            expect(actionsSource).toMatch(/imageSizes:\s*processingSettingsSnapshot\.imageSizes/);
-            expect(actionsSource).toMatch(/forceSrgbDerivatives:\s*processingSettingsSnapshot\.forceSrgbDerivatives/);
-            expect(actionsSource).toMatch(/wideGamutJpegChroma:\s*processingSettingsSnapshot\.wideGamutJpegChroma/);
-            expect(actionsSource).toMatch(/avifEffort:\s*processingSettingsSnapshot\.avifEffort/);
-            expect(actionsSource).toMatch(/sdrJpegChroma:\s*processingSettingsSnapshot\.sdrJpegChroma/);
-            expect(actionsSource).toMatch(/wideGamutMaxSourcePixels:\s*processingSettingsSnapshot\.wideGamutMaxSourcePixels/);
-            expect(actionsSource).toMatch(/autoAltTextEnabled:\s*processingSettingsSnapshot\.autoAltTextEnabled/);
-            expect(actionsSource).toMatch(/semanticSearchMode:\s*processingSettingsSnapshot\.semanticSearchMode/);
-            expect(actionsSource).toMatch(/colorSignals:\s*\{/);
+            expect(retryFailedImageBody!).toMatch(/enqueueImageProcessing\s*\(\s*\{/);
+            expect(retryFailedImageBody!).toMatch(/filenameOriginal:\s*image\.filename_original/);
+            expect(retryFailedImageBody!).toMatch(/quality:\s*processingSettingsSnapshot\.quality/);
+            expect(retryFailedImageBody!).toMatch(/imageSizes:\s*processingSettingsSnapshot\.imageSizes/);
+            expect(retryFailedImageBody!).toMatch(/forceSrgbDerivatives:\s*processingSettingsSnapshot\.forceSrgbDerivatives/);
+            expect(retryFailedImageBody!).toMatch(/wideGamutJpegChroma:\s*processingSettingsSnapshot\.wideGamutJpegChroma/);
+            expect(retryFailedImageBody!).toMatch(/avifEffort:\s*processingSettingsSnapshot\.avifEffort/);
+            expect(retryFailedImageBody!).toMatch(/sdrJpegChroma:\s*processingSettingsSnapshot\.sdrJpegChroma/);
+            expect(retryFailedImageBody!).toMatch(/wideGamutMaxSourcePixels:\s*processingSettingsSnapshot\.wideGamutMaxSourcePixels/);
+            expect(retryFailedImageBody!).toMatch(/autoAltTextEnabled:\s*processingSettingsSnapshot\.autoAltTextEnabled/);
+            expect(retryFailedImageBody!).toMatch(/semanticSearchMode:\s*processingSettingsSnapshot\.semanticSearchMode/);
+            expect(retryFailedImageBody!).toMatch(/colorSignals:\s*\{/);
         });
 
         it('restores a visible failed state when the queue rejects the retry job', () => {
-            expect(actionsSource).toContain('const enqueued = enqueueImageProcessing');
-            expect(actionsSource).toMatch(/if\s*\(\s*!enqueued\s*\)\s*\{/);
-            expect(actionsSource).toMatch(/processing_error:\s*retryError/);
-            expect(actionsSource).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
-            expect(actionsSource).toMatch(/processing_settings_json:\s*null/);
-            expect(actionsSource).toMatch(/isNull\s*\(\s*images\.processing_error\s*\)/);
-            expect(actionsSource).toContain('const restoredRows = Number(restoreHeader?.affectedRows ?? 0)');
-            expect(actionsSource).toContain('state.permanentlyFailedIds.add(id)');
-            expect(actionsSource).toContain("return { error: t('failedToRetryImage') }");
+            expect(retryFailedImageBody!).toContain('const enqueued = enqueueImageProcessing');
+            expect(retryFailedImageBody!).toMatch(/if\s*\(\s*!enqueued\s*\)\s*\{/);
+            expect(retryFailedImageBody!).toMatch(/processing_error:\s*retryError/);
+            expect(retryFailedImageBody!).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
+            expect(retryFailedImageBody!).toMatch(/processing_settings_json:\s*null/);
+            expect(retryFailedImageBody!).toMatch(/isNull\s*\(\s*images\.processing_error\s*\)/);
+            expect(retryFailedImageBody!).toContain('const restoredRows = Number(restoreHeader?.affectedRows ?? 0)');
+            expect(retryFailedImageBody!).toContain('state.permanentlyFailedIds.add(id)');
+            expect(retryFailedImageBody!).toContain("return { error: t('failedToRetryImage') }");
         });
 
         it('returns { success: true } on successful retry initiation', () => {
-            expect(actionsSource).toMatch(/return\s*\{\s*success:\s*true\s+as\s+const\s*\}/);
+            expect(retryFailedImageBody!).toMatch(/return\s*\{\s*success:\s*true\s+as\s+const\s*\}/);
         });
     });
 
@@ -188,3 +190,53 @@ describe('R10-H2: failed image persistence and retry', () => {
         });
     });
 });
+
+function extractFnBody(source: string, header: string): string | null {
+    const headerIdx = source.indexOf(header);
+    if (headerIdx === -1) return null;
+    const openBrace = source.indexOf('{', headerIdx);
+    if (openBrace === -1) return null;
+
+    let depth = 0;
+    let i = openBrace;
+    let inString: '"' | "'" | '`' | null = null;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    while (i < source.length) {
+        const ch = source[i];
+        const next = source[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n') inLineComment = false;
+        } else if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i++;
+            }
+        } else if (inString) {
+            if (ch === '\\') {
+                i++;
+            } else if (ch === inString) {
+                inString = null;
+            }
+        } else if (ch === '/' && next === '/') {
+            inLineComment = true;
+            i++;
+        } else if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i++;
+        } else if (ch === '"' || ch === "'" || ch === '`') {
+            inString = ch;
+        } else if (ch === '{') {
+            depth++;
+        } else if (ch === '}') {
+            depth--;
+            if (depth === 0) return source.slice(openBrace, i + 1);
+        }
+
+        i++;
+    }
+
+    return null;
+}
