@@ -8,12 +8,14 @@ import { DEFAULT_LOCALE } from '@/lib/constants';
 import { localizePath } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { ifNoneMatchMatches } from '@/lib/http-etag';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
 
 const FEED_LIMIT = 50;
 const CACHE_CONTROL = 'public, max-age=600, s-maxage=1800';
+const EMPTY_FEED_UPDATED_AT = '1970-01-01T00:00:00.000Z';
 
 function toIso(value: unknown): string | null {
     if (!value) return null;
@@ -28,14 +30,6 @@ function toIso(value: unknown): string | null {
 
 function createAtomFeedEtag(xml: string): string {
     return `W/"atom-${createHash('sha256').update(xml).digest('base64url').slice(0, 22)}"`;
-}
-
-function isEtagMatch(ifNoneMatch: string | null, etag: string): boolean {
-    if (!ifNoneMatch) return false;
-    return ifNoneMatch.split(',').some((candidate) => {
-        const value = candidate.trim();
-        return value === '*' || value === etag;
-    });
 }
 
 // @public-no-rate-limit-required: bounded Atom feed is read-only, capped at FEED_LIMIT, and served with public cache headers for syndication clients.
@@ -113,7 +107,7 @@ export async function GET(request: NextRequest) {
     // tolerates ordering changes.
     const feedUpdated = entries.length > 0
         ? entries.reduce((acc, e) => (e.updated > acc ? e.updated : acc), entries[0].updated)
-        : new Date().toISOString();
+        : EMPTY_FEED_UPDATED_AT;
 
     // R17-M4: emit <rights>. Prefer admin-configured copyright in
     // site-config.json; fall back to a sensible "© {year} {author}".
@@ -154,7 +148,7 @@ export async function GET(request: NextRequest) {
     // for 304s so settings-only changes force a fresh 200 instead of a stale
     // If-Modified-Since short-circuit.
     const etag = createAtomFeedEtag(xml);
-    if (isEtagMatch(ifNoneMatch, etag)) {
+    if (ifNoneMatchMatches(ifNoneMatch, etag)) {
         return new NextResponse(null, {
             status: 304,
             headers: {

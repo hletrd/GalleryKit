@@ -63,7 +63,7 @@ for (const [label, source] of SUITES) {
         it('uses XML content ETags for 304s so SEO/settings changes invalidate the feed', () => {
             expect(source).toContain('createAtomFeedEtag(xml)');
             expect(source).toContain("request.headers.get('if-none-match')");
-            expect(source).toContain('isEtagMatch(ifNoneMatch, etag)');
+            expect(source).toContain('ifNoneMatchMatches(ifNoneMatch, etag)');
             expect(source).toContain("'ETag': etag");
             expect(source).not.toContain('isFeedNotModified');
             expect(source).not.toContain('getFeedUpdatedAt');
@@ -71,7 +71,7 @@ for (const [label, source] of SUITES) {
 
         it('returns 304 only from the live ETag branch and 200 with the same ETag otherwise', () => {
             const etagIndex = source.indexOf('const etag = createAtomFeedEtag(xml)');
-            const matchIndex = source.indexOf('if (isEtagMatch(ifNoneMatch, etag))');
+            const matchIndex = source.indexOf('if (ifNoneMatchMatches(ifNoneMatch, etag))');
             const notModifiedIndex = source.indexOf('status: 304', matchIndex);
             const okIndex = source.indexOf('status: 200', notModifiedIndex);
             expect(etagIndex).toBeGreaterThan(-1);

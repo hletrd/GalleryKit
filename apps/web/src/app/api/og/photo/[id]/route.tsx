@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
+import { createHash } from 'crypto';
 import sharp from 'sharp';
 import { getImageCached, getImageProcessingStateCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -11,6 +12,7 @@ import { BASE_URL } from '@/lib/constants';
 import siteConfig from '@/site-config.json';
 import { parseSafePositiveInteger } from '@/lib/validation';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { ifNoneMatchMatches } from '@/lib/http-etag';
 
 export const runtime = 'nodejs';
 
@@ -36,6 +38,44 @@ async function postProcessOgImage(pngBuffer: Buffer): Promise<Buffer> {
         .withIccProfile('srgb')
         .jpeg({ quality: 88 })
         .toBuffer();
+}
+
+function toStableEtagTimestamp(value: unknown): string {
+    if (!value) return '';
+    try {
+        return value instanceof Date
+            ? value.toISOString()
+            : new Date(value as string | number).toISOString();
+    } catch {
+        return '';
+    }
+}
+
+function createPhotoOgEtag(input: {
+    id: number;
+    filenameJpeg: string;
+    displayTitle: string;
+    siteTitle: string;
+    updatedAt: unknown;
+    createdAt: unknown;
+    imageSizes: number[];
+}): string {
+    const freshness = toStableEtagTimestamp(input.updatedAt)
+        || toStableEtagTimestamp(input.createdAt);
+    const sizes = [...input.imageSizes].sort((a, b) => a - b).join(',');
+    const hash = createHash('sha256')
+        .update([
+            input.id,
+            input.filenameJpeg,
+            freshness,
+            sizes,
+            input.displayTitle,
+            input.siteTitle,
+        ].join('\0'))
+        .digest('base64url')
+        .slice(0, 22);
+
+    return `W/"og-photo-${hash}"`;
 }
 
 export async function GET(
@@ -90,6 +130,24 @@ export async function GET(
         const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
         const rawTitle = getPhotoDisplayTitle(image, `Photo #${image.id}`);
         const displayTitle = sanitizeForOg(rawTitle);
+        const etag = createPhotoOgEtag({
+            id: image.id,
+            filenameJpeg: image.filename_jpeg,
+            displayTitle,
+            siteTitle,
+            updatedAt: image.updated_at,
+            createdAt: image.created_at,
+            imageSizes: config.imageSizes,
+        });
+        if (ifNoneMatchMatches(req.headers.get('if-none-match'), etag)) {
+            return new Response(null, {
+                status: 304,
+                headers: {
+                    'Cache-Control': OG_SUCCESS_CACHE_CONTROL,
+                    'ETag': etag,
+                },
+            });
+        }
 
         // R24-M1: iterate configured `imageSizes` ascending; first available
         // sized JPEG derivative wins. This degrades cleanly through the
@@ -238,6 +296,7 @@ export async function GET(
             headers: {
                 'Content-Type': 'image/jpeg',
                 'Cache-Control': OG_SUCCESS_CACHE_CONTROL,
+                'ETag': etag,
             },
         });
     } catch (e: unknown) {

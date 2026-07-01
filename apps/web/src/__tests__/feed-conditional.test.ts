@@ -102,13 +102,33 @@ describe('root /feed.xml route conditional requests', () => {
         expect(etag).toBeTruthy();
 
         const second = await getRootFeed(feedRequest('/feed.xml', {
-            'if-none-match': `W/"other", ${etag}`,
+            'if-none-match': `W/"other", ${etag?.replace(/^W\//, '')}`,
         }));
 
         expect(second.status).toBe(304);
         expect(second.headers.get('ETag')).toBe(etag);
         expect(second.headers.get('Last-Modified')).toBe('Sun, 17 May 2026 10:00:00 GMT');
         expect(await second.text()).toBe('');
+    });
+
+    it('keeps empty-feed ETags stable across requests', async () => {
+        getImagesForFeedMock.mockResolvedValue([]);
+
+        const first = await getRootFeed(feedRequest('/feed.xml'));
+        const etag = first.headers.get('ETag');
+        expect(first.status).toBe(200);
+        expect(first.headers.get('Last-Modified')).toBe('Thu, 01 Jan 1970 00:00:00 GMT');
+        expect(etag).toBeTruthy();
+
+        const second = await getRootFeed(feedRequest('/feed.xml'));
+        expect(second.status).toBe(200);
+        expect(second.headers.get('ETag')).toBe(etag);
+
+        const conditional = await getRootFeed(feedRequest('/feed.xml', {
+            'if-none-match': etag ?? '',
+        }));
+        expect(conditional.status).toBe(304);
+        expect(conditional.headers.get('ETag')).toBe(etag);
     });
 
     it('keeps If-Modified-Since informational unless If-None-Match matches', async () => {
@@ -201,7 +221,7 @@ describe('topic /[locale]/[topic]/feed.xml route conditional requests', () => {
 
         const second = await getTopicFeed(
             feedRequest('/en/landscape/feed.xml', {
-                'if-none-match': etag ?? '',
+                'if-none-match': etag?.replace(/^W\//, '') ?? '',
             }),
             topicParams('en', 'landscape'),
         );
@@ -209,6 +229,35 @@ describe('topic /[locale]/[topic]/feed.xml route conditional requests', () => {
         expect(second.status).toBe(304);
         expect(second.headers.get('ETag')).toBe(etag);
         expect(await second.text()).toBe('');
+    });
+
+    it('keeps empty topic-feed ETags stable across requests', async () => {
+        getImagesForFeedMock.mockResolvedValue([]);
+
+        const first = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml'),
+            topicParams('en', 'landscape'),
+        );
+        const etag = first.headers.get('ETag');
+        expect(first.status).toBe(200);
+        expect(first.headers.get('Last-Modified')).toBe('Thu, 01 Jan 1970 00:00:00 GMT');
+        expect(etag).toBeTruthy();
+
+        const second = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml'),
+            topicParams('en', 'landscape'),
+        );
+        expect(second.status).toBe(200);
+        expect(second.headers.get('ETag')).toBe(etag);
+
+        const conditional = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml', {
+                'if-none-match': etag ?? '',
+            }),
+            topicParams('en', 'landscape'),
+        );
+        expect(conditional.status).toBe(304);
+        expect(conditional.headers.get('ETag')).toBe(etag);
     });
 
     it('keeps topic If-Modified-Since informational unless If-None-Match matches', async () => {

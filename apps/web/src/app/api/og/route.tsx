@@ -8,6 +8,7 @@ import { getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
 import { countCodePoints } from '@/lib/utils';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { ifNoneMatchMatches } from '@/lib/http-etag';
 
 export const runtime = 'nodejs';
 
@@ -130,7 +131,7 @@ export async function GET(req: NextRequest) {
       .update(`${topicRecord.slug}|${topicLabel}|${tagList.join(',')}|${siteTitle}`)
       .digest('hex')
       .slice(0, 32) + '"';
-    if (req.headers.get('if-none-match') === etag) {
+    if (ifNoneMatchMatches(req.headers.get('if-none-match'), etag)) {
       return new Response(null, {
         status: 304,
         headers: {

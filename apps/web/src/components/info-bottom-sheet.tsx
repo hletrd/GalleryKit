@@ -48,6 +48,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
+    const [sheetElement, setSheetElement] = useState<HTMLDivElement | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
     const modalRootRef = useRef<HTMLDivElement>(null);
     const dragHandleRef = useRef<HTMLButtonElement>(null);
@@ -73,6 +74,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
             case 'expanded':
                 return '0';
         }
+    }, []);
+
+    const setSheetNode = useCallback((node: HTMLDivElement | null) => {
+        sheetRef.current = node;
+        setSheetElement(node);
     }, []);
 
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -196,7 +202,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                 }}
             >
             <div
-                ref={sheetRef}
+                ref={setSheetNode}
                 role="dialog"
                 aria-modal="true"
                 aria-label={t('viewer.bottomSheet')}
@@ -504,7 +510,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                         <ChevronDown className="h-4 w-4 ml-auto" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                                <DropdownMenuContent
+                                                    align="end"
+                                                    className="min-w-[12rem]"
+                                                    container={sheetElement ?? undefined}
+                                                >
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                         <a
                                                             href={downloadHref}

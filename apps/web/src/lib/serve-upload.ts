@@ -11,6 +11,7 @@ import { UPLOAD_ROOT } from '@/lib/upload-paths';
 import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 import { getColorSettingsHash } from '@/lib/settings-hash';
 import { getGalleryConfig } from '@/lib/gallery-config';
+import { ifNoneMatchMatches } from '@/lib/http-etag';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
@@ -233,20 +234,18 @@ export async function serveUploadFile(
         // with no body. The Cache-Control + ETag headers are still
         // emitted so the client can update its freshness timer.
         // Header parsing handles both single-tag (`W/"v6-..."`) and
-        // comma-separated tag lists (`W/"a", W/"b"`).
-        if (ifNoneMatch) {
-            const tags = ifNoneMatch.split(',').map((t) => t.trim());
-            if (tags.includes('*') || tags.includes(etag)) {
-                await closeFileHandle();
-                return new NextResponse(null, {
-                    status: 304,
-                    headers: {
-                        'ETag': etag,
-                        'Cache-Control': 'public, max-age=3600, must-revalidate',
-                        'X-Content-Type-Options': 'nosniff',
-                    },
-                });
-            }
+        // comma-separated tag lists (`W/"a", W/"b"`). If-None-Match uses
+        // weak comparison, so `W/"v6-..."` and `"v6-..."` are equivalent.
+        if (ifNoneMatchMatches(ifNoneMatch ?? null, etag)) {
+            await closeFileHandle();
+            return new NextResponse(null, {
+                status: 304,
+                headers: {
+                    'ETag': etag,
+                    'Cache-Control': 'public, max-age=3600, must-revalidate',
+                    'X-Content-Type-Options': 'nosniff',
+                },
+            });
         }
 
         // R20-L1: HEAD requests do not need the body — return early with

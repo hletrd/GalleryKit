@@ -53,7 +53,7 @@
  *    into a free enumeration oracle with unmetered DB/CPU consumption.
  *    Both OG buckets are source-locked to this contract
  *    (og-route-source-contracts.test.ts — zero rollbacks;
- *    og-photo-fallback.test.ts — exactly two, both pre-DB).
+ *    og-photo-fallback.test.ts — exactly one, pre-DB).
  *    Use for: unauthenticated CPU/DB-expensive GET surfaces where
  *    failure responses are themselves attacker-probeable.
  */

@@ -95,6 +95,12 @@ describe('serveUploadFile', () => {
         // Cache-Control still emitted (matches MDN/HTTP 304 guidance).
         expect(conditional.headers.get('Cache-Control')).toContain('must-revalidate');
 
+        // If-None-Match uses weak comparison, so a strong validator with the
+        // same opaque tag still revalidates the weak response ETag.
+        const strongEquivalent = etag.replace(/^W\//, '');
+        const weakEquivalent = await serveUploadFile(['jpeg', 'inm.jpg'], strongEquivalent);
+        expect(weakEquivalent.status).toBe(304);
+
         // Mismatching ETag must still serve the body.
         const mismatched = await serveUploadFile(['jpeg', 'inm.jpg'], 'W/"stale"');
         expect(mismatched.status).toBe(200);
