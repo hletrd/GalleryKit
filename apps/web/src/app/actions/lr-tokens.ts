@@ -63,7 +63,8 @@ export async function createLrToken(opts: {
     // `.slice(0, 128)` silently truncate — and potentially bisect a
     // surrogate pair into U+FFFD mojibake — on the credential-management
     // surface where label accuracy decides WHICH token an admin revokes.
-    // The UI's maxLength={128} already aligns with this bound.
+    // Do not mirror this with HTML maxLength={128}: browsers count UTF-16 code
+    // units there, while this contract intentionally counts Unicode code points.
     if (countCodePoints(label) > 128) {
         return { error: t('lrTokenInvalidLabel'), field: 'label' };
     }
@@ -137,5 +138,10 @@ export async function listLrTokens(): Promise<LrTokenListItem[] | { error: strin
     const user = await getCurrentUser();
     if (!user) return { error: t('unauthorized') };
 
-    return listTokensForUser(user.id);
+    try {
+        return await listTokensForUser(user.id);
+    } catch (err: unknown) {
+        console.error('listLrTokens failed:', err);
+        return { error: t('lrTokenListFailed') };
+    }
 }

@@ -9,8 +9,8 @@
  * with constant-time comparison and enforces the `expires_at` and scope set.
  *
  * The schema for `admin_tokens` is created in a Drizzle migration committed
- * after this file. Until that table exists at runtime, all functions here
- * fail closed (verify returns null, list returns []).
+ * after this file. Until that table exists at runtime, verification fails closed
+ * while list/create callers surface a generic admin-facing error.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { db } from '@/db';
@@ -175,20 +175,15 @@ export async function markTokenUsed(tokenId: number): Promise<void> {
     }
 }
 
-/** List tokens for an admin user. Returns [] if the table is missing. */
+/** List tokens for an admin user. Throws on DB/table failures so callers can surface a load error. */
 export async function listTokensForUser(userId: number): Promise<Array<Omit<AdminTokenRecord, 'tokenHash'>>> {
-    let rows: AdminTokenRow[];
-    try {
-        const result = await db.execute(sql`
-            SELECT id, user_id, label, token_hash, scopes, created_at, last_used_at, expires_at
-            FROM admin_tokens
-            WHERE user_id = ${userId}
-            ORDER BY created_at DESC
-        `);
-        rows = (Array.isArray(result) ? result[0] : result) as unknown as AdminTokenRow[];
-    } catch {
-        return [];
-    }
+    const result = await db.execute(sql`
+        SELECT id, user_id, label, token_hash, scopes, created_at, last_used_at, expires_at
+        FROM admin_tokens
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+    `);
+    const rows = (Array.isArray(result) ? result[0] : result) as unknown as AdminTokenRow[];
     return rows.map((row) => ({
         id: row.id,
         userId: row.user_id,

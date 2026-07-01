@@ -214,7 +214,7 @@ export function TokensClient() {
                                 if (labelError) setLabelError('');
                             }}
                             placeholder={t('lrToken.labelPlaceholder')}
-                            maxLength={128}
+                            maxLength={256}
                             aria-invalid={!!labelError}
                             aria-describedby={labelError ? labelErrorId : undefined}
                             // R4C6 COR-R4C6-01: the IME composition-commit Enter

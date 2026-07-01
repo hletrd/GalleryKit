@@ -821,7 +821,9 @@
     "analyticsEnabled": "This site loads Google Analytics to measure visits and interactions. Google may receive request and device information according to its own policies. GalleryKit also stores first-party photo, topic, and shared-gallery view events for local analytics, including timestamps, bot classification, and country/referrer summaries when available. Full IP addresses and client fingerprints are not stored in these analytics tables. Separate short-lived abuse-prevention buckets may store full IP addresses for rate limiting. View events are retained for the configured VIEW_RETENTION_DAYS window, defaulting to 395 days.",
     "analyticsDisabled": "Google Analytics is not configured on this site. GalleryKit still stores first-party photo, topic, and shared-gallery view events for local analytics, including timestamps, bot classification, and country/referrer summaries when available. Full IP addresses and client fingerprints are not stored in these analytics tables. Separate short-lived abuse-prevention buckets may store full IP addresses for rate limiting. View events are retained for the configured VIEW_RETENTION_DAYS window, defaulting to 395 days.",
     "metadataTitle": "Photo Metadata",
-    "metadataBody": "Standard gallery and photo pages exclude GPS coordinates. The public map can show coordinates only for topics an admin explicitly marks as public-GPS visible. Upload settings can strip location data from original files before storage when that privacy option is enabled."
+    "metadataBody": "Standard gallery and photo pages exclude GPS coordinates. The public map can show coordinates only for topics an admin explicitly marks as public-GPS visible. Upload settings can strip location data from original files before storage when that privacy option is enabled.",
+    "mapTilesTitle": "Map Tiles",
+    "mapTilesBody": "The public map loads map tiles from OpenStreetMap tile servers. Those providers may receive request details such as your IP address, device/browser information, referrer, and the approximate map area being viewed."
   },
   "onThisDay": {
     "title": "On This Day",

@@ -27,6 +27,10 @@ export default async function PrivacyPage() {
                     <h2 className="text-lg font-medium text-foreground">{t('metadataTitle')}</h2>
                     <p>{t('metadataBody')}</p>
                 </section>
+                <section className="space-y-2">
+                    <h2 className="text-lg font-medium text-foreground">{t('mapTilesTitle')}</h2>
+                    <p>{t('mapTilesBody')}</p>
+                </section>
             </div>
         </div>
     );

@@ -199,7 +199,7 @@ export function UploadDropzone({
     }, [t, uploadLimits.maxFiles, uploadLimits.maxFileBytes, uploadLimits.maxTotalBytes]);
 
     const acceptedImageTypes = useMemo(() => ({
-        'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tiff', '.tif', '.gif']
+        'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']
     }), []);
 
     const onDropRejected = useCallback((fileRejections: FileRejection[]) => {

@@ -4,11 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
+- Cycle 96/100 Implementation Plan - safe narrow fixes scheduled for token list errors, Unicode label input, privacy map disclosure, browser upload accept drift, and release ledger evidence from starting HEAD `2f22620c361304ba0408053f546f45e3c74ddfdb` (`cycle-96-2026-07-01-plan.md`)
+- Cycle 96/100 Deferred Findings - broad restore/schema/query/UI/test/runbook findings preserved with original severity/confidence and exit criteria (`cycle-96-2026-07-01-deferred.md`)
 - Cycle 95/100 Implementation Plan - committed/pushed/deployed as `2178046587484fb301bc731f855699e44888d2e6`; closed safe narrow release-ledger evidence for Cycle 94 (`cycle-95-2026-07-01-plan.md`)
 - Cycle 95/100 Deferred Findings - no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 95/100 Implementation Plan - final docs-only release ledger sync committed/pushed at `2f22620c361304ba0408053f546f45e3c74ddfdb`; Cycle 96 started from user-provided deployed `master` HEAD `2f22620c361304ba0408053f546f45e3c74ddfdb` (`cycle-95-2026-07-01-plan.md`)
 - Cycle 94/100 Implementation Plan - committed/pushed/deployed as `750729ada2403c0c01267670b9552a05e0ead217`; Cycle 95 started from user-provided deployed `master` HEAD `750729ada2403c0c01267670b9552a05e0ead217` and pre-change production smoke was healthy (`cycle-94-2026-07-01-plan.md`)
 - Cycle 94/100 Deferred Findings - broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-94-2026-07-01-deferred.md`)
 - Cycle 93/100 Implementation Plan - committed/pushed/deployed as `33eca7b5`; Cycle 94 started from user-provided deployed `master` HEAD `33eca7b5e4102bd5097777dbb926ee2cb94c6d71` (`cycle-93-2026-07-01-plan.md`)

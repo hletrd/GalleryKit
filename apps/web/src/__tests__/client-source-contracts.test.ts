@@ -95,13 +95,13 @@ describe('client component source contracts', () => {
     }
   });
 
-  it('upload picker only advertises formats accepted as first-class browser uploads', () => {
+  it('upload picker advertises backend-supported first-class browser uploads', () => {
     const code = source('components/upload-dropzone.tsx');
     const acceptList = /'image\/\*':\s*\[([^\]]+)\]/.exec(code)?.[1] ?? '';
-    for (const ext of ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tiff', '.tif', '.gif']) {
+    for (const ext of ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']) {
       expect(acceptList).toContain(`'${ext}'`);
     }
-    for (const ext of ['.arw', '.heic', '.heif', '.bmp']) {
+    for (const ext of ['.arw', '.cr2', '.nef']) {
       expect(acceptList).not.toContain(`'${ext}'`);
     }
   });
@@ -184,12 +184,17 @@ describe('client component source contracts', () => {
     expect(code).toMatch(/onOpenChange=\{\(open\) => \{[\s\S]{0,120}if \(!open\) setLabelError\(''\);/);
     expect(code).toMatch(/onChange=\{\(e\) => \{[\s\S]{0,120}if \(labelError\) setLabelError\(''\);/);
     expect(code).toMatch(/if \(result\.field === 'label'\) \{[\s\S]{0,80}setLabelError\(result\.error\);/);
+    expect(code).not.toContain('maxLength={128}');
+    expect(code).toContain('maxLength={256}');
     expect(action).toContain("field?: 'label'");
     expect(action).toMatch(/return \{ error: t\('lrTokenInvalidLabel'\), field: 'label' \};/);
+    expect(action).toContain('Do not mirror this with HTML maxLength={128}');
   });
 
   it('renders token-list load failures as a persistent retryable alert', () => {
     const code = source('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+    const action = source('app/actions/lr-tokens.ts');
+    const tokenLib = source('lib/admin-tokens.ts');
     expect(code).toContain("const [loadError, setLoadError] = useState('')");
     expect(code).toContain("const loadErrorId = 'token-list-error'");
     expect(code).toMatch(/setLoading\(true\);[\s\S]{0,80}setLoadError\(''\);/);
@@ -199,5 +204,20 @@ describe('client component source contracts', () => {
     expect(code).toContain("t('common.tryAgain')");
     expect(code).toContain('onClick={fetchTokens}');
     expect(code).not.toMatch(/tokens\.length === 0[\s\S]{0,80}loadError/);
+    expect(action).toMatch(/try \{[\s\S]*return await listTokensForUser\(user\.id\);[\s\S]*catch \(err: unknown\)/);
+    expect(action).toContain("return { error: t('lrTokenListFailed') };");
+    const listFunction = /export async function listTokensForUser[\s\S]*?\n}/.exec(tokenLib)?.[0] ?? '';
+    expect(listFunction).toContain('ORDER BY created_at DESC');
+    expect(listFunction).not.toContain('catch');
+    expect(listFunction).not.toContain('return []');
+  });
+
+  it('keeps browser upload accept extensions aligned with backend-supported photo formats', () => {
+    const dropzone = source('components/upload-dropzone.tsx');
+    const processor = source('lib/process-image.ts');
+    for (const ext of ['.heic', '.heif', '.bmp']) {
+      expect(processor).toContain(`'${ext}'`);
+      expect(dropzone).toContain(`'${ext}'`);
+    }
   });
 });

@@ -81,8 +81,12 @@ describe('cycle 11 source contracts', () => {
     it('public copy matches current privacy and EXIF-derived alt-text behavior', () => {
         expect(en.privacy.metadataBody).toContain('public map');
         expect(en.privacy.metadataBody).toContain('public-GPS visible');
+        expect(en.privacy.mapTilesTitle).toContain('Map Tiles');
+        expect(en.privacy.mapTilesBody).toContain('OpenStreetMap tile servers');
         expect(ko.privacy.metadataBody).toContain('공개 지도');
         expect(ko.privacy.metadataBody).toContain('공개 GPS 표시');
+        expect(ko.privacy.mapTilesTitle).toContain('지도 타일');
+        expect(ko.privacy.mapTilesBody).toContain('OpenStreetMap 타일 서버');
         expect(en.imageManager.bulkApplyAltSuggestedHint).toContain('EXIF-derived');
         expect(ko.imageManager.bulkApplyAltSuggestedHint).toContain('EXIF 기반');
         expect(en.viewer.shortcutsHint).toContain('in lightbox');

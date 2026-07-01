@@ -13,9 +13,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { createTokenMock, revokeTokenMock, requireSameOriginAdminMock, isAdminMock, getRestoreMaintenanceMessageMock } = vi.hoisted(() => ({
+const { createTokenMock, revokeTokenMock, listTokensForUserMock, requireSameOriginAdminMock, isAdminMock, getRestoreMaintenanceMessageMock } = vi.hoisted(() => ({
     createTokenMock: vi.fn(async () => ({ plaintext: 'gk_test', id: 7 })),
     revokeTokenMock: vi.fn(async () => true),
+    listTokensForUserMock: vi.fn(async () => []),
     requireSameOriginAdminMock: vi.fn(async () => null),
     isAdminMock: vi.fn(async () => true),
     getRestoreMaintenanceMessageMock: vi.fn((): string | null => null),
@@ -36,7 +37,7 @@ vi.mock('@/lib/admin-tokens', async (importOriginal) => {
         ...actual,
         createToken: createTokenMock,
         revokeToken: revokeTokenMock,
-        listTokensForUser: vi.fn(async () => []),
+        listTokensForUser: listTokensForUserMock,
     };
 });
 
@@ -60,7 +61,7 @@ vi.mock('@/lib/restore-maintenance', () => ({
     getRestoreMaintenanceMessage: getRestoreMaintenanceMessageMock,
 }));
 
-import { createLrToken, revokeLrToken } from '@/app/actions/lr-tokens';
+import { createLrToken, revokeLrToken, listLrTokens } from '@/app/actions/lr-tokens';
 
 // R4C4 I18N-R4C4-05: the action's error strings are localized via
 // getTranslations('serverActions'); this suite's next-intl mock returns the
@@ -71,6 +72,8 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
         createTokenMock.mockResolvedValue({ plaintext: 'gk_test', id: 7 });
         revokeTokenMock.mockClear();
         revokeTokenMock.mockResolvedValue(true);
+        listTokensForUserMock.mockClear();
+        listTokensForUserMock.mockResolvedValue([]);
         requireSameOriginAdminMock.mockClear();
         requireSameOriginAdminMock.mockResolvedValue(null);
         isAdminMock.mockClear();
@@ -182,6 +185,16 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
         );
         const result = await createLrToken({ label: 'ok label', scopes: ['lr:upload'] });
         expect(result).toEqual({ error: 'lrTokenCreateFailed' });
+        consoleSpy.mockRestore();
+    });
+
+    it('surfaces token list DB failures as a load error instead of an empty list', async () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        listTokensForUserMock.mockRejectedValueOnce(
+            new Error("ER_NO_SUCH_TABLE: Table 'gallerykit.admin_tokens' doesn't exist"),
+        );
+
+        await expect(listLrTokens()).resolves.toEqual({ error: 'lrTokenListFailed' });
         consoleSpy.mockRestore();
     });
 });
