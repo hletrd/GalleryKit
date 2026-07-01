@@ -12,6 +12,7 @@ describe('cycle 6 source contracts', () => {
         expect(source).toContain('const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0)');
         expect(source).toContain('.limit(Math.min(BATCH_SIZE, remainingScanBudget))');
         expect(source).toContain('function logScanLimitReached()');
+        expect(source).toContain('console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`)');
         expect(source).toMatch(/if \(processed \+ failed >= SEMANTIC_SCAN_LIMIT\) \{\s*logScanLimitReached\(\);\s*break;\s*\}\s*if \(rows\.length < BATCH_SIZE\) break;/);
         expect(source).not.toContain('processed + failed + rows.length > SEMANTIC_SCAN_LIMIT');
     });

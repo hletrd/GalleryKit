@@ -795,6 +795,7 @@
     "backfillRunning": "Re-encoding…",
     "backfillQueued": "Re-encoding queued — {count} photo(s) will be processed in the background.",
     "backfillNothingToDo": "All photos are already at the current pipeline version. Nothing to re-encode.",
+    "backfillNoPipelineCandidatesSettingsOnly": "All photos are already at the current pipeline version, so the in-app re-encode has no candidates. Existing derivatives still need the sidecar backfill with --force-reencode for the saved settings-only change.",
     "backfillAlreadyRunning": "A re-encode run is already in progress.",
     "backfillUnavailable": "Re-encode is unavailable while a database restore is active.",
     "backfillFailed": "Failed to queue re-encode. Check server logs.",

@@ -198,7 +198,9 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                 const result = await triggerBackfill();
                 if (result.ok && result.status === 'queued') {
                     if ((result.affectedRows ?? 0) === 0) {
-                        toast.info(t('settings.backfillNothingToDo'));
+                        toast.info(hasSavedBackfillPending
+                            ? t('settings.backfillNoPipelineCandidatesSettingsOnly')
+                            : t('settings.backfillNothingToDo'));
                     } else {
                         toast.success(
                             t('settings.backfillQueued', { count: String(result.affectedRows ?? 0) }),

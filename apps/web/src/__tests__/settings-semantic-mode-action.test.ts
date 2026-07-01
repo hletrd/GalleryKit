@@ -165,6 +165,19 @@ describe('updateGallerySettings semantic_search_mode', () => {
         expect(logAuditEventMock).toHaveBeenCalledTimes(1);
     });
 
+    it('canonicalizes scalar setting values before persistence', async () => {
+        await expect(updateGallerySettings({ image_quality_jpeg: ' 95 ' })).resolves.toEqual({
+            success: true,
+            settings: { image_quality_jpeg: '95' },
+        });
+
+        expect(transactionMock).toHaveBeenCalledTimes(1);
+        expect(persistedRows).toEqual([{ key: 'image_quality_jpeg', value: '95' }]);
+        expect(txOnDuplicateKeyUpdateMock).toHaveBeenCalledTimes(1);
+        expect(revalidateAllAppDataMock).toHaveBeenCalledTimes(1);
+        expect(logAuditEventMock).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores semantically unchanged image sizes before active-upload checks', async () => {
         selectLimitResults.push([{ value: '640,1536' }]);
         hasActiveUploadClaimsMock.mockReturnValue(true);

@@ -32,4 +32,18 @@ describe('buildChangedGallerySettingsPayload', () => {
             { image_sizes: '1536, 640', image_quality_jpeg: '90' },
         )).toEqual({});
     });
+
+    it('omits scalar settings changed only by surrounding whitespace', () => {
+        expect(buildChangedGallerySettingsPayload(
+            { image_quality_jpeg: ' 90 ', avif_effort: '6 ' },
+            { image_quality_jpeg: '90', avif_effort: '6' },
+        )).toEqual({});
+    });
+
+    it('canonicalizes changed scalar settings before submit', () => {
+        expect(buildChangedGallerySettingsPayload(
+            { image_quality_jpeg: ' 95 ', avif_effort: '6' },
+            { image_quality_jpeg: '90', avif_effort: '6' },
+        )).toEqual({ image_quality_jpeg: '95' });
+    });
 });

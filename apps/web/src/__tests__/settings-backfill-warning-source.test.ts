@@ -16,6 +16,8 @@ describe('settings backfill warning persistence', () => {
         expect(SOURCE).toContain('const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending)');
         expect(SOURCE).toContain('const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults)');
         expect(SOURCE).toContain('const savedBackfillRelevantChange = Object.keys(changed).some((key) => SETTINGS_BACKFILL_WARNING_KEY_SET.has(key))');
+        expect(SOURCE).toContain('backfillNoPipelineCandidatesSettingsOnly');
+        expect(SOURCE).toMatch(/toast\.info\(hasSavedBackfillPending\s*\?\s*t\('settings\.backfillNoPipelineCandidatesSettingsOnly'\)\s*:\s*t\('settings\.backfillNothingToDo'\)\)/);
         expect(SOURCE).toContain('const previousBaseline = initialRef.current');
         expect(SOURCE.indexOf('const previousBaseline = initialRef.current')).toBeLessThan(
             SOURCE.indexOf('initialRef.current = nextSettings'),

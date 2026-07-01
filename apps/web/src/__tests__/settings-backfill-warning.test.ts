@@ -41,4 +41,12 @@ describe('settings backfill warning key contract', () => {
             defaults,
         )).toBe(false);
     });
+
+    it('treats scalar settings with surrounding whitespace as unchanged', () => {
+        expect(hasBackfillRelevantDifference(
+            { image_quality_jpeg: ' 90 ', avif_effort: '6 ' },
+            { image_quality_jpeg: '90', avif_effort: '6' },
+            defaults,
+        )).toBe(false);
+    });
 });

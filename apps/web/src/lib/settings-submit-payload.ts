@@ -1,14 +1,7 @@
-import { normalizeConfiguredImageSizes } from './gallery-config-shared';
-
-function normalizeSettingForDiff(key: string, value: string): string {
-    if (key === 'image_sizes' && value.trim()) {
-        return normalizeConfiguredImageSizes(value) ?? value;
-    }
-    return value;
-}
+import { normalizeGallerySettingValue } from './settings-normalization';
 
 function normalizeBaselineForDiff(key: string, value: string | undefined): string | undefined {
-    return value === undefined ? undefined : normalizeSettingForDiff(key, value);
+    return value === undefined ? undefined : normalizeGallerySettingValue(key, value);
 }
 
 export function buildChangedGallerySettingsPayload(
@@ -18,7 +11,7 @@ export function buildChangedGallerySettingsPayload(
     return Object.fromEntries(
         Object.entries(settings)
             .map(([key, value]) => {
-                return [key, normalizeSettingForDiff(key, value)] as const;
+                return [key, normalizeGallerySettingValue(key, value)] as const;
             })
             .filter(([key, value]) => value !== normalizeBaselineForDiff(key, baseline[key])),
     );

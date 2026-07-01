@@ -14,6 +14,7 @@ import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
+import { normalizeGallerySettingValue } from '@/lib/settings-normalization';
 
 /** @action-origin-exempt: read-only admin getter */
 export async function getGallerySettingsAdmin() {
@@ -55,7 +56,12 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     if (!normalized.ok) {
         return { error: t(normalized.error) };
     }
-    const sanitizedSettings = normalized.record;
+    const sanitizedSettings = Object.fromEntries(
+        Object.entries(normalized.record).map(([key, value]) => [
+            key,
+            normalizeGallerySettingValue(key, value),
+        ]),
+    );
 
     // Validate individual setting values (on sanitized values)
     for (const [key, value] of Object.entries(sanitizedSettings)) {

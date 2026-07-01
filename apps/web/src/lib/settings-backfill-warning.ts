@@ -1,9 +1,9 @@
 import {
     DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS,
     getSettingDefaults,
-    normalizeConfiguredImageSizes,
     type GallerySettingKey,
 } from './gallery-config-shared';
+import { normalizeGallerySettingValue } from './settings-normalization';
 
 export const SETTINGS_BACKFILL_WARNING_KEYS = DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS
     .filter((key) => key !== 'image_sizes');
@@ -15,10 +15,10 @@ export function getEffectiveBackfillSettingValue(
     defaults: Record<GallerySettingKey, string>,
     key: string,
 ): string {
-    const defaultValue = defaults[key as GallerySettingKey] ?? '';
+    const defaultValue = normalizeGallerySettingValue(key, defaults[key as GallerySettingKey] ?? '');
     const rawValue = settings[key];
-    const value = rawValue?.trim() ? rawValue : defaultValue;
-    return key === 'image_sizes' ? (normalizeConfiguredImageSizes(value) ?? value) : value;
+    const value = rawValue === undefined ? '' : normalizeGallerySettingValue(key, rawValue);
+    return value || defaultValue;
 }
 
 export function hasBackfillRelevantDifference(

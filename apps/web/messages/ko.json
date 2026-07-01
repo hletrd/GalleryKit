@@ -795,6 +795,7 @@
     "backfillRunning": "재인코딩 중…",
     "backfillQueued": "재인코딩이 시작되었습니다. {count}개의 사진이 백그라운드에서 처리됩니다.",
     "backfillNothingToDo": "모든 사진이 이미 최신 파이프라인 버전입니다. 재인코딩할 사진이 없습니다.",
+    "backfillNoPipelineCandidatesSettingsOnly": "모든 사진이 이미 최신 파이프라인 버전이라 앱 안의 재인코딩 대상은 없습니다. 저장한 설정 변경을 기존 파생 이미지에 적용하려면 여전히 사이드카 백필을 --force-reencode로 실행해야 합니다.",
     "backfillAlreadyRunning": "이미 재인코딩이 진행 중입니다.",
     "backfillUnavailable": "데이터베이스 복원이 진행 중일 때는 재인코딩을 실행할 수 없습니다.",
     "backfillFailed": "재인코딩을 시작하지 못했습니다. 서버 로그를 확인해 주세요.",
