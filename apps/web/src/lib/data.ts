@@ -1201,6 +1201,24 @@ export async function getImage(id: number) {
     return getImageWithSelectFields(id, publicSelectFields);
 }
 
+export async function getImageProcessingState(id: number): Promise<{ id: number; processed: boolean } | null> {
+    if (!Number.isInteger(id) || id <= 0) {
+        return null;
+    }
+
+    const [row] = await db.select({
+        id: images.id,
+        processed: images.processed,
+    })
+        .from(images)
+        .where(eq(images.id, id))
+        .limit(1);
+
+    return row
+        ? { id: row.id, processed: row.processed === true }
+        : null;
+}
+
 export async function getImageForViewer(id: number, includeAdminFields: boolean = false) {
     return getImageWithSelectFields(id, includeAdminFields ? adminSelectFields : publicSelectFields);
 }
@@ -1728,6 +1746,7 @@ export async function getMapImages() {
 }
 
 export const getImageCached = cache(getImage);
+export const getImageProcessingStateCached = cache(getImageProcessingState);
 export const getImageForViewerCached = cache(getImageForViewer);
 // AGG-R8c3-05: SSR-deduplicated minimal latest-image lookup for the home OG card.
 export const getLatestImageForOgCached = cache(getLatestImageForOg);

@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import sharp from 'sharp';
-import { getImageCached, getSeoSettings } from '@/lib/data';
+import { getImageCached, getImageProcessingStateCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
@@ -71,7 +71,8 @@ export async function GET(
             getGalleryConfig(),
         ]);
 
-        // Fall back to site default if photo not found.
+        // Fall back to site default if photo not found. Existing but still
+        // unprocessed rows are temporary misses, so keep them non-cacheable.
         // getImageCached already filters WHERE processed = true, so a non-null
         // result is guaranteed to be processed.
         // SEC-R4C17-01: the attempt stays CHARGED — this branch is reached
@@ -81,7 +82,9 @@ export async function GET(
         // policy (og-route-source-contracts.test.ts); this route's contract
         // is locked by og-photo-fallback.test.ts.
         if (!image) {
-            return buildFallbackResponse(seo.url, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+            const state = await getImageProcessingStateCached(imageId);
+            const cacheControl = state ? OG_TEMPORARY_FALLBACK_CACHE_CONTROL : OG_SUCCESS_CACHE_CONTROL;
+            return buildFallbackResponse(seo.url, cacheControl, seo.og_image_url || undefined);
         }
 
         const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
