@@ -308,6 +308,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.repeat) return;
             // Space key toggles slideshow — don't reset controls or stop slideshow
             if (e.key === ' ') {
                 // R4C6 COR-R4C6-12: consult the editable-target guard BEFORE

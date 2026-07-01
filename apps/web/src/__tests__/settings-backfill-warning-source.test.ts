@@ -11,20 +11,18 @@ describe('settings backfill warning persistence', () => {
     it('keeps a re-encode obligation visible after saving byte-impacting settings', () => {
         expect(SOURCE).toContain('const [hasSavedBackfillPending, setHasSavedBackfillPending] = useState(false)');
         expect(SOURCE).toContain('const backfillPendingBaselineRef = useRef<Record<string, string> | null>(null)');
-        expect(SOURCE).toContain('function getEffectiveBackfillSettingValue(');
-        expect(SOURCE).toContain("const defaultValue = defaults[key as GallerySettingKey] ?? ''");
-        expect(SOURCE).toContain('const value = rawValue?.trim() ? rawValue : defaultValue');
+        expect(SOURCE).toContain('SETTINGS_BACKFILL_WARNING_KEY_SET');
+        expect(SOURCE).toContain('hasBackfillRelevantDifference');
         expect(SOURCE).toContain('const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending)');
-        expect(SOURCE).toContain('getEffectiveBackfillSettingValue(settings, defaults, key) !== getEffectiveBackfillSettingValue(baseline, defaults, key)');
-        expect(SOURCE).toContain('const savedBackfillRelevantChange = Object.keys(changed).some((key) => COLOR_HDR_BACKFILL_KEYS.has(key))');
+        expect(SOURCE).toContain('const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults)');
+        expect(SOURCE).toContain('const savedBackfillRelevantChange = Object.keys(changed).some((key) => SETTINGS_BACKFILL_WARNING_KEY_SET.has(key))');
         expect(SOURCE).toContain('const previousBaseline = initialRef.current');
         expect(SOURCE.indexOf('const previousBaseline = initialRef.current')).toBeLessThan(
             SOURCE.indexOf('initialRef.current = nextSettings'),
         );
         expect(SOURCE).toContain('if (hasExistingImages && savedBackfillRelevantChange && !backfillPendingBaselineRef.current) {');
         expect(SOURCE).toContain('backfillPendingBaselineRef.current = previousBaseline');
-        expect(SOURCE).toContain('const stillNeedsReencode = Array.from(COLOR_HDR_BACKFILL_KEYS).some(');
-        expect(SOURCE).toContain('getEffectiveBackfillSettingValue(nextSettings, defaults, key) !== getEffectiveBackfillSettingValue(pendingBaseline, defaults, key)');
+        expect(SOURCE).toContain('const stillNeedsReencode = hasBackfillRelevantDifference(nextSettings, pendingBaseline, defaults)');
         expect(SOURCE).toContain('setHasSavedBackfillPending(stillNeedsReencode)');
         expect(SOURCE).toContain('backfillPendingBaselineRef.current = null');
         expect(SOURCE).toContain('{showBackfillRequired && (');

@@ -39,24 +39,12 @@ import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
 import { inArray } from 'drizzle-orm';
 import type { GalleryConfig } from './gallery-config';
-import type { GallerySettingKey } from './gallery-config-shared';
+import { DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS, type GallerySettingKey } from './gallery-config-shared';
 
 // R16C16 TE-16-04: exported so a unit test can pin the exhaustive membership
 // (the compile-time guard below only validates each entry IS a setting key, not
 // that the list is complete — see the NOTE on _ColorKeysAreSettingKeys).
-export const COLOR_IMPACTING_KEYS = [
-    'wide_gamut_jpeg_chroma',
-    'sdr_jpeg_chroma',
-    'avif_effort',
-    'force_srgb_derivatives',
-    'wide_gamut_max_source_pixels',
-    // R7-H2: quality changes produce different encoded bytes — must invalidate ETag
-    'image_quality_webp',
-    'image_quality_avif',
-    'image_quality_jpeg',
-    // R8-R6: size config changes produce different derivative files
-    'image_sizes',
-] as const;
+export const COLOR_IMPACTING_KEYS = DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS;
 
 // AGG-R7C3-02: compile-time guard — every COLOR_IMPACTING_KEY MUST be a real
 // gallery setting key. Mirrors the PrivacySensitiveKeys-derived guards in

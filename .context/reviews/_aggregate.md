@@ -1,13 +1,14 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-66-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-67-2026-07-01/_aggregate.md`
 
-Cycle 66 produced five deduplicated findings:
+Cycle 67 produced six deduplicated findings:
 
-- `C66-01` - Settings re-encode warning compares raw stored values instead of effective defaults.
-- `C66-02` - plan index advertises Cycle 64 as active during Cycle 66.
-- `C66-03` - Cycle 65 ledger leaves commit/push/deploy unresolved.
-- `C66-04` - Similar Photos abort source test does not prove fetch signal wiring.
-- `C66-05` - Settings source test does not prove baseline-capture ordering or default-aware comparison.
+- `C67-01` - HDR ingest toggle is treated as an existing-derivative re-encode setting.
+- `C67-02` - CLIP embedding sidecar can stop at a custom scan limit without the rerun notice.
+- `C67-03` - Lightbox shortcut handler accepts repeated keydown events.
+- `C67-04` - Settings backfill warning regression is still mostly source-contract only.
+- `C67-05` - Similar Photos abort-source test is brittle to harmless formatting.
+- `C67-06` - Cycle 66 ledger and plan index remain active after signed push/deploy.
 
-Cycle 66 schedules all five findings. No new Cycle 66 findings are deferred. `C65-02`, `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.
+Cycle 67 schedules all six findings. No new Cycle 67 findings are deferred. `C65-02`, `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain explicitly deferred.

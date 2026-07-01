@@ -85,6 +85,10 @@ const PRODUCTION_FLAG = process.argv.includes('--production');
 // images missing an embedding row AT THIS version are (re-)embedded.
 const TARGET_MODEL_VERSION = PRODUCTION_FLAG ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
+function logScanLimitReached() {
+    console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
+}
+
 async function checkSemanticModeEnabled(): Promise<boolean> {
     const rows = await db.select({ value: adminSettings.value })
         .from(adminSettings)
@@ -143,7 +147,7 @@ async function main(): Promise<number> {
         for (;;) {
             const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
             if (remainingScanBudget === 0) {
-                console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
+                logScanLimitReached();
                 break;
             }
 
@@ -218,6 +222,11 @@ async function main(): Promise<number> {
                         failedImageIds.push(id);
                     }
                 }));
+            }
+
+            if (processed + failed >= SEMANTIC_SCAN_LIMIT) {
+                logScanLimitReached();
+                break;
             }
 
             if (rows.length < BATCH_SIZE) break;

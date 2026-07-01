@@ -8,9 +8,10 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 import { updateGallerySettings } from '@/app/actions/settings';
-import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
+import { getSettingDefaults, normalizeConfiguredImageSizes, SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey, SemanticSearchMode } from '@/lib/gallery-config-shared';
 import { buildChangedGallerySettingsPayload } from '@/lib/settings-submit-payload';
+import { SETTINGS_BACKFILL_WARNING_KEY_SET, hasBackfillRelevantDifference } from '@/lib/settings-backfill-warning';
 import { Switch } from '@/components/ui/switch';
 import {
     AlertDialog,
@@ -30,7 +31,6 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, RefreshCcw } from 'lucide-react';
-import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import { getSemanticSearchSelectValue, getWritableSemanticSearchModeFromSelect, STORED_SEMANTIC_PRODUCTION_INACTIVE } from '@/lib/semantic-search-settings-ui';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -40,40 +40,6 @@ interface SettingsClientProps {
     initialSettings: Record<string, string>;
     hasExistingImages: boolean;
     resolvedSemanticSearchMode: SemanticSearchMode;
-}
-
-// R10-M14: settings keys whose change actually requires re-running the
-// color-pipeline backfill so existing photo derivatives reflect the new
-// encoder behavior. Changing e.g. the slideshow interval or the
-// semantic-search mode doesn't change derivative bytes, so the backfill
-// warning should NOT fire on those edits. Without this gate admins learn
-// to ignore the amber banner because it shows on every edit, and then
-// miss it when it actually matters.
-const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
-    'force_srgb_derivatives',
-    'allow_hdr_ingest',
-    'wide_gamut_jpeg_chroma',
-    'sdr_jpeg_chroma',
-    'avif_effort',
-    'wide_gamut_max_source_pixels',
-    // image quality settings DO change the rendered bytes for existing
-    // photos, so include them — they're not strictly color but the
-    // photographer-visible "this edit needs a backfill to take effect on
-    // already-uploaded photos" framing applies the same way.
-    'image_quality_webp',
-    'image_quality_avif',
-    'image_quality_jpeg',
-]);
-
-function getEffectiveBackfillSettingValue(
-    settings: Record<string, string>,
-    defaults: Record<GallerySettingKey, string>,
-    key: string,
-): string {
-    const defaultValue = defaults[key as GallerySettingKey] ?? '';
-    const rawValue = settings[key];
-    const value = rawValue?.trim() ? rawValue : defaultValue;
-    return key === 'image_sizes' ? (normalizeConfiguredImageSizes(value) ?? value) : value;
 }
 
 const SETTINGS_FIELD_IDS: Record<string, string> = {
@@ -215,9 +181,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     // value differs from the last committed baseline snapshot). The
     // amber warning above the image-processing fields surfaces only when
     // at least one such field has been edited.
-    const hasDirtyBackfillField = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
-        (key) => getEffectiveBackfillSettingValue(settings, defaults, key) !== getEffectiveBackfillSettingValue(baseline, defaults, key),
-    );
+    const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults);
     const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending);
 
     // R27-UX-HIGH-1: Path A — fire the in-app backfill server action when
@@ -281,7 +245,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     toast.info(t('settings.noChanges'));
                     return;
                 }
-                const savedBackfillRelevantChange = Object.keys(changed).some((key) => COLOR_HDR_BACKFILL_KEYS.has(key));
+                const savedBackfillRelevantChange = Object.keys(changed).some((key) => SETTINGS_BACKFILL_WARNING_KEY_SET.has(key));
                 const result = await updateGallerySettings(changed);
                 if (result.success) {
                     const previousBaseline = initialRef.current;
@@ -298,9 +262,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     }
                     if (hasExistingImages && backfillPendingBaselineRef.current) {
                         const pendingBaseline = backfillPendingBaselineRef.current;
-                        const stillNeedsReencode = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
-                            (key) => getEffectiveBackfillSettingValue(nextSettings, defaults, key) !== getEffectiveBackfillSettingValue(pendingBaseline, defaults, key),
-                        );
+                        const stillNeedsReencode = hasBackfillRelevantDifference(nextSettings, pendingBaseline, defaults);
                         setHasSavedBackfillPending(stillNeedsReencode);
                         if (!stillNeedsReencode) {
                             backfillPendingBaselineRef.current = null;

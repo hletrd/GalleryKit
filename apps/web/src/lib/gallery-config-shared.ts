@@ -69,6 +69,21 @@ export const GALLERY_SETTING_KEYS = [
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
 export type SemanticSearchMode = 'disabled' | 'stub' | 'production';
 
+// Settings that change existing derivative bytes and therefore require a
+// re-encode/backfill before already-uploaded photos reflect the new values.
+// Upload-admission settings such as allow_hdr_ingest are intentionally absent.
+export const DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS = [
+    'wide_gamut_jpeg_chroma',
+    'sdr_jpeg_chroma',
+    'avif_effort',
+    'force_srgb_derivatives',
+    'wide_gamut_max_source_pixels',
+    'image_quality_webp',
+    'image_quality_avif',
+    'image_quality_jpeg',
+    'image_sizes',
+] as const satisfies readonly GallerySettingKey[];
+
 // ── SEO Setting Keys ──────────────────────────────────────────────────────────
 
 export const SEO_SETTING_KEYS = [

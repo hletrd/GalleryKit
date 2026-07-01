@@ -78,6 +78,17 @@ describe('lightbox <img> accessible name (A11Y-R4C6-04)', () => {
 });
 
 describe('lightbox Space branch ordering (COR-R4C6-12)', () => {
+    it('ignores repeated shortcut keydown events before toggling or navigating', () => {
+        const handlerIdx = SRC.indexOf('const handleKeyDown = (e: KeyboardEvent) => {');
+        expect(handlerIdx).toBeGreaterThan(-1);
+        const handler = SRC.slice(handlerIdx, handlerIdx + 2600);
+        const repeatIdx = handler.indexOf('if (e.repeat) return;');
+        expect(repeatIdx).toBeGreaterThan(-1);
+        expect(repeatIdx).toBeLessThan(handler.indexOf("e.key === ' '"));
+        expect(repeatIdx).toBeLessThan(handler.indexOf("e.key === 'ArrowLeft'"));
+        expect(repeatIdx).toBeLessThan(handler.indexOf("e.key === 'ArrowRight'"));
+    });
+
     it('isEditableTarget precedes preventDefault in the Space branch', () => {
         const spaceIdx = SRC.indexOf("e.key === ' '");
         expect(spaceIdx).toBeGreaterThan(-1);

@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 66/100 Implementation Plan — active; schedules Settings effective-default comparison, source-contract locks, and ledger repair (`cycle-66-2026-07-01-plan.md`)
-- Cycle 66/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-66-2026-07-01-deferred.md`)
+- Cycle 67/100 Implementation Plan — active; schedules Settings warning key sharing, CLIP scan-limit notice, lightbox repeat guard, source-contract hardening, and ledger repair (`cycle-67-2026-07-01-plan.md`)
+- Cycle 67/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-67-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 66/100 Implementation Plan — active; schedules Settings effective-default comparison, source-contract locks, and ledger repair (`cycle-66-2026-07-01-plan.md`)
+- Cycle 67/100 Implementation Plan — active; schedules Settings warning key sharing, CLIP scan-limit notice, lightbox repeat guard, source-contract hardening, and ledger repair (`cycle-67-2026-07-01-plan.md`)
+- Cycle 67/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-67-2026-07-01-deferred.md`)
+- Cycle 66/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 67 started from deployed `3e8ab924` (`cycle-66-2026-07-01-plan.md`)
 - Cycle 66/100 Deferred Findings — no new deferred findings; carry-forward items repeated (`cycle-66-2026-07-01-deferred.md`)
 - Cycle 65/100 Implementation Plan — implementation committed/pushed/deployed; terminal evidence recorded in plan (`cycle-65-2026-07-01-plan.md`)
 - Cycle 65/100 Deferred Findings — durable settings-only re-encode marker deferred; carry-forward items repeated (`cycle-65-2026-07-01-deferred.md`)
