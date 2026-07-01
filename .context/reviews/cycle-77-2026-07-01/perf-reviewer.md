@@ -1,0 +1,44 @@
+# Cycle 77 Performance Reviewer
+
+Reviewed HEAD: `8aefc3659fa8b6c08bff0da62d29b9ceb40029c5`.
+
+Scope: performance, concurrency, CPU/memory, DB query shape/index alignment, caching/freshness, queue/backfill behavior, service worker, and public UI responsiveness.
+
+## Inventory
+
+- Guidance and prior state: read `AGENTS.md`, `CLAUDE.md`, `.context/reviews/_aggregate.md`, `.context/reviews/cycle-76-2026-07-01/_aggregate.md`, `.context/plans/cycle-76-2026-07-01-plan.md`, and `.context/plans/cycle-76-2026-07-01-deferred.md`. Cycle 76 scheduled the backfill deleted-row confirmation and per-photo OG freshness work, while deferring the low-risk coverage items and carrying forward the older performance backlog.
+- Public listing data path: `getImagesLite()` is cursor-capable after the first page and caps lookahead at 101 rows (`apps/web/src/lib/data.ts:785`, `apps/web/src/lib/data.ts:806`); first-page `getImagesLitePage()` still uses the grouped `COUNT(*) OVER()` count shape (`apps/web/src/lib/data.ts:898`, `apps/web/src/lib/data.ts:914`) already covered by historical deferred items.
+- Feed/sitemap data path: feed helpers order by `updated_at, created_at, id` with small route limits (`apps/web/src/lib/data.ts:828`, `apps/web/src/lib/data.ts:852`), sitemap uses lightweight id/timestamp rows and a 50k cap (`apps/web/src/lib/data.ts:1684`, `apps/web/src/lib/data.ts:1694`), and the schema still lacks the deferred updated-time indexes (`apps/web/src/db/schema.ts:117`).
+- Map data path: public map rows remain capped at 10k with a documented stable order (`apps/web/src/lib/data.ts:1698`, `apps/web/src/lib/data.ts:1707`), and the route dynamically imports Leaflet through a client-only loader (`apps/web/src/components/map/map-loader.tsx:9`).
+- Image serving/cache freshness: derivative serving uses a 5s module cache plus inflight dedupe for settings-hash ETags (`apps/web/src/lib/serve-upload.ts:46`, `apps/web/src/lib/serve-upload.ts:59`), returns 304 on matching validators (`apps/web/src/lib/serve-upload.ts:239`), has a HEAD no-body fast path (`apps/web/src/lib/serve-upload.ts:251`), and wires GET request aborts to file-stream cleanup (`apps/web/src/app/uploads/[...path]/route.ts:12`).
+- OG/feed/sitemap surfaces: per-photo OG now builds ETags from photo identity, freshness, derivative size list, settings hash, pipeline version, and title inputs (`apps/web/src/app/api/og/photo/[id]/route.tsx:56`); route fetches remain byte/time bounded by `pickFirstAvailablePhotoBuffer()` through the OG helper. Feed 304s are ETag-only by design; sitemap stays `revalidate = 3600`.
+- Queue and backfill: upload queue concurrency is capped against the DB pool and defaults to 1 (`apps/web/src/lib/image-queue.ts:87`); in-app backfill reserves roughly half the pool for live traffic and clamps effective concurrency (`apps/web/src/lib/admin-backfill-runner.ts:96`, `apps/web/src/lib/admin-backfill-runner.ts:129`); candidate walking is keyset-batched in app (`apps/web/src/lib/admin-backfill-runner.ts:401`), while sidecar all-candidate loading remains a known deferred item (`apps/web/scripts/backfill-color-pipeline.ts:373`).
+- Cycle 76 backfill fix verification by inspection: both in-app and sidecar paths now confirm row absence before cleanup instead of treating `affectedRows === 0` alone as deletion evidence (`apps/web/src/lib/admin-backfill-runner.ts:468`, `apps/web/scripts/backfill-color-pipeline.ts:445`).
+- Semantic search/similar search: public routes hard-cap scan size through `SEMANTIC_SCAN_LIMIT`, clamped at 25k (`apps/web/src/lib/clip-embeddings.ts:36`, `apps/web/src/lib/clip-embeddings.ts:44`), use the model-version/updated-at embedding index (`apps/web/src/db/schema.ts:295`), abort stale requests, and compute dot product for normalized production vectors (`apps/web/src/app/api/search/semantic/route.ts:263`, `apps/web/src/app/api/search/semantic/route.ts:301`, `apps/web/src/app/api/search/similar/[id]/route.ts:164`).
+- Public UI responsiveness: masonry eager/high-priority loading is limited to above-fold columns (`apps/web/src/components/home-client.tsx:296`, `apps/web/src/components/home-client.tsx:362`), load-more prevents overlapping requests and stale state commits (`apps/web/src/components/load-more.tsx:43`, `apps/web/src/components/load-more.tsx:55`), photo neighbor preloading emits one chosen format per neighbor (`apps/web/src/components/photo-viewer.tsx:256`, `apps/web/src/components/photo-viewer.tsx:295`), and histogram CPU work is moved to a worker after downscaling to 256px (`apps/web/src/components/histogram.tsx:169`, `apps/web/src/components/histogram.tsx:179`, `apps/web/src/components/histogram.tsx:541`).
+- Service worker: image derivatives use stale-while-revalidate with a 50 MB LRU cap and 300 ms HEAD probe timeout (`apps/web/public/sw.template.js:5`, `apps/web/public/sw.template.js:35`, `apps/web/public/sw.template.js:243`); admin/revocable share/smart/map HTML routes are bypassed while normal public HTML gets a 24h network-first fallback (`apps/web/public/sw.template.js:43`, `apps/web/public/sw.template.js:359`, `apps/web/public/sw.template.js:432`).
+
+## Findings
+
+No new confirmed performance findings in current HEAD.
+
+The current HEAD includes the Cycle 76 fixes that matter for this lane: same-value re-encode updates no longer imply row deletion, and per-photo OG validators now include derivative byte-impact inputs. The remaining expensive shapes I found are already recorded as deferred/backlog work with no new evidence that changes severity, exit criteria, or scheduling.
+
+## Known Deferred Not Re-raised
+
+- `PERF-13-02` / `AGG-C33-09` / `C15-D13`: first public listing pages still pay grouped `COUNT(*) OVER()` count work (`apps/web/src/lib/data.ts:898`, `apps/web/src/lib/data.ts:914`). Not re-raised because the existing deferral is scale-gated and no new latency trace or corpus-size trigger was present.
+- `PERF-C39-03`: feed and sitemap updated-time indexes remain absent while feed/sitemap helpers order or aggregate on `updated_at` (`apps/web/src/lib/data.ts:509`, `apps/web/src/lib/data.ts:828`, `apps/web/src/lib/data.ts:1684`; schema indexes at `apps/web/src/db/schema.ts:117`). Not re-raised because Cycle 76 explicitly carries it forward.
+- `PERF-C39-04`: backfill pipeline-version candidate queries still lack a matching composite index (`apps/web/src/lib/admin-backfill-runner.ts:390`, `apps/web/src/lib/admin-backfill-runner.ts:407`; schema indexes at `apps/web/src/db/schema.ts:117`). Not re-raised because Cycle 76 explicitly carries it forward.
+- `AGG-C38-08`: sidecar color backfill still materializes all candidates in one query (`apps/web/scripts/backfill-color-pipeline.ts:373`). Not re-raised because it remains an explicitly deferred throughput/memory planning item.
+- `D29-01` / `AGG-C29-02`: semantic/similar search still performs request-thread vector scoring over the newest capped embedding window (`apps/web/src/app/api/search/semantic/route.ts:263`, `apps/web/src/app/api/search/similar/[id]/route.ts:164`). Not re-raised because the scan is bounded and the historical exit criterion requires corpus/latency evidence or scheduled vector-index/worker work.
+- `D29-08`: service-worker cached-image hits can synchronously wait up to the 300 ms HEAD probe budget before serving stale (`apps/web/public/sw.template.js:35`, `apps/web/public/sw.template.js:307`). Not re-raised because the timeout is bounded and no trace showed cached-image delay.
+- `C65-02`: settings-only re-encode obligation disappearing after page reload remains deferred. The Cycle 76 OG/updated_at fix improves freshness signaling for re-encoded rows, but it does not newly schedule the broader persisted obligation work.
+- `C61-06`: shared-group view-count flush race coverage remains deferred. Implementation inspection shows bounded buffering, retries, and drain hooks (`apps/web/src/lib/data.ts:13`, `apps/web/src/lib/data.ts:191`), but I did not add a new coverage finding.
+- `PA-42-02`: production CLIP web-process catch-up advisory locking/caps remains deferred. Current queue bootstrap and semantic runtime caps are bounded (`apps/web/src/lib/image-queue.ts:394`, `apps/web/src/lib/clip-embeddings.ts:36`), and I found no new production activation evidence changing severity.
+
+## Final Sweep
+
+- Confirmed reviewed HEAD: `8aefc3659fa8b6c08bff0da62d29b9ceb40029c5`; local `master` and `origin/master` point at the same commit.
+- Source files were not modified. This review artifact is the only file I wrote.
+- I did not run lint/typecheck/build/tests because this lane performed a read-only code review plus markdown artifact write.
+- Stop condition met: inventory completed across the requested surfaces, no new non-deferred performance finding found, and all observed expensive paths either have current mitigations or remain covered by known deferred records.

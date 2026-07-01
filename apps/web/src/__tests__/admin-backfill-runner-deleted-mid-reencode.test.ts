@@ -151,6 +151,13 @@ function staticSqlText(arg: unknown): string {
     return out;
 }
 
+function expectImageUpdateBumpsUpdatedAt() {
+    const updateTexts = executeMock.mock.calls
+        .map(([arg]) => staticSqlText(arg))
+        .filter((text) => text.includes('UPDATE images SET'));
+    expect(updateTexts.some((text) => /updated_at\s*=\s*CURRENT_TIMESTAMP/.test(text))).toBe(true);
+}
+
 describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reencode', () => {
     beforeEach(() => {
         const sym = Symbol.for('gallerykit.adminBackfillState');
@@ -234,6 +241,7 @@ describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reenco
         // deleted-mid-reencode must NOT flip the WITH-FAILURES banner.
         expect(state.lastRunHadFailures).toBe(false);
         expect(state.running).toBe(false);
+        expectImageUpdateBumpsUpdatedAt();
     });
 
     it('does not delete variants when a same-value UPDATE reports 0 changed rows for a live row', async () => {
@@ -260,5 +268,6 @@ describe('AGG-R8c3-03: backfill cleans up orphaned variants on delete-mid-reenco
         expect(state.errors).toBe(0);
         expect(state.lastRunHadFailures).toBe(false);
         expect(state.running).toBe(false);
+        expectImageUpdateBumpsUpdatedAt();
     });
 });

@@ -269,6 +269,43 @@ describe('OG route rate-limit behavior', () => {
         );
     });
 
+    it('does not 304 the photo OG route when the image pipeline version changed', async () => {
+        const updatedAt = new Date('2026-06-01T10:00:00.000Z');
+        const createdAt = new Date('2026-05-01T10:00:00.000Z');
+        getImageCachedMock.mockResolvedValue({
+            id: 42,
+            title: 'Mountain',
+            filename_jpeg: 'mountain.jpg',
+            tag_names: null,
+            updated_at: updatedAt,
+            created_at: createdAt,
+        });
+        pickFirstAvailablePhotoBufferMock.mockResolvedValue(null);
+        const staleEtag = createPhotoOgEtag({
+            id: 42,
+            filenameJpeg: 'mountain.jpg',
+            displayTitle: 'Mountain',
+            updatedAt,
+            createdAt,
+            pipelineVersion: IMAGE_PIPELINE_VERSION - 1,
+        });
+
+        const response = await photoOgGet(
+            new NextRequest('https://example.test/api/og/photo/42', {
+                headers: { 'if-none-match': staleEtag },
+            }),
+            { params: Promise.resolve({ id: '42' }) },
+        );
+
+        expect(response.status).toBe(302);
+        expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
+        expect(pickFirstAvailablePhotoBufferMock).toHaveBeenCalledWith(
+            expect.any(String),
+            'mountain.jpg',
+            [640, 1536],
+        );
+    });
+
     it('uses no-store redirects when a processed photo has no available derivative yet', async () => {
         getImageCachedMock.mockResolvedValue({
             id: 42,

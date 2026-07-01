@@ -47,6 +47,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
     collectDeletedMidReencodeFiles,
+    confirmBackfillUpdateResults,
     cleanupDeletedMidReencodeVariants,
     countDeletedMidReencodeDetectionFailures,
     computeBackfillExitCode,
@@ -102,6 +103,48 @@ describe('sidecar backfill delete-mid-reencode partition (collectDeletedMidReenc
     });
 });
 
+describe('sidecar backfill update confirmation (confirmBackfillUpdateResults)', () => {
+    it('marks changed rows live without probing for row existence', async () => {
+        const rowExists = vi.fn(async () => false);
+        const a = files('changed-row');
+
+        await expect(confirmBackfillUpdateResults([
+            { id: 7, affectedRows: 1, files: a },
+        ], rowExists)).resolves.toEqual([
+            { id: 7, affectedRows: 1, files: a, rowStillExists: true },
+        ]);
+        expect(rowExists).not.toHaveBeenCalled();
+    });
+
+    it('keeps same-value zero-row updates live when the row still exists', async () => {
+        const rowExists = vi.fn(async () => true);
+        const a = files('same-value-row');
+        const confirmed = await confirmBackfillUpdateResults([
+            { id: 8, affectedRows: 0, files: a },
+        ], rowExists);
+
+        expect(confirmed).toEqual([
+            { id: 8, affectedRows: 0, files: a, rowStillExists: true },
+        ]);
+        expect(rowExists).toHaveBeenCalledExactlyOnceWith(8);
+        expect(collectDeletedMidReencodeFiles(confirmed)).toEqual([]);
+    });
+
+    it('marks zero-row updates absent when the follow-up probe misses', async () => {
+        const rowExists = vi.fn(async () => false);
+        const a = files('deleted-row');
+        const confirmed = await confirmBackfillUpdateResults([
+            { id: 9, affectedRows: 0, files: a },
+        ], rowExists);
+
+        expect(confirmed).toEqual([
+            { id: 9, affectedRows: 0, files: a, rowStillExists: false },
+        ]);
+        expect(rowExists).toHaveBeenCalledExactlyOnceWith(9);
+        expect(collectDeletedMidReencodeFiles(confirmed)).toEqual([a]);
+    });
+});
+
 describe('sidecar backfill delete-mid-reencode cleanup (cleanupDeletedMidReencodeVariants)', () => {
     beforeEach(() => {
         deleteImageVariantsMock.mockClear();
@@ -154,6 +197,15 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
 
     it('flushBatch calls collectDeletedMidReencodeFiles to partition the UPDATE results', () => {
         expect(scriptSrc).toMatch(/collectDeletedMidReencodeFiles\(\s*confirmedUpdateResults\s*\)/);
+    });
+
+    it('flushBatch calls confirmBackfillUpdateResults to probe zero-row updates', () => {
+        expect(scriptSrc).toMatch(/confirmBackfillUpdateResults\(\s*updateResults\s*,\s*rowExists\s*\)/);
+    });
+
+    it('both sidecar UPDATE branches advance updated_at for freshness validators', () => {
+        const occurrences = scriptSrc.match(/updated_at\s*=\s*CURRENT_TIMESTAMP/g) ?? [];
+        expect(occurrences.length).toBeGreaterThanOrEqual(2);
     });
 
     it('flushBatch maps the deleted-row files through cleanupDeletedMidReencodeVariants', () => {

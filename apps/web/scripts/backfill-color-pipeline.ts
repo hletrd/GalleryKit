@@ -164,6 +164,16 @@ export function collectDeletedMidReencodeFiles(
         .map((r) => r.files);
 }
 
+export async function confirmBackfillUpdateResults(
+    results: { id: number; affectedRows: number; files: BatchFilenames }[],
+    rowExists: (id: number) => Promise<boolean>,
+): Promise<{ id: number; affectedRows: number; files: BatchFilenames; rowStillExists: boolean }[]> {
+    return Promise.all(results.map(async (result) => ({
+        ...result,
+        rowStillExists: result.affectedRows === 0 ? await rowExists(result.id) : true,
+    })));
+}
+
 /**
  * AGG-C4-04 (run-6 cycle-4, tracer TRC-C4-01): of the detection-failure rows in
  * a batch (the `derivativeBatch` entries — the ones that incremented
@@ -482,10 +492,7 @@ async function main() {
                 updateResults.push({ id: item.id, affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
             }
         });
-        const confirmedUpdateResults = await Promise.all(updateResults.map(async (result) => ({
-            ...result,
-            rowStillExists: result.affectedRows === 0 ? await rowExists(result.id) : true,
-        })));
+        const confirmedUpdateResults = await confirmBackfillUpdateResults(updateResults, rowExists);
         // AGG-C5-01: partition + cleanup via the module-level exported helpers
         // (unit-tested in backfill-color-pipeline-deleted-mid-reencode.test.ts).
         const deletedMidReencodeFiles = collectDeletedMidReencodeFiles(confirmedUpdateResults);
