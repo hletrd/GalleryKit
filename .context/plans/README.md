@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 90/100 Implementation Plan - active; release-ledger closure committed/pushed/deployed as signed `dcc8055`, with a docs-only terminal-evidence sync in progress (`cycle-90-2026-07-01-plan.md`)
-- Cycle 90/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-90-2026-07-01-deferred.md`)
+- Cycle 91/100 Implementation Plan - active; schedules terminal-ledger and lightbox accessibility source-contract fixes from deployed `c648634` (`cycle-91-2026-07-01-plan.md`)
+- Cycle 91/100 Deferred Findings - no newly deferred findings; broad carry-forward items remain bound to their recorded exit criteria (`cycle-91-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 90/100 Implementation Plan - release-ledger closure committed/pushed/deployed as signed `dcc8055`, with docs-only terminal-evidence sync committed as `c648634`; Cycle 91 started from deployed `c648634` (`cycle-90-2026-07-01-plan.md`)
+- Cycle 90/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-90-2026-07-01-deferred.md`)
 - Cycle 89/100 Implementation Plan - implementation committed/pushed/deployed as `baefb42`; Cycle 90 started from deployed `baefb42` (`cycle-89-2026-07-01-plan.md`)
 - Cycle 89/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-89-2026-07-01-deferred.md`)
 - Cycle 88/100 Implementation Plan - implementation committed/pushed/deployed as `10cd166`; Cycle 89 started from deployed `10cd166` (`cycle-88-2026-07-01-plan.md`)

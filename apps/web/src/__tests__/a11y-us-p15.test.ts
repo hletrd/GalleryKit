@@ -7,7 +7,7 @@
  * similar to the existing action-origin and api-auth lint tests.
  *
  * AC-6:  skip-to-main-content link in root layout (layout.tsx)
- * AC-3:  image position communicated via aria-label on lightbox img (aria-roledescription removed — lightbox is a dialog, not a carousel)
+ * AC-3:  lightbox position communicated by a live status region (aria-roledescription removed — lightbox is a dialog, not a carousel)
  * AC-7:  aria-live="polite" + aria-atomic="true" on load-more status region
  * AC-10: Play/Pause button in lightbox controls overlay
  */
@@ -49,17 +49,18 @@ describe('US-P15 a11y contracts', () => {
         const src = readSrc('components/lightbox.tsx');
         // The lightbox is a dialog overlay showing one image at a time, not a
         // carousel. aria-roledescription="slide" requires a parent carousel
-        // container per WAI-ARIA carousel pattern. The image position is
-        // communicated via aria-label instead (tested in AC-3b).
+        // container per WAI-ARIA carousel pattern. The image keeps its
+        // descriptive alt text; position is announced by a live status region.
         expect(src).not.toMatch(/aria-roledescription="slide"/);
     });
 
-    it('AC-3: lightbox image aria-label references currentIndex/totalCount', () => {
+    it('AC-3: lightbox position status announces currentIndex/totalCount', () => {
         const src = readSrc('components/lightbox.tsx');
-        // The aria-label expression uses currentIndex and totalCount
-        expect(src).toMatch(/currentIndex.*totalCount|totalCount.*currentIndex/s);
-        // The formatted label is of the form "N / M"
-        expect(src).toMatch(/currentIndex \+ 1.*totalCount|`\$\{currentIndex \+ 1\} \/ \$\{totalCount\}`/s);
+        expect(src).toContain('role="status"');
+        expect(src).toContain('aria-live="polite"');
+        expect(src).toContain("aria.photoPosition");
+        expect(src).toContain('current: currentIndex + 1');
+        expect(src).toContain('total: totalCount');
     });
 
     it('AC-7: load-more has aria-live="polite" and aria-atomic="true" on status region', () => {
