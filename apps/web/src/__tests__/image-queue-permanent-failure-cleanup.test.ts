@@ -10,7 +10,12 @@
  * queue state and checking that the IDs are removed.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getProcessingQueueState } from '@/lib/image-queue';
+
+const actionsPath = path.join(__dirname, '..', 'app', 'actions', 'images.ts');
+const actionsSource = fs.readFileSync(actionsPath, 'utf8');
 
 describe('permanentlyFailedIds cleanup on image deletion', () => {
     let state: ReturnType<typeof getProcessingQueueState>;
@@ -100,4 +105,72 @@ describe('permanentlyFailedIds cleanup on image deletion', () => {
         expect(state.enqueued.has(id)).toBe(false);
         expect(state.permanentlyFailedIds.has(id)).toBe(false);
     });
+
+    it('source contract: deleteImage clears permanentlyFailedIds for the deleted ID', () => {
+        const deleteImageBody = extractFnBody(actionsSource, 'export async function deleteImage');
+        expect(deleteImageBody, 'deleteImage body must be findable').toBeTruthy();
+
+        expect(deleteImageBody!).toMatch(/const\s+queueState\s*=\s*getProcessingQueueState\s*\(\s*\)/);
+        expect(deleteImageBody!).toMatch(/queueState\.permanentlyFailedIds\.delete\s*\(\s*id\s*\)/);
+    });
+
+    it('source contract: deleteImages clears permanentlyFailedIds for every found deleted ID', () => {
+        const deleteImagesBody = extractFnBody(actionsSource, 'export async function deleteImages');
+        expect(deleteImagesBody, 'deleteImages body must be findable').toBeTruthy();
+
+        expect(deleteImagesBody!).toMatch(/const\s+queueState\s*=\s*getProcessingQueueState\s*\(\s*\)/);
+        expect(deleteImagesBody!).toMatch(
+            /for\s*\(\s*const\s+id\s+of\s+foundIds\s*\)\s*\{[\s\S]*?queueState\.permanentlyFailedIds\.delete\s*\(\s*id\s*\)/,
+        );
+    });
 });
+
+function extractFnBody(source: string, header: string): string | null {
+    const headerIdx = source.indexOf(header);
+    if (headerIdx === -1) return null;
+    const openBrace = source.indexOf('{', headerIdx);
+    if (openBrace === -1) return null;
+
+    let depth = 0;
+    let i = openBrace;
+    let inString: '"' | "'" | '`' | null = null;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    while (i < source.length) {
+        const ch = source[i];
+        const next = source[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n') inLineComment = false;
+        } else if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i++;
+            }
+        } else if (inString) {
+            if (ch === '\\') {
+                i++;
+            } else if (ch === inString) {
+                inString = null;
+            }
+        } else if (ch === '/' && next === '/') {
+            inLineComment = true;
+            i++;
+        } else if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i++;
+        } else if (ch === '"' || ch === "'" || ch === '`') {
+            inString = ch;
+        } else if (ch === '{') {
+            depth++;
+        } else if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                return source.slice(openBrace + 1, i);
+            }
+        }
+        i++;
+    }
+    return null;
+}

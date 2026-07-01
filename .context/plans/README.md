@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 84/100 Implementation Plan - active; schedules Cycle 83 release-ledger closure and failed-image retry label source-contract hardening (`cycle-84-2026-07-01-plan.md`)
-- Cycle 84/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-84-2026-07-01-deferred.md`)
+- Cycle 85/100 Implementation Plan - active; schedules Cycle 84 release-ledger closure, retry aria-label locale-template coverage, and per-action permanently-failed delete cleanup source contracts (`cycle-85-2026-07-01-plan.md`)
+- Cycle 85/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-85-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 84/100 Implementation Plan - implementation committed/pushed/deployed as `1d29b988`; Cycle 85 started from deployed `1d29b988` (`cycle-84-2026-07-01-plan.md`)
+- Cycle 84/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-84-2026-07-01-deferred.md`)
 - Cycle 83/100 Implementation Plan - implementation committed/pushed as signed `023ae28d`; no committed Cycle 83 deploy transcript was present during Cycle 84 review, so Cycle 84 deploy is scheduled to supersede production state after its pushed fix (`cycle-83-2026-07-01-plan.md`)
 - Cycle 83/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-83-2026-07-01-deferred.md`)
 - Cycle 82/100 Implementation Plan - implementation committed/pushed/deployed as `cc46b1d6`; Cycle 83 started from deployed `cc46b1d6` (`cycle-82-2026-07-01-plan.md`)

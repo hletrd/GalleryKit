@@ -23,6 +23,17 @@ const actionsSource = fs.readFileSync(actionsPath, 'utf8');
 const dashboardPath = path.join(__dirname, '..', 'app', '[locale]', 'admin', '(protected)', 'dashboard', 'dashboard-client.tsx');
 const dashboardSource = fs.readFileSync(dashboardPath, 'utf8');
 
+type DashboardMessages = {
+    dashboard: {
+        retryImageAria: string;
+        retryingImageAria: string;
+    };
+};
+
+const messagesPath = path.join(__dirname, '..', '..', 'messages');
+const enMessages = JSON.parse(fs.readFileSync(path.join(messagesPath, 'en.json'), 'utf8')) as DashboardMessages;
+const koMessages = JSON.parse(fs.readFileSync(path.join(messagesPath, 'ko.json'), 'utf8')) as DashboardMessages;
+
 describe('R10-H2: failed image persistence and retry', () => {
     describe('image-queue.ts failure persistence', () => {
         it('persists processing_error to DB when MAX_RETRIES exceeded', () => {
@@ -150,6 +161,13 @@ describe('R10-H2: failed image persistence and retry', () => {
     });
 
     describe('dashboard retry accessibility', () => {
+        it('keeps retry aria-label locale templates parameterized by row label', () => {
+            for (const messages of [enMessages, koMessages]) {
+                expect(messages.dashboard.retryImageAria).toContain('{label}');
+                expect(messages.dashboard.retryingImageAria).toContain('{label}');
+            }
+        });
+
         it('labels each retry button with the failed image row label', () => {
             const failedImageRowBody = dashboardSource.slice(
                 dashboardSource.indexOf('failedImages.map((img) => {'),
