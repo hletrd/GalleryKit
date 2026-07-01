@@ -1,12 +1,9 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-58-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-59-2026-07-01/_aggregate.md`
 
-Cycle 58 produced four deduplicated findings:
+Cycle 59 produced one deduplicated finding:
 
-- `C58-01` - Cycle 57 remains active in committed ledgers after its fix commit.
-- `C58-02` - Photo page public/admin fetch split is still protected by source-grep, not behavior.
-- `C58-03` - Strip-GPS lock coverage only tests one boolean change direction.
-- `C58-04` - Histogram key-type tooltip trigger is a tiny text-only touch target.
+- `C59-01` - Cycle 58 terminal evidence is stale in committed ledgers after signed/pushed/deployed fix commit `a4bb2670`.
 
-Cycle 58 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.
+Cycle 59 has no new deferred findings. `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, and `AGG-C38-08` remain carried forward.

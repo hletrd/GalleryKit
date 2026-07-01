@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 58/100 Implementation Plan — active; photo-page fetch behavior coverage, strip-GPS lock direction coverage, histogram touch target, and Cycle 57 ledger closure scheduled (`cycle-58-2026-07-01-plan.md`)
-- Cycle 58/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-58-2026-07-01-deferred.md`)
+- Cycle 59/100 Implementation Plan — active; Cycle 58 terminal evidence and review/plan pointers scheduled (`cycle-59-2026-07-01-plan.md`)
+- Cycle 59/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-59-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 58/100 Implementation Plan — active; photo-page fetch behavior coverage, strip-GPS lock direction coverage, histogram touch target, and Cycle 57 ledger closure scheduled (`cycle-58-2026-07-01-plan.md`)
+- Cycle 59/100 Implementation Plan — active; Cycle 58 terminal evidence and review/plan pointers scheduled (`cycle-59-2026-07-01-plan.md`)
+- Cycle 59/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-59-2026-07-01-deferred.md`)
+- Cycle 58/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 59 started from deployed `a4bb2670` (`cycle-58-2026-07-01-plan.md`)
 - Cycle 58/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-58-2026-07-01-deferred.md`)
 - Cycle 57/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 58 started from deployed `51bca789` (`cycle-57-2026-07-01-plan.md`)
 - Cycle 57/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-57-2026-07-01-deferred.md`)
