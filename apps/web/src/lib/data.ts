@@ -367,11 +367,10 @@ const adminListSelectFields = {
 
 // PRIVACY: publicSelectFields is the canonical field set for ALL unauthenticated routes.
 // It is derived from adminSelectFields by explicitly OMITTING PII/internal fields (latitude,
-// longitude, filename_original, user_filename, original_format, original_file_size, processed). Because it is a separate object (not
-// the same reference), adding a field to adminSelectFields does NOT automatically leak
-// it to public queries — the field must be explicitly included here too.
-// This is the primary privacy enforcement mechanism: any developer adding a sensitive
-// field to adminSelectFields must consciously decide whether to also include it here.
+// longitude, filename_original, user_filename, original_format, original_file_size, processed).
+// The rest-spread means a new adminSelectFields key becomes public unless it is omitted
+// here, so `privacy-fields.test.ts` pins the exact public key allowlist and forces an
+// intentional review whenever this public contract changes.
 const {
     latitude: _omitLatitude,
     longitude: _omitLongitude,

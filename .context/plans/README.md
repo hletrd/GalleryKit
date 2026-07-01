@@ -4,6 +4,8 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
+- Cycle 98/100 Implementation Plan - safe narrow fixes scheduled for public select allowlist coverage, raw i18n duplicate-key detection, and Cycle 97 release-ledger evidence from deployed HEAD `6f40f66d9a6949ea866966230e5fe0ba61024637` (`cycle-98-2026-07-01-plan.md`)
+- Cycle 98/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-98-2026-07-01-deferred.md`)
 - Cycle 97/100 Implementation Plan - safe narrow fixes scheduled for feed maintenance/rate limiting, restore SQL scan-tail hardening, derivative cleanup, grid P3 badge visibility, upload accept source-contract parity, and release ledger evidence from deployed HEAD `061c1c81af234469641f75a53e5bbc61fa63114a` (`cycle-97-2026-07-01-plan.md`)
 - Cycle 97/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-97-2026-07-01-deferred.md`)
 - Cycle 96/100 Implementation Plan - committed/pushed/deployed as `061c1c81af234469641f75a53e5bbc61fa63114a`; closed safe narrow token list, Unicode label, privacy map disclosure, upload accept, and release ledger findings (`cycle-96-2026-07-01-plan.md`)
@@ -13,6 +15,7 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Recent Plans
 
+- Cycle 97/100 Implementation Plan - committed/pushed/deployed as signed `6f40f66d9a6949ea866966230e5fe0ba61024637`; Cycle 98 started from user-provided deployed `master` HEAD `6f40f66d9a6949ea866966230e5fe0ba61024637` (`cycle-97-2026-07-01-plan.md`)
 - Cycle 96/100 Implementation Plan - signed commit `061c1c81af234469641f75a53e5bbc61fa63114a` is the user-provided deployed `master` HEAD at Cycle 97 start (`cycle-96-2026-07-01-plan.md`)
 - Cycle 95/100 Implementation Plan - final docs-only release ledger sync committed/pushed at `2f22620c361304ba0408053f546f45e3c74ddfdb`; Cycle 96 started from user-provided deployed `master` HEAD `2f22620c361304ba0408053f546f45e3c74ddfdb` (`cycle-95-2026-07-01-plan.md`)
 - Cycle 94/100 Implementation Plan - committed/pushed/deployed as `750729ada2403c0c01267670b9552a05e0ead217`; Cycle 95 started from user-provided deployed `master` HEAD `750729ada2403c0c01267670b9552a05e0ead217` and pre-change production smoke was healthy (`cycle-94-2026-07-01-plan.md`)

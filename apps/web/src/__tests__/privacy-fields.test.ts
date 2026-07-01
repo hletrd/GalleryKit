@@ -44,6 +44,37 @@ const SENSITIVE_KEYS = [
     'pipeline_version',
 ] as const;
 
+const PUBLIC_SAFE_KEYS = [
+    'alt_text_suggested',
+    'avif_10bit',
+    'camera_model',
+    'capture_date',
+    'color_primaries',
+    'created_at',
+    'description',
+    'exposure_compensation',
+    'exposure_program',
+    'exposure_time',
+    'f_number',
+    'filename_avif',
+    'filename_jpeg',
+    'filename_webp',
+    'flash',
+    'focal_length',
+    'height',
+    'id',
+    'iso',
+    'lens_model',
+    'metering_mode',
+    'original_height',
+    'original_width',
+    'title',
+    'topic',
+    'updated_at',
+    'white_balance',
+    'width',
+] as const;
+
 describe('Privacy field separation', () => {
     it('sensitive fields exist in the images schema', () => {
         for (const key of SENSITIVE_KEYS) {
@@ -67,6 +98,10 @@ describe('Privacy field separation', () => {
         expect(publicSelectFieldKeys).toContain('id');
         expect(publicSelectFieldKeys).toContain('title');
         expect(publicSelectFieldKeys).toContain('filename_jpeg');
+    });
+
+    it('public select fields match the explicit safe allowlist', () => {
+        expect(publicSelectFieldKeys).toEqual([...PUBLIC_SAFE_KEYS].sort());
     });
 
     /**

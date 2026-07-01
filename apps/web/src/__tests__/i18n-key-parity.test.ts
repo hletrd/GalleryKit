@@ -20,9 +20,15 @@
  * equality is exactly the right gate; a value comparison would be wrong.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import enMessages from '../../messages/en.json';
 import koMessages from '../../messages/ko.json';
+
+const MESSAGE_SOURCES = [
+    { locale: 'en', path: new URL('../../messages/en.json', import.meta.url) },
+    { locale: 'ko', path: new URL('../../messages/ko.json', import.meta.url) },
+] as const;
 
 function flattenKeys(messages: unknown, prefix = ''): string[] {
     const keys: string[] = [];
@@ -38,6 +44,92 @@ function flattenKeys(messages: unknown, prefix = ''): string[] {
         }
     }
     return keys;
+}
+
+function skipWhitespace(source: string, index: number) {
+    while (index < source.length && /\s/.test(source[index] ?? '')) index += 1;
+    return index;
+}
+
+function readJsonString(source: string, index: number) {
+    const start = index;
+    index += 1;
+    while (index < source.length) {
+        const char = source[index];
+        if (char === '\\') {
+            index += 2;
+            continue;
+        }
+        if (char === '"') {
+            const raw = source.slice(start, index + 1);
+            return { value: JSON.parse(raw) as string, next: index + 1 };
+        }
+        index += 1;
+    }
+    throw new Error('Unterminated JSON string');
+}
+
+function skipJsonNumber(source: string, index: number) {
+    while (index < source.length && /[-+0-9.eE]/.test(source[index] ?? '')) index += 1;
+    return index;
+}
+
+function findDuplicateObjectKeys(source: string) {
+    const duplicates: string[] = [];
+
+    function parseValue(index: number, path: string): number {
+        index = skipWhitespace(source, index);
+        const char = source[index];
+        if (char === '{') return parseObject(index, path);
+        if (char === '[') return parseArray(index, path);
+        if (char === '"') return readJsonString(source, index).next;
+        if (char === '-' || /\d/.test(char ?? '')) return skipJsonNumber(source, index);
+        for (const literal of ['true', 'false', 'null']) {
+            if (source.startsWith(literal, index)) return index + literal.length;
+        }
+        throw new Error(`Unexpected JSON token at offset ${index}`);
+    }
+
+    function parseArray(index: number, path: string): number {
+        index += 1;
+        index = skipWhitespace(source, index);
+        if (source[index] === ']') return index + 1;
+        while (index < source.length) {
+            index = parseValue(index, `${path}[]`);
+            index = skipWhitespace(source, index);
+            if (source[index] === ']') return index + 1;
+            if (source[index] !== ',') throw new Error(`Expected "," or "]" at offset ${index}`);
+            index += 1;
+        }
+        throw new Error('Unterminated JSON array');
+    }
+
+    function parseObject(index: number, path: string): number {
+        const seen = new Set<string>();
+        index += 1;
+        index = skipWhitespace(source, index);
+        if (source[index] === '}') return index + 1;
+        while (index < source.length) {
+            if (source[index] !== '"') throw new Error(`Expected object key at offset ${index}`);
+            const key = readJsonString(source, index);
+            index = skipWhitespace(source, key.next);
+            if (source[index] !== ':') throw new Error(`Expected ":" after key at offset ${index}`);
+            const fullKey = path ? `${path}.${key.value}` : key.value;
+            if (seen.has(key.value)) duplicates.push(fullKey);
+            seen.add(key.value);
+            index = parseValue(index + 1, fullKey);
+            index = skipWhitespace(source, index);
+            if (source[index] === '}') return index + 1;
+            if (source[index] !== ',') throw new Error(`Expected "," or "}" at offset ${index}`);
+            index += 1;
+            index = skipWhitespace(source, index);
+        }
+        throw new Error('Unterminated JSON object');
+    }
+
+    const end = skipWhitespace(source, parseValue(0, ''));
+    if (end !== source.length) throw new Error(`Unexpected trailing JSON token at offset ${end}`);
+    return duplicates;
 }
 
 describe('i18n leaf-key parity (en.json <-> ko.json)', () => {
@@ -65,8 +157,13 @@ describe('i18n leaf-key parity (en.json <-> ko.json)', () => {
         expect(koKeys).toEqual(enKeys);
     });
 
-    it('neither locale has duplicate leaf keys (well-formed JSON sanity)', () => {
-        expect(new Set(enKeys).size, 'en.json has duplicate flattened keys').toBe(enKeys.length);
-        expect(new Set(koKeys).size, 'ko.json has duplicate flattened keys').toBe(koKeys.length);
+    it('neither locale has duplicate object keys in raw JSON source', () => {
+        for (const { locale, path } of MESSAGE_SOURCES) {
+            const source = readFileSync(path, 'utf8');
+            expect(
+                findDuplicateObjectKeys(source),
+                `${locale}.json has duplicate object keys; parsed imports would silently keep only the last value`,
+            ).toEqual([]);
+        }
     });
 });
