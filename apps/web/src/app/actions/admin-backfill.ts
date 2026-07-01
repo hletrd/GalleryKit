@@ -94,6 +94,7 @@ export interface BackfillStatusResult {
     detectionFailures?: number;
     skippedMissingOriginal?: number;
     skippedLocked?: number;
+    lastRunNoCandidates?: boolean;
     lastRunHadFailures?: boolean;
     lastError?: string | null;
     error?: string;
@@ -120,6 +121,7 @@ export async function getBackfillStatus(): Promise<BackfillStatusResult> {
             detectionFailures: s.detectionFailures,
             skippedMissingOriginal: s.skippedMissingOriginal,
             skippedLocked: s.skippedLocked,
+            lastRunNoCandidates: s.lastRunNoCandidates,
             lastRunHadFailures: s.lastRunHadFailures,
             lastError: s.lastError,
         };

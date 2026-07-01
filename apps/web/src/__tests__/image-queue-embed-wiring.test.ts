@@ -20,20 +20,19 @@ describe('upload embedding hook wiring', () => {
     expect(src).not.toContain("buf.toString('base64')");
     expect(src).toContain('embeddingToBuffer');
   });
-  it('reuses the upload-time semanticSearchMode snapshot before fetching config (R17C17 PERF-17-04)', () => {
-    // Normal upload jobs carry quality+imageSizes so they skip the bootstrap
-    // config-load gate; without the job snapshot the embedding IIFE issued a
-    // redundant per-image SELECT admin_settings. The IIFE must prefer the job
-    // snapshot and only fetch when BOTH the bootstrap resolve and the snapshot
-    // are absent.
-    expect(src).toContain('job.semanticSearchMode');
+  it('resolves current semanticSearchMode before post-processing embedding writes', () => {
+    // Processing byte-affecting settings are accepted-upload snapshots, but
+    // semantic embedding mode is a serving/runtime choice. The post-processing
+    // side effect must fetch the current mode after processed=true so a mode
+    // flip while the job waits cannot write stale stub rows over production.
     expect(src).toContain('applyRuntimeSemanticGate');
+    expect(src).toContain('post-processing embedding writes resolve the');
+    expect(src).toMatch(/candidate\.imageSizes\.every\(\(size\) => Number\.isInteger\(size\) && size >= MIN_IMAGE_SIZE\)/);
     expect(src).toMatch(
-      /applyRuntimeSemanticGate\s*\(\s*[\s\S]*resolvedSemanticMode\s*\?\?\s*job\.semanticSearchMode\s*\?\?\s*'disabled'[\s\S]*\)/,
+      /const cfg = await getGalleryConfig\(\);[\s\S]*semanticMode = applyRuntimeSemanticGate\(cfg\.semanticSearchMode\);[\s\S]*storeImageEmbeddingForMode\(job\.id, originalPath, semanticMode\)/,
     );
-    expect(src).toMatch(
-      /resolvedSemanticMode === null && job\.semanticSearchMode === undefined/,
-    );
+    expect(src).not.toContain('resolvedSemanticMode ?? job.semanticSearchMode');
+    expect(src).not.toContain('job.semanticSearchMode ??');
   });
 
   it('runtime-gates production semantic snapshots behind SEMANTIC_SEARCH_ALLOW_PRODUCTION', () => {

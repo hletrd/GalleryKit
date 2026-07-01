@@ -31,3 +31,44 @@ export function hasBackfillRelevantDifference(
         !== getEffectiveBackfillSettingValue(baseline, defaults, key)
     ));
 }
+
+export interface SavedBackfillPendingTransition {
+    hasSavedBackfillPending: boolean;
+    pendingBaseline: Record<string, string> | null;
+}
+
+export function resolveSavedBackfillPendingTransition({
+    hasExistingImages,
+    savedBackfillRelevantChange,
+    previousBaseline,
+    nextSettings,
+    pendingBaseline,
+    defaults = getSettingDefaults(),
+}: {
+    hasExistingImages: boolean;
+    savedBackfillRelevantChange: boolean;
+    previousBaseline: Record<string, string>;
+    nextSettings: Record<string, string>;
+    pendingBaseline: Record<string, string> | null;
+    defaults?: Record<GallerySettingKey, string>;
+}): SavedBackfillPendingTransition {
+    if (!hasExistingImages) {
+        return { hasSavedBackfillPending: false, pendingBaseline: null };
+    }
+
+    const baselineForPending = pendingBaseline
+        ?? (savedBackfillRelevantChange ? previousBaseline : null);
+    if (!baselineForPending) {
+        return { hasSavedBackfillPending: false, pendingBaseline: null };
+    }
+
+    const hasSavedBackfillPending = hasBackfillRelevantDifference(
+        nextSettings,
+        baselineForPending,
+        defaults,
+    );
+    return {
+        hasSavedBackfillPending,
+        pendingBaseline: hasSavedBackfillPending ? baselineForPending : null,
+    };
+}

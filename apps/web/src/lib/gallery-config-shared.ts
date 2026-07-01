@@ -142,6 +142,8 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
+export const MIN_IMAGE_SIZE = 128;
+export const MAX_IMAGE_SIZE = 10000;
 
 /**
  * C3-A6 / C3-INT-MED-1: shared narrow type for JPEG chroma subsampling
@@ -251,7 +253,7 @@ export function normalizeConfiguredImageSizes(sizesStr: string): string | null {
     }
 
     const parsed = rawParts.map((segment) => Number(segment));
-    if (parsed.some((value) => !Number.isInteger(value) || value <= 0 || value > 10000)) {
+    if (parsed.some((value) => !Number.isInteger(value) || value < MIN_IMAGE_SIZE || value > MAX_IMAGE_SIZE)) {
         return null;
     }
 

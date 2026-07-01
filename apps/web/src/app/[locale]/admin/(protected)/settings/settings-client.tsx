@@ -11,7 +11,7 @@ import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes, SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey, SemanticSearchMode } from '@/lib/gallery-config-shared';
 import { buildChangedGallerySettingsPayload } from '@/lib/settings-submit-payload';
-import { SETTINGS_BACKFILL_WARNING_KEY_SET, hasBackfillRelevantDifference } from '@/lib/settings-backfill-warning';
+import { SETTINGS_BACKFILL_WARNING_KEY_SET, hasBackfillRelevantDifference, resolveSavedBackfillPendingTransition } from '@/lib/settings-backfill-warning';
 import { Switch } from '@/components/ui/switch';
 import {
     AlertDialog,
@@ -259,17 +259,16 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     setSettings(nextSettings);
                     initialRef.current = nextSettings;
                     setBaseline(nextSettings);
-                    if (hasExistingImages && savedBackfillRelevantChange && !backfillPendingBaselineRef.current) {
-                        backfillPendingBaselineRef.current = previousBaseline;
-                    }
-                    if (hasExistingImages && backfillPendingBaselineRef.current) {
-                        const pendingBaseline = backfillPendingBaselineRef.current;
-                        const stillNeedsReencode = hasBackfillRelevantDifference(nextSettings, pendingBaseline, defaults);
-                        setHasSavedBackfillPending(stillNeedsReencode);
-                        if (!stillNeedsReencode) {
-                            backfillPendingBaselineRef.current = null;
-                        }
-                    }
+                    const backfillPending = resolveSavedBackfillPendingTransition({
+                        hasExistingImages,
+                        savedBackfillRelevantChange,
+                        previousBaseline,
+                        nextSettings,
+                        pendingBaseline: backfillPendingBaselineRef.current,
+                        defaults,
+                    });
+                    backfillPendingBaselineRef.current = backfillPending.pendingBaseline;
+                    setHasSavedBackfillPending(backfillPending.hasSavedBackfillPending);
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
@@ -370,7 +369,11 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                             {backfillStatus && (backfillStatus.completedRuns ?? 0) > 0 && (
                                 <div role="status" className="mt-3 border-t border-blue-200/60 dark:border-blue-900/40 pt-2 text-xs text-blue-900/90 dark:text-blue-200/90 space-y-1">
                                     <strong className="block">{t('settings.backfillLastRunTitle')}</strong>
-                                    {backfillStatus.lastRunHadFailures ? (
+                                    {backfillStatus.lastRunNoCandidates ? (
+                                        <p>
+                                            {t('settings.backfillLastRunNoCandidates')}
+                                        </p>
+                                    ) : backfillStatus.lastRunHadFailures ? (
                                         <p className="text-amber-700 dark:text-amber-400">
                                             {/* AGG-1 (run-6 c1): render the REAL successfully-re-encoded
                                                 count from the runner's mirrored `processed` counter, and

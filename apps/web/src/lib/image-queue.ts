@@ -7,7 +7,7 @@ import { connection, db, images, sessions, imageEmbeddings } from '@/db';
 import { eq, and, sql, asc, gt, notInArray, isNull } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
-import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
+import { MIN_IMAGE_SIZE, type JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
@@ -158,7 +158,7 @@ function isProcessingSettingsSnapshot(value: unknown): value is ProcessingSettin
         && typeof candidate.quality.jpeg === 'number'
         && (candidate.imageSizes === undefined || (
             Array.isArray(candidate.imageSizes)
-            && candidate.imageSizes.every((size) => Number.isInteger(size) && size > 0)
+            && candidate.imageSizes.every((size) => Number.isInteger(size) && size >= MIN_IMAGE_SIZE)
         ))
         && typeof candidate.forceSrgbDerivatives === 'boolean'
         && ['4:4:4', '4:2:2', '4:2:0'].includes(String(candidate.wideGamutJpegChroma))
@@ -246,11 +246,10 @@ export type ImageProcessingJob = {
     sdrJpegChroma?: JpegChromaSubsampling;
     wideGamutMaxSourcePixels?: number;
     autoAltTextEnabled?: boolean;
-    // R17C17 PERF-17-04: snapshot the semantic-search mode at upload time (same
-    // intent as the 6 settings above). Normal upload jobs carry quality+imageSizes
-    // so they skip the bootstrap config-load gate below — without this snapshot the
-    // fire-and-forget embedding IIFE issued a redundant SELECT admin_settings per
-    // processed image (React cache() is request-scoped, a no-op in the queue worker).
+    // Historical processing snapshots include this field. Keep accepting it so
+    // pending rows deserialize, but post-processing embedding writes resolve the
+    // current runtime semantic mode after processed=true; do not use this
+    // upload-time value for embedding writes.
     semanticSearchMode?: 'disabled' | 'stub' | 'production';
     // R6-H1: full color signals for bootstrap NCLX preservation. ProcessImageFormats
     // consumes colorPrimaries; the remaining fields future-proof the bootstrap.
@@ -617,16 +616,11 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // C2-A5 / C2-A6: SDR JPEG chroma + wide-gamut max source pixels
             let sdrJpegChroma: JpegChromaSubsampling | undefined = job.sdrJpegChroma;
             let wideGamutMaxSourcePixels: number | undefined = job.wideGamutMaxSourcePixels;
-            // R16C16 PERF-16-01: reuse the bootstrap config read for the embedding
-            // semantic-mode decision so a bootstrap/legacy job does not issue a
-            // second SELECT admin_settings inside the fire-and-forget IIFE below.
-            let resolvedSemanticMode: 'disabled' | 'stub' | 'production' | null = null;
             if (!quality && !imageSizes) {
                 // Bootstrap / legacy re-enqueue path: the job carries none of the
                 // processing settings, so load them all from current config.
                 try {
                     const config = await getGalleryConfig();
-                    resolvedSemanticMode = config.semanticSearchMode;
                     quality = {
                         webp: config.imageQualityWebp,
                         avif: config.imageQualityAvif,
@@ -742,24 +736,15 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             //   stub rows, so no schema migration is needed for that future encoder
             //   to tell stub vectors apart from production ones.
             trackQueueSideEffect(state, (async () => {
-                // PERF-16-01: reuse the bootstrap config read when it already
-                // resolved the mode (legacy/bootstrap jobs); only normal jobs —
-                // which skip the bootstrap read — fetch the mode here.
-                // R17C17 PERF-17-04: prefer the bootstrap config resolve, then the
-                // upload-time job snapshot, before issuing a per-image SELECT.
-                // Bootstrap/re-enqueue jobs set resolvedSemanticMode; normal upload
-                // jobs carry job.semanticSearchMode. Only a job lacking BOTH (a
-                // legacy snapshot-less upload job) falls through to the fetch.
-                let semanticMode: 'disabled' | 'stub' | 'production' = applyRuntimeSemanticGate(
-                    resolvedSemanticMode ?? job.semanticSearchMode ?? 'disabled',
-                );
-                if (resolvedSemanticMode === null && job.semanticSearchMode === undefined) {
-                    try {
-                        const cfg = await getGalleryConfig();
-                        semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
-                    } catch {
-                        // DB unavailable — skip silently
-                    }
+                let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+                try {
+                    const cfg = await getGalleryConfig();
+                    semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
+                } catch {
+                    // DB unavailable — skip silently. Semantic embedding mode is
+                    // resolved at write time, not from the upload-time processing
+                    // snapshot, so a mode flip while a job waits in the queue cannot
+                    // write stale stub rows over the active production model.
                 }
                 if (semanticMode === 'disabled') return;
                 try {

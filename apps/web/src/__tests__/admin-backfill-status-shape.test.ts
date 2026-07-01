@@ -37,6 +37,7 @@ vi.mock('@/lib/admin-backfill-runner', () => ({
         skippedLocked: 0,
         encodeFailures: 1,
         detectionFailures: 0,
+        lastRunNoCandidates: false,
         lastRunHadFailures: true,
     })),
 }));
@@ -59,6 +60,7 @@ describe('AGG-6: getBackfillStatus forwards the extended runner-state shape', ()
         expect(res.detectionFailures).toBe(0);
         expect(res.skippedMissingOriginal).toBe(1);
         expect(res.skippedLocked).toBe(0);
+        expect(res.lastRunNoCandidates).toBe(false);
         expect(res.lastRunHadFailures).toBe(true);
         expect(res.lastError).toBe('ER_LOCK_DEADLOCK');
         expect(res.completedRuns).toBe(4);

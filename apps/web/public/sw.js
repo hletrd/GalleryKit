@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = 'a0a1f469-p7';
+const SW_VERSION = '4e423156-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -305,7 +305,6 @@ async function staleWhileRevalidateImage(request) {
     // already accepts). We do NOT remove the synchronous HEAD — that would
     // regress the documented freshness behavior.
     const cachedEtag = cached.headers.get('ETag');
-    let cacheVerifiedByProbe = false;
     if (cachedEtag) {
       try {
         const head = await fetch(request.url, {
@@ -333,21 +332,21 @@ async function staleWhileRevalidateImage(request) {
             if (fresh) return fresh;
           }
           if (networkEtag && networkEtag === cachedEtag) {
-            cacheVerifiedByProbe = true;
+            const refreshedCached = await refreshCachedImageTimestamp(imageCache, cacheKey, cached);
+            touchMeta(request.url, cachedSize).catch(() => {});
+            return refreshedCached;
           }
         }
       } catch {
         // HEAD probe failed — fall through to stale-serve below
       }
     }
-    if (!cacheVerifiedByProbe && await evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)) {
+    if (await evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)) {
       const fresh = await startRevalidate();
       return fresh ?? new Response('Network error', { status: 503 });
     }
     // Serve stale immediately, revalidate in background (true SWR path:
-    // no ETag to probe, probe network-failed, or probe answered 200 with
-    // the same ETag — the latter still refreshes the entry in background
-    // exactly as before).
+    // no ETag to probe or the probe network-failed).
     startRevalidate();
     return cached;
   }

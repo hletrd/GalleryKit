@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     DEFAULT_GRID_CARD_TARGET_SIZE,
     DEFAULT_IMAGE_SIZES,
+    MIN_IMAGE_SIZE,
     MAX_IMAGE_SIZE_COUNT,
     findGridCardImageSize,
     getPhotoViewerImageSizes,
@@ -20,7 +21,12 @@ describe('normalizeConfiguredImageSizes', () => {
         expect(normalizeConfiguredImageSizes('640,,1536')).toBeNull();
         expect(normalizeConfiguredImageSizes('640,wide')).toBeNull();
         expect(normalizeConfiguredImageSizes('640.5,1536')).toBeNull();
-        expect(normalizeConfiguredImageSizes(Array.from({ length: MAX_IMAGE_SIZE_COUNT + 1 }, (_, index) => String(index + 1)).join(','))).toBeNull();
+        expect(normalizeConfiguredImageSizes(Array.from({ length: MAX_IMAGE_SIZE_COUNT + 1 }, (_, index) => String(MIN_IMAGE_SIZE + index)).join(','))).toBeNull();
+    });
+
+    it('enforces the documented minimum derivative width', () => {
+        expect(normalizeConfiguredImageSizes(String(MIN_IMAGE_SIZE - 1))).toBeNull();
+        expect(normalizeConfiguredImageSizes(String(MIN_IMAGE_SIZE))).toBe(String(MIN_IMAGE_SIZE));
     });
 });
 
@@ -58,6 +64,8 @@ describe('getPhotoViewerImageSizes', () => {
 describe('isValidSettingValue(image_sizes)', () => {
     it('accepts canonicalizable lists and rejects invalid ones', () => {
         expect(isValidSettingValue('image_sizes', '2048,640,1536')).toBe(true);
+        expect(isValidSettingValue('image_sizes', '128,640')).toBe(true);
+        expect(isValidSettingValue('image_sizes', '127,640')).toBe(false);
         expect(isValidSettingValue('image_sizes', '640,,1536')).toBe(false);
         expect(isValidSettingValue('image_sizes', '640.5,1536')).toBe(false);
     });

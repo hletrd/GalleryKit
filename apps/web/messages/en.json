@@ -801,6 +801,7 @@
     "backfillFailed": "Failed to queue re-encode. Check server logs.",
     "backfillLastRunTitle": "Last re-encode run",
     "backfillLastRunClean": "Completed cleanly — {processed} photo(s) re-encoded.",
+    "backfillLastRunNoCandidates": "No pipeline-version candidates were found. Existing derivatives may still need the sidecar backfill with --force-reencode after settings-only changes.",
     "backfillLastRunWithFailures": "Completed with failures — {processed} re-encoded, {errors} fatal error(s), {encodeFailures} encode failure(s), {detectionFailures} detection failure(s). Affected photos kept their previous version and will be retried on the next run.",
     "backfillLastRunSkips": "{skippedMissingOriginal} skipped (missing original), {skippedLocked} skipped (busy).",
     "backfillLastRunError": "Last error: {error}"

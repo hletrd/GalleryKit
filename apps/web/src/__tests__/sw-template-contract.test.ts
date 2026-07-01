@@ -233,6 +233,30 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(branch).not.toMatch(/startRevalidate\(/);
     });
 
+    it('a 200 HEAD with the same ETag serves cached with no body fetch', () => {
+        const fn = imageFn();
+        const sameEtag = fn.indexOf('networkEtag && networkEtag === cachedEtag');
+        expect(sameEtag).toBeGreaterThan(-1);
+        const branchEnd = fn.indexOf('return refreshedCached;', sameEtag);
+        expect(branchEnd).toBeGreaterThan(sameEtag);
+        const branch = fn.slice(sameEtag, branchEnd);
+        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
+        expect(branch).toMatch(/touchMeta\(/);
+        expect(branch).not.toMatch(/startRevalidate\(/);
+    });
+
+    it('the generated sw.js serves cached on same-ETag 200 HEAD without a body fetch', () => {
+        const fnIdx = GENERATED_SW.indexOf('async function staleWhileRevalidateImage');
+        const htmlIdx = GENERATED_SW.indexOf('async function networkFirstHtml');
+        const fn = GENERATED_SW.slice(fnIdx, htmlIdx);
+        const sameEtag = fn.indexOf('networkEtag && networkEtag === cachedEtag');
+        expect(sameEtag).toBeGreaterThan(-1);
+        const branchEnd = fn.indexOf('return refreshedCached;', sameEtag);
+        const branch = fn.slice(sameEtag, branchEnd);
+        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
+        expect(branch).not.toMatch(/startRevalidate\(/);
+    });
+
     it('touchMeta never grows a tracked size (no eviction trigger)', () => {
         const fnIdx = TEMPLATE.indexOf('async function touchMeta');
         expect(fnIdx).toBeGreaterThan(-1);

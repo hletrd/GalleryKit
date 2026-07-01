@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     SETTINGS_BACKFILL_WARNING_KEYS,
     hasBackfillRelevantDifference,
+    resolveSavedBackfillPendingTransition,
 } from '@/lib/settings-backfill-warning';
 import {
     DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS,
@@ -48,5 +49,56 @@ describe('settings backfill warning key contract', () => {
             { image_quality_jpeg: '90', avif_effort: '6' },
             defaults,
         )).toBe(false);
+    });
+});
+
+describe('resolveSavedBackfillPendingTransition', () => {
+    it('keeps a saved settings-only obligation pending after a byte-impacting save', () => {
+        const previousBaseline = { image_quality_jpeg: '90' };
+        const nextSettings = { image_quality_jpeg: '95' };
+
+        expect(resolveSavedBackfillPendingTransition({
+            hasExistingImages: true,
+            savedBackfillRelevantChange: true,
+            previousBaseline,
+            nextSettings,
+            pendingBaseline: null,
+            defaults,
+        })).toEqual({
+            hasSavedBackfillPending: true,
+            pendingBaseline: previousBaseline,
+        });
+    });
+
+    it('clears a saved obligation when settings return to the pending baseline', () => {
+        const previousBaseline = { image_quality_jpeg: '90' };
+
+        expect(resolveSavedBackfillPendingTransition({
+            hasExistingImages: true,
+            savedBackfillRelevantChange: true,
+            previousBaseline,
+            nextSettings: { image_quality_jpeg: '90' },
+            pendingBaseline: previousBaseline,
+            defaults,
+        })).toEqual({
+            hasSavedBackfillPending: false,
+            pendingBaseline: null,
+        });
+    });
+
+    it('does not create a saved obligation when there are no existing images', () => {
+        const previousBaseline = { image_quality_jpeg: '90' };
+
+        expect(resolveSavedBackfillPendingTransition({
+            hasExistingImages: false,
+            savedBackfillRelevantChange: true,
+            previousBaseline,
+            nextSettings: { image_quality_jpeg: '95' },
+            pendingBaseline: null,
+            defaults,
+        })).toEqual({
+            hasSavedBackfillPending: false,
+            pendingBaseline: null,
+        });
     });
 });

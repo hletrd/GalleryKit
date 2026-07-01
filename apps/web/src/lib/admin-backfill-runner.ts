@@ -188,6 +188,8 @@ interface AdminBackfillState {
      * Reset to false at the start of every run.
      */
     lastRunHadFailures: boolean;
+    /** True when the last completed trigger found no pipeline-version candidates. */
+    lastRunNoCandidates: boolean;
     // AGG-R5C2-10 (COR-R5C2-01/-02) observability counters. All additive and
     // backward-compatible — existing consumers (admin-backfill.ts destructures
     // only `running`) are unaffected. These reflect the LAST run's tallies and
@@ -234,6 +236,7 @@ function getState(): AdminBackfillState {
             detectionFailures: 0,
             deletedMidReencode: 0,
             lastRunHadFailures: false,
+            lastRunNoCandidates: false,
         };
     }
     // Defensive backfill for state objects created before these fields existed
@@ -247,6 +250,7 @@ function getState(): AdminBackfillState {
     s.detectionFailures ??= 0;
     s.deletedMidReencode ??= 0;
     s.lastRunHadFailures ??= false;
+    s.lastRunNoCandidates ??= false;
     return s;
 }
 
@@ -261,6 +265,7 @@ function resetPerRunCounters(state: AdminBackfillState, queuedCount: number) {
     state.detectionFailures = 0;
     state.deletedMidReencode = 0;
     state.lastRunHadFailures = false;
+    state.lastRunNoCandidates = false;
 }
 
 /**
@@ -291,6 +296,7 @@ export function _resetAdminBackfillStateForTesting(): void {
         detectionFailures: 0,
         deletedMidReencode: 0,
         lastRunHadFailures: false,
+        lastRunNoCandidates: false,
     };
 }
 
@@ -310,6 +316,7 @@ export function readAdminBackfillState(): Readonly<AdminBackfillState> {
         detectionFailures: s.detectionFailures,
         deletedMidReencode: s.deletedMidReencode,
         lastRunHadFailures: s.lastRunHadFailures,
+        lastRunNoCandidates: s.lastRunNoCandidates,
     };
 }
 
@@ -855,10 +862,11 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         // The actual candidate fetch is now batched inside runBackfill.
         const candidateCount = await fetchCandidateCount();
         if (candidateCount === 0) {
-            // Nothing to do — record a clean completed no-op so stale
-            // failure/counter state from the previous run cannot survive in
-            // the admin status banner.
+            // Nothing to do — record a distinct completed no-candidate state
+            // so stale failure/counter state from the previous run cannot
+            // survive, without presenting it as a clean re-encode.
             resetPerRunCounters(state, 0);
+            state.lastRunNoCandidates = true;
             state.completedRuns++;
             await releaseBackfillLock(lockConn);
             return { status: 'queued', affectedRows: 0 };

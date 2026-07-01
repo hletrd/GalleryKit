@@ -301,7 +301,7 @@ describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-c
         );
     }
 
-    it('records a zero-candidate trigger as a clean completed no-op run', async () => {
+    it('records a zero-candidate trigger as a distinct completed no-op run', async () => {
         const sym = Symbol.for('gallerykit.adminBackfillState');
         (globalThis as typeof globalThis & Record<symbol, unknown>)[sym] = {
             running: false,
@@ -316,6 +316,7 @@ describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-c
             detectionFailures: 1,
             deletedMidReencode: 1,
             lastRunHadFailures: true,
+            lastRunNoCandidates: false,
         };
         const batches = buildExecuteMock(0);
 
@@ -335,6 +336,7 @@ describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-c
         expect(state.deletedMidReencode).toBe(0);
         expect(state.lastError).toBeNull();
         expect(state.lastRunHadFailures).toBe(false);
+        expect(state.lastRunNoCandidates).toBe(true);
         expect(state.completedRuns).toBe(5);
     });
 

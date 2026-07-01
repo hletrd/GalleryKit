@@ -17,16 +17,15 @@ describe('settings backfill warning persistence', () => {
         expect(SOURCE).toContain('const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults)');
         expect(SOURCE).toContain('const savedBackfillRelevantChange = Object.keys(changed).some((key) => SETTINGS_BACKFILL_WARNING_KEY_SET.has(key))');
         expect(SOURCE).toContain('backfillNoPipelineCandidatesSettingsOnly');
+        expect(SOURCE).toContain('resolveSavedBackfillPendingTransition');
         expect(SOURCE).toMatch(/toast\.info\(hasSavedBackfillPending\s*\?\s*t\('settings\.backfillNoPipelineCandidatesSettingsOnly'\)\s*:\s*t\('settings\.backfillNothingToDo'\)\)/);
         expect(SOURCE).toContain('const previousBaseline = initialRef.current');
         expect(SOURCE.indexOf('const previousBaseline = initialRef.current')).toBeLessThan(
             SOURCE.indexOf('initialRef.current = nextSettings'),
         );
-        expect(SOURCE).toContain('if (hasExistingImages && savedBackfillRelevantChange && !backfillPendingBaselineRef.current) {');
-        expect(SOURCE).toContain('backfillPendingBaselineRef.current = previousBaseline');
-        expect(SOURCE).toContain('const stillNeedsReencode = hasBackfillRelevantDifference(nextSettings, pendingBaseline, defaults)');
-        expect(SOURCE).toContain('setHasSavedBackfillPending(stillNeedsReencode)');
-        expect(SOURCE).toContain('backfillPendingBaselineRef.current = null');
+        expect(SOURCE).toContain('pendingBaseline: backfillPendingBaselineRef.current');
+        expect(SOURCE).toContain('backfillPendingBaselineRef.current = backfillPending.pendingBaseline');
+        expect(SOURCE).toContain('setHasSavedBackfillPending(backfillPending.hasSavedBackfillPending)');
         expect(SOURCE).toContain('{showBackfillRequired && (');
     });
 });
