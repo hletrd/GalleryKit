@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '67d2683e-p7';
+const SW_VERSION = 'a0a1f469-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -452,9 +452,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Revocable/public object pages — always bypass to network. Offline HTML
-  // cache can otherwise outlive share revoke/delete/expiry or photo deletion
-  // for up to HTML_MAX_AGE_MS.
+  // Revocable public object pages — always bypass to network. Offline HTML
+  // cache can otherwise outlive share revoke/delete/expiry or smart-collection
+  // membership changes for up to HTML_MAX_AGE_MS. Normal `/p/:id` photo pages
+  // intentionally remain eligible for the offline HTML fallback.
   if (isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)) return;
 
   // HTML routes — network-first with 24 h fallback

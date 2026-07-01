@@ -128,6 +128,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
+    const [settledQuery, setSettledQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | 'semanticSetupRequired' | null>(null);
@@ -155,12 +156,14 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         setLoading(false);
         setResults([]);
         setSearchStatus(null);
+        setSettledQuery('');
     }, []);
 
     const performSearch = useCallback(async (searchQuery: string, semantic: boolean) => {
         // Clear stale refs from previous result sets
         resultRefs.current = [];
-        if (!searchQuery.trim()) {
+        const normalizedQuery = searchQuery.trim();
+        if (!normalizedQuery) {
             clearSearchState();
             return;
         }
@@ -175,10 +178,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 // falls through to the generic 'error' branch. The
                 // keyword path surfaces a helpful message for the analogous case, so the
                 // semantic path should too.
-                if (countCodePoints(searchQuery.trim()) < SEMANTIC_MIN_QUERY_CODEPOINTS) {
+                if (countCodePoints(normalizedQuery) < SEMANTIC_MIN_QUERY_CODEPOINTS) {
                     setLoading(false);
                     setResults([]);
                     setSearchStatus('invalidSemantic');
+                    setSettledQuery(normalizedQuery);
                     return;
                 }
                 semanticAbortRef.current?.abort();
@@ -189,13 +193,14 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 const resp = await fetch('/api/search/semantic', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: searchQuery, topK: SEMANTIC_TOP_K_DEFAULT }),
+                    body: JSON.stringify({ query: normalizedQuery, topK: SEMANTIC_TOP_K_DEFAULT }),
                     signal: abortController.signal,
                 });
                 if (requestId !== requestIdRef.current) return;
                 if (resp.status === 429) {
                     setResults([]);
                     setSearchStatus('rateLimited');
+                    setSettledQuery(normalizedQuery);
                 } else if (resp.status === 503) {
                     let semanticErrorCode: string | undefined;
                     try {
@@ -210,9 +215,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             ? 'semanticSetupRequired'
                             : 'maintenance',
                     );
+                    setSettledQuery(normalizedQuery);
                 } else if (!resp.ok) {
                     setResults([]);
                     setSearchStatus('error');
+                    setSettledQuery(normalizedQuery);
                 } else {
                     const json = await resp.json() as { results?: { imageId: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null; lens_model?: string | null; capture_date?: string | null }[] };
                     // R4C6 COR-R4C6-07: resp.json() is a SECOND await — re-check
@@ -235,9 +242,10 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     }));
                     setResults(semanticResults);
                     setSearchStatus(null);
+                    setSettledQuery(normalizedQuery);
                 }
             } else {
-                const data = await searchImagesAction(searchQuery);
+                const data = await searchImagesAction(normalizedQuery);
                 if (requestId === requestIdRef.current) {
                     if (data.status === 'ok') {
                         setResults(data.results);
@@ -246,6 +254,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         setResults([]);
                         setSearchStatus(data.status);
                     }
+                    setSettledQuery(normalizedQuery);
                 }
             }
         } catch (err) {
@@ -255,6 +264,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             if (requestId === requestIdRef.current) {
                 setResults([]);
                 setSearchStatus('error');
+                setSettledQuery(normalizedQuery);
             }
         } finally {
             if (
@@ -268,6 +278,19 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             }
         }
     }, [clearSearchState]);
+
+    const handleQueryChange = useCallback((nextQuery: string) => {
+        requestIdRef.current++;
+        semanticAbortRef.current?.abort();
+        semanticAbortRef.current = null;
+        resultRefs.current = [];
+        setQuery(nextQuery);
+        setActiveIndex(-1);
+        setLoading(false);
+        setResults([]);
+        setSearchStatus(null);
+        setSettledQuery('');
+    }, []);
 
     useEffect(() => {
         return () => {
@@ -363,6 +386,20 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
         );
     }
 
+    const trimmedQuery = query.trim();
+    const hasSettledCurrentQuery = trimmedQuery.length > 0 && settledQuery === trimmedQuery;
+    const hasDisplayedResults = hasSettledCurrentQuery && results.length > 0;
+    const liveSearchStatusMessage = loading
+        ? t('search.searching')
+        : hasDisplayedResults
+            ? t('search.resultsCount', { count: results.length })
+            : '';
+    const visibleSearchStatusMessage = !loading && hasSettledCurrentQuery && !hasDisplayedResults
+        ? searchStatus
+            ? t(`search.${searchStatus}`)
+            : t('search.noResults')
+        : '';
+
     const dialog = (
         <div ref={modalRootRef} className="contents">
             <div
@@ -394,15 +431,15 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         <Input
                             id="search-input"
                             ref={inputRef}
-	                            aria-label={t('search.placeholder')}
-	                            aria-describedby={results.length > 0 ? 'search-keyboard-instructions' : undefined}
-	                            role="combobox"
-	                            aria-autocomplete="list"
-	                            aria-controls={results.length > 0 ? 'search-results' : undefined}
-	                            aria-expanded={results.length > 0}
-	                            aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `search-result-${activeIndex}` : undefined}
+                            aria-label={t('search.placeholder')}
+                            aria-describedby={hasDisplayedResults ? 'search-keyboard-instructions' : undefined}
+                            role="combobox"
+                            aria-autocomplete="list"
+                            aria-controls={hasDisplayedResults ? 'search-results' : undefined}
+                            aria-expanded={hasDisplayedResults}
+                            aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `search-result-${activeIndex}` : undefined}
                             value={query}
-                            onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
+                            onChange={(e) => handleQueryChange(e.target.value)}
                             onKeyDown={(e) => {
                                 // R4C6 COR-R4C6-01: while an IME composition
                                 // is in progress, arrows navigate the
@@ -424,7 +461,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             placeholder={t('search.placeholder')}
                             className="h-11 border-0 px-0 py-2 shadow-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         />
-                        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" role="status" aria-label={t('common.loading')} />}
+                        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" aria-hidden="true" />}
                         <Button
                             variant="ghost"
                             size="icon"
@@ -438,23 +475,15 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         </Button>
                     </div>
                     <div className="sr-only" aria-live="polite" aria-atomic="true">
-                        {loading
-                            ? t('search.searching')
-                            : searchStatus
-                                ? t(`search.${searchStatus}`)
-                                : query.trim() && results.length > 0
-                                    ? t('search.resultsCount', { count: results.length })
-                                    : query.trim()
-                                        ? t('search.noResults')
-                                        : ''}
+                        {liveSearchStatusMessage}
                     </div>
-                    {results.length > 0 && (
+                    {hasDisplayedResults && (
                         <p id="search-keyboard-instructions" className="sr-only">
                             {t('search.keyboardInstructions')}
                         </p>
                     )}
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
-                        {results.length > 0 ? (
+                        {hasDisplayedResults ? (
                             <div className="p-2" id="search-results" role="listbox" aria-label={t('aria.searchPhotos')}>
                                 {results.map((image, idx) => (
                                     <SearchResultItem
@@ -470,9 +499,9 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                     />
                                 ))}
                             </div>
-                        ) : query.trim() ? (
-                            <div className="p-8 text-center text-muted-foreground text-sm">
-                                {loading ? '' : searchStatus ? t(`search.${searchStatus}`) : t('search.noResults')}
+                        ) : trimmedQuery ? (
+                            <div className="p-8 text-center text-muted-foreground text-sm" role="status" aria-live="polite" aria-atomic="true">
+                                {visibleSearchStatusMessage}
                             </div>
                         ) : (
                             <div className="p-8 text-center text-muted-foreground text-sm">
@@ -482,7 +511,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     </div>
                     <div className="hidden sm:block p-2 border-t text-center">
                         <p className="text-xs text-muted-foreground">
-                            {results.length > 0 && (
+                            {hasDisplayedResults && (
                                 <span className="mr-2">{t('search.keyboardInstructions')}</span>
                             )}
                             <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}

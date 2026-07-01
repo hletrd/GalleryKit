@@ -9,9 +9,10 @@ describe('search disclaimer', () => {
 
   it('keeps the visible empty/error search status in the accessibility tree', () => {
     const statusBlock = src.match(
-      /\) : query\.trim\(\) \? \([\s\S]{0,160}<div className="p-8 text-center text-muted-foreground text-sm"([^>]*)>/,
+      /\) : trimmedQuery \? \([\s\S]{0,220}<div className="p-8 text-center text-muted-foreground text-sm"([^>]*)>/,
     );
     expect(statusBlock).not.toBeNull();
     expect(statusBlock?.[1] ?? '').not.toContain('aria-hidden');
+    expect(statusBlock?.[1] ?? '').toContain('role="status"');
   });
 });

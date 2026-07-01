@@ -1,0 +1,46 @@
+# Cycle 63 Photographer Product / Critic Review
+
+Reviewer: photographer-product / critic lane
+Date: 2026-07-01
+Start HEAD: `ecfda466cab14cd6a9ffbe03e6dc7d42023c8e82`
+Scope: read-only product review from a photographer's perspective. Assigned write target only: `.context/reviews/cycle-63-2026-07-01/photographer-product-critic.md`.
+
+## Required Context Read
+
+- `AGENTS.md`: project policy says color/HDR should preserve photographer intent and not ship edit/culling/scoring features (`AGENTS.md:45`), and lists the blocking quality gates (`AGENTS.md:29`).
+- `CLAUDE.md`: product premise, Color/HDR pipeline, HDR ingest, privacy, upload/backfill, deploy, and i18n guidance (`CLAUDE.md:269`, `CLAUDE.md:271`, `CLAUDE.md:300`, `CLAUDE.md:339`, `CLAUDE.md:467`, `CLAUDE.md:609`).
+- `.context/plans/README.md`: Cycle 62 is the active latest plan/deferred baseline (`.context/plans/README.md:7`, `.context/plans/README.md:8`).
+- `.context/reviews/_aggregate.md`: Cycle 62 fixed `C62-01` through `C62-03`; `C62-04` and named carry-forward items remain deferred (`.context/reviews/_aggregate.md:3`, `.context/reviews/_aggregate.md:12`).
+- Cycle 62 plan/deferred: full gates, signed commit, push, deploy, and deployed public-search smoke are recorded (`.context/plans/cycle-62-2026-07-01-plan.md:58`, `.context/plans/cycle-62-2026-07-01-plan.md:65`, `.context/plans/cycle-62-2026-07-01-plan.md:70`, `.context/plans/cycle-62-2026-07-01-plan.md:71`); search status duplication is explicitly deferred (`.context/plans/cycle-62-2026-07-01-deferred.md:7`, `.context/plans/cycle-62-2026-07-01-deferred.md:12`).
+- Current Cycle 63 peer artifacts already present: performance/deploy docs found `C63-PAD-01` on service-worker comment drift; UI/UX found `C63-UX-01` on admin analytics link target size. I did not duplicate those lane-owned findings.
+
+## Product-Facing Inventory
+
+- Color/HDR presentation: `apps/web/src/components/color-details-section.tsx`, `apps/web/src/components/lightbox-color-pip.tsx`, `apps/web/src/components/wide-gamut-hint.tsx`, `apps/web/src/components/histogram.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/lib/image-types.ts`.
+- Upload/re-encode workflows: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`.
+- Public sharing/search: `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/sql-like.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`.
+- Metadata privacy and public response shape: `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/__tests__/search-route-privacy.test.ts`.
+- Korean/i18n and product copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Operational availability docs: `AGENTS.md`, `CLAUDE.md`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, and current Cycle 63 deploy-doc peer review.
+
+## Findings
+
+No new photographer-product / critic findings.
+
+I found no new evidence that changes the schedule for `C62-04`, `C61-06`, `C61-07`, `PA-42-02`, `TV-40-03`, `PERF-C39-03`, `PERF-C39-04`, `AGG-C38-07`, or `AGG-C38-08`. I also did not re-raise the current peer-lane findings `C63-PAD-01` and `C63-UX-01`.
+
+## Evidence
+
+- Color/HDR public honesty remains explicit in render code. Public viewers can see color primaries and delivered bit-depth/format context, but transfer function, HDR badge, gain map, source bit depth, matrix, ICC profile, and pipeline decision are gated on `isAdmin` (`apps/web/src/components/color-details-section.tsx:201`, `apps/web/src/components/color-details-section.tsx:384`, `apps/web/src/components/color-details-section.tsx:455`, `apps/web/src/components/color-details-section.tsx:480`, `apps/web/src/components/color-details-section.tsx:544`, `apps/web/src/components/color-details-section.tsx:568`; `apps/web/src/components/lightbox-color-pip.tsx:51`, `apps/web/src/components/lightbox-color-pip.tsx:84`, `apps/web/src/components/lightbox-color-pip.tsx:244`).
+- Upload paths honor photographer/admin intent. Browser upload rejects HDR by default, warns when accepted, strips DB GPS plus retained originals, and writes color/HDR audit columns before enqueue (`apps/web/src/app/actions/images.ts:374`, `apps/web/src/app/actions/images.ts:383`, `apps/web/src/app/actions/images.ts:402`, `apps/web/src/app/actions/images.ts:454`, `apps/web/src/app/actions/images.ts:520`). The Lightroom/PAT upload route mirrors HDR, GPS, color-column, and processing-settings behavior (`apps/web/src/app/api/admin/lr/upload/route.ts:396`, `apps/web/src/app/api/admin/lr/upload/route.ts:407`, `apps/web/src/app/api/admin/lr/upload/route.ts:470`, `apps/web/src/app/api/admin/lr/upload/route.ts:518`).
+- Re-encode paths keep byte and metadata claims aligned. The encoder writes fresh per-format Sharp pipelines, P3/sRGB ICC tags, 10-bit AVIF when supported, atomic output paths, and verified non-empty base files (`apps/web/src/lib/process-image.ts:1220`, `apps/web/src/lib/process-image.ts:1251`, `apps/web/src/lib/process-image.ts:1304`, `apps/web/src/lib/process-image.ts:1391`, `apps/web/src/lib/process-image.ts:1424`, `apps/web/src/lib/process-image.ts:1439`). Queue and both backfill entry points persist `was_downscaled`/`avif_10bit`, update color columns only after detection succeeds, and avoid advancing `pipeline_version` on detection failure (`apps/web/src/lib/image-queue.ts:646`, `apps/web/src/lib/image-queue.ts:679`; `apps/web/src/lib/admin-backfill-runner.ts:586`, `apps/web/src/lib/admin-backfill-runner.ts:610`; `apps/web/scripts/backfill-color-pipeline.ts:259`, `apps/web/scripts/backfill-color-pipeline.ts:285`, `apps/web/scripts/backfill-color-pipeline.ts:448`).
+- Metadata privacy remains guarded. Public selects omit GPS, original filenames, upload attribution, HDR internals, source bit depth, color pipeline internals, and processing diagnostics, with compile-time guards for public and map surfaces (`apps/web/src/lib/data.ts:368`, `apps/web/src/lib/data.ts:375`, `apps/web/src/lib/data.ts:410`, `apps/web/src/lib/data.ts:473`). Public semantic/similar enrichment uses a shared compile-guarded field set and strips scores before response (`apps/web/src/lib/search-enrichment-fields.ts:29`, `apps/web/src/lib/search-enrichment-fields.ts:43`; `apps/web/src/app/api/search/semantic/route.ts:313`, `apps/web/src/app/api/search/semantic/route.ts:363`; `apps/web/src/app/api/search/similar/[id]/route.ts:207`, `apps/web/src/app/api/search/similar/[id]/route.ts:267`).
+- Public search and sharing are consistent with Cycle 62 fixes. Keyword search validates, rate-limits, calls the shared `containsLike()` helper, and rolls back failed attempts (`apps/web/src/app/actions/public.ts:237`, `apps/web/src/app/actions/public.ts:255`, `apps/web/src/app/actions/public.ts:305`); the helper emits `ESCAPE '!'`, avoiding the deployed MariaDB parse failure (`apps/web/src/lib/sql-like.ts:5`, `apps/web/src/lib/sql-like.ts:9`). Share metadata stays generic/noindex before the rate-limited body lookup, so key validity and image-specific details are not exposed in unthrottled metadata generation (`apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:44`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:98`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:49`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:104`).
+- Korean/i18n copy remains aligned with photographer-facing honesty. Korean search, HDR ingest, force-sRGB, semantic-search, GPS, and privacy copy clearly states the same operational limits as English (`apps/web/messages/ko.json:425`, `apps/web/messages/ko.json:745`, `apps/web/messages/ko.json:758`, `apps/web/messages/ko.json:768`, `apps/web/messages/ko.json:771`, `apps/web/messages/ko.json:820`; `apps/web/messages/en.json:425`, `apps/web/messages/en.json:745`, `apps/web/messages/en.json:758`, `apps/web/messages/en.json:769`, `apps/web/messages/en.json:771`, `apps/web/messages/en.json:820`).
+- No edit/culling/scoring product drift found. The product contract says no edit/culling/scoring features ship (`CLAUDE.md:271`). Current user-visible "edit" and "bulk edit" copy is metadata management, not photo editing or ranking (`apps/web/messages/en.json:218`, `apps/web/messages/en.json:233`; `apps/web/messages/ko.json:218`). Semantic/similar scores remain internal ranking data and are removed from public JSON as noted above.
+
+## Validation
+
+- Source review only for the product surfaces above; no source files were edited.
+- Focused regression run passed: `npm test --workspace=apps/web -- color-details-section-delivered lightbox-color-pip-hdr privacy-fields search-route-privacy semantic-search-route similar-route cycle-11-source-contracts data-tag-names-sql public-actions` -> 9 files passed, 123 tests passed.
+- Full lint/typecheck/build/full Vitest/deploy were not rerun in this lane; Cycle 62 plan records those gates and deployed public-search smoke as passed.

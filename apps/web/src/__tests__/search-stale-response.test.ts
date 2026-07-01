@@ -27,7 +27,7 @@ describe('semantic search stale-response guard (COR-R4C6-07)', () => {
     });
 
     it('the keyword branch keeps its own post-await guard', () => {
-        const kwIdx = SRC.indexOf('await searchImagesAction(searchQuery)');
+        const kwIdx = SRC.indexOf('await searchImagesAction(normalizedQuery)');
         expect(kwIdx).toBeGreaterThan(-1);
         const guardIdx = SRC.indexOf('requestId === requestIdRef.current', kwIdx);
         expect(guardIdx).toBeGreaterThan(kwIdx);
