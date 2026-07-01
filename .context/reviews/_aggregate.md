@@ -1,10 +1,9 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-89-2026-07-01/_aggregate.md`
+Current aggregate: `cycle-90-2026-07-01/_aggregate.md`
 
-Cycle 89 produced two deduplicated findings:
+Cycle 90 produced one deduplicated finding:
 
-- `C89-01` - Cycle 88 release ledger still marks commit/push/deploy incomplete after signed deployed HEAD `10cd166`.
-- `C89-02` - Color backfill detection ignores the operator-tuned full-image pixel cap while the encode path uses `MAX_INPUT_PIXELS`.
+- `C90-01` - Cycle 89 release ledger still marks commit/push/deploy incomplete after signed deployed HEAD `baefb42`.
 
-Cycle 89 schedules both findings. No new Cycle 89 findings are deferred. `C88-03`, `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
+Cycle 90 schedules the finding. No new Cycle 90 findings are deferred. `C88-03`, `C80-06`, `C77-ARCH-01`, `C76-04`, `C76-05`, and `C75-08` remain carry-forward deferred items.
