@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 86/100 Implementation Plan - active; schedules Cycle 85 release-ledger closure after signed deployed HEAD `0ba77ff` (`cycle-86-2026-07-01-plan.md`)
-- Cycle 86/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-86-2026-07-01-deferred.md`)
+- Cycle 87/100 Implementation Plan - active; schedules Cycle 86 release-ledger closure after signed deployed HEAD `ee83c13` (`cycle-87-2026-07-01-plan.md`)
+- Cycle 87/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-87-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 86/100 Implementation Plan - implementation committed/pushed/deployed as `ee83c13`; Cycle 87 started from deployed `ee83c13` (`cycle-86-2026-07-01-plan.md`)
+- Cycle 86/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-86-2026-07-01-deferred.md`)
 - Cycle 85/100 Implementation Plan - implementation committed/pushed/deployed as `0ba77ff`; Cycle 86 started from deployed `0ba77ff` (`cycle-85-2026-07-01-plan.md`)
 - Cycle 85/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-85-2026-07-01-deferred.md`)
 - Cycle 84/100 Implementation Plan - implementation committed/pushed/deployed as `1d29b988`; Cycle 85 started from deployed `1d29b988` (`cycle-84-2026-07-01-plan.md`)
