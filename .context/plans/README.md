@@ -4,13 +4,16 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 96/100 Implementation Plan - safe narrow fixes scheduled for token list errors, Unicode label input, privacy map disclosure, browser upload accept drift, and release ledger evidence from starting HEAD `2f22620c361304ba0408053f546f45e3c74ddfdb` (`cycle-96-2026-07-01-plan.md`)
+- Cycle 97/100 Implementation Plan - safe narrow fixes scheduled for feed maintenance/rate limiting, restore SQL scan-tail hardening, derivative cleanup, grid P3 badge visibility, upload accept source-contract parity, and release ledger evidence from deployed HEAD `061c1c81af234469641f75a53e5bbc61fa63114a` (`cycle-97-2026-07-01-plan.md`)
+- Cycle 97/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-97-2026-07-01-deferred.md`)
+- Cycle 96/100 Implementation Plan - committed/pushed/deployed as `061c1c81af234469641f75a53e5bbc61fa63114a`; closed safe narrow token list, Unicode label, privacy map disclosure, upload accept, and release ledger findings (`cycle-96-2026-07-01-plan.md`)
 - Cycle 96/100 Deferred Findings - broad restore/schema/query/UI/test/runbook findings preserved with original severity/confidence and exit criteria (`cycle-96-2026-07-01-deferred.md`)
 - Cycle 95/100 Implementation Plan - committed/pushed/deployed as `2178046587484fb301bc731f855699e44888d2e6`; closed safe narrow release-ledger evidence for Cycle 94 (`cycle-95-2026-07-01-plan.md`)
 - Cycle 95/100 Deferred Findings - no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 96/100 Implementation Plan - signed commit `061c1c81af234469641f75a53e5bbc61fa63114a` is the user-provided deployed `master` HEAD at Cycle 97 start (`cycle-96-2026-07-01-plan.md`)
 - Cycle 95/100 Implementation Plan - final docs-only release ledger sync committed/pushed at `2f22620c361304ba0408053f546f45e3c74ddfdb`; Cycle 96 started from user-provided deployed `master` HEAD `2f22620c361304ba0408053f546f45e3c74ddfdb` (`cycle-95-2026-07-01-plan.md`)
 - Cycle 94/100 Implementation Plan - committed/pushed/deployed as `750729ada2403c0c01267670b9552a05e0ead217`; Cycle 95 started from user-provided deployed `master` HEAD `750729ada2403c0c01267670b9552a05e0ead217` and pre-change production smoke was healthy (`cycle-94-2026-07-01-plan.md`)
 - Cycle 94/100 Deferred Findings - broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-94-2026-07-01-deferred.md`)

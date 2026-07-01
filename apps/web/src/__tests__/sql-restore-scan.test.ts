@@ -250,6 +250,26 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql(nextWindow.combined)).toBe(true);
     });
 
+    it('compacts scan-tail whitespace so split routine/view heads cannot outrun the tail window', () => {
+        const disallowedTails = [
+            'FUNCTION evil() RETURNS INT DETERMINISTIC RETURN 1;',
+            'PROCEDURE evil() SELECT 1;',
+            'VIEW evil AS SELECT 1;',
+            'TRIGGER evil BEFORE DELETE ON images FOR EACH ROW SET @x = 1;',
+        ];
+
+        for (const secondChunk of disallowedTails) {
+            const firstChunk = `CREATE${' '.repeat(SQL_SCAN_TAIL_BYTES + 1)}`;
+            const { combined, nextTail } = appendSqlScanChunk('', firstChunk);
+            expect(containsDangerousSql(combined), secondChunk).toBe(false);
+            expect(nextTail.length).toBeLessThanOrEqual(SQL_SCAN_TAIL_BYTES);
+            expect(nextTail).toBe('CREATE');
+
+            const nextWindow = appendSqlScanChunk(nextTail, secondChunk);
+            expect(containsDangerousSql(nextWindow.combined), secondChunk).toBe(true);
+        }
+    });
+
     it('keeps enough trailing context to detect dangerous statements split across chunk boundaries', () => {
         const firstChunk = `DROP${' '.repeat(2048)}`;
         const secondChunk = 'DATABASE gallerykit;';

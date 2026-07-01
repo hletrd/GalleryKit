@@ -73,6 +73,9 @@ describe('cycle 22 source contracts', () => {
     it('exposes the P3 gamut badge and route-error escape hatch to assistive tech', () => {
         const home = readSrc('components/home-client.tsx');
         expect(home).toContain('const photoAriaLabel = isWideGamut');
+        expect(home).toContain('useDisplayCapability');
+        expect(home).toContain("document.documentElement.setAttribute('data-display-gamut', displayGamut)");
+        expect(home).toContain("document.documentElement.setAttribute('data-force-show-color-chips', forceShowColorChips ? 'true' : 'false')");
         expect(home).toContain("(${t('viewer.gamutBadgeP3')})");
         expect(home).toContain('aria-label={photoAriaLabel}');
         expect(home).toContain('aria-label={t(\'viewer.gamutBadgeP3\')}');

@@ -15,12 +15,18 @@ const {
     getTopicBySlugMock,
     getGalleryConfigMock,
     getTranslationsMock,
+    isRestoreMaintenanceActiveMock,
+    getClientIpMock,
+    preIncrementFeedAttemptMock,
 } = vi.hoisted(() => ({
     getImagesForFeedMock: vi.fn(),
     getSeoSettingsMock: vi.fn(),
     getTopicBySlugMock: vi.fn(),
     getGalleryConfigMock: vi.fn(),
     getTranslationsMock: vi.fn(),
+    isRestoreMaintenanceActiveMock: vi.fn(),
+    getClientIpMock: vi.fn(),
+    preIncrementFeedAttemptMock: vi.fn(),
 }));
 
 vi.mock('@/lib/data', () => ({
@@ -31,6 +37,15 @@ vi.mock('@/lib/data', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
+}));
+
+vi.mock('@/lib/restore-maintenance', () => ({
+    isRestoreMaintenanceActive: isRestoreMaintenanceActiveMock,
+}));
+
+vi.mock('@/lib/rate-limit', () => ({
+    getClientIp: getClientIpMock,
+    preIncrementFeedAttempt: preIncrementFeedAttemptMock,
 }));
 
 vi.mock('next-intl/server', () => ({
@@ -77,9 +92,25 @@ beforeEach(() => {
     getImagesForFeedMock.mockResolvedValue([{ ...FEED_ROW }]);
     getTopicBySlugMock.mockResolvedValue({ slug: 'landscape', label: 'Landscape' });
     getTranslationsMock.mockResolvedValue((key: string) => (key === 'photo' ? 'Photo' : key));
+    isRestoreMaintenanceActiveMock.mockReturnValue(false);
+    getClientIpMock.mockReturnValue('203.0.113.10');
+    preIncrementFeedAttemptMock.mockReturnValue(false);
 });
 
 describe('root /feed.xml route conditional requests', () => {
+    it('returns a non-cacheable 503 during restore maintenance before feed-shaping work', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        const response = await getRootFeed(feedRequest('/feed.xml'));
+
+        expect(response.status).toBe(503);
+        expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
+        expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+        expect(getSeoSettingsMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+        expect(getImagesForFeedMock).not.toHaveBeenCalled();
+    });
+
     it('returns a 200 Atom feed with an ETag derived from rendered XML', async () => {
         const response = await getRootFeed(feedRequest('/feed.xml'));
 
@@ -189,6 +220,44 @@ describe('topic /[locale]/[topic]/feed.xml route conditional requests', () => {
 
         expect(response.status).toBe(404);
         expect(getTopicBySlugMock).toHaveBeenCalledWith('missing');
+        expect(getSeoSettingsMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+        expect(getTranslationsMock).not.toHaveBeenCalled();
+        expect(getImagesForFeedMock).not.toHaveBeenCalled();
+    });
+
+    it('returns a non-cacheable 503 during restore maintenance before topic/feed DB work', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        const response = await getTopicFeed(
+            feedRequest('/en/landscape/feed.xml'),
+            topicParams('en', 'landscape'),
+        );
+
+        expect(response.status).toBe(503);
+        expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
+        expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+        expect(getTopicBySlugMock).not.toHaveBeenCalled();
+        expect(getSeoSettingsMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+        expect(getTranslationsMock).not.toHaveBeenCalled();
+        expect(getImagesForFeedMock).not.toHaveBeenCalled();
+    });
+
+    it('rate-limits topic feed DB lookups before resolving attacker-controlled topic segments', async () => {
+        preIncrementFeedAttemptMock.mockReturnValue(true);
+
+        const response = await getTopicFeed(
+            feedRequest('/en/random-probe/feed.xml'),
+            topicParams('en', 'random-probe'),
+        );
+
+        expect(response.status).toBe(429);
+        expect(response.headers.get('Cache-Control')).toBe('no-store, no-cache, must-revalidate');
+        expect(response.headers.get('Retry-After')).toBe('60');
+        expect(getClientIpMock).toHaveBeenCalled();
+        expect(preIncrementFeedAttemptMock).toHaveBeenCalledWith('203.0.113.10', expect.any(Number));
+        expect(getTopicBySlugMock).not.toHaveBeenCalled();
         expect(getSeoSettingsMock).not.toHaveBeenCalled();
         expect(getGalleryConfigMock).not.toHaveBeenCalled();
         expect(getTranslationsMock).not.toHaveBeenCalled();

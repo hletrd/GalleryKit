@@ -100,6 +100,15 @@ export const shareRateLimit = createResetAtBoundedMap<string>(SHARE_RATE_LIMIT_M
 const SHARE_RATE_LIMIT_PRUNE_INTERVAL_MS = 60 * 1000; // 1 minute
 let lastShareRateLimitPruneAt = 0;
 
+// In-memory rate limit for public per-topic Atom feed lookups. Successful feed
+// responses remain publicly cacheable, but topic-miss probes still hit DB.
+export const FEED_WINDOW_MS = 60 * 1000;
+export const FEED_MAX_REQUESTS = 60;
+export const FEED_RATE_LIMIT_MAX_KEYS = 2000;
+export const feedRateLimit = createResetAtBoundedMap<string>(FEED_RATE_LIMIT_MAX_KEYS);
+const FEED_RATE_LIMIT_PRUNE_INTERVAL_MS = 60 * 1000;
+let lastFeedRateLimitPruneAt = 0;
+
 // Re-export RateLimitEntry from bounded-map for backward compatibility
 export type RateLimitEntry = WindowEntry;
 
@@ -347,6 +356,38 @@ export function preIncrementShareAttempt(ip: string, now: number = Date.now()): 
 export function resetShareRateLimitForTests() {
     shareRateLimit.clear();
     lastShareRateLimitPruneAt = 0;
+}
+
+export function pruneFeedRateLimit(now: number, options?: { force?: boolean }) {
+    const shouldPrune =
+        options?.force
+        || feedRateLimit.size > FEED_RATE_LIMIT_MAX_KEYS
+        || now - lastFeedRateLimitPruneAt >= FEED_RATE_LIMIT_PRUNE_INTERVAL_MS;
+
+    if (!shouldPrune) {
+        return false;
+    }
+
+    lastFeedRateLimitPruneAt = now;
+    feedRateLimit.prune(now);
+    return true;
+}
+
+/** Returns `true` when the public feed bucket is over the limit. */
+export function preIncrementFeedAttempt(ip: string, now: number = Date.now()): boolean {
+    pruneFeedRateLimit(now);
+    const entry = feedRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        feedRateLimit.set(ip, { count: 1, resetAt: now + FEED_WINDOW_MS });
+    } else {
+        feedRateLimit.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
+    }
+    return (feedRateLimit.get(ip)?.count ?? 0) > FEED_MAX_REQUESTS;
+}
+
+export function resetFeedRateLimitForTests() {
+    feedRateLimit.clear();
+    lastFeedRateLimitPruneAt = 0;
 }
 
 // ── Semantic search rate-limit helpers ────────────────────────────────

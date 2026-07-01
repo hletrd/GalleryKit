@@ -28,6 +28,12 @@ function hasMetadataProvider(path: string): boolean {
   );
 }
 
+function parseSingleQuotedArrayItems(sourceCode: string, pattern: RegExp): string[] {
+  const body = pattern.exec(sourceCode)?.[1];
+  expect(body).toBeTruthy();
+  return Array.from(body!.matchAll(/'([^']+)'/g), (match) => match[1]).sort();
+}
+
 describe('client component source contracts', () => {
   it('refreshes the dashboard after partial-success uploads', () => {
     const code = source('components/upload-dropzone.tsx');
@@ -97,12 +103,10 @@ describe('client component source contracts', () => {
 
   it('upload picker advertises backend-supported first-class browser uploads', () => {
     const code = source('components/upload-dropzone.tsx');
-    const acceptList = /'image\/\*':\s*\[([^\]]+)\]/.exec(code)?.[1] ?? '';
-    for (const ext of ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']) {
-      expect(acceptList).toContain(`'${ext}'`);
-    }
+    const acceptExtensions = parseSingleQuotedArrayItems(code, /'image\/\*':\s*\[([^\]]+)\]/);
+    expect(acceptExtensions).toEqual(['.avif', '.bmp', '.gif', '.heic', '.heif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp'].sort());
     for (const ext of ['.arw', '.cr2', '.nef']) {
-      expect(acceptList).not.toContain(`'${ext}'`);
+      expect(acceptExtensions).not.toContain(ext);
     }
   });
 
@@ -215,9 +219,8 @@ describe('client component source contracts', () => {
   it('keeps browser upload accept extensions aligned with backend-supported photo formats', () => {
     const dropzone = source('components/upload-dropzone.tsx');
     const processor = source('lib/process-image.ts');
-    for (const ext of ['.heic', '.heif', '.bmp']) {
-      expect(processor).toContain(`'${ext}'`);
-      expect(dropzone).toContain(`'${ext}'`);
-    }
+    const acceptExtensions = parseSingleQuotedArrayItems(dropzone, /'image\/\*':\s*\[([^\]]+)\]/);
+    const backendExtensions = parseSingleQuotedArrayItems(processor, /const ALLOWED_EXTENSIONS = new Set\(\[\s*([\s\S]*?)\s*\]\)/);
+    expect(acceptExtensions).toEqual(backendExtensions);
   });
 });

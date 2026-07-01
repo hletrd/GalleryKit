@@ -157,6 +157,7 @@ export default async function SmartCollectionPage({ params }: { params: Promise<
                 hasMore={hasMore}
                 totalCount={totalCount}
                 imageSizes={config.imageSizes}
+                forceShowColorChips={config.forceShowColorChips}
                 smartCollectionSlug={collection.slug}
             />
         </>

@@ -16,6 +16,7 @@ import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { useDisplayCapability } from '@/lib/use-display-capability';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -119,15 +120,26 @@ interface HomeClientProps {
     hasMore?: boolean;
     totalCount?: number;
     imageSizes?: number[];
+    forceShowColorChips?: boolean;
 }
 
-export function HomeClient({ images, tags, topics, currentTags, topicSlug, smartCollectionSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES }: HomeClientProps) {
+export function HomeClient({ images, tags, topics, currentTags, topicSlug, smartCollectionSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES, forceShowColorChips = false }: HomeClientProps) {
     const { t, locale } = useTranslation();
     const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);
+    const { colorGamut: displayGamut } = useDisplayCapability();
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-display-gamut', displayGamut);
+        document.documentElement.setAttribute('data-force-show-color-chips', forceShowColorChips ? 'true' : 'false');
+        return () => {
+            document.documentElement.removeAttribute('data-display-gamut');
+            document.documentElement.removeAttribute('data-force-show-color-chips');
+        };
+    }, [displayGamut, forceShowColorChips]);
 
     const scrollKey = useMemo(() => `${SCROLL_STORAGE_PREFIX}${pathname}`, [pathname]);
 

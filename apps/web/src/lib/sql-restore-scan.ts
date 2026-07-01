@@ -199,6 +199,19 @@ function stripSqlCommentsAsSpacesAndValueLiterals(input: string): string {
     ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
 }
 
+function compactSqlScanTail(input: string): string {
+    const forms = [
+        stripSqlCommentsAndLiterals(input),
+        stripSqlCommentsAndLiteralsWithCommentSpaces(input),
+        stripSqlCommentsAndValueLiterals(input),
+        stripSqlCommentsAsSpacesAndValueLiterals(input),
+    ];
+    const compactedForms = forms
+        .map((form) => form.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+    return Array.from(new Set(compactedForms)).join('\n');
+}
+
 function normalizeSqlIdentifier(identifier: string) {
     const trimmed = identifier.trim();
     if (trimmed.startsWith('`') && trimmed.endsWith('`')) {
@@ -256,9 +269,10 @@ export function appendSqlScanChunk(
     chunk: string,
     maxTailBytes: number = SQL_SCAN_TAIL_BYTES,
 ) {
-    const combined = `${previousTail}${chunk}`;
+    const combined = previousTail ? `${previousTail}\n${chunk}` : chunk;
+    const compactTail = compactSqlScanTail(combined);
     return {
         combined,
-        nextTail: combined.slice(-maxTailBytes),
+        nextTail: compactTail.slice(-maxTailBytes),
     };
 }

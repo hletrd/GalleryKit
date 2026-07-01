@@ -222,7 +222,7 @@ export default async function TopicPage({
           }}
         />
       )}
-      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topicData.slug} heading={topicData.label} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
+      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topicData.slug} heading={topicData.label} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} forceShowColorChips={config.forceShowColorChips} />
     </>
   );
 }

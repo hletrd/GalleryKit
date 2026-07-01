@@ -230,7 +230,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
         />
       )}
       <div className="space-y-12">
-        <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
+        <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} forceShowColorChips={config.forceShowColorChips} />
         <OnThisDayWidget />
       </div>
     </>

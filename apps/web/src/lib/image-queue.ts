@@ -25,12 +25,14 @@ import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
 import { parseBoundedPositiveInteger } from '@/lib/env';
 
+export const ORPHANED_DERIVATIVE_TEMP_MIN_AGE_MS = 60 * 60 * 1000;
+
 /**
- * Remove orphaned .tmp files from upload directories.
- * These are created during atomic rename in processImageFormats and may
- * persist if the process crashes between link and rename.
+ * Remove stale orphaned derivative temp/backup files from upload directories.
+ * Fresh files may belong to a sidecar backfill that overlaps a web restart, so
+ * cleanup is age-gated instead of deleting every matching filename at startup.
  */
-async function cleanOrphanedTmpFiles(): Promise<void> {
+export async function cleanOrphanedTmpFiles(now: number = Date.now()): Promise<void> {
     const dirs = [UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG];
     // C7R-RPL-09 / AGG7R-13: scan directories in parallel. Prior
     // sequential for-loop stacked readdir+unlink latency per dir at
@@ -39,21 +41,37 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
     await Promise.all(dirs.map(async (dir) => {
         try {
             const entries = await fs.readdir(dir);
-            const tmpFiles = entries.filter(f => f.endsWith('.tmp'));
-            if (tmpFiles.length === 0) return;
+            const tempFiles = entries.filter(f => f.endsWith('.tmp') || f.endsWith('.bak'));
+            if (tempFiles.length === 0) return;
+            const staleFiles: string[] = [];
+            await Promise.all(tempFiles.map(async (f) => {
+                const filePath = path.join(dir, f);
+                try {
+                    const stat = await fs.stat(filePath);
+                    if (now - stat.mtimeMs >= ORPHANED_DERIVATIVE_TEMP_MIN_AGE_MS) {
+                        staleFiles.push(f);
+                    }
+                } catch (err) {
+                    const code = err && typeof err === 'object' && 'code' in err
+                        ? (err as { code?: unknown }).code
+                        : null;
+                    if (code !== 'ENOENT') throw err;
+                }
+            }));
+            if (staleFiles.length === 0) return;
             // C6R-RPL-04 / AGG6R-03: log AFTER unlink so the count reflects
             // files actually removed (not files merely discovered). Prior
             // behavior claimed "Removing N" before any unlink ran, which
             // misrepresents the operation if unlinks quietly fail.
             const settled = await Promise.allSettled(
-                tmpFiles.map(f => fs.unlink(path.join(dir, f))),
+                staleFiles.map(f => fs.unlink(path.join(dir, f))),
             );
             const removed = settled.filter(r => r.status === 'fulfilled').length;
             const failures = settled.length - removed;
             if (failures > 0) {
-                console.warn(`[Cleanup] Removed ${removed}/${settled.length} orphaned .tmp files from ${dir} (${failures} unlink errors)`);
+                console.warn(`[Cleanup] Removed ${removed}/${settled.length} stale orphaned derivative temp files from ${dir} (${failures} unlink errors)`);
             } else {
-                console.debug(`[Cleanup] Removed ${removed} orphaned .tmp files from ${dir}`);
+                console.debug(`[Cleanup] Removed ${removed} stale orphaned derivative temp files from ${dir}`);
             }
         } catch (err) {
             // C8R-RPL-04 / AGG8R-08: narrow the catch. ENOENT is
@@ -68,7 +86,7 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
             if (code === 'ENOENT') {
                 return;
             }
-            console.warn(`[Cleanup] Failed to scan ${dir} for orphaned .tmp files:`, err);
+            console.warn(`[Cleanup] Failed to scan ${dir} for stale orphaned derivative temp files:`, err);
         }
     }));
 }
