@@ -466,7 +466,7 @@ Compare against `apps/web/drizzle/meta/_journal.json` entries × `SHA256` of eac
 
 ### Per-iteration deploy directive
 
-`npm run deploy` from the repo root reads gitignored `.env.deploy`, connects to the configured deploy host, and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The deploy target is configuration-owned by `.env.deploy`, not hardcoded in documentation. The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
+`npm run deploy` from the repo root reads the gitignored root `.env.deploy` when present, otherwise falls back to `$HOME/.gallerykit-secrets/gallery-deploy.env` unless `DEPLOY_ENV_FILE` points somewhere else. It connects to the configured deploy host and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The deploy target is configuration-owned by that deploy env file, not hardcoded in documentation. The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
 
 ### Disk hygiene
 

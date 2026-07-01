@@ -14,8 +14,8 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 ## Deploy
 
-- **`npm run deploy` from repo root** is per-iteration policy. Runs after every commit pushed to `master`. Reads gitignored `.env.deploy`. No staging.
-- The deploy host and SSH credentials are config-driven via the gitignored root `.env.deploy` (copy from `.env.deploy.example`, then `chmod 600 .env.deploy`); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in `.env.deploy` (see `CLAUDE.md` "Remote Deploy Helper").
+- **`npm run deploy` from repo root** is per-iteration policy. Runs after every commit pushed to `master`. Reads gitignored root `.env.deploy` when present, otherwise `$HOME/.gallerykit-secrets/gallery-deploy.env` unless `DEPLOY_ENV_FILE` overrides it. No staging.
+- The deploy host and SSH credentials are config-driven via the deploy env file (copy `.env.deploy.example` to `.env.deploy`, then `chmod 600 .env.deploy`, for the root-local path); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in the deploy env file (see `CLAUDE.md` "Remote Deploy Helper").
 - **`apps/web/deploy.sh` auto-prunes Docker after every deploy** (`container` + `image -af` + `builder -af` + `volume` prune — `volume` WITHOUT `-a`) so the disk-constrained host stays clean. The prune runs AFTER `up -d`, so the live container + its image survive; in-use data is never touched (persistence is bind mounts `./data`, `./public/uploads`, `./public/resources`, read-only `./src/site-config.json`, plus host MySQL; immutable public assets come from the built image). Preserve all three guarantees (prune-after-up, bind-mounted data, no `-a` on the auto `volume prune`) if you change it. See `CLAUDE.md` "Disk hygiene".
 - **Never `npm install` inside the running `gallerykit-web` container** — it clobbers prod-deps and crashes the site. For one-off scripts use a `--rm` sidecar from `web-web:latest` with read-only source mounts (see `CLAUDE.md` "Backfill" section).
 
