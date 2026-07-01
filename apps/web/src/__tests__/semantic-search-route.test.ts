@@ -160,11 +160,23 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
     it('returns 503 when restore maintenance is active', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
+        const textMock = vi.fn(async () => JSON.stringify({ query: 'mountain landscape' }));
+        const request = {
+            headers: new Headers({ 'content-type': 'application/json', 'content-length': '30' }),
+            signal: new AbortController().signal,
+            text: textMock,
+        } as unknown as NextRequest;
 
-        const response = await POST(mockRequest({ query: 'mountain landscape' }));
+        const response = await POST(request);
 
         expect(response.status).toBe(503);
         await expect(response.json()).resolves.toEqual({ error: 'Maintenance' });
+        expect(textMock).not.toHaveBeenCalled();
+        expect(getClientIpMock).not.toHaveBeenCalled();
+        expect(preIncrementSemanticAttemptMock).not.toHaveBeenCalled();
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
+        expect(getGalleryConfigMock).not.toHaveBeenCalled();
+        expect(dbSelectMock).not.toHaveBeenCalled();
     });
 
     it('returns 400 for non-finite Content-Length (C12-LOW-02)', async () => {

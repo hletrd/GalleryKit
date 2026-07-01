@@ -31,12 +31,13 @@ describe('cycle 11 source contracts', () => {
         }
     });
 
-    it('LIKE search predicates emit an explicit ESCAPE clause', () => {
+    it('LIKE search predicates emit a MariaDB-safe explicit ESCAPE clause', () => {
         const helper = src('lib/sql-like.ts');
         const data = src('lib/data.ts');
         const smartCollections = src('lib/smart-collections.ts');
 
-        expect(helper).toContain("ESCAPE '\\\\'");
+        expect(helper).toContain("ESCAPE '!'");
+        expect(helper).toContain("value.replace(/[!%_]/g, '!$&')");
         expect(data).toContain("import { containsLike } from './sql-like'");
         expect(smartCollections).toContain("import { containsLike } from '@/lib/sql-like'");
         expect(data).not.toContain('like(images.title');

@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 61/100 Implementation Plan — active; OG restore-maintenance guards, LR restore-window ordering, migration journal reverse guard, Cycle 60 ledger closure, and local env mode correction scheduled (`cycle-61-2026-07-01-plan.md`)
-- Cycle 61/100 Deferred Findings — broad test-coverage gaps deferred; carry-forward items repeated (`cycle-61-2026-07-01-deferred.md`)
+- Cycle 62/100 Implementation Plan — active; Cycle 61 ledger closure, public search MariaDB LIKE escape fix, and semantic maintenance assertion scheduled (`cycle-62-2026-07-01-plan.md`)
+- Cycle 62/100 Deferred Findings — search status announcement polish deferred; carry-forward items repeated (`cycle-62-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 61/100 Implementation Plan — active; OG restore-maintenance guards, LR restore-window ordering, migration journal reverse guard, Cycle 60 ledger closure, and local env mode correction scheduled (`cycle-61-2026-07-01-plan.md`)
+- Cycle 62/100 Implementation Plan — active; Cycle 61 ledger closure, public search MariaDB LIKE escape fix, and semantic maintenance assertion scheduled (`cycle-62-2026-07-01-plan.md`)
+- Cycle 62/100 Deferred Findings — search status announcement polish deferred; carry-forward items repeated (`cycle-62-2026-07-01-deferred.md`)
+- Cycle 61/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 62 started from deployed `0bf3371c` (`cycle-61-2026-07-01-plan.md`)
 - Cycle 61/100 Deferred Findings — broad test-coverage gaps deferred; carry-forward items repeated (`cycle-61-2026-07-01-deferred.md`)
 - Cycle 60/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 61 started from deployed `7e85644e` (`cycle-60-2026-07-01-plan.md`)
 - Cycle 60/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-60-2026-07-01-deferred.md`)

@@ -214,6 +214,23 @@ describe('getImagesLite tag_names SQL shape', () => {
         expect(searchFnBody).not.toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
     });
 
+    it('Drizzle compiled LIKE predicates use a MariaDB-safe escape marker', async () => {
+        const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');
+        const { images } = await import('../db/schema');
+        const { containsLike } = await import('../lib/sql-like');
+        const proxyDb = drizzleProxy(async () => ({ rows: [] }));
+
+        const compiled = proxyDb
+            .select({ id: images.id })
+            .from(images)
+            .where(containsLike(images.title, '100%_!'))
+            .toSQL();
+
+        expect(compiled.sql.toLowerCase()).toContain("escape '!'");
+        expect(compiled.sql.toLowerCase()).not.toContain("escape '\\\\'");
+        expect(compiled.params).toContain('%100!%!_!!%');
+    });
+
     /**
      * C14-MED-01: lock that getImageByShareKey uses a single query with
      * LEFT JOIN + GROUP_CONCAT for tags instead of two sequential queries
