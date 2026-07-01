@@ -82,6 +82,23 @@ export function getPhotoDisplayTitleFromTagNames(
     );
 }
 
+export function getPhotoResultLabel(
+    image: { title: string | null | undefined; description?: string | null | undefined },
+    fallback: string,
+): string {
+    const title = image.title?.trim();
+    if (title && !isFilenameLikeTitle(title)) {
+        return title;
+    }
+
+    const description = image.description?.trim();
+    if (description) {
+        return description;
+    }
+
+    return fallback;
+}
+
 export function getConcisePhotoAltText(
     image: {
         title: string | null | undefined;

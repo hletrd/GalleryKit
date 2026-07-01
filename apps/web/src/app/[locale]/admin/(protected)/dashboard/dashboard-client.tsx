@@ -36,6 +36,10 @@ interface DashboardClientProps {
     hasExistingImages: boolean;
 }
 
+function getFailedImageLabel(img: FailedImage): string {
+    return img.title?.trim() || img.user_filename?.trim() || `ID ${img.id}`;
+}
+
 export function DashboardClient({ images, failedImages: initialFailed, topics, tags, page, totalPages, imageSizes, shareBaseUrl, uploadLimits, stripGpsOnUpload, hasExistingImages }: DashboardClientProps) {
     const { t, locale } = useTranslation();
     const [failedImages, setFailedImages] = useState<FailedImage[]>(initialFailed);
@@ -77,11 +81,16 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                         {t('dashboard.failedImages', { count: failedImages.length })}
                     </h2>
                     <div className="space-y-2">
-                        {failedImages.map((img) => (
-                            <div
-                                key={img.id}
-                                className="flex items-center gap-3 rounded-md bg-background p-2"
-                            >
+                        {failedImages.map((img) => {
+                            const label = getFailedImageLabel(img);
+                            const labelId = `failed-image-label-${img.id}`;
+                            const errorId = img.processing_error ? `failed-image-error-${img.id}` : undefined;
+                            const retrying = retryingId === img.id;
+                            return (
+                                <div
+                                    key={img.id}
+                                    className="flex items-center gap-3 rounded-md bg-background p-2"
+                                >
                                 {/* R4C2 UX-R4C2-03: an image lands in this panel
                                     BECAUSE processing failed — in the dominant
                                     failure class the _64.jpg derivative was never
@@ -97,10 +106,10 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                                     <ImageOff className="h-5 w-5 text-muted-foreground" />
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium">
-                                        {img.title ?? img.user_filename ?? `ID ${img.id}`}
+                                    <p id={labelId} className="truncate text-sm font-medium">
+                                        {label}
                                     </p>
-                                    <p className="truncate text-xs text-muted-foreground">
+                                    <p id={errorId} className="truncate text-xs text-muted-foreground">
                                         {img.processing_error}
                                     </p>
                                 </div>
@@ -110,12 +119,15 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                                     className="shrink-0"
                                     disabled={retryingId === img.id}
                                     onClick={() => handleRetry(img.id)}
+                                    aria-label={t(retrying ? 'dashboard.retryingImageAria' : 'dashboard.retryImageAria', { label })}
+                                    aria-describedby={errorId}
                                 >
                                     <RotateCcw className="h-4 w-4 mr-1" />
-                                    {retryingId === img.id ? t('dashboard.retrying') : t('dashboard.retry')}
+                                    {retrying ? t('dashboard.retrying') : t('dashboard.retry')}
                                 </Button>
-                            </div>
-                        ))}
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             )}

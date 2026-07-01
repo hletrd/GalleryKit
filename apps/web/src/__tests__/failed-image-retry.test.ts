@@ -20,6 +20,9 @@ const dataSource = fs.readFileSync(dataPath, 'utf8');
 const actionsPath = path.join(__dirname, '..', 'app', 'actions', 'images.ts');
 const actionsSource = fs.readFileSync(actionsPath, 'utf8');
 
+const dashboardPath = path.join(__dirname, '..', 'app', '[locale]', 'admin', '(protected)', 'dashboard', 'dashboard-client.tsx');
+const dashboardSource = fs.readFileSync(dashboardPath, 'utf8');
+
 describe('R10-H2: failed image persistence and retry', () => {
     describe('image-queue.ts failure persistence', () => {
         it('persists processing_error to DB when MAX_RETRIES exceeded', () => {
@@ -143,6 +146,20 @@ describe('R10-H2: failed image persistence and retry', () => {
 
         it('returns { success: true } on successful retry initiation', () => {
             expect(actionsSource).toMatch(/return\s*\{\s*success:\s*true\s+as\s+const\s*\}/);
+        });
+    });
+
+    describe('dashboard retry accessibility', () => {
+        it('labels each retry button with the failed image row label', () => {
+            expect(dashboardSource).toContain('function getFailedImageLabel(img: FailedImage): string');
+            expect(dashboardSource).toContain("img.title?.trim() || img.user_filename?.trim() || `ID ${img.id}`");
+            expect(dashboardSource).toContain("aria-label={t(retrying ? 'dashboard.retryingImageAria' : 'dashboard.retryImageAria', { label })}");
+        });
+
+        it('describes retry buttons with the processing error when present', () => {
+            expect(dashboardSource).toContain('const errorId = img.processing_error ? `failed-image-error-${img.id}` : undefined');
+            expect(dashboardSource).toContain('id={errorId}');
+            expect(dashboardSource).toContain('aria-describedby={errorId}');
         });
     });
 });

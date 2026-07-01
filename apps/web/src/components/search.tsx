@@ -21,6 +21,7 @@ import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embedding-constants';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
 import { countCodePoints } from '@/lib/utils';
 import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
+import { getPhotoResultLabel } from '@/lib/photo-title';
 
 // AGG-C8-04 (run-6 cycle-8): the semantic route rejects queries shorter than this
 // many code points with HTTP 400 (api/search/semantic/route.ts: `countCodePoints(query) < 3`).
@@ -67,6 +68,7 @@ function SearchResultItem({
 }: SearchResultItemProps) {
     const sizedSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, previewImageSizes);
     const baseSrc = imageUrl(`/uploads/jpeg/${image.filename_jpeg}`);
+    const label = getPhotoResultLabel(image, `${t('common.photo')} ${image.id}`);
     const [imgSrc, setImgSrc] = useState<string>(sizedSrc);
     const fallbackTriedRef = useRef(false);
     return (
@@ -100,7 +102,7 @@ function SearchResultItem({
             </div>
             <div className="min-w-0 flex-1">
                 <p className="font-medium text-sm truncate">
-                    {image.title || image.description || `${t('common.photo')} ${image.id}`}
+                    {label}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">
                     {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, image.lens_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' · ')}

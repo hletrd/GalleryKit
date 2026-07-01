@@ -15,4 +15,10 @@ describe('search disclaimer', () => {
     expect(statusBlock?.[1] ?? '').not.toContain('aria-hidden');
     expect(statusBlock?.[1] ?? '').toContain('role="status"');
   });
+
+  it('normalizes result labels through the shared photo-title helper', () => {
+    expect(src).toMatch(/import\s+\{\s*getPhotoResultLabel\s*\}\s+from '@\/lib\/photo-title'/);
+    expect(src).toContain('const label = getPhotoResultLabel(image, `${t(\'common.photo\')} ${image.id}`)');
+    expect(src).not.toContain('image.title || image.description');
+  });
 });

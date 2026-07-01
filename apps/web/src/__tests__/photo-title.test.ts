@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDisplayTitleFromTagNames, getPhotoDocumentTitle, humanizeTagLabel, isFilenameLikeTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDisplayTitleFromTagNames, getPhotoDocumentTitle, getPhotoResultLabel, humanizeTagLabel, isFilenameLikeTitle } from '@/lib/photo-title';
 
 describe('isFilenameLikeTitle', () => {
     it('recognizes filename-like titles', () => {
@@ -86,6 +86,18 @@ describe('lite photo title helpers', () => {
 
     it('humanizes slug-style underscores in tag-derived alt text', () => {
         expect(getConcisePhotoAltText({ title: 'IMG_0001.JPG', tag_names: 'Music_Festival,Night_Sky' }, 'Photo')).toBe('Music Festival, Night Sky');
+    });
+});
+
+describe('getPhotoResultLabel', () => {
+    it('rejects blank and filename-like result titles before using description or fallback', () => {
+        expect(getPhotoResultLabel({ title: ' IMG_0001.JPG ', description: 'Golden hour over Seoul' }, 'Photo 1')).toBe('Golden hour over Seoul');
+        expect(getPhotoResultLabel({ title: '   ', description: '   ' }, 'Photo 2')).toBe('Photo 2');
+    });
+
+    it('trims meaningful result labels', () => {
+        expect(getPhotoResultLabel({ title: '  Golden Hour  ', description: 'ignored' }, 'Photo 3')).toBe('Golden Hour');
+        expect(getPhotoResultLabel({ title: null, description: '  Street portrait  ' }, 'Photo 4')).toBe('Street portrait');
     });
 });
 

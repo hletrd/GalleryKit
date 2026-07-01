@@ -70,6 +70,8 @@
     "failedImages": "Failed Images ({count})",
     "retry": "Retry",
     "retrying": "Retrying…",
+    "retryImageAria": "Retry processing {label}",
+    "retryingImageAria": "Retrying processing {label}",
     "retryFailed": "Retry failed. Check the server logs or try again.",
     "retrySuccess": "Queued for re-processing.",
     "previousPage": "Previous page",

@@ -70,6 +70,8 @@
     "failedImages": "처리 실패 이미지 ({count})",
     "retry": "재시도",
     "retrying": "재시도 중…",
+    "retryImageAria": "{label} 처리 재시도",
+    "retryingImageAria": "{label} 처리 재시도 중",
     "retryFailed": "재시도에 실패했습니다. 서버 로그를 확인하거나 다시 시도해 주세요.",
     "retrySuccess": "재처리 대기열에 추가되었습니다.",
     "previousPage": "이전 페이지",

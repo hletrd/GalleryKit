@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { sizedImageUrl, imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { getPhotoResultLabel } from '@/lib/photo-title';
 
 interface SimilarResult {
     imageId: number;
@@ -176,10 +177,10 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                             {results.map((item) => {
                                 const sizedSrc = sizedImageUrl('/uploads/jpeg', item.filename_jpeg, thumbnailSize, imageSizes);
                                 const baseSrc = imageUrl(`/uploads/jpeg/${item.filename_jpeg}`);
-                                // C21 AGG-C21-23: keep the fallback non-empty AND unique so
-                                // a strip of untitled related-photo links does not read as
-                                // repeated "Photo" controls to assistive technology.
-                                const label = item.title ?? item.description ?? `${tCommon('photo')} ${item.imageId}`;
+                                // C21 AGG-C21-23 / C82: keep the fallback non-empty,
+                                // unique, and routed through the shared filename-like
+                                // title rejection used by other public photo surfaces.
+                                const label = getPhotoResultLabel(item, `${tCommon('photo')} ${item.imageId}`);
                                 return (
                                     <SimilarThumb
                                         key={item.imageId}
