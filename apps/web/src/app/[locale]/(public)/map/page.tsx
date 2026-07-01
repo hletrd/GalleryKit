@@ -8,6 +8,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
+import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 // Public map pages must reflect GPS data immediately as topics are toggled.
 export const revalidate = 0;
@@ -56,7 +57,10 @@ export default async function MapPage() {
             latitude: img.latitude,
             longitude: img.longitude,
             title: img.title ?? null,
-            displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id }),
+            displayTitle: getPhotoDisplayTitle(
+                { title: img.title ?? null },
+                tPhoto('titleWithId', { id: img.id }),
+            ),
             filename_jpeg: img.filename_jpeg,
             topic: img.topic,
         }));

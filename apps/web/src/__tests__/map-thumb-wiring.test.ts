@@ -67,7 +67,10 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         expect(client).not.toContain('String(marker.id)');
         expect(client).not.toContain('marker.title ?? marker.id');
         expect(page).toContain("const tPhoto = await getTranslations('photo')");
-        expect(page).toContain("displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id })");
+        expect(page).toMatch(/from '@\/lib\/photo-title'/);
+        expect(page).toContain('getPhotoDisplayTitle(');
+        expect(page).toContain("tPhoto('titleWithId', { id: img.id })");
+        expect(page).not.toContain("displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id })");
         expect(page).toContain('{marker.displayTitle}');
         expect(page).not.toContain("`${t('openPhoto')} ${marker.id}`");
     });
