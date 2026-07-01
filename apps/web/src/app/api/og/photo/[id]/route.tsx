@@ -10,6 +10,7 @@ import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rat
 import { BASE_URL } from '@/lib/constants';
 import siteConfig from '@/site-config.json';
 import { parseSafePositiveInteger } from '@/lib/validation';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export const runtime = 'nodejs';
 
@@ -41,6 +42,13 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> },
 ) {
     const { id } = await params;
+
+    if (isRestoreMaintenanceActive()) {
+        return new Response('Maintenance', {
+            status: 503,
+            headers: { 'Cache-Control': OG_ERROR_CACHE_CONTROL },
+        });
+    }
 
     // C7-SEC-01: rate-limit the CPU-intensive OG image generation endpoint.
     // Budget: 30 requests / 60s / IP (same as main /api/og route).

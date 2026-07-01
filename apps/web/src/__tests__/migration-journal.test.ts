@@ -14,7 +14,8 @@
  * This test catches that mistake at `npm test` / commit time instead of at the
  * next production deploy:
  *   (1) `when` strictly increases for every entry with idx >= 7;
- *   (2) every journal `tag` has a matching `drizzle/<tag>.sql` file.
+ *   (2) every journal `tag` has a matching `drizzle/<tag>.sql` file;
+ *   (3) every top-level `drizzle/*.sql` file has a matching journal tag.
  *
  * GRANDFATHERED INVERSION (idx 6 -> 7): the journal carries a historical
  * non-monotonic step — idx 6 (0006_admin_tokens, when 1778304060000) is FOLLOWED
@@ -36,8 +37,9 @@
  * runs (and drops reactions) before baselining. The .sql file is
  * baselined-not-run, mirroring 0023_remove_paid_downloads. The old orphaned
  * `drizzle/0014_drop_reactions.sql` (no journal entry, invalid MySQL `DROP COLUMN
- * IF EXISTS`) was deleted as superseded. The tag->file direction (every journal
- * tag has a .sql) is asserted; the file->tag direction is NOT.
+ * IF EXISTS`) was deleted as superseded. Both tag->file and file->tag directions
+ * are asserted so a future orphan SQL file cannot pass tests while never being
+ * journaled or deployed.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -110,6 +112,20 @@ describe('drizzle migration journal integrity', () => {
         for (const e of entries) {
             const sqlPath = path.join(drizzleDir, `${e.tag}.sql`);
             expect(fs.existsSync(sqlPath), `journal tag "${e.tag}" (idx ${e.idx}) has no matching ${e.tag}.sql`).toBe(true);
+        }
+    });
+
+    it('every top-level drizzle/*.sql file has a matching journal tag', () => {
+        const journalTags = new Set(loadJournal().map((entry) => entry.tag));
+        const sqlTags = fs.readdirSync(drizzleDir)
+            .filter((name) => name.endsWith('.sql'))
+            .map((name) => name.slice(0, -'.sql'.length));
+
+        for (const tag of sqlTags) {
+            expect(
+                journalTags.has(tag),
+                `drizzle/${tag}.sql is not listed in meta/_journal.json, so an already-baselined DB would never apply it`,
+            ).toBe(true);
         }
     });
 

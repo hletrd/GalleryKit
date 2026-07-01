@@ -202,6 +202,20 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(guardIndex).toBeLessThan(insertIndex);
     });
 
+    it('re-checks restore maintenance and acquires the upload contract lock before topic DB work (C61-02)', () => {
+        const formDataIndex = LR_SRC.indexOf('request.formData()');
+        const topicSelectIndex = LR_SRC.indexOf('db.select({ slug: topics.slug })');
+        const secondMaintenanceGuardIndex = LR_SRC.indexOf('isRestoreMaintenanceActive()', formDataIndex + 1);
+        const lockIndex = LR_SRC.indexOf('acquireUploadProcessingContractLock()', formDataIndex + 1);
+
+        expect(formDataIndex).toBeGreaterThan(-1);
+        expect(topicSelectIndex).toBeGreaterThan(-1);
+        expect(secondMaintenanceGuardIndex).toBeGreaterThan(formDataIndex);
+        expect(lockIndex).toBeGreaterThan(formDataIndex);
+        expect(secondMaintenanceGuardIndex).toBeLessThan(topicSelectIndex);
+        expect(lockIndex).toBeLessThan(topicSelectIndex);
+    });
+
     it('re-checks restore-maintenance after save and cleans up the orphan (DEF-C4-01)', () => {
         // The late re-check must run after the GPS-strip / save window and
         // before the insert so a restore that begins mid-request does not race

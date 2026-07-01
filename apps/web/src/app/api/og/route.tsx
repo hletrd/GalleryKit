@@ -7,6 +7,7 @@ import siteConfig from '@/site-config.json';
 import { getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
 import { countCodePoints } from '@/lib/utils';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export const runtime = 'nodejs';
 
@@ -60,6 +61,13 @@ function parseOgTags(tags: string | null): string[] {
 
 export async function GET(req: NextRequest) {
   try {
+    if (isRestoreMaintenanceActive()) {
+      return new Response('Maintenance', {
+        status: 503,
+        headers: { 'Cache-Control': OG_ERROR_CACHE_CONTROL },
+      });
+    }
+
     const { searchParams } = new URL(req.url);
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');

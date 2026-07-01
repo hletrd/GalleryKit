@@ -4,12 +4,14 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 60/100 Implementation Plan — active; Cycle 59 terminal evidence and short deploy-doc drift scheduled (`cycle-60-2026-07-01-plan.md`)
-- Cycle 60/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-60-2026-07-01-deferred.md`)
+- Cycle 61/100 Implementation Plan — active; OG restore-maintenance guards, LR restore-window ordering, migration journal reverse guard, Cycle 60 ledger closure, and local env mode correction scheduled (`cycle-61-2026-07-01-plan.md`)
+- Cycle 61/100 Deferred Findings — broad test-coverage gaps deferred; carry-forward items repeated (`cycle-61-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
-- Cycle 60/100 Implementation Plan — active; Cycle 59 terminal evidence and short deploy-doc drift scheduled (`cycle-60-2026-07-01-plan.md`)
+- Cycle 61/100 Implementation Plan — active; OG restore-maintenance guards, LR restore-window ordering, migration journal reverse guard, Cycle 60 ledger closure, and local env mode correction scheduled (`cycle-61-2026-07-01-plan.md`)
+- Cycle 61/100 Deferred Findings — broad test-coverage gaps deferred; carry-forward items repeated (`cycle-61-2026-07-01-deferred.md`)
+- Cycle 60/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 61 started from deployed `7e85644e` (`cycle-60-2026-07-01-plan.md`)
 - Cycle 60/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-60-2026-07-01-deferred.md`)
 - Cycle 59/100 Implementation Plan — implementation committed/pushed/deployed; Cycle 60 started from deployed `fe112ba5` (`cycle-59-2026-07-01-plan.md`)
 - Cycle 59/100 Deferred Findings — no new deferred items; carry-forward only (`cycle-59-2026-07-01-deferred.md`)

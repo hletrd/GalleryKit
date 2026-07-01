@@ -249,33 +249,26 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Description too long (max 5000 characters)' }, { status: 400, headers: NO_CACHE });
         }
 
-        // Verify topic exists. This runs after the conservative upload preclaim,
-        // so thrown DB errors must settle the claim before returning.
-        let topicRow: { slug: string } | undefined;
-        try {
-            [topicRow] = await db.select({ slug: topics.slug })
-                .from(topics)
-                .where(eq(topics.slug, topicSlug))
-                .limit(1);
-        } catch (err) {
+        // C61-02: re-check restore maintenance after multipart parsing and
+        // validation, then acquire the upload-processing contract lock BEFORE
+        // the topic DB SELECT. A restore can begin while a large multipart body
+        // is being parsed; without this second guard and earlier lock, the route
+        // can query tables during the restore window before the lock rejects it.
+        if (isRestoreMaintenanceActive()) {
             settleTrackerToActual(false);
-            console.error('LR upload: failed to verify topic', err);
-            return NextResponse.json({ error: 'Upload failed' }, { status: 500, headers: NO_CACHE });
-        }
-        if (!topicRow) {
-            settleTrackerToActual(false);
-            return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
         }
 
-        // Run-3 RPF cycle 3 / F3 (CR-C3-01): acquire the upload-processing
-        // contract lock for the whole save→insert→enqueue window, mirroring the
-        // browser upload action (app/actions/images.ts:183). The MySQL advisory
-        // lock `gallerykit_upload_processing_contract` serializes uploads with
-        // `image_sizes` / `strip_gps_on_upload` settings changes so the first
-        // committed image cannot race a setting intended to lock once photos
-        // exist (CLAUDE.md "Race Condition Protections"). Without this, an LR
-        // publish could interleave with a concurrent settings change and defeat
-        // the lock-once guarantee on the primary non-browser ingest path.
+        // Run-3 RPF cycle 3 / F3 (CR-C3-01), extended by C61-02: acquire the
+        // upload-processing contract lock for the topic-verify→save→insert→enqueue
+        // window, mirroring the browser upload action. The MySQL advisory lock
+        // `gallerykit_upload_processing_contract` serializes uploads with
+        // restores and `image_sizes` / `strip_gps_on_upload` settings changes so
+        // the first committed image cannot race a setting intended to lock once
+        // photos exist.
         const uploadContractLock = await acquireUploadProcessingContractLock();
         if (!uploadContractLock) {
             settleTrackerToActual(false);
@@ -286,6 +279,25 @@ export const POST = withAdminAuth(
         }
 
         try {
+            // Verify topic exists under the upload-processing contract lock. This
+            // runs after the conservative upload preclaim, so thrown DB errors
+            // must settle the claim before returning.
+            let topicRow: { slug: string } | undefined;
+            try {
+                [topicRow] = await db.select({ slug: topics.slug })
+                    .from(topics)
+                    .where(eq(topics.slug, topicSlug))
+                    .limit(1);
+            } catch (err) {
+                settleTrackerToActual(false);
+                console.error('LR upload: failed to verify topic', err);
+                return NextResponse.json({ error: 'Upload failed' }, { status: 500, headers: NO_CACHE });
+            }
+            if (!topicRow) {
+                settleTrackerToActual(false);
+                return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
+            }
+
             await ensureUploadDirectories();
 
             let config: Awaited<ReturnType<typeof getGalleryConfigStrict>>;
