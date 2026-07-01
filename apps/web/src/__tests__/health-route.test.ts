@@ -18,7 +18,7 @@ vi.mock('@/lib/restore-maintenance', () => ({
     isRestoreMaintenanceActive: isRestoreMaintenanceActiveMock,
 }));
 
-import { GET } from '@/app/api/health/route';
+import { GET, runtime } from '@/app/api/health/route';
 
 describe('/api/health', () => {
     beforeEach(() => {
@@ -27,6 +27,10 @@ describe('/api/health', () => {
         isRestoreMaintenanceActiveMock.mockReset();
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
         executeMock.mockResolvedValue([{ ok: 1 }]);
+    });
+
+    it('pins the route to the Node runtime for the optional database probe', () => {
+        expect(runtime).toBe('nodejs');
     });
 
     it('returns a generic unavailable status during restore maintenance', async () => {

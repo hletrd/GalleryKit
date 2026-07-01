@@ -4,7 +4,8 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- None. Cycle 91 completed and is listed under Recent Plans.
+- Cycle 92/100 Implementation Plan - active; scheduled safe narrow fixes for `/api/health` runtime pinning, release-ledger evidence, smart-collection docs, and SEO/share copy (`cycle-92-2026-07-01-plan.md`)
+- Cycle 92/100 Deferred Findings - active; broad restore/schema/performance/E2E/UI/operational findings preserved with exit criteria (`cycle-92-2026-07-01-deferred.md`)
 
 ## Recent Plans
 

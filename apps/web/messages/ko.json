@@ -479,12 +479,12 @@
     "authorPlaceholder": "이름",
     "authorHint": "Open Graph와 JSON-LD에 사용됩니다. 비워두면 기본값이 사용됩니다.",
     "locale": "OG 로케일",
-    "localeHint": "Open Graph 로케일 코드 (예: en_US, ko_KR). 비워두면 기본값이 사용됩니다.",
+    "localeHint": "지원하지 않는 경로 로케일에 사용할 Open Graph 로케일 대체값입니다(예: en_US, ko_KR). 지원하는 경로 로케일은 자동으로 결정됩니다.",
     "ogTitle": "Open Graph 이미지",
-    "ogDesc": "소셜 미디어 링크 미리보기 기본 이미지입니다. 공개 사진 페이지는 생성된 사진 카드를 사용하고, 비공개 공유 링크는 일반 noindex 메타데이터를 사용합니다.",
+    "ogDesc": "소셜 미디어 링크 미리보기 기본 이미지입니다. 공개 사진 페이지는 생성된 사진 카드를 사용하고, 목록에 공개되지 않는 공유 링크는 일반 noindex 메타데이터를 사용합니다.",
     "ogImageUrl": "OG 이미지 URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "동일 출처 URL 또는 경로입니다. 기본/대체 미리보기 이미지로 사용되며, 비공개 공유 링크는 공유 사진을 조회해 미리보기에 쓰지 않습니다.",
+    "ogImageUrlHint": "동일 출처 URL 또는 경로입니다. 기본/대체 미리보기 이미지로 사용되며, 목록에 공개되지 않는 공유 링크는 공유 사진을 조회해 미리보기에 쓰지 않습니다.",
     "loadFailed": "SEO 설정을 불러오지 못했습니다. 변경 사항을 저장하기 전에 다시 시도해 주세요."
   },
   "serverActions": {

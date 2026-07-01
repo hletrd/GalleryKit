@@ -479,12 +479,12 @@
     "authorPlaceholder": "Your Name",
     "authorHint": "Used in Open Graph and JSON-LD. Leave empty for default.",
     "locale": "OG Locale",
-    "localeHint": "Open Graph locale code (e.g. en_US, ko_KR). Leave empty for default.",
+    "localeHint": "Open Graph locale fallback for unsupported route locales (e.g. en_US, ko_KR). Supported route locales set this automatically.",
     "ogTitle": "Open Graph Image",
-    "ogDesc": "Default image for social media link previews. Public photo pages use generated photo cards; private share links use generic noindex metadata.",
+    "ogDesc": "Default image for social media link previews. Public photo pages use generated photo cards; unlisted share links use generic noindex metadata.",
     "ogImageUrl": "OG Image URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "Same-origin URL or path. Used as the fallback/default preview image; private share links do not look up shared photos for previews.",
+    "ogImageUrlHint": "Same-origin URL or path. Used as the fallback/default preview image; unlisted share links do not look up shared photos for previews.",
     "loadFailed": "Could not load SEO settings. Please try again before saving changes."
   },
   "serverActions": {

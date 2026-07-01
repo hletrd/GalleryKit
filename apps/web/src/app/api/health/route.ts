@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // @public-no-rate-limit-required: operational readiness endpoint; optional DB probe is intentionally unauthenticated and low-cost.
 export async function GET() {
