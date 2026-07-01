@@ -58,7 +58,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, POOL_CONNECTION_LIMIT } from '@/db';
 import { sql } from 'drizzle-orm';
-import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '@/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '@/lib/process-image';
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
@@ -589,7 +589,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         let detectionError: unknown = null;
         try {
             const image = sharp(originalPath, {
-                limitInputPixels: 256 * 1024 * 1024,
+                limitInputPixels: MAX_INPUT_PIXELS,
                 failOn: 'error',
                 sequentialRead: true,
             });

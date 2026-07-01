@@ -4,11 +4,13 @@ This index is a convenience pointer for agents. The authoritative state for a cy
 
 ## Active Current-Cycle Plans
 
-- Cycle 88/100 Implementation Plan - active; schedules Cycle 87 release-ledger closure and retry enqueue source-contract tightening after signed deployed HEAD `afc2bf5` (`cycle-88-2026-07-01-plan.md`)
-- Cycle 88/100 Deferred Findings - defers semantic embedding model-version storage migration; carry-forward register remains referenced (`cycle-88-2026-07-01-deferred.md`)
+- Cycle 89/100 Implementation Plan - active; schedules Cycle 88 release-ledger closure and color-backfill pixel-cap wiring after signed deployed HEAD `10cd166` (`cycle-89-2026-07-01-plan.md`)
+- Cycle 89/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-89-2026-07-01-deferred.md`)
 
 ## Recent Plans
 
+- Cycle 88/100 Implementation Plan - implementation committed/pushed/deployed as `10cd166`; Cycle 89 started from deployed `10cd166` (`cycle-88-2026-07-01-plan.md`)
+- Cycle 88/100 Deferred Findings - defers semantic embedding model-version storage migration; carry-forward register remains referenced (`cycle-88-2026-07-01-deferred.md`)
 - Cycle 87/100 Implementation Plan - implementation committed/pushed/deployed as `afc2bf5`; Cycle 88 started from deployed `afc2bf5` (`cycle-87-2026-07-01-plan.md`)
 - Cycle 87/100 Deferred Findings - no new deferred findings; carry-forward register remains referenced (`cycle-87-2026-07-01-deferred.md`)
 - Cycle 86/100 Implementation Plan - implementation committed/pushed/deployed as `ee83c13`; Cycle 87 started from deployed `ee83c13` (`cycle-86-2026-07-01-plan.md`)

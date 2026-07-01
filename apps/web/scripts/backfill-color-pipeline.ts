@@ -47,7 +47,7 @@ import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import sharp from 'sharp';
-import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '../src/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
@@ -273,7 +273,7 @@ export async function reprocessRow(
     // columns stay in sync with the current detection logic.
     try {
         const image = sharp(originalPath, {
-            limitInputPixels: 256 * 1024 * 1024,
+            limitInputPixels: MAX_INPUT_PIXELS,
             failOn: 'error',
             sequentialRead: true,
         });
