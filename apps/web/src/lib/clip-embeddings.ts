@@ -114,11 +114,16 @@ const IS_LITTLE_ENDIAN = (() => {
  * Accepts a Buffer of exactly EMBEDDING_BYTES bytes.
  *
  * C2-14 (run-10 c2) / PERF-04: on little-endian platforms this avoids the
- * 512-call `readFloatLE` loop. `decodeEmbeddingColumn`'s callers (the semantic
- * + similar-image search routes) read the returned array transiently inside a
- * single synchronous `.map()` to score against a query vector and never store
- * or mutate it afterward, so a zero-copy view is safe from a data-lifetime
- * standpoint. Buffer alignment is a separate, wire-position-dependent concern
+ * 512-call `readFloatLE` loop. RETENTION CONTRACT (tightened C3-06, run-10
+ * c3): the zero-copy result is safe ONLY for immediate synchronous
+ * consumption — decode, score, discard within one synchronous `.map()`
+ * iteration with no intervening `await`. Any caller that HOLDS the result
+ * across further DB I/O (or caches it, e.g. the deferred C2-14b matrix
+ * cache) MUST copy first (`new Float32Array(decoded)`): the aligned branch
+ * returns a view over mysql2's wire-packet ArrayBuffer, so retention both
+ * couples correctness to undocumented driver buffer-lifetime internals and
+ * pins the entire underlying socket-read buffer in memory for the lifetime
+ * of the 2 KB view. Buffer alignment is a separate, wire-position-dependent concern
  * (mysql2's `readBuffer()` returns `this.buffer.slice(...)`, a view over the
  * driver's own socket-read buffer that is never rewritten after being handed
  * back — see node_modules/mysql2/lib/packets/packet.js `readBuffer()` and

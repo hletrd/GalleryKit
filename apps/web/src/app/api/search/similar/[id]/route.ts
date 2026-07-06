@@ -157,7 +157,15 @@ export async function GET(
         if (decoded === null) {
             return NextResponse.json({ error: 'Embedding data is corrupt' }, { status: 404, headers: NO_STORE_HEADERS });
         }
-        targetEmbedding = decoded;
+        // CR3-01 / C3-06 (run-10 c3): defensive copy. Unlike the transient
+        // per-row decode in the scan .map() below, THIS vector is retained
+        // across the next `await db.select(...)` — a zero-copy view over a
+        // mysql2 wire buffer held across further pool I/O couples correctness
+        // to undocumented driver buffer-lifetime internals (the C1-31 class;
+        // one lane traced it safe, another judged it a latent corruption —
+        // one 512-float copy off the hot loop settles it either way). Also
+        // the mandatory pattern for the deferred C2-14b matrix cache.
+        targetEmbedding = new Float32Array(decoded);
     } catch {
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
