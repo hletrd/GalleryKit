@@ -90,6 +90,17 @@ async function checkLoadMoreRateLimit(
     now: number,
 ): Promise<{ status: 'ok' | 'rateLimited' | 'dbError'; bucketStart: number; dbIncremented: boolean }> {
     const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
+    // C1-01 (run-10 cycle-1): read-only saturated fast path, mirroring
+    // searchImagesAction. A caller already at/over the in-memory budget is
+    // rejected before ANY persistent limiter work, so a sustained over-limit
+    // retry loop costs zero DB increment/select/decrement round-trips on the
+    // single-writer MySQL instance. Admitted-request accounting below is
+    // unchanged.
+    pruneLoadMoreRateLimit(now);
+    const saturatedEntry = loadMoreRateLimit.get(ip);
+    if (saturatedEntry && saturatedEntry.resetAt > now && saturatedEntry.count >= LOAD_MORE_MAX_REQUESTS) {
+        return { status: 'rateLimited', bucketStart, dbIncremented: false };
+    }
     const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
     let dbIncremented = false;
 
@@ -368,6 +379,14 @@ async function checkViewRecordRateLimit(
     now: number,
 ): Promise<{ status: 'ok' | 'rateLimited'; bucketStart: number; dbIncremented: boolean }> {
     const bucketStart = getRateLimitBucketStart(now, VIEW_RECORD_WINDOW_MS);
+    // C1-01 (run-10 cycle-1): read-only saturated fast path — see
+    // checkLoadMoreRateLimit. Over-limit view recording must not spend DB
+    // limiter round-trips per rejected request.
+    viewRecordRateLimit.prune(now);
+    const saturatedEntry = viewRecordRateLimit.get(ip);
+    if (saturatedEntry && saturatedEntry.resetAt > now && saturatedEntry.count >= VIEW_RECORD_MAX_REQUESTS) {
+        return { status: 'rateLimited', bucketStart, dbIncremented: false };
+    }
     const overLimitInMemory = isViewRecordRateLimited(ip, now);
     let dbIncremented = false;
 
