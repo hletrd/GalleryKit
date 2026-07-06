@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Centralized registry for MySQL advisory lock names.
  *
@@ -52,8 +54,22 @@ export const LOCK_SEMANTIC_EMBEDDING_BACKFILL = 'gallerykit_semantic_embedding_b
  * open for the lifetime of the process so a second GalleryKit instance
  * sharing this MySQL server can detect it and warn. See
  * `lib/single-writer-guard.ts`.
+ *
+ * C3-03 (run-10 c3): the lock name is scoped PER DATABASE, unlike the other
+ * locks above (which deliberately serialize across all GalleryKit instances
+ * on a MySQL server). Two legitimately separate galleries (separate DBs) on
+ * one MySQL server are a documented-supported co-location; an un-namespaced
+ * singleton lock would permanently false-alarm the second gallery AND leave
+ * it guardless. The DB name is folded through sha256 and truncated so the
+ * lock name stays well under MySQL's 64-char advisory-lock-name limit for
+ * any database name.
  */
-export const LOCK_SINGLE_WRITER_GUARD = 'gallerykit_web_singleton';
+export const LOCK_SINGLE_WRITER_GUARD_PREFIX = 'gallerykit_web_singleton';
+
+export function getSingleWriterLockName(dbName: string): string {
+    const dbHash = createHash('sha256').update(dbName).digest('hex').slice(0, 16);
+    return `${LOCK_SINGLE_WRITER_GUARD_PREFIX}_${dbHash}`;
+}
 
 /**
  * mysql2 can surface MySQL integer scalar results as number, bigint, or string

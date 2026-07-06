@@ -1,15 +1,18 @@
 /**
- * C2-03 (run-10 c2): behavioral coverage for the WARN-ONLY single-writer
- * boot guard. The guard probes a MySQL advisory lock on a dedicated
- * (non-pooled) connection at startup:
- *   - acquired  -> hold the connection open for process lifetime, silently.
- *   - unavailable (0) -> loud console.error naming the topology doc, close
- *     the probe connection, never throw.
+ * C2-03 (run-10 c2) + C3-02/C3-03 (run-10 c3): behavioral coverage for the
+ * WARN-ONLY single-writer boot guard. The guard probes a DB-scoped MySQL
+ * advisory lock on a dedicated (non-pooled) connection at startup:
+ *   - acquired  -> hold the connection open for process lifetime, silently,
+ *     with a periodic unref'd SELECT 1 keepalive so MySQL's wait_timeout
+ *     cannot silently reap the lock (C3-02).
+ *   - unavailable (0) -> close the probe connection QUIETLY, re-probe once
+ *     after ~25s (rolling-deploy drain tolerance, C3-03); only a persistent
+ *     holder earns the loud console.error naming the topology doc. Never throw.
  *   - any connection/query error -> console.warn only, never throw.
- *   - a later 'error' event on the held connection -> console.warn once,
- *     never crash the process (mysql2 Connection is an EventEmitter and
- *     throws if 'error' has no listener).
- *   - stopSingleWriterGuard() releases the lock and closes the connection.
+ *   - a later 'error' event or keepalive failure on the held connection ->
+ *     console.warn once, never crash the process.
+ *   - stopSingleWriterGuard() clears timers, releases the lock, closes the
+ *     connection.
  *
  * Both the mysql2/promise module and the connection-options helper
  * (scripts/mysql-connection-options.js) are mocked so this suite never
@@ -97,11 +100,19 @@ describe('startSingleWriterGuard — lock acquired', () => {
         expect(errorHandlerCall).toBeTruthy();
         expect(errorHandlerCall?.[1]).toBeInstanceOf(Function);
 
-        // GET_LOCK was called with the singleton lock name.
-        const { LOCK_SINGLE_WRITER_GUARD } = await import('@/lib/advisory-locks');
+        // GET_LOCK was called with the DB-SCOPED singleton lock name (C3-03):
+        // prefix + 16-hex sha256 fold of the database name, under MySQL's
+        // 64-char advisory-lock-name limit.
+        const { getSingleWriterLockName, LOCK_SINGLE_WRITER_GUARD_PREFIX } = await import('@/lib/advisory-locks');
+        const expectedName = getSingleWriterLockName('test-db');
+        expect(expectedName).toMatch(
+            new RegExp(`^${LOCK_SINGLE_WRITER_GUARD_PREFIX}_[0-9a-f]{16}$`),
+        );
+        expect(expectedName.length).toBeLessThanOrEqual(64);
+        expect(getSingleWriterLockName('other-db')).not.toBe(expectedName);
         const getLockCall = conn.query.mock.calls.find((c) => String(c[0]).includes('GET_LOCK'));
         expect(getLockCall).toBeTruthy();
-        expect((getLockCall![1] as unknown[])[0]).toBe(LOCK_SINGLE_WRITER_GUARD);
+        expect((getLockCall![1] as unknown[])[0]).toBe(expectedName);
     });
 
     it('accepts BigInt(1) and the string "1" as acquired, matching isAdvisoryLockAcquired', async () => {
@@ -131,33 +142,130 @@ describe('startSingleWriterGuard — lock acquired', () => {
     });
 });
 
-describe('startSingleWriterGuard — lock unavailable', () => {
-    it('logs a loud topology warning naming CLAUDE.md and closes the probe connection', async () => {
-        const conn = makeConn(0);
-        createConnectionMock.mockResolvedValue(conn);
+describe('startSingleWriterGuard — lock unavailable (re-probe, C3-03)', () => {
+    it('stays quiet on first contention, then logs the loud topology error only after the re-probe confirms a persistent holder', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(0);
+            const conn2 = makeConn(0);
+            createConnectionMock.mockResolvedValueOnce(conn1).mockResolvedValueOnce(conn2);
 
-        const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
-        await startSingleWriterGuard();
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
 
-        expect(conn.end).toHaveBeenCalledTimes(1);
-        expect(consoleWarnSpy).not.toHaveBeenCalled();
-        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            // First contention: probe connection closed quietly — a rolling
+            // deploy's old process legitimately holds the lock through its
+            // drain window, so no cry-wolf error yet.
+            expect(conn1.end).toHaveBeenCalledTimes(1);
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
 
-        const message = consoleErrorSpy.mock.calls[0].join(' ');
-        expect(message.toLowerCase()).toMatch(/singleton/);
-        expect(message).toMatch(/CLAUDE\.md/);
-        expect(message.toLowerCase()).toMatch(/runtime topology/);
+            await vi.advanceTimersByTimeAsync(25_000);
+
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            const message = consoleErrorSpy.mock.calls[0].join(' ');
+            expect(message.toLowerCase()).toMatch(/singleton/);
+            expect(message).toMatch(/CLAUDE\.md/);
+            expect(message.toLowerCase()).toMatch(/runtime topology/);
+            expect(conn2.end).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('acquires quietly on re-probe when the first contention was transient (rolling-deploy overlap)', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(0);
+            const conn2 = makeConn(1);
+            createConnectionMock.mockResolvedValueOnce(conn1).mockResolvedValueOnce(conn2);
+
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+            expect(conn1.end).toHaveBeenCalledTimes(1);
+
+            await vi.advanceTimersByTimeAsync(25_000);
+
+            // Old process finished draining; the re-probe acquired the lock
+            // and now HOLDS the second connection — no operator noise.
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+            expect(consoleWarnSpy).not.toHaveBeenCalled();
+            expect(conn2.end).not.toHaveBeenCalled();
+            const errorHandlerCall = conn2.on.mock.calls.find((c) => c[0] === 'error');
+            expect(errorHandlerCall).toBeTruthy();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('treats a null GET_LOCK result (timeout/unhealthy) the same as unavailable', async () => {
-        const conn = makeConn(null);
-        createConnectionMock.mockResolvedValue(conn);
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(null);
+            const conn2 = makeConn(null);
+            createConnectionMock.mockResolvedValueOnce(conn1).mockResolvedValueOnce(conn2);
 
-        const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
-        await startSingleWriterGuard();
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+            expect(conn1.end).toHaveBeenCalledTimes(1);
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
 
-        expect(conn.end).toHaveBeenCalledTimes(1);
-        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(25_000);
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('held-connection keepalive (C3-02)', () => {
+    it('issues a periodic SELECT 1 so MySQL wait_timeout cannot reap the lock', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn = makeConn(1);
+            createConnectionMock.mockResolvedValue(conn);
+
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+
+            const keepaliveCalls = () =>
+                conn.query.mock.calls.filter((c) => String(c[0]).includes('SELECT 1')).length;
+            expect(keepaliveCalls()).toBe(0);
+
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(keepaliveCalls()).toBe(1);
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(keepaliveCalls()).toBe(2);
+            expect(consoleWarnSpy).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('warns once, stops the keepalive, and closes the connection when the keepalive query fails', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn = makeConn(1);
+            createConnectionMock.mockResolvedValue(conn);
+
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+
+            conn.query.mockImplementation(async (sql: string) => {
+                if (String(sql).includes('SELECT 1')) throw new Error('server has gone away');
+                return [[], undefined];
+            });
+
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+            expect(consoleWarnSpy.mock.calls[0].join(' ').toLowerCase()).toMatch(/lapsed/);
+            expect(conn.end).toHaveBeenCalled();
+
+            // Keepalive was cleared — a later tick must not warn again.
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 
