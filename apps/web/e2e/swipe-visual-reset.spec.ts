@@ -49,7 +49,14 @@ async function dispatchSwipe(page: Page, { fromX, toX, y }: SwipeOpts) {
     );
 }
 
-test('shared-group in-place swipe: navigates AND resets the edge indicator + progress bar', async ({ page }) => {
+// ONE page session covers both scenarios: the /s|/g share routes carry a
+// per-IP probe limiter (SHARE_MAX_REQUESTS = 60/min; a rate-limited lookup
+// renders the not-found page by design), and parallel e2e workers plus the
+// shared grid's viewport-entry RSC prefetches all draw from the same
+// 127.0.0.1 budget — a second page.goto of the share URL in a sibling test
+// flaked into that limiter during the full suite run. Sub-threshold is
+// asserted first (same photo), then the threshold swipe (in-place switch).
+test('shared-group swipe: sub-threshold snaps back; threshold navigates in place; visuals reset both times', async ({ page }) => {
     await ensureEnglishLocale(page);
     await page.goto('/g/Abc234Def5');
     await expectNoNextError(page);
@@ -60,40 +67,29 @@ test('shared-group in-place swipe: navigates AND resets the edge indicator + pro
     await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
     const startingUrl = page.url();
 
-    // Swipe left well past the 80px threshold → next photo, in place.
-    await dispatchSwipe(page, { fromX: 300, toX: 140, y: 300 });
+    // Phase 1: 40px < the 80px threshold → snap back, same photo.
+    await dispatchSwipe(page, { fromX: 300, toX: 260, y: 300 });
+    await expect(page).toHaveURL(startingUrl);
+    const next = page.getByTestId('swipe-next-indicator');
+    if ((await next.count()) > 0) {
+        await expect(next.first()).toHaveCSS('opacity', '0');
+    }
 
+    // Phase 2: swipe left well past the threshold → next photo, IN PLACE
+    // (shared view wires onSelectId=setCurrentImageId — no remount, which is
+    // exactly the DBG3-01 stale-visuals path).
+    await dispatchSwipe(page, { fromX: 300, toX: 140, y: 300 });
     await expect(page).not.toHaveURL(startingUrl);
     await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
 
     // The swiped-from indicator must settle back to its resting state —
     // pre-fix it stayed at the drag opacity indefinitely on this path.
     // (After the in-place switch the PREV indicator exists too; check both
-    // present indicators and the progress bar wrapper's opacity.)
+    // present indicators.)
     for (const testId of ['swipe-next-indicator', 'swipe-prev-indicator']) {
         const indicator = page.getByTestId(testId);
         if ((await indicator.count()) > 0) {
             await expect(indicator.first()).toHaveCSS('opacity', '0');
         }
-    }
-});
-
-test('sub-threshold swipe snaps back: no navigation, indicator resets', async ({ page }) => {
-    await ensureEnglishLocale(page);
-    await page.goto('/g/Abc234Def5');
-    await expectNoNextError(page);
-
-    const firstSharedPhoto = page.locator('a[href*="/g/Abc234Def5?photoId="]').first();
-    await firstSharedPhoto.click();
-    await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
-    const startingUrl = page.url();
-
-    // 40px < the 80px threshold → snap back, same photo.
-    await dispatchSwipe(page, { fromX: 300, toX: 260, y: 300 });
-
-    await expect(page).toHaveURL(startingUrl);
-    const next = page.getByTestId('swipe-next-indicator');
-    if ((await next.count()) > 0) {
-        await expect(next.first()).toHaveCSS('opacity', '0');
     }
 });
