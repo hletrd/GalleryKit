@@ -31,9 +31,15 @@ describe('unified derivative cache policy (ARCH-R4C6-06)', () => {
     it('nginx uploads location uses the unified policy and never immutable', () => {
         const locIdx = NGINX.indexOf('/uploads/(jpeg|webp|avif)/');
         expect(locIdx).toBeGreaterThan(-1);
-        // Slice to the next location block — a bare indexOf('}') would stop
-        // at the `{2}` quantifier inside the locale-prefix rewrite regex.
-        const nextLocIdx = NGINX.indexOf('location /', locIdx);
+        // Boundary-detection fix (run-10 c2): bound the slice at the uploads
+        // location's own closing brace (newline + 4-space indent + `}`) — the
+        // old `indexOf('location /')` boundary ran past `location ^~ …` blocks
+        // (added for the public page limiter) into their prose comments, false-
+        // positiving on the word "immutable" in a comment rather than in a
+        // directive. A bare indexOf('}') would stop at the `{2}` quantifier
+        // inside the location pattern itself; the indented close is unambiguous
+        // (inner directives are 8-space indented).
+        const nextLocIdx = NGINX.indexOf('\n    }', locIdx);
         expect(nextLocIdx).toBeGreaterThan(locIdx);
         const locBlock = NGINX.slice(locIdx, nextLocIdx);
         expect(locBlock).toContain(POLICY);
