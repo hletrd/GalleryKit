@@ -386,6 +386,39 @@ describe('sw-cache: touchMeta', () => {
     await touchMeta(url, 999999, meta);
     expect(await totalCacheSize(meta)).toBe(500);
   });
+
+  // PERF3-03 / C3-22 (run-10 c3): size-0 meta entries under-count the LRU cap.
+  it('resolves the real body size lazily when no size is known (knownSize 0)', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    const resolveSize = vi.fn(async () => 4321);
+    await touchMeta(url, 0, meta, resolveSize);
+    expect(resolveSize).toHaveBeenCalledTimes(1);
+    expect(meta.snapshot().get(url)?.size).toBe(4321);
+  });
+
+  it('does not invoke resolveSize when a size is already tracked', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await meta.setAll(new Map([[url, { url, size: 999, timestamp: 100 }]]));
+    const resolveSize = vi.fn(async () => 4321);
+    await touchMeta(url, 0, meta, resolveSize);
+    expect(resolveSize).not.toHaveBeenCalled();
+    expect(meta.snapshot().get(url)?.size).toBe(999);
+  });
+
+  it('SKIPS the meta write entirely when the size is unresolvable (never records size 0)', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await touchMeta(url, 0, meta, async () => 0);
+    expect(meta.snapshot().has(url)).toBe(false);
+    await touchMeta(url, 0, meta, async () => {
+      throw new Error('blob read failed');
+    });
+    expect(meta.snapshot().has(url)).toBe(false);
+    await touchMeta(url, 0, meta);
+    expect(meta.snapshot().has(url)).toBe(false);
+  });
 });
 
 describe('sw-cache: resolveCachedEntryAge', () => {

@@ -175,10 +175,29 @@ async function evictHtmlCacheIfNeeded() {
  * because the rewrite cost a full cache.put per view for bytes that never
  * changed).
  */
-async function touchMeta(url, knownSize) {
+async function touchMeta(url, knownSize, resolveSize) {
   return withMetaMutation(async () => {
     const entries = await getMeta();
     const existing = entries.get(url);
+    let size = existing && existing.size ? existing.size : knownSize;
+    // PERF3-03 / C3-22 (run-10 c3): a cached response without a meta record
+    // (pre-C2-11 entry, or meta lost to browser quota eviction) AND without a
+    // Content-Length header used to be re-inserted here with size 0 — a real
+    // Cache-storage occupant that the MAX_IMAGE_BYTES walk could neither
+    // count nor meaningfully evict. Resolve the actual body size lazily
+    // (blob read, rare path only); if it still resolves to 0, skip the meta
+    // write entirely and let the next full revalidation's size-accounting
+    // write record the real size.
+    if (!size && typeof resolveSize === 'function') {
+      try {
+        size = await resolveSize();
+      } catch {
+        size = 0;
+      }
+    }
+    if (!size) {
+      return;
+    }
     // AGG-H3 (run-6 cycle-2): delete-then-set so a touched entry moves to the
     // Map's tail. The eviction head-walk relies on insertion order == recency,
     // so a 304-touch must reposition the entry too, otherwise a
@@ -186,7 +205,7 @@ async function touchMeta(url, knownSize) {
     entries.delete(url);
     entries.set(url, {
       url,
-      size: existing && existing.size ? existing.size : knownSize,
+      size,
       timestamp: Date.now(),
     });
     await setMeta(entries);
@@ -339,7 +358,14 @@ async function staleWhileRevalidateImage(request) {
         if (head.status === 304) {
           // Server confirms cache is fresh — serve cached, no body fetch,
           // no local body rewrite (C2-11, run-10 c2). Meta-only recency touch.
-          touchMeta(request.url, cachedSize).catch(() => {});
+          // C3-10 (run-10 c3, TRC3-02/CRIT3-05): AWAIT the touch — the meta
+          // timestamp is the SOLE recency authority now, and an un-awaited
+          // write sits outside respondWith's lifetime, so SW termination (or
+          // a silent write failure) froze recency and spuriously evicted
+          // server-confirmed-fresh entries. Awaiting keeps the write inside
+          // the respondWith promise chain (lifetime-covered); the catch still
+          // serves the cached bytes if the meta write fails.
+          await touchMeta(request.url, cachedSize, () => responseSize(cached)).catch(() => {});
           return cached;
         }
         if (head.status === 404 || head.status === 410) {
@@ -356,8 +382,9 @@ async function staleWhileRevalidateImage(request) {
           }
           if (networkEtag && networkEtag === cachedEtag) {
             // Same as the 304 branch above (C2-11, run-10 c2): confirmed
-            // fresh, no local body rewrite, meta-only recency touch.
-            touchMeta(request.url, cachedSize).catch(() => {});
+            // fresh, no local body rewrite, meta-only recency touch —
+            // awaited for the same C3-10 lifetime/durability reasons.
+            await touchMeta(request.url, cachedSize, () => responseSize(cached)).catch(() => {});
             return cached;
           }
         }

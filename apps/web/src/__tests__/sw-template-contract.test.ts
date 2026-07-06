@@ -202,7 +202,7 @@ describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-1
         expect(TEMPLATE).toContain('let metaMutationQueue = Promise.resolve();');
         expect(TEMPLATE).toContain('metaMutationQueue = run.catch(() => {});');
         expect(TEMPLATE).toMatch(/async function recordAndEvict\(url, newSize\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
-        expect(TEMPLATE).toMatch(/async function touchMeta\(url, knownSize\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
+        expect(TEMPLATE).toMatch(/async function touchMeta\(url, knownSize, resolveSize\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
         expect(TEMPLATE).toMatch(/async function deleteMeta\(url\) \{\s*\n\s*return withMetaMutation\(async \(\) => \{/);
     });
 });
@@ -283,6 +283,32 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const fn = TEMPLATE.slice(fnIdx, TEMPLATE.indexOf('async function', fnIdx + 1));
         expect(fn).toMatch(/existing && existing\.size \? existing\.size : knownSize/);
         expect(fn).not.toMatch(/recordAndEvict/);
+    });
+
+    // C3-10 (run-10 c3, TRC3-02/CRIT3-05): the meta timestamp is the SOLE
+    // recency authority after C2-11, so the touch must be AWAITED — inside
+    // respondWith's promise chain the SW's lifetime covers the write; a
+    // fire-and-forget touch could be dropped on SW termination, freezing
+    // recency and spuriously evicting server-confirmed-fresh entries.
+    it('both confirmed-fresh branches AWAIT the recency touch (template + generated)', () => {
+        for (const src of [TEMPLATE, GENERATED_SW]) {
+            const matches = src.match(/await touchMeta\(request\.url, cachedSize, \(\) => responseSize\(cached\)\)\.catch\(\(\) => \{\}\);/g) ?? [];
+            expect(matches.length).toBe(2);
+            expect(src).not.toMatch(/^\s*touchMeta\(request\.url/m);
+        }
+    });
+
+    // PERF3-03 / C3-22 (run-10 c3): touchMeta must skip (not record) a
+    // size-0 entry after failing to resolve the body size — a 0-size record
+    // occupies Cache storage invisibly to the MAX_IMAGE_BYTES walk.
+    it('touchMeta resolves an unknown size lazily and never records size 0', () => {
+        for (const src of [TEMPLATE, GENERATED_SW]) {
+            const fnIdx = src.indexOf('async function touchMeta');
+            expect(fnIdx).toBeGreaterThan(-1);
+            const fn = src.slice(fnIdx, src.indexOf('async function', fnIdx + 1));
+            expect(fn).toMatch(/if \(!size && typeof resolveSize === 'function'\)/);
+            expect(fn).toMatch(/if \(!size\) \{\s*\n\s*return;/);
+        }
     });
 
     it('cache-miss and ETag-mismatch paths still await the network response', () => {

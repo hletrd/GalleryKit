@@ -201,22 +201,43 @@ export async function totalCacheSize(meta: MetaStore): Promise<number> {
  * without touching the cache store. Mirrors the template's `touchMeta`:
  * used when the server confirms a cached response is still fresh (304 /
  * same-ETag), so only recency changes — never eviction, since no size grows.
+ *
+ * PERF3-03 / C3-22 (run-10 c3): when no prior size is tracked and the caller
+ * has no Content-Length (`knownSize` 0), the actual body size is resolved
+ * lazily via `resolveSize` (rare path — meta lost to quota eviction or a
+ * pre-C2-11 entry). If the size still resolves to 0, the meta write is
+ * SKIPPED: a size-0 record occupies real Cache-storage bytes but is
+ * invisible to the MAX_IMAGE_BYTES accounting walk, letting the LRU drift
+ * past its cap. The next full revalidation's recordAndEvict sets the real
+ * size instead.
  */
 export async function touchMeta(
   url: string,
   knownSize: number,
   meta: MetaStore,
+  resolveSize?: () => Promise<number>,
 ): Promise<void> {
   return withMetaMutation(async () => {
     const entries = await meta.getAll();
     const existing = entries.get(url);
+    let size = existing && existing.size ? existing.size : knownSize;
+    if (!size && typeof resolveSize === 'function') {
+      try {
+        size = await resolveSize();
+      } catch {
+        size = 0;
+      }
+    }
+    if (!size) {
+      return;
+    }
     // AGG-H3 (run-6 cycle-2): delete-then-set so the touched entry moves to
     // the Map's tail, keeping insertion order == recency for the head-walk
     // eviction in recordAndEvict.
     entries.delete(url);
     entries.set(url, {
       url,
-      size: existing && existing.size ? existing.size : knownSize,
+      size,
       timestamp: Date.now(),
     });
     await meta.setAll(entries);
