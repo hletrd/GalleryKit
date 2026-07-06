@@ -20,6 +20,51 @@ const SERVE_UPLOAD = readFileSync(resolve(__dirname, '../lib/serve-upload.ts'), 
 
 const POLICY = 'public, max-age=3600, must-revalidate';
 
+type NginxLocationBlock = { pattern: string; body: string };
+
+/**
+ * C2-31 exit-criterion / CRIT3-06 / WP12 (run-10 c3): parse nginx location
+ * blocks structurally instead of string offsets. The previous
+ * `indexOf('location /')` boundary — and its run-10 c2 replacement
+ * `indexOf('\n    }')` — were both string-offset hacks that broke (or nearly
+ * broke) every time a new location block or prose comment landed: the word
+ * "immutable" in a COMMENT false-positived a directive assertion, and the
+ * indented-brace boundary depended on exact 4-space indentation. This parser
+ * strips comments line-wise (prose can never match a directive assertion
+ * again) and brace-balances each block (quantifier braces like `[a-z]{2}`
+ * inside location patterns are self-balancing, so per-line counting holds).
+ */
+export function parseNginxLocationBlocks(conf: string): NginxLocationBlock[] {
+    const lines = conf.split('\n').map((line) => {
+        const hash = line.indexOf('#');
+        return hash >= 0 ? line.slice(0, hash) : line;
+    });
+    const blocks: NginxLocationBlock[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        // The block-opening `{` is the LAST brace on the line, so a
+        // non-greedy pattern capture tolerates `{n}` regex quantifiers
+        // inside the location pattern itself.
+        const opener = /^\s*location\s+(.+?)\s*\{\s*$/.exec(lines[i]);
+        if (!opener) continue;
+        let depth = 1;
+        const bodyLines: string[] = [];
+        for (let j = i + 1; j < lines.length && depth > 0; j++) {
+            for (const ch of lines[j]) {
+                if (ch === '{') depth++;
+                else if (ch === '}') depth--;
+                if (depth === 0) break;
+            }
+            if (depth > 0) bodyLines.push(lines[j]);
+        }
+        blocks.push({ pattern: opener[1], body: bodyLines.join('\n') });
+    }
+    return blocks;
+}
+
+export function findNginxLocation(conf: string, patternSubstring: string): NginxLocationBlock | undefined {
+    return parseNginxLocationBlocks(conf).find((b) => b.pattern.includes(patternSubstring));
+}
+
 describe('unified derivative cache policy (ARCH-R4C6-06)', () => {
     it('next.config headers() carries the uploads rule with the unified policy', () => {
         expect(NEXT_CONFIG).toMatch(/source: '\/uploads\/:format\(jpeg\|webp\|avif\)\/:file\*'/);
@@ -29,22 +74,12 @@ describe('unified derivative cache policy (ARCH-R4C6-06)', () => {
     });
 
     it('nginx uploads location uses the unified policy and never immutable', () => {
-        const locIdx = NGINX.indexOf('/uploads/(jpeg|webp|avif)/');
-        expect(locIdx).toBeGreaterThan(-1);
-        // Boundary-detection fix (run-10 c2): bound the slice at the uploads
-        // location's own closing brace (newline + 4-space indent + `}`) — the
-        // old `indexOf('location /')` boundary ran past `location ^~ …` blocks
-        // (added for the public page limiter) into their prose comments, false-
-        // positiving on the word "immutable" in a comment rather than in a
-        // directive. A bare indexOf('}') would stop at the `{2}` quantifier
-        // inside the location pattern itself; the indented close is unambiguous
-        // (inner directives are 8-space indented).
-        const nextLocIdx = NGINX.indexOf('\n    }', locIdx);
-        expect(nextLocIdx).toBeGreaterThan(locIdx);
-        const locBlock = NGINX.slice(locIdx, nextLocIdx);
-        expect(locBlock).toContain(POLICY);
-        expect(locBlock).not.toMatch(/immutable/);
-        expect(locBlock).not.toMatch(/expires 1y/);
+        const uploads = findNginxLocation(NGINX, '/uploads/(jpeg|webp|avif)/');
+        expect(uploads).toBeDefined();
+        expect(uploads!.body).toContain(POLICY);
+        // Comment-stripped body: only a real directive can match now.
+        expect(uploads!.body).not.toMatch(/immutable/);
+        expect(uploads!.body).not.toMatch(/expires 1y/);
     });
 
     it('serve-upload.ts keeps the same policy on the paths it serves', () => {

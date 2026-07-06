@@ -46,9 +46,10 @@ describe('production /api/:path* CSP header (C2-41)', () => {
         const rules = await getHeaderRules('production');
         const apiRule = findRule(rules, '/api/:path*');
         expect(apiRule).toBeDefined();
-        expect(apiRule!.headers).toEqual([
-            { key: 'Content-Security-Policy', value: API_CSP },
-        ]);
+        // WP12 / CRIT3-06 (run-10 c3): assert the load-bearing header, not
+        // the exact header ARRAY — an unrelated future header on this rule
+        // must not fail a CSP contract.
+        expect(findHeader(apiRule, 'Content-Security-Policy')?.value).toBe(API_CSP);
     });
 
     it('adds the same API CSP rule under any non-dev NODE_ENV (e.g. test)', async () => {
@@ -67,9 +68,13 @@ describe('production /api/:path* CSP header (C2-41)', () => {
         const rules = await getHeaderRules('production');
         const uploadsRule = findRule(rules, '/uploads/:format(jpeg|webp|avif)/:file*');
         expect(uploadsRule).toBeDefined();
-        expect(uploadsRule!.headers).toEqual([
-            { key: 'Cache-Control', value: 'public, max-age=3600, must-revalidate' },
-        ]);
+        expect(findHeader(uploadsRule, 'Cache-Control')?.value).toBe(
+            'public, max-age=3600, must-revalidate',
+        );
+        // The derivative rule must never regain immutable (in-place backfill
+        // re-encode hazard) — the load-bearing negative, without pinning the
+        // whole header array.
+        expect(findHeader(uploadsRule, 'Cache-Control')?.value).not.toContain('immutable');
     });
 
     it('leaves the catch-all security headers unchanged in production (no CSP there, STS present)', async () => {
@@ -96,13 +101,15 @@ describe('production /api/:path* CSP header (C2-41)', () => {
         expect(findHeader(catchAll, 'Content-Security-Policy')?.value).toBeTruthy();
     });
 
-    it('returns exactly three header rules (uploads, api, catch-all) in production', async () => {
+    // WP12 / CRIT3-06 (run-10 c3): the exact-rule-COUNT pins ("exactly three
+    // in production, two in dev") were an ossification tax — ANY future
+    // headers() rule would fail a CSP test that has nothing to do with it.
+    // The load-bearing shape is: the three known rules exist where expected
+    // and the dedicated /api rule is production-only (asserted above).
+    it('keeps the three known rules present in production (no count pin)', async () => {
         const rules = await getHeaderRules('production');
-        expect(rules).toHaveLength(3);
-    });
-
-    it('returns exactly two header rules (uploads, catch-all) in dev', async () => {
-        const rules = await getHeaderRules('development');
-        expect(rules).toHaveLength(2);
+        expect(findRule(rules, '/uploads/:format(jpeg|webp|avif)/:file*')).toBeDefined();
+        expect(findRule(rules, '/api/:path*')).toBeDefined();
+        expect(findRule(rules, '/(.*)')).toBeDefined();
     });
 });
