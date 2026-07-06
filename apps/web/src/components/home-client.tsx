@@ -20,6 +20,12 @@ import { useDisplayCapability } from '@/lib/use-display-capability';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
+// C1-21 (PERF-02): bucket width for the stored viewportWidth so an interactive
+// resize/drag only updates state (and re-renders every masonry card) when the
+// estimated card width would actually shift by a visible amount, instead of
+// on every rAF'd resize frame.
+const VIEWPORT_WIDTH_BUCKET_PX = 48;
+
 function useColumnCount() {
     const [count, setCount] = useState(2);
     // DES-R5C3-04 (plan-315 item 26): also track the viewport width so callers
@@ -44,7 +50,12 @@ function useColumnCount() {
         const update = () => {
             if (!mountedRef.current) return;
             const w = window.innerWidth;
-            setViewportWidth(w);
+            // C1-21 (PERF-02): column count is still derived from the RAW width
+            // (unchanged breakpoint behavior) — only the width stored for
+            // estimatedCardWidth is quantized, so re-renders during a drag only
+            // happen when the estimate would meaningfully change.
+            const quantizedWidth = Math.round(w / VIEWPORT_WIDTH_BUCKET_PX) * VIEWPORT_WIDTH_BUCKET_PX;
+            setViewportWidth(prev => prev === quantizedWidth ? prev : quantizedWidth);
             if (w < 640) setCount(1);
             else if (w < 768) setCount(2);
             else if (w < 1280) setCount(3);
