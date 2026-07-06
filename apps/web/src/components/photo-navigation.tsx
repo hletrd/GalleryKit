@@ -23,14 +23,21 @@ const VERTICAL_LIMIT = 30;
 export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSelectId, swipeTargetRef }: PhotoNavigationProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
-    const [swipeOffset, setSwipeOffset] = useState(0);
-    const [isSnapping, setIsSnapping] = useState(false);
     const [shouldReduceMotion, setShouldReduceMotion] = useState(
         () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     );
     const touchStartX = useRef(0);
     const touchStartY = useRef(0);
     const isSwiping = useRef(false);
+    // C2-18 (run-10 c2): swipe-feedback visuals are driven imperatively via
+    // these refs so a per-frame touchmove writes opacity/transform/width
+    // straight to the nodes instead of re-rendering the whole component on
+    // every move. The offset lives in a ref; React state only holds the
+    // reduced-motion preference.
+    const prevIndicatorRef = useRef<HTMLDivElement>(null);
+    const nextIndicatorRef = useRef<HTMLDivElement>(null);
+    const progressBarRef = useRef<HTMLDivElement>(null);
+    const progressBarInnerRef = useRef<HTMLDivElement>(null);
 
     const getPhotoPath = useCallback((id: number) => (
         buildPhotoPath ? buildPhotoPath(id) : localizePath(locale, `/p/${id}`)
@@ -47,6 +54,41 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
     const vibrateForSwipe = useCallback(() => {
         if (shouldReduceMotion || typeof navigator.vibrate !== 'function') return;
         navigator.vibrate(10);
+    }, [shouldReduceMotion]);
+
+    // C2-18 (run-10 c2): apply swipe-feedback visuals imperatively — a verbatim
+    // reproduction of the previous swipeOffset-derived inline styles, written
+    // to refs instead of through React state so touchmove never re-renders.
+    // `animate` maps to the previous isSnapping transition (settle animations
+    // on touchend/cancel; immediate follow during an active drag).
+    const applySwipeVisuals = useCallback((offset: number, animate: boolean) => {
+        const transition = animate && !shouldReduceMotion
+            ? 'transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.25s ease'
+            : '';
+        const magnitude = Math.min(Math.abs(offset) / SWIPE_THRESHOLD, 1);
+        const prevEl = prevIndicatorRef.current;
+        if (prevEl) {
+            prevEl.style.transition = transition;
+            prevEl.style.opacity = String(offset > 0 ? Math.min(offset / SWIPE_THRESHOLD, 1) : 0);
+            prevEl.style.transform = `translateY(-50%) translateX(${Math.min(offset * 0.4, 24)}px)`;
+        }
+        const nextEl = nextIndicatorRef.current;
+        if (nextEl) {
+            nextEl.style.transition = transition;
+            nextEl.style.opacity = String(offset < 0 ? Math.min(-offset / SWIPE_THRESHOLD, 1) : 0);
+            nextEl.style.transform = `translateY(-50%) translateX(${Math.max(offset * 0.4, -24)}px)`;
+        }
+        const barEl = progressBarRef.current;
+        if (barEl) {
+            barEl.style.transition = transition;
+            barEl.style.opacity = String(magnitude * 0.7);
+        }
+        const barInnerEl = progressBarInnerRef.current;
+        if (barInnerEl) {
+            barInnerEl.style.transition = transition;
+            barInnerEl.style.width = `${magnitude * 48}px`;
+            barInnerEl.style.transform = `translateX(${offset > 0 ? '-25%' : '25%'})`;
+        }
     }, [shouldReduceMotion]);
 
     useEffect(() => {
@@ -66,7 +108,6 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             touchStartX.current = e.changedTouches[0].clientX;
             touchStartY.current = e.changedTouches[0].clientY;
             isSwiping.current = false;
-            setIsSnapping(false);
         };
 
         const handleTouchMove = (e: TouchEvent) => {
@@ -81,8 +122,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             const deltaY = touch.clientY - touchStartY.current;
 
             const resetSwipe = () => {
-                setIsSnapping(true);
-                setSwipeOffset(0);
+                applySwipeVisuals(0, true);
                 isSwiping.current = false;
             };
 
@@ -112,7 +152,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 return deltaX;
             })();
 
-            setSwipeOffset(clampedOffset);
+            applySwipeVisuals(clampedOffset, false);
         };
 
         const handleTouchEnd = (e: TouchEvent) => {
@@ -123,8 +163,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
 
             // Ignore if vertical movement too large
             if (Math.abs(deltaY) > VERTICAL_LIMIT) {
-                setIsSnapping(true);
-                setSwipeOffset(0);
+                applySwipeVisuals(0, true);
                 isSwiping.current = false;
                 return;
             }
@@ -139,16 +178,14 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 goToPhoto(prevId);
             } else {
                 // Snap back
-                setIsSnapping(true);
-                setSwipeOffset(0);
+                applySwipeVisuals(0, true);
             }
 
             isSwiping.current = false;
         };
 
         const handleTouchCancel = () => {
-            setIsSnapping(true);
-            setSwipeOffset(0);
+            applySwipeVisuals(0, true);
             isSwiping.current = false;
         };
 
@@ -163,31 +200,19 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             swipeTarget.removeEventListener('touchend', handleTouchEnd);
             swipeTarget.removeEventListener('touchcancel', handleTouchCancel);
         };
-    }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef, vibrateForSwipe]);
-
-    // Opacity of swipe indicators proportional to displacement
-    const prevIndicatorOpacity = swipeOffset > 0
-        ? Math.min(swipeOffset / SWIPE_THRESHOLD, 1)
-        : 0;
-    const nextIndicatorOpacity = swipeOffset < 0
-        ? Math.min(-swipeOffset / SWIPE_THRESHOLD, 1)
-        : 0;
-
-    const transitionStyle = isSnapping && !shouldReduceMotion
-        ? { transition: 'transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.25s ease' }
-        : {};
+    }, [goToPhoto, prevId, nextId, disabled, swipeTargetRef, vibrateForSwipe, applySwipeVisuals]);
 
     return (
         <>
-            {/* Swipe feedback: left edge indicator (shows on rightward swipe toward prev) */}
+            {/* Swipe feedback: left edge indicator (shows on rightward swipe toward prev).
+                C2-18 (run-10 c2): opacity/transform written imperatively via
+                applySwipeVisuals during a drag; the initial inline style holds
+                the resting (invisible) state. */}
             {prevId && (
                 <div
+                    ref={prevIndicatorRef}
                     className="absolute left-4 top-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
-                    style={{
-                        opacity: prevIndicatorOpacity,
-                        transform: `translateY(-50%) translateX(${Math.min(swipeOffset * 0.4, 24)}px)`,
-                        ...transitionStyle,
-                    }}
+                    style={{ opacity: 0, transform: 'translateY(-50%) translateX(0px)' }}
                 >
                     <div className="h-14 w-14 rounded-full bg-black/60 flex items-center justify-center shadow-lg">
                         <ChevronLeft className="h-7 w-7 text-white" />
@@ -198,12 +223,9 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             {/* Swipe feedback: right edge indicator (shows on leftward swipe toward next) */}
             {nextId && (
                 <div
+                    ref={nextIndicatorRef}
                     className="absolute right-4 top-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
-                    style={{
-                        opacity: nextIndicatorOpacity,
-                        transform: `translateY(-50%) translateX(${Math.max(swipeOffset * 0.4, -24)}px)`,
-                        ...transitionStyle,
-                    }}
+                    style={{ opacity: 0, transform: 'translateY(-50%) translateX(0px)' }}
                 >
                     <div className="h-14 w-14 rounded-full bg-black/60 flex items-center justify-center shadow-lg">
                         <ChevronRight className="h-7 w-7 text-white" />
@@ -211,25 +233,21 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 </div>
             )}
 
-            {/* Swipe progress bar — subtle horizontal indicator at bottom */}
-            {swipeOffset !== 0 && (
+            {/* Swipe progress bar — subtle horizontal indicator at bottom.
+                C2-18 (run-10 c2): always mounted (was gated on swipeOffset !== 0)
+                so applySwipeVisuals can drive it imperatively; it stays invisible
+                (opacity 0 / width 0) and pointer-events-none at rest. */}
+            <div
+                ref={progressBarRef}
+                className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
+                style={{ opacity: 0 }}
+            >
                 <div
-                    className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-                    style={{
-                        opacity: Math.min(Math.abs(swipeOffset) / SWIPE_THRESHOLD, 1) * 0.7,
-                        ...transitionStyle,
-                    }}
-                >
-                    <div
-                        className="h-1 rounded-full bg-white/70"
-                        style={{
-                            width: `${Math.min(Math.abs(swipeOffset) / SWIPE_THRESHOLD, 1) * 48}px`,
-                            transform: `translateX(${swipeOffset > 0 ? '-25%' : '25%'})`,
-                            ...transitionStyle,
-                        }}
-                    />
-                </div>
-            )}
+                    ref={progressBarInnerRef}
+                    className="h-1 rounded-full bg-white/70"
+                    style={{ width: '0px', transform: 'translateX(-25%)' }}
+                />
+            </div>
 
             {/* Static navigation buttons (hover on desktop, always visible on mobile).
                 R4C1 UX-R4C1-14: z-20, NOT z-10. The photo's AnimatePresence
