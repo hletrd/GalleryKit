@@ -14,6 +14,7 @@ import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { hasMySQLErrorCode, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 const PHOTO_SHARE_KEY_LENGTH = 10;
@@ -95,6 +96,12 @@ export async function createPhotoShareLink(imageId: number) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
@@ -198,6 +205,12 @@ export async function createGroupShareLink(imageIds: number[]) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
@@ -321,6 +334,12 @@ export async function revokePhotoShareLink(imageId: number) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
@@ -361,6 +380,12 @@ export async function deleteGroupShareLink(groupId: number) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(groupId) || groupId <= 0) {

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError } from '@/lib/db-restore';
+import {
+    hasPlausibleSqlDumpHeader,
+    isIgnorableRestoreStdinError,
+    isMysqldumpArtifactHeader,
+    hasMysqldumpCompletionTrailer,
+} from '@/lib/db-restore';
 
 const DB_ACTIONS_SRC = readFileSync(
     resolve(__dirname, '../app/[locale]/admin/db-actions.ts'),
@@ -73,6 +78,67 @@ describe('backup dump validation', () => {
         expect(dumpDatabaseSource.indexOf('hasPlausibleSqlDumpHeader(headerBytes)')).toBeLessThan(
             dumpDatabaseSource.indexOf('resolve({ success: true, filename'),
         );
-        expect(dumpDatabaseSource).toMatch(/fs\.unlink\(outputPath\)\.catch\(\(\) => \{\}\);[\s\S]*resolve\(\{ success: false, error: t\('failedToWriteBackup'\) \}\);/);
+        expect(dumpDatabaseSource).toMatch(/fs\.unlink\(tmpOutputPath\)\.catch\(\(\) => \{\}\);[\s\S]*resolve\(\{ success: false, error: t\('failedToWriteBackup'\) \}\);/);
+    });
+
+    it('C1-02: streams the dump to a .tmp sibling and atomically renames only after all checks pass', () => {
+        const dumpDatabaseSource = DB_ACTIONS_SRC.slice(
+            DB_ACTIONS_SRC.indexOf('export async function dumpDatabase()'),
+            DB_ACTIONS_SRC.indexOf('// Restore intentionally uses'),
+        );
+
+        // Write goes to the .tmp path, never directly to the canonical filename.
+        expect(dumpDatabaseSource).toMatch(/const tmpOutputPath = `\$\{outputPath\}\.tmp`/);
+        expect(dumpDatabaseSource).toContain('createWriteStream(tmpOutputPath');
+        expect(dumpDatabaseSource).not.toContain('createWriteStream(outputPath');
+        // The atomic publish happens after the trailer completeness check and
+        // before the success resolve.
+        const trailerIdx = dumpDatabaseSource.indexOf('hasMysqldumpCompletionTrailer(tailBytes)');
+        const renameIdx = dumpDatabaseSource.indexOf('await fs.rename(tmpOutputPath, outputPath)');
+        const successIdx = dumpDatabaseSource.indexOf('resolve({ success: true, filename');
+        expect(trailerIdx).toBeGreaterThan(-1);
+        expect(renameIdx).toBeGreaterThan(trailerIdx);
+        expect(successIdx).toBeGreaterThan(renameIdx);
+    });
+
+    it('C1-02: restore requires the mysqldump completion trailer for mysqldump-headed files', () => {
+        const restoreIdx = DB_ACTIONS_SRC.indexOf('// Restore intentionally uses');
+        const restoreSource = DB_ACTIONS_SRC.slice(restoreIdx);
+        expect(restoreSource).toContain('isMysqldumpArtifactHeader(headerBytes)');
+        expect(restoreSource).toContain('hasMysqldumpCompletionTrailer(tailBytes)');
+        expect(restoreSource).toContain("t('truncatedSqlDump')");
+        // The completeness gate must run before the mysql child is spawned.
+        expect(restoreSource.indexOf('hasMysqldumpCompletionTrailer(tailBytes)')).toBeLessThan(
+            restoreSource.indexOf("spawn('mysql'"),
+        );
+    });
+});
+
+describe('isMysqldumpArtifactHeader (C1-02)', () => {
+    it('identifies mysqldump and mariadb-dump artifacts', () => {
+        expect(isMysqldumpArtifactHeader('-- MySQL dump 10.13  Distrib 8.0.36')).toBe(true);
+        expect(isMysqldumpArtifactHeader('-- MariaDB dump 10.19')).toBe(true);
+        expect(isMysqldumpArtifactHeader('\n-- MySQL dump 10.13')).toBe(true);
+    });
+
+    it('does not classify operator-authored SQL as a mysqldump artifact', () => {
+        expect(isMysqldumpArtifactHeader('-- my hand-written backup')).toBe(false);
+        expect(isMysqldumpArtifactHeader('CREATE TABLE `images` (`id` int);')).toBe(false);
+        expect(isMysqldumpArtifactHeader('SET NAMES utf8mb4;')).toBe(false);
+    });
+});
+
+describe('hasMysqldumpCompletionTrailer (C1-02)', () => {
+    it('accepts a complete dump tail', () => {
+        expect(hasMysqldumpCompletionTrailer('UNLOCK TABLES;\n\n-- Dump completed on 2026-07-06 12:00:00\n')).toBe(true);
+        expect(hasMysqldumpCompletionTrailer('-- Dump completed\n')).toBe(true);
+    });
+
+    it('rejects a tail truncated at a clean statement boundary', () => {
+        // The dangerous case: every statement is complete, but the dump was
+        // cut short — imports cleanly with exit code 0 while missing tables.
+        expect(hasMysqldumpCompletionTrailer("INSERT INTO `images` VALUES (42,'x');\n")).toBe(false);
+        expect(hasMysqldumpCompletionTrailer('UNLOCK TABLES;\n')).toBe(false);
+        expect(hasMysqldumpCompletionTrailer('')).toBe(false);
     });
 });

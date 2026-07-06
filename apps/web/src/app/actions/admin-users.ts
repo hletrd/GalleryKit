@@ -15,6 +15,7 @@ import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { LOCK_ADMIN_DELETE, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
@@ -81,6 +82,12 @@ export async function createAdminUser(formData: FormData) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // AGG10R-RPL-01: validate form-field shape BEFORE the rate-limit
@@ -190,6 +197,12 @@ export async function deleteAdminUser(id: number) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const currentUser = await getCurrentUser();
     if (!currentUser) return { error: t('unauthorized') };

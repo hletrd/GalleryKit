@@ -32,6 +32,7 @@ import { parseSmartCollectionQuery, remapTopicSlugInQuery } from '@/lib/smart-co
 import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { LOCK_TOPIC_ROUTE_SEGMENTS, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 
@@ -89,6 +90,12 @@ export async function createTopic(formData: FormData) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // C7-AGG7R-03: sanitizeAdminString checks Unicode formatting BEFORE
@@ -186,6 +193,12 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Reject malformed input: if sanitization changes the value, the input
@@ -413,6 +426,12 @@ export async function deleteTopic(slug: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Reject malformed input: if sanitization changes the value, the input
@@ -486,6 +505,12 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Sanitize before validation — reject malformed input: if sanitization
@@ -553,6 +578,12 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Reject malformed input: if sanitization changes the value, the input
@@ -610,6 +641,12 @@ export async function setTopicMapVisible(topicSlug: string, mapVisible: boolean)
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const { value: cleanSlug, rejected: slugRejected } = requireCleanInput(topicSlug);

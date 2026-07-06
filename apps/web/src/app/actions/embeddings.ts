@@ -23,6 +23,7 @@ import { resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 
 const BACKFILL_CONCURRENCY = 2;
@@ -60,6 +61,12 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     if (maintenanceError) return { status: 'error', message: maintenanceError };
     const originError = await requireSameOriginAdmin();
     if (originError) return { status: 'unauthorized', message: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the whole backfill body (released on every exit path via
+    // Symbol.dispose) so an embedding backfill admitted before the restore
+    // marker flips cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { status: 'error', message: t('restoreInProgress') };
     if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
 
     // Rate-limit: once per hour per admin user

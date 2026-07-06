@@ -11,6 +11,7 @@ import { parseSmartCollectionQuery } from '@/lib/smart-collections';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 
 export async function createSmartCollection(formData: FormData) {
     const t = await getTranslations('serverActions');
@@ -18,6 +19,12 @@ export async function createSmartCollection(formData: FormData) {
     if (maintenanceError) return { error: maintenanceError };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
@@ -67,6 +74,12 @@ export async function updateSmartCollection(id: number, formData: FormData) {
     if (maintenanceError) return { error: maintenanceError };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) return { error: t('invalidInput') };
@@ -115,6 +128,12 @@ export async function deleteSmartCollection(id: number) {
     if (maintenanceError) return { error: maintenanceError };
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) return { error: t('invalidInput') };

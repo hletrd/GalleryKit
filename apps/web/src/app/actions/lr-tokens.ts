@@ -17,6 +17,7 @@ import { countCodePoints } from '@/lib/utils';
 import { headers } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 
 export type LrTokenListItem = Omit<AdminTokenRecord, 'tokenHash'>;
 
@@ -38,6 +39,12 @@ export async function createLrToken(opts: {
 
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
 
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();
@@ -115,6 +122,12 @@ export async function revokeLrToken(tokenId: number): Promise<{ success: boolean
 
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
 
     if (!(await isAdmin())) return { error: t('unauthorized') };
     const user = await getCurrentUser();

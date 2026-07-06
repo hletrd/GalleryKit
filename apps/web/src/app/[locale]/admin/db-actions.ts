@@ -23,8 +23,9 @@ import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { drainBackgroundDbWritesForRestore } from "@/lib/background-db-writes";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
+import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
-import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
+import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES, isMysqldumpArtifactHeader, hasMysqldumpCompletionTrailer, MYSQLDUMP_TRAILER_SCAN_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
@@ -184,6 +185,13 @@ export async function dumpDatabase() {
 
     const backupsDir = path.join(process.cwd(), 'data', 'backups');
     const outputPath = path.join(backupsDir, filename);
+    // C1-02 (run-10 cycle-1, DBG-03): the dump streams to a .tmp sibling and is
+    // atomically rename()d to the canonical filename ONLY after every
+    // completeness check passes. A mid-write process kill (OOM, docker stop
+    // past the grace window, host power loss) therefore can never leave a
+    // truncated file at a real, listed backup filename — the worst case is an
+    // orphaned .tmp that the next successful backup run ignores.
+    const tmpOutputPath = `${outputPath}.tmp`;
 
     // C2L2-08: create the backups directory owner-only so its mode aligns with
     // the per-file `0o600` mode applied below. Operators on multi-user hosts
@@ -227,7 +235,7 @@ export async function dumpDatabase() {
                 env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
             });
 
-        const writeStream = createWriteStream(outputPath, { mode: 0o600 });
+        const writeStream = createWriteStream(tmpOutputPath, { mode: 0o600 });
         let settled = false;
         let writeStreamHadError = false;
         const clearWatchdog = armDbChildProcessWatchdog(dump, 'mysqldump backup', (err) => {
@@ -235,7 +243,7 @@ export async function dumpDatabase() {
             settled = true;
             console.error('mysqldump backup timeout:', err);
             writeStream.destroy(err);
-            fs.unlink(outputPath).catch(() => {});
+            fs.unlink(tmpOutputPath).catch(() => {});
             resolve({ success: false, error: t('backupFailed') });
         });
 
@@ -248,7 +256,7 @@ export async function dumpDatabase() {
             clearWatchdog();
             console.error('Backup writeStream error:', err);
             dump.kill();
-            fs.unlink(outputPath).catch(() => {});
+            fs.unlink(tmpOutputPath).catch(() => {});
             resolve({ success: false, error: t('failedToWriteBackup') });
         });
 
@@ -280,7 +288,7 @@ export async function dumpDatabase() {
                 // may be truncated or corrupt. Report failure instead of success.
                 if (writeStreamHadError) {
                     console.error('Backup writeStream error during flush — file may be corrupt');
-                    fs.unlink(outputPath).catch(() => {});
+                    fs.unlink(tmpOutputPath).catch(() => {});
                     resolve({ success: false, error: t('failedToWriteBackup') });
                     return;
                 }
@@ -290,15 +298,15 @@ export async function dumpDatabase() {
                 // 0 without producing output (e.g., permissions issue on some
                 // MySQL versions that don't set a non-zero exit code).
                 try {
-                    const stats = await fs.stat(outputPath);
+                    const stats = await fs.stat(tmpOutputPath);
                     if (stats.size === 0) {
                         console.error('Backup file is empty despite mysqldump exit code 0');
-                        fs.unlink(outputPath).catch(() => {});
+                        fs.unlink(tmpOutputPath).catch(() => {});
                         resolve({ success: false, error: t('failedToWriteBackup') });
                         return;
                     }
                     const headerBuf = Buffer.alloc(256);
-                    const fd = await fs.open(outputPath, 'r');
+                    const fd = await fs.open(tmpOutputPath, 'r');
                     let headerBytesRead = 0;
                     try {
                         const { bytesRead } = await fd.read(headerBuf, 0, headerBuf.length, 0);
@@ -309,12 +317,42 @@ export async function dumpDatabase() {
                     const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
                     if (!hasPlausibleSqlDumpHeader(headerBytes)) {
                         console.error('Backup file does not start with a plausible SQL dump header');
-                        fs.unlink(outputPath).catch(() => {});
+                        fs.unlink(tmpOutputPath).catch(() => {});
                         resolve({ success: false, error: t('failedToWriteBackup') });
                         return;
                     }
+
+                    // C1-02 (run-10 cycle-1, DBG-03): completeness check. Our
+                    // own mysqldump invocation never passes --skip-comments, so
+                    // a COMPLETE dump always ends with the `-- Dump completed`
+                    // trailer; its absence means the stream was cut mid-dump
+                    // even though the exit code was 0 (e.g. a wedged pipe
+                    // flushed late) — never publish such a file as a backup.
+                    if (isMysqldumpArtifactHeader(headerBytes)) {
+                        const tailStart = Math.max(0, stats.size - MYSQLDUMP_TRAILER_SCAN_BYTES);
+                        const tailBuf = Buffer.alloc(Math.min(stats.size, MYSQLDUMP_TRAILER_SCAN_BYTES));
+                        const tailFd = await fs.open(tmpOutputPath, 'r');
+                        let tailBytesRead = 0;
+                        try {
+                            const { bytesRead } = await tailFd.read(tailBuf, 0, tailBuf.length, tailStart);
+                            tailBytesRead = bytesRead;
+                        } finally {
+                            await tailFd.close();
+                        }
+                        const tailBytes = tailBuf.subarray(0, tailBytesRead).toString('utf8');
+                        if (!hasMysqldumpCompletionTrailer(tailBytes)) {
+                            console.error('Backup file is missing the mysqldump completion trailer — dump is incomplete');
+                            fs.unlink(tmpOutputPath).catch(() => {});
+                            resolve({ success: false, error: t('failedToWriteBackup') });
+                            return;
+                        }
+                    }
+
+                    // C1-02: every check passed — atomically publish the dump
+                    // at its canonical, listable filename.
+                    await fs.rename(tmpOutputPath, outputPath);
                 } catch {
-                    fs.unlink(outputPath).catch(() => {});
+                    fs.unlink(tmpOutputPath).catch(() => {});
                     resolve({ success: false, error: t('failedToWriteBackup') });
                     return;
                 }
@@ -331,7 +369,7 @@ export async function dumpDatabase() {
                 // Return filename; url points to authenticated admin download route
                 resolve({ success: true, filename, url: `/api/admin/db/download?file=${encodeURIComponent(filename)}` });
             } else {
-                fs.unlink(outputPath).catch(() => {});
+                fs.unlink(tmpOutputPath).catch(() => {});
                 resolve({ success: false, error: t('backupExitedWithCode', { code }) });
             }
         });
@@ -341,7 +379,7 @@ export async function dumpDatabase() {
             settled = true;
             clearWatchdog();
             console.error('mysqldump spawn error:', err);
-            fs.unlink(outputPath).catch(() => {});
+            fs.unlink(tmpOutputPath).catch(() => {});
             resolve({ success: false, error: t('backupFailed') });
         });
         });
@@ -495,6 +533,19 @@ export async function restoreDatabase(formData: FormData) {
                 await quiesceImageProcessingQueueForRestore();
                 imageQueueQuiesced = true;
                 await drainBackgroundDbWritesForRestore();
+                // C1-03 (run-10 cycle-1, closes C77-ARCH-01): drain FOREGROUND
+                // admin mutations too. Every mutating admin action holds a
+                // shared barrier slot for its whole body; the durable marker
+                // (set above) plus the exclusive flag refuse new entrants, and
+                // this wait ensures a mutation admitted BEFORE the marker
+                // flipped cannot still be mid-body writing into the database
+                // while the import replaces it. On timeout the restore ABORTS
+                // rather than importing over concurrent writes.
+                const mutationsDrained = await drainAdminMutationsForRestore();
+                if (!mutationsDrained) {
+                    console.error('Restore aborted: in-flight admin mutations did not settle within the drain budget');
+                    return { success: false, error: t('restoreFailed') };
+                }
             } catch (err) {
                 console.error('Failed to prepare restore maintenance window', err);
                 return { success: false, error: t('restoreFailed') };
@@ -505,6 +556,11 @@ export async function restoreDatabase(formData: FormData) {
             keepRestoreMaintenance = restoreResult.keepMaintenance === true;
             return restoreResult;
         } finally {
+            // C1-03: the exclusive barrier side ends with the restore window —
+            // released unconditionally (on failure the durable maintenance
+            // marker still blocks mutations; a stale exclusive flag must never
+            // outlive the restore attempt).
+            releaseAdminMutationExclusive();
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
                 try {
                     endDurableRestoreMaintenance();
@@ -615,6 +671,34 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         if (!validHeader) {
             await cleanupTempFile();
             return { success: false, error: t('invalidSqlDump') };
+        }
+
+        // C1-02 (run-10 cycle-1, DBG-03): completeness check for mysqldump
+        // artifacts. A dump truncated at a clean statement boundary imports
+        // with exit code 0 and would be reported as a SUCCESSFUL restore while
+        // silently missing every table after the truncation point. mysqldump
+        // output (this app never passes --skip-comments) always ends with a
+        // `-- Dump completed` trailer; when the header identifies a mysqldump
+        // artifact, require it. Operator-authored plain SQL (no mysqldump
+        // header) is not subject to this check.
+        if (isMysqldumpArtifactHeader(headerBytes)) {
+            const restoreFileSize = (await fs.stat(tempPath)).size;
+            const tailStart = Math.max(0, restoreFileSize - MYSQLDUMP_TRAILER_SCAN_BYTES);
+            const tailBuf = Buffer.alloc(Math.min(restoreFileSize, MYSQLDUMP_TRAILER_SCAN_BYTES));
+            const tailFd = await fs.open(tempPath, 'r');
+            let tailBytesRead = 0;
+            try {
+                const { bytesRead } = await tailFd.read(tailBuf, 0, tailBuf.length, tailStart);
+                tailBytesRead = bytesRead;
+            } finally {
+                await tailFd.close();
+            }
+            const tailBytes = tailBuf.subarray(0, tailBytesRead).toString('utf8');
+            if (!hasMysqldumpCompletionTrailer(tailBytes)) {
+                console.error('Restore rejected: mysqldump-headed file is missing the completion trailer (truncated dump)');
+                await cleanupTempFile();
+                return { success: false, error: t('truncatedSqlDump') };
+            }
         }
 
         const CHUNK_SIZE = 1024 * 1024;
@@ -781,8 +865,28 @@ async function resolveMigrationScriptPath(): Promise<string> {
 async function runPostRestoreMigrations(t: Awaited<ReturnType<typeof getTranslations>>) {
     const scriptPath = await resolveMigrationScriptPath();
     return new Promise<{ success: boolean; error?: string }>((resolve) => {
+        // C1-12 (run-10 cycle-1, SEC-02): minimal child env, matching the
+        // discipline of the sibling mysqldump/mysql spawns. The migrate child
+        // needs PATH + NODE_ENV, the DB_* connection vars consumed by
+        // scripts/mysql-connection-options.js, and the two vars migrate.js
+        // itself reads (ADMIN_PASSWORD for seed reconciliation,
+        // UPLOAD_ORIGINAL_ROOT for path reconciliation) — NOT the full
+        // process.env, which would leak SESSION_SECRET and every other runtime
+        // secret into a child that never uses them.
+        const migrateEnvKeys = [
+            'PATH',
+            'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_SSL', 'DB_SSL_CA',
+            'ADMIN_PASSWORD', 'UPLOAD_ORIGINAL_ROOT',
+        ] as const;
+        // NODE_ENV is set in the initializer (Next's ProcessEnv augmentation
+        // marks it readonly, so it cannot go through the keyed loop below).
+        const migrateEnv: NodeJS.ProcessEnv = { NODE_ENV: process.env.NODE_ENV, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
+        for (const key of migrateEnvKeys) {
+            const value = process.env[key];
+            if (value !== undefined) migrateEnv[key] = value;
+        }
         const migrate = spawn(process.execPath, [scriptPath], {
-            env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+            env: migrateEnv,
         });
         let settled = false;
         const clearWatchdog = armDbChildProcessWatchdog(migrate, 'post-restore migration', (err) => {

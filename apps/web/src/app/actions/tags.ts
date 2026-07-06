@@ -6,11 +6,12 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
-import { isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { isValidTagName, isValidTagSlug, hasMySQLErrorCode } from '@/lib/validation';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
 import { requireCleanInput } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 // Tag Management
@@ -46,6 +47,12 @@ export async function updateTag(id: number, name: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Validate ID is a positive integer
@@ -105,6 +112,23 @@ export async function updateTag(id: number, name: string) {
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         return { success: true };
     } catch (e) {
+        // C1-18 (run-10 cycle-1, CR-05): renaming a tag onto a slug owned by a
+        // DIFFERENT tag hits the unique constraint. Surface the specific
+        // collision like the addTagToImage/batchAddTags paths instead of the
+        // generic failedToUpdateTag, so the admin can see WHY the rename failed.
+        if (hasMySQLErrorCode(e, 'ER_DUP_ENTRY')) {
+            let existingName = trimmedName;
+            try {
+                const [collidingTag] = await db.select({ name: tags.name })
+                    .from(tags)
+                    .where(eq(tags.slug, slug));
+                if (collidingTag?.name) existingName = collidingTag.name;
+            } catch {
+                // Lookup is best-effort; the collision message is still more
+                // actionable than the generic failure even without the name.
+            }
+            return { error: t('tagSlugCollision', { newName: trimmedName, existingName }) };
+        }
         console.error("Failed to update tag", e);
         return { error: t('failedToUpdateTag') };
     }
@@ -117,6 +141,12 @@ export async function deleteTag(id: number) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Validate ID is a positive integer
@@ -167,6 +197,12 @@ export async function addTagToImage(imageId: number, tagName: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
@@ -242,6 +278,12 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
@@ -311,6 +353,12 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): hold a shared restore-fence
+    // slot for the WHOLE mutation body (released on every exit path via
+    // Symbol.dispose) so a mutation admitted before the restore marker flips
+    // cannot write into the freshly restored database mid-import.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { error: t('restoreInProgress') };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) return { error: t('noImagesSelected') };
@@ -409,6 +457,9 @@ export async function batchUpdateImageTags(
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { success: false, added: 0, removed: 0, warnings: [originError] };
+    // C1-03 (run-10 cycle-1, closes C77-ARCH-01): restore-fence slot — see updateTag.
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return { success: false, added: 0, removed: 0, warnings: [t('restoreInProgress')] };
     if (!(await isAdmin())) return { success: false, added: 0, removed: 0, warnings: [t('unauthorized')] };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {

@@ -599,6 +599,7 @@
     "fileTooLarge": "파일이 너무 큽니다 (최대 250MB)",
     "failedToSaveUpload": "업로드 파일 저장에 실패했습니다",
     "invalidSqlDump": "올바르지 않은 SQL 덤프 파일입니다",
+    "truncatedSqlDump": "SQL 덤프가 불완전합니다 (mysqldump 완료 트레일러 누락). 잘린 덤프를 복원하면 데이터가 유실될 수 있으니 백업을 다시 내보내 주세요.",
     "disallowedSql": "SQL 파일에 허용되지 않는 구문이 포함되어 있습니다",
     "failedToReadRestore": "복원 파일 읽기에 실패했습니다",
     "restoreFailed": "데이터베이스 복원에 실패했습니다",

@@ -599,6 +599,7 @@
     "fileTooLarge": "File too large (max 250MB)",
     "failedToSaveUpload": "Failed to save uploaded file",
     "invalidSqlDump": "Invalid SQL dump file",
+    "truncatedSqlDump": "The SQL dump appears to be incomplete (missing the mysqldump completion trailer). Restoring a truncated dump would silently lose data — please re-export the backup.",
     "disallowedSql": "SQL file contains disallowed statements",
     "failedToReadRestore": "Failed to read restore file",
     "restoreFailed": "Database restore failed",
