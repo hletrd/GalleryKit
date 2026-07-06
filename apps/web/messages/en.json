@@ -596,6 +596,8 @@
     "rawRejectedWarning": "{count} camera RAW file(s) were rejected. Export your RAWs to JPEG, TIFF, AVIF, or PNG before uploading.",
     "gpsStripFailed": "GPS metadata could not be stripped from the original. Upload was rejected to avoid retaining location data.",
     "restoreInProgress": "Another restore is already in progress",
+    "restoreBlockedByUpload": "Restore is blocked because an upload or processing-contract change is in flight. Please try again shortly.",
+    "restoreBlockedByBackfill": "Restore is blocked because a color-pipeline or embedding backfill is running. Please wait for it to finish before retrying.",
     "noFileProvided": "No file provided",
     "fileTooLarge": "File too large (max 250MB)",
     "failedToSaveUpload": "Failed to save uploaded file",

@@ -596,6 +596,8 @@
     "rawRejectedWarning": "RAW 파일 {count}개가 거부되었습니다. JPEG, TIFF, AVIF, PNG로 내보낸 뒤 다시 업로드해 주세요.",
     "gpsStripFailed": "원본에서 GPS 메타데이터를 제거할 수 없습니다. 위치 정보가 보관되지 않도록 업로드를 거부했습니다.",
     "restoreInProgress": "다른 복원 작업이 이미 진행 중입니다",
+    "restoreBlockedByUpload": "업로드 또는 처리 계약 변경 작업이 진행 중이어서 복원이 차단되었습니다. 잠시 후 다시 시도해 주세요.",
+    "restoreBlockedByBackfill": "색상 파이프라인 또는 임베딩 백필 작업이 실행 중이어서 복원이 차단되었습니다. 작업이 끝난 후 다시 시도해 주세요.",
     "noFileProvided": "파일이 제공되지 않았습니다",
     "fileTooLarge": "파일이 너무 큽니다 (최대 250MB)",
     "failedToSaveUpload": "업로드 파일 저장에 실패했습니다",
