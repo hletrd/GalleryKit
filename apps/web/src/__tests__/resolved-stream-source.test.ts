@@ -9,7 +9,10 @@ describe('resolved-path streaming contracts', () => {
     it('serves uploads from the validated descriptor, not a path reopen', () => {
         expect(serveUploadSource).toContain('const resolvedPath = await realpath(absolutePath)');
         expect(serveUploadSource).toContain("fileHandle = await open(resolvedPath, 'r')");
-        expect(serveUploadSource).toContain('const stats = await fileHandle.stat();');
+        // PERF3-07 (run-10 c3): 304/HEAD use a path-stat (no body served, no
+        // fd), but the GET BODY path still stats THROUGH the descriptor it
+        // streams from — that is the load-bearing race-safety contract.
+        expect(serveUploadSource).toContain('const bodyStats = await fileHandle.stat();');
         expect(serveUploadSource).toContain('fileStream = fileHandle.createReadStream({ autoClose: true })');
         expect(serveUploadSource).toContain('same descriptor');
         expect(serveUploadSource).not.toContain('createReadStream(absolutePath)');
