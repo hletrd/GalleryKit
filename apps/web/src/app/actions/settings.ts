@@ -10,6 +10,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { normalizeStringRecord } from '@/lib/sanitize';
 import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
+import { SETTINGS_BACKFILL_WARNING_KEYS, hasBackfillRelevantDifference } from '@/lib/settings-backfill-warning';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -163,8 +164,43 @@ export async function updateGallerySettings(settings: Record<string, string>) {
             }
         }
 
+        // C2-02 (run-10 c2): the byte-impacting keys other than image_sizes
+        // (already hard-fenced above) have no admission fence at all — an
+        // admin can freely change encoder quality/gamut settings even with
+        // photos already on disk. Rather than a hard block, surface a soft
+        // signal: if one of those keys actually changes value (checked
+        // against a fresh DB read, not just the client's own diff) AND at
+        // least one image has already been processed (so it already carries
+        // derivative bytes encoded under the old settings), tell the caller a
+        // re-encode is now required. Derived from the authoritative
+        // SETTINGS_BACKFILL_WARNING_KEYS export so this can never drift from
+        // the settings UI's own warning logic.
+        let requiresBackfill = false;
+        const requestedBackfillWarningKeys = SETTINGS_BACKFILL_WARNING_KEYS.filter((key) =>
+            Object.prototype.hasOwnProperty.call(sanitizedSettings, key));
+
+        if (requestedBackfillWarningKeys.length > 0) {
+            const currentBackfillWarningRows = await db
+                .select({ key: adminSettings.key, value: adminSettings.value })
+                .from(adminSettings)
+                .where(inArray(adminSettings.key, requestedBackfillWarningKeys));
+            const currentBackfillWarningSettings: Record<string, string> = {};
+            for (const row of currentBackfillWarningRows) {
+                currentBackfillWarningSettings[row.key] = row.value;
+            }
+
+            if (hasBackfillRelevantDifference(sanitizedSettings, currentBackfillWarningSettings, defaults)) {
+                const [existingProcessedImage] = await db
+                    .select({ id: images.id })
+                    .from(images)
+                    .where(eq(images.processed, true))
+                    .limit(1);
+                requiresBackfill = !!existingProcessedImage;
+            }
+        }
+
         if (Object.keys(sanitizedSettings).length === 0) {
-            return { success: true as const, settings: sanitizedSettings };
+            return { success: true as const, settings: sanitizedSettings, requiresBackfill };
         }
 
         // Upsert each setting atomically in a transaction to prevent partial writes on crash
@@ -191,7 +227,7 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         // C1R-04: return the normalized values (including the canonicalized
         // image_sizes string) so the admin settings client can rehydrate from
         // what was actually persisted.
-        return { success: true as const, settings: sanitizedSettings };
+        return { success: true as const, settings: sanitizedSettings, requiresBackfill };
     } catch (err) {
         console.error('Failed to update gallery settings', err);
         return { error: t('failedToUpdateGallerySettings') };

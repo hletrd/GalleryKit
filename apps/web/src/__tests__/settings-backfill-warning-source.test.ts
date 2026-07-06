@@ -13,7 +13,7 @@ describe('settings backfill warning persistence', () => {
         expect(SOURCE).toContain('const backfillPendingBaselineRef = useRef<Record<string, string> | null>(null)');
         expect(SOURCE).toContain('SETTINGS_BACKFILL_WARNING_KEY_SET');
         expect(SOURCE).toContain('hasBackfillRelevantDifference');
-        expect(SOURCE).toContain('const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending)');
+        expect(SOURCE).toContain('const showBackfillRequired = hasSavedBackfillPending || (hasExistingImages && hasDirtyBackfillField)');
         expect(SOURCE).toContain('const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults)');
         expect(SOURCE).toContain('const savedBackfillRelevantChange = Object.keys(changed).some((key) => SETTINGS_BACKFILL_WARNING_KEY_SET.has(key))');
         expect(SOURCE).toContain('backfillNoPipelineCandidatesSettingsOnly');
@@ -24,8 +24,14 @@ describe('settings backfill warning persistence', () => {
             SOURCE.indexOf('initialRef.current = nextSettings'),
         );
         expect(SOURCE).toContain('pendingBaseline: backfillPendingBaselineRef.current');
-        expect(SOURCE).toContain('backfillPendingBaselineRef.current = backfillPending.pendingBaseline');
-        expect(SOURCE).toContain('setHasSavedBackfillPending(backfillPending.hasSavedBackfillPending)');
         expect(SOURCE).toContain('{showBackfillRequired && (');
+
+        // C2-02 (run-10 c2): the action's independently-verified requiresBackfill
+        // signal (fresh DB diff + a real processed-image check) is folded into the
+        // same pending flag so it survives a stale hasExistingImages page-load prop.
+        expect(SOURCE).toContain('const hasSavedBackfillPendingNext = backfillPending.hasSavedBackfillPending || result.requiresBackfill === true');
+        expect(SOURCE).toContain('backfillPendingBaselineRef.current = hasSavedBackfillPendingNext');
+        expect(SOURCE).toContain('? (backfillPending.pendingBaseline ?? previousBaseline)');
+        expect(SOURCE).toContain('setHasSavedBackfillPending(hasSavedBackfillPendingNext)');
     });
 });

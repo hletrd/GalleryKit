@@ -9,6 +9,7 @@ const {
     txDeleteWhereMock,
     dbSelectMock,
     selectLimitResults,
+    selectWhereResults,
     isAdminMock,
     getCurrentUserMock,
     getTranslationsMock,
@@ -20,11 +21,20 @@ const {
     acquireUploadProcessingContractLockMock,
 } = vi.hoisted(() => {
     const selectLimitResults: Array<unknown[]> = [];
+    // C2-02 (run-10 c2): a bare `.where(...)` awaited WITHOUT a further
+    // `.limit()` call (used by the requiresBackfill diff's inArray fetch)
+    // must resolve on its own — real Drizzle query builders are thenable at
+    // every step. Model that by returning a promise that ALSO exposes
+    // `.limit()` for chains that still want a single row.
+    const selectWhereResults: Array<unknown[]> = [];
     const dbSelectMock = vi.fn(() => ({
         from: vi.fn(() => ({
-            where: vi.fn(() => ({
-                limit: vi.fn(() => Promise.resolve(selectLimitResults.shift() ?? [])),
-            })),
+            where: vi.fn(() => {
+                const limit = vi.fn(() => Promise.resolve(selectLimitResults.shift() ?? []));
+                const wherePromise = Promise.resolve(selectWhereResults.shift() ?? []) as Promise<unknown[]> & { limit: typeof limit };
+                wherePromise.limit = limit;
+                return wherePromise;
+            }),
             limit: vi.fn(() => Promise.resolve(selectLimitResults.shift() ?? [])),
         })),
     }));
@@ -38,6 +48,7 @@ const {
         txDeleteWhereMock: vi.fn(),
         dbSelectMock,
         selectLimitResults,
+        selectWhereResults,
         isAdminMock: vi.fn(),
         getCurrentUserMock: vi.fn(),
         getTranslationsMock: vi.fn(),
@@ -113,6 +124,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
     beforeEach(() => {
         persistedRows = [];
         selectLimitResults.length = 0;
+        selectWhereResults.length = 0;
         vi.clearAllMocks();
         releaseUploadContractLockMock = vi.fn().mockResolvedValue(undefined);
         getTranslationsMock.mockResolvedValue((key: string) => key);
@@ -156,6 +168,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
         await expect(updateGallerySettings({ semantic_search_mode: mode })).resolves.toEqual({
             success: true,
             settings: { semantic_search_mode: mode },
+            requiresBackfill: false,
         });
 
         expect(transactionMock).toHaveBeenCalledTimes(1);
@@ -169,6 +182,9 @@ describe('updateGallerySettings semantic_search_mode', () => {
         await expect(updateGallerySettings({ image_quality_jpeg: ' 95 ' })).resolves.toEqual({
             success: true,
             settings: { image_quality_jpeg: '95' },
+            // No stored current value and no processed image row in this fixture,
+            // so the fresh diff detects a change but there is nothing to re-encode.
+            requiresBackfill: false,
         });
 
         expect(transactionMock).toHaveBeenCalledTimes(1);
@@ -185,6 +201,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
         await expect(updateGallerySettings({ image_sizes: '1536, 640' })).resolves.toEqual({
             success: true,
             settings: {},
+            requiresBackfill: false,
         });
 
         expect(hasActiveUploadClaimsMock).not.toHaveBeenCalled();
@@ -215,6 +232,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
         await expect(updateGallerySettings({ strip_gps_on_upload: 'false' })).resolves.toEqual({
             success: true,
             settings: {},
+            requiresBackfill: false,
         });
 
         expect(hasActiveUploadClaimsMock).not.toHaveBeenCalled();

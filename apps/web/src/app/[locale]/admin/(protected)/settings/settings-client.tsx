@@ -189,7 +189,13 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     // amber warning above the image-processing fields surfaces only when
     // at least one such field has been edited.
     const hasDirtyBackfillField = hasBackfillRelevantDifference(settings, baseline, defaults);
-    const showBackfillRequired = hasExistingImages && (hasDirtyBackfillField || hasSavedBackfillPending);
+    // C2-02 (run-10 c2): hasSavedBackfillPending can now also be confirmed by
+    // the server's fresh DB read (see handleSave), which survives a stale
+    // hasExistingImages prop — e.g. the page loaded before the gallery's
+    // first photo was processed in another tab. The live/unsaved-dirty case
+    // still relies on the page-load prop since there is no fresher signal
+    // without a round trip on every keystroke.
+    const showBackfillRequired = hasSavedBackfillPending || (hasExistingImages && hasDirtyBackfillField);
 
     // R27-UX-HIGH-1: Path A — fire the in-app backfill server action when
     // the photographer clicks "Re-encode existing photos". The action
@@ -274,8 +280,18 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                         pendingBaseline: backfillPendingBaselineRef.current,
                         defaults,
                     });
-                    backfillPendingBaselineRef.current = backfillPending.pendingBaseline;
-                    setHasSavedBackfillPending(backfillPending.hasSavedBackfillPending);
+                    // C2-02 (run-10 c2): the action independently re-checks the
+                    // byte-impacting diff against a fresh DB read and confirms at
+                    // least one processed image exists, so `result.requiresBackfill`
+                    // survives a stale `hasExistingImages` prop (page loaded before
+                    // the gallery's first photo finished processing in another
+                    // tab/session). Fold it into the same pending flag rather than
+                    // re-gating it behind that prop.
+                    const hasSavedBackfillPendingNext = backfillPending.hasSavedBackfillPending || result.requiresBackfill === true;
+                    backfillPendingBaselineRef.current = hasSavedBackfillPendingNext
+                        ? (backfillPending.pendingBaseline ?? previousBaseline)
+                        : null;
+                    setHasSavedBackfillPending(hasSavedBackfillPendingNext);
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
