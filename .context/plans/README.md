@@ -21,11 +21,13 @@ re-opened on two-lane review agreement.
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 1/100 Implementation Plan - full 12-lane fresh review; schedules 30 findings incl. the aged restore mutation fence (C77-ARCH-01), backup/restore completeness verification, first-page `COUNT(*) OVER()` removal, rate-limiter saturated fast path (closes orphaned cycle-99 finding), queue robustness, and live-verified a11y fixes, from start HEAD `657eb024` (`cycle-1-2026-07-06-plan.md`)
-- Run-10 Cycle 1/100 Deferred Findings - defers mysql2-internals coupling test, broad source-contract retirement (policy adopted instead), multipart RSS measurement, startup TRUST_PROXY fail-loud, Collections admin UI product decision, and operator topology confirmation, each with exit criteria (`cycle-1-2026-07-06-deferred.md`)
+- Run-10 Cycle 2/100 Implementation Plan - 12-lane fresh review from start HEAD `642c5091`; mandatory carry-over fixed first: deploy-host container build (workspace-nested drizzle-kit TS2307, negative-control verified, commit `223b3836`); schedules 26 work packages incl. Lightbox/Info-sheet focus restore, soft-404 status fix, byte-impacting-settings re-encode notice, single-writer boot guard, ISOBMFF parent-bound validation, SW 304 write-amplification fix, lean topics accessor, and a perf/test/docs batch (`cycle-2-2026-07-07-plan.md`)
+- Run-10 Cycle 2/100 Deferred Findings - defers map clustering, embedding-matrix cache, view-record round-trip fold, on-this-day index/migration, GPS-strip streaming, `updated_at` index migration, site-config runtime-mount decision, storage-module product decision, restore-drain slot re-scoping, scanner tokenizer rework, and the perf long-tail, each with exit criteria (`cycle-2-2026-07-07-deferred.md`)
 
 ## Recent Plans
 
+- Run-10 Cycle 1/100 Implementation Plan - COMPLETED: 16 commits pushed (terminal `642c5091`), all 8 gates green locally, retroactively verify-arch-approved; the per-cycle deploy failed on the container build (drizzle-kit TS2307) and was carried over as run-10 cycle-2's mandatory first work item, fixed as `223b3836` (`cycle-1-2026-07-06-plan.md`)
+- Run-10 Cycle 1/100 Deferred Findings - defers mysql2-internals coupling test, broad source-contract retirement (policy adopted instead), multipart RSS measurement, startup TRUST_PROXY fail-loud, Collections admin UI product decision, and operator topology confirmation, each with exit criteria (`cycle-1-2026-07-06-deferred.md`)
 - Cycle 98/100 Implementation Plan - committed/pushed as signed `d6912560`; closed public select allowlist coverage, raw i18n duplicate-key detection, and Cycle 97 release-ledger evidence (`cycle-98-2026-07-01-plan.md`)
 - Cycle 98/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-98-2026-07-01-deferred.md`)
 - Cycle 99 (recovery run, partial) - review-only: architect + perf lanes committed as `8b09ce64`/`657eb024`; never planned in that run; findings folded into Run-10 Cycle 1 (`.context/reviews/cycle-99-2026-07-01/`)

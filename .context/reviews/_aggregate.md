@@ -1,33 +1,43 @@
 # Latest Aggregate Review
 
-Current aggregate: `cycle-1-2026-07-06/_aggregate.md` (run-10 cycle 1/100, reviewed HEAD `657eb024`).
+Current aggregate: `cycle-2-2026-07-07/_aggregate.md` (run-10 cycle 2/100, reviewed HEAD `642c5091`;
+the mandatory carry-over Docker build fix landed mid-review as `223b3836`).
 
-Run-10 cycle 1 was a full 12-lane fresh fan-out after the cycle-85..99 recovery run. It produced 34
-deduplicated dispositions: 30 scheduled (mostly narrow fixes plus three larger items — the aged
-C77-ARCH-01 restore mutation fence, backup/restore completeness verification, and the first-page
-`COUNT(*) OVER()` removal), 3 deferred with exit criteria (mysql2-internals coupling test, broader
-source-contract test retirement, multipart RSS measurement + startup TRUST_PROXY fail-loud), and 4
-stale-baseline items resolved during the cycle-start git reconciliation (divergence, stray cycle-94
-copies, superseded cycle-85 diffs).
+Run-10 cycle 2 was a full 12-lane fresh fan-out (11 file-writing lanes + the secondary
+feature-dev code-reviewer message lane). It produced 55 deduplicated findings (C2-01..C2-55).
+The first fan-out attempt this cycle was wiped by an API session limit before any lane wrote
+output and was fully re-spawned.
 
 Highest-signal items:
 
-- `C1-01` — public `load_more`/`view_record` limiters do DB work for already-saturated callers (3-lane agreement; closes the orphaned cycle-99 architect finding).
-- `C1-02` — backup/restore lacks dump-completeness verification (truncated dump can restore "successfully").
-- `C1-03` — restore maintenance does not fence non-upload admin writers (deferred C77-ARCH-01, drained this cycle).
-- `C1-07` — `COUNT(*) OVER()` on the hot first-page listing (re-opened from deferred C94-11 on 2-lane agreement).
-- `C1-08`/`C1-09`/`C1-10` — live-verified admin focus-loss, garbled month-heading accessible names, missing admin `<h1>`s.
-- `C1-25` — CLAUDE.md overstates smart collections as admin-manageable; CRUD actions have no UI/API surface.
-- `C1-26` — ledger repair: cycle-99 review was orphaned (never aggregated/indexed/scheduled).
+- Carry-over (closed): deploy-host container build failed on workspace-nested `drizzle-kit`
+  (TS2307 in `drizzle.config.ts`); root-caused to the builder stage copying only root
+  `/app/node_modules`, fixed + negative-control verified in `223b3836`.
+- `C2-01` — focus lost to `<body>` after closing Lightbox / mobile Info sheet (live-reproduced).
+- `C2-02` — 7 of 9 byte-impacting admin settings accepted silently with no re-encode prompt/marker.
+- `C2-03` — single-writer topology has no code-level guard (3-lane agreement).
+- `C2-04` — soft 404: all public not-found routes return HTTP 200 on the live site.
+- `C2-05` — ISOBMFF child-box size not validated against parent container end in
+  `color-detection.ts`/`gain-map-detection.ts` (feeds the HDR ingest gate; empirically reproduced).
+- `C2-06`/`C2-07` — public SSR pages unthrottled at every layer; the rate-limit lint gate is
+  structurally blind to `page.tsx` (3-lane agreement with pool-ceiling ARCH-02/PERF-13).
+- `C2-11`..`C2-21` — perf cluster: SW 304 write amplification, 10k Leaflet markers, per-render
+  `MAX(updated_at)` topics subquery, semantic-scan decode cost, view-record round-trips,
+  non-sargable timeline scans, unbounded tag `IN (...)`, touchmove re-renders, masonry memo,
+  GPS-strip full-file buffering, unindexed `updated_at` sorts.
+- Verified clean: document-specialist found zero doc/code mismatches; verifier confirmed ~60
+  CLAUDE.md claims byte-for-byte (3 wording notes); security lane found no CRIT/HIGH vulns.
 
 ## Agent Failures
 
-The first 12-lane fan-out was killed by an API session limit after 4 lanes wrote artifacts; the
-remaining 8 lanes were re-spawned per the retry rule and all completed. No lane remains failed.
+The first 12-lane fan-out of this cycle was killed by an API session limit before any artifacts
+were written; all 12 lanes were re-spawned per the retry rule. Eleven completed and wrote files;
+the secondary feature-dev code-reviewer lane returns via final message and is folded in as an
+addendum when received (see the cycle aggregate's AGENT FAILURES section).
 
 ## Plan Disposition
 
-All 34 dispositions are scheduled or explicitly deferred in `.context/plans/cycle-1-2026-07-06-plan.md`
-and `.context/plans/cycle-1-2026-07-06-deferred.md`. Deferred registers remain:
-`.context/plans/cycle-96-2026-07-01-deferred.md` (broad carry-forwards) plus the new cycle-1 register.
-An age-budget policy for carry-forward deferrals is adopted in `.context/plans/README.md`.
+All findings are scheduled or explicitly deferred in `.context/plans/cycle-2-2026-07-07-plan.md`
+and `.context/plans/cycle-2-2026-07-07-deferred.md`. Deferred registers remain:
+`.context/plans/cycle-96-2026-07-01-deferred.md` (broad carry-forwards) plus the cycle-1 and
+cycle-2 registers. The carry-forward age-budget policy in `.context/plans/README.md` applies.
