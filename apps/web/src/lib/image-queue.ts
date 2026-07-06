@@ -18,12 +18,6 @@ import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
 
-/** C1-19 (run-10 cycle-1, TRC-02): FK rejection for an image deleted while its
- *  un-awaited embedding write was in flight — expected, not an error. */
-function isMissingImageFkError(err: unknown): boolean {
-    return hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW_2')
-        || hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW');
-}
 import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
@@ -31,6 +25,13 @@ import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from 
 import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
 import { parseBoundedPositiveInteger } from '@/lib/env';
+
+/** C1-19 (run-10 cycle-1, TRC-02): FK rejection for an image deleted while its
+ *  un-awaited embedding write was in flight — expected, not an error. */
+function isMissingImageFkError(err: unknown): boolean {
+    return hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW_2')
+        || hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW');
+}
 
 export const ORPHANED_DERIVATIVE_TEMP_MIN_AGE_MS = 60 * 60 * 1000;
 

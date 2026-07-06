@@ -894,10 +894,18 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     // Check for explicit reasoned exempt comment.
     // C1-BUG-05: strip string literals before matching so the tag inside
     // a string literal does not falsely exempt the file.
+    // C1-38 (run-10 cycle-1): the single/double-quote patterns must NOT cross
+    // newlines. A bare apostrophe inside a COMMENT (e.g. "the orchestrator's
+    // timeout") would otherwise pair with the next real string quote several
+    // lines below, and the greedy deleted span could swallow the exemption
+    // comment itself — flipping a correctly-exempted route to a false
+    // violation. Real single/double-quoted JS strings cannot contain raw
+    // newlines, so line-bounded matching is strictly more correct. Template
+    // literals CAN span lines and keep the multi-line pattern.
     const withoutStrings = content
         .replace(/`[^`]*`/g, '')
-        .replace(/"[^"]*"/g, '')
-        .replace(/'[^']*'/g, '');
+        .replace(/"[^"\n]*"/g, '')
+        .replace(/'[^'\n]*'/g, '');
     const hasExemption = EXEMPT_COMMENT_RE.test(withoutStrings);
     if (hasExemption) {
         const expensiveReadHandlers = readHandlers.filter((handler) => bodyContainsExpensiveGetWork(handler.body, sourceFile, localExpensiveGetFunctions, importedExpensiveReadFunctions));

@@ -154,6 +154,43 @@ describe('checkPublicRouteSource', () => {
         expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
     });
 
+    it('C1-38: a bare apostrophe in an earlier comment cannot swallow the exemption', () => {
+        // Regression: the string-stripping pass ran with patterns whose
+        // character classes crossed newlines, so an apostrophe inside a
+        // COMMENT paired with the next real string quote and the deleted span
+        // swallowed the exemption comment below it — flipping a correctly
+        // exempted route into a false violation (found by the ralph verifier
+        // on the C1-16 health-route comment "the orchestrator's patience").
+        const source = `
+            // readiness probes must answer within the orchestrator's patience
+            // @public-no-rate-limit-required: operational readiness endpoint; low-cost
+            export async function POST(request) {
+                const status = 'unavailable';
+                return { status };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('carries @public-no-rate-limit-required'))).toBe(true);
+    });
+
+    it('C1-38: exemption tags inside multi-line template literals are still stripped', () => {
+        // The template-literal pattern deliberately remains multi-line; a tag
+        // inside one must not exempt the file (C1-BUG-05 posture preserved).
+        const source = `
+            import { db } from '@/db';
+            const banner = \`
+                @public-no-rate-limit-required: not a real exemption
+            \`;
+            export async function POST(request) {
+                await db.insert(banner);
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed.length).toBeGreaterThan(0);
+    });
+
     it('passes cheap GET handlers without a limiter', () => {
         const source = `
             export async function GET() {

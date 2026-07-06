@@ -5,7 +5,7 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-/** C1-16: readiness probes must answer within the orchestrator's patience. */
+/** C1-16: readiness probes must answer within the orchestrator patience window. */
 const HEALTH_DB_PROBE_TIMEOUT_MS = 2_000;
 
 // @public-no-rate-limit-required: operational readiness endpoint; optional DB probe is intentionally unauthenticated and low-cost.
@@ -34,7 +34,7 @@ export async function GET() {
         // C1-16 (run-10 cycle-1, CR-03): bound the probe. A wedged-but-accepting
         // MySQL (lock stall, saturated pool queue) neither resolves nor rejects
         // promptly; an unbounded readiness probe then hangs past the
-        // orchestrator's own HTTP timeout AND pins one of the 10 pool
+        // orchestrator HTTP timeout AND pins one of the 10 pool
         // connections during the very incident it should be reporting. Timeout
         // counts as not-ready -> 503.
         await Promise.race([
