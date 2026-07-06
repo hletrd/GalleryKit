@@ -194,12 +194,49 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
  * such store, so a `cache()`-wrapped call there can memoize far longer than
  * intended, silently pinning stale settings (e.g. a `semantic_search_mode`
  * flip an already-running background task never observes). Detached
- * background call sites — currently the three in `image-queue.ts` — MUST use
- * this uncached accessor instead of `getGalleryConfig()` so every invocation
- * re-reads current admin settings. Request-path server components/actions
- * should keep using the cached `getGalleryConfig()` below.
+ * background call sites — the three in `image-queue.ts` plus the admin
+ * backfill runner's detached `runBackfill` (C3-04) — MUST use this uncached
+ * accessor instead of `getGalleryConfig()` so every invocation re-reads
+ * current admin settings. Request-path server components/actions should keep
+ * using the cached `getGalleryConfig()` below.
+ *
+ * PERF3-01 / C3-16 (run-10 c3): the queue's per-image side-effect gate calls
+ * this once per processed image (a 17-row `admin_settings` SELECT each, all
+ * discarded after one field check in the default deployment). A tiny
+ * module-level TTL micro-cache (2 s) with in-flight dedupe collapses
+ * bootstrap-storm reads to ~one query per interval while keeping the
+ * detached-context freshness contract: a settings flip is observed within a
+ * 2 s skew, far below any human flip-setting-then-act workflow latency.
  */
-export const getGalleryConfigUncached: typeof _getGalleryConfig = _getGalleryConfig;
+const UNCACHED_CONFIG_TTL_MS = 2_000;
+let uncachedConfigCache: { value: GalleryConfig; expiresAt: number } | null = null;
+let uncachedConfigInFlight: Promise<GalleryConfig> | null = null;
+
+export const getGalleryConfigUncached: typeof _getGalleryConfig = async () => {
+    const now = Date.now();
+    if (uncachedConfigCache && uncachedConfigCache.expiresAt > now) {
+        return uncachedConfigCache.value;
+    }
+    if (uncachedConfigInFlight) {
+        return uncachedConfigInFlight;
+    }
+    uncachedConfigInFlight = (async () => {
+        try {
+            const value = await _getGalleryConfig();
+            uncachedConfigCache = { value, expiresAt: Date.now() + UNCACHED_CONFIG_TTL_MS };
+            return value;
+        } finally {
+            uncachedConfigInFlight = null;
+        }
+    })();
+    return uncachedConfigInFlight;
+};
+
+/** Test hook (C3-16): reset the uncached-accessor micro-cache between tests. */
+export function _uncachedConfigCacheReset(): void {
+    uncachedConfigCache = null;
+    uncachedConfigInFlight = null;
+}
 
 /** Cached gallery config — deduped within a single SSR request via React cache(). */
 export const getGalleryConfig = cache(_getGalleryConfig);

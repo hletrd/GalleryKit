@@ -97,7 +97,7 @@ git values must be treated as compromised and must not be reused.
 | `TRUST_PROXY` | — | Set to `true` behind nginx/reverse proxy so per-IP rate limiting sees the real client IP |
 | `TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops from the right of `X-Forwarded-For`; keep `1` for shipped nginx-only, where nginx overwrites incoming XFF with `$remote_addr` |
 | `HEALTH_CHECK_DB` | — | Set to `true` to make `/api/health` probe DB readiness (default is liveness-only) |
-| `QUEUE_CONCURRENCY` | `1` | Background image-processing jobs concurrency in this web process |
+| `QUEUE_CONCURRENCY` | `1` | Background image-processing jobs concurrency in this web process. Parser max 8, but the effective value is clamped by the pool budget: `min(requested, max(1, floor((POOL_CONNECTION_LIMIT − max(3, ceil(POOL_CONNECTION_LIMIT/2))) / 2)))` (`resolveImageQueueConcurrency` in `image-queue.ts`) — **2** at the shipped pool of 10, with a boot-time `console.warn` when clamped down (C3-15, run-10 c3) |
 | `SHARP_CONCURRENCY` | `max(1, floor((cpuCount-1)/3))` | Upper bound for Sharp/libvips threads. When unset, defaults to `max(1, floor((cpuCount-1)/3))` (the `/3` accounts for the AVIF/WebP/JPEG format fan-out so one image stays near `cores-1` total threads). An explicit value is capped at `cpuCount-1` |
 | `IMAGE_MAX_INPUT_PIXELS` | `268435456` | Decompression bomb protection cap (default 256M pixels) |
 | `IMAGE_MAX_INPUT_PIXELS_TOPIC` | `67108864` | Separate cap for topic images (default 64M; smaller because topic images are 512x512) |
@@ -266,7 +266,7 @@ headroom during simultaneous admin maintenance operations.
 
 1. Files uploaded via `uploadImages()` server action
 2. Original saved to the private upload store under `data/uploads/original/`
-3. Enqueued to `PQueue` (default concurrency: 1; override with `QUEUE_CONCURRENCY`) for background processing
+3. Enqueued to `PQueue` (default concurrency: 1; override with `QUEUE_CONCURRENCY`, pool-budget-clamped — effective cap **2** at the shipped 10-connection pool, warned on clamp; see the env-var table) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
 5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at configurable sizes each (default: 640, 1536, 2048, 4096, 5120, 7680; admin-configurable up to 8 sizes)
 6. Per-format **fresh** `sharp(inputPath, …)` instance (WI-14 cross-format isolation — see the Color & HDR "Encoder decision matrix" note), with `clone()` used only WITHIN a format (e.g. the 10-bit AVIF fallback). NOTE (AGG-R7-08): the encoder does NOT keep a single decoded instance across formats/sizes — it opens a fresh decode per output to eliminate shared-state contamination, trading decode reuse for correctness (the encoder no longer keeps a shared decoded `image` var across formats, and the per-path WI-14 "fresh sharp instance per format for ALL paths" note lives in `generateForFormat` in `process-image.ts` — search the `WI-14 / R8-R8` comment rather than a brittle line number, which drifts on every edit)

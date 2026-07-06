@@ -64,3 +64,49 @@ describe('resolveImageQueueConcurrency', () => {
         expect(limit - cap * 2).toBeGreaterThanOrEqual(reserved);
     });
 });
+
+/**
+ * DOC3-01 / C3-15 (run-10 c3): an operator raising QUEUE_CONCURRENCY on the
+ * default pool silently got an effective concurrency of 2 with no signal —
+ * unlike the admin backfill runner, which warns on clamp. The module now
+ * logs a boot-time warning when the requested value is clamped down.
+ */
+describe('QUEUE_CONCURRENCY clamp warning (DOC3-01 / C3-15)', () => {
+    it('warns at module load when the requested concurrency is clamped by the pool budget', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.QUEUE_CONCURRENCY;
+        process.env.QUEUE_CONCURRENCY = '8';
+        vi.resetModules();
+        try {
+            await import('@/lib/image-queue');
+            const clampWarning = warnSpy.mock.calls.find((call) =>
+                String(call[0]).includes('clamped to'));
+            expect(clampWarning).toBeTruthy();
+            expect(String(clampWarning?.[0])).toContain('QUEUE_CONCURRENCY=8');
+            expect(String(clampWarning?.[0])).toContain('clamped to 2');
+        } finally {
+            if (prev === undefined) delete process.env.QUEUE_CONCURRENCY;
+            else process.env.QUEUE_CONCURRENCY = prev;
+            vi.resetModules();
+            warnSpy.mockRestore();
+        }
+    });
+
+    it('does not warn when the requested concurrency fits the budget', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.QUEUE_CONCURRENCY;
+        process.env.QUEUE_CONCURRENCY = '2';
+        vi.resetModules();
+        try {
+            await import('@/lib/image-queue');
+            const clampWarning = warnSpy.mock.calls.find((call) =>
+                String(call[0]).includes('clamped to'));
+            expect(clampWarning).toBeFalsy();
+        } finally {
+            if (prev === undefined) delete process.env.QUEUE_CONCURRENCY;
+            else process.env.QUEUE_CONCURRENCY = prev;
+            vi.resetModules();
+            warnSpy.mockRestore();
+        }
+    });
+});

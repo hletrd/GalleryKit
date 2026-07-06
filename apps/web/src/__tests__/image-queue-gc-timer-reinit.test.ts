@@ -130,3 +130,59 @@ describe('getProcessingQueueState GC timer re-init (WP22 / C2-33)', () => {
         expect(clearIntervalSpy).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * ARCH3-04 / C3-20 (run-10 c3): per-job retry timers are tracked on state so
+ * the defensive re-init clears them alongside gcInterval (same leaked-timer
+ * class C2-33 fixed) and shutdown can clear parked backoff timers.
+ */
+describe('per-job retry timer tracking (ARCH3-04 / C3-20)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        vi.resetModules();
+        delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[processingQueueKey];
+        vi.doUnmock('p-queue');
+        vi.doUnmock('@/db');
+        vi.doUnmock('drizzle-orm');
+    });
+
+    it('clears tracked retry timers when the defensive re-init replaces a malformed state', async () => {
+        const { getProcessingQueueState } = await loadQueueModule();
+        const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
+
+        const parkedRetry = setTimeout(() => {}, 60_000);
+        parkedRetry.unref?.();
+        (globalThis as typeof globalThis & Record<symbol, unknown>)[processingQueueKey] = {
+            queue: null,
+            enqueued: new Set<number>(),
+            bootstrapped: false,
+            retryTimers: new Set([parkedRetry]),
+        };
+
+        const state = getProcessingQueueState();
+
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(parkedRetry);
+        expect(state.retryTimers instanceof Set).toBe(true);
+        expect(state.retryTimers.size).toBe(0);
+    });
+
+    it('clears parked retry timers on shutdown before draining the queue', async () => {
+        const { getProcessingQueueState, shutdownImageProcessingQueue } = await loadQueueModule();
+        const state = getProcessingQueueState();
+        const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
+
+        const parkedRetry = setTimeout(() => {}, 60_000);
+        parkedRetry.unref?.();
+        state.retryTimers.add(parkedRetry);
+
+        await shutdownImageProcessingQueue(state, {
+            pause: vi.fn(),
+            clear: vi.fn(),
+            onIdle: vi.fn(async () => {}),
+        });
+
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(parkedRetry);
+        expect(state.retryTimers.size).toBe(0);
+    });
+});
