@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import FocusTrap from '@/components/lazy-focus-trap';
 import { Info, MapPin, Calendar, Clock, X, Download, ChevronDown } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
@@ -38,16 +38,21 @@ interface InfoBottomSheetProps {
     histogramCycleRef?: React.RefObject<(() => void) | null>;
     /** R28-HD-LOW-1: persist WideGamutHint dismissal across sessions for share-route recipients. */
     isSharedView?: boolean;
+    /** C2-01 (run-10 c2): explicit focus-restore target (the mobile Info
+     *  button that opened the sheet). The sheet's `return null` unmounts the
+     *  FocusTrap in the same commit it deactivates, so focus-trap-react's
+     *  returnFocusOnDeactivate races the unmount and can no-op — restoring
+     *  this opener ref explicitly refocuses the button when the sheet closes. */
+    restoreFocusRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 type SheetState = 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef, isSharedView = false }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef, isSharedView = false, restoreFocusRef }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
-    const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
     const [sheetElement, setSheetElement] = useState<HTMLDivElement | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
     const modalRootRef = useRef<HTMLDivElement>(null);
@@ -67,6 +72,26 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         prevIsOpenRef.current = isOpen;
     }, [isOpen]);
 
+    // C2-01 (run-10 c2): explicit focus restore on close. The `return null`
+    // below unmounts the FocusTrap in the same commit that deactivates it, so
+    // focus-trap-react's returnFocusOnDeactivate races the unmount and can
+    // no-op, dropping focus to <body>. When the sheet closes, refocus the
+    // parent-supplied opener (the mobile Info button) on a rAF so the restore
+    // runs after the sheet + FocusTrap have torn down.
+    const prevIsOpenForFocusRef = useRef(isOpen);
+    useEffect(() => {
+        const wasOpen = prevIsOpenForFocusRef.current;
+        prevIsOpenForFocusRef.current = isOpen;
+        if (wasOpen && !isOpen) {
+            const target = restoreFocusRef?.current;
+            if (target) {
+                window.requestAnimationFrame(() => {
+                    if (document.body.contains(target)) target.focus();
+                });
+            }
+        }
+    }, [isOpen, restoreFocusRef]);
+
     const getTranslateY = useCallback((state: SheetState): string => {
         switch (state) {
             case 'peek':
@@ -81,6 +106,22 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         setSheetElement(node);
     }, []);
 
+    // C2-18 (run-10 c2): the sheet transform is driven imperatively so a
+    // drag's per-frame touchmove writes style.transform straight to the node
+    // instead of re-rendering the whole sheet subtree via setState. React
+    // state (sheetState) still owns the resting peek/expanded position; this
+    // layout effect re-applies the resting transform whenever the sheet opens
+    // or that state changes (drag-handle click, Escape, breakpoint sync) so
+    // those transitions keep animating. It runs on state/open changes only, so
+    // it never fights the imperative drag frames (which don't setState).
+    useLayoutEffect(() => {
+        if (!isOpen) return;
+        const el = sheetRef.current;
+        if (!el) return;
+        el.style.transition = '';
+        el.style.transform = `translateY(${getTranslateY(sheetState)})`;
+    }, [isOpen, sheetState, getTranslateY]);
+
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
         touchStartY.current = e.touches[0].clientY;
         touchStartTime.current = Date.now();
@@ -90,13 +131,17 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         if (touchStartY.current === null) return;
         e.preventDefault(); // prevent background scroll while dragging the sheet
         const deltaY = e.changedTouches[0].clientY - touchStartY.current;
-        setLiveTranslateY(deltaY);
-    }, []);
+        // C2-18 (run-10 c2): write the live drag transform straight to the node
+        // (no setState) so a per-frame touchmove doesn't re-render the sheet.
+        const el = sheetRef.current;
+        if (el) {
+            el.style.transition = 'none';
+            el.style.transform = `translateY(calc(${getTranslateY(sheetState)} + ${deltaY}px))`;
+        }
+    }, [getTranslateY, sheetState]);
 
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         if (touchStartY.current === null || touchStartTime.current === null) return;
-
-        setLiveTranslateY(null); // reset live tracking
 
         const deltaY = e.changedTouches[0].clientY - touchStartY.current;
         const deltaTime = Date.now() - touchStartTime.current;
@@ -106,26 +151,28 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         const isSwipeDown = deltaY > 30 || (deltaY > 0 && velocity > 0.3);
 
         let shouldClose = false;
-        setSheetState(prev => {
-            if (isSwipeUp) {
-                if (prev === 'peek') return 'expanded';
-                return prev;
-            }
-            if (isSwipeDown) {
-                if (prev === 'expanded') return 'peek';
-                if (prev === 'peek') {
-                    shouldClose = true;
-                    return 'peek';
-                }
-                return prev;
-            }
-            return prev;
-        });
+        let nextState: SheetState = sheetState;
+        if (isSwipeUp) {
+            if (sheetState === 'peek') nextState = 'expanded';
+        } else if (isSwipeDown) {
+            if (sheetState === 'expanded') nextState = 'peek';
+            else if (sheetState === 'peek') shouldClose = true;
+        }
+
+        // C2-18 (run-10 c2): settle the transform imperatively so a snap-back
+        // (no sheetState change) still animates back to the resting position —
+        // the layout effect only fires when sheetState actually changes.
+        const el = sheetRef.current;
+        if (el) {
+            el.style.transition = '';
+            el.style.transform = `translateY(${getTranslateY(nextState)})`;
+        }
+        if (nextState !== sheetState) setSheetState(nextState);
         if (shouldClose) onClose();
 
         touchStartY.current = null;
         touchStartTime.current = null;
-    }, [onClose]);
+    }, [onClose, sheetState, getTranslateY]);
 
     const handleBackdropClick = useCallback(() => {
         if (sheetState === 'expanded') {
@@ -207,11 +254,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                 aria-modal="true"
                 aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
+                // C2-18 (run-10 c2): transform/transition are applied
+                // imperatively (see the layout effect + touch handlers) so drag
+                // frames never re-render this subtree; the resting transform is
+                // reasserted whenever sheetState/isOpen change.
                 style={{
-                    transform: `translateY(${liveTranslateY !== null
-                        ? `calc(${getTranslateY(sheetState)} + ${liveTranslateY}px)`
-                        : getTranslateY(sheetState)})`,
-                    transition: liveTranslateY !== null ? 'none' : undefined,
                     maxHeight: '95vh',
                     ...({'maxHeight': '95dvh'} as React.CSSProperties),
                     minHeight: `${PEEK_HEIGHT}px`,
