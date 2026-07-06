@@ -51,10 +51,19 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     twitter: {
       card: 'summary_large_image',
     },
-    robots: {
-      index: true,
-      follow: true,
-    },
+    // C3-05 (run-10 c3, TRC3-03 + DES3-01): deliberately NO explicit
+    // `robots: { index: true, follow: true }` here. Next elides the robots
+    // meta tag entirely for the index/follow default on valid pages, so the
+    // explicit block was a no-op everywhere EXCEPT real 404s — where the
+    // ancestor-resolved "index, follow" tag rendered ALONGSIDE the
+    // framework-injected `noindex` (Next auto-injects
+    // `<meta name="robots" content="noindex">` on 404-status pages),
+    // shipping two CONFLICTING robots directives on every not-found URL.
+    // Omitting the default leaves the framework's noindex as the single
+    // authoritative tag on 404s and changes nothing on valid pages.
+    // (`not-found.tsx` cannot carry its own metadata export — only the
+    // experimental global-not-found.js supports that per Next 16 docs —
+    // so this elision IS the fix.) Pinned by e2e/not-found-status.spec.ts.
   };
 }
 

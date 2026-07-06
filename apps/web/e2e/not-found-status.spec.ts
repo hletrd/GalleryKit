@@ -47,3 +47,44 @@ test.describe('not-found routes return HTTP 404', () => {
         expect(res.status()).toBe(200);
     });
 });
+
+/**
+ * C3-05 (run-10 c3, TRC3-03 + DES3-01) — single, consistent robots signal on
+ * 404 pages.
+ *
+ * The status-bearing 404 fix regressed the head metadata: the locale
+ * layout's explicit `robots: { index: true, follow: true }` (elided by Next
+ * on valid pages) rendered on 404 pages ALONGSIDE the framework-injected
+ * `noindex`, shipping two conflicting robots directives. The explicit
+ * default was removed; these assertions pin exactly one robots meta tag
+ * (noindex) on 404 responses and none of the conflicting `index, follow`
+ * form anywhere.
+ */
+test.describe('404 pages carry a single noindex robots signal', () => {
+    const robotsTags = (html: string) =>
+        html.match(/<meta\s+name="robots"[^>]*>/g) ?? [];
+
+    for (const [label, url] of [
+        ['nonexistent photo id', '/en/p/99999999'],
+        ['nonexistent topic slug', '/en/nonexistent-topic-xyz'],
+        ['arbitrary path', '/en/nonexistent-page-xyz-abc'],
+        ['nonexistent collection (ko locale)', '/ko/c/nonexistent-collection-xyz'],
+    ] as const) {
+        test(`${label}: exactly one robots tag, noindex, no index-follow conflict`, async ({ request }) => {
+            const res = await request.get(url);
+            expect(res.status()).toBe(404);
+            const html = await res.text();
+            const tags = robotsTags(html);
+            expect(tags).toHaveLength(1);
+            expect(tags[0]).toContain('noindex');
+            expect(html).not.toMatch(/<meta\s+name="robots"\s+content="index, follow"/);
+        });
+    }
+
+    test('control: valid pages emit no robots meta tag at all (index/follow default is elided)', async ({ request }) => {
+        const res = await request.get('/en');
+        expect(res.status()).toBe(200);
+        const html = await res.text();
+        expect(robotsTags(html)).toHaveLength(0);
+    });
+});
