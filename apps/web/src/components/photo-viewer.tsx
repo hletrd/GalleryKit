@@ -92,6 +92,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const colorDetailsToggleRef = useRef<(() => void) | null>(null);
     const histogramCycleRef = useRef<(() => void) | null>(null);
     const mediaContainerRef = useRef<HTMLDivElement>(null);
+    // C2-01 (run-10 c2): explicit focus-restore targets handed to the Lightbox
+    // and InfoBottomSheet overlays. Their opener buttons live in the toolbar,
+    // which the lightbox hides while open — so the overlays refocus these
+    // known-visible triggers on close instead of a stale activeElement snapshot.
+    const lightboxTriggerRef = useRef<HTMLButtonElement>(null);
+    const mobileInfoButtonRef = useRef<HTMLButtonElement>(null);
 
     // Persist info sidebar pin state across photo navigation
     const [isPinned, setIsPinned] = useState(() => {
@@ -545,9 +551,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 )}
 
                 <div className="flex shrink-0 gap-2">
-                    <LightboxTrigger onClick={() => setShowLightbox(true)} />
+                    <LightboxTrigger onClick={() => setShowLightbox(true)} buttonRef={lightboxTriggerRef} />
 
                     <Button
+                        ref={mobileInfoButtonRef}
                         variant="outline"
                         size="sm"
                         onClick={() => setShowBottomSheet(true)}
@@ -979,6 +986,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 totalCount={images.length}
                 isAdmin={isAdmin}
                 forceSrgbDerivatives={forceSrgbDerivatives}
+                restoreFocusRef={lightboxTriggerRef}
             />
         )}
 
@@ -992,6 +1000,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             forceSrgbDerivatives={forceSrgbDerivatives}
             histogramCycleRef={histogramCycleRef}
             isSharedView={isSharedView}
+            restoreFocusRef={mobileInfoButtonRef}
         />
     </>
     );

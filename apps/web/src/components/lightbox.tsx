@@ -28,6 +28,13 @@ interface LightboxProps {
     /** R10-L20: replicate delivered bit depth + format chips in expanded panel. */
     isAdmin?: boolean;
     forceSrgbDerivatives?: boolean;
+    /** C2-01 (run-10 c2): explicit focus-restore target (the toolbar
+     *  LightboxTrigger button). photo-viewer hides the whole toolbar
+     *  (display:none) while the lightbox is open, so the mount-time
+     *  `document.activeElement` snapshot is unfocusable during teardown and
+     *  focus silently falls to <body>. Restoring the parent-owned trigger ref
+     *  refocuses a visible element instead. */
+    restoreFocusRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
@@ -45,10 +52,10 @@ function getLightboxAutoHidePreference() {
     );
 }
 
-export function LightboxTrigger({ onClick }: { onClick: () => void }) {
+export function LightboxTrigger({ onClick, buttonRef }: { onClick: () => void; buttonRef?: React.Ref<HTMLButtonElement> }) {
     const { t } = useTranslation();
     return (
-        <Button variant="ghost" size="icon" onClick={onClick} className="h-11 w-11" aria-label={t('aria.openFullscreen')} aria-keyshortcuts="F" title={`${t('aria.openFullscreen')} (F)`}>
+        <Button ref={buttonRef} variant="ghost" size="icon" onClick={onClick} className="h-11 w-11" aria-label={t('aria.openFullscreen')} aria-keyshortcuts="F" title={`${t('aria.openFullscreen')} (F)`}>
             <Maximize className="h-4 w-4" />
         </Button>
     );
@@ -79,7 +86,7 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
         : 'scale(1.03) translate(2%, 2%)';
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount, isAdmin = false, forceSrgbDerivatives = false }: LightboxProps) {
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount, isAdmin = false, forceSrgbDerivatives = false, restoreFocusRef }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [colorPipOpen, setColorPipOpen] = useState(false);
@@ -440,14 +447,32 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         const focusFrame = window.requestAnimationFrame(() => {
             (closeButtonRef.current ?? dialogRef.current)?.focus();
         });
+        // C2-01 (run-10 c2): capture the restore target at setup. Prefer the
+        // explicit trigger the parent supplied (the toolbar LightboxTrigger
+        // button); it is always mounted — photo-viewer only hides the toolbar
+        // via display:none while the lightbox is open — so its element is
+        // stable for the lightbox's lifetime. The old fallback focused the
+        // mount-time `document.activeElement` snapshot, but by the time this
+        // effect runs focus-trap has already moved focus onto the lightbox's
+        // own close button, which unmounts on close, so focusing it no-ops to
+        // <body> (the bug this fixes). Capturing here (not in cleanup) also
+        // keeps the value out of the ref-in-cleanup lint trap.
+        const restoreTarget = restoreFocusRef?.current ?? previouslyFocusedRef.current;
         return () => {
             window.cancelAnimationFrame(focusFrame);
             document.body.style.overflow = prev;
-            if (previouslyFocusedRef.current && document.body.contains(previouslyFocusedRef.current)) {
-                previouslyFocusedRef.current.focus();
+            // Defer to a rAF so the focus runs after the parent re-shows the
+            // toolbar and after focus-trap-react's own returnFocusOnDeactivate,
+            // making this the final, winning focus setter.
+            if (restoreTarget) {
+                window.requestAnimationFrame(() => {
+                    if (document.body.contains(restoreTarget)) {
+                        restoreTarget.focus();
+                    }
+                });
             }
         };
-    }, []);
+    }, [restoreFocusRef]);
 
     return (
         <FocusTrap focusTrapOptions={{ allowOutsideClick: true, initialFocus: () => closeButtonRef.current || dialogRef.current || document.body, fallbackFocus: () => closeButtonRef.current || dialogRef.current || document.body }}>
