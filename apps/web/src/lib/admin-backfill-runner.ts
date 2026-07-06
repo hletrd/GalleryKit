@@ -62,7 +62,7 @@ import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveC
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigUncached } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 
@@ -688,7 +688,14 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         // sees THIS run's real successful count and fatal-error count, not a
         // stale carry-over or a snapshot-derived reconstruction.
         resetPerRunCounters(state, state.lastQueuedCount);
-        const config = await getGalleryConfig();
+        // C3-04 (run-10 c3, ARCH3-02/VER3-03): runBackfill is launched
+        // DETACHED (fire-and-forget from the admin action), outside any
+        // request store — the request-cached accessor can memoize across
+        // runs there, re-encoding at STALE settings after an admin flips a
+        // color/quality key. Same invariant as image-queue's three detached
+        // call sites (02bea8d6); pinned by
+        // detached-uncached-config-wiring.test.ts.
+        const config = await getGalleryConfigUncached();
         const settings: RunnerSettings = {
             quality: {
                 webp: config.imageQualityWebp,

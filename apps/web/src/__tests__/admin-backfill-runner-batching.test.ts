@@ -61,7 +61,7 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('@/lib/gallery-config', () => ({
-    getGalleryConfig: vi.fn().mockResolvedValue({
+    getGalleryConfigUncached: vi.fn().mockResolvedValue({
         imageQualityWebp: 80,
         imageQualityAvif: 60,
         imageQualityJpeg: 80,

@@ -36,7 +36,7 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('@/lib/gallery-config', () => ({
-    getGalleryConfig: vi.fn(),
+    getGalleryConfigUncached: vi.fn(),
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
@@ -62,7 +62,7 @@ vi.mock('@/lib/upload-paths', () => ({
 }));
 
 import { triggerAdminBackfill, readAdminBackfillState } from '@/lib/admin-backfill-runner';
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigUncached } from '@/lib/gallery-config';
 import { db } from '@/db';
 
 describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () => {
@@ -117,7 +117,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
 
         // Make getGalleryConfig blow up so the runner takes the early-throw
         // path the previous code couldn't recover from.
-        (getGalleryConfig as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        (getGalleryConfigUncached as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
             new Error('boom: admin_settings row missing'),
         );
 
@@ -166,7 +166,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
             ],
         ]);
 
-        (getGalleryConfig as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+        (getGalleryConfigUncached as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
 
         const first = await triggerAdminBackfill();
         expect(first.status).toBe('queued');
@@ -181,7 +181,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         // does NOT short-circuit on the in-process `running` flag. Mock a
         // working config the second time; we don't care about the runner's
         // actual work, just that the trigger isn't poisoned.
-        (getGalleryConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        (getGalleryConfigUncached as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
             imageQualityWebp: 80,
             imageQualityAvif: 60,
             imageQualityJpeg: 80,
