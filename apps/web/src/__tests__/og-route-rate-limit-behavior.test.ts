@@ -64,9 +64,15 @@ function saturateUnknownOgBucket(now = Date.now()) {
     }
 }
 
+// C1-14 (run-10 cycle-1): the topic OG ETag folds in the card template version
+// and the image pipeline version so a card redesign invalidates crawler
+// caches. OG_TEMPLATE_VERSION must stay in sync with api/og/route.tsx (route
+// files cannot export non-handler symbols, so it is mirrored here).
+const OG_TEMPLATE_VERSION = 1;
+
 function createTopicOgEtag(slug: string, label: string, tags: string[] = [], siteTitle = 'Gallery') {
     return '"' + createHash('sha256')
-        .update(`${slug}|${label}|${tags.join(',')}|${siteTitle}`)
+        .update(`v${OG_TEMPLATE_VERSION}-p${IMAGE_PIPELINE_VERSION}|${slug}|${label}|${tags.join(',')}|${siteTitle}`)
         .digest('hex')
         .slice(0, 32) + '"';
 }

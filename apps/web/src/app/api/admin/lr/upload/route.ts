@@ -509,6 +509,16 @@ export const POST = withAdminAuth(
             );
         }
 
+        // C1-15 (run-10 cycle-1, CR-02): the image row is COMMITTED past this
+        // point. Everything below is post-commit bookkeeping — if any of it
+        // throws (revalidateAllAppData is the realistic candidate;
+        // enqueueImageProcessing returns a bool and logAuditEvent self-catches),
+        // the upload still SUCCEEDED, so the external publish client must
+        // receive a parseable JSON success rather than a framework-generated
+        // non-JSON 500 that would trigger a spurious client retry and a
+        // duplicate upload. A missed enqueue is self-healing: the bootstrap
+        // scan re-discovers processed=false rows without a processing_error.
+        try {
         // F3: the upload completed — reconcile the pre-claim to the actual
         // (1 file, fileSize bytes). Identity settle here, but kept explicit so
         // the claim/settle pairing is symmetric with the browser path and the
@@ -579,6 +589,14 @@ export const POST = withAdminAuth(
         });
 
         revalidateAllAppData();
+        } catch (postCommitErr) {
+            // C1-15: log loudly, but the response below still reports the
+            // truth — the row is committed and the upload succeeded.
+            console.error('LR upload: post-commit work failed (upload already committed)', {
+                imageId,
+                err: postCommitErr,
+            });
+        }
 
         return NextResponse.json(
             { success: true, id: imageId },

@@ -95,8 +95,13 @@ export async function GET(
         return abortResponse();
     }
 
-    // Gate 4: rate-limit pre-increment (Pattern 2 — rollback on all subsequent
-    // early-return paths before expensive embedding/DB work begins).
+    // Gate 4: rate-limit pre-increment. C1-17 (run-10 cycle-1, CR-04): the
+    // pre-increment is CHARGED AND NEVER REFUNDED on early return — there is
+    // deliberately no rollback in this route. The 429 below and the
+    // disabled/stub 503 both keep the budget, matching the semantic route's
+    // documented posture (AGG-12): protected DB/embedding work is intentionally
+    // counted even when the request is ultimately rejected. Do NOT add an
+    // early-return between here and the protected work expecting a refund.
     const ip = getClientIp(request.headers);
     const now = Date.now();
     const overLimit = preIncrementSemanticAttempt(ip, now);

@@ -9,8 +9,16 @@ import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
 import { countCodePoints } from '@/lib/utils';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { ifNoneMatchMatches } from '@/lib/http-etag';
+import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 
 export const runtime = 'nodejs';
+
+/** C1-14 (run-10 cycle-1, CR-01): bump on ANY layout/styling change to the
+ *  rendered topic OG card (gradient, fonts, spacing, structure). The ETag
+ *  folds this in so a card redesign invalidates crawler/CDN caches even when
+ *  the topic's content strings are unchanged — mirroring the per-photo
+ *  route's createPhotoOgEtag, which already versions its ETag. */
+const OG_TEMPLATE_VERSION = 1;
 
 const MAX_TOPIC_LABEL_LENGTH = 100;
 const MAX_OG_TAGS = 20;
@@ -127,8 +135,10 @@ export async function GET(req: NextRequest) {
     // AGG8F-01 / plan-233: ETag covers the inputs that drive the
     // rendered image. If a crawler revisits with `If-None-Match`,
     // short-circuit to 304 without rerunning the SVG/PNG pipeline.
+    // C1-14: the CODE that renders the card drives the image too — fold in the
+    // template + pipeline versions so a redesign is not 304'd into oblivion.
     const etag = '"' + createHash('sha256')
-      .update(`${topicRecord.slug}|${topicLabel}|${tagList.join(',')}|${siteTitle}`)
+      .update(`v${OG_TEMPLATE_VERSION}-p${IMAGE_PIPELINE_VERSION}|${topicRecord.slug}|${topicLabel}|${tagList.join(',')}|${siteTitle}`)
       .digest('hex')
       .slice(0, 32) + '"';
     if (ifNoneMatchMatches(req.headers.get('if-none-match'), etag)) {
