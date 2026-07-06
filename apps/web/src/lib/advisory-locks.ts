@@ -47,6 +47,15 @@ export const LOCK_COLOR_PIPELINE_BACKFILL = 'gallerykit_color_pipeline_backfill'
 export const LOCK_SEMANTIC_EMBEDDING_BACKFILL = 'gallerykit_semantic_embedding_backfill';
 
 /**
+ * Lock signals single-writer liveness at boot (C2-03, run-10 c2). Unlike the
+ * other locks above, this one does not serialize an operation — it is held
+ * open for the lifetime of the process so a second GalleryKit instance
+ * sharing this MySQL server can detect it and warn. See
+ * `lib/single-writer-guard.ts`.
+ */
+export const LOCK_SINGLE_WRITER_GUARD = 'gallerykit_web_singleton';
+
+/**
  * mysql2 can surface MySQL integer scalar results as number, bigint, or string
  * depending on connection flags and server metadata. Treat only the exact
  * advisory-lock success value as acquired.

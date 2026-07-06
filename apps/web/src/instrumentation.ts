@@ -17,6 +17,17 @@ export async function register() {
             // back to 'unknown' country code in analytics.ts
         }
 
+        // C2-03 (run-10 c2): WARN-ONLY single-writer boot guard. Fire-and-forget
+        // — never awaited in a way that would delay boot. startSingleWriterGuard
+        // handles all its own errors internally and never rejects; the .catch
+        // here is defense-in-depth only (an unhandled rejection is fatal under
+        // Node's default policy).
+        import('@/lib/single-writer-guard')
+            .then(({ startSingleWriterGuard }) => startSingleWriterGuard())
+            .catch((err) => {
+                console.warn('[Startup] single-writer guard failed to initialize (non-fatal):', err);
+            });
+
         const gracefulShutdown = async (signal: string) => {
             console.debug(`[Shutdown] ${signal} received, draining queue...`);
             let completed = false;
@@ -36,11 +47,13 @@ export async function register() {
                 const { shutdownImageProcessingQueue } = await import('@/lib/image-queue');
                 const { flushBufferedSharedGroupViewCounts } = await import('@/lib/data');
                 const { drainBackgroundDbWrites } = await import('@/lib/background-db-writes');
+                const { stopSingleWriterGuard } = await import('@/lib/single-writer-guard');
                 await Promise.race([
                     Promise.all([
                         shutdownImageProcessingQueue(),
                         flushBufferedSharedGroupViewCounts(),
                         drainBackgroundDbWrites(),
+                        stopSingleWriterGuard(),
                     ]).then(() => { completed = true; }),
                     shutdownTimeout,
                 ]);
