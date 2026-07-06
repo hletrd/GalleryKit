@@ -25,4 +25,8 @@ services:
       - ./data:/app/data
       - ./public/uploads:/app/apps/web/public/uploads
       - ./public/resources:/app/apps/web/public/resources
+      # NOTE (ARCH-03, run-10 c2): site-config.json is BUILD-TIME-INLINED (every
+      # consumer `import`s it, and Next inlines JSON imports at build). This mount
+      # only guarantees the build context file exists for rebuilds on this host —
+      # editing the mounted file has NO runtime effect until the next image rebuild.
       - ./src/site-config.json:/app/apps/web/src/site-config.json:ro
