@@ -744,11 +744,30 @@ async function getRecordedHashes(connection) {
  * step. New migrations (added later with a strictly-greater `when`) pass the
  * cursor check and apply normally.
  */
-async function baselineAllJournalMigrations(connection, migrations) {
+async function baselineAllJournalMigrations(connection, migrations, options = {}) {
     const haveHashes = await getRecordedHashes(connection);
     const inserts = migrations.filter((m) => !haveHashes.has(m.hash));
     if (inserts.length === 0) {
         return 0;
+    }
+
+    // C3-01 belt-and-braces (run-10 c3): baselining records a hash WITHOUT
+    // executing its SQL, so it must never be applied to an entry sitting
+    // above the caller's recorded cursor — those are pending migrations whose
+    // SQL (including DML) drizzle.migrate() must genuinely run. A caller that
+    // knows its cursor passes it here so a future refactor cannot silently
+    // reintroduce the batch-swallow this guard exists to prevent.
+    if (options.maxFolderMillis !== undefined && options.maxFolderMillis !== null) {
+        const aboveCursor = inserts.filter(
+            (m) => Number(m.folderMillis) > Number(options.maxFolderMillis)
+        );
+        if (aboveCursor.length > 0) {
+            throw new Error(
+                `[Migration] Refusing to baseline ${aboveCursor.length} migration(s) above the recorded cursor ` +
+                `(their SQL has not executed): ${aboveCursor.map((m) => m.tag).join(', ')}. ` +
+                `Baselining them would silently drop their SQL; they must be left for drizzle.migrate() to apply.`
+            );
+        }
     }
 
     for (const m of inserts) {
@@ -818,23 +837,37 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     // The DB carries gallery tables but the migration log is incomplete at or
     // below the recorded cursor (or the log is empty / the legacy single-row
     // baseline poisoned the cursor). Reconcile the schema we know about
-    // idempotently, then baseline every journal entry whose schema state is
-    // now reflected in the DB.
+    // idempotently, then baseline ONLY the true-drift entries (at/below the
+    // cursor) whose schema state the reconcile just converged.
     //
-    // FDR-01 caveat: in this MIXED case a pending new-tail entry is baselined
-    // WITHOUT executing its .sql (reconcile mirrors DDL only, never DML), so
-    // any entry above the cursor is loudly named for the operator.
-    if (cursor !== null) {
-        const swallowedTail = missing.filter((m) => Number(m.folderMillis) > Number(cursor));
-        if (swallowedTail.length > 0) {
-            console.warn(
-                `[Migration] WARNING: drift repair is baselining ${swallowedTail.length} migration(s) above the recorded cursor WITHOUT executing their SQL: ` +
-                `${swallowedTail.map((m) => m.tag).join(', ')}. Their DDL is covered by reconcileLegacySchema; any DML backfill in those files must be applied manually.`
-            );
-        }
+    // C3-01 (run-10 c3, closes the FDR-01 residual): the previous mixed-case
+    // behavior baselined EVERY missing entry — including genuinely-new pending
+    // migrations above the cursor — so their SQL (including DML, which
+    // reconcileLegacySchema never mirrors) silently never executed, and the
+    // runMigrations post-condition could not catch it (the hash was present).
+    // One misdated sibling in a batch swallowed the whole batch. Now the
+    // above-cursor tail is left UN-baselined so drizzle.migrate() genuinely
+    // applies it. Trade-off, documented in the CLAUDE.md runbook: because
+    // reconcileLegacySchema mirrors the CURRENT full schema (including the
+    // tail's DDL, per migration-authoring step 3), drizzle applying the tail
+    // can fail loudly on duplicate DDL in this mixed state — a loud deploy
+    // failure the operator resolves by hand is strictly better than silently
+    // dropping committed migration SQL. DML-only or non-mirrored tails apply
+    // cleanly and heal the deploy end-to-end.
+    const trueDrift = cursor === null
+        ? missing
+        : missing.filter((m) => Number(m.folderMillis) <= Number(cursor));
+    const pendingTail = missing.filter((m) => !trueDrift.includes(m));
+    if (pendingTail.length > 0) {
+        console.warn(
+            `[Migration] NOTE: drift repair found ${pendingTail.length} pending migration(s) above the recorded cursor: ` +
+            `${pendingTail.map((m) => m.tag).join(', ')}. They are NOT being baselined — drizzle will apply their SQL. ` +
+            `If reconcileLegacySchema already mirrors their DDL, the apply step will fail loudly (duplicate DDL); ` +
+            `resolve the drift, then baseline those entries manually per the CLAUDE.md runbook.`
+        );
     }
     await reconcileLegacySchema(connection, dbName);
-    await baselineAllJournalMigrations(connection, migrations);
+    await baselineAllJournalMigrations(connection, trueDrift, { maxFolderMillis: cursor });
 }
 
 async function runMigrations(connection, migrationsFolder, expectedMigrations) {
@@ -925,6 +958,7 @@ if (require.main === module) {
 
 module.exports = {
     areSameFileBytes,
+    baselineAllJournalMigrations,
     hashFileSync,
     main,
     migrateLegacyOriginalUploads,

@@ -26,6 +26,11 @@ const migrate = require('../../scripts/migrate.js') as {
         dbName: string,
         migrations: Array<{ tag: string; hash: string; folderMillis: number }>,
     ) => Promise<void>;
+    baselineAllJournalMigrations: (
+        connection: unknown,
+        migrations: Array<{ tag: string; hash: string; folderMillis: number }>,
+        options?: { maxFolderMillis?: number | null },
+    ) => Promise<number>;
 };
 
 type QueryCall = { sql: string; params?: unknown[] };
@@ -120,17 +125,92 @@ describe('prepareLegacyDatabaseIfNeeded — pending vs drift (FDR-01)', () => {
         expect(inserts).toHaveLength(1);
         expect(inserts[0]?.params?.[0]).toBe('hash-0');
     });
+
+    it('MIXED batch (drift below cursor + pending above): baselines ONLY the drift entries, never the pending tail (C3-01)', async () => {
+        // Reproduces the run-10 c3 DBG3-02 empirical case: hash-2 (when=2500,
+        // above cursor) and hash-4 (when=3000, above cursor) are genuinely new
+        // pending migrations; hash-3 (when=1800, below cursor) is true drift
+        // (e.g. a misdated `when` or out-of-band log surgery). The pre-fix
+        // code baselined ALL THREE — silently dropping the pending tail's SQL
+        // while the post-condition passed. The fix baselines only hash-3 and
+        // leaves hash-2/hash-4 for drizzle.migrate() to genuinely apply.
+        const migrations = journal([1000, 2000, 2500, 1800, 3000]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: ['hash-0', 'hash-1'],
+            cursor: 2000,
+        });
+
+        await migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations);
+
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(1);
+        expect(inserts[0]?.params?.[0]).toBe('hash-3');
+        const insertedHashes = inserts.map((c) => c.params?.[0]);
+        expect(insertedHashes).not.toContain('hash-2');
+        expect(insertedHashes).not.toContain('hash-4');
+    });
+
+    it('legacy empty-log DB (cursor null) still baselines everything after reconcile', async () => {
+        const migrations = journal([1000, 2000]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+
+        await migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations);
+
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(2);
+        expect(inserts.map((c) => c.params?.[0])).toEqual(['hash-0', 'hash-1']);
+    });
 });
 
-describe('migrate.js source contracts (FDR-01)', () => {
+describe('baselineAllJournalMigrations — above-cursor guard (C3-01)', () => {
+    it('throws instead of baselining an entry above the provided cursor', async () => {
+        const migrations = journal([1000, 3000]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: 2000,
+        });
+
+        await expect(
+            migrate.baselineAllJournalMigrations(connection, migrations, { maxFolderMillis: 2000 }),
+        ).rejects.toThrow(/Refusing to baseline/);
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(0);
+    });
+
+    it('baselines normally when no cursor bound is provided (fresh/legacy bootstrap path)', async () => {
+        const migrations = journal([1000, 3000]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+
+        const inserted = await migrate.baselineAllJournalMigrations(connection, migrations, { maxFolderMillis: null });
+        expect(inserted).toBe(2);
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(2);
+    });
+});
+
+describe('migrate.js source contracts (FDR-01 / C3-01)', () => {
     const src = fs.readFileSync(
         path.resolve(__dirname, '..', '..', 'scripts', 'migrate.js'),
         'utf8',
     );
 
-    it('names swallowed above-cursor entries when drift repair baselines them', () => {
-        expect(src).toContain('WITHOUT executing their SQL');
-        expect(src).toContain('must be applied manually');
+    it('names the pending tail left for drizzle in the mixed drift case', () => {
+        expect(src).toContain('NOT being baselined');
+        expect(src).toContain('drizzle will apply their SQL');
+    });
+
+    it('keeps the baseline above-cursor refusal guard', () => {
+        expect(src).toContain('Refusing to baseline');
     });
 
     it('keeps the runMigrations post-condition throw', () => {
