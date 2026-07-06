@@ -199,3 +199,59 @@ describe('bootstrapMissingActiveEmbeddings scan cap (WP21 / C2-34)', () => {
         expect(embeddingLimitMock).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * TRC3-01 / C3-07 (run-10 c3): the scan cursor must persist ACROSS
+ * invocations. The C2-34 cap relied on embedded rows dropping out of the
+ * isNull filter — false for permanently-failing rows, so a stuck prefix
+ * ≥ SEMANTIC_SCAN_LIMIT restarted at id 0 every call and starved every
+ * newer row forever. (The mocked resolveOriginalUploadPath returning null
+ * makes EVERY scanned row a stuck row here — exactly the starvation shape.)
+ */
+describe('embedding-scan cursor persistence (TRC3-01 / C3-07)', () => {
+    beforeEach(() => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'debug').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.resetModules();
+        delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for('gallerykit.imageProcessingQueue')];
+        vi.doUnmock('p-queue');
+        vi.doUnmock('@/db');
+        vi.doUnmock('drizzle-orm');
+    });
+
+    it('persists the resume cursor on cap-hit, resumes past the stuck prefix, and wraps to 0 on clean completion', async () => {
+        const batch1 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 1));
+        const batch2 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 51));
+        const batch3 = Array.from({ length: 10 }, (_, i) => embeddingRow(i + 101));
+
+        const { bootstrapImageProcessingQueue, getProcessingQueueState, embeddingLimitMock } =
+            await loadQueueModule({ embeddingBatches: [batch1, batch2, batch3], scanLimit: 100 });
+
+        // Invocation 1: hits the 100-row cap after two batches (all rows stay
+        // "stuck" because resolveOriginalUploadPath is mocked to null).
+        await bootstrapImageProcessingQueue();
+        const state = getProcessingQueueState();
+        await Promise.allSettled(Array.from(state.sideEffects));
+        expect(embeddingLimitMock).toHaveBeenCalledTimes(2);
+        // Pre-fix this stayed 0 (implicit restart); now it records the resume point.
+        expect(state.embeddingScanCursorId).toBe(100);
+
+        // Invocation 2: must RESUME past the stuck prefix (gt id > 100), not
+        // rescan it — the third batch (ids 101-110) is reached and, being a
+        // short batch, completes the pass cleanly, wrapping the cursor to 0
+        // so a later invocation retries the failed prefix.
+        state.bootstrapped = false;
+        await bootstrapImageProcessingQueue();
+        await Promise.allSettled(Array.from(state.sideEffects));
+        expect(embeddingLimitMock).toHaveBeenCalledTimes(3);
+        const drizzle = await import('drizzle-orm');
+        const gtCalls = vi.mocked(drizzle.gt).mock.calls;
+        expect(gtCalls.some((call) => call[1] === 100)).toBe(true);
+        expect(state.embeddingScanCursorId).toBe(0);
+    });
+});

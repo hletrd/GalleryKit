@@ -143,6 +143,18 @@ const REQUESTED_QUEUE_CONCURRENCY = parseBoundedPositiveInteger(
     { fallback: 1, max: 8 },
 );
 const QUEUE_CONCURRENCY = resolveImageQueueConcurrency(REQUESTED_QUEUE_CONCURRENCY, POOL_CONNECTION_LIMIT);
+// DOC3-01 / C3-15 (run-10 c3): warn on clamp-down, mirroring the admin
+// backfill runner. An operator raising QUEUE_CONCURRENCY (documented max 8)
+// on the default 10-connection pool silently got an effective concurrency of
+// 2 with no signal anywhere; the CLAUDE.md env-var row now documents the
+// pool-budget formula and this log line makes the clamp visible at boot.
+if (QUEUE_CONCURRENCY < REQUESTED_QUEUE_CONCURRENCY) {
+    console.warn(
+        `[Queue] QUEUE_CONCURRENCY=${REQUESTED_QUEUE_CONCURRENCY} requested but clamped to ${QUEUE_CONCURRENCY} ` +
+        `by the DB pool budget (pool=${POOL_CONNECTION_LIMIT}, reserved=${IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS(POOL_CONNECTION_LIMIT)}); ` +
+        `raise the pool size to raise the effective queue concurrency (see CLAUDE.md, QUEUE_CONCURRENCY).`,
+    );
+}
 
 export type ProcessingSettingsSnapshot = {
     quality: ImageQualitySettings;
@@ -330,6 +342,20 @@ export type ProcessingQueueState = {
      *  overlapping scans re-embedded the same rows and starved the shared CLIP
      *  inference queue that visitor semantic search waits on. */
     embeddingBootstrapInFlight?: Promise<void> | null;
+    /** TRC3-01 / C3-07 (run-10 c3): resume point for the missing-embedding
+     *  scan ACROSS invocations. A permanently-un-embeddable prefix (missing
+     *  originals, broken encoder) stays in the isNull join filter forever;
+     *  with a cursor that restarted at 0 every call, a stuck prefix ≥
+     *  SEMANTIC_SCAN_LIMIT consumed the whole scan budget on every
+     *  invocation and starved newer rows indefinitely. The cursor now
+     *  persists when the cap trips and resets to 0 only after a scan
+     *  completes cleanly (wrap-around retries the failed prefix). */
+    embeddingScanCursorId: number;
+    /** ARCH3-04 / C3-20 (run-10 c3): per-job claim/processing retry timers.
+     *  Previously bare locals — invisible to shutdown and to the C2-33
+     *  defensive re-init (which cleared only gcInterval), so a replaced
+     *  state object could leak armed timers firing against dead state. */
+    retryTimers: Set<ReturnType<typeof setTimeout>>;
 };
 
 export const getProcessingQueueState = (): ProcessingQueueState => {
@@ -357,6 +383,14 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         if (!(existing.sideEffects instanceof Set)) {
             existing.sideEffects = new Set<Promise<void>>();
         }
+        // Backfill fields added after the state shape was first persisted on
+        // the global symbol (older in-process states survive hot reloads).
+        if (!(existing.retryTimers instanceof Set)) {
+            existing.retryTimers = new Set<ReturnType<typeof setTimeout>>();
+        }
+        if (typeof existing.embeddingScanCursorId !== 'number') {
+            existing.embeddingScanCursorId = 0;
+        }
         return existing;
     }
 
@@ -366,8 +400,17 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
     // arming further down), simply dropping the reference leaks the
     // timer — it keeps firing against an object nothing else references,
     // forever, once per hour. Clear it before constructing the replacement.
+    // ARCH3-04 / C3-20 (run-10 c3): per-job retry timers are cleared here
+    // too — same leaked-timer class, they fire enqueueImageProcessing
+    // against the REPLACED state once each.
     if (existing && typeof existing === 'object' && existing.gcInterval) {
         clearInterval(existing.gcInterval);
+    }
+    if (existing && typeof existing === 'object' && existing.retryTimers instanceof Set) {
+        for (const timer of existing.retryTimers) {
+            clearTimeout(timer);
+        }
+        existing.retryTimers.clear();
     }
 
     const newState: ProcessingQueueState = {
@@ -390,10 +433,31 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         bootstrapContinuationScheduled: false,
         bootstrapCursorId: null,
         sideEffects: new Set<Promise<void>>(),
+        embeddingScanCursorId: 0,
+        retryTimers: new Set<ReturnType<typeof setTimeout>>(),
     };
     globalWithQueue[processingQueueKey] = newState;
     return newState;
 };
+
+/** ARCH3-04 / C3-20 (run-10 c3): register a per-job retry timer on state so
+ *  shutdown and the defensive re-init can clear it; self-deregisters when it
+ *  fires. */
+function scheduleTrackedRetry(state: ProcessingQueueState, delayMs: number, fire: () => void) {
+    const retryTimer = setTimeout(() => {
+        state.retryTimers.delete(retryTimer);
+        fire();
+    }, delayMs);
+    retryTimer.unref?.();
+    state.retryTimers.add(retryTimer);
+}
+
+function clearTrackedRetryTimers(state: ProcessingQueueState) {
+    for (const timer of state.retryTimers) {
+        clearTimeout(timer);
+    }
+    state.retryTimers.clear();
+}
 
 function trackQueueSideEffect(state: ProcessingQueueState, task: Promise<void>) {
     state.sideEffects.add(task);
@@ -457,18 +521,23 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
     const activeModelVersion = semanticMode === 'production'
         ? PRODUCTION_MODEL_VERSION
         : STUB_MODEL_VERSION;
-    let cursorId = 0;
+    // TRC3-01 / C3-07 (run-10 c3): resume from the persisted cursor. The
+    // C2-34 design relied on embedded rows dropping out of the isNull filter,
+    // which holds ONLY when every scanned row eventually embeds — a
+    // permanently-failing row (missing original, broken encoder/weights)
+    // stays isNull forever, and with a cursor restarting at 0 every call a
+    // stuck prefix ≥ SEMANTIC_SCAN_LIMIT crowded out every newer row on
+    // every invocation, forever. Persisting the resume point starves nothing;
+    // the failed prefix is retried on wrap-around after a clean full pass.
+    let cursorId = state.embeddingScanCursorId;
     let scanned = 0;
     for (;;) {
         // C2-34 (WP21, run-10 cycle-2): bound each invocation to the same
         // scan cap the semantic-search routes use, so a huge missing-
-        // embedding backlog can't walk every processed row in one call. Rows
-        // embedded during this call drop out of the isNull(imageEmbeddings.
-        // imageId) filter below, so a later bootstrap invocation naturally
-        // continues past wherever this one stopped — no persisted cursor
-        // needed across invocations.
+        // embedding backlog can't walk every processed row in one call.
         if (scanned >= SEMANTIC_SCAN_LIMIT) {
-            console.warn(`[Queue] embedding bootstrap reached scan cap (${scanned}); remaining rows will be picked up on a later bootstrap`);
+            state.embeddingScanCursorId = cursorId;
+            console.warn(`[Queue] embedding bootstrap reached scan cap (${scanned}); a later bootstrap resumes from id > ${cursorId}`);
             break;
         }
         const rows = await db.select({
@@ -510,6 +579,10 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
 
         const lastRow = rows.at(-1);
         if (!lastRow || rows.length < BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE) {
+            // Clean completion (reached the end of the candidate set): reset
+            // the persisted cursor so the NEXT invocation wraps around to 0
+            // and re-attempts any still-isNull (previously failed) rows.
+            state.embeddingScanCursorId = 0;
             break;
         }
         cursorId = lastRow.id;
@@ -566,6 +639,13 @@ export async function shutdownImageProcessingQueue(
     state: ProcessingQueueState = getProcessingQueueState(),
     queue: Pick<PQueue, 'pause' | 'clear' | 'onIdle'> = state.queue,
 ) {
+    // ARCH3-04 / C3-20 (run-10 c3): clear parked retry timers before the
+    // drain — a job in its backoff window is neither in the queue nor in
+    // sideEffects, so the drain never saw it. Correctness holds either way
+    // (the row stays processed=false and the next boot's bootstrap
+    // re-enqueues it; enqueueImageProcessing also no-ops once shuttingDown
+    // is set) — this just stops orphaned timers from firing post-drain.
+    clearTrackedRetryTimers(state);
     await drainProcessingQueueForShutdown(state, queue);
 }
 
@@ -645,10 +725,9 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // hits the `state.enqueued.has(job.id)` guard at line 259 and returns
                 // immediately, leaving the job stuck forever.
                 state.enqueued.delete(job.id);
-                const retryTimer = setTimeout(() => {
+                scheduleTrackedRetry(state, delay, () => {
                     enqueueImageProcessing(job);
-                }, delay);
-                retryTimer.unref?.();
+                });
                 claimRetryScheduled = true;
                 return;
             }
@@ -862,13 +941,17 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // transient failure (e.g. a momentary DB/FS blip) gets
                 // spacing instead of immediately re-queueing into the same
                 // failure and burning through MAX_RETRIES in a tight loop.
-                const delay = PROCESSING_RETRY_DELAY_MS * Math.min(retries, 5); // escalating up to 25s
+                // DBG3-04/TRC3-06 (run-10 c3): with MAX_RETRIES = 3, `retries`
+                // only ever reaches 2 on this path, so the real schedule is
+                // 5s → 10s; the min(…, 5) clamp is inherited from the
+                // claim-retry schedule (where MAX_CLAIM_RETRIES = 10 makes
+                // 25s reachable) and is unreachable dead headroom here.
+                const delay = PROCESSING_RETRY_DELAY_MS * Math.min(retries, 5); // escalating up to 10s at this call site
                 console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES}) in ${delay}ms`);
                 state.enqueued.delete(job.id);
-                const retryTimer = setTimeout(() => {
+                scheduleTrackedRetry(state, delay, () => {
                     enqueueImageProcessing(job);
-                }, delay);
-                retryTimer.unref?.();
+                });
                 retried = true;
                 return;
             }
@@ -1202,6 +1285,11 @@ export async function quiesceImageProcessingQueueForRestore(
     state.bootstrapped = false;
     state.bootstrapContinuationScheduled = false;
     state.bootstrapCursorId = null;
+    // C3-07/C3-20 (run-10 c3): the restore may replace the images table
+    // entirely — reset the embedding-scan resume point and clear any parked
+    // per-job retry timers whose jobs reference pre-restore rows.
+    state.embeddingScanCursorId = 0;
+    clearTrackedRetryTimers(state);
     if (state.bootstrapRetryTimer) {
         clearTimeout(state.bootstrapRetryTimer);
         state.bootstrapRetryTimer = undefined;
