@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, useRef, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -98,6 +98,22 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         return () => mq.removeEventListener('change', handler);
     }, []);
 
+    // DBG3-01 / C3-13 (run-10 c3): re-assert the resting visuals whenever the
+    // displayed photo changes. The indicator JSX carries STATIC style
+    // literals, so React's props diff sees no change across re-renders and
+    // never clears the imperatively-written drag styles — on an IN-PLACE
+    // photo switch (shared-group view wires onSelectId=setCurrentImageId, no
+    // navigation/remount) the swiped-from edge glow would otherwise persist
+    // over the newly displayed photo until the next gesture. Keyed on
+    // prevId/nextId (they change with the displayed photo) so ANY switch
+    // path — swipe, buttons, keyboard — resets the visuals. Mirrors the
+    // info-bottom-sheet.tsx useLayoutEffect idiom from the same refactor
+    // cycle (fc21007a).
+    useLayoutEffect(() => {
+        applySwipeVisuals(0, false);
+        isSwiping.current = false;
+    }, [prevId, nextId, applySwipeVisuals]);
+
     useEffect(() => {
         // Skip touch handling when lightbox is open — it handles its own navigation
         if (disabled) return;
@@ -169,11 +185,17 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             }
 
             if (deltaX < -SWIPE_THRESHOLD && nextId) {
-                // Swipe left -> next photo
+                // Swipe left -> next photo. DBG3-01 / C3-13 (run-10 c3):
+                // reset the visuals in the SUCCESS branches too — on an
+                // in-place photo switch (shared-group onSelectId path) the
+                // component does not remount, and the static JSX style
+                // literals mean React never clears the drag styles.
+                applySwipeVisuals(0, true);
                 vibrateForSwipe();
                 goToPhoto(nextId);
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
-                // Swipe right -> prev photo
+                // Swipe right -> prev photo (same reset rationale as above).
+                applySwipeVisuals(0, true);
                 vibrateForSwipe();
                 goToPhoto(prevId);
             } else {
@@ -211,6 +233,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             {prevId && (
                 <div
                     ref={prevIndicatorRef}
+                    data-testid="swipe-prev-indicator"
                     className="absolute left-4 top-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
                     style={{ opacity: 0, transform: 'translateY(-50%) translateX(0px)' }}
                 >
@@ -224,6 +247,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             {nextId && (
                 <div
                     ref={nextIndicatorRef}
+                    data-testid="swipe-next-indicator"
                     className="absolute right-4 top-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
                     style={{ opacity: 0, transform: 'translateY(-50%) translateX(0px)' }}
                 >

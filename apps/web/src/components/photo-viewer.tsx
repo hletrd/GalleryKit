@@ -648,7 +648,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     navigation transitions instead of swapping
                     instantaneously underneath the still-fading-out
                     previous photo. */}
-                <div ref={mediaContainerRef} className="relative flex items-center justify-center bg-black/5 dark:bg-black rounded-xl border dark:border-transparent p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group">
+                <div ref={mediaContainerRef} data-testid="photo-media-container" className="relative flex items-center justify-center bg-black/5 dark:bg-black rounded-xl border dark:border-transparent p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}

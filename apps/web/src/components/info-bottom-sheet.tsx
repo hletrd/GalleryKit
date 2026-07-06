@@ -39,10 +39,20 @@ interface InfoBottomSheetProps {
     /** R28-HD-LOW-1: persist WideGamutHint dismissal across sessions for share-route recipients. */
     isSharedView?: boolean;
     /** C2-01 (run-10 c2): explicit focus-restore target (the mobile Info
-     *  button that opened the sheet). The sheet's `return null` unmounts the
-     *  FocusTrap in the same commit it deactivates, so focus-trap-react's
-     *  returnFocusOnDeactivate races the unmount and can no-op — restoring
-     *  this opener ref explicitly refocuses the button when the sheet closes. */
+     *  button that opened the sheet). The sheet's internal `return null`
+     *  unmounts the FocusTrap in the same commit it deactivates, so
+     *  focus-trap-react's returnFocusOnDeactivate races that teardown and can
+     *  no-op — restoring this opener ref explicitly refocuses the button when
+     *  the sheet closes.
+     *
+     *  Scope note (DBG3-03 / C3-23, run-10 c3): the restore fires on the
+     *  CLOSE-WHILE-MOUNTED transition only (isOpen true→false; the component
+     *  instance itself is unconditionally rendered by PhotoViewer and never
+     *  conditionally unmounted). A true unmount-while-open would also unmount
+     *  the restore target (both are owned by the same PhotoViewer), so there
+     *  is deliberately no unmount cleanup here — if this component is ever
+     *  made conditionally rendered (like Lightbox), add an unmount-scoped
+     *  cleanup mirroring lightbox.tsx's. */
     restoreFocusRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
