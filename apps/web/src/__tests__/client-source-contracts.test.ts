@@ -155,11 +155,16 @@ describe('client component source contracts', () => {
     expect(timeline).toContain('getAlternateOpenGraphLocales');
 
     const year = source('app/[locale]/(public)/year/[year]/page.tsx');
-    expect(year).toContain("getTranslations('topic')");
-    expect(year).toContain("title: tTopic('notFoundTitle')");
+    // C2-04 (UX-03, run-10 c2): the invalid-year branch now throws
+    // notFound() (status-bearing 404 via year/[year]/layout.tsx +
+    // generateMetadata) instead of returning a translated notFoundTitle —
+    // the not-found boundary supplies the localized copy.
+    expect(year).toContain('notFound()');
     expect(year).not.toContain("title: 'Not Found'");
     expect(year).toContain('openGraph');
     expect(year).toContain('twitter');
+    const yearLayout = source('app/[locale]/(public)/year/[year]/layout.tsx');
+    expect(yearLayout).toContain('notFound()');
   });
 
   // R4C4 UX-R4C4-04 / TEST-R4C4-13: the token-create Enter path must respect

@@ -116,20 +116,28 @@ describe('photo page generateMetadata — US-P13 per-photo OG', () => {
         expect(twitterImages![0]).toContain('/api/og/photo/42');
     });
 
-    it('returns only a title (no og images) when the photo is not found — fallback', async () => {
+    // C2-04 (UX-03, run-10 c2): missing/malformed photos now THROW notFound()
+    // from generateMetadata instead of returning a notFoundTitle metadata
+    // object — the status-bearing 404 contract (see p/[id]/layout.tsx). Next's
+    // notFound() throws an error whose digest carries NEXT_HTTP_ERROR_FALLBACK
+    // (Next 15/16) or NEXT_NOT_FOUND (older); pin on the digest, not the
+    // message, which is not part of the public contract.
+    function isNotFoundError(err: unknown): boolean {
+        const digest = (err as { digest?: string } | null)?.digest ?? '';
+        return digest.includes('NEXT_HTTP_ERROR_FALLBACK;404') || digest.includes('NEXT_NOT_FOUND');
+    }
+
+    it('throws notFound() when the photo is missing — status-bearing 404', async () => {
         getImageCachedMock.mockResolvedValue(null);
 
-        const metadata = await generateMetadata({ params: Promise.resolve({ id: '999', locale: 'en' }) });
-
-        // No openGraph on missing photo
-        expect((metadata as { openGraph?: unknown }).openGraph).toBeUndefined();
-        expect((metadata as { title?: string }).title).toBe('Photo Not Found');
+        await expect(
+            generateMetadata({ params: Promise.resolve({ id: '999', locale: 'en' }) }),
+        ).rejects.toSatisfy(isNotFoundError);
     });
 
-    it('returns only a title for a non-numeric id — fallback', async () => {
-        const metadata = await generateMetadata({ params: Promise.resolve({ id: 'notanumber', locale: 'en' }) });
-
-        expect((metadata as { openGraph?: unknown }).openGraph).toBeUndefined();
-        expect((metadata as { title?: string }).title).toBe('Photo Not Found');
+    it('throws notFound() for a non-numeric id — status-bearing 404', async () => {
+        await expect(
+            generateMetadata({ params: Promise.resolve({ id: 'notanumber', locale: 'en' }) }),
+        ).rejects.toSatisfy(isNotFoundError);
     });
 });
