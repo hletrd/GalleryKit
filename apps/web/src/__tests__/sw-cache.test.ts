@@ -5,6 +5,9 @@ import {
   totalCacheSize,
   isAdminRoute,
   isImageDerivative,
+  touchMeta,
+  resolveCachedEntryAge,
+  evictIfExpired,
   type CacheEntry,
   type CacheStore,
   type MetaStore,
@@ -331,5 +334,128 @@ describe('sw-cache: recordAndEvict quota-evicted entries (R4C6 TEST-R4C6-11)', (
     expect(snapshot.has(phantomUrl)).toBe(false);
     expect(snapshot.has(realUrl)).toBe(false);
     expect(snapshot.has('http://localhost/uploads/avif/new.avif')).toBe(true);
+  });
+});
+
+// C2-11 (run-10 c2): meta-first recency touch + expiry, mirroring the
+// template's touchMeta/evictExpiredCachedImage/cachedImageAge trio.
+describe('sw-cache: touchMeta', () => {
+  it('creates a meta entry with the known size when none exists', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await touchMeta(url, 1234, meta);
+    const entry = meta.snapshot().get(url);
+    expect(entry?.size).toBe(1234);
+    expect(entry?.timestamp).toBeTypeOf('number');
+  });
+
+  it('keeps the existing tracked size instead of the passed knownSize', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await meta.setAll(new Map([[url, { url, size: 999, timestamp: 100 }]]));
+    await touchMeta(url, 1, meta);
+    expect(meta.snapshot().get(url)?.size).toBe(999);
+  });
+
+  it('bumps the timestamp and moves the entry to the tail (recency reorder)', async () => {
+    vi.useFakeTimers();
+    try {
+      const meta = new MockMetaStore();
+      const A = 'http://localhost/uploads/avif/a.avif';
+      const B = 'http://localhost/uploads/avif/b.avif';
+      await meta.setAll(
+        new Map([
+          [A, { url: A, size: 10, timestamp: 100 }],
+          [B, { url: B, size: 10, timestamp: 200 }],
+        ]),
+      );
+      vi.setSystemTime(300);
+      await touchMeta(A, 10, meta);
+      const keys = [...meta.snapshot().keys()];
+      expect(keys).toEqual([B, A]);
+      expect(meta.snapshot().get(A)?.timestamp).toBe(300);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never grows tracked total (no eviction concern) even repeated', async () => {
+    const meta = new MockMetaStore();
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await touchMeta(url, 500, meta);
+    await touchMeta(url, 999999, meta);
+    expect(await totalCacheSize(meta)).toBe(500);
+  });
+});
+
+describe('sw-cache: resolveCachedEntryAge', () => {
+  const now = 10_000;
+
+  it('prefers the meta timestamp when a meta entry exists', () => {
+    const metaEntry: CacheEntry = { url: 'x', size: 1, timestamp: 9_000 };
+    expect(resolveCachedEntryAge(metaEntry, 1, now)).toBe(1_000);
+  });
+
+  it('falls back to the header timestamp when no meta entry exists', () => {
+    expect(resolveCachedEntryAge(undefined, 7_000, now)).toBe(3_000);
+  });
+
+  it('returns Infinity when neither meta nor header timestamp is usable', () => {
+    expect(resolveCachedEntryAge(undefined, null, now)).toBe(Infinity);
+    expect(resolveCachedEntryAge(undefined, 0, now)).toBe(Infinity);
+    expect(resolveCachedEntryAge(undefined, Number.NaN, now)).toBe(Infinity);
+  });
+
+  it('ignores a non-finite meta timestamp and falls back to the header', () => {
+    const metaEntry: CacheEntry = { url: 'x', size: 1, timestamp: Number.NaN };
+    expect(resolveCachedEntryAge(metaEntry, 4_000, now)).toBe(6_000);
+  });
+});
+
+describe('sw-cache: evictIfExpired', () => {
+  let cache: MockCacheStore;
+  let meta: MockMetaStore;
+
+  beforeEach(() => {
+    cache = new MockCacheStore();
+    meta = new MockMetaStore();
+  });
+
+  it('does not evict a fresh entry (meta timestamp within max age)', async () => {
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await meta.setAll(new Map([[url, { url, size: 10, timestamp: 9_000 }]]));
+    const evicted = await evictIfExpired(url, cache, meta, 60_000, null, 10_000);
+    expect(evicted).toBe(false);
+    expect(cache.deleted).toHaveLength(0);
+    expect(meta.snapshot().has(url)).toBe(true);
+  });
+
+  it('evicts an entry whose meta timestamp exceeds max age', async () => {
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await meta.setAll(new Map([[url, { url, size: 10, timestamp: 0 }]]));
+    const evicted = await evictIfExpired(url, cache, meta, 1_000, null, 10_000);
+    expect(evicted).toBe(true);
+    expect(cache.deleted).toContain(url);
+    expect(meta.snapshot().has(url)).toBe(false);
+  });
+
+  it('treats a repeatedly-touched (confirmed-fresh) entry as fresh even though no header timestamp advances', async () => {
+    // Simulates the C2-11 fix: touchMeta keeps bumping the meta timestamp on
+    // every 304/same-ETag confirmation without ever rewriting the response
+    // header, so expiry must not fall back to a stale/absent header once a
+    // meta record exists.
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await touchMeta(url, 10, meta);
+    const evicted = await evictIfExpired(url, cache, meta, 60_000, null, Date.now());
+    expect(evicted).toBe(false);
+  });
+
+  it('falls back to the header timestamp when no meta record exists', async () => {
+    const url = 'http://localhost/uploads/avif/legacy.avif';
+    // No meta entry at all (e.g. pre-change entry) — header says it was
+    // cached 5s ago, which exceeds the 1s max age used here.
+    const evicted = await evictIfExpired(url, cache, meta, 1_000, 5_000, 10_000);
+    expect(evicted).toBe(true);
+    expect(cache.deleted).toContain(url);
   });
 });

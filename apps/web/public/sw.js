@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '8fadda29-p7';
+const SW_VERSION = 'a6ad1051-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -167,6 +167,13 @@ async function evictHtmlCacheIfNeeded() {
  * server confirmed the cached bytes are authoritative. Keeps a known size
  * if one is already tracked (Content-Length may be absent on some cached
  * responses); never triggers eviction because no size grows.
+ *
+ * C2-11 (run-10 c2): this timestamp is now also the primary source read by
+ * evictExpiredCachedImage's stale check (previously the `sw-cached-at`
+ * response header, which only advanced via a body-rewriting helper that
+ * re-`put` the cached Response on every confirmed-fresh view — removed
+ * because the rewrite cost a full cache.put per view for bytes that never
+ * changed).
  */
 async function touchMeta(url, knownSize) {
   return withMetaMutation(async () => {
@@ -216,12 +223,6 @@ function responseWithCacheTimestamp(response) {
   });
 }
 
-async function refreshCachedImageTimestamp(imageCache, cacheKey, cached) {
-  const refreshed = responseWithCacheTimestamp(cached);
-  await imageCache.put(cacheKey, refreshed.clone());
-  return refreshed;
-}
-
 function cachedImageAge(response) {
   const cachedAt = Number(response.headers.get('sw-cached-at'));
   if (!Number.isFinite(cachedAt) || cachedAt <= 0) {
@@ -230,8 +231,22 @@ function cachedImageAge(response) {
   return Date.now() - cachedAt;
 }
 
+// C2-11 (run-10 c2): read recency from the LRU meta store FIRST. touchMeta
+// keeps that timestamp current on every confirmed-fresh (304 / same-ETag)
+// revalidation WITHOUT rewriting the cached response body, so the
+// `sw-cached-at` response header stops advancing once an entry has been
+// touched this way — it can no longer be treated as authoritative once a
+// meta record exists. The header is only a fallback for an entry with no
+// meta record (a pre-change entry, or a meta read racing a missing/corrupt
+// record); using it unconditionally would age out entries the server keeps
+// confirming as fresh on every revalidation.
 async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
-  const age = cachedImageAge(cached);
+  const entries = await getMeta();
+  const metaEntry = entries.get(url);
+  const age =
+    metaEntry && Number.isFinite(metaEntry.timestamp)
+      ? Date.now() - metaEntry.timestamp
+      : cachedImageAge(cached);
   if (!Number.isNaN(age) && age > IMAGE_MAX_STALE_MS) {
     await imageCache.delete(cacheKey);
     await deleteMeta(url);
@@ -293,6 +308,14 @@ async function staleWhileRevalidateImage(request) {
     // timestamp is touched. A 200 with a differing ETag means the cache is
     // stale, so we dispatch the revalidate and serve the network response.
     //
+    // C2-11 (run-10 c2): on a confirmed-fresh 304 or same-ETag 200, the
+    // cached Response is also returned WITHOUT a local body rewrite (no
+    // imageCache.put) — the bytes are unchanged, so re-tee'ing the body and
+    // re-`put`ing it into the cache on every confirmed-fresh view bought
+    // nothing but CPU/IO. Only the LRU meta timestamp changes (touchMeta);
+    // evictExpiredCachedImage reads that timestamp first so recency still
+    // holds even though the sw-cached-at header no longer advances.
+    //
     // AGG-R8-05 (run-8 c2): BOUND the synchronous HEAD probe. The freshness
     // intent above is deliberate (serve fresh colors immediately after an admin
     // color-setting change), but the probe sits on the DISPLAY path — a warm
@@ -314,10 +337,10 @@ async function staleWhileRevalidateImage(request) {
         });
         const cachedSize = Number(cached.headers.get('Content-Length')) || 0;
         if (head.status === 304) {
-          // Server confirms cache is fresh — serve cached, no body fetch.
-          const refreshedCached = await refreshCachedImageTimestamp(imageCache, cacheKey, cached);
+          // Server confirms cache is fresh — serve cached, no body fetch,
+          // no local body rewrite (C2-11, run-10 c2). Meta-only recency touch.
           touchMeta(request.url, cachedSize).catch(() => {});
-          return refreshedCached;
+          return cached;
         }
         if (head.status === 404 || head.status === 410) {
           await imageCache.delete(cacheKey);
@@ -332,9 +355,10 @@ async function staleWhileRevalidateImage(request) {
             if (fresh) return fresh;
           }
           if (networkEtag && networkEtag === cachedEtag) {
-            const refreshedCached = await refreshCachedImageTimestamp(imageCache, cacheKey, cached);
+            // Same as the 304 branch above (C2-11, run-10 c2): confirmed
+            // fresh, no local body rewrite, meta-only recency touch.
             touchMeta(request.url, cachedSize).catch(() => {});
-            return refreshedCached;
+            return cached;
           }
         }
       } catch {

@@ -181,3 +181,92 @@ export async function totalCacheSize(meta: MetaStore): Promise<number> {
   }
   return total;
 }
+
+// ─── Recency touch + expiry (C2-11, run-10 c2) ─────────────────────────────
+//
+// The shipped template's staleWhileRevalidateImage HEAD-probe/304 flow (and
+// its refreshCachedImageTimestamp/evictExpiredCachedImage/cachedImageAge
+// helpers) still lives only in public/sw.template.js — it depends on a live
+// fetch() Response and the ambient `caches` API, so it is not mirrored here
+// (see AGG-R8c3-11/TEST-3 in sw-template-contract.test.ts). The two pieces
+// below ARE pure and runtime-agnostic, so they mirror the template's
+// meta-first recency logic for unit coverage: touchMeta updates ONLY the
+// LRU meta timestamp for a confirmed-fresh entry (no body rewrite, no
+// eviction), and resolveCachedEntryAge/evictIfExpired implement the
+// meta-timestamp-first, header-fallback age check used by the template's
+// evictExpiredCachedImage.
+
+/**
+ * Bump the recency timestamp of an existing LRU meta entry (or create one)
+ * without touching the cache store. Mirrors the template's `touchMeta`:
+ * used when the server confirms a cached response is still fresh (304 /
+ * same-ETag), so only recency changes — never eviction, since no size grows.
+ */
+export async function touchMeta(
+  url: string,
+  knownSize: number,
+  meta: MetaStore,
+): Promise<void> {
+  return withMetaMutation(async () => {
+    const entries = await meta.getAll();
+    const existing = entries.get(url);
+    // AGG-H3 (run-6 cycle-2): delete-then-set so the touched entry moves to
+    // the Map's tail, keeping insertion order == recency for the head-walk
+    // eviction in recordAndEvict.
+    entries.delete(url);
+    entries.set(url, {
+      url,
+      size: existing && existing.size ? existing.size : knownSize,
+      timestamp: Date.now(),
+    });
+    await meta.setAll(entries);
+  });
+}
+
+/**
+ * Resolve a cached entry's age for stale-expiry checks. Prefers the LRU
+ * meta store's timestamp — kept current by touchMeta / recordAndEvict on
+ * every confirmed-fresh revalidation without any body rewrite — and falls
+ * back to a response-header-derived timestamp only when no meta record
+ * exists. A header-only fallback stops advancing once an entry has been
+ * touched without rewriting the response, so treating it as authoritative
+ * whenever meta already exists would age out entries the server keeps
+ * confirming as fresh.
+ */
+export function resolveCachedEntryAge(
+  metaEntry: CacheEntry | undefined,
+  headerTimestamp: number | null,
+  now: number = Date.now(),
+): number {
+  if (metaEntry && Number.isFinite(metaEntry.timestamp)) {
+    return now - metaEntry.timestamp;
+  }
+  if (headerTimestamp !== null && Number.isFinite(headerTimestamp) && headerTimestamp > 0) {
+    return now - headerTimestamp;
+  }
+  return Infinity;
+}
+
+/**
+ * Evict a cache entry (and its meta record) if its resolved age exceeds
+ * `maxAgeMs`. Mirrors the template's `evictExpiredCachedImage`.
+ *
+ * @returns true if the entry was evicted.
+ */
+export async function evictIfExpired(
+  url: string,
+  cache: CacheStore,
+  meta: MetaStore,
+  maxAgeMs: number,
+  headerTimestamp: number | null = null,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const entries = await meta.getAll();
+  const age = resolveCachedEntryAge(entries.get(url), headerTimestamp, now);
+  if (age > maxAgeMs) {
+    await cache.delete(url);
+    await removeEntry(url, meta);
+    return true;
+  }
+  return false;
+}

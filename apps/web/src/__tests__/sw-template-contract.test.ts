@@ -221,19 +221,24 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(imageFn()).toMatch(/const startRevalidate\s*=\s*\(\)\s*=>/);
     });
 
-    it('the 304 branch serves cached with a metadata touch and no body fetch', () => {
+    // C2-11 (run-10 c2): a confirmed-fresh 304 must serve the cached
+    // Response AS-IS — no local body rewrite (no imageCache.put), just a
+    // meta-only recency touch. Rebuilding + re-putting identical bytes on
+    // every confirmed-fresh view was the PERF-01 finding.
+    it('the 304 branch serves cached with a metadata touch and no body rewrite', () => {
         const fn = imageFn();
         const head304 = fn.indexOf("head.status === 304");
         expect(head304).toBeGreaterThan(-1);
-        const branchEnd = fn.indexOf('return refreshedCached;', head304);
+        const branchEnd = fn.indexOf('return cached;', head304);
         expect(branchEnd).toBeGreaterThan(head304);
         const branch = fn.slice(head304, branchEnd);
-        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(branch).toMatch(/touchMeta\(/);
+        expect(branch).not.toMatch(/refreshCachedImageTimestamp/);
+        expect(branch).not.toMatch(/imageCache\.put\(/);
         expect(branch).not.toMatch(/startRevalidate\(/);
     });
 
-    it('a 200 HEAD with the same ETag serves cached with no body fetch', () => {
+    it('a 200 HEAD with the same ETag serves cached with no body rewrite', () => {
         const fn = imageFn();
         const headFetch = fn.indexOf('const head = await fetch(request.url');
         const firstHeadStatusBranch = fn.indexOf('if (head.status === 304)');
@@ -244,24 +249,32 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(cachedSizeDeclaration).toBeGreaterThan(headFetch);
         expect(cachedSizeDeclaration).toBeLessThan(firstHeadStatusBranch);
         expect(sameEtag).toBeGreaterThan(-1);
-        const branchEnd = fn.indexOf('return refreshedCached;', sameEtag);
+        const branchEnd = fn.indexOf('return cached;', sameEtag);
         expect(branchEnd).toBeGreaterThan(sameEtag);
         const branch = fn.slice(sameEtag, branchEnd);
-        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(branch).toMatch(/touchMeta\(/);
+        expect(branch).not.toMatch(/refreshCachedImageTimestamp/);
+        expect(branch).not.toMatch(/imageCache\.put\(/);
         expect(branch).not.toMatch(/startRevalidate\(/);
     });
 
-    it('the generated sw.js serves cached on same-ETag 200 HEAD without a body fetch', () => {
+    it('the generated sw.js serves cached on same-ETag 200 HEAD without a body rewrite', () => {
         const fnIdx = GENERATED_SW.indexOf('async function staleWhileRevalidateImage');
         const htmlIdx = GENERATED_SW.indexOf('async function networkFirstHtml');
         const fn = GENERATED_SW.slice(fnIdx, htmlIdx);
         const sameEtag = fn.indexOf('networkEtag && networkEtag === cachedEtag');
         expect(sameEtag).toBeGreaterThan(-1);
-        const branchEnd = fn.indexOf('return refreshedCached;', sameEtag);
+        const branchEnd = fn.indexOf('return cached;', sameEtag);
         const branch = fn.slice(sameEtag, branchEnd);
-        expect(branch).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
+        expect(branch).toMatch(/touchMeta\(/);
+        expect(branch).not.toMatch(/refreshCachedImageTimestamp/);
+        expect(branch).not.toMatch(/imageCache\.put\(/);
         expect(branch).not.toMatch(/startRevalidate\(/);
+    });
+
+    it('refreshCachedImageTimestamp no longer exists in the template or generated worker (C2-11)', () => {
+        expect(TEMPLATE).not.toMatch(/refreshCachedImageTimestamp/);
+        expect(GENERATED_SW).not.toMatch(/refreshCachedImageTimestamp/);
     });
 
     it('touchMeta never grows a tracked size (no eviction trigger)', () => {
@@ -312,17 +325,23 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(GENERATED_SW).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
     });
 
-    it('stamps image cache entries and expires unverified stale derivatives', () => {
+    it('stamps image cache entries and expires unverified stale derivatives via meta-first age (C2-11)', () => {
         const fn = imageFn();
         expect(TEMPLATE).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
         expect(TEMPLATE).toMatch(/function responseWithCacheTimestamp\(response\)/);
-        expect(TEMPLATE).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(TEMPLATE).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
         expect(fn).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
-        expect(fn).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(TEMPLATE).toMatch(/function cachedImageAge\(response\)/);
         expect(TEMPLATE).toMatch(/return Infinity;/);
-        expect(TEMPLATE).toMatch(/async function evictExpiredCachedImage\(imageCache, cacheKey, url, cached\)/);
+        // The meta store is now the primary age source: evictExpiredCachedImage
+        // reads getMeta() first and only falls back to cachedImageAge(cached)
+        // (the sw-cached-at header) when no meta entry exists.
+        const evictFnIdx = TEMPLATE.indexOf('async function evictExpiredCachedImage(imageCache, cacheKey, url, cached)');
+        expect(evictFnIdx).toBeGreaterThan(-1);
+        const evictFn = TEMPLATE.slice(evictFnIdx, TEMPLATE.indexOf('async function staleWhileRevalidateImage'));
+        expect(evictFn).toMatch(/const entries = await getMeta\(\);/);
+        expect(evictFn).toMatch(/const metaEntry = entries\.get\(url\);/);
+        expect(evictFn).toMatch(/metaEntry && Number\.isFinite\(metaEntry\.timestamp\)\s*\n\s*\? Date\.now\(\) - metaEntry\.timestamp\s*\n\s*: cachedImageAge\(cached\)/);
         expect(TEMPLATE).toMatch(/age > IMAGE_MAX_STALE_MS/);
         expect(TEMPLATE).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*await deleteMeta\(url\);/);
         const expiryIdx = fn.indexOf('evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)');
@@ -332,13 +351,12 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(expiryBranch).toMatch(/return fresh \?\? new Response\('Network error', \{ status: 503 \}\);/);
     });
 
-    it('generated sw.js carries image stale-expiry stamping from the template', () => {
+    it('generated sw.js carries image stale-expiry stamping and meta-first age from the template', () => {
         expect(GENERATED_SW).toMatch(/const IMAGE_MAX_STALE_MS\s*=\s*60 \* 60 \* 1000;/);
-        expect(GENERATED_SW).toMatch(/async function refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(GENERATED_SW).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
-        expect(GENERATED_SW).toMatch(/refreshCachedImageTimestamp\(imageCache, cacheKey, cached\)/);
         expect(GENERATED_SW).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
         expect(GENERATED_SW).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
+        expect(GENERATED_SW).toMatch(/const metaEntry = entries\.get\(url\);/);
     });
 
     it('evicts stale derivative cache entries when the server returns 404 or 410', () => {
