@@ -103,4 +103,13 @@ before any lane produced output; this aggregate is from the re-spawned fan-out.
 
 ## AGENT FAILURES / addendum
 - First fan-out attempt (12 lanes) was wiped by an API session limit before output; fully re-spawned.
-- feature-dev-code-reviewer (secondary pass, message-return lane): pending at aggregate-write time; its findings are folded into the planning pass directly if/when its final message arrives (addendum will be appended to this file). If it fails, that is recorded here per the retry rule.
+- feature-dev-code-reviewer (secondary pass, message-return lane): HUNG without returning
+  (no output after several hours; polled once). Per the retry rule it was replaced by a
+  time-boxed general-purpose lane with complementary scope (api routes / i18n / e2e /
+  migrate.js), which wrote `fd-code-reviewer.md`.
+
+### Addendum — replacement secondary lane findings
+| ID | Sev/Conf | Location | Title | Disposition |
+|----|---------|----------|-------|-------------|
+| C2-56 (FDR-01) | MED-HIGH/High | `apps/web/scripts/migrate.js:787-800` | prepareLegacyDatabaseIfNeeded pre-baselined pending NEW migrations, so their SQL (incl. DML) never executed on deployed DBs and the runMigrations post-condition was dead code | FIXED same cycle (`b4e986c3`): pending-vs-drift split — above-cursor missing entries are left for drizzle.migrate() to genuinely apply; mixed drift warns about swallowed tails; runbook updated; `migrate-pending-migrations.test.ts` |
+- Everything else in the replacement lane's scope was verified clean (API routes, i18n request, e2e specs, backup-filename handling).
