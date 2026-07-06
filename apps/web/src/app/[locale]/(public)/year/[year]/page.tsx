@@ -178,6 +178,7 @@ export default async function YearInReviewPage({
                                     className="text-xl font-semibold mb-4 pb-2 border-b"
                                 >
                                     {monthName}
+                                    {' · '}
                                     <span className="ml-2 text-sm font-normal text-muted-foreground">
                                         {t('photosCount', { count: monthPhotos.length })}
                                     </span>

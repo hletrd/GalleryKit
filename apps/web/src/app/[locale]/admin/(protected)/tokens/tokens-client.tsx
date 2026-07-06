@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +9,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { isImeComposingReactEvent } from '@/lib/ime';
 import { copyToClipboard } from '@/lib/clipboard';
 import { createLrToken, revokeLrToken, listLrTokens, type LrTokenListItem } from '@/app/actions/lr-tokens';
+import { useRestoreFocusAfterPending } from '@/lib/use-restore-focus-after-pending';
 import { Loader2, Plus, Trash2, Copy, Key } from 'lucide-react';
 import {
     Dialog,
@@ -33,6 +34,12 @@ export function TokensClient() {
     const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
     const labelErrorId = 'token-label-error';
     const loadErrorId = 'token-list-error';
+    const retryButtonRef = useRef<HTMLButtonElement>(null);
+    const createButtonRef = useRef<HTMLButtonElement>(null);
+    const revokeConfirmButtonRef = useRef<HTMLButtonElement>(null);
+    useRestoreFocusAfterPending(retryButtonRef, isPending);
+    useRestoreFocusAfterPending(createButtonRef, isPending);
+    useRestoreFocusAfterPending(revokeConfirmButtonRef, isPending);
 
     const loadTokens = async () => {
         const result = await listLrTokens();
@@ -147,6 +154,7 @@ export function TokensClient() {
                 <div id={loadErrorId} role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
                     <p className="text-destructive-text">{loadError}</p>
                     <Button
+                        ref={retryButtonRef}
                         type="button"
                         variant="outline"
                         className="mt-3 min-h-[44px]"
@@ -231,7 +239,7 @@ export function TokensClient() {
                         <Button variant="outline" onClick={() => setShowCreate(false)} className="min-h-[44px]">
                             {t('common.cancel')}
                         </Button>
-                        <Button onClick={handleCreate} disabled={isPending} className="gap-2 min-h-[44px]">
+                        <Button ref={createButtonRef} onClick={handleCreate} disabled={isPending} className="gap-2 min-h-[44px]">
                             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                             {t('lrToken.createButton')}
                         </Button>
@@ -304,6 +312,7 @@ export function TokensClient() {
                             {t('common.cancel')}
                         </Button>
                         <Button
+                            ref={revokeConfirmButtonRef}
                             variant="destructive"
                             onClick={() => confirmRevokeId !== null && handleRevoke(confirmRevokeId)}
                             disabled={isPending}

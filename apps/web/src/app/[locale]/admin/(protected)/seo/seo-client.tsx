@@ -12,6 +12,7 @@ import { updateSeoSettings } from '@/app/actions/seo';
 import { Save, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
+import { useRestoreFocusAfterPending } from '@/lib/use-restore-focus-after-pending';
 
 interface SeoSettings {
     seo_title: string;
@@ -31,6 +32,8 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const [isPending, startTransition] = useTransition();
     const [settings, setSettings] = useState<SeoSettings>(initialSettings);
     const initialRef = useRef<SeoSettings>(initialSettings);
+    const saveButtonRef = useRef<HTMLButtonElement>(null);
+    useRestoreFocusAfterPending(saveButtonRef, isPending);
 
     const handleChange = (field: keyof SeoSettings, value: string) => {
         setSettings(prev => ({ ...prev, [field]: value }));
@@ -80,7 +83,7 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                     </Button>
                     <h1 className="min-w-0 text-3xl font-bold tracking-tight">{t('seo.title')}</h1>
                 </div>
-                <Button onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
+                <Button ref={saveButtonRef} onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
                     <Save className="h-4 w-4" />
                     {isPending ? t('seo.saving') : t('seo.save')}
                 </Button>

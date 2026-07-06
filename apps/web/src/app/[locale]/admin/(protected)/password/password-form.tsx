@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { updatePassword } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
+import { useRestoreFocusAfterPending } from "@/lib/use-restore-focus-after-pending";
 
 type ActionState = {
     error?: string;
@@ -25,6 +26,8 @@ export function PasswordForm() {
     const [state, formAction, isPending] = useActionState(updatePassword, startState);
     const { t } = useTranslation();
     const [confirmError, setConfirmError] = useState<string | null>(null);
+    const submitButtonRef = useRef<HTMLButtonElement>(null);
+    useRestoreFocusAfterPending(submitButtonRef, isPending);
     const passwordHelpId = 'password-min-length-help';
     const confirmPasswordDescription = confirmError
         ? `${passwordHelpId} confirmPassword-error`
@@ -111,7 +114,7 @@ export function PasswordForm() {
                 )}
             </div>
 
-            <Button type="submit" disabled={isPending}>
+            <Button ref={submitButtonRef} type="submit" disabled={isPending}>
                 {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {t('password.submit')}
             </Button>

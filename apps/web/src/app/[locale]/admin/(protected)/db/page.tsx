@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTranslations } from 'next-intl';
 import { MAX_RESTORE_SIZE_BYTES, MAX_RESTORE_SIZE_LABEL } from '@/lib/db-restore';
+import { useRestoreFocusAfterPending } from '@/lib/use-restore-focus-after-pending';
 
 type PendingDbAction = 'backup' | 'restore' | 'export' | null;
 
@@ -32,6 +33,16 @@ export default function DbPage() {
     const [restoreFile, setRestoreFile] = useState<File | null>(null);
     const [restoreInputKey, setRestoreInputKey] = useState(0);
     const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+    const backupButtonRef = useRef<HTMLButtonElement>(null);
+    const restoreButtonRef = useRef<HTMLButtonElement>(null);
+    const exportButtonRef = useRef<HTMLButtonElement>(null);
+    // Each button's own pendingAction slice (rather than the shared
+    // `isPending`) so settling one action only restores focus to the
+    // button that actually triggered it, not whichever button's effect
+    // happens to run first.
+    useRestoreFocusAfterPending(backupButtonRef, pendingAction === 'backup');
+    useRestoreFocusAfterPending(restoreButtonRef, pendingAction === 'restore');
+    useRestoreFocusAfterPending(exportButtonRef, pendingAction === 'export');
 
     const handleBackup = () => {
         setPendingAction('backup');
@@ -153,6 +164,7 @@ export default function DbPage() {
                     </CardHeader>
                     <CardContent>
                         <Button
+                            ref={backupButtonRef}
                             onClick={handleBackup}
                             disabled={isPending}
                             className="w-full"
@@ -205,6 +217,7 @@ export default function DbPage() {
                         </Alert>
                         <AlertDialog open={showRestoreConfirm} onOpenChange={setShowRestoreConfirm}>
                             <Button
+                                ref={restoreButtonRef}
                                 onClick={handleRestore}
                                 disabled={isPending || !restoreFile}
                                 variant="destructive"
@@ -248,6 +261,7 @@ export default function DbPage() {
                     </CardHeader>
                     <CardContent>
                          <Button
+                            ref={exportButtonRef}
                             onClick={handleExportCsv}
                             disabled={isPending}
                             variant="secondary"

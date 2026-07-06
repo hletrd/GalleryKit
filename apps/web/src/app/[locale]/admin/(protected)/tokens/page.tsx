@@ -1,7 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { TokensClient } from './tokens-client';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Key } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { adminTokenRouteMetadata } from '../../admin-metadata';
 
 export const dynamic = 'force-dynamic';
@@ -11,13 +10,10 @@ export const generateMetadata = adminTokenRouteMetadata;
 export default async function TokensPage() {
     const t = await getTranslations('lrToken');
     return (
-        <div className="max-w-4xl">
+        <div className="max-w-4xl space-y-6">
+            <h1 className="text-3xl font-bold tracking-tight">{t('title')}</h1>
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Key className="h-5 w-5" />
-                        {t('title')}
-                    </CardTitle>
                     <CardDescription>{t('description')}</CardDescription>
                 </CardHeader>
                 <CardContent>

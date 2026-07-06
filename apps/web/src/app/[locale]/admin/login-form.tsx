@@ -4,11 +4,12 @@ import { login } from '@/app/actions';
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { useActionState, useState, type FormEvent } from 'react';
+import { useActionState, useRef, useState, type FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
 import { useTranslations } from 'next-intl';
 import { useTranslation } from '@/components/i18n-provider';
+import { useRestoreFocusAfterPending } from '@/lib/use-restore-focus-after-pending';
 
 const initialState = {
     error: '',
@@ -24,6 +25,8 @@ export function LoginForm() {
     // autocorrect). Default to masked.
     const [showPassword, setShowPassword] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
+    const submitButtonRef = useRef<HTMLButtonElement>(null);
+    useRestoreFocusAfterPending(submitButtonRef, isPending);
 
     const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
         const formData = new FormData(event.currentTarget);
@@ -124,7 +127,7 @@ export function LoginForm() {
                                 {state.error}
                             </p>
                         )}
-                        <Button type="submit" className="w-full h-11" disabled={isPending}>
+                        <Button ref={submitButtonRef} type="submit" className="w-full h-11" disabled={isPending}>
                             {isPending ? t('submitting') : t('submit')}
                         </Button>
                     </form>

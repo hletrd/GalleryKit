@@ -217,6 +217,7 @@ export default async function TimelinePage({
                                     className="text-xl font-semibold mb-3 sticky top-16 bg-background/90 backdrop-blur-sm py-2 z-10"
                                 >
                                     {t('monthHeading', { month: monthName, year: selectedYear ?? '' })}
+                                    {' · '}
                                     <span className="ml-2 text-sm font-normal text-muted-foreground">
                                         {t('photosCount', { count: monthPhotos.length })}
                                     </span>

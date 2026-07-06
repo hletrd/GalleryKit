@@ -12,6 +12,7 @@ import { getSettingDefaults, normalizeConfiguredImageSizes, SLIDESHOW_INTERVAL_M
 import type { GallerySettingKey, SemanticSearchMode } from '@/lib/gallery-config-shared';
 import { buildChangedGallerySettingsPayload } from '@/lib/settings-submit-payload';
 import { SETTINGS_BACKFILL_WARNING_KEY_SET, hasBackfillRelevantDifference, resolveSavedBackfillPendingTransition } from '@/lib/settings-backfill-warning';
+import { useRestoreFocusAfterPending } from '@/lib/use-restore-focus-after-pending';
 import { Switch } from '@/components/ui/switch';
 import {
     AlertDialog,
@@ -72,6 +73,8 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     // alongside `initialRef.current` on successful save.
     const [baseline, setBaseline] = useState<Record<string, string>>(initialSettings);
     const initialRef = useRef<Record<string, string>>(initialSettings);
+    const saveButtonRef = useRef<HTMLButtonElement>(null);
+    useRestoreFocusAfterPending(saveButtonRef, isPending);
 
     // AGG-R5C3-04: surface the last backfill run's outcome to the admin. The
     // runner already computed encode/detection-failure counters but nothing
@@ -305,7 +308,7 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     </Button>
                     <h1 className="min-w-0 text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
                 </div>
-                <Button onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
+                <Button ref={saveButtonRef} onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {isPending ? t('settings.saving') : t('settings.save')}
                 </Button>
