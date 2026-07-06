@@ -38,8 +38,13 @@ export function prioritizeSecurityFields(metadata: Record<string, unknown>): Rec
 }
 
 /**
- * Fire-and-forget audit log writer.
- * Callers should use `.catch(console.debug)` to avoid blocking.
+ * Fire-and-forget audit log writer. The returned promise ALWAYS resolves —
+ * a failed DB insert is caught internally and reported via `console.error`
+ * instead of rejecting, so a lost audit write for a security-relevant action
+ * (login, password change, restore) is visible in production logs rather than
+ * silently swallowed by a caller's `.catch(console.debug)` (C2-09, run-10 c2).
+ * Existing callers' `.catch(console.debug)` remains harmless dead code since
+ * the promise this function returns never rejects.
  *
  * Security note: When metadata exceeds 4096 chars, it is truncated to a 4000-char
  * preview. Security-relevant fields (ip, userAgent, action, userId, targetType,
@@ -83,14 +88,21 @@ export async function logAuditEvent(
         }
     }
 
-    await trackBackgroundDbWrite(() => db.insert(auditLog).values({
-        userId,
-        action,
-        targetType: targetType ?? null,
-        targetId: targetId ?? null,
-        ip: ip ?? null,
-        metadata: serializedMetadata,
-    }));
+    // C2-09 (run-10 c2): never let a failed audit write reject — log it loudly
+    // instead so it surfaces in production logs even though legacy callers
+    // only attach a silent `.catch(console.debug)`.
+    try {
+        await trackBackgroundDbWrite(() => db.insert(auditLog).values({
+            userId,
+            action,
+            targetType: targetType ?? null,
+            targetId: targetId ?? null,
+            ip: ip ?? null,
+            metadata: serializedMetadata,
+        }));
+    } catch (err) {
+        console.error('[audit] failed to record ' + action, err);
+    }
 }
 
 /**
