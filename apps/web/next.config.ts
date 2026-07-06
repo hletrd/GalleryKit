@@ -71,6 +71,21 @@ const nextConfig: NextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=3600, must-revalidate' },
         ],
       },
+      // C2-41 (run-10 c2): proxy.ts's matcher excludes /api, so the
+      // middleware-applied per-request CSP (production nonce-based) never
+      // reaches /api/* responses (JSON + the Satori-rendered OG images).
+      // The '/(.*)' rule below only emits a CSP in dev (isDev branch), so
+      // without this rule production /api/* shipped with no CSP at all,
+      // contradicting Next-as-CSP-single-source-of-truth. Gated to non-dev
+      // only: in dev, '/(.*)' already matches /api/* and applies the full
+      // devCspValue, so adding this here too would just be a redundant
+      // same-path duplicate for no benefit.
+      ...(!isDev ? [{
+        source: '/api/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "default-src 'none'; frame-ancestors 'none'; sandbox" },
+        ],
+      }] : []),
       {
         source: '/(.*)',
         headers: [
