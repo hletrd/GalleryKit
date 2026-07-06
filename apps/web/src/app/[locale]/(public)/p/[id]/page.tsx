@@ -46,10 +46,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
     if (maintenanceMetadata) return maintenanceMetadata;
 
+    // C2-04 (UX-03, run-10 c2): throw notFound() HERE, not just in the page
+    // body. generateMetadata resolves before the response starts streaming,
+    // so this produces a real HTTP 404. The page body's own notFound() runs
+    // inside the [locale]/loading.tsx implicit Suspense boundary, AFTER the
+    // 200 shell has flushed — it can only swap the UI, never the status
+    // (the production soft-404 the run-10 c2 designer lane reproduced).
+    // getImageCached is React-cache()-deduped with the page's fetch, so this
+    // adds no extra DB round-trip.
     const imageId = parseSafePositiveInteger(id);
     if (imageId === null) {
-        const t = await getTranslations('photo');
-        return { title: t('notFoundTitle') };
+        notFound();
     }
 
     const [locale, t, seo, image] = await Promise.all([
@@ -60,9 +67,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     ]);
 
     if (!image) {
-        return {
-            title: t('notFoundTitle'),
-        };
+        notFound();
     }
 
     const displayTitle = getPhotoDisplayTitle(image, t('titleWithId', { id: image.id }));

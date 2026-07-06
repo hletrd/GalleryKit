@@ -22,10 +22,6 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     if (maintenanceMetadata) return maintenanceMetadata;
 
     const collection = await getSmartCollectionBySlugCached(slug);
-    // R19-L1: prefetch translations so the not-found / private-collection
-    // branch returns a translated `notFoundTitle` instead of an empty
-    // <title>. Empty titles render the URL itself as the tab label and
-    // trip Lighthouse / axe-core a11y audits.
     const [locale, t, seo] = await Promise.all([
         getLocale(),
         getTranslations('smartCollection'),
@@ -33,10 +29,14 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     ]);
 
     if (!collection || !collection.is_public) {
-        return {
-            title: t('notFoundTitle'),
-            robots: { index: false, follow: false },
-        };
+        // C2-04 (UX-03, run-10 c2): notFound() here yields a real HTTP 404
+        // for missing AND private collections (the page body 404s private
+        // collections identically, so no information is leaked either way).
+        // Supersedes the R19-L1 translated-notFoundTitle branch: the
+        // not-found boundary now provides the tab title, so no empty-<title>
+        // Lighthouse/axe regression. See the p/[id] generateMetadata note
+        // for the streaming mechanism.
+        notFound();
     }
 
     const pageUrl = localizeUrl(seo.url, locale, `/c/${collection.slug}`);

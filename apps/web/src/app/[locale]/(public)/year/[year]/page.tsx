@@ -28,15 +28,17 @@ export async function generateMetadata({
     const maintenanceMetadata = await getPublicRestoreMaintenanceMetadata();
     if (maintenanceMetadata) return maintenanceMetadata;
 
-    const [locale, t, tTopic, seo] = await Promise.all([
+    const [locale, t, seo] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
-        getTranslations('topic'),
         getSeoSettings(),
     ]);
     const yearNum = Number(yearParam);
     if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
-        return { title: tTopic('notFoundTitle'), robots: { index: false, follow: false } };
+        // C2-04 (UX-03, run-10 c2): notFound() here yields a real HTTP 404 —
+        // the page body's notFound() fires after the streamed 200 shell
+        // (see the p/[id] generateMetadata note for the full mechanism).
+        notFound();
     }
 
     const pageUrl = localizeUrl(seo.url, locale, `/year/${yearNum}`);

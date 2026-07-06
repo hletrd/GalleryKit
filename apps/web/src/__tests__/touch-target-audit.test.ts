@@ -61,6 +61,11 @@ const appLevelExtraFiles = [
     path.resolve(srcRoot, 'app', '[locale]', 'error.tsx'),
     path.resolve(srcRoot, 'app', '[locale]', 'not-found.tsx'),
     path.resolve(srcRoot, 'app', '[locale]', 'layout.tsx'),
+    // app/[locale]/loading.tsx was REMOVED in run-10 c2 (C2-04): a global
+    // loading boundary forces every public page onto the streamed-200 path,
+    // making real HTTP 404s impossible (vercel/next.js#75543). The entry
+    // below is kept so the audit re-covers the file automatically if a
+    // future change reintroduces it (the consumer existsSync-filters).
     path.resolve(srcRoot, 'app', '[locale]', 'loading.tsx'),
 ];
 

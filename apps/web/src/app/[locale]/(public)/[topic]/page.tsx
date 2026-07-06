@@ -61,10 +61,14 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     topicTagsPromise,
   ]);
 
-  if (!topicData) return {
-    title: t('notFoundTitle'),
-    description: t('notFoundDescription'),
-  };
+  // C2-04 (UX-03, run-10 c2): throw notFound() HERE so the HTTP status is a
+  // real 404 — the page body's notFound() runs inside the
+  // [locale]/loading.tsx implicit Suspense boundary AFTER the 200 shell has
+  // flushed (the production soft-404 the designer lane reproduced). Safe for
+  // alias slugs: getTopicBySlugCached resolves aliases to their canonical
+  // topic (topicData is truthy, page redirects), so this branch only fires
+  // when neither a topic nor an alias exists.
+  if (!topicData) notFound();
 
   const tagSlugs = requestedTagSlugs.length > 0
     ? filterExistingTagSlugs(requestedTagSlugs, allTags)
