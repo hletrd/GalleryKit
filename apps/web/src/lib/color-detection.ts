@@ -245,15 +245,22 @@ export function parseCicpFromHeif(buffer: Buffer): CicpTriplet | null {
             let dataStart = pos + 8;
 
             if (size === 1) {
-                if (pos + 16 > buffer.length) break;
+                // DBG-01 (run-10 c2): bound against `limit` (this container's
+                // true end), not the whole-buffer length — same fix as
+                // gps-exif-strip.ts's walkChildren() and the gain-map walker
+                // in gain-map-detection.ts. A child box declaring a size past
+                // its container's end but still within the overall buffer
+                // must be rejected, or CICP could be parsed from foreign
+                // sibling bytes belonging to a different box.
+                if (pos + 16 > limit) break;
                 size = Number(buffer.readBigUInt64BE(pos + 8));
                 headerSize = 16;
                 dataStart = pos + 16;
             } else if (size === 0) {
-                size = buffer.length - pos;
+                size = limit - pos;
             }
 
-            if (size < headerSize || pos + size > buffer.length) break;
+            if (size < headerSize || pos + size > limit) break;
 
             const boxEnd = pos + size;
             const dataSize = size - headerSize;

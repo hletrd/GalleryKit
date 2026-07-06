@@ -60,23 +60,29 @@ export function hasGainMap(buffer: Buffer): boolean {
     const infeEntries: InfeEntry[] = [];
     const irefEntries: IrefEntry[] = [];
 
-    function readBoxHeader(pos: number): { size: number; type: string; headerSize: number; dataStart: number } | null {
-        if (pos + 8 > buffer.length) return null;
+    // DBG-01 (run-10 c2): validate a child box's declared size against its
+    // TRUE enclosing container end (`end`), not the whole-buffer length —
+    // same fix as gps-exif-strip.ts's walkChildren(). A child that declares
+    // a size running past its container's end but still within the overall
+    // buffer must be rejected, or the walker reads into sibling bytes that
+    // belong to a different (possibly attacker-crafted) box.
+    function readBoxHeader(pos: number, end: number): { size: number; type: string; headerSize: number; dataStart: number } | null {
+        if (pos + 8 > end) return null;
         let size = buffer.readUInt32BE(pos);
         const type = buffer.toString('ascii', pos + 4, pos + 8);
         let headerSize = 8;
         let dataStart = pos + 8;
 
         if (size === 1) {
-            if (pos + 16 > buffer.length) return null;
+            if (pos + 16 > end) return null;
             size = Number(buffer.readBigUInt64BE(pos + 8));
             headerSize = 16;
             dataStart = pos + 16;
         } else if (size === 0) {
-            size = buffer.length - pos;
+            size = end - pos;
         }
 
-        if (size < headerSize || pos + size > buffer.length) return null;
+        if (size < headerSize || pos + size > end) return null;
         return { size, type, headerSize, dataStart };
     }
 
@@ -163,7 +169,7 @@ export function hasGainMap(buffer: Buffer): boolean {
         }
         let parsed = 0;
         while (pos + 8 <= boxEnd && parsed < entryCount && parsed < 1024) {
-            const header = readBoxHeader(pos);
+            const header = readBoxHeader(pos, boxEnd);
             if (!header) return;
             if (header.type === 'infe') {
                 const entry = parseInfe(header.dataStart, pos + header.size);
@@ -189,7 +195,7 @@ export function hasGainMap(buffer: Buffer): boolean {
         let pos = dataStart + 4;
         let parsed = 0;
         while (pos + 8 <= boxEnd && parsed < 1024) {
-            const header = readBoxHeader(pos);
+            const header = readBoxHeader(pos, boxEnd);
             if (!header) return;
             const innerEnd = pos + header.size;
             let inner = header.dataStart;
@@ -220,7 +226,7 @@ export function hasGainMap(buffer: Buffer): boolean {
         let pos = offset;
         const limit = Math.min(end, offset + MAX_SCAN_BYTES, buffer.length);
         while (pos + 8 <= limit) {
-            const header = readBoxHeader(pos);
+            const header = readBoxHeader(pos, limit);
             if (!header) break;
             const boxEnd = pos + header.size;
             if (header.type === 'meta') {
