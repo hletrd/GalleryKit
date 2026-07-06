@@ -505,14 +505,32 @@ type _LargePayloadKeysInPublic = Extract<keyof typeof publicSelectFields, _Large
 const _largePayloadGuard: _LargePayloadKeysInPublic extends never ? true : [_LargePayloadKeysInPublic, 'ERROR: large-payload field found in publicSelectFields — fetch in individual queries instead, see CLAUDE.md "Image Processing Pipeline" / "Performance Optimizations"'] = true;
 void _largePayloadGuard;
 
+// WP11 (C2-13/PERF-03, run-10 cycle-2): lean topics accessor with no
+// correlated subquery. This is the accessor behind `getTopicsCached`, used by
+// nav/home/topic/smart-collection pages — all `revalidate = 0` — so every one
+// of those requests previously paid for a `MAX(updated_at)` probe per topic
+// it never read. The sitemap-only variant with that subquery now lives in
+// `getTopicsWithLatestUpdate()` below.
 export async function getTopics() {
-    // R18-M1: select `last_image_updated_at` via correlated subquery so
-    // the sitemap homepage/topic entries can emit `<lastmod>` (Googlebot's
-    // documented crawl-prioritization signal). The subquery hits the
-    // existing `idx_images_topic` (topic, processed, capture_date,
-    // created_at) — `MAX(updated_at)` requires a row probe per topic-slug
-    // partition, which is cheap at gallery scale and the `revalidate = 3600`
-    // ISR window on `/sitemap.xml` caches the result.
+    return db.select({
+        slug: topics.slug,
+        label: topics.label,
+        order: topics.order,
+        image_filename: topics.image_filename,
+        map_visible: topics.map_visible,
+    }).from(topics).orderBy(asc(topics.order));
+}
+
+// R18-M1 (moved by WP11 / C2-13, run-10 cycle-2): select
+// `last_image_updated_at` via correlated subquery so the sitemap
+// homepage/topic entries can emit `<lastmod>` (Googlebot's documented
+// crawl-prioritization signal). The subquery hits the existing
+// `idx_images_topic` (topic, processed, capture_date, created_at) —
+// `MAX(updated_at)` requires a row probe per topic-slug partition, which is
+// cheap at gallery scale and the `revalidate = 3600` ISR window on
+// `/sitemap.xml` caches the result. This accessor is sitemap-only — every
+// other consumer uses the lean `getTopics()` above.
+export async function getTopicsWithLatestUpdate() {
     return db.select({
         slug: topics.slug,
         label: topics.label,
@@ -911,6 +929,11 @@ export async function getImagesLitePage(
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
+    // C2-36 (DBG-02, run-10 cycle-2): rows and totalCount are two separate
+    // query executions, not one atomic snapshot — a concurrent write between
+    // them can make totalCount briefly disagree with rows.length/hasMore.
+    // Deliberate trade-off from the lean-count split (perf commit 3000bb05);
+    // a stale header count self-corrects on the next request.
     const [rows, totalCount] = await Promise.all([
         query.limit(normalizedPageSize + 1).offset(offset),
         getImageCount(topic, tagSlugs, { includeUnprocessed }),
@@ -1507,6 +1530,10 @@ export async function getImagesForSmartCollection(
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = baseQuery.where(and(compiledCondition, eq(images.processed, true)));
+    // C2-36 (DBG-02, run-10 cycle-2): same benign non-atomicity as
+    // `getImagesLitePage` — rows and countRows are separate query executions,
+    // so a concurrent write can make the count briefly disagree with the
+    // returned page; self-corrects on the next request.
     const [rows, countRows] = await Promise.all([
         query
             .limit(normalizedPageSize + 1)
@@ -1809,3 +1836,25 @@ async function _getSeoSettings(): Promise<SeoSettings> {
 }
 
 export const getSeoSettings = cache(_getSeoSettings);
+
+/**
+ * WP16 (C2-42/ARCH-09, run-10 cycle-2): complete `SeoSettings` fallback,
+ * defaulted entirely from `site-config.json`, for callers that must survive a
+ * `getSeoSettings()` rejection (e.g. `nav.tsx`, rendered on every page).
+ * Mirrors `_getSeoSettings()`'s siteConfig-default branch field-for-field so a
+ * DB outage degrades to the same values a fresh install would show. The
+ * previous inline fallback in `nav.tsx` only set `nav_title` — sourced from
+ * the wrong siteConfig field (`title` instead of `nav_title`) — and omitted
+ * every other `SeoSettings` field.
+ */
+export function buildSeoSettingsFallback(): SeoSettings {
+    return {
+        title: siteConfig.title,
+        description: siteConfig.description,
+        nav_title: siteConfig.nav_title,
+        author: siteConfig.author,
+        locale: siteConfig.locale,
+        url: process.env.BASE_URL || siteConfig.url,
+        og_image_url: null,
+    };
+}

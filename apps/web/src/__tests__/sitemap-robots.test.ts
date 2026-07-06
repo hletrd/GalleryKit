@@ -7,7 +7,7 @@ const dataMocks = vi.hoisted(() => ({
         process.env.BASE_URL = 'https://gallery.test';
         return true;
     })(),
-    getTopics: vi.fn(),
+    getTopicsWithLatestUpdate: vi.fn(),
     getLatestImageUpdatedAt: vi.fn(),
     getImageIdsForSitemap: vi.fn(),
 }));
@@ -21,7 +21,7 @@ import { LOCALES } from '@/lib/constants';
 describe('sitemap route', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        dataMocks.getTopics.mockResolvedValue([
+        dataMocks.getTopicsWithLatestUpdate.mockResolvedValue([
             { slug: 'landscape', last_image_updated_at: new Date('2026-01-02T00:00:00Z') },
         ]);
         dataMocks.getLatestImageUpdatedAt.mockResolvedValue(new Date('2026-01-03T00:00:00Z'));
@@ -33,7 +33,12 @@ describe('sitemap route', () => {
     it('reserves localized homepage/topic URL budget before querying image URLs', async () => {
         await sitemap();
 
-        const expectedImageBudget = Math.floor((50000 - LOCALES.length * 2) / LOCALES.length);
+        // WP18 (C2-29/CRIT-02, run-10 cycle-2): reservation now also folds in
+        // the global feed entry (+1) and localized per-topic feed entries
+        // (LOCALES.length * topics.length), on top of the original
+        // homepage+topic reservation (LOCALES.length * (1 + topics.length)).
+        // With one mocked topic that totals LOCALES.length * 3 + 1.
+        const expectedImageBudget = Math.floor((50000 - (LOCALES.length * 3 + 1)) / LOCALES.length);
         expect(dataMocks.getImageIdsForSitemap).toHaveBeenCalledWith(expectedImageBudget);
     });
 
@@ -58,13 +63,74 @@ describe('sitemap route', () => {
     });
 
     it('falls back to localized homepages when sitemap data queries fail', async () => {
-        dataMocks.getTopics.mockRejectedValueOnce(new Error('db down'));
+        dataMocks.getTopicsWithLatestUpdate.mockRejectedValueOnce(new Error('db down'));
 
         const entries = await sitemap();
         const urls = entries.map((entry) => entry.url);
 
         expect(urls).toEqual(LOCALES.map((locale) => `${TEST_BASE_URL}/${locale}`).concat(`${TEST_BASE_URL}/feed.xml`));
         expect(dataMocks.getImageIdsForSitemap).not.toHaveBeenCalled();
+    });
+});
+
+describe('sitemap URL budget boundary (WP18 / C2-29)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        dataMocks.getLatestImageUpdatedAt.mockResolvedValue(new Date('2026-01-03T00:00:00Z'));
+    });
+
+    it('reserves budget for the global feed row and per-topic feed rows so the image query never overshoots MAX_SITEMAP_URLS', async () => {
+        const topicCount = 100;
+        const mockTopics = Array.from({ length: topicCount }, (_, i) => ({
+            slug: `topic-${i}`,
+            last_image_updated_at: new Date('2026-01-02T00:00:00Z'),
+        }));
+        dataMocks.getTopicsWithLatestUpdate.mockResolvedValue(mockTopics);
+        // A well-behaved image query respects the requested limit.
+        dataMocks.getImageIdsForSitemap.mockImplementation(async (limit: number) =>
+            Array.from({ length: limit }, (_, i) => ({
+                id: i + 1,
+                created_at: new Date('2026-01-01T00:00:00Z'),
+                updated_at: new Date('2026-01-01T00:00:00Z'),
+            })),
+        );
+
+        const entries = await sitemap();
+
+        // reservedNonImageUrls = L*(1+T) + 1 + L*T (homepage+topic, the
+        // global feed row, and localized per-topic feed rows).
+        const reservedNonImageUrls = LOCALES.length * (1 + topicCount) + 1 + LOCALES.length * topicCount;
+        const expectedBudget = Math.floor((50000 - reservedNonImageUrls) / LOCALES.length);
+        expect(dataMocks.getImageIdsForSitemap).toHaveBeenCalledWith(expectedBudget);
+
+        expect(entries.length).toBeLessThanOrEqual(50000);
+
+        const feedUrls = entries.map((e) => e.url).filter((u) => u.endsWith('/feed.xml'));
+        // 1 global feed + one per-topic-per-locale feed.
+        expect(feedUrls.length).toBe(1 + LOCALES.length * topicCount);
+    });
+
+    it('clamps the final entry list to MAX_SITEMAP_URLS even if the image query over-returns', async () => {
+        const topicCount = 5;
+        const mockTopics = Array.from({ length: topicCount }, (_, i) => ({
+            slug: `topic-${i}`,
+            last_image_updated_at: new Date('2026-01-02T00:00:00Z'),
+        }));
+        dataMocks.getTopicsWithLatestUpdate.mockResolvedValue(mockTopics);
+        // Simulate a query that ignores the requested budget and returns far
+        // more rows than asked — the reservation arithmetic alone would then
+        // be insufficient; the final `.slice(0, MAX_SITEMAP_URLS)` must hold.
+        dataMocks.getImageIdsForSitemap.mockResolvedValue(
+            Array.from({ length: 60000 }, (_, i) => ({
+                id: i + 1,
+                created_at: new Date('2026-01-01T00:00:00Z'),
+                updated_at: new Date('2026-01-01T00:00:00Z'),
+            })),
+        );
+
+        const entries = await sitemap();
+
+        expect(entries.length).toBe(50000);
     });
 });
 

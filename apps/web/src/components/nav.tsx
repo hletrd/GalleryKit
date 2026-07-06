@@ -1,14 +1,16 @@
 import { Suspense } from 'react';
-import { getSeoSettings, getTopicsCached } from "@/lib/data";
+import { buildSeoSettingsFallback, getSeoSettings, getTopicsCached } from "@/lib/data";
 import { NavClient } from "./nav-client";
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
-import siteConfig from '@/site-config.json';
 
 export async function Nav() {
     const [topics, seo, config] = await Promise.all([
         getTopicsCached().catch(() => []),
-        getSeoSettings().catch(() => ({ nav_title: siteConfig.title })),
+        // C2-42 (ARCH-09, run-10 cycle-2): use the shared complete fallback
+        // builder instead of an inline partial object defaulted from the
+        // wrong siteConfig field (`title` instead of `nav_title`).
+        getSeoSettings().catch(() => buildSeoSettingsFallback()),
         getGalleryConfig().catch(() => ({
             imageSizes: DEFAULT_IMAGE_SIZES,
             semanticSearchMode: 'disabled',

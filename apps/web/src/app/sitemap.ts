@@ -1,4 +1,4 @@
-import { getImageIdsForSitemap, getLatestImageUpdatedAt, getTopics } from '@/lib/data';
+import { getImageIdsForSitemap, getLatestImageUpdatedAt, getTopicsWithLatestUpdate } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
 // AGG8F-02 / plan-234: drop `force-dynamic` so the existing `revalidate = 3600`
@@ -18,7 +18,9 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 // Google recommends max 50,000 URLs per sitemap file. Reserve the budget for
-// localized homepage/topic URLs first, then spend the remaining slots on images.
+// every non-image row (localized homepage/topic pages, the global feed entry,
+// and localized per-topic feed entries) first, then spend the remaining slots
+// on images. A final `.slice(0, MAX_SITEMAP_URLS)` clamp guards the total.
 const MAX_SITEMAP_URLS = 50000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -29,7 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // not swallow runtime errors silently — at runtime a DB outage already
   // surfaces via /api/health and observability, so the same fallback there
   // is preferable to a 5xx on /sitemap.xml that would teach crawlers to back off.
-  let topics: Awaited<ReturnType<typeof getTopics>> = [];
+  let topics: Awaited<ReturnType<typeof getTopicsWithLatestUpdate>> = [];
   let images: Awaited<ReturnType<typeof getImageIdsForSitemap>> = [];
   // R18-M1: site-wide `MAX(images.updated_at)` for the homepage entries'
   // `<lastmod>`. Googlebot uses lastmod as a published crawl-prioritization
@@ -38,13 +40,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let homepageLastModified: Date | null = null;
   try {
     [topics, homepageLastModified] = await Promise.all([
-      getTopics(),
+      getTopicsWithLatestUpdate(),
       getLatestImageUpdatedAt(),
     ]);
-    const reservedLocalizedUrls = LOCALES.length * (1 + topics.length);
+    // WP18 (C2-29/CRIT-02, run-10 cycle-2): reserve budget for EVERY non-image
+    // row appended below, not just homepage + topic pages. homepageEntries +
+    // topicEntries reserve `LOCALES.length * (1 + topics.length)`; feedEntry is
+    // a single global (non-localized) URL (+1); topicFeedEntries reserves one
+    // localized row per topic (`LOCALES.length * topics.length`). Previously
+    // only the first term was reserved, so feedEntry and topicFeedEntries
+    // could push the total past MAX_SITEMAP_URLS uncounted.
+    const reservedNonImageUrls =
+      LOCALES.length * (1 + topics.length) + 1 + LOCALES.length * topics.length;
     const imageBudget = Math.max(
       0,
-      Math.floor((MAX_SITEMAP_URLS - reservedLocalizedUrls) / LOCALES.length),
+      Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
     );
     images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
   } catch (err) {
@@ -97,9 +107,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // R19-L3: per-topic feed entries. Each topic ships a per-locale feed at
   // `/{locale}/{topic}/feed.xml`; without these sitemap rows
   // sitemap-first aggregators (Inoreader, Feedly auto-discovery) cannot
-  // see them. Reuses `topic.last_image_updated_at` from getTopics()
-  // (already projected by R18-M1) so freshness signals match the topic
-  // page's `<lastmod>`.
+  // see them. Reuses `topic.last_image_updated_at` from
+  // getTopicsWithLatestUpdate() (already projected by R18-M1; moved out of
+  // getTopics() by WP11/C2-13) so freshness signals match the topic page's
+  // `<lastmod>`.
   const topicFeedEntries: MetadataRoute.Sitemap = topics.flatMap((topic) =>
     LOCALES.map((locale) => ({
       url: `${BASE_URL}${localizePath(locale, `/${topic.slug}/feed.xml`)}`,
@@ -111,11 +122,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
+  // WP18 (C2-29/CRIT-02, run-10 cycle-2): defensive clamp — the reservation
+  // arithmetic above should already keep the total within budget, but this
+  // guarantees the contract even if a future entry type is added upstream of
+  // it without updating the reservation.
   return [
     ...homepageEntries,
     ...topicEntries,
     ...imageEntries,
     ...feedEntry,
     ...topicFeedEntries,
-  ];
+  ].slice(0, MAX_SITEMAP_URLS);
 }
