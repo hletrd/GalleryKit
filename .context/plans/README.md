@@ -2,18 +2,39 @@
 
 This index is a convenience pointer for agents. The authoritative state for a cycle remains the individual plan and deferred files in this directory plus the latest review aggregate.
 
+## Authoritative timeline
+
+The single authoritative release lineage is the committed `origin/master` history. Cycle numbering
+restarted at run-10 cycle 1 on 2026-07-06 from HEAD `657eb024` (the terminal commit of the 2026-07-01
+recovery run, whose cycles 85-99 ran from a non-NFS checkout after the NFS worktree failed mid-cycle-85).
+Cycle 99 of that run recorded review evidence but was never planned; its findings are folded into
+run-10 cycle 1 (see `cycle-1-2026-07-06-plan.md` WP1/WP14). Do not derive frontier state from prose in
+this file alone — verify against `git log` and the newest plan/deferred pair.
+
+## Carry-forward age budget (adopted run-10 cycle 1)
+
+A deferred High-severity finding that crosses 8 cycles unchanged must either be scheduled or be
+explicitly reclassified as permanently-deferred/won't-fix with a documented product decision — it may
+not be re-listed verbatim again. First application: `C77-ARCH-01` (restore mutation fence) is scheduled
+in run-10 cycle 1 after 8+ cycles of carry-forward; `C94-11` (`COUNT(*) OVER()` first-page cost) is
+re-opened on two-lane review agreement.
+
 ## Active Current-Cycle Plans
 
-- Cycle 98/100 Implementation Plan - safe narrow fixes scheduled for public select allowlist coverage, raw i18n duplicate-key detection, and Cycle 97 release-ledger evidence from deployed HEAD `6f40f66d9a6949ea866966230e5fe0ba61024637` (`cycle-98-2026-07-01-plan.md`)
-- Cycle 98/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-98-2026-07-01-deferred.md`)
-- Cycle 97/100 Implementation Plan - safe narrow fixes scheduled for feed maintenance/rate limiting, restore SQL scan-tail hardening, derivative cleanup, grid P3 badge visibility, upload accept source-contract parity, and release ledger evidence from deployed HEAD `061c1c81af234469641f75a53e5bbc61fa63114a` (`cycle-97-2026-07-01-plan.md`)
-- Cycle 97/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-97-2026-07-01-deferred.md`)
-- Cycle 96/100 Implementation Plan - committed/pushed/deployed as `061c1c81af234469641f75a53e5bbc61fa63114a`; closed safe narrow token list, Unicode label, privacy map disclosure, upload accept, and release ledger findings (`cycle-96-2026-07-01-plan.md`)
-- Cycle 96/100 Deferred Findings - broad restore/schema/query/UI/test/runbook findings preserved with original severity/confidence and exit criteria (`cycle-96-2026-07-01-deferred.md`)
-- Cycle 95/100 Implementation Plan - committed/pushed/deployed as `2178046587484fb301bc731f855699e44888d2e6`; closed safe narrow release-ledger evidence for Cycle 94 (`cycle-95-2026-07-01-plan.md`)
-- Cycle 95/100 Deferred Findings - no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
+- Run-10 Cycle 1/100 Implementation Plan - full 12-lane fresh review; schedules 30 findings incl. the aged restore mutation fence (C77-ARCH-01), backup/restore completeness verification, first-page `COUNT(*) OVER()` removal, rate-limiter saturated fast path (closes orphaned cycle-99 finding), queue robustness, and live-verified a11y fixes, from start HEAD `657eb024` (`cycle-1-2026-07-06-plan.md`)
+- Run-10 Cycle 1/100 Deferred Findings - defers mysql2-internals coupling test, broad source-contract retirement (policy adopted instead), multipart RSS measurement, startup TRUST_PROXY fail-loud, Collections admin UI product decision, and operator topology confirmation, each with exit criteria (`cycle-1-2026-07-06-deferred.md`)
 
 ## Recent Plans
+
+- Cycle 98/100 Implementation Plan - committed/pushed as signed `d6912560`; closed public select allowlist coverage, raw i18n duplicate-key detection, and Cycle 97 release-ledger evidence (`cycle-98-2026-07-01-plan.md`)
+- Cycle 98/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-98-2026-07-01-deferred.md`)
+- Cycle 99 (recovery run, partial) - review-only: architect + perf lanes committed as `8b09ce64`/`657eb024`; never planned in that run; findings folded into Run-10 Cycle 1 (`.context/reviews/cycle-99-2026-07-01/`)
+- Cycle 97/100 Implementation Plan - committed/pushed/deployed as signed `6f40f66d`; feed maintenance/rate limiting, restore SQL scan-tail hardening, derivative cleanup, grid P3 badge visibility, upload accept source-contract parity (`cycle-97-2026-07-01-plan.md`)
+- Cycle 97/100 Deferred Findings - no newly deferred findings; carry-forward broad items remain preserved in Cycle 96 deferred register (`cycle-97-2026-07-01-deferred.md`)
+- Cycle 96/100 Implementation Plan - committed/pushed/deployed as `061c1c81`; closed safe narrow token list, Unicode label, privacy map disclosure, upload accept, and release ledger findings (`cycle-96-2026-07-01-plan.md`)
+- Cycle 96/100 Deferred Findings - broad restore/schema/query/UI/test/runbook findings preserved with original severity/confidence and exit criteria; `C77-ARCH-01` and `C94-11` left this register for the Run-10 Cycle 1 schedule (`cycle-96-2026-07-01-deferred.md`)
+- Cycle 95/100 Implementation Plan - committed/pushed/deployed as `21780465`; closed safe narrow release-ledger evidence for Cycle 94 (`cycle-95-2026-07-01-plan.md`)
+- Cycle 95/100 Deferred Findings - no newly deferred findings, carry-forward broad route-level upload coverage, admin E2E, zoom keyboard panning, mobile admin redesign, restore/schema/performance findings preserved with exit criteria (`cycle-95-2026-07-01-deferred.md`)
 
 - Cycle 97/100 Implementation Plan - committed/pushed/deployed as signed `6f40f66d9a6949ea866966230e5fe0ba61024637`; Cycle 98 started from user-provided deployed `master` HEAD `6f40f66d9a6949ea866966230e5fe0ba61024637` (`cycle-97-2026-07-01-plan.md`)
 - Cycle 96/100 Implementation Plan - signed commit `061c1c81af234469641f75a53e5bbc61fa63114a` is the user-provided deployed `master` HEAD at Cycle 97 start (`cycle-96-2026-07-01-plan.md`)
