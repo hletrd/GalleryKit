@@ -1,7 +1,7 @@
 import createMiddleware from 'next-intl/middleware';
 import { NextRequest, NextResponse } from 'next/server';
 import { LOCALES, DEFAULT_LOCALE } from '@/lib/constants';
-import { buildContentSecurityPolicy } from '@/lib/content-security-policy';
+import { buildCspSafely } from '@/lib/content-security-policy';
 import siteConfig from '@/site-config.json';
 
 const intlMiddleware = createMiddleware({
@@ -41,7 +41,10 @@ function withProductionCspRequest(request: NextRequest): NextRequest {
   const nonce = crypto.randomUUID().replace(/-/g, '');
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);
-  requestHeaders.set('Content-Security-Policy', buildContentSecurityPolicy({
+  // C2-37 (run-10 c2): buildCspSafely never throws — a malformed
+  // IMAGE_BASE_URL degrades to a CSP without the image base URL instead
+  // of 500ing every request through this middleware.
+  requestHeaders.set('Content-Security-Policy', buildCspSafely({
     nonce,
     isDev: false,
     googleAnalyticsId: siteConfig.google_analytics_id,

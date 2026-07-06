@@ -25,6 +25,33 @@ export function parseCspImageBaseUrl(rawValue: string | undefined, environment: 
   return parsed;
 }
 
+let hasLoggedCspBuildFailure = false;
+
+/**
+ * C2-37 (run-10 c2): buildContentSecurityPolicy's `imageBaseUrl` default
+ * parameter parses IMAGE_BASE_URL synchronously via parseCspImageBaseUrl,
+ * which throws on a malformed or credential-bearing value. proxy.ts calls
+ * buildContentSecurityPolicy on every request, so an unvalidated runtime
+ * env var can 500 the entire site. This wrapper degrades instead: on
+ * failure it logs once per process and rebuilds the CSP without the image
+ * base URL (images may 404 from the CDN — the site keeps serving).
+ */
+export function buildCspSafely(args: {
+  nonce?: string;
+  isDev?: boolean;
+  googleAnalyticsId?: string | null;
+} = {}): string {
+  try {
+    return buildContentSecurityPolicy(args);
+  } catch (error) {
+    if (!hasLoggedCspBuildFailure) {
+      hasLoggedCspBuildFailure = true;
+      console.error('[content-security-policy] failed to build CSP (likely a malformed IMAGE_BASE_URL); falling back without the image base URL:', error);
+    }
+    return buildContentSecurityPolicy({ ...args, imageBaseUrl: null });
+  }
+}
+
 export function getCspImageSources(imageBaseUrl: URL | null): string[] {
   const sources = ["'self'", 'data:', 'blob:'];
   if (imageBaseUrl) {
