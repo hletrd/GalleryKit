@@ -82,6 +82,25 @@ describe('unified derivative cache policy (ARCH-R4C6-06)', () => {
         expect(uploads!.body).not.toMatch(/expires 1y/);
     });
 
+    // C3-09 (run-10 c3): the image optimizer must carry its own dedicated
+    // limiter — a blanket exemption left the one Sharp-re-encoding public
+    // endpoint unthrottled; putting it on zone=public would let tile fan-out
+    // starve page-navigation budgets. Structural assertions via the parser.
+    it('nginx /_next/image location carries its own nextimage limiter zone', () => {
+        expect(NGINX).toMatch(/limit_req_zone \$binary_remote_addr zone=nextimage:10m rate=30r\/s;/);
+        const image = findNginxLocation(NGINX, '/_next/image');
+        expect(image).toBeDefined();
+        expect(image!.body).toMatch(/limit_req zone=nextimage burst=120 nodelay;/);
+        expect(image!.body).not.toMatch(/limit_req zone=public/);
+    });
+
+    it('nginx catch-all keeps the public zone and stays off nextimage', () => {
+        const catchAll = parseNginxLocationBlocks(NGINX).find((b) => b.pattern.trim() === '/');
+        expect(catchAll).toBeDefined();
+        expect(catchAll!.body).toMatch(/limit_req zone=public burst=40 nodelay;/);
+        expect(catchAll!.body).not.toMatch(/zone=nextimage/);
+    });
+
     it('serve-upload.ts keeps the same policy on the paths it serves', () => {
         expect(SERVE_UPLOAD).toContain(POLICY);
         // and still rejects immutable by design (in-place re-encode hazard)

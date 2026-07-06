@@ -477,6 +477,20 @@ Compare against `apps/web/drizzle/meta/_journal.json` entries × `SHA256` of eac
 
 `npm run deploy` from the repo root reads the gitignored root `.env.deploy` when present, otherwise falls back to `$HOME/.gallerykit-secrets/gallery-deploy.env` unless `DEPLOY_ENV_FILE` points somewhere else. It connects to the configured deploy host and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The deploy target is configuration-owned by that deploy env file, not hardcoded in documentation. The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
 
+### Applying host-nginx config changes (C3-08, run-10 c3)
+
+**Deploys do NOT touch host nginx.** `apps/web/nginx/default.conf` is a committed template; a change to it (new `limit_req_zone`, body-size caps, location blocks) is INERT in production until an operator applies it on the deploy host by hand. Do not mark an nginx-config finding "closed" on commit alone — the ledger disposition is "shipped config; prod-apply pending" until the steps below are verified.
+
+Operator apply + verify procedure:
+
+1. Copy/sync the committed `default.conf` into the host's nginx config location (operator-owned; not part of `deploy.sh`).
+2. `nginx -t` — MUST pass before any reload; a failed test leaves the running config untouched.
+3. `nginx -s reload` (or `systemctl reload nginx`) — reload, never restart, so in-flight requests drain.
+4. Verify the limiter is live: a rapid same-IP burst beyond the relevant zone budget (e.g. >50 rapid GETs of `/` for `zone=public` rate=10r/s burst=40; >150 rapid `/_next/image` requests for `zone=nextimage` rate=30r/s burst=120) must return HTTP 429 for the overflow, AND a normal page load with its full asset fan-out must NOT 429.
+5. Record the verification (date + zone + result) in the current cycle's plan/ledger.
+
+The `zone=public` (added run-10 c2) and `zone=nextimage` (added run-10 c3) limiters both await this procedure on any host whose nginx predates them.
+
 ### Disk hygiene
 
 The deploy host has 124 G total. Repeated deploys accumulate Docker images + builder cache that can fill the disk; once disk hits 100 % the next `git pull` on the deploy host fails with `unable to write loose object file: No space left on device`.
