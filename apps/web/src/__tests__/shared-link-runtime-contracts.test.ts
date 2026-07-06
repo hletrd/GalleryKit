@@ -36,8 +36,8 @@ describe('C1-36: sharedGroup namespace carries every key the /g/[key] page rende
         // sibling `shared` namespace, producing MISSING_MESSAGE errors on
         // every shared-group photo view. Key-parity tests compare en↔ko key
         // SETS, so a key missing from BOTH locales passes them.
-        expect((enMessages as Record<string, Record<string, string>>).sharedGroup.backToSharedPhotos).toBeTruthy();
-        expect((koMessages as Record<string, Record<string, string>>).sharedGroup.backToSharedPhotos).toBeTruthy();
+        expect((enMessages as unknown as Record<string, Record<string, string>>).sharedGroup.backToSharedPhotos).toBeTruthy();
+        expect((koMessages as unknown as Record<string, Record<string, string>>).sharedGroup.backToSharedPhotos).toBeTruthy();
     });
 
     it('the /g/[key] page only renders sharedGroup keys that exist', () => {
@@ -45,7 +45,7 @@ describe('C1-36: sharedGroup namespace carries every key the /g/[key] page rende
             path.join(__dirname, '..', 'app', '[locale]', '(public)', 'g', '[key]', 'page.tsx'),
             'utf8',
         );
-        const sharedGroupKeys = new Set(Object.keys((enMessages as Record<string, Record<string, string>>).sharedGroup));
+        const sharedGroupKeys = new Set(Object.keys((enMessages as unknown as Record<string, Record<string, string>>).sharedGroup));
         // Match direct translator calls: t('key') / tShared('key', ...).
         // The page's sharedGroup translators are named t and tShared per source.
         const translatorNames = [...pageSource.matchAll(/const\s+(\w+)\s*=?[^=]*getTranslations\('sharedGroup'\)/g)].map((m) => m[1]);
@@ -59,7 +59,7 @@ describe('C1-36: sharedGroup namespace carries every key the /g/[key] page rende
             if (!sharedGroupKeys.has(key)) {
                 // Allow keys that belong to the other translators used on the
                 // page (common/aria) — only fail when NO namespace carries it.
-                const en = enMessages as Record<string, Record<string, string>>;
+                const en = enMessages as unknown as Record<string, Record<string, string>>;
                 const carried = ['common', 'aria', 'photo', 'shared'].some((ns) => en[ns] && key in en[ns]);
                 expect(carried, `sharedGroup page renders unknown key '${key}'`).toBe(true);
             }

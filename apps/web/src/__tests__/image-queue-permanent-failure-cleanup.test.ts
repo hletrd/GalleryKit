@@ -107,7 +107,10 @@ describe('permanentlyFailedIds cleanup on image deletion', () => {
     });
 
     it('source contract: deleteImage clears permanentlyFailedIds for the deleted ID', () => {
-        const deleteImageBody = extractFnBody(actionsSource, 'export async function deleteImage');
+        // 'deleteImage' is a string-prefix of 'deleteImages', so the header must
+        // include the opening paren — otherwise indexOf() can match the start of
+        // the sibling `deleteImages(` declaration and extract the wrong body.
+        const deleteImageBody = extractFnBody(actionsSource, 'export async function deleteImage(');
         expect(deleteImageBody, 'deleteImage body must be findable').toBeTruthy();
 
         expect(deleteImageBody!).toMatch(/const\s+queueState\s*=\s*getProcessingQueueState\s*\(\s*\)/);
@@ -115,7 +118,7 @@ describe('permanentlyFailedIds cleanup on image deletion', () => {
     });
 
     it('source contract: deleteImages clears permanentlyFailedIds for every found deleted ID', () => {
-        const deleteImagesBody = extractFnBody(actionsSource, 'export async function deleteImages');
+        const deleteImagesBody = extractFnBody(actionsSource, 'export async function deleteImages(');
         expect(deleteImagesBody, 'deleteImages body must be findable').toBeTruthy();
 
         expect(deleteImagesBody!).toMatch(/const\s+queueState\s*=\s*getProcessingQueueState\s*\(\s*\)/);
