@@ -24,6 +24,10 @@ const {
     txDeleteMock,
     executeMock,
     sqlMock,
+    selectMock,
+    fromMock,
+    whereMock,
+    limitMock,
 } = vi.hoisted(() => {
     const onDuplicateKeyUpdateMock = vi.fn(async () => undefined);
     const valuesMock = vi.fn(() => ({ onDuplicateKeyUpdate: onDuplicateKeyUpdateMock }));
@@ -48,11 +52,18 @@ const {
     // assert GREATEST() / <= 0 appear in the right places.
     const sqlMock = vi.fn((strings: TemplateStringsArray) => ({ __sql: strings.join('?') }));
 
+    // checkRateLimit (C2-22/TEST-01) chain: db.select().from().where().limit().
+    const limitMock = vi.fn(async () => [] as Array<{ count: number }>);
+    const whereMock = vi.fn(() => ({ limit: limitMock }));
+    const fromMock = vi.fn(() => ({ where: whereMock }));
+    const selectMock = vi.fn(() => ({ from: fromMock }));
+
     return {
         insertMock, valuesMock, onDuplicateKeyUpdateMock,
         deleteMock, deleteWhereMock,
         transactionMock, txUpdateMock, txDeleteMock,
         executeMock, sqlMock,
+        selectMock, fromMock, whereMock, limitMock,
     };
 });
 
@@ -64,6 +75,7 @@ vi.mock('@/db', () => ({
         delete: deleteMock,
         transaction: transactionMock,
         execute: executeMock,
+        select: selectMock,
     },
     rateLimitBuckets: {
         ip: 'rate_limit_buckets.ip',
@@ -79,7 +91,7 @@ vi.mock('drizzle-orm', () => ({
     sql: sqlMock,
 }));
 
-import { incrementRateLimit, decrementRateLimit, resetRateLimit, purgeOldBuckets, RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE } from '@/lib/rate-limit';
+import { incrementRateLimit, decrementRateLimit, resetRateLimit, purgeOldBuckets, checkRateLimit, RATE_LIMIT_BUCKET_PURGE_BATCH_SIZE } from '@/lib/rate-limit';
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -137,6 +149,55 @@ describe('resetRateLimit (AGG-T1)', () => {
         expect(deleteWhereMock).toHaveBeenCalledTimes(1);
         // It must be a plain delete (no transaction needed — full-row removal).
         expect(transactionMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('checkRateLimit (C2-22/TEST-01)', () => {
+    it('queries via db.select().from().where().limit(1) with ip + bucketType + bucketStart eq conditions', async () => {
+        limitMock.mockResolvedValueOnce([{ count: 2 }]);
+
+        await checkRateLimit('203.0.113.20', 'login', 5, 60_000, 4_000);
+
+        expect(selectMock).toHaveBeenCalledTimes(1);
+        expect(fromMock).toHaveBeenCalledTimes(1);
+        expect(whereMock).toHaveBeenCalledTimes(1);
+        expect(limitMock).toHaveBeenCalledWith(1);
+
+        // The mocked `and`/`eq` from drizzle-orm record their raw args, so the
+        // where() clause shape can be asserted without a real query builder.
+        const whereArg = (whereMock.mock.calls as unknown[][])[0][0] as { __and: unknown[] };
+        expect(whereArg).toEqual({
+            __and: [
+                { __eq: ['rate_limit_buckets.ip', '203.0.113.20'] },
+                { __eq: ['rate_limit_buckets.bucket_type', 'login'] },
+                { __eq: ['rate_limit_buckets.bucket_start', 4_000] },
+            ],
+        });
+    });
+
+    it('returns limited:true at the exceeded boundary (count >= maxRequests)', async () => {
+        limitMock.mockResolvedValueOnce([{ count: 5 }]);
+
+        const result = await checkRateLimit('203.0.113.21', 'login', 5, 60_000, 1_000);
+
+        expect(result).toEqual({ limited: true, count: 5 });
+    });
+
+    it('returns limited:false just below the boundary (count === maxRequests - 1)', async () => {
+        limitMock.mockResolvedValueOnce([{ count: 4 }]);
+
+        const result = await checkRateLimit('203.0.113.21', 'login', 5, 60_000, 1_000);
+
+        expect(result).toEqual({ limited: false, count: 4 });
+    });
+
+    it('treats an empty result as count 0, not limited, and does not throw', async () => {
+        limitMock.mockResolvedValueOnce([]);
+
+        await expect(checkRateLimit('203.0.113.22', 'login', 5, 60_000, 1_000)).resolves.toEqual({
+            limited: false,
+            count: 0,
+        });
     });
 });
 
