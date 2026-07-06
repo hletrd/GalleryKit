@@ -38,30 +38,7 @@ import { buildDownloadFilename } from '@/lib/download-filename';
 import { getJpegDownloadCopy } from '@/lib/download-labels';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 import { getAvifSupportPromise } from '@/lib/avif-support';
-
-/** Check if a keyboard event target belongs to an interactive element. */
-export function isEditableTarget(e: KeyboardEvent): boolean {
-    const target = e.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-    if (!(target instanceof HTMLElement)) return false;
-    if (target.isContentEditable) return true;
-    if (target.closest([
-        'a',
-        'button',
-        'select',
-        'textarea',
-        'summary',
-        '[contenteditable="true"]',
-        '[role="button"]',
-        '[role="link"]',
-        '[role="menuitem"]',
-        '[role="option"]',
-        '[role="textbox"]',
-        '[role="switch"]',
-        '[data-radix-popper-content-wrapper]',
-    ].join(','))) return true;
-    return false;
-}
+import { isEditableTarget } from '@/lib/editable-target';
 
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';

@@ -8,7 +8,7 @@ import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
-import { isEditableTarget } from '@/components/photo-viewer';
+import { isEditableTarget } from '@/lib/editable-target';
 import { LightboxColorPip } from '@/components/lightbox-color-pip';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize, SLIDESHOW_INTERVAL_DEFAULT } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText } from '@/lib/photo-title';
