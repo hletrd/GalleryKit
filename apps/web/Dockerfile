@@ -58,8 +58,11 @@ RUN npm ci --workspace=apps/web --include=optional && \
         @parcel/watcher-linux-${npm_arch}-glibc@2.5.6 \
         @swc/core-linux-${npm_arch}-gnu@1.15.41 \
         @next/swc-linux-${npm_arch}-gnu@16.2.9 \
-        lightningcss-linux-${npm_arch}-gnu@1.32.0 && \
-    mkdir -p apps/web/node_modules
+        lightningcss-linux-${npm_arch}-gnu@1.32.0
+
+# Guarantee the workspace-nested tree exists even if a future lockfile hoists
+# everything to the root — the builder stage COPYs this path unconditionally.
+RUN mkdir -p apps/web/node_modules
 
 FROM build-base AS prod-deps
 WORKDIR /app
@@ -78,8 +81,11 @@ RUN npm ci --omit=dev --workspace=apps/web && \
     npm install --workspace=apps/web --omit=dev --include=optional --no-save \
         @img/sharp-libvips-linux-${npm_arch}@1.2.4 \
         @img/sharp-linux-${npm_arch}@0.34.5 && \
-    node -e "require('sharp')" && \
-    mkdir -p apps/web/node_modules
+    node -e "require('sharp')"
+
+# Guarantee the workspace-nested tree exists even if a future lockfile hoists
+# everything to the root — the runner stage COPYs this path unconditionally.
+RUN mkdir -p apps/web/node_modules
 
 FROM build-base AS builder
 ARG BASE_URL

@@ -253,7 +253,14 @@ describe('deploy script safety contract', () => {
     });
 
     it('pins explicit Docker native optional dependency installs to lockfile versions', () => {
-        const nativeInstallBlock = dockerfile.match(/npm install --workspace=apps\/web --include=optional --no-save \\\n(?<body>[\s\S]*?)\n\nFROM build-base AS prod-deps/);
+        // Terminator update (run-10 c2): capture ends at the first blank line
+        // after the install block instead of the prod-deps FROM line — the
+        // deps stage now carries a trailing `RUN mkdir -p apps/web/node_modules`
+        // (workspace-nested COPY guarantee) between the install and the next
+        // stage. The pin contract on the package tokens is unchanged. The
+        // literal `--include=optional --no-save` prefix still uniquely anchors
+        // the deps stage (prod-deps uses `--omit=dev --include=optional`).
+        const nativeInstallBlock = dockerfile.match(/npm install --workspace=apps\/web --include=optional --no-save \\\n(?<body>[\s\S]*?)\n\n/);
         expect(nativeInstallBlock?.groups?.body).toBeTruthy();
         const packageTokens = nativeInstallBlock!.groups!.body
             .split(/\\\n/)
