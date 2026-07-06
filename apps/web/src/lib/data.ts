@@ -872,28 +872,6 @@ export async function getFeedUpdatedAt(topicSlug?: string) {
     return rows[0] ?? null;
 }
 
-export function normalizePaginatedRows<T extends { total_count: number | null }>(
-    rows: T[],
-    pageSize: number,
-): {
-    rows: Omit<T, 'total_count'>[];
-    totalCount: number;
-    hasMore: boolean;
-} {
-    const normalizedPageSize = Math.max(0, pageSize);
-    const visibleRows = rows.slice(0, normalizedPageSize).map((row) => {
-        const { total_count, ...visibleRow } = row;
-        void total_count;
-        return visibleRow as Omit<T, 'total_count'>;
-    });
-
-    return {
-        rows: visibleRows,
-        totalCount: Number(rows[0]?.total_count ?? 0),
-        hasMore: rows.length > normalizedPageSize,
-    };
-}
-
 export async function getImagesLitePage(
     topic?: string,
     tagSlugs?: string[],
@@ -907,10 +885,21 @@ export async function getImagesLitePage(
     }
 
     const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT);
+    // C1-07 (run-10 cycle-1, CRIT-05/PERF-03; re-opened deferred C94-11):
+    // the exact header total is computed by the lean getImageCount() —
+    // an index-friendly plain count over `images` with the tag filter as an
+    // IN(subquery) — run in PARALLEL with the page query, instead of a
+    // window-function count column on the page query itself. MySQL evaluates
+    // window functions after grouping, so the window shape forced
+    // materialization of the FULL grouped tag-join result set before LIMIT
+    // could cut it, on every uncached (`revalidate = 0`) home/topic
+    // first-page render. The predicates are identical (buildImageConditions
+    // and getImageCount share buildTagFilterCondition and the same
+    // topic/processed conditions), so the count semantics are unchanged:
+    // distinct matching images.
     const baseQuery = db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
-        total_count: sql<number>`COUNT(*) OVER()`,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -922,13 +911,15 @@ export async function getImagesLitePage(
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const rows = await query.limit(normalizedPageSize + 1).offset(offset);
-    const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
+    const [rows, totalCount] = await Promise.all([
+        query.limit(normalizedPageSize + 1).offset(offset),
+        getImageCount(topic, tagSlugs, { includeUnprocessed }),
+    ]);
 
     return {
-        images: pageRows,
+        images: rows.slice(0, normalizedPageSize),
         totalCount,
-        hasMore,
+        hasMore: rows.length > normalizedPageSize,
     };
 }
 
@@ -1491,10 +1482,14 @@ export async function getImagesForSmartCollection(
         };
     }
 
+    // C1-07 (run-10 cycle-1): same lean-count treatment as getImagesLitePage —
+    // the compiled smart-collection predicates are self-contained IN(subquery)
+    // conditions over `images` (see compileSmartCollection), so a plain
+    // COUNT(*) over `images` with the identical WHERE equals the grouped
+    // window count at strictly lower cost.
     const baseQuery = db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
-        total_count: sql<number>`COUNT(*) OVER()`,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -1503,15 +1498,19 @@ export async function getImagesForSmartCollection(
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = baseQuery.where(and(compiledCondition, eq(images.processed, true)));
-    const rows = await query
-        .limit(normalizedPageSize + 1)
-        .offset(Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0));
-    const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
+    const [rows, countRows] = await Promise.all([
+        query
+            .limit(normalizedPageSize + 1)
+            .offset(Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0)),
+        db.select({ count: sql<number>`count(*)` })
+            .from(images)
+            .where(and(compiledCondition, eq(images.processed, true))),
+    ]);
 
     return {
-        images: pageRows,
-        totalCount,
-        hasMore,
+        images: rows.slice(0, normalizedPageSize),
+        totalCount: Number(countRows[0]?.count ?? 0),
+        hasMore: rows.length > normalizedPageSize,
     };
 }
 

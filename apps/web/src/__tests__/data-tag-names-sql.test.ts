@@ -104,18 +104,32 @@ describe('getImagesLite tag_names SQL shape', () => {
         expect(body).not.toMatch(/\bblur_data_url\b/);
     });
 
-    it('uses LEFT JOIN + GROUP BY for getImagesLitePage and preserves total_count window function', () => {
+    it('uses LEFT JOIN + GROUP BY for getImagesLitePage with a lean parallel count (no window function)', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getImagesLitePage');
         expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
         expect(body).toContain('.leftJoin(imageTags');
         expect(body).toContain('.leftJoin(tags');
         expect(body).toContain('.groupBy(images.id)');
-        // The total_count window function is the public-page pagination
-        // contract; ensure the fix did not drop it.
-        expect(body).toContain('COUNT(*) OVER()');
+        // C1-07 (run-10 cycle-1): the exact header total must come from the
+        // lean getImageCount() run in Promise.all with the page query — NOT
+        // from a COUNT(*) OVER() window column, which forced the grouped
+        // tag-join to fully materialize before LIMIT on every uncached
+        // first-page render. This retires the prior assertion that pinned the
+        // window function in place (ARCH-04 policy: the pin blocked the fix).
+        expect(body).not.toContain('COUNT(*) OVER()');
+        expect(body).toMatch(/Promise\.all\s*\(/);
+        expect(body).toMatch(/getImageCount\s*\(\s*topic,\s*tagSlugs,\s*\{\s*includeUnprocessed\s*\}\s*\)/);
         expect(body).not.toMatch(/\bit\.tag_id\b/);
         expect(body).not.toMatch(/\bblur_data_url\b/);
+    });
+
+    it('getImagesForSmartCollection first page uses a lean parallel count (no window function)', () => {
+        const source = readSource();
+        const body = extractFunctionBody(source, 'getImagesForSmartCollection');
+        expect(body).not.toContain('COUNT(*) OVER()');
+        expect(body).toMatch(/Promise\.all\s*\(/);
+        expect(body).toMatch(/count\(\*\)/);
     });
 
     /**
