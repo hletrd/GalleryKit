@@ -28,6 +28,20 @@ notes, needs-validation items, and accepted-by-design boundaries.
   namespace-inventory contract test lands (making the pick-list mechanically safe) —
   whichever comes first schedules the provider split.
 
+### C3-28 — memoize the CSP invariant halves + parsed IMAGE_BASE_URL (perf PERF3-06)
+- Original severity/confidence: Low / High (microseconds per request; strictly wasted work).
+- Citations: `apps/web/src/lib/content-security-policy.ts:95-105` (default-parameter parse
+  per call), `apps/web/src/proxy.ts` (per-request call site).
+- Reason (discovered during WP15 implementation): module-level memoization of the
+  `IMAGE_BASE_URL` parse conflicts with the per-call fail-degrade semantics that
+  `csp-malformed-image-base-url.test.ts` deliberately pins (`buildCspSafely` must observe
+  the CURRENT env value per call and degrade per value); contorting a security-sensitive
+  builder for a microsecond win fails the risk/benefit test. The serve-upload half of
+  WP15 (PERF3-07) shipped.
+- Exit criterion: measured middleware CPU attributable to CSP assembly, OR a CSP-builder
+  redesign that owns env-lifetime semantics explicitly — either re-opens this with the
+  test-contract question settled first.
+
 ### C3-30 — updateTag/deleteTag opposite lock order (perf PERF3-08)
 - Original severity/confidence: Low / High (mechanism) with very low likelihood.
 - Citations: `apps/web/src/app/actions/tags.ts:91,100-105,167-173`.

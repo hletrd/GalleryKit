@@ -108,8 +108,11 @@ after the 05:00 KST reset and all completed.
 - First fan-out attempt (12 lanes, 02:2x KST) was killed by an API session limit before
   10 of 12 lanes produced output; fully re-spawned after the 05:00 KST reset (architect +
   document-specialist survived from the first attempt).
-- feature-dev-code-reviewer (secondary, message-return lane): the re-spawned instance had
-  not returned by aggregate-write time (~1h elapsed; same lane hung for hours in cycle-2 and
-  was replaced). Disposition recorded here; if its report arrives before cycle close, an
-  addendum will be appended below. Its scope (cycle-2 commit surface) was fully covered by
-  the 11 completed lanes, including two lanes with empirical/live reproduction.
+- feature-dev-code-reviewer (secondary, message-return lane): the re-spawned instance
+  (its retry after the session-limit kill) never returned through the implementation
+  phase (>2h) — the same hang the lane exhibited in cycle-2. FINAL DISPOSITION: recorded
+  as failed after retry per the fan-out retry rule. Its scope (cycle-2 commit surface)
+  was fully covered by the 11 completed lanes, including two lanes with empirical/live
+  reproduction (debugger's migrate.js repro; designer's live browser pass). Future
+  cycles should treat this lane as unreliable and budget a general-purpose replacement
+  from the start (as cycle-2's replacement pattern did).

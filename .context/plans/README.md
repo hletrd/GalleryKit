@@ -19,12 +19,21 @@ not be re-listed verbatim again. First application: `C77-ARCH-01` (restore mutat
 in run-10 cycle 1 after 8+ cycles of carry-forward; `C94-11` (`COUNT(*) OVER()` first-page cost) is
 re-opened on two-lane review agreement.
 
+## Consolidated carry-forward register
+
+- `deferred-carry-forward.md` (adopted run-10 cycle-3, C3-27) — one row per OPEN deferred
+  finding across all registers with first-deferred cycle + age, making the 8-cycle age
+  budget mechanically checkable. Per-cycle registers remain the authoritative detail records.
+
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 2/100 Implementation Plan - 12-lane fresh review from start HEAD `642c5091`; mandatory carry-over fixed first: deploy-host container build (workspace-nested drizzle-kit TS2307, negative-control verified, commit `223b3836`); schedules 26 work packages incl. Lightbox/Info-sheet focus restore, soft-404 status fix, byte-impacting-settings re-encode notice, single-writer boot guard, ISOBMFF parent-bound validation, SW 304 write-amplification fix, lean topics accessor, and a perf/test/docs batch (`cycle-2-2026-07-07-plan.md`)
-- Run-10 Cycle 2/100 Deferred Findings - defers map clustering, embedding-matrix cache, view-record round-trip fold, on-this-day index/migration, GPS-strip streaming, `updated_at` index migration, site-config runtime-mount decision, storage-module product decision, restore-drain slot re-scoping, scanner tokenizer rework, and the perf long-tail, each with exit criteria (`cycle-2-2026-07-07-deferred.md`)
+- Run-10 Cycle 3/100 Implementation Plan - 12-lane review from start HEAD `e08b6f97` (38 deduped findings); schedules 16 work packages incl. the migrate.js mixed-case batch-swallow fix (4-lane agreement, empirically reproduced), single-writer-guard keepalive + DB-scoped lock, detached backfill uncached-config, 404 robots-conflict fix, SW touchMeta durability, swipe-visual reset, embedding-scan cursor persistence, nginx nextimage zone + apply runbook, and test/docs batches (`cycle-3-2026-07-07-plan.md`)
+- Run-10 Cycle 3/100 Deferred Findings - defers the i18n client-payload trim, CSP memoization (conflicts with pinned fail-degrade semantics), tag lock-order, JSON-LD dev-warning validation, migrate-journal redesign, data.ts split, and the two operator halves (nginx apply, LB realip), each with exit criteria (`cycle-3-2026-07-07-deferred.md`)
 
 ## Recent Plans
+
+- Run-10 Cycle 2/100 Implementation Plan - COMPLETED + deployed (post-deploy verification `e08b6f97`): 12-lane fresh review from start HEAD `642c5091`; mandatory carry-over fixed first (deploy-host container build, `223b3836`); shipped 26 work packages incl. Lightbox/Info-sheet focus restore, soft-404 status fix, byte-impacting-settings re-encode notice, single-writer boot guard, ISOBMFF parent-bound validation, SW 304 write-amplification fix, lean topics accessor, and a perf/test/docs batch (`cycle-2-2026-07-07-plan.md`)
+- Run-10 Cycle 2/100 Deferred Findings - defers map clustering, embedding-matrix cache, view-record round-trip fold, on-this-day index/migration, GPS-strip streaming, `updated_at` index migration, site-config runtime-mount decision, storage-module product decision, restore-drain slot re-scoping, scanner tokenizer rework, and the perf long-tail, each with exit criteria (`cycle-2-2026-07-07-deferred.md`)
 
 - Run-10 Cycle 1/100 Implementation Plan - COMPLETED: 16 commits pushed (terminal `642c5091`), all 8 gates green locally, retroactively verify-arch-approved; the per-cycle deploy failed on the container build (drizzle-kit TS2307) and was carried over as run-10 cycle-2's mandatory first work item, fixed as `223b3836` (`cycle-1-2026-07-06-plan.md`)
 - Run-10 Cycle 1/100 Deferred Findings - defers mysql2-internals coupling test, broad source-contract retirement (policy adopted instead), multipart RSS measurement, startup TRUST_PROXY fail-loud, Collections admin UI product decision, and operator topology confirmation, each with exit criteria (`cycle-1-2026-07-06-deferred.md`)
