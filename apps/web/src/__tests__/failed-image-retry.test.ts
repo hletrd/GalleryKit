@@ -54,10 +54,14 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(queueSource).not.toMatch(/failed_at:\s*new\s+Date\(\)\s*\.toISOString\(\)/);
         });
 
-        it('truncates processing_error to 512 chars before DB write', () => {
+        it('truncates processing_error to 512 chars before DB write (code-point safe)', () => {
             // The schema defines processing_error as varchar(512).
+            // C1-20 (run-10 cycle-1): truncation must be code-point safe — a raw
+            // UTF-16 .slice(0, 512) can bisect a surrogate pair, storing an
+            // unpaired surrogate that mysql2 serializes as U+FFFD.
             expect(queueSource).toMatch(/truncatedError\s*=\s*lastErrorMsg\.length\s*>\s*512/);
-            expect(queueSource).toMatch(/lastErrorMsg\.slice\s*\(\s*0\s*,\s*512\s*\)/);
+            expect(queueSource).toMatch(/Array\.from\s*\(\s*lastErrorMsg\s*\)\.slice\s*\(\s*0\s*,\s*512\s*\)\.join\s*\(\s*''\s*\)/);
+            expect(queueSource).not.toMatch(/lastErrorMsg\.slice\s*\(\s*0\s*,\s*512\s*\)/);
         });
 
         it('clears processing_error and failed_at on successful processing', () => {

@@ -16,7 +16,14 @@ import { purgeOldAuditLog } from '@/lib/audit';
 import { purgeOldViewEvents } from '@/lib/view-retention';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
-import { isValidFilename } from '@/lib/validation';
+import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
+
+/** C1-19 (run-10 cycle-1, TRC-02): FK rejection for an image deleted while its
+ *  un-awaited embedding write was in flight — expected, not an error. */
+function isMissingImageFkError(err: unknown): boolean {
+    return hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW_2')
+        || hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW');
+}
 import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
@@ -305,6 +312,12 @@ export type ProcessingQueueState = {
     bootstrapContinuationScheduled?: boolean;
     bootstrapCursorId: number | null;
     sideEffects: Set<Promise<void>>;
+    /** C1-06 (run-10 cycle-1, PERF-01): in-flight dedupe for the missing-embedding
+     *  retry scan. Every bootstrap invocation (continuation batches, 30 s retry
+     *  timers, restore resume) previously launched a NEW full scan from cursor 0;
+     *  overlapping scans re-embedded the same rows and starved the shared CLIP
+     *  inference queue that visitor semantic search waits on. */
+    embeddingBootstrapInFlight?: Promise<void> | null;
 };
 
 export const getProcessingQueueState = (): ProcessingQueueState => {
@@ -565,6 +578,24 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                     state.claimRetryCounts.delete(job.id);
                     state.enqueued.delete(job.id);
                     console.error(`[Queue] Job ${job.id} failed to acquire claim ${claimRetries} times, giving up`);
+                    // C1-04 (run-10 cycle-1, TRC-01): claim exhaustion previously
+                    // left the row processed=false with processing_error NULL, so
+                    // the next bootstrap scan re-discovered and re-enqueued the
+                    // same job forever with no admin-visible signal. Persist a
+                    // distinguishable failure (surfaces in the admin failed-images
+                    // panel with Retry) and track it as permanently failed in this
+                    // process — retryFailedImage clears both on manual retry.
+                    state.permanentlyFailedIds.add(job.id);
+                    try {
+                        await db.update(images)
+                            .set({
+                                processing_error: `Could not acquire the image-processing lock after ${claimRetries} attempts. Another worker may still hold gallerykit:image-processing:${job.id}; retry after it releases.`,
+                                failed_at: toMySqlDateTime(new Date()),
+                            })
+                            .where(and(eq(images.id, job.id), eq(images.processed, false)));
+                    } catch (dbErr) {
+                        console.error(`[Queue] Failed to persist claim-exhaustion error for job ${job.id}:`, dbErr);
+                    }
                     state.bootstrapped = false;
                     state.bootstrapCursorId = null;
                     scheduleBootstrapRetry(state, `[Queue] Job ${job.id} could not acquire a processing claim after ${claimRetries} attempts.`);
@@ -768,7 +799,17 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 try {
                     await storeImageEmbeddingForMode(job.id, originalPath, semanticMode);
                 } catch (embedErr) {
-                    console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
+                    // C1-19 (run-10 cycle-1, TRC-02): the embedding write is
+                    // intentionally un-awaited by the main job, so deleting a
+                    // just-processed image can race it into an expected FK
+                    // rejection (the image row is gone; imageEmbeddings.imageId
+                    // cascades on delete). That is normal day-2 admin behavior,
+                    // not a bug — log it at debug, keep real failures at warn.
+                    if (isMissingImageFkError(embedErr)) {
+                        console.debug(`[Queue] Skipped embedding for image ${job.id} — image was deleted before the embedding write landed.`);
+                    } else {
+                        console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
+                    }
                 }
             })());
 
@@ -817,8 +858,13 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // admin failed-images panel stayed empty. toMySqlDateTime renders
             // the accepted 'YYYY-MM-DD HH:MM:SS' literal.
             try {
+                // C1-20 (run-10 cycle-1, DBG-02): code-point-safe truncation —
+                // a raw UTF-16 .slice can bisect a surrogate pair at offset 512,
+                // storing an unpaired surrogate that mysql2 serializes as U+FFFD.
+                // Same pattern as truncateCodePoints (caption-generator.ts) and
+                // admin-tokens.ts label truncation.
                 const truncatedError = lastErrorMsg.length > 512
-                    ? lastErrorMsg.slice(0, 512)
+                    ? Array.from(lastErrorMsg).slice(0, 512).join('')
                     : lastErrorMsg;
                 await db.update(images)
                     .set({ processing_error: truncatedError, failed_at: toMySqlDateTime(new Date()) })
@@ -837,8 +883,12 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             state.bootstrapCursorId = null;
             scheduleBootstrapRetry(state, `[Queue] Job ${job.id} remains pending after ${MAX_RETRIES} processing attempts.`);
         } finally {
+            // C1-04 (run-10 cycle-1, TRC-01): a swallowed RELEASE_LOCK failure on
+            // a still-alive session leaks the advisory lock onto a pooled
+            // connection and can durably wedge every future claim for this id —
+            // log loudly, not at debug.
             await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {
-                console.debug(`[Queue] Failed to release lock for job ${job.id}:`, err);
+                console.error(`[Queue] Failed to release lock for job ${job.id}:`, err);
             });
             if (!retried) {
                 state.enqueued.delete(job.id);
@@ -978,10 +1028,19 @@ export const bootstrapImageProcessingQueue = async () => {
         // C9-07: processed=true is committed before embedding side effects run.
         // If the process restarts or the side effect transiently fails, retry a
         // bounded batch of processed rows missing the active model embedding.
-        const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state).catch((err) => {
-            console.debug('bootstrapMissingActiveEmbeddings failed:', err);
-        });
-        trackQueueSideEffect(state, bootstrapEmbeddingRetry);
+        // C1-06 (run-10 cycle-1, PERF-01): guarded so overlapping bootstrap
+        // invocations cannot stack concurrent full scans.
+        if (!state.embeddingBootstrapInFlight) {
+            const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state)
+                .catch((err) => {
+                    console.debug('bootstrapMissingActiveEmbeddings failed:', err);
+                })
+                .finally(() => {
+                    state.embeddingBootstrapInFlight = null;
+                });
+            state.embeddingBootstrapInFlight = bootstrapEmbeddingRetry;
+            trackQueueSideEffect(state, bootstrapEmbeddingRetry);
+        }
         // R10-M14: When pending.length === 0 during a CONTINUATION scan
         // (bootstrapCursorId !== null), we cannot distinguish "no more pending
         // images" from "all pending images in this batch are permanently failed".

@@ -181,7 +181,11 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
 
         expect(source).toContain('sideEffects: Set<Promise<void>>');
         expect(source).toContain('trackQueueSideEffect(state');
-        expect(source).toContain('const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state).catch');
+        // C1-06 (run-10 cycle-1): the retry scan is now launched behind an
+        // in-flight dedupe guard, but it must STILL be tracked as a queue side
+        // effect so restore quiescence drains it.
+        expect(source).toContain('const bootstrapEmbeddingRetry = bootstrapMissingActiveEmbeddings(state)');
+        expect(source).toMatch(/if\s*\(\s*!state\.embeddingBootstrapInFlight\s*\)/);
         expect(source).toContain('trackQueueSideEffect(state, bootstrapEmbeddingRetry)');
         expect(source).toContain('await drainQueueSideEffects(state)');
         expect(source).toContain('Skipping embedding write for image');
