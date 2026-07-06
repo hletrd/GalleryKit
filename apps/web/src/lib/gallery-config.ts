@@ -183,5 +183,23 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
     return buildGalleryConfig(await getSettingsMap());
 }
 
+/**
+ * Uncached gallery config accessor for detached background contexts (WP19,
+ * C2-10, run-10 cycle-2).
+ *
+ * React's `cache()` (used by `getGalleryConfig` below) de-dupes lookups
+ * within the AsyncLocalStorage store React maintains for the lifetime of a
+ * single request. Code that runs OUTSIDE a request — PQueue job closures,
+ * `setInterval`/`setTimeout` callbacks, restore-maintenance resume — has no
+ * such store, so a `cache()`-wrapped call there can memoize far longer than
+ * intended, silently pinning stale settings (e.g. a `semantic_search_mode`
+ * flip an already-running background task never observes). Detached
+ * background call sites — currently the three in `image-queue.ts` — MUST use
+ * this uncached accessor instead of `getGalleryConfig()` so every invocation
+ * re-reads current admin settings. Request-path server components/actions
+ * should keep using the cached `getGalleryConfig()` below.
+ */
+export const getGalleryConfigUncached: typeof _getGalleryConfig = _getGalleryConfig;
+
 /** Cached gallery config — deduped within a single SSR request via React cache(). */
 export const getGalleryConfig = cache(_getGalleryConfig);

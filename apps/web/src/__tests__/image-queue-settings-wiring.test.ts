@@ -68,6 +68,8 @@ vi.mock('@/db', () => ({
     },
     images: { id: 'id', processed: 'processed' },
     sessions: {},
+    // C2-08 (WP7): image-queue.ts now imports POOL_CONNECTION_LIMIT from @/db.
+    POOL_CONNECTION_LIMIT: 10,
 }));
 
 vi.mock('@/lib/process-image', () => ({
@@ -85,6 +87,12 @@ vi.mock('@/lib/upload-paths', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
+    // C2-10 (WP19): image-queue.ts's detached-context call sites (including
+    // the post-processing embedding side-effect this file exercises) now use
+    // getGalleryConfigUncached instead of the request-cached export. Alias
+    // the same mock fn so the existing getGalleryConfigMock assertions below
+    // still observe the call.
+    getGalleryConfigUncached: getGalleryConfigMock,
 }));
 vi.mock('@/lib/clip-model', () => ({ embedImageReal: embedImageRealMock }));
 vi.mock('@/lib/clip-inference', () => ({ embedImageStub: embedImageStubMock }));
@@ -92,6 +100,7 @@ vi.mock('@/lib/clip-embeddings', () => ({
     embeddingToBuffer: embeddingToBufferMock,
     PRODUCTION_MODEL_VERSION: 'jina-clip-v2-d512-q8',
     STUB_MODEL_VERSION: 'stub-sha256-v1',
+    SEMANTIC_SCAN_LIMIT: 2000,
 }));
 
 vi.mock('@/lib/queue-shutdown', () => ({

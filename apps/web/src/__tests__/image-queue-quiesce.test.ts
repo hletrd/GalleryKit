@@ -39,6 +39,8 @@ vi.mock('@/db', () => ({
     db: {},
     images: {},
     sessions: {},
+    // C2-08 (WP7): image-queue.ts now imports POOL_CONNECTION_LIMIT from @/db.
+    POOL_CONNECTION_LIMIT: 10,
 }));
 
 vi.mock('@/lib/process-image', () => ({
@@ -56,6 +58,9 @@ vi.mock('@/lib/upload-paths', () => ({
 
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: vi.fn(),
+    // C2-10 (WP19): image-queue.ts's detached-context call sites now use
+    // getGalleryConfigUncached instead of the request-cached export.
+    getGalleryConfigUncached: vi.fn(),
 }));
 
 vi.mock('@/lib/queue-shutdown', () => ({

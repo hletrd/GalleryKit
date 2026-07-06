@@ -29,7 +29,7 @@ describe('upload embedding hook wiring', () => {
     expect(src).toContain('post-processing embedding writes resolve the');
     expect(src).toMatch(/candidate\.imageSizes\.every\(\(size\) => Number\.isInteger\(size\) && size >= MIN_IMAGE_SIZE\)/);
     expect(src).toMatch(
-      /const cfg = await getGalleryConfig\(\);[\s\S]*semanticMode = applyRuntimeSemanticGate\(cfg\.semanticSearchMode\);[\s\S]*storeImageEmbeddingForMode\(job\.id, originalPath, semanticMode\)/,
+      /const cfg = await getGalleryConfigUncached\(\);[\s\S]*semanticMode = applyRuntimeSemanticGate\(cfg\.semanticSearchMode\);[\s\S]*storeImageEmbeddingForMode\(job\.id, originalPath, semanticMode\)/,
     );
     expect(src).not.toContain('resolvedSemanticMode ?? job.semanticSearchMode');
     expect(src).not.toContain('job.semanticSearchMode ??');

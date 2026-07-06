@@ -52,6 +52,8 @@ async function loadQueueModule({
             select: selectMock,
             delete: vi.fn(() => ({ where: vi.fn() })),
         },
+        // C2-08 (WP7): image-queue.ts now imports POOL_CONNECTION_LIMIT from @/db.
+        POOL_CONNECTION_LIMIT: 10,
         images: {
             id: 'id',
             filename_original: 'filename_original',
@@ -87,6 +89,9 @@ async function loadQueueModule({
     }));
     vi.doMock('@/lib/gallery-config', () => ({
         getGalleryConfig: vi.fn(),
+        // C2-10 (WP19): image-queue.ts's detached-context call sites now use
+        // getGalleryConfigUncached instead of the request-cached export.
+        getGalleryConfigUncached: vi.fn(),
     }));
     vi.doMock('@/lib/queue-shutdown', () => ({
         drainProcessingQueueForShutdown: vi.fn(),

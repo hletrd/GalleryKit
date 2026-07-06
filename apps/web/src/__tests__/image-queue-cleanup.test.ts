@@ -20,6 +20,8 @@ async function loadQueueCleanup(dirs: { webp: string; avif: string; jpeg: string
         images: {},
         sessions: {},
         imageEmbeddings: {},
+        // C2-08 (WP7): image-queue.ts now imports POOL_CONNECTION_LIMIT from @/db.
+        POOL_CONNECTION_LIMIT: 10,
     }));
     vi.doMock('@/lib/process-image', () => ({
         processImageFormats: vi.fn(),
@@ -32,7 +34,12 @@ async function loadQueueCleanup(dirs: { webp: string; avif: string; jpeg: string
         UPLOAD_DIR_JPEG: dirs.jpeg,
         resolveOriginalUploadPath: vi.fn(),
     }));
-    vi.doMock('@/lib/gallery-config', () => ({ getGalleryConfig: vi.fn() }));
+    vi.doMock('@/lib/gallery-config', () => ({
+        getGalleryConfig: vi.fn(),
+        // C2-10 (WP19): image-queue.ts's detached-context call sites now use
+        // getGalleryConfigUncached instead of the request-cached export.
+        getGalleryConfigUncached: vi.fn(),
+    }));
     vi.doMock('@/lib/queue-shutdown', () => ({ drainProcessingQueueForShutdown: vi.fn() }));
     vi.doMock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));
     vi.doMock('@/lib/audit', () => ({ purgeOldAuditLog: vi.fn() }));
@@ -49,6 +56,7 @@ async function loadQueueCleanup(dirs: { webp: string; avif: string; jpeg: string
         embeddingToBuffer: vi.fn(),
         STUB_MODEL_VERSION: 'stub',
         PRODUCTION_MODEL_VERSION: 'prod',
+        SEMANTIC_SCAN_LIMIT: 2000,
     }));
     vi.doMock('@/lib/clip-model', () => ({ embedImageReal: vi.fn() }));
 

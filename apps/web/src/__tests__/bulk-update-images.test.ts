@@ -92,6 +92,9 @@ function makeSelectChain(result: unknown[]) {
 }
 
 vi.mock('@/db', () => ({
+    // image-queue.ts (transitively imported) reads the pool limit at module
+    // scope for its concurrency budget (C2-08, run-10 c2).
+    POOL_CONNECTION_LIMIT: 10,
     db: {
         update: dbUpdateMock,
         insert: dbInsertMock,

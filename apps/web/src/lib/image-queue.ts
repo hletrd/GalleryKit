@@ -3,13 +3,13 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { connection, db, images, sessions, imageEmbeddings } from '@/db';
+import { connection, db, images, sessions, imageEmbeddings, POOL_CONNECTION_LIMIT } from '@/db';
 import { eq, and, sql, asc, gt, notInArray, isNull } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { MIN_IMAGE_SIZE, type JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
-import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigUncached, type GalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
@@ -21,7 +21,7 @@ import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
 import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
-import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
+import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
 import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
 import { parseBoundedPositiveInteger } from '@/lib/env';
@@ -103,6 +103,11 @@ const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 /** Tracks whether one-time bootstrap cleanup has run in this process. */
 let bootstrapCleanupRun = false;
 const CLAIM_RETRY_DELAY_MS = 5000;
+// C2-32 (WP20, run-10 cycle-2): mirrors CLAIM_RETRY_DELAY_MS below — a
+// processing failure (Sharp crash, transient FS/DB blip) previously
+// re-enqueued synchronously with no spacing, unlike the claim-retry path.
+// Give transient failures room to clear before burning through MAX_RETRIES.
+const PROCESSING_RETRY_DELAY_MS = 5000;
 const BOOTSTRAP_BATCH_SIZE = 500;
 const BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE = 50;
 const BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY = 2;
@@ -110,6 +115,12 @@ const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 /** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
 const MAX_PERMANENTLY_FAILED_IDS = 1000;
+// C2-08 (WP7, run-10 cycle-2): this constant now exists only as
+// resolveImageQueueConcurrency's default parameter (test convenience,
+// mirrors resolveBackfillConcurrency's fallback in admin-backfill-runner.ts).
+// The real call site below passes the actual POOL_CONNECTION_LIMIT imported
+// from @/db so a future pool-size change cannot silently drift out of sync
+// with this module's concurrency budget.
 const DEFAULT_DB_POOL_CONNECTION_LIMIT = 10;
 export const IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS = (poolLimit: number): number =>
     Math.max(3, Math.ceil(poolLimit / 2));
@@ -131,7 +142,7 @@ const REQUESTED_QUEUE_CONCURRENCY = parseBoundedPositiveInteger(
     process.env.QUEUE_CONCURRENCY,
     { fallback: 1, max: 8 },
 );
-const QUEUE_CONCURRENCY = resolveImageQueueConcurrency(REQUESTED_QUEUE_CONCURRENCY);
+const QUEUE_CONCURRENCY = resolveImageQueueConcurrency(REQUESTED_QUEUE_CONCURRENCY, POOL_CONNECTION_LIMIT);
 
 export type ProcessingSettingsSnapshot = {
     quality: ImageQualitySettings;
@@ -349,6 +360,16 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         return existing;
     }
 
+    // C2-33 (WP22, run-10 cycle-2): the defensive re-init below replaces a
+    // malformed `existing` state object with a fresh one. If the malformed
+    // object still carried an armed hourly GC interval (see gcInterval
+    // arming further down), simply dropping the reference leaks the
+    // timer — it keeps firing against an object nothing else references,
+    // forever, once per hour. Clear it before constructing the replacement.
+    if (existing && typeof existing === 'object' && existing.gcInterval) {
+        clearInterval(existing.gcInterval);
+    }
+
     const newState: ProcessingQueueState = {
         // One image-processing job can already encode AVIF/WebP/JPEG and
         // use multiple libvips workers. Default to one foreground-friendly
@@ -426,7 +447,7 @@ async function storeImageEmbeddingForMode(
 async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
     let semanticMode: 'disabled' | 'stub' | 'production';
     try {
-        const cfg = await getGalleryConfig();
+        const cfg = await getGalleryConfigUncached();
         semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
     } catch {
         return;
@@ -437,7 +458,19 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
         ? PRODUCTION_MODEL_VERSION
         : STUB_MODEL_VERSION;
     let cursorId = 0;
+    let scanned = 0;
     for (;;) {
+        // C2-34 (WP21, run-10 cycle-2): bound each invocation to the same
+        // scan cap the semantic-search routes use, so a huge missing-
+        // embedding backlog can't walk every processed row in one call. Rows
+        // embedded during this call drop out of the isNull(imageEmbeddings.
+        // imageId) filter below, so a later bootstrap invocation naturally
+        // continues past wherever this one stopped — no persisted cursor
+        // needed across invocations.
+        if (scanned >= SEMANTIC_SCAN_LIMIT) {
+            console.warn(`[Queue] embedding bootstrap reached scan cap (${scanned}); remaining rows will be picked up on a later bootstrap`);
+            break;
+        }
         const rows = await db.select({
             id: images.id,
             filename_original: images.filename_original,
@@ -454,6 +487,8 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
             ))
             .orderBy(asc(images.id))
             .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
+
+        scanned += rows.length;
 
         for (let i = 0; i < rows.length; i += BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY) {
             const chunk = rows.slice(i, i + BOOTSTRAP_EMBEDDING_RETRY_CONCURRENCY);
@@ -670,7 +705,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // Bootstrap / legacy re-enqueue path: the job carries none of the
                 // processing settings, so load them all from current config.
                 try {
-                    const config = await getGalleryConfig();
+                    const config = await getGalleryConfigUncached();
                     quality = {
                         webp: config.imageQualityWebp,
                         avif: config.imageQualityAvif,
@@ -788,7 +823,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             trackQueueSideEffect(state, (async () => {
                 let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
                 try {
-                    const cfg = await getGalleryConfig();
+                    const cfg = await getGalleryConfigUncached();
                     semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
                 } catch {
                     // DB unavailable — skip silently. Semantic embedding mode is
@@ -822,9 +857,18 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             const retries = (state.retryCounts.get(job.id) || 0) + 1;
             if (retries < MAX_RETRIES) {
                 state.retryCounts.set(job.id, retries);
-                console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES})`);
+                // C2-32 (WP20, run-10 cycle-2): escalating backoff before
+                // re-enqueue, mirroring the claim-retry schedule above, so a
+                // transient failure (e.g. a momentary DB/FS blip) gets
+                // spacing instead of immediately re-queueing into the same
+                // failure and burning through MAX_RETRIES in a tight loop.
+                const delay = PROCESSING_RETRY_DELAY_MS * Math.min(retries, 5); // escalating up to 25s
+                console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES}) in ${delay}ms`);
                 state.enqueued.delete(job.id);
-                enqueueImageProcessing(job);
+                const retryTimer = setTimeout(() => {
+                    enqueueImageProcessing(job);
+                }, delay);
+                retryTimer.unref?.();
                 retried = true;
                 return;
             }
