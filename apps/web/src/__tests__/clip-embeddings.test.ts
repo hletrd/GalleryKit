@@ -96,6 +96,111 @@ describe('embeddingToBuffer / bufferToEmbedding', () => {
     });
 });
 
+// C2-14 (run-10 c2): bufferToEmbedding now takes a zero-copy Float32Array view
+// (or a single bulk-copy fallback when misaligned) instead of a 512-call
+// readFloatLE loop. These tests pin value-equivalence against a reference
+// per-element readFloatLE decode, cover a misaligned input Buffer, and cover
+// NaN/Infinity bit patterns.
+describe('bufferToEmbedding — zero-copy decode (C2-14)', () => {
+    /** Reference decode: the old per-element readFloatLE loop. */
+    function referenceDecode(buf: Buffer): Float32Array {
+        const arr = new Float32Array(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            arr[i] = buf.readFloatLE(i * 4);
+        }
+        return arr;
+    }
+
+    it('matches the reference readFloatLE decode for random vectors', () => {
+        const original = new Float32Array(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            original[i] = Math.random() * 2 - 1;
+        }
+        const buf = embeddingToBuffer(original);
+        const expected = referenceDecode(buf);
+        const actual = bufferToEmbedding(buf);
+        expect(actual.length).toBe(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            expect(actual[i]).toBe(expected[i]);
+        }
+    });
+
+    it('decodes a 4-byte-aligned Buffer via the zero-copy view path', () => {
+        // embeddingToBuffer uses Buffer.allocUnsafe, which for a 2048-byte
+        // allocation is pool-backed and 8-byte (so also 4-byte) aligned —
+        // this exercises the zero-copy `new Float32Array(buf.buffer, ...)` branch.
+        const original = new Float32Array(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) original[i] = Math.sin(i * 0.02);
+        const buf = embeddingToBuffer(original);
+        expect(buf.byteOffset % 4).toBe(0);
+        const decoded = bufferToEmbedding(buf);
+        const expected = referenceDecode(buf);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            expect(decoded[i]).toBe(expected[i]);
+        }
+    });
+
+    it('decodes a misaligned-offset Buffer identically (bulk-copy fallback path)', () => {
+        const original = new Float32Array(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            original[i] = Math.cos(i * 0.03) * 100;
+        }
+        const sourceBuf = embeddingToBuffer(original);
+
+        // Build a larger backing ArrayBuffer and place the embedding bytes at a
+        // byte offset that is NOT a multiple of 4 (offset 2), forcing
+        // bufferToEmbedding's misaligned-copy branch.
+        const misalignedOffset = 2;
+        const backing = new ArrayBuffer(misalignedOffset + EMBEDDING_BYTES + 2);
+        const misalignedBuf = Buffer.from(backing, misalignedOffset, EMBEDDING_BYTES);
+        sourceBuf.copy(misalignedBuf);
+        expect(misalignedBuf.byteOffset % 4).not.toBe(0);
+
+        const decoded = bufferToEmbedding(misalignedBuf);
+        const expected = referenceDecode(misalignedBuf);
+        expect(decoded.length).toBe(EMBEDDING_DIM);
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
+            expect(decoded[i]).toBe(expected[i]);
+        }
+    });
+
+    it('preserves NaN and Infinity bit patterns through zero-copy decode', () => {
+        const buf = Buffer.alloc(EMBEDDING_BYTES);
+        buf.writeFloatLE(NaN, 0);
+        buf.writeFloatLE(Infinity, 4);
+        buf.writeFloatLE(-Infinity, 8);
+        buf.writeFloatLE(-0, 12);
+        for (let i = 4; i < EMBEDDING_DIM; i++) {
+            buf.writeFloatLE(i * 0.001, i * 4);
+        }
+        const decoded = bufferToEmbedding(buf);
+        expect(Number.isNaN(decoded[0])).toBe(true);
+        expect(decoded[1]).toBe(Infinity);
+        expect(decoded[2]).toBe(-Infinity);
+        expect(Object.is(decoded[3], -0)).toBe(true);
+    });
+
+    it('preserves NaN/Infinity bit patterns through the misaligned bulk-copy path too', () => {
+        const sourceBuf = Buffer.alloc(EMBEDDING_BYTES);
+        sourceBuf.writeFloatLE(NaN, 0);
+        sourceBuf.writeFloatLE(Infinity, 4);
+        sourceBuf.writeFloatLE(-Infinity, 8);
+        for (let i = 3; i < EMBEDDING_DIM; i++) {
+            sourceBuf.writeFloatLE(i * 0.001, i * 4);
+        }
+        const misalignedOffset = 1;
+        const backing = new ArrayBuffer(misalignedOffset + EMBEDDING_BYTES + 3);
+        const misalignedBuf = Buffer.from(backing, misalignedOffset, EMBEDDING_BYTES);
+        sourceBuf.copy(misalignedBuf);
+        expect(misalignedBuf.byteOffset % 4).not.toBe(0);
+
+        const decoded = bufferToEmbedding(misalignedBuf);
+        expect(Number.isNaN(decoded[0])).toBe(true);
+        expect(decoded[1]).toBe(Infinity);
+        expect(decoded[2]).toBe(-Infinity);
+    });
+});
+
 describe('topK', () => {
     it('returns top K results above threshold, sorted descending', () => {
         const matches = [

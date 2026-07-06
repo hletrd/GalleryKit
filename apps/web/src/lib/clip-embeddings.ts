@@ -97,14 +97,58 @@ export function embeddingToBuffer(embedding: Float32Array): Buffer {
     return buf;
 }
 
+// C2-14 (run-10 c2): one-time platform-endianness probe. Every supported
+// production Node.js target (x86_64, arm64) is little-endian, but Float32Array
+// reads are platform-endian, so a raw-view zero-copy path would silently
+// byte-swap on a hypothetical big-endian host. Probe once at module load
+// rather than assume, and keep the portable readFloatLE loop as the BE
+// fallback below.
+const IS_LITTLE_ENDIAN = (() => {
+    const probe = new ArrayBuffer(2);
+    new DataView(probe).setInt16(0, 1, true);
+    return new Int16Array(probe)[0] === 1;
+})();
+
 /**
  * Deserialize a Node.js Buffer (little-endian float32 array) into a Float32Array.
  * Accepts a Buffer of exactly EMBEDDING_BYTES bytes.
+ *
+ * C2-14 (run-10 c2) / PERF-04: on little-endian platforms this avoids the
+ * 512-call `readFloatLE` loop. `decodeEmbeddingColumn`'s callers (the semantic
+ * + similar-image search routes) read the returned array transiently inside a
+ * single synchronous `.map()` to score against a query vector and never store
+ * or mutate it afterward, so a zero-copy view is safe from a data-lifetime
+ * standpoint. Buffer alignment is a separate, wire-position-dependent concern
+ * (mysql2's `readBuffer()` returns `this.buffer.slice(...)`, a view over the
+ * driver's own socket-read buffer that is never rewritten after being handed
+ * back — see node_modules/mysql2/lib/packets/packet.js `readBuffer()` and
+ * packet_parser.js — but the slice offset within that buffer depends on wire
+ * position and is not guaranteed to be a multiple of 4), so this still checks
+ * alignment and falls back to a single bulk copy (not a per-element loop) when
+ * misaligned.
  */
 export function bufferToEmbedding(buf: Buffer): Float32Array {
     if (buf.length !== EMBEDDING_BYTES) {
         throw new Error(`bufferToEmbedding: expected ${EMBEDDING_BYTES} bytes, got ${buf.length}`);
     }
+    if (IS_LITTLE_ENDIAN) {
+        if (buf.byteOffset % 4 === 0) {
+            // Zero-copy: Float32Array requires byteOffset % BYTES_PER_ELEMENT === 0.
+            return new Float32Array(buf.buffer, buf.byteOffset, EMBEDDING_DIM);
+        }
+        // Misaligned slice (e.g. an odd byte offset into a larger wire packet).
+        // Float32Array can't view it directly at this offset. Use a fresh,
+        // explicitly offset-0 ArrayBuffer (not Buffer.allocUnsafe, whose pool
+        // alignment is an internal implementation detail) so the result is
+        // trivially 4-byte aligned, and a single bulk `TypedArray.set` copy
+        // (native memcpy) instead of 512 individual reads.
+        const alignedBuffer = new ArrayBuffer(EMBEDDING_BYTES);
+        new Uint8Array(alignedBuffer).set(buf);
+        return new Float32Array(alignedBuffer);
+    }
+    // Big-endian fallback: Float32Array is platform-endian, so a raw view
+    // would byte-swap. Correctness over speed here (no real production target
+    // today).
     const arr = new Float32Array(EMBEDDING_DIM);
     for (let i = 0; i < EMBEDDING_DIM; i++) {
         arr[i] = buf.readFloatLE(i * 4);
