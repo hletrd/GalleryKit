@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
-import { lstat, open, realpath, type FileHandle } from 'fs/promises';
+import { lstat, open, realpath, stat, type FileHandle } from 'fs/promises';
 import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
 // R4C1 PERF-R4C1-07: import the version constant from its definition site
@@ -15,6 +15,29 @@ import { ifNoneMatchMatches } from '@/lib/http-etag';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
+
+/**
+ * PERF3-07 / C3-29 (run-10 c3): UPLOAD_ROOT cannot change without a process
+ * restart, so its realpath is resolved once and cached — previously every
+ * request (including the SW's per-tile HEAD revalidation probes) re-ran the
+ * syscall. Only a SUCCESSFUL resolution is cached: the ENOENT fallback
+ * (upload root not created yet at boot) is computed per-request so a root
+ * directory created later — possibly through a symlink — is re-resolved
+ * rather than pinned to the unresolved fallback path forever.
+ */
+let cachedResolvedUploadRoot: string | null = null;
+async function resolveUploadRootCached(): Promise<string> {
+    if (cachedResolvedUploadRoot) return cachedResolvedUploadRoot;
+    try {
+        cachedResolvedUploadRoot = await realpath(UPLOAD_ROOT);
+        return cachedResolvedUploadRoot;
+    } catch (err: unknown) {
+        if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+            return path.resolve(UPLOAD_ROOT);
+        }
+        throw err;
+    }
+}
 
 /**
  * R4C3 PERF-R4C3-05: debounce the settings-hash computation on the
@@ -173,12 +196,7 @@ export async function serveUploadFile(
         await handle.close();
     };
     try {
-        const resolvedRoot = await realpath(UPLOAD_ROOT).catch((err: unknown) => {
-            if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-                return path.resolve(UPLOAD_ROOT);
-            }
-            throw err;
-        });
+        const resolvedRoot = await resolveUploadRootCached();
         const pathStats = await lstat(absolutePath);
         if (pathStats.isSymbolicLink()) {
             return new NextResponse('Access denied', { status: 403 });
@@ -187,17 +205,23 @@ export async function serveUploadFile(
         if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
             return new NextResponse('Access denied', { status: 403 });
         }
-        fileHandle = await open(resolvedPath, 'r');
-        const stats = await fileHandle.stat();
+
+        // PERF3-07 / C3-29 (run-10 c3): the 304 and HEAD branches below never
+        // stream a body, so they are served from a plain path-stat — no fd
+        // open/close pair per warm-cache SW revalidation probe (this route is
+        // the SW's per-tile HEAD target, so the syscall pair multiplied by
+        // tile count). The GET body path further down still opens the fd
+        // FIRST and stats through it, so streamed headers and body always
+        // describe the same file (the rename-after-validation race safety
+        // that motivated the fd-stat pattern).
+        const stats = await stat(resolvedPath);
 
         if (!stats.isFile()) {
-            await closeFileHandle();
             return new NextResponse('Access denied', { status: 403 });
         }
 
         // Content type already resolved from extension above (no SVG)
         if (!contentType) {
-            await closeFileHandle();
             return new NextResponse('Unsupported file type', { status: 404 });
         }
 
@@ -237,7 +261,7 @@ export async function serveUploadFile(
         // comma-separated tag lists (`W/"a", W/"b"`). If-None-Match uses
         // weak comparison, so `W/"v6-..."` and `"v6-..."` are equivalent.
         if (ifNoneMatchMatches(ifNoneMatch ?? null, etag)) {
-            await closeFileHandle();
+            // PERF3-07: no fd was opened for this branch — nothing to close.
             return new NextResponse(null, {
                 status: 304,
                 headers: {
@@ -250,12 +274,35 @@ export async function serveUploadFile(
 
         // R20-L1: HEAD requests do not need the body — return early with
         // headers only. Skips the createReadStream + Readable.toWeb work that
-        // Next.js would discard anyway, and avoids opening a file descriptor
-        // for crawler / link-checker HEAD bursts that miss the ETag
-        // short-circuit above.
+        // Next.js would discard anyway, and (PERF3-07) genuinely never opens
+        // a file descriptor for crawler / link-checker / SW-probe HEAD
+        // bursts that miss the ETag short-circuit above.
+        if (method === 'HEAD') {
+            return new NextResponse(null, {
+                headers: {
+                    'Content-Type': contentType,
+                    'Content-Length': stats.size.toString(),
+                    'Cache-Control': 'public, max-age=3600, must-revalidate',
+                    'ETag': etag,
+                    'X-Content-Type-Options': 'nosniff',
+                },
+            });
+        }
+
+        // GET body path: open the fd and stat THROUGH it so the streamed
+        // headers and body always describe the same file even if the
+        // pathname is replaced after the validation above (the original
+        // fd-stat race-safety contract, unchanged).
+        fileHandle = await open(resolvedPath, 'r');
+        const bodyStats = await fileHandle.stat();
+        if (!bodyStats.isFile()) {
+            await closeFileHandle();
+            return new NextResponse('Access denied', { status: 403 });
+        }
+        const bodyEtag = `W/"v${IMAGE_PIPELINE_VERSION}-${bodyStats.mtimeMs.toFixed(0)}-${bodyStats.size}-${settingsHash}"`;
         const responseHeaders = {
             'Content-Type': contentType,
-            'Content-Length': stats.size.toString(),
+            'Content-Length': bodyStats.size.toString(),
             // public + max-age + must-revalidate: edge caches keep the file
             // fast for one hour, but every browser must revalidate on the
             // next request via If-None-Match. Combined with the
@@ -264,14 +311,9 @@ export async function serveUploadFile(
             // R8-R7: reduced from 86400 to 3600 so color-pipeline fixes
             // ship to browsers within an hour instead of up to 24 hours.
             'Cache-Control': 'public, max-age=3600, must-revalidate',
-            'ETag': etag,
+            'ETag': bodyEtag,
             'X-Content-Type-Options': 'nosniff',
         } as const;
-
-        if (method === 'HEAD') {
-            await closeFileHandle();
-            return new NextResponse(null, { headers: responseHeaders });
-        }
 
         // Create stream and convert to web ReadableStream for proper lifecycle
         // management. The stream is opened from the same descriptor that was

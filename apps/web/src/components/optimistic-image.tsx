@@ -23,20 +23,32 @@ function OptimisticImageInner({ src, alt, className, fallbackSrc, ...props }: Op
     const [retryCount, setRetryCount] = useState(0);
     const retryCountRef = useRef(0);
     const retryTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+    // CR3-02 / C3-24 (run-10 c3): the URL retries are built from. Starts as
+    // the primary `src` prop and switches to `fallbackSrc` once the fallback
+    // branch is taken, so retries target the CURRENTLY displayed source
+    // instead of hammering the already-failed original.
+    const retryBaseRef = useRef(src);
 
     // Clear retry timer on unmount
     useEffect(() => () => { clearTimeout(retryTimerRef.current); }, []);
 
     const handleError = () => {
-        if (fallbackSrc && imgSrc !== fallbackSrc) {
+        if (fallbackSrc && imgSrc !== fallbackSrc && retryBaseRef.current !== fallbackSrc) {
             setImgSrc(fallbackSrc);
+            // CR3-02 / C3-24 (run-10 c3): once the fallback is taken it
+            // becomes the retry BASE. The previous code reset the counter but
+            // kept building retry URLs from the original `src` prop, so a
+            // transiently-failing fallback got exactly one attempt while the
+            // known-dead original burned all the retries.
+            retryBaseRef.current = fallbackSrc;
             retryCountRef.current = 0;
             setRetryCount(0);
             setIsLoading(true);
             return;
         }
 
-        const isLocalUpload = typeof src === 'string' && src.startsWith('/uploads/');
+        const base = retryBaseRef.current;
+        const isLocalUpload = typeof base === 'string' && base.startsWith('/uploads/');
         const maxRetries = isLocalUpload ? 1 : 5;
         if (retryCount < maxRetries) {
             const delay = Math.min(500 * Math.pow(2, retryCount), 15000);
@@ -44,8 +56,8 @@ function OptimisticImageInner({ src, alt, className, fallbackSrc, ...props }: Op
                 const nextRetry = retryCountRef.current + 1;
                 retryCountRef.current = nextRetry;
                 setRetryCount(nextRetry);
-                const separator = typeof src === 'string' && src.includes('?') ? '&' : '?';
-                setImgSrc(`${src}${separator}retry=${nextRetry}`);
+                const separator = typeof base === 'string' && base.includes('?') ? '&' : '?';
+                setImgSrc(`${base}${separator}retry=${nextRetry}`);
             }, delay);
         } else {
             setError(true);
