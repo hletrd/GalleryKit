@@ -442,6 +442,7 @@
     "backHome": "갤러리로 돌아가기"
   },
   "sharedGroup": {
+    "backToSharedPhotos": "공유 사진으로 돌아가기",
     "title": "공유된 사진",
     "photo": "사진",
     "empty": "이 그룹에 사진이 없습니다.",

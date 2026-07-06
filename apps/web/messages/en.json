@@ -442,6 +442,7 @@
     "backHome": "Back to gallery"
   },
   "sharedGroup": {
+    "backToSharedPhotos": "Back to shared photos",
     "title": "Shared Photos",
     "photo": "Photo",
     "empty": "No photos in this group.",

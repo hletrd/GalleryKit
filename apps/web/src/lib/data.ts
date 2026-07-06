@@ -1221,6 +1221,8 @@ export async function getImageForViewer(id: number, includeAdminFields: boolean 
 // GROUP_CONCAT (matching getImagesLite pattern). Previously this function
 // issued 2 sequential DB queries (image row, then tags), adding one round-
 // trip per shared-photo page load.
+const TAG_CONCAT_OUTER_SEPARATOR = '\u0001';
+
 export async function getImageByShareKey(key: string) {
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, 10)) {
@@ -1241,7 +1243,14 @@ export async function getImageByShareKey(key: string) {
         // C20-LOW-02: use explicit SEPARATOR '\x01' instead of MySQL's default
         // comma so the parsing is robust against any future change to MySQL's
         // default separator or tag slug format.
-        tag_concat: sql<string | null>`GROUP_CONCAT(DISTINCT CONCAT(${tags.slug}, CHAR(0), ${tags.name}) ORDER BY ${tags.slug} SEPARATOR CHAR(1))`,
+        // C1-35 (run-10 cycle-1, e2e gate): the SEPARATOR clause accepts ONLY
+        // a string literal — the prior expression form (a CHAR() call) was an
+        // ER_PARSE_ERROR, so this query failed on EVERY /s/[key] shared-link
+        // render (unit tests mock the db and the recovery run never executed
+        // the e2e gate, so it shipped unseen).
+        // The separator is a string LITERAL embedded in the SQL text (visible
+        // \u0001 escape below — never a raw control byte in source).
+        tag_concat: sql<string | null>`GROUP_CONCAT(DISTINCT CONCAT(${tags.slug}, CHAR(0), ${tags.name}) ORDER BY ${tags.slug} SEPARATOR ${sql.raw(`'${TAG_CONCAT_OUTER_SEPARATOR}'`)})`,
     })
         .from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
