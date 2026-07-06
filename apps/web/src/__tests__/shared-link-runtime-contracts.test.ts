@@ -47,10 +47,7 @@ describe('C1-36: sharedGroup namespace carries every key the /g/[key] page rende
         );
         const sharedGroupKeys = new Set(Object.keys((enMessages as unknown as Record<string, Record<string, string>>).sharedGroup));
         // Match direct translator calls: t('key') / tShared('key', ...).
-        // The page's sharedGroup translators are named t and tShared per source.
-        const translatorNames = [...pageSource.matchAll(/const\s+(\w+)\s*=?[^=]*getTranslations\('sharedGroup'\)/g)].map((m) => m[1]);
         const keyPattern = /\bt(?:Shared)?\('([A-Za-z0-9_.]+)'/g;
-        void translatorNames;
         for (const match of pageSource.matchAll(keyPattern)) {
             const key = match[1];
             // Only enforce keys without a namespace dot (namespaced lookups

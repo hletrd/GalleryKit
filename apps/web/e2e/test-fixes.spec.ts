@@ -13,7 +13,14 @@ async function openFirstPhoto(page: import('@playwright/test').Page) {
   await expect(page).toHaveURL(/\/p\/\d+/);
 }
 
-test('mobile nav keeps secondary controls hidden until expanded', async ({ page }) => {
+test('mobile nav keeps controls visible in the collapsed bar and topic chips behind expand', async ({ page }) => {
+  // C1-37 (run-10 cycle-1): the CURRENT nav design deliberately keeps the
+  // controls (search/theme/locale) in the collapsed mobile bar and moves the
+  // topic chips into the expanded panel (nav-client.tsx: "Controls: visible
+  // in the collapsed mobile bar; topic chips move into the expanded mobile
+  // panel."). This spec previously pinned the pre-redesign layout (controls
+  // hidden until expand) and could not pass against the shipped nav; the
+  // recovery run never executed the e2e gate, so the drift went unseen.
   await page.setViewportSize(MOBILE);
   await ensureEnglishLocale(page);
   await page.goto('/');
@@ -21,8 +28,8 @@ test('mobile nav keeps secondary controls hidden until expanded', async ({ page 
 
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
-  await expect(nav.getByRole('button', { name: themeButtonName })).toBeHidden();
+  await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
+  await expect(nav.getByRole('button', { name: themeButtonName })).toBeVisible();
 
   await nav.getByRole('button', { name: 'Expand menu' }).click();
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();

@@ -46,7 +46,14 @@ test.describe('Nav visual checks', () => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
     await expect(nav).toBeVisible();
     await expect(nav.getByRole('button', { name: 'Expand menu' })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
+    // C1-37 (run-10 cycle-1): the Search control is DELIBERATELY visible in
+    // the collapsed mobile bar (nav-client.tsx: "Controls: visible in the
+    // collapsed mobile bar; topic chips move into the expanded mobile
+    // panel."). This spec previously pinned the pre-redesign layout (search
+    // hidden until expand) and failed on every run since the nav change
+    // shipped — the recovery run never executed the e2e gate, so the stale
+    // expectation was never surfaced.
+    await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
     await expectVisibleNavTargetsAreStable(nav);
     await page.screenshot({ path: 'test-results/nav-collapsed-mobile.png', fullPage: false });
   });
