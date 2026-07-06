@@ -4,18 +4,15 @@ import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
-import { GridPicture } from '@/components/grid-picture';
 import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import { useTranslation } from "@/components/i18n-provider";
-import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
+import { MasonryCard } from '@/components/masonry-card';
 import { cn } from '@/lib/utils';
-import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
-import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
-import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
-import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
@@ -81,7 +78,7 @@ function useColumnCount() {
     return { count, viewportWidth };
 }
 
-interface GalleryImage {
+export interface GalleryImage {
     id: number;
     capture_date: string | null;
     created_at: string | Date;
@@ -118,6 +115,18 @@ function getClientImageListCursor(image: Pick<ImageListCursorInput, 'capture_dat
         capture_date: image.capture_date ?? null,
         created_at: image.created_at,
     };
+}
+
+// C2-19 (run-10 c2): pure per-card derivation extracted out of the
+// orderedImages.map JSX so MasonryCard's memoized bail-out can be unit-tested
+// without a DOM renderer, and so the values passed as props are computed
+// once per card rather than inline in JSX.
+export function computeIsAboveFold(index: number, columnCount: number, itemCount: number): boolean {
+    return index < Math.min(columnCount, itemCount);
+}
+
+export function resolveTopicLabel(topic: string | undefined, topicsMap: Record<string, string>): string | undefined {
+    return (topic && topicsMap[topic]) || topic;
 }
 
 interface HomeClientProps {
@@ -307,135 +316,17 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                 When fewer items than the breakpoint's max columns exist,
                 clamp to the item count so the grid fills its width. */}
             <GridPictureFallbackBoundary className={masonryClasses}>
-                {orderedImages.map((image, index) => {
-                    // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
-                    // now baked into `getPhotoDisplayTitleFromTagNames` and
-                    // `getConcisePhotoAltText` via the shared
-                    // `humanizeTagLabel` helper, so the card title and the
-                    // alt text agree without any inline post-processing.
-                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
-                    const altText = getConcisePhotoAltText(image, t('common.photo'));
-
-                    const isAboveFold = index < Math.min(columnCount, itemCount);
-
-                    // AGG-R8-08 (run-8 c2): guard the width/height denominators.
-                    // image.width/height are NOT NULL from validated Sharp
-                    // metadata so a 0 is near-impossible, but an unguarded
-                    // `/ image.width` emits "auto Infinitypx" (and "0 / 0"
-                    // aspect-ratio) — invalid CSS that browsers silently drop,
-                    // losing the CLS reservation for that card. Fall back to a
-                    // 1:1 square reservation when either dimension is non-positive.
-                    const hasValidDims = image.width > 0 && image.height > 0;
-                    const cardAspectRatio = hasValidDims ? `${image.width} / ${image.height}` : '1 / 1';
-                    const cardIntrinsicHeight = hasValidDims
-                        ? Math.round(estimatedCardWidth * image.height / image.width)
-                        : Math.round(estimatedCardWidth);
-                    const isWideGamut = isWideGamutPrimary(image.color_primaries);
-                    const photoAriaLabel = isWideGamut
-                        ? `${t('aria.viewPhoto', { title: displayTitle })} (${t('viewer.gamutBadgeP3')})`
-                        : t('aria.viewPhoto', { title: displayTitle });
-
-                    return (
-                        <div
-                            key={image.id}
-                            className={cn(
-                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 mb-4 w-full"
-                            )}
-                            style={{
-                                aspectRatio: cardAspectRatio,
-                                backgroundColor: 'hsl(var(--muted))',
-                                containIntrinsicSize: `auto ${cardIntrinsicHeight}px`,
-                            }}
-                        >
-                            <Link
-                                href={localizePath(locale, `/p/${image.id}`)}
-                                prefetch={false}
-                                aria-label={photoAriaLabel}
-                                onClick={saveScrollPosition}
-                            >
-                                <div className="relative w-full">
-                                        {(() => {
-                                            const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
-                                            const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
-
-                                            if (baseWebp && baseAvif) {
-                                                // Use the two smallest configured sizes for masonry grid thumbnails
-                                                const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
-                                                const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
-                                                const masonrySizes = "(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw";
-                                                return (
-                                                    <GridPicture
-                                                        sources={[
-                                                            {
-                                                                type: 'image/avif',
-                                                                srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
-                                                                sizes: masonrySizes,
-                                                            },
-                                                            {
-                                                                type: 'image/webp',
-                                                                srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
-                                                                sizes: masonrySizes,
-                                                            },
-                                                        ]}
-                                                        src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                                        alt={altText}
-                                                        width={image.width}
-                                                        height={image.height}
-                                                        className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                        loading={isAboveFold ? "eager" : "lazy"}
-                                                        decoding="async"
-                                                        fetchPriority={isAboveFold ? "high" : "auto"}
-                                                    />
-                                                );
-                                            }
-
-                                            return (
-                                                <OptimisticImage
-                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                                    alt={altText}
-                                                    width={image.width}
-                                                    height={image.height}
-                                                    className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                    sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                                                    blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-                                                    placeholder="blur"
-                                                    // R16-L3: parity with the primary <img> path above so
-                                                    // legacy photos (no sized derivative) don't block the main
-                                                    // thread during masonry scroll. next/image forwards the
-                                                    // attribute through to the underlying <img>.
-                                                    decoding="async"
-                                                />
-                                            );
-                                        })()}
-                                    {/* R10-H5: subtle gamut badge for wide-gamut photos, gated by display capability */}
-                                    {isWideGamut && (
-                                        <div className="absolute top-2 right-2 z-10">
-                                            <span
-                                                className="gamut-p3-badge inline-flex items-center justify-center min-h-11 min-w-11 px-2 py-1 text-[10px] font-bold bg-purple-200/90 text-purple-900 dark:bg-purple-900/60 dark:text-purple-200 rounded-full backdrop-blur-sm"
-                                                aria-label={t('viewer.gamutBadgeP3')}
-                                                title={t('viewer.gamutBadgeP3')}
-                                            >
-                                                <span aria-hidden="true">P3</span>
-                                            </span>
-                                        </div>
-                                    )}
-                                    <div className="absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/75 to-transparent p-3">
-                                        <h3 className="text-white text-sm font-medium truncate">{displayTitle}</h3>
-                                        <p className="text-white/80 text-xs truncate">
-                                            {(image.topic && topicsMap[image.topic]) || image.topic}
-                                        </p>
-                                    </div>
-                                    <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/70 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
-                                        <h3 className="text-white font-medium truncate">
-                                            {displayTitle}
-                                        </h3>
-                                        <p className="text-white/80 text-xs truncate">{(image.topic && topicsMap[image.topic]) || image.topic}</p>
-                                    </div>
-                                </div>
-                            </Link>
-                        </div>
-                    );
-                })}
+                {orderedImages.map((image, index) => (
+                    <MasonryCard
+                        key={image.id}
+                        image={image}
+                        estimatedCardWidth={estimatedCardWidth}
+                        isAboveFold={computeIsAboveFold(index, columnCount, itemCount)}
+                        topicLabel={resolveTopicLabel(image.topic, topicsMap)}
+                        imageSizes={imageSizes}
+                        onLinkClick={saveScrollPosition}
+                    />
+                ))}
             </GridPictureFallbackBoundary>
 
             {hasMore && (

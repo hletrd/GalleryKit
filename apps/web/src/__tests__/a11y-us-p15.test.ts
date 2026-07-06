@@ -91,7 +91,10 @@ describe('US-P15 a11y contracts', () => {
     });
 
     it('AC-1: home-client masonry cards use getConcisePhotoAltText for alt text', () => {
-        const src = readSrc('components/home-client.tsx');
+        // C2-19 (run-10 c2): the per-card alt-text derivation moved from
+        // home-client.tsx's inline orderedImages.map into the extracted,
+        // memoized MasonryCard component.
+        const src = readSrc('components/masonry-card.tsx');
         expect(src).toMatch(/getConcisePhotoAltText/);
         // The altText variable is used in the <img alt={altText}> attribute
         expect(src).toMatch(/alt=\{altText\}/);

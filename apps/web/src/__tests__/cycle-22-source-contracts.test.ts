@@ -71,16 +71,23 @@ describe('cycle 22 source contracts', () => {
     });
 
     it('exposes the P3 gamut badge and route-error escape hatch to assistive tech', () => {
+        // C2-19 (run-10 c2): the per-card photoAriaLabel derivation and the
+        // gamut badge JSX moved from home-client.tsx's inline
+        // orderedImages.map into the extracted, memoized MasonryCard.
+        // useDisplayCapability and the data-display-gamut/data-force-show-
+        // color-chips effect stay in home-client.tsx (they drive a
+        // document-level attribute, not per-card markup).
         const home = readSrc('components/home-client.tsx');
-        expect(home).toContain('const photoAriaLabel = isWideGamut');
+        const masonryCard = readSrc('components/masonry-card.tsx');
         expect(home).toContain('useDisplayCapability');
         expect(home).toContain("document.documentElement.setAttribute('data-display-gamut', displayGamut)");
         expect(home).toContain("document.documentElement.setAttribute('data-force-show-color-chips', forceShowColorChips ? 'true' : 'false')");
-        expect(home).toContain("(${t('viewer.gamutBadgeP3')})");
-        expect(home).toContain('aria-label={photoAriaLabel}');
-        expect(home).toContain('aria-label={t(\'viewer.gamutBadgeP3\')}');
-        expect(home).toContain('title={t(\'viewer.gamutBadgeP3\')}');
-        expect(home).not.toMatch(/className="gamut-p3-badge[\s\S]{0,220}aria-hidden="true"/);
+        expect(masonryCard).toContain('const photoAriaLabel = isWideGamut');
+        expect(masonryCard).toContain("(${t('viewer.gamutBadgeP3')})");
+        expect(masonryCard).toContain('aria-label={photoAriaLabel}');
+        expect(masonryCard).toContain('aria-label={t(\'viewer.gamutBadgeP3\')}');
+        expect(masonryCard).toContain('title={t(\'viewer.gamutBadgeP3\')}');
+        expect(masonryCard).not.toMatch(/className="gamut-p3-badge[\s\S]{0,220}aria-hidden="true"/);
 
         const routeError = readSrc('app/[locale]/error.tsx');
         expect(routeError).toContain('aria-label={t(\'nav.label\')}');

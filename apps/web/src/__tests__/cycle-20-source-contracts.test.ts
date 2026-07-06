@@ -23,11 +23,13 @@ describe('cycle 20 source contracts', () => {
     });
 
     it('does not prefetch photo detail routes from dense grids or hidden adjacent links', () => {
-        const home = readSrc('components/home-client.tsx');
+        // C2-19 (run-10 c2): the per-card <Link> moved from home-client.tsx's
+        // inline orderedImages.map into the extracted, memoized MasonryCard.
+        const masonryCard = readSrc('components/masonry-card.tsx');
         const photoPage = readSrc('app/[locale]/(public)/p/[id]/page.tsx');
         const viewer = readSrc('components/photo-viewer.tsx');
         const navigation = readSrc('components/photo-navigation.tsx');
-        expect(home).toContain('prefetch={false}');
+        expect(masonryCard).toContain('prefetch={false}');
         expect(photoPage).toContain('prefetch={false} className="hidden"');
         expect(viewer).not.toContain('router.prefetch(buildPhotoPath(id))');
         expect(navigation).not.toContain('router.prefetch(getPhotoPath(');
