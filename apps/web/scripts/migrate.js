@@ -792,10 +792,47 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
         return;
     }
 
-    // The DB carries gallery tables but the migration log is incomplete (or the
-    // legacy single-row baseline poisoned the cursor). Reconcile the schema we
-    // know about idempotently, then baseline every journal entry whose schema
-    // state is now reflected in the DB.
+    // FDR-01 (run-10 c2): distinguish PENDING NEW MIGRATIONS from LEGACY
+    // DRIFT. The previous control flow treated any missing hash on a
+    // gallery-bearing DB as drift and ran reconcile + baseline-all — which
+    // recorded a genuinely NEW migration's hash BEFORE drizzle.migrate() ran,
+    // so the committed .sql (including any DML backfill, which
+    // reconcileLegacySchema does NOT mirror) never executed on any deployed
+    // database, and the runMigrations post-condition was structurally
+    // unreachable. When every missing entry sits strictly ABOVE the recorded
+    // MAX(created_at) cursor, this is the normal "new migrations pending"
+    // case: leave them unrecorded so drizzle.migrate() genuinely applies
+    // them (their SQL runs; drizzle records the hash rows itself), and the
+    // post-condition regains its meaning.
+    const [cursorRows] = await connection.query(
+        'SELECT MAX(created_at) AS cursor FROM __drizzle_migrations'
+    );
+    const cursor = cursorRows?.[0]?.cursor ?? null;
+    const missing = migrations.filter((m) => !haveHashes.has(m.hash));
+    if (cursor !== null && missing.every((m) => Number(m.folderMillis) > Number(cursor))) {
+        const tags = missing.map((m) => m.tag).join(', ');
+        console.log(`[Migration] ${missing.length} pending migration(s) above the recorded cursor will be applied by drizzle: ${tags}`);
+        return;
+    }
+
+    // The DB carries gallery tables but the migration log is incomplete at or
+    // below the recorded cursor (or the log is empty / the legacy single-row
+    // baseline poisoned the cursor). Reconcile the schema we know about
+    // idempotently, then baseline every journal entry whose schema state is
+    // now reflected in the DB.
+    //
+    // FDR-01 caveat: in this MIXED case a pending new-tail entry is baselined
+    // WITHOUT executing its .sql (reconcile mirrors DDL only, never DML), so
+    // any entry above the cursor is loudly named for the operator.
+    if (cursor !== null) {
+        const swallowedTail = missing.filter((m) => Number(m.folderMillis) > Number(cursor));
+        if (swallowedTail.length > 0) {
+            console.warn(
+                `[Migration] WARNING: drift repair is baselining ${swallowedTail.length} migration(s) above the recorded cursor WITHOUT executing their SQL: ` +
+                `${swallowedTail.map((m) => m.tag).join(', ')}. Their DDL is covered by reconcileLegacySchema; any DML backfill in those files must be applied manually.`
+            );
+        }
+    }
     await reconcileLegacySchema(connection, dbName);
     await baselineAllJournalMigrations(connection, migrations);
 }
@@ -891,5 +928,6 @@ module.exports = {
     hashFileSync,
     main,
     migrateLegacyOriginalUploads,
+    prepareLegacyDatabaseIfNeeded,
     resolveUploadRoots,
 };
