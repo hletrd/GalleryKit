@@ -439,13 +439,16 @@ export async function restoreDatabase(formData: FormData) {
         // depend on. Hold the upload-processing contract lock for the whole
         // restore window so an upload cannot pass its maintenance checks and
         // then insert/enqueue while the DB import is dropping/recreating rows.
+        // C2-45 (run-10 c2): distinct message so an operator sees this is
+        // an in-flight upload/processing-contract change, not a second
+        // concurrent restore attempt (which uses restoreInProgress above).
         uploadContractLock = await acquireUploadProcessingContractLock(0);
         if (!uploadContractLock) {
             await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (upload-contract early-return) failed:', err);
             });
             dbRestoreLockHeld = false;
-            return { success: false, error: t('restoreInProgress') };
+            return { success: false, error: t('restoreBlockedByUpload') };
         }
 
         const [backfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
@@ -460,7 +463,10 @@ export async function restoreDatabase(formData: FormData) {
             dbRestoreLockHeld = false;
             await uploadContractLock.release();
             uploadContractLock = null;
-            return { success: false, error: t('restoreInProgress') };
+            // C2-45 (run-10 c2): shared with the semantic-backfill branch
+            // below — the real blocker is a running backfill, not another
+            // restore.
+            return { success: false, error: t('restoreBlockedByBackfill') };
         }
         backfillLockHeld = true;
 
@@ -480,7 +486,9 @@ export async function restoreDatabase(formData: FormData) {
             dbRestoreLockHeld = false;
             await uploadContractLock.release();
             uploadContractLock = null;
-            return { success: false, error: t('restoreInProgress') };
+            // C2-45 (run-10 c2): same shared backfill-blocked message as the
+            // color-pipeline branch above.
+            return { success: false, error: t('restoreBlockedByBackfill') };
         }
         semanticBackfillLockHeld = true;
 
