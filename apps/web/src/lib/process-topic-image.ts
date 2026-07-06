@@ -126,20 +126,44 @@ export async function deleteTopicImage(filename: string) {
     await fs.unlink(path.join(RESOURCES_DIR, filename)).catch(() => {});
 }
 
+/** C1-05 (run-10 cycle-1, DBG-01): minimum age before a tmp-* topic file is
+ *  treated as orphaned. bootstrapImageProcessingQueue is NOT startup-only — it
+ *  re-runs on every continuation batch and every 30 s bootstrap retry — so an
+ *  un-gated cleanup could delete an admin's mid-stream topic-cover upload
+ *  (processTopicImage pipes the upload to tmp-{uuid} before Sharp reads it).
+ *  Mirrors ORPHANED_DERIVATIVE_TEMP_MIN_AGE_MS in image-queue.ts (kept as a
+ *  local constant — importing it from image-queue would create a module cycle,
+ *  since image-queue imports this module for the bootstrap cleanup call). */
+export const ORPHANED_TOPIC_TEMP_MIN_AGE_MS = 60 * 60 * 1000;
+
 /**
  * Remove orphaned tmp-* files from the private topic temp dir and the legacy
  * public resources dir. Legacy public tmp files may exist from older releases.
- * Called at startup from bootstrapImageProcessingQueue (image-queue.ts),
- * similar to cleanOrphanedTmpFiles for image upload directories.
+ * Called from bootstrapImageProcessingQueue (image-queue.ts), similar to
+ * cleanOrphanedTmpFiles for image upload directories — and age-gated exactly
+ * like that sibling, so fresh in-flight uploads are never raced (C1-05).
  */
 export async function cleanOrphanedTopicTempFiles(): Promise<void> {
     try {
+        const now = Date.now();
         await Promise.all([TOPIC_TMP_ROOT, RESOURCES_DIR].map(async (dir) => {
-            const entries = await fs.readdir(dir).catch(() => []);
+            const entries = await fs.readdir(dir).catch(() => [] as string[]);
             const tmpFiles = entries.filter(f => f.startsWith('tmp-'));
-            if (tmpFiles.length > 0) {
-                console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned temp files from ${dir}`);
-                await Promise.all(tmpFiles.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
+            if (tmpFiles.length === 0) return;
+            const staleFiles: string[] = [];
+            await Promise.all(tmpFiles.map(async (f) => {
+                try {
+                    const stat = await fs.stat(path.join(dir, f));
+                    if (now - stat.mtimeMs >= ORPHANED_TOPIC_TEMP_MIN_AGE_MS) {
+                        staleFiles.push(f);
+                    }
+                } catch {
+                    // File vanished mid-scan — nothing to clean.
+                }
+            }));
+            if (staleFiles.length > 0) {
+                console.info(`[Cleanup] Removing ${staleFiles.length} orphaned temp files from ${dir}`);
+                await Promise.all(staleFiles.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
             }
         }));
     } catch {

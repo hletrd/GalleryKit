@@ -64,6 +64,7 @@ import {
     processTopicImage,
     deleteTopicImage,
     cleanOrphanedTopicTempFiles,
+    ORPHANED_TOPIC_TEMP_MIN_AGE_MS,
 } from '@/lib/process-topic-image';
 
 // ---------------------------------------------------------------------------
@@ -177,18 +178,33 @@ describe('cleanOrphanedTopicTempFiles', () => {
     });
 
     it('removes stale tmp-* files and leaves non-tmp files intact', async () => {
-        // Write a stale temp file and a regular .webp file into the isolated dir.
+        // Write a temp file and BACKDATE its mtime past the orphan age gate
+        // (C1-05: only genuinely stale files may be cleaned), plus a regular
+        // .webp file into the isolated dir.
         const tmpFile = path.join(topicResourcesDir, `tmp-test-${Date.now()}`);
         const keepFile = path.join(topicResourcesDir, `keep-${Date.now()}.webp`);
         await fs.writeFile(tmpFile, 'stale');
         await fs.writeFile(keepFile, 'keep');
+        const past = new Date(Date.now() - ORPHANED_TOPIC_TEMP_MIN_AGE_MS - 60_000);
+        await fs.utimes(tmpFile, past, past);
 
         await cleanOrphanedTopicTempFiles();
 
-        // tmp-* file must be gone.
+        // stale tmp-* file must be gone.
         await expect(fs.access(tmpFile)).rejects.toThrow();
         // non-tmp file must remain.
         await expect(fs.access(keepFile)).resolves.toBeUndefined();
+    });
+
+    it('C1-05: leaves FRESH tmp-* files alone (in-flight topic-cover uploads must not be raced)', async () => {
+        const freshTmpFile = path.join(topicResourcesDir, `tmp-fresh-${Date.now()}`);
+        await fs.writeFile(freshTmpFile, 'in-flight upload bytes');
+
+        await cleanOrphanedTopicTempFiles();
+
+        // A just-written tmp file is younger than the age gate and must survive.
+        await expect(fs.access(freshTmpFile)).resolves.toBeUndefined();
+        await fs.unlink(freshTmpFile).catch(() => {});
     });
 
     it('is a no-op when there are no tmp-* files (no throw, no side effects)', async () => {
