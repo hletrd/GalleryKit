@@ -58,7 +58,8 @@ RUN npm ci --workspace=apps/web --include=optional && \
         @parcel/watcher-linux-${npm_arch}-glibc@2.5.6 \
         @swc/core-linux-${npm_arch}-gnu@1.15.41 \
         @next/swc-linux-${npm_arch}-gnu@16.2.9 \
-        lightningcss-linux-${npm_arch}-gnu@1.32.0
+        lightningcss-linux-${npm_arch}-gnu@1.32.0 && \
+    mkdir -p apps/web/node_modules
 
 FROM build-base AS prod-deps
 WORKDIR /app
@@ -77,7 +78,8 @@ RUN npm ci --omit=dev --workspace=apps/web && \
     npm install --workspace=apps/web --omit=dev --include=optional --no-save \
         @img/sharp-libvips-linux-${npm_arch}@1.2.4 \
         @img/sharp-linux-${npm_arch}@0.34.5 && \
-    node -e "require('sharp')"
+    node -e "require('sharp')" && \
+    mkdir -p apps/web/node_modules
 
 FROM build-base AS builder
 ARG BASE_URL
@@ -92,6 +94,17 @@ WORKDIR /app
 # Full node_modules for build step (includes devDependencies needed by next build)
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Workspace-nested node_modules: npm's workspace installer places some
+# packages under apps/web/node_modules instead of hoisting them to the root
+# (e.g. drizzle-kit 0.31.x and its private esbuild tree, per the committed
+# package-lock.json layout). The root COPY above only brings /app/node_modules,
+# and `COPY . .` cannot supply the nested tree because the build context
+# excludes node_modules — so without this line the in-image `next build`
+# typecheck fails with TS2307 "Cannot find module 'drizzle-kit'" in
+# drizzle.config.ts (tsconfig includes **/*.ts). The deps stage guarantees the
+# directory exists via `mkdir -p` even if a future lockfile hoists everything.
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 
 WORKDIR /app/apps/web
 RUN node scripts/ensure-site-config.mjs
@@ -142,6 +155,12 @@ COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 # mysql2, and drizzle-orm, while runtime paths need externalized native packages
 # such as sharp for uploads, topic covers, CLIP image embedding, and OG cards.
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+# Workspace-nested runtime deps (same class as the builder-stage nested copy):
+# today every nested package under apps/web/node_modules is dev-only, so this
+# copies an empty directory — but if a future lockfile nests a PRODUCTION dep
+# there, the runtime would break without it. prod-deps guarantees the source
+# directory exists via `mkdir -p`.
+COPY --from=prod-deps --chown=node:node /app/apps/web/node_modules ./apps/web/node_modules
 
 # Create persistence directories and cache.
 # /app/data/models/clip is created here so the path exists even before the

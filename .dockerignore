@@ -1,5 +1,11 @@
 node_modules
+# Nested workspace installs too (apps/web/node_modules): a bare `node_modules`
+# only matches the context root, so a host-side apps/web/node_modules (macOS
+# natives) would otherwise leak into `COPY . .` and diverge local smoke builds
+# from the deploy host. In-image deps come exclusively from the deps stage.
+**/node_modules
 .next
+**/.next
 .git
 .context
 .omx
@@ -8,6 +14,11 @@ node_modules
 .claude
 .claude/
 ._*
+# AppleDouble metadata companions appear NEXT TO files on NFS/SMB-shared
+# checkouts (e.g. apps/web/._data) and BuildKit's tar sender chokes on their
+# xattrs; the bare `._*` above only matches the context root. Same fix as the
+# long-standing `**/._*` entry in apps/web/.dockerignore.
+**/._*
 *.tsbuildinfo
 .github
 .vscode
