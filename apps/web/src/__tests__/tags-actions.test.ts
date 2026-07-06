@@ -5,6 +5,7 @@ const {
     updateMock,
     insertMock,
     deleteMock,
+    executeMock,
     transactionMock,
     isAdminMock,
     getCurrentUserMock,
@@ -18,6 +19,7 @@ const {
     updateMock: vi.fn(),
     insertMock: vi.fn(),
     deleteMock: vi.fn(),
+    executeMock: vi.fn(),
     transactionMock: vi.fn(),
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
@@ -62,12 +64,31 @@ function makeDeleteChain<T>(result: T) {
     };
 }
 
+// C2-17 (run-10 c2): `drizzle-orm` is NOT mocked in this file, so `sql\`...\``
+// calls in tags.ts produce real drizzle SQL objects with a public
+// `queryChunks` array (StringChunk pieces interleaved with raw interpolated
+// values). These helpers let tests assert on the join-UPDATE's shape and
+// bound tag id without needing to mock the `sql` tag itself.
+function collectSqlChunks(value: unknown): unknown[] {
+    return (value as { queryChunks: unknown[] }).queryChunks;
+}
+
+function sqlKeywords(value: unknown): string {
+    return collectSqlChunks(value)
+        .filter((chunk): chunk is { value: string[] } => (
+            !!chunk && typeof chunk === 'object' && Array.isArray((chunk as { value?: unknown }).value)
+        ))
+        .map((chunk) => chunk.value.join(''))
+        .join('');
+}
+
 vi.mock('@/db', () => ({
     db: {
         select: selectMock,
         update: updateMock,
         insert: insertMock,
         delete: deleteMock,
+        execute: executeMock,
         transaction: transactionMock,
     },
     tags: {
@@ -114,7 +135,7 @@ vi.mock('@/lib/action-guards', () => ({
     requireSameOriginAdmin: vi.fn(async () => null),
 }));
 
-import { addTagToImage, batchAddTags, batchUpdateImageTags, updateTag } from '@/app/actions/tags';
+import { addTagToImage, batchAddTags, batchUpdateImageTags, deleteTag, updateTag } from '@/app/actions/tags';
 
 describe('tag actions', () => {
     beforeEach(() => {
@@ -147,30 +168,23 @@ describe('tag actions', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
-    it('updates a tag with audit, dashboard revalidation, and linked-image timestamp touch', async () => {
-        const txImageUpdateWhere = vi.fn().mockResolvedValue([{ affectedRows: 2 }]);
+    it('updates a tag with audit, dashboard revalidation, and a join-UPDATE timestamp touch', async () => {
         const txTagUpdateWhere = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
+        const txExecute = vi.fn().mockResolvedValue([{}]);
         selectMock.mockReturnValueOnce(makeSelectChain([{ id: 7 }]));
         transactionMock.mockImplementation(async (callback: (tx: {
-            select: typeof selectMock;
             update: typeof updateMock;
+            execute: typeof executeMock;
         }) => Promise<void>) => {
-            const txSelect = vi.fn().mockReturnValueOnce(makeSelectChain([{ id: 10 }, { id: 11 }]));
-            const txUpdate = vi.fn()
-                .mockReturnValueOnce({
-                    set: vi.fn().mockReturnValue({
-                        where: txTagUpdateWhere,
-                    }),
-                })
-                .mockReturnValueOnce({
-                    set: vi.fn().mockReturnValue({
-                        where: txImageUpdateWhere,
-                    }),
-                });
+            const txUpdate = vi.fn().mockReturnValueOnce({
+                set: vi.fn().mockReturnValue({
+                    where: txTagUpdateWhere,
+                }),
+            });
 
             await callback({
-                select: txSelect,
                 update: txUpdate,
+                execute: txExecute,
             });
         });
 
@@ -182,7 +196,40 @@ describe('tag actions', () => {
         });
         expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/admin/tags', '/admin/dashboard', '/');
         expect(txTagUpdateWhere).toHaveBeenCalled();
-        expect(txImageUpdateWhere).toHaveBeenCalled();
+
+        // C2-17 (run-10 c2): a single join-UPDATE replaces the SELECT-all-tagged
+        // image ids + UPDATE ... IN pair — assert the join-UPDATE ran with the
+        // right shape and tag id binding instead of a second .update() call.
+        expect(txExecute).toHaveBeenCalledTimes(1);
+        const [sqlArg] = txExecute.mock.calls[0];
+        expect(sqlKeywords(sqlArg)).toMatch(/UPDATE[\s\S]*JOIN[\s\S]*SET[\s\S]*WHERE/);
+        expect(collectSqlChunks(sqlArg)).toContain(7);
+    });
+
+    it('skips the join-UPDATE when the tag row was not actually updated', async () => {
+        const txTagUpdateWhere = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
+        const txExecute = vi.fn().mockResolvedValue([{}]);
+        selectMock.mockReturnValueOnce(makeSelectChain([{ id: 7 }]));
+        transactionMock.mockImplementation(async (callback: (tx: {
+            update: typeof updateMock;
+            execute: typeof executeMock;
+        }) => Promise<void>) => {
+            const txUpdate = vi.fn().mockReturnValueOnce({
+                set: vi.fn().mockReturnValue({
+                    where: txTagUpdateWhere,
+                }),
+            });
+
+            await callback({
+                update: txUpdate,
+                execute: txExecute,
+            });
+        });
+
+        await expect(updateTag(7, 'Night Sky')).resolves.toEqual({ error: 'tagNotFound' });
+
+        expect(txExecute).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 
     it('does not audit or revalidate updateTag failures before mutation', async () => {
@@ -191,6 +238,72 @@ describe('tag actions', () => {
         await expect(updateTag(7, 'Night Sky')).resolves.toEqual({ error: 'tagNotFound' });
 
         expect(transactionMock).not.toHaveBeenCalled();
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+        expect(revalidateLocalizedPathsMock).not.toHaveBeenCalled();
+    });
+
+    it('touches images via a join-UPDATE BEFORE deleting image_tags rows, then audits and revalidates', async () => {
+        const callOrder: string[] = [];
+        const txExecute = vi.fn().mockImplementation(async () => {
+            callOrder.push('execute');
+            return [{}];
+        });
+        const txImageTagsDeleteWhere = vi.fn().mockImplementation(async () => {
+            callOrder.push('delete-image-tags');
+            return [{ affectedRows: 3 }];
+        });
+        const txTagDeleteWhere = vi.fn().mockImplementation(async () => {
+            callOrder.push('delete-tag');
+            return [{ affectedRows: 1 }];
+        });
+        transactionMock.mockImplementation(async (callback: (tx: {
+            execute: typeof executeMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            const txDelete = vi.fn()
+                .mockReturnValueOnce({ where: txImageTagsDeleteWhere })
+                .mockReturnValueOnce({ where: txTagDeleteWhere });
+
+            await callback({
+                execute: txExecute,
+                delete: txDelete,
+            });
+        });
+
+        await expect(deleteTag(7)).resolves.toEqual({ success: true });
+
+        // C2-17 (run-10 c2): the join-UPDATE reads image_tags as its row
+        // source, so it MUST run before those rows are deleted below.
+        expect(callOrder).toEqual(['execute', 'delete-image-tags', 'delete-tag']);
+
+        const [sqlArg] = txExecute.mock.calls[0];
+        expect(sqlKeywords(sqlArg)).toMatch(/UPDATE[\s\S]*JOIN[\s\S]*SET[\s\S]*WHERE/);
+        expect(collectSqlChunks(sqlArg)).toContain(7);
+
+        expect(logAuditEventMock).toHaveBeenCalledWith(1, 'tag_delete', 'tag', '7');
+        expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/admin/tags', '/admin/dashboard', '/');
+    });
+
+    it('reports tagNotFound and skips audit when deleteTag affects no rows', async () => {
+        const txExecute = vi.fn().mockResolvedValue([{}]);
+        const txImageTagsDeleteWhere = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
+        const txTagDeleteWhere = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
+        transactionMock.mockImplementation(async (callback: (tx: {
+            execute: typeof executeMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            const txDelete = vi.fn()
+                .mockReturnValueOnce({ where: txImageTagsDeleteWhere })
+                .mockReturnValueOnce({ where: txTagDeleteWhere });
+
+            await callback({
+                execute: txExecute,
+                delete: txDelete,
+            });
+        });
+
+        await expect(deleteTag(7)).resolves.toEqual({ error: 'tagNotFound' });
+
         expect(logAuditEventMock).not.toHaveBeenCalled();
         expect(revalidateLocalizedPathsMock).not.toHaveBeenCalled();
     });

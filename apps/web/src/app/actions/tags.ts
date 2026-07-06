@@ -88,19 +88,21 @@ export async function updateTag(id: number, name: string) {
 
         let updateRows = 0;
         await db.transaction(async (tx) => {
-            const affectedImages = await tx.select({ id: imageTags.imageId })
-                .from(imageTags)
-                .where(eq(imageTags.tagId, id));
-            const affectedImageIds = affectedImages.map((image) => image.id);
-
             const [updateResult] = await tx.update(tags)
                 .set({ name: trimmedName, slug })
                 .where(eq(tags.id, id));
             updateRows = updateResult.affectedRows;
-            if (updateRows > 0 && affectedImageIds.length > 0) {
-                await tx.update(images)
-                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-                    .where(inArray(images.id, affectedImageIds));
+            if (updateRows > 0) {
+                // C2-17 (run-10 c2): single join-UPDATE instead of SELECT-all-tagged
+                // image ids + UPDATE ... IN, which shipped a multi-MB SQL packet and
+                // held a long images row-lock for tags spanning tens of thousands of
+                // photos.
+                await tx.execute(sql`
+                    UPDATE ${images}
+                    JOIN ${imageTags} ON ${imageTags.imageId} = ${images.id}
+                    SET ${images.updated_at} = CURRENT_TIMESTAMP
+                    WHERE ${imageTags.tagId} = ${id}
+                `);
             }
         });
         if (updateRows === 0) {
@@ -158,19 +160,19 @@ export async function deleteTag(id: number) {
         // Delete imageTags explicitly before tag (defense in depth alongside FK cascade)
         let deletedRows = 0;
         await db.transaction(async (tx) => {
-            const affectedImages = await tx.select({ id: imageTags.imageId })
-                .from(imageTags)
-                .where(eq(imageTags.tagId, id));
-            const affectedImageIds = affectedImages.map((image) => image.id);
-
+            // C2-17 (run-10 c2): single join-UPDATE instead of SELECT-all-tagged
+            // image ids + UPDATE ... IN. Must run BEFORE the image_tags rows for
+            // this tag are deleted below — the join is the row source, and once
+            // those rows are gone there is nothing left to join against.
+            await tx.execute(sql`
+                UPDATE ${images}
+                JOIN ${imageTags} ON ${imageTags.imageId} = ${images.id}
+                SET ${images.updated_at} = CURRENT_TIMESTAMP
+                WHERE ${imageTags.tagId} = ${id}
+            `);
             await tx.delete(imageTags).where(eq(imageTags.tagId, id));
             const [delResult] = await tx.delete(tags).where(eq(tags.id, id));
             deletedRows = delResult.affectedRows;
-            if (deletedRows > 0 && affectedImageIds.length > 0) {
-                await tx.update(images)
-                    .set({ updated_at: sql`CURRENT_TIMESTAMP` })
-                    .where(inArray(images.id, affectedImageIds));
-            }
         });
         if (deletedRows === 0) {
             return { error: t('tagNotFound') };
