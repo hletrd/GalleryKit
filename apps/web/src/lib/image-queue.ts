@@ -16,7 +16,7 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
 
 import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
@@ -676,7 +676,7 @@ async function acquireImageProcessingClaim(jobId: number): Promise<PoolConnectio
             return lockConnection;
         }
     } catch (err) {
-        lockConnection.release();
+        destroyPooledAdvisoryLockConnectionOnAcquireError(lockConnection, `image processing claim ${jobId}`, err);
         throw err;
     }
 

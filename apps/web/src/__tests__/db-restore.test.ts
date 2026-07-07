@@ -84,8 +84,10 @@ describe('backup dump validation', () => {
         expect(dumpDatabaseSource).toContain('connection.getConnection()');
         expect(dumpDatabaseSource).toContain('SELECT GET_LOCK(?, 0) AS acquired');
         expect(dumpDatabaseSource).toContain('[LOCK_DB_RESTORE]');
+        expect(dumpDatabaseSource).toContain("destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'backup restore lock', err)");
+        expect(dumpDatabaseSource).toContain("console.error('Database backup failed before child process completed:', err)");
         expect(dumpDatabaseSource).toContain("releasePooledAdvisoryLocks(conn, [LOCK_DB_RESTORE], 'backup finally')");
-        expect(dumpDatabaseSource).toMatch(/finally\s*\{[\s\S]*releasePooledAdvisoryLocks[\s\S]*else\s*\{[\s\S]*conn\.release\(\)/);
+        expect(dumpDatabaseSource).toMatch(/finally\s*\{[\s\S]*releasePooledAdvisoryLocks[\s\S]*else if \(conn\)\s*\{[\s\S]*conn\.release\(\)/);
     });
 
     it('validates the generated backup header before returning a downloadable filename', () => {

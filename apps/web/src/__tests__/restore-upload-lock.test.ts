@@ -94,7 +94,7 @@ describe('restore/upload writer coordination', () => {
     it('does not reject corrective restore attempts before advisory-lock acquisition while maintenance is active', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
         const functionStart = source.indexOf('export async function restoreDatabase');
-        const getConnectionIdx = source.indexOf('const conn = await connection.getConnection()', functionStart);
+        const getConnectionIdx = source.indexOf('conn = await connection.getConnection()', functionStart);
         const setupWindow = source.slice(functionStart, getConnectionIdx);
 
         expect(setupWindow).not.toContain('getRestoreMaintenanceMessage');

@@ -1,102 +1,146 @@
-# Debugger Review - Cycle 15
+# Debugger Review - Cycle 17
 
-Date: 2026-07-07 KST
-Reviewer lane: debugger
-Scope: whole-repository latent bug and failure-mode review, with emphasis on null/edge-state bugs, async hazards, race windows, restore/upload failures, data inconsistency, path handling, and UI runtime errors.
+Date: 2026-07-08 KST
+Reviewer lane: debugger subagent
+Scope: whole-repository latent bug and failure-mode review, focused on regressions, error paths, lifecycle gaps, race conditions, crashes, surprising runtime states, and bugs tests may miss.
 
-Constraints honored: review-only; no application source, database, service, commit, push, or deploy changes. The only write in this lane is this review artifact.
+Constraints honored: review-only; no fixes, no database/service changes, no deploy, no commit, no push. The only write is this review artifact.
 
 ## Inventory And Coverage
 
-Required instructions read before reviewing:
+Required instructions and repo context read before judging behavior:
 
 - `AGENTS.md`
-- `CLAUDE.md`, focused on architecture, security, restore/race protections, schema/migration rules, image pipeline, semantic-search activation, deployment/runtime topology, and test/quality-gate sections
+- `CLAUDE.md`, especially architecture, restore/race protections, schema/migration rules, deploy/runtime topology, semantic-search activation, CLIP backfill, and quality gates
 - `.context/reviews/prompts/common_review_scope.md`
 - `.context/reviews/prompts/debugger.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- `.context/plans/README.md`
 
-Inventory built first:
+Debugging-relevant inventory built first:
 
-- Full source inventory: 617 files under `apps/web/src`.
-- Debugger-relevant runtime inventory: 316 files across server actions, API routes, core libraries, schema/migrations/scripts, app routes/pages/components, and e2e/test surfaces used as regression evidence.
-- Server actions examined: `admin-backfill.ts`, `admin-users.ts`, `auth.ts`, `collections.ts`, `embeddings.ts`, `images.ts`, `lr-tokens.ts`, `public.ts`, `seo.ts`, `settings.ts`, `sharing.ts`, `tags.ts`, `topics.ts`.
-- API routes examined: admin DB download, Lightroom upload, health/live, OG image routes, semantic search, similar search, and upload-serving routes.
-- Core library surfaces examined: DB pool, restore maintenance, durable restore marker, admin mutation barrier, upload-processing contract lock, background DB write drain, maintenance scheduler, pending session revocations, upload tracker, upload paths/storage, image queue, image processing, topic-image processing, data access, rate limits, API auth/admin tokens, audit logging, gallery config, CLIP/semantic helpers, smart collections, and feed/SEO helpers.
-- Data/schema/deploy surfaces examined: `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, Drizzle SQL/journal metadata, Docker/deploy/runtime entry points, and backup/restore scripts.
-- UI runtime surface examined: locale app routes/pages plus reusable components under `apps/web/src/components`, with static sweeps for browser globals, unsafe HTML, date/JSON parsing, effect cleanup, non-null assertions, and route parameter assumptions.
-- Regression evidence reviewed from tests where relevant, but tests and comments were not treated as proof of correctness without matching source behavior.
+- `apps/web/src`: 618 TypeScript/TSX files total.
+- Runtime/app source: 258 TS/TSX files across `app`, `components`, `lib`, and `db`, plus `proxy.ts`, `instrumentation.ts`, `i18n`, and `types`.
+- Tests: 356 unit/source-contract test files under `apps/web/src/__tests__`.
+- E2E: 12 files under `apps/web/e2e`, including hydration, origin guard, public/admin, focus restore, and visual reset specs.
+- Migrations: 30 SQL migrations (`0000` through `0029`) plus Drizzle journal/snapshots under `apps/web/drizzle`.
+- Scripts: 28 operational/build/migration/backfill scripts under `apps/web/scripts`, including `migrate.js`, restore recovery, CLIP/model seed, color and semantic backfills, entrypoint, and lint guards.
+- Config/deploy surfaces: `apps/web/package.json`, root package/lock context, `next.config.ts`, `Dockerfile`, `docker-compose.yml`, `deploy.sh`, `nginx/default.conf`, ESLint, TypeScript, Vitest, Playwright, and env examples.
+- Review/context surfaces: current review prompts and plan index were read; archived `.context` reviews/plans were searched where useful but not fully reread because they are historical, not active behavior.
 
-No relevant file category in this inventory was intentionally skipped. High-risk files were read directly; broad UI and test surfaces were covered by full-file inventories plus targeted static sweeps for debugger-specific failure modes.
+High-risk files were read directly: DB pool, advisory lock helpers, restore actions, restore maintenance marker, mutation barrier, upload action/API, upload tracker, image queue, queue shutdown, background DB writes, CLIP model/embedding/backfill paths, semantic/similar routes, settings/admin/topic/user actions, migration/deploy scripts, and revalidation. Broad UI and test surfaces were covered by full inventories plus targeted static sweeps for browser globals, hydration, storage, aborts, semantic-production gates, advisory locks, and request lifecycle hazards.
+
+No runtime/source/migration/config/deploy category relevant to the requested failure modes was intentionally skipped. Existing unrelated dirty review artifacts were left untouched.
 
 ## Confirmed Issues
 
-### DBG15-01 - In-app color backfill trigger bypasses the restore foreground-mutation barrier
+### DBG17-01 - Lightroom upload can leak quota claims when upload-directory creation fails
 
-Severity: High
+Severity: Medium
 Confidence: High
 
 Files/regions:
 
-- `apps/web/src/app/actions/admin-backfill.ts:32-61`
-- `apps/web/src/lib/admin-mutation-barrier.ts:15-29`
-- `apps/web/src/app/[locale]/admin/db-actions.ts:497-531`
-- Comparison path with the expected pattern: `apps/web/src/app/actions/embeddings.ts:59-70`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:272-301`
+- Settled neighboring error paths: `apps/web/src/app/api/admin/lr/upload/route.ts:303-312`
+- Existing test mock always succeeds: `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:74`
 
 Why this is a problem:
 
-`triggerBackfill()` is a mutating admin action: it calls `triggerAdminBackfill()` to start the in-app color-pipeline backfill and then writes an `admin_backfill_triggered` audit row. It performs only same-origin and admin checks. It does not call `getRestoreMaintenanceMessage(...)`, and it never holds `acquireAdminMutationSlot()` for the duration of the action.
-
-That breaks the restore design documented in `admin-mutation-barrier.ts`: every foreground admin mutation admitted before the durable restore marker flips must hold a shared slot so `restoreDatabase()` can drain it before import. `restoreDatabase()` explicitly depends on that contract at `db-actions.ts:520-531`; actions without a slot are invisible to `drainAdminMutationsForRestore()`.
+The Lightroom upload route makes a conservative upload-tracker claim before slow work, then settles it on known rejection/error branches. After topic verification, it calls `await ensureUploadDirectories()` at line 301 outside a local catch. If that mkdir/chmod path throws because the bind mount is missing, read-only, permission-denied, or otherwise unhealthy, control jumps to the outer `finally` that releases only the upload-processing contract lock. The upload tracker claim is not settled and the route returns a framework-level 500 instead of the JSON error shape used by adjacent branches.
 
 Concrete failure scenario:
 
-1. An admin clicks the in-app color backfill trigger while another admin starts a DB restore.
-2. `triggerBackfill()` passes its entry checks before the restore marker flips, but it does not acquire a mutation slot.
-3. The backfill runner returns quickly, or returns `queued` with zero candidates and releases its backfill lock, while the server action is still before or inside the audit write at `admin-backfill.ts:51-60`.
-4. The restore sets durable maintenance, drains all registered foreground mutation slots, sees none for this action, and proceeds with the import.
-5. The untracked action can then write its audit event, or complete a trigger based on pre-restore state, after the restore has replaced tables. That is the exact post-restore write race the foreground barrier was added to prevent.
+1. `apps/web/public/uploads` or the private original root is temporarily unwritable after a host mount/configuration issue.
+2. A Lightroom client uploads a valid multipart request.
+3. The route preclaims `count=1` and the request byte size, verifies the topic, then `ensureUploadDirectories()` throws.
+4. The client sees an opaque 500, and the preclaim remains charged for the rolling tracker window until pruning/expiry. Repeated retries can exhaust that admin/IP's upload budget even though no file was accepted.
 
 Suggested fix:
 
-Give `triggerBackfill()` the same restore fence shape used by other mutating admin actions:
+Wrap `ensureUploadDirectories()` in the same settle-and-return style as `getGalleryConfigStrict()` and disk-space failures. On failure, call `settleTrackerToActual(false)` and return a no-store JSON error, likely 507 for storage/unwritable paths or 503 for transient setup failure. Add a route test that mocks `ensureUploadDirectories` rejecting and asserts tracker settlement plus JSON status.
 
-- Check `getRestoreMaintenanceMessage(t('restoreInProgress'))` immediately after translations and before same-origin/admin work returns success.
-- Hold `using mutationSlot = acquireAdminMutationSlot();` across the whole trigger/audit body, returning `restoreInProgress` when acquisition fails.
-- Keep `getBackfillStatus()` read-only and exempt.
+### DBG17-02 - Sidecar CLIP backfill can permanently starve later images behind a failed prefix
 
-The embedding backfill action at `apps/web/src/app/actions/embeddings.ts:59-70` is the closest local template.
+Severity: Medium
+Confidence: High
+
+Files/regions:
+
+- `apps/web/scripts/backfill-clip-embeddings.ts:151-190`
+- `apps/web/scripts/backfill-clip-embeddings.ts:199-202`
+- `apps/web/scripts/backfill-clip-embeddings.ts:234-246`
+
+Why this is a problem:
+
+The sidecar semantic backfill starts each process with `cursor = 0`, scans processed images missing the target `model_version`, and stops when `processed + failed >= SEMANTIC_SCAN_LIMIT`. Production failures such as missing private originals increment `failed` but do not create an embedding row, so those low-ID rows remain eligible on the next invocation. Because the cursor is process-local, every retry starts at the same failed low-ID rows.
+
+Concrete failure scenario:
+
+1. Production has at least `SEMANTIC_SCAN_LIMIT` old processed images whose originals are missing or unreadable.
+2. The operator follows the documented `--production --force` backfill runbook.
+3. The script attempts only the failed prefix, logs failures, exits nonzero, and does not reach newer valid rows.
+4. Re-running the same command repeats the same prefix from `cursor = 0`; later images never receive embeddings, so production semantic search remains partially or mostly unseeded despite repeated operator retries.
+
+Suggested fix:
+
+Make progress durable across failed rows. Options: persist a backfill cursor/checkpoint for sidecar runs, mark failed image IDs with a retry/dead-letter state that the candidate query can skip for the current activation pass, or separate "rows scanned" from "rows attempted" so the script can continue past failures while still bounding inference work. Add a regression with enough synthetic failed low-ID candidates to prove a later valid row is reached on a subsequent run.
 
 ## Likely Issues
 
-None found beyond the confirmed restore-barrier gap above.
+### DBG17-03 - Pooled advisory-lock acquisition errors can return lock-holding sessions to the pool
+
+Severity: High
+Confidence: Medium
+
+Files/regions:
+
+- `apps/web/src/lib/upload-processing-contract-lock.ts:27-75`
+- `apps/web/src/lib/image-queue.ts:668-684`
+- `apps/web/src/lib/admin-backfill-runner.ts:324-342`
+- `apps/web/src/lib/admin-backfill-runner.ts:363-379`
+- `apps/web/src/app/actions/topics.ts:70-94`
+- `apps/web/src/app/actions/admin-users.ts:239-315`
+- `apps/web/src/app/actions/embeddings.ts:113-214`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:173-184`, `apps/web/src/app/[locale]/admin/db-actions.ts:349-358`, `apps/web/src/app/[locale]/admin/db-actions.ts:401-409`, `apps/web/src/app/[locale]/admin/db-actions.ts:425-440`, `apps/web/src/app/[locale]/admin/db-actions.ts:573-581`
+- Test that currently locks in the unsafe upload-contract behavior: `apps/web/src/__tests__/upload-processing-contract-lock.test.ts:118-127`
+
+Why this is a problem:
+
+The repo correctly hardened advisory-lock release failures with `releasePooledAdvisoryLocks(...)`, which destroys pooled connections when `RELEASE_LOCK` cannot be proven. The acquisition side still has an ambiguity gap. Several pooled call sites issue `SELECT GET_LOCK(...)`, keep `lockAcquired = false` until the result is read, and release the connection back to the pool when the query throws.
+
+If MySQL executed `GET_LOCK` but the client observes a mid-round-trip error before receiving the row, the session may hold the advisory lock. Returning that live session to the pool can poison future unrelated borrowers and wedge fail-fast lock paths until process restart. This is the same failure class the release helper was designed to prevent, just on acquisition rather than release.
+
+Concrete failure scenario:
+
+1. A network/proxy blip occurs after MySQL grants `gallerykit_upload_processing_contract` but before mysql2 resolves the query.
+2. `acquireUploadProcessingContractLock()` catches the query error while `lockAcquired` is still false and calls `conn.release()`.
+3. The pooled session still holds the lock. Future uploads, restore setup, and settings changes see the contract lock as busy or behave inconsistently depending on which pooled connection they borrow.
+4. Equivalent wedges are possible for per-image processing locks, color/semantic backfills, topic route mutations, admin deletion, and restore/backup locks.
+
+Suggested fix:
+
+Centralize pooled advisory-lock acquisition in a helper. On explicit `GET_LOCK` result `1`, return a lock handle; on explicit `0`/`NULL`, release normally; on any query error before an explicit result, destroy the connection instead of releasing it. Update all pooled `GET_LOCK` acquisition sites to use it. Replace the current upload-contract test expectation at `upload-processing-contract-lock.test.ts:118-127` with a destroy-on-query-error assertion, and add source/behavior coverage for the other acquisition sites.
 
 ## Risks Requiring Manual Validation
 
-- I did not run the full quality gate suite in this review-only lane. If DBG15-01 is fixed, validate with targeted server-action tests plus the standard gates: lint, API auth/origin/rate-limit linters, typecheck, build, and unit tests.
-- I did not run a live MySQL restore drill. The finding is source-confirmed from the missing barrier call and restore drain contract, but the exact timing window should be covered by a regression test rather than manual timing.
+- Browser upload DB-outage UX: `apps/web/src/app/actions/images.ts:307-316` now settles the preclaim before rethrowing a topic-lookup DB error, so the quota leak is closed, but the user-facing server-action behavior is still a framework error rather than a localized return object. Manually validate whether the admin UI presents a tolerable failure during a DB restart.
+- Upload cancellation: the Lightroom route has many settle paths and the server action has a one-shot claim settler, but I did not run a live client-disconnect drill. The source-confirmed leak above is independent of cancellation.
+- Production reverse proxy: `apps/web/nginx/default.conf` is a template and `CLAUDE.md` notes deploys do not apply host nginx changes automatically. Manual production validation should confirm the host copy still matches the current route/body-size/rate-limit contract.
+- Semantic production activation: source gates correctly require DB mode plus `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`apps/web/src/lib/gallery-config.ts:123-126`) and the routes reject disabled mode, but actual deployed model weights/row counts require host validation per the runbook.
 
 ## Revalidated Non-Findings
 
-- Prior cycle DB child-process watchdog finding: no longer active. Timeout handling now lives in `apps/web/src/lib/db-child-watchdog.ts`, and behavioral tests cover SIGTERM/SIGKILL sequencing.
-- Prior cycle DB pool init-timeout finding: no longer active. `apps/web/src/db/index.ts` destroys a connection that times out during initialization instead of releasing it back to the pool, and the regression test asserts `destroy()`.
-- Browser and Lightroom uploads: rejected as current findings. Both paths use restore-maintenance checks, admin mutation slots where applicable, upload-processing contract locks, tracker claim/settlement, late restore checks, disk cleanup, and queue handoff safeguards.
-- Backup/restore/import: rejected as an additional finding. The reviewed path uses DB restore advisory locks, durable maintenance, upload/backfill locks, SQL scanning, child-process watchdogs, bounded drains, and post-restore migration assertions.
-- Image queue and processing: rejected as current findings. Queue bootstrap, retry, permanent failure persistence, per-image locks, delete-during-processing cleanup, derivative backup/restore, and shutdown/restore drains are present.
-- Public expensive endpoints: rejected as current findings. Semantic/similar search, OG routes, public search/load-more, and share view writes use validation and rate-limit pre-increment or bounded background-write tracking.
-- Upload path traversal/symlink escape: rejected as current findings. Upload serving and storage helpers validate top-level directories, path segments, realpaths, lstat/symlink state, extensions, and original-file privacy boundaries.
-- Schema/migration drift: rejected as current findings. Current schema, migration journal, and `reconcileLegacySchema()` were checked for the latest image/settings/semantic/feed columns and indexes; the migrator includes committed-hash postconditions.
-- UI browser-global/runtime hazards: rejected as current findings. Static sweeps found browser APIs inside client components/effects/handlers or guarded script injection paths, with no unguarded server-render browser global use in the reviewed app/component surface.
+- DB outage and pool exhaustion: `apps/web/src/db/index.ts` caps the pool (`connectionLimit=10`, `queueLimit=20`) and wraps borrowed connection startup in a timeout/destroy path. Write paths that require upload privacy/settings use `getGalleryConfigStrict()`; read paths intentionally fall back to defaults through `getGalleryConfig()`.
+- Restore interruption: `db-actions.ts` uses durable restore maintenance, queue/background-write drains, admin mutation barrier, upload/backfill locks, child-process watchdogs, temp-file cleanup, and recovery tooling. The broad design is coherent; no new source-confirmed restore-interruption bug was found.
+- Child-process timeout: `apps/web/src/lib/db-child-watchdog.ts` handles timeout with stdio teardown, SIGTERM, SIGKILL fallback, listener cleanup, and timer cleanup.
+- Advisory-lock release failure: `apps/web/src/lib/advisory-lock-release.ts` destroys pooled sessions on failed `RELEASE_LOCK`; the remaining issue is acquisition ambiguity, not release.
+- Cache/revalidation failure: `apps/web/src/lib/revalidation.ts:30-64` catches `revalidatePath` failures and keeps mutations from failing after commit.
+- Invalid env: upload limit parsing and MySQL CLI TLS helpers fail closed or fall back as documented; production secrets/env enforcement is covered by migration/startup code and tests.
+- Request aborts: semantic and similar search routes check `request.signal` before/after slow sections; CLIP text embedding accepts an abort signal.
+- UI hydration: targeted sweeps for `window`, `document`, `localStorage`, `sessionStorage`, and hydration comments found deliberate client-only effect usage, suppression only for known date/device-dependent content, and a dedicated `hydration-photo-page.spec.ts`. No new source-confirmed hydration bug was found.
 
-## Final Missed-Issue Sweep
+## Final Missed-Issues Sweep
 
-Final sweeps covered:
+Final sweeps covered advisory-lock acquisition/release shapes, semantic production gates, request abort paths, upload tracker settlement, restore maintenance lifecycle, child-process watchdog usage, browser-global hydration hazards, deploy/nginx/body-size contracts, migration/journal protections, and tests that pin these behaviors.
 
-- restore admission, durable marker state, foreground mutation drain, background DB write drain, maintenance sweeps, upload queue quiescence, pending session revocations, and lock release ordering;
-- browser upload, Lightroom upload, topic/tag/share/settings/user/token/image mutations, audit side effects, and same-origin/admin guard placement;
-- public route validation, rate limiting, cache headers, ETags, OG rendering, semantic/similar search, and public data privacy projections;
-- filesystem path validation, temp-file cleanup, original/derivative isolation, delete/retry behavior, and queue recovery;
-- migration journal ordering, schema reconciliation, current Drizzle schema, baseline/hash assertions, and deploy/runtime cleanup assumptions;
-- UI runtime patterns for date/JSON parsing, client/server boundaries, browser globals, effect cleanup, non-null assertions, and unsafe HTML.
-
-No relevant file in the debugger inventory was skipped. The only concrete latent failure mode found is DBG15-01.
+No relevant source, test, script, migration, config, or deploy category was intentionally skipped. Historical `.context` archives were not fully read end-to-end; they were treated as prior-review history rather than active runtime behavior.

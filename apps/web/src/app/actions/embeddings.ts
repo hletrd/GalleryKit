@@ -25,7 +25,7 @@ import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
@@ -114,10 +114,17 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     let semanticBackfillLockHeld = false;
     try {
         lockConn = await connection.getConnection();
-        const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            'SELECT GET_LOCK(?, 0) AS acquired',
-            [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
-        );
+        let lockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                'SELECT GET_LOCK(?, 0) AS acquired',
+                [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
+            );
+        } catch (err) {
+            destroyPooledAdvisoryLockConnectionOnAcquireError(lockConn, 'semantic embedding backfill action', err);
+            lockConn = null;
+            throw err;
+        }
         if (!isAdvisoryLockAcquired(lockRows[0]?.acquired)) {
             return { status: 'error', message: t('restoreInProgress') };
         }

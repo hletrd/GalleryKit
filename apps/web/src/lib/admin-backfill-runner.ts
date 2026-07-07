@@ -62,7 +62,7 @@ import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveC
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { getGalleryConfigDetached } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
@@ -337,7 +337,7 @@ async function acquireBackfillLock(): Promise<PoolConnection | null> {
         lockConn.release();
         return null;
     } catch (err) {
-        lockConn.release();
+        destroyPooledAdvisoryLockConnectionOnAcquireError(lockConn, 'color pipeline backfill', err);
         throw err;
     }
 }
@@ -371,7 +371,7 @@ async function acquireImageProcessingClaim(imageId: number): Promise<PoolConnect
             return lockConn;
         }
     } catch (err) {
-        lockConn.release();
+        destroyPooledAdvisoryLockConnectionOnAcquireError(lockConn, `image processing claim ${imageId}`, err);
         throw err;
     }
     lockConn.release();

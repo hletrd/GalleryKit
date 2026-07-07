@@ -62,6 +62,7 @@ export default async function AnalyticsPage({
                 colReferrer: t('colReferrer'),
                 colSharedAlbum: t('colSharedAlbum'),
                 noData: t('noData'),
+                unknownCountry: t('unknownCountry'),
                 untitled: t('untitled'),
                 opensInNewWindow: t('opensInNewWindow'),
                 approximateDisclaimer: t('approximateDisclaimer'),

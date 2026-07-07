@@ -1,7 +1,7 @@
 'use server';
 
 import { db, connection } from "@/db";
-import type { RowDataPacket } from "mysql2/promise";
+import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
@@ -32,7 +32,7 @@ import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
 import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
-import { createPooledAdvisoryLockReleaser, releasePooledAdvisoryLocks } from "@/lib/advisory-lock-release";
+import { createPooledAdvisoryLockReleaser, destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from "@/lib/advisory-lock-release";
 import { armDbChildProcessWatchdog } from "@/lib/db-child-watchdog";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
@@ -160,7 +160,12 @@ export async function dumpDatabase() {
     // the per-file `0o600` mode applied below. Operators on multi-user hosts
     // benefit from defense-in-depth even though CLAUDE.md accepts plaintext
     // backups at rest as the personal-gallery threat model.
-    await fs.mkdir(backupsDir, { recursive: true, mode: 0o700 });
+    try {
+        await fs.mkdir(backupsDir, { recursive: true, mode: 0o700 });
+    } catch (err) {
+        console.error('Failed to prepare backup directory:', err);
+        return { success: false as const, error: t('backupFailed') };
+    }
 
     let sslArgs: string[];
     try {
@@ -170,13 +175,21 @@ export async function dumpDatabase() {
         return { success: false as const, error: t('backupFailed') };
     }
 
-    const conn = await connection.getConnection();
+    let conn: PoolConnection | null = null;
     let dbRestoreLockHeld = false;
     try {
-        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            "SELECT GET_LOCK(?, 0) AS acquired",
-            [LOCK_DB_RESTORE],
-        );
+        conn = await connection.getConnection();
+        let lockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                "SELECT GET_LOCK(?, 0) AS acquired",
+                [LOCK_DB_RESTORE],
+            );
+        } catch (err) {
+            destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'backup restore lock', err);
+            conn = null;
+            throw err;
+        }
         const acquired = lockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(acquired)) {
             return { success: false as const, error: t('restoreInProgress') };
@@ -346,14 +359,17 @@ export async function dumpDatabase() {
             resolve({ success: false, error: t('backupFailed') });
         });
         });
+    } catch (err) {
+        console.error('Database backup failed before child process completed:', err);
+        return { success: false as const, error: t('backupFailed') };
     } finally {
-        if (dbRestoreLockHeld) {
+        if (conn && dbRestoreLockHeld) {
             // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
             // RELEASE_LOCK — the restore lock is probed fail-fast
             // (GET_LOCK(...,0)), so leaking it onto a live pooled session
             // would wedge every future backup/restore until process restart.
             await releasePooledAdvisoryLocks(conn, [LOCK_DB_RESTORE], 'backup finally');
-        } else {
+        } else if (conn) {
             conn.release();
         }
     }
@@ -379,7 +395,13 @@ export async function restoreDatabase(formData: FormData) {
     // execute on the same session. Advisory locks are session-scoped —
     // with pooled connections, GET_LOCK and RELEASE_LOCK may run on
     // different connections, making the lock unreliable.
-    const conn = await connection.getConnection();
+    let conn: PoolConnection;
+    try {
+        conn = await connection.getConnection();
+    } catch (err) {
+        console.error('Database restore connection acquisition failed:', err);
+        return { success: false, error: t('restoreFailed') };
+    }
     // C7-02 (run-10 cycle 7b): the restore connection holds up to three
     // chained advisory locks released at different points. The staged
     // releaser remembers any failed RELEASE_LOCK and the terminal finish()
@@ -394,14 +416,28 @@ export async function restoreDatabase(formData: FormData) {
     let restoreLifecycleVerified = false;
     let keepRestoreMaintenance = false;
     let imageQueueQuiesced = false;
+    let restoreLockConnectionDestroyed = false;
+    const destroyRestoreLockConnectionOnAcquireError = (label: string, err: unknown) => {
+        destroyPooledAdvisoryLockConnectionOnAcquireError(conn, label, err);
+        restoreLockConnectionDestroyed = true;
+        dbRestoreLockHeld = false;
+        backfillLockHeld = false;
+        semanticBackfillLockHeld = false;
+    };
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
         // Matches the admin-user delete pattern at admin-users.ts:186-189.
-        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            "SELECT GET_LOCK(?, 0) AS acquired",
-            [LOCK_DB_RESTORE]
-        );
+        let lockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                "SELECT GET_LOCK(?, 0) AS acquired",
+                [LOCK_DB_RESTORE]
+            );
+        } catch (err) {
+            destroyRestoreLockConnectionOnAcquireError('restore lock', err);
+            throw err;
+        }
         const acquired = lockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(acquired)) {
             return { success: false, error: t('restoreInProgress') };
@@ -422,10 +458,16 @@ export async function restoreDatabase(formData: FormData) {
             return { success: false, error: t('restoreBlockedByUpload') };
         }
 
-        const [backfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            "SELECT GET_LOCK(?, 0) AS acquired",
-            [LOCK_COLOR_PIPELINE_BACKFILL]
-        );
+        let backfillLockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [backfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                "SELECT GET_LOCK(?, 0) AS acquired",
+                [LOCK_COLOR_PIPELINE_BACKFILL]
+            );
+        } catch (err) {
+            destroyRestoreLockConnectionOnAcquireError('restore color backfill lock', err);
+            throw err;
+        }
         const backfillLockAcquired = backfillLockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(backfillLockAcquired)) {
             await lockReleaser.release(LOCK_DB_RESTORE, 'backfill-lock early-return');
@@ -439,10 +481,16 @@ export async function restoreDatabase(formData: FormData) {
         }
         backfillLockHeld = true;
 
-        const [semanticBackfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            "SELECT GET_LOCK(?, 0) AS acquired",
-            [LOCK_SEMANTIC_EMBEDDING_BACKFILL]
-        );
+        let semanticBackfillLockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [semanticBackfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                "SELECT GET_LOCK(?, 0) AS acquired",
+                [LOCK_SEMANTIC_EMBEDDING_BACKFILL]
+            );
+        } catch (err) {
+            destroyRestoreLockConnectionOnAcquireError('restore semantic backfill lock', err);
+            throw err;
+        }
         const semanticBackfillLockAcquired = semanticBackfillLockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(semanticBackfillLockAcquired)) {
             await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'semantic-backfill early-return color-lock');
@@ -583,6 +631,9 @@ export async function restoreDatabase(formData: FormData) {
             await uploadContractLock?.release();
             uploadContractLock = null;
         }
+    } catch (err) {
+        console.error('Database restore failed before structured restore result:', err);
+        return { success: false, error: t('restoreFailed') };
     } finally {
         if (uploadContractLock) {
             await uploadContractLock.release().catch((err) => {
@@ -601,7 +652,9 @@ export async function restoreDatabase(formData: FormData) {
         }
         // C7-02: terminal decision — release to the pool only when every
         // RELEASE_LOCK above succeeded; destroy the connection otherwise.
-        lockReleaser.finish();
+        if (!restoreLockConnectionDestroyed) {
+            lockReleaser.finish();
+        }
     }
 }
 

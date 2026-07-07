@@ -23,6 +23,7 @@ interface AnalyticsTranslations {
     colReferrer: string;
     colSharedAlbum: string;
     noData: string;
+    unknownCountry: string;
     untitled: string;
     opensInNewWindow: string;
     // R27-UX-MED-2: surface the truth about counter precision so the
@@ -57,6 +58,19 @@ export function AnalyticsClient({ locale, topPhotos, topTopics, countries, refer
         { value: '90d', label: t.window90d },
         { value: 'all', label: t.windowAll },
     ];
+    const countryDisplayNames = typeof Intl.DisplayNames === 'function'
+        ? new Intl.DisplayNames([locale], { type: 'region' })
+        : null;
+    const formatCountry = (code: string | null) => {
+        const normalized = code?.trim().toUpperCase() ?? '';
+        if (!/^[A-Z]{2}$/.test(normalized)) {
+            return { label: t.unknownCountry, code: normalized };
+        }
+        return {
+            label: countryDisplayNames?.of(normalized) ?? normalized,
+            code: normalized,
+        };
+    };
 
     return (
         <div className="space-y-8">
@@ -185,12 +199,20 @@ export function AnalyticsClient({ locale, topPhotos, topTopics, countries, refer
                                         </td>
                                     </tr>
                                 ) : (
-                                    countries.map((row) => (
-                                        <tr key={row.country_code} className="border-b last:border-0 hover:bg-muted/30">
-                                            <td className="px-4 py-3 font-mono">{row.country_code}</td>
-                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
-                                        </tr>
-                                    ))
+                                    countries.map((row) => {
+                                        const country = formatCountry(row.country_code);
+                                        return (
+                                            <tr key={row.country_code} className="border-b last:border-0 hover:bg-muted/30">
+                                                <td className="px-4 py-3">
+                                                    <span>{country.label}</span>
+                                                    {country.code && (
+                                                        <span className="ml-2 font-mono text-xs text-muted-foreground">{country.code}</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString(locale)}</td>
+                                            </tr>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>

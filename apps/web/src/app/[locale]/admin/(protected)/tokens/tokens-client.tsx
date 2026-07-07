@@ -131,6 +131,10 @@ export function TokensClient() {
         month: 'long',
         day: 'numeric',
     });
+    const confirmRevokeToken = confirmRevokeId === null
+        ? null
+        : tokens.find((token) => token.id === confirmRevokeId) ?? null;
+    const confirmRevokeLabel = confirmRevokeToken?.label ?? '';
 
     return (
         <div className="space-y-4">
@@ -304,8 +308,8 @@ export function TokensClient() {
             <Dialog open={confirmRevokeId !== null} onOpenChange={(open) => { if (!open && !isPending) setConfirmRevokeId(null); }}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{t('lrToken.revokeTitle')}</DialogTitle>
-                        <DialogDescription>{t('lrToken.revokeDesc')}</DialogDescription>
+                        <DialogTitle>{t('lrToken.revokeTitle', { label: confirmRevokeLabel })}</DialogTitle>
+                        <DialogDescription>{t('lrToken.revokeDesc', { label: confirmRevokeLabel })}</DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setConfirmRevokeId(null)} disabled={isPending} className="min-h-[44px]">
@@ -314,8 +318,8 @@ export function TokensClient() {
                         <Button
                             ref={revokeConfirmButtonRef}
                             variant="destructive"
-                            onClick={() => confirmRevokeId !== null && handleRevoke(confirmRevokeId)}
-                            disabled={isPending}
+                            onClick={() => confirmRevokeToken && handleRevoke(confirmRevokeToken.id)}
+                            disabled={isPending || !confirmRevokeToken}
                             className="min-h-[44px]"
                         >
                             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : t('lrToken.revokeButton')}

@@ -298,7 +298,16 @@ export const POST = withAdminAuth(
                 return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
             }
 
-            await ensureUploadDirectories();
+            try {
+                await ensureUploadDirectories();
+            } catch (err) {
+                console.error('LR upload: failed to prepare upload directories', err);
+                settleTrackerToActual(false);
+                return NextResponse.json(
+                    { error: 'Upload storage unavailable; retry shortly' },
+                    { status: 503, headers: NO_CACHE },
+                );
+            }
 
             let config: Awaited<ReturnType<typeof getGalleryConfigStrict>>;
             try {

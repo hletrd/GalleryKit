@@ -1,7 +1,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { connection } from '@/db';
 import { LOCK_UPLOAD_PROCESSING_CONTRACT, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 type UploadProcessingContractLock = {
     release: () => Promise<void>;
@@ -65,11 +65,7 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
                 // C7-02: same destroy-don't-release discipline on the error path.
                 await releasePooledAdvisoryLocks(conn, [LOCK_UPLOAD_PROCESSING_CONTRACT], 'upload processing contract (error path)');
             } else {
-                try {
-                    conn.release();
-                } catch (releaseErr) {
-                    console.debug('connection.release() after GET_LOCK failure threw:', releaseErr);
-                }
+                destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'upload processing contract', err);
             }
         }
         return null;

@@ -20,7 +20,7 @@ import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { normalizeGallerySettingValue } from '@/lib/settings-normalization';
 import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 async function acquireColorBackfillSettingsLock(): Promise<PoolConnection | null> {
     const conn = await connection.getConnection();
@@ -35,7 +35,7 @@ async function acquireColorBackfillSettingsLock(): Promise<PoolConnection | null
         }
         return conn;
     } catch (err) {
-        conn.destroy();
+        destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'color backfill settings', err);
         throw err;
     }
 }
@@ -187,17 +187,14 @@ export async function updateGallerySettings(settings: Record<string, string>) {
             }
         }
 
-        // C2-02 (run-10 c2): the byte-impacting keys other than image_sizes
-        // (already hard-fenced above) have no admission fence at all — an
-        // admin can freely change encoder quality/gamut settings even with
-        // photos already on disk. Rather than a hard block, surface a soft
-        // signal: if one of those keys actually changes value (checked
-        // against a fresh DB read, not just the client's own diff) AND at
-        // least one image has already been processed (so it already carries
-        // derivative bytes encoded under the old settings), tell the caller a
-        // re-encode is now required. Derived from the authoritative
-        // SETTINGS_BACKFILL_WARNING_KEYS export so this can never drift from
-        // the settings UI's own warning logic.
+        // C2-02 + R17C16: byte-impacting settings carry two contracts. First,
+        // compute the soft requiresBackfill signal when a persisted value
+        // actually changes and processed derivative bytes already exist.
+        // Second, for those same backfill-relevant changes, briefly acquire
+        // the shared color-backfill advisory lock before saving so an admin
+        // settings write cannot race a sidecar/in-app re-encode snapshot.
+        // Derived from SETTINGS_BACKFILL_WARNING_KEYS so UI warning logic and
+        // the server-side coordination fence stay aligned.
         let requiresBackfill = false;
         let hasBackfillRelevantChange = false;
         const requestedBackfillWarningKeys = SETTINGS_BACKFILL_WARNING_KEYS.filter((key) =>

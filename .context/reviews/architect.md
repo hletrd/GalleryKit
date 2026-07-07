@@ -1,237 +1,290 @@
-# Cycle 16 - Architect Review
+# Architecture Review - Cycle 17/100
 
+Review role: architect subagent
+Repo: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-07-08
-Role: architect
-Repository: `/Users/hletrd/flash-shared/gallery`
+Scope: boundaries, layering, coupling, state ownership, migration/deploy architecture, reliability, data model evolution, background workers, and operational topology.
 
-## Scope And Method
+No fixes were implemented.
 
-This is a whole-repository architecture/design-risk review for GalleryKit. I built the inventory first from tracked repository files, then reviewed architecture-relevant docs, runtime configuration, App Router routes/actions, data-access modules, migration scripts, deployment scripts, queue/processing code, storage code, semantic-search code, and the tests that lock those boundaries. I did not use prior review conclusions as proof; code, tests, and docs were cross-checked directly.
+## Architecture Inventory
 
-Generated/build outputs, package caches, binary image fixtures, and historical review artifacts were excluded from architectural source analysis. No source/config/docs surface in the inventory below was intentionally skipped.
+Docs and project context inspected:
+- `AGENTS.md` - workspace rules, deploy policy, migration/privacy conventions, required quality gates.
+- `CLAUDE.md` - full architecture, security model, single-writer assumptions, restore/runbook, CLIP/semantic activation, disk/deploy topology, image pipeline notes.
+- `.context/plans/` and `.context/reviews/` - prior plan/review context and aggregate/deferred architecture notes, with attention to cycle and photographer/restore/color/semantic themes.
+- `README.md`, root `package.json`, `package-lock.json`.
 
-## Architecture Inventory Reviewed
+Deployment, runtime, and topology surfaces inspected:
+- `scripts/deploy-remote.sh`
+- `scripts/check-proxy-topology.mjs`
+- `apps/web/deploy.sh`
+- `apps/web/docker-compose.yml`
+- `apps/web/Dockerfile`
+- `apps/web/next.config.ts`
+- `apps/web/package.json`
+- `apps/web/src/instrumentation.ts`
+- `apps/web/src/lib/single-writer-guard.ts`
+- `apps/web/src/lib/content-security-policy.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/gallery-config-server.ts`
+- `apps/web/src/lib/settings-hash.ts`
 
-- Operating instructions and design docs: `AGENTS.md`, `CLAUDE.md`, `apps/web/README.md`, `.context/reviews/prompts/**`.
-- Root/package/build config: root `package.json`, `package-lock.json`, `tsconfig.json`, `.github/workflows/**`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/tsconfig*.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`.
-- Next.js App Router and boundaries: all tracked files under `apps/web/src/app/**`, including public pages, admin pages, API routes, server actions, upload routes, layouts, metadata/OG routes, and `apps/web/src/proxy.ts` / `apps/web/src/instrumentation.ts`.
-- Core source modules: all tracked files under `apps/web/src/lib/**`, `apps/web/src/db/**`, `apps/web/src/components/**`, `apps/web/src/auth.ts`, `apps/web/src/env.ts`, `apps/web/src/server-only.ts`, and shared test fixtures/helpers.
-- Schema and migrations: `apps/web/drizzle/**`, `apps/web/drizzle.config.ts`, `apps/web/scripts/migrate.js`, migration journal tests, and schema-drift tripwire tests.
-- Runtime/deploy topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, root deploy scripts, `apps/web/nginx/default.conf`, health/live endpoints, and deployment documentation.
-- Storage/media/search surfaces: upload paths, image queue, Sharp processing, topic resources, derivative serving, storage abstraction quarantine, CLIP model/embedding/search/backfill modules.
-- Quality gates and boundary tests: `apps/web/src/__tests__/**`, `apps/web/e2e/**`, lint scripts for admin API auth/action origin/public route rate limiting, privacy-field tests, migration journal tests, and storage quarantine tests.
+Data, migrations, restore, and storage surfaces inspected:
+- `apps/web/src/db/index.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/advisory-locks.ts`
+- `apps/web/src/lib/admin-mutation-barrier.ts`
+- `apps/web/src/lib/background-db-writes.ts`
+- `apps/web/src/lib/restore-maintenance.ts`
+- `apps/web/src/lib/restore-maintenance-durable.ts`
+- `apps/web/src/lib/upload-processing-contract-lock.ts`
+- `apps/web/drizzle/0000_*.sql` through `apps/web/drizzle/0029_*.sql`
+- `apps/web/drizzle/meta/_journal.json`
+- `apps/web/scripts/migrate.js`
+- `apps/web/scripts/check-migration-journal.mjs`
+- `apps/web/scripts/check-schema-migration-parity.mjs`
+- `apps/web/scripts/check-schema-migration-consistency.mjs`
+- `apps/web/scripts/check-privacy-guards.mjs`
 
-Final sweep emphasis: I explicitly rechecked commonly missed seams: startup side effects, App Router route/action auth wrappers, public select shapes, migration baseline logic, host-nginx deploy drift, storage abstraction quarantine, topic-resource paths, CLIP model gates, static derivative cache behavior, and single-writer assumptions.
+Server Actions and API boundary surfaces inspected:
+- `apps/web/src/app/actions/admin-backfill.ts`
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/collections.ts`
+- `apps/web/src/app/actions/embeddings.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/lr-tokens.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- API routes under `apps/web/src/app/api/**/route.ts`, including admin DB download, Lightroom upload, health/live, Open Graph, semantic search, similar search, public upload serving, and feeds.
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`
 
-## Findings Summary
+Background worker, image, color, and semantic-search surfaces inspected:
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/admin-backfill-runner.ts`
+- `apps/web/src/lib/image-processing.ts`
+- `apps/web/src/lib/image-processing-config.ts`
+- `apps/web/src/lib/image-processing-inline.ts`
+- `apps/web/src/lib/serve-upload.ts`
+- `apps/web/src/lib/clip-model.ts`
+- `apps/web/src/lib/clip-stub.ts`
+- `apps/web/src/lib/clip-preprocess.ts`
+- `apps/web/src/lib/semantic-search.ts`
+- `apps/web/src/lib/semantic-query-cache.ts`
+- `apps/web/scripts/backfill-color-pipeline.ts`
+- `apps/web/scripts/backfill-clip-embeddings.ts`
+- `apps/web/scripts/preflight-clip-production.mjs`
+- `apps/web/scripts/seed-clip-weights.sh`
+- `apps/web/scripts/semantic-search-smoke.mjs`
+- `apps/web/scripts/semantic-search-health.mjs`
 
-Confirmed issues:
+Security lint and quality-gate architecture inspected:
+- `apps/web/scripts/check-action-origin.ts`
+- `apps/web/scripts/check-api-auth.ts`
+- `apps/web/scripts/check-public-route-rate-limit.ts`
+- `apps/web/scripts/check-touch-targets.mjs`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/action-origin*.test.ts`
+- `apps/web/src/__tests__/public-route-rate-limit*.test.ts`
+- Representative unit tests and e2e specs covering restore, rate limits, semantic search, image queue, admin flows, and route behavior.
 
-1. Production single-writer enforcement is warn-only while process-local correctness mechanisms continue running.
-2. Byte-impacting settings become global truth before existing static derivatives match the new policy.
+## Findings
 
-Likely issues:
+### A1. Single-writer topology is correctness-critical but only warning-enforced
 
-1. The quarantined storage abstraction's `resources/*` contract conflicts with the live topic-resource path/URL contract.
-2. The CLIP embedding table supports only one vector per image, so mode/model transitions destructively replace prior embeddings.
-
-Manual-validation risks:
-
-1. Host nginx configuration is architecture-critical but is not applied or drift-checked by deploy.
-2. Migration safety still depends on hand-maintained `reconcileLegacySchema` matching committed migrations; no database structural diff proves equivalence.
-
-## Confirmed Issues
-
-### A16-ARCH-01 - Single-writer invariant is warning-only
-
+Classification: Confirmed issue
 Severity: High
 Confidence: High
-Status: Confirmed issue
 
-Code regions:
-
-- `apps/web/src/lib/single-writer-guard.ts:6-16` documents that two live web processes break restore mutation fences, upload quota tracking, and rate-limit fast paths, but the guard must never block startup.
-- `apps/web/src/lib/single-writer-guard.ts:218-235` emits the second-instance warning and explicitly says startup continues.
-- `apps/web/src/lib/single-writer-guard.ts:277-302` starts with a zero-timeout advisory lock probe and only schedules a background re-probe on contention.
-- `apps/web/src/instrumentation.ts:1-10` starts restore sync, maintenance scheduling, and image-queue bootstrap during process registration.
-- `apps/web/src/instrumentation.ts:22-31` starts the single-writer guard fire-and-forget after those startup side effects, and failure is non-fatal.
-- `apps/web/src/lib/maintenance-scheduler.ts:83-91` starts an in-process hourly sweep in every web process.
-- `apps/web/src/lib/advisory-locks.ts:10-18` warns that most advisory lock names are MySQL-server scoped and assume one GalleryKit per MySQL server unless names are prefixed.
+Evidence:
+- `apps/web/src/lib/single-writer-guard.ts:6-16` states that multiple live web processes sharing the same DB break process-local restore fencing, upload quotas, image queue state, and in-memory rate-limit fast paths.
+- `apps/web/src/lib/single-writer-guard.ts:17-21` states the guard is warning-only and must never block startup.
+- `apps/web/src/instrumentation.ts:22-31` starts the guard fire-and-forget and logs failures without preventing boot.
+- `apps/web/src/lib/single-writer-guard.ts:218-235` logs that another instance was detected, but explicitly continues startup.
+- `apps/web/docker-compose.yml:12-17` defines a single named container, but Docker/runtime configuration is the convention rather than the enforcement boundary.
 
 Why this is a problem:
-
-The repository states a single-web-instance / single-writer topology, and multiple correctness mechanisms remain process-local. The only topology guard is intentionally observational, asynchronous, and non-blocking. A second process can continue accepting traffic, starting queue/bootstrap work, running maintenance, and using process-local fast paths even after the guard knows another instance owns the singleton lock.
+The repository correctly documents a single-writer architecture, but the most important invariant is enforced operationally instead of structurally. Several safety systems are process-local: restore maintenance state, admin mutation draining, upload tracking, queue membership, and some rate-limit fast paths. If a second process appears, both instances can independently believe they own safe execution windows.
 
 Concrete failure scenario:
-
-A deploy, manual sidecar, or duplicated Docker service leaves two `gallerykit-web` processes pointed at the same database for longer than the 25-second grace window. The second process logs the loud warning but keeps serving. During that window both processes can run queue/bootstrap and maintenance code, while restore fences, upload quotas, buffered/shared view-count writes, and rate-limit fast paths are not globally coordinated. The system is now outside its documented consistency model, but readiness/health still appears green.
+A manual `next start`, an accidental second container, a blue-green overlap, or a restart race keeps two web processes alive against the same MySQL DB and bind mounts. Instance A starts a restore and drains only its local writers. Instance B accepts a Lightroom upload or admin mutation because its local restore flag and mutation slots are clear. The restore imports an older SQL dump while Instance B writes new rows/files, leaving DB/file state inconsistent after revalidation.
 
 Suggested fix:
+Make the singleton guard fail-closed in production unless an explicit unsafe override such as `ALLOW_MULTI_INSTANCE_UNSAFE=true` is set. If multi-instance operation is desired, move restore state, mutation fencing, upload quotas, queue state, and rate-limit ownership into shared durable storage with DB-scoped locks and transactional claims. Also add a deploy/runtime check that fails health when another writer is detected.
 
-Choose one explicit topology contract and enforce it. If GalleryKit remains single-writer, make persistent singleton-lock contention a production startup/readiness failure after the rolling-deploy grace period, before accepting public/admin traffic. If multi-instance operation is desired, move the process-local fences, quota/rate-limit fast paths, queue ownership, and buffered analytics state into database/distributed coordination before allowing multiple live instances. A transitional compromise is to keep boot non-blocking in development but fail health/readiness in production when contention persists.
+### A2. Background DB connection budgeting is independent and can oversubscribe the live pool
 
-### A16-ARCH-02 - Byte-impacting settings commit before derivative bytes converge
-
+Classification: Confirmed issue
 Severity: Medium
 Confidence: High
-Status: Confirmed issue
 
-Code regions:
-
-- `apps/web/src/app/actions/settings.ts:168-201` explicitly allows byte-impacting settings, other than hard-fenced upload-contract keys, to change with only a soft `requiresBackfill` signal.
-- `apps/web/src/app/actions/settings.ts:207-239` persists those settings, revalidates app data, invalidates detached config cache, and returns success before existing derivatives are re-encoded.
-- `apps/web/src/lib/settings-hash.ts:14-26` states that the route-handler ETag hash only helps fallback route-handler traffic; existing static derivatives still need re-encoding before bytes change.
-- `apps/web/next.config.ts:60-77` confirms existing derivatives live under `public/uploads` and are normally served as static files with one-hour `must-revalidate` caching.
-- `apps/web/src/lib/process-image.ts:1187-1204` only rewrites final derivative paths when processing/backfill actually runs.
-- `apps/web/src/db/schema.ts:82-83` tracks `pipeline_version`, while `apps/web/src/db/schema.ts:115-117` stores a pending-row processing snapshot that is cleared after successful processing; there is no durable per-image active settings-generation state for already-processed derivatives.
+Evidence:
+- `apps/web/src/db/index.ts:31-42` sets `POOL_CONNECTION_LIMIT` to 10 and `queueLimit` to 20 for the shared app pool.
+- `apps/web/src/lib/image-queue.ts:121-134` reserves half the pool for live requests and derives image queue concurrency from the same pool.
+- `apps/web/src/lib/admin-backfill-runner.ts:106-143` independently reserves half the pool and derives admin backfill concurrency from the same pool.
+- `apps/web/src/lib/image-queue.ts:486-524` performs embedding DB writes inside image processing work.
+- `apps/web/src/lib/admin-backfill-runner.ts:145-220` keeps process-local backfill state and runs the backfill fire-and-forget once triggered.
 
 Why this is a problem:
-
-The configuration layer can say a new color/quality policy is active while the dominant served artifact, static files in `public/uploads`, still contains old bytes. The system has warnings and operational docs, but no durable "media generation pending" state tying a settings commit to corpus convergence. That makes the media pipeline split-brain: new uploads and future backfills use the new settings, while old static derivatives keep old color/quality behavior under unchanged filenames.
-
-Concrete failure scenario:
-
-An admin changes `force_srgb_derivatives`, wide-gamut settings, AVIF/JPEG/WebP quality, or sharpening to correct delivery quality. The settings action succeeds and pages revalidate. New uploads follow the new encoder policy, but existing images continue serving old static derivatives until a separate backfill is run and completes. Public galleries show mixed color/quality behavior, and operators can no longer infer delivered bytes from current settings.
-
-Suggested fix:
-
-Make byte-impacting settings a durable generation transition. Store an active derivative-generation/settings hash per image or per derivative, mark the gallery as "backfill required" transactionally with the settings update, and surface completion state in admin/ops diagnostics. Stronger designs are settings-versioned derivative paths or routing all derivative reads through a generation-aware resolver. At minimum, enqueue/track the required backfill in the same transaction as the settings write and do not present the new policy as fully applied until the corpus converges.
-
-## Likely Issues
-
-### A16-ARCH-03 - Storage abstraction resource paths conflict with live topic-resource paths
-
-Severity: Medium
-Confidence: Medium
-Status: Likely issue
-
-Code regions:
-
-- `apps/web/src/lib/storage/types.ts:4-16` says the storage layer is experimental, not wired end-to-end, and maps derivative/resource keys to `UPLOAD_ROOT/<key>`.
-- `apps/web/src/lib/storage/local.ts:21` includes `resources` in `REQUIRED_PUBLIC_DIRS`.
-- `apps/web/src/lib/storage/local.ts:55-67` resolves non-original keys under `UPLOAD_ROOT`.
-- `apps/web/src/lib/storage/local.ts:159-166` returns public URLs as `/uploads/<key>`.
-- `apps/web/src/lib/process-topic-image.ts:11-28` resolves live topic resources under `public/resources` or `TOPIC_RESOURCES_ROOT`.
-- `apps/web/src/lib/process-topic-image.ts:95-126` writes and deletes topic cover files directly in that resources directory.
-- `apps/web/src/lib/serve-upload.ts:15` and `apps/web/src/lib/serve-upload.ts:172-175` only serve `/uploads/{jpeg,webp,avif}` and reject other top-level upload directories.
-- `apps/web/src/__tests__/storage-quarantine.test.ts:1-27` acknowledges the abstraction is quarantined because importing it would create a second unaudited write path.
-
-Why this is a problem:
-
-The quarantine currently prevents active damage, but the abstraction's documented `resources/*` namespace does not match the live product namespace. Live topic covers are stored under `public/resources` and served as `/resources/...`; the storage backend would put `resources/foo.webp` under `public/uploads/resources/foo.webp` and return `/uploads/resources/foo.webp`, which the upload-serving handler rejects. This is exactly the kind of boundary drift that becomes a bug when a future integration removes or relaxes the quarantine test.
+The image queue and admin color backfill each make reasonable local assumptions, but there is no shared background-work budget. With the default 10-connection pool, each subsystem can reserve for live traffic as if the other subsystem were idle. When both run, they can collectively consume almost the entire pool.
 
 Concrete failure scenario:
-
-A future refactor intentionally wires topic-image handling through `getStorage()` and writes `resources/<uuid>.webp`. The write succeeds and tests that only assert file existence may pass, but the admin/public UI still asks for `/resources/<filename>` or the storage URL returns `/uploads/resources/<filename>`, which the upload route 404s. The deploy also persists `public/resources` separately from `public/uploads`, so backups and cleanup scripts can miss or orphan the new files.
-
-Suggested fix:
-
-Before unquarantining `@/lib/storage`, remove `resources` from the local backend unless it is actually supported, or add an explicit namespace mapper: `resources/*` must resolve to `TOPIC_RESOURCES_ROOT` and public URLs must be `/resources/*`. Add focused tests that cover topic-cover write/read/delete URL behavior through the abstraction. Keep the quarantine test until upload, derivative serving, originals, topic resources, cleanup, backup, and restore all use the same storage contract.
-
-### A16-ARCH-04 - Semantic embeddings destructively replace prior model rows
-
-Severity: Medium
-Confidence: Medium
-Status: Likely issue
-
-Code regions:
-
-- `apps/web/src/db/schema.ts:277-304` defines `image_embeddings` with `image_id` as the primary key and `model_version` as an attribute, not part of the key.
-- `apps/web/src/lib/image-queue.ts:486-524` writes embeddings with `onDuplicateKeyUpdate`, replacing both the vector and `modelVersion` for the image.
-- `apps/web/src/app/api/search/semantic/route.ts:263-279` scans only rows matching the active model version.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:137-190` requires production model rows for both the target image and candidates.
-- `CLAUDE.md:169` documents that one active row exists per image and running a different mode/model destructively replaces the prior vector.
-- `apps/web/src/lib/gallery-config-shared.ts:223-229` heals stored production mode to disabled unless the production env gate is set, so mode changes can happen through config/environment transitions.
-
-Why this is a problem:
-
-The schema is intentionally an "active embedding" store, not a model-history store. That is simple, but it couples operator mode changes, backfills, and future model upgrades to destructive replacement. The search routes are correctly model-gated, so any accidental overwrite with stub rows or a future model's rows can make production search appear empty or partially unavailable until a full production backfill runs again.
-
-Concrete failure scenario:
-
-An operator enables production CLIP and backfills all images. Later, during troubleshooting or a demo, stub mode is enabled and upload/bootstrap/backfill writes rows for the same images. The single primary key causes production vectors to be overwritten with `stub-sha256-v1`. Production semantic and similar search then filter for the production model and either return `semantic_no_embeddings` or only a partial corpus until the full production backfill is repeated.
+An operator triggers color re-encode while uploads are still producing image jobs and semantic writes. The backfill uses one global lock connection plus worker connections; image queue jobs use additional DB reads/writes; live page/API requests now compete for the remaining one or two connections. Once the pool queue reaches `queueLimit: 20`, user-visible requests fail or time out even though each subsystem individually respected its own cap.
 
 Suggested fix:
+Introduce one shared background DB budget/semaphore for image processing, admin color backfill, semantic embedding writes, and maintenance sweeps. Each subsystem should acquire from the same budget before DB-heavy work. Alternatively, split background workers into a separate process/pool with an explicit MySQL capacity budget and make live request reserve limits account for that external pool.
 
-If model switching or upgrades are expected, change the schema to retain multiple vectors per image with a composite key such as `(image_id, model_version)` plus an active-model setting or view. If the one-row design is intentional, make transitions that overwrite a different `model_version` explicit operator actions with row-count previews and confirmation, and expose current row counts by model in admin/ops diagnostics.
+### A3. Advisory lock names are partly DB-scoped and partly MySQL-server-global
 
-## Manual-Validation Risks
-
-### A16-ARCH-05 - Host nginx template is not applied or drift-checked by deploy
-
+Classification: Confirmed issue
 Severity: Medium
 Confidence: High
-Status: Manual-validation risk
 
-Code/doc regions:
-
-- `CLAUDE.md:509-521` states that deploys do not touch host nginx and that changes to `apps/web/nginx/default.conf` are inert until an operator applies them manually.
-- `apps/web/deploy.sh:51-56` only runs Docker Compose rebuild/start for the application.
-- `apps/web/deploy.sh:57-77` health-checks the app container/live endpoint, not the live host nginx configuration.
-- `apps/web/deploy.sh:79-108` prunes Docker artifacts and reports disk state, but performs no nginx hash check, `nginx -t`, or reload.
+Evidence:
+- `apps/web/src/lib/advisory-locks.ts:10-18` notes that MySQL advisory locks are server-scoped, not database-scoped, and that separate GalleryKit instances on one MySQL server will block each other unless lock names are prefixed.
+- `apps/web/src/lib/advisory-locks.ts:20-49` defines static global names for restore, upload processing, topic route segments, admin delete, color backfill, semantic backfill, and per-image processing locks.
+- `apps/web/src/lib/advisory-locks.ts:51-71` makes the single-writer lock DB-scoped via a database hash, explicitly supporting separate DB co-location for that one guard.
 
 Why this is a problem:
-
-The nginx layer owns architecture-significant behavior: body-size limits, rate limiting, real-client-IP forwarding, static upload/resource handling, TLS/HSTS headers, and routing to Next.js. The repository can ship a correct `nginx/default.conf` while production continues running an older manual host config. The docs call this out, but the deploy path cannot prove the running edge matches the committed architecture.
+The locking model has two different ownership boundaries. The singleton guard treats separate DBs on the same MySQL server as separate GalleryKit instances, but operational locks still collide across all DBs on that server. That creates false coupling between otherwise separate galleries and can hide production stalls as unrelated lock contention.
 
 Concrete failure scenario:
-
-A fix adds or changes a limiter/body-size cap in `apps/web/nginx/default.conf`, tests and code review pass, and `npm run deploy` succeeds. The host still runs the previous nginx file because no operator applied it. Public flood protection, Lightroom upload body limits, or `_next/image` rate limits remain stale in production even though the repo says the issue is fixed.
+Two GalleryKit deployments use different databases on the same MySQL server. Gallery A starts a restore and holds `gallerykit:db-restore`; Gallery B cannot perform a restore or upload-processing critical section even though its DB is unrelated. If both galleries process image ID `42`, `gallerykit:image-processing:42` can also serialize unrelated jobs or cause retries in the wrong deployment.
 
 Suggested fix:
+Prefix every advisory lock with a stable instance key, preferably derived from DB name plus configured instance ID, and keep all locks under one naming helper. If co-location is not supported, fail startup when the DB server appears shared and document the one-GalleryKit-per-MySQL-server requirement as a hard invariant.
 
-Add a deploy-time drift check that compares the committed nginx template hash to the configured host nginx file and fails or loudly warns when they differ. A stronger fix is to manage nginx as deployment-owned infrastructure: copy the template, run `nginx -t`, reload, and verify a bounded live smoke test behind an explicit production-change gate. If nginx must remain manual, persist the applied template hash/date in an ops ledger and have deploy print the drift status.
+### A4. Restore quiescence relies on a manual registry of process-local writers
 
-### A16-ARCH-06 - Migration reconcile path lacks an automated structural equivalence proof
-
+Classification: Likely issue
 Severity: Medium
 Confidence: Medium
-Status: Manual-validation risk
 
-Code regions:
-
-- `apps/web/drizzle/meta/_journal.json:48-58` shows the historical non-monotonic migration jump from idx 6 to idx 7.
-- `apps/web/src/__tests__/migration-journal-monotonicity.test.ts:1-28` documents the Drizzle MAX-created-at footgun and pins monotonicity/post-condition behavior.
-- `apps/web/src/__tests__/migration-journal-monotonicity.test.ts:44-54` allowlists the known historical inversion.
-- `apps/web/src/__tests__/migration-journal.test.ts:63-105` enforces monotonic behavior from the safe tail and global max from idx 18 onward.
-- `apps/web/scripts/migrate.js:348-370` starts `reconcileLegacySchema`, the maintained idempotent schema bootstrap path.
-- `apps/web/scripts/migrate.js:684-730` mirrors `image_embeddings` and related indexes/FKs manually in reconcile.
-- `apps/web/scripts/migrate.js:758-782` explains that Drizzle MySQL relies on a MAX timestamp cursor rather than per-entry hash checks.
-- `apps/web/scripts/migrate.js:858-878` routes fresh databases through reconcile plus per-entry baseline.
-- `apps/web/scripts/migrate.js:949-973` enforces the post-condition that every journal hash must be recorded.
+Evidence:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:497-536` says every process-local DB writer must be added to the restore drain checklist.
+- `apps/web/src/lib/admin-mutation-barrier.ts:1-33` implements a process-local restore-window fence for admin mutations.
+- `apps/web/src/lib/background-db-writes.ts:11-31` tracks background promises only when callers explicitly wrap them.
+- `apps/web/src/lib/background-db-writes.ts:77-112` drains only the tracked background writes and analytics queue.
+- `apps/web/src/lib/restore-maintenance.ts:1-27` stores the active restore state in process-local `globalThis`.
 
 Why this is a problem:
-
-The migration discipline is much stronger than a naive Drizzle setup, but it still depends on authors manually keeping `reconcileLegacySchema` equivalent to the current committed migration state. The tests pin monotonic journal behavior and hash-recording guarantees; they do not prove that a fresh reconcile-baselined database and a database that applied all SQL migrations have identical column types, defaults, indexes, foreign keys, collations, or intentionally mirrored DML outcomes.
+The current restore path is carefully built, but the ownership model is social: future process-local writers must remember to participate in the checklist and tracking helpers. The architecture has multiple ways to start asynchronous DB work, and the restore system cannot automatically see unregistered timers, detached promises, or new background queues.
 
 Concrete failure scenario:
-
-A future migration adds a column with a non-default collation, an index prefix, or a DML backfill. The `.sql` file is correct and the journal tests pass, but `reconcileLegacySchema` mirrors only the column name or misses the exact default/index/DML semantics. A brand-new or legacy-baselined deployment boots with a schema that differs from a normally migrated deployment. The mismatch surfaces later as a query-plan regression, strict-mode insert failure, or semantic inconsistency that the post-condition hash check cannot detect because the hash was baselined.
+A future feature adds a periodic metadata refresh or fire-and-forget aggregation that writes through Drizzle without `trackBackgroundDbWrite()` and without an admin mutation slot. Restore starts, drains the known writers, imports SQL, and runs migrations. The unregistered writer completes after the import and writes rows derived from the pre-restore state, polluting the restored database.
 
 Suggested fix:
+Make background DB writes go through a small registered scheduler or DB-write wrapper that is visible to restore draining. Add a source-contract lint test for detached DB writes, `setInterval`/timer DB work, and untracked `void` DB promises outside approved modules. Replace the manual checklist with a declarative registry exported by each background subsystem.
 
-Add an integration test that spins two disposable MySQL databases: one applying committed migrations through the normal Drizzle path and one applying reconcile+baseline. Compare `INFORMATION_SCHEMA` for tables, columns, indexes, foreign keys, nullability, defaults, collations, and generated/extra attributes. Include explicit fixtures for mirrored DML migrations or require DML-bearing migrations to provide a verifier query. Keep the current journal/hash tests as fast tripwires, but add the structural diff as the architecture proof.
+### A5. DB backup/restore does not own filesystem consistency
 
-## No Finding After Review
+Classification: Confirmed issue
+Severity: Medium
+Confidence: High
 
-- Module boundaries and data layering: `apps/web/src/lib/data.ts:251-327` separates admin select fields, `apps/web/src/lib/data.ts:368-407` derives public fields by omission, and `apps/web/src/lib/data.ts:458-476` compile-guards sensitive fields. I did not find a confirmed admin/public leak in the reviewed public surfaces.
-- Semantic-search enrichment: `apps/web/src/lib/search-enrichment-fields.ts:1-47` centralizes public search result fields with a compile-time `PrivacySensitiveKeys` guard. The CLIP risks above are model-retention/ops risks, not public-data separation issues.
-- App Router/admin boundaries: `apps/web/src/lib/api-auth.ts:58-144` centralizes admin API auth, token-scope bypass rules, and no-store/nosniff response defaults; `apps/web/src/lib/action-guards.ts:37-43` centralizes same-origin admin checks for mutating server actions. I did not find a new confirmed boundary bypass in this architecture pass.
-- Migration discipline: despite A16-ARCH-06, the repo has substantial protections against the known Drizzle skip failure: journal monotonicity tests, DML-baseline guards, per-entry baselining, and a post-condition hash assertion.
-- Image processing pipeline coupling: the pipeline is tightly coupled by design to local files, Sharp/libvips, static derivative paths, and admin settings. I did not find a new confirmed corruption issue beyond the settings-generation gap in A16-ARCH-02 and the storage-abstraction mismatch in A16-ARCH-03.
+Evidence:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:192-199` creates backups with `mysqldump`, so the backup artifact is SQL only.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:759-765` restores by piping SQL into `mysql`.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:803-829` performs post-restore migration and cache revalidation, but there is no file manifest reconciliation in the restore transaction.
+- `apps/web/docker-compose.yml:24-32` bind-mounts mutable `./data`, `./public/uploads`, and `./public/resources` outside the image.
 
-## Final Sweep
+Why this is a problem:
+The restore boundary is the database, but gallery correctness also depends on original uploads, generated derivatives, resources, and possibly metadata side files. DB rows and filesystem objects can move out of sync across backups, deletes, failed uploads, or host-level restores.
 
-Commonly missed issue classes checked:
+Concrete failure scenario:
+An operator restores a SQL dump from Monday while the filesystem remains at Wednesday. The restored DB references images that were deleted from disk after Monday, or omits images whose files still exist. Public pages can render broken images, derivative regeneration can fail on missing originals, and orphaned files continue consuming disk without DB ownership.
 
-- Startup/background side effects before readiness.
-- Multiple web-process / single database assumptions.
-- Public API and server-action auth boundaries.
-- Public select shapes and search enrichment fields.
-- Static `public/uploads` precedence over route-handler derivative serving.
-- Storage abstraction vs direct filesystem upload/topic-resource paths.
-- CLIP production/stub gates, row model-version filters, and embedding overwrite behavior.
-- Migration journal monotonicity, reconcile/baseline behavior, and hash post-condition.
-- Docker/compose/deploy/nginx runtime topology and docs-code drift.
+Suggested fix:
+Either make the admin backup a full consistency bundle containing SQL plus a file manifest/snapshot, or add a required post-restore reconciliation pass that validates DB rows against original and derivative files, marks missing originals unprocessed, schedules derivative rebuilds, and reports orphaned files for operator action. The UI/runbook should label SQL restore as DB-only.
 
-Skipped as non-architecture implementation surface: generated output, dependency caches, uploaded/binary media fixtures, and old review artifacts not needed as evidence. No relevant tracked source/config/doc file category from the inventory was skipped.
+### A6. Image/CSP base URL ownership is split between build time and runtime
+
+Classification: Confirmed issue
+Severity: Medium
+Confidence: High
+
+Evidence:
+- `apps/web/next.config.ts:32-38` parses `IMAGE_BASE_URL` while loading Next config.
+- `apps/web/next.config.ts:121-125` builds `images.remotePatterns` from that config-time value.
+- `apps/web/src/lib/content-security-policy.ts:139-143` builds runtime CSP image sources from `process.env.IMAGE_BASE_URL`.
+- `apps/web/docker-compose.yml:7-9` passes build args for `NEXT_PUBLIC_APP_URL` and `IMAGE_BASE_URL`, while `apps/web/docker-compose.yml:18-23` also passes runtime env vars.
+
+Why this is a problem:
+One setting controls several concerns, but not all of them are evaluated at the same time. A runtime env-only change can update CSP and generated URLs while leaving Next image remote patterns baked from the previous build.
+
+Concrete failure scenario:
+An operator changes `IMAGE_BASE_URL` in the deploy env and restarts without rebuilding, or the build arg and runtime env diverge. The app emits or allows the new CDN host in CSP, but Next image optimization still rejects it because `remotePatterns` was baked with the old host. Thumbnails or Open Graph images fail only after deployment.
+
+Suggested fix:
+Add a startup assertion that compares the runtime `IMAGE_BASE_URL` with a build-time baked value and fails or loudly marks health unhealthy when they differ. Alternatively, remove runtime variability from this setting and require rebuilds for changes, or route image serving through a stable local origin that does not require runtime remote-pattern changes.
+
+### A7. Semantic embedding work is not globally coordinated with in-app scan and sidecar backfill
+
+Classification: Risk needing manual validation
+Severity: Low
+Confidence: Medium
+
+Evidence:
+- `apps/web/src/lib/image-queue.ts:527-622` starts an in-app scan for missing active embeddings and processes up to `SEMANTIC_SCAN_LIMIT` with bounded local concurrency.
+- `apps/web/scripts/backfill-clip-embeddings.ts:120-130` acquires `LOCK_SEMANTIC_EMBEDDING_BACKFILL` for the sidecar/script backfill.
+- `apps/web/src/lib/clip-model.ts:53-64` defines process-local CLIP inference queue limits.
+- `apps/web/src/lib/clip-model.ts:65-173` enforces inference slots only inside the current Node process.
+
+Why this is a problem:
+The sidecar has a database advisory lock, but the in-app bootstrap scan and request-time semantic work are controlled by process-local queues. The app can therefore perform embedding work while a sidecar is also embedding, and CLIP inference limits do not form a host-wide CPU/RSS budget.
+
+Concrete failure scenario:
+Production CLIP is enabled, an operator starts `backfill-clip-embeddings.ts`, and the web process also boots or receives uploads that trigger missing-embedding bootstrap. Both processes load CLIP weights and run inference. The DB upsert converges eventually, but CPU, memory, and request latency can spike; semantic endpoints may return 503 or time out during the overlap.
+
+Suggested fix:
+Have in-app semantic bootstrap respect the same semantic backfill advisory lock, or disable the bootstrap while the sidecar lock is held. For production, consider moving CLIP inference to a dedicated worker process with one host-wide queue and an explicit concurrency/RSS budget.
+
+### A8. Sidecar color backfill can bypass the app's pool-aware concurrency limits
+
+Classification: Risk needing manual validation
+Severity: Low
+Confidence: Medium
+
+Evidence:
+- `apps/web/scripts/backfill-color-pipeline.ts:383-387` allows `BACKFILL_CONCURRENCY` from 1 to 8 in the sidecar script.
+- `apps/web/src/lib/admin-backfill-runner.ts:130-143` clamps in-app backfill concurrency from the shared pool limit and reserved live-connection budget.
+- `apps/web/src/db/index.ts:31-42` configures each Node process with its own MySQL pool.
+
+Why this is a problem:
+The sidecar is operator controlled and separate from the web process, so it does not share the in-app runner's pool-aware budgeting. A high sidecar concurrency can add another pool of DB work and Sharp/libvips CPU pressure while live traffic and image queue work continue.
+
+Concrete failure scenario:
+An operator runs the sidecar with `BACKFILL_CONCURRENCY=8` during traffic. The sidecar opens its own pool and performs CPU-heavy derivative work while the web process handles uploads, semantic writes, and requests. MySQL and CPU become saturated even though the web process's internal caps remain valid.
+
+Suggested fix:
+Reuse the same concurrency derivation for sidecar backfill or add an explicit sidecar capacity model that accounts for live web pool size and host CPU. Require an `--unsafe-concurrency` or env flag for values above the safe default, and document that the script should run during a maintenance window unless this budget is configured.
+
+## Non-Finding Notes
+
+- The Server Action and API security lint architecture is strong. `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-api-auth.ts`, and `apps/web/scripts/check-public-route-rate-limit.ts` make origin/auth/rate-limit requirements explicit and fail closed for unsupported export shapes.
+- The migration architecture has unusually good post-condition checks. `apps/web/scripts/migrate.js` reconciles legacy schema, Drizzle journal state, and committed migration hashes; the AGENTS.md migration rules correctly call out the journal `when` ordering hazard.
+- Privacy-sensitive admin-only fields are guarded in both runtime omit lists and test/type fixtures; this review did not find a new privacy-boundary ownership issue.
+
+## Final Missed-Issues Sweep
+
+I rechecked the main cross-file seams after drafting findings:
+- Server Actions/API routes vs data layer and auth/origin/rate-limit lint gates.
+- Restore maintenance vs background writers, image queue, admin mutations, and durable marker startup sync.
+- Image processing queues vs admin backfill, semantic embedding writes, and MySQL pool limits.
+- Deployment scripts, Docker topology, health checks, and post-deploy prune behavior.
+- Migration journal, schema reconciliation, and privacy guard conventions.
+- Runtime config, CSP, image base URL, and cache/revalidation surfaces.
+
+Relevant files skipped or not line-read completely:
+- Binary/static assets, screenshots, fonts, and visual fixture images.
+- Generated coverage/gate logs and historical review artifacts not directly relevant after inventory.
+- I did not line-read every UI component or every one of the 3000+ tests; I focused on architecture-relevant source, tests, scripts, docs, migrations, config, deployment surfaces, and the cross-file contracts listed in the inventory.

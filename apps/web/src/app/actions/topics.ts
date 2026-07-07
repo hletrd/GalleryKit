@@ -41,7 +41,7 @@ import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { LOCK_TOPIC_ROUTE_SEGMENTS, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     // C3L-CR-02: combined single query with UNION instead of two sequential
@@ -70,12 +70,20 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
 async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<T> {
     const conn = await connection.getConnection();
     let lockAcquired = false;
+    let connectionDestroyed = false;
 
     try {
-        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
-            "SELECT GET_LOCK(?, 5) AS acquired",
-            [LOCK_TOPIC_ROUTE_SEGMENTS]
-        );
+        let lockRows: (RowDataPacket & { acquired: number })[];
+        try {
+            [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
+                "SELECT GET_LOCK(?, 5) AS acquired",
+                [LOCK_TOPIC_ROUTE_SEGMENTS]
+            );
+        } catch (err) {
+            destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'topic route segments', err);
+            connectionDestroyed = true;
+            throw err;
+        }
         lockAcquired = isAdvisoryLockAcquired(lockRows[0]?.acquired);
         if (!lockAcquired) {
             throw new TopicRouteLockTimeoutError();
@@ -83,12 +91,12 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
 
         return await action();
     } finally {
-        if (lockAcquired) {
+        if (!connectionDestroyed && lockAcquired) {
             // C7-02 (run-10 cycle 7b): the destroy-don't-release pattern this
             // site pioneered (3acf638a) now lives in the shared helper so all
             // pooled advisory-lock sites behave identically. Never throws.
             await releasePooledAdvisoryLocks(conn, [LOCK_TOPIC_ROUTE_SEGMENTS], 'topic route segments');
-        } else {
+        } else if (!connectionDestroyed) {
             conn.release();
         }
     }

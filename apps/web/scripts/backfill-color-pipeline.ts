@@ -322,23 +322,6 @@ async function main() {
     const { db, connection } = await import('../src/db');
     const { sql } = await import('drizzle-orm');
 
-    // R8-CRIT: resolve current admin settings so backfilled images produce
-    // identical derivatives to what a fresh upload would produce.
-    const config = await getGalleryConfig();
-    const backfillSettings: BackfillSettings = {
-        quality: {
-            webp: config.imageQualityWebp,
-            avif: config.imageQualityAvif,
-            jpeg: config.imageQualityJpeg,
-        },
-        sizes: config.imageSizes,
-        forceSrgbDerivatives: config.forceSrgbDerivatives,
-        wideGamutJpegChroma: config.wideGamutJpegChroma,
-        avifEffort: config.avifEffort,
-        sdrJpegChroma: config.sdrJpegChroma,
-        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
-    };
-
     console.log('[backfill-color-pipeline] Acquiring advisory lock…');
 
     // Acquire a dedicated connection for the advisory lock.
@@ -365,6 +348,24 @@ async function main() {
     }
 
     assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+
+    // R8-CRIT: resolve current admin settings while holding the shared
+    // backfill lock so an admin settings save cannot commit between the
+    // snapshot and the re-encode work. This mirrors the in-app runner.
+    const config = await getGalleryConfig();
+    const backfillSettings: BackfillSettings = {
+        quality: {
+            webp: config.imageQualityWebp,
+            avif: config.imageQualityAvif,
+            jpeg: config.imageQualityJpeg,
+        },
+        sizes: config.imageSizes,
+        forceSrgbDerivatives: config.forceSrgbDerivatives,
+        wideGamutJpegChroma: config.wideGamutJpegChroma,
+        avifEffort: config.avifEffort,
+        sdrJpegChroma: config.sdrJpegChroma,
+        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+    };
 
     console.log('[backfill-color-pipeline] Lock acquired. Fetching candidate rows…');
     assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);

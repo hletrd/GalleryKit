@@ -3,6 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import {
     createPooledAdvisoryLockReleaser,
+    destroyPooledAdvisoryLockConnectionOnAcquireError,
     releasePooledAdvisoryLocks,
 } from '@/lib/advisory-lock-release';
 
@@ -19,6 +20,23 @@ function makeConn() {
 }
 
 describe('pooled advisory-lock release helper', () => {
+    it('destroys a pooled connection after an ambiguous GET_LOCK acquisition error', () => {
+        const conn = makeConn();
+        const error = new Error('connection lost after grant');
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'test acquire', error);
+
+        expect(conn.destroy).toHaveBeenCalledTimes(1);
+        expect(conn.release).not.toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('GET_LOCK (test acquire) failed; destroying pooled connection'),
+            error,
+        );
+
+        errorSpy.mockRestore();
+    });
+
     it('returns a clean connection to the pool when every RELEASE_LOCK succeeds', async () => {
         const conn = makeConn();
 

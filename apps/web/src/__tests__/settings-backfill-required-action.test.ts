@@ -1,11 +1,11 @@
 /**
- * C2-02 (run-10 c2, TRC-01): the 8 unfenced byte-impacting settings (every
- * DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS entry except image_sizes, which is
- * hard-locked once any image exists) have no admission fence — an admin can
- * change encoder quality/gamut settings even with photos already on disk.
- * `updateGallerySettings` now returns `requiresBackfill: true` when such a
- * key's value actually changes (verified against a fresh DB read, not just
- * the caller's own diff) AND at least one image has already been processed.
+ * C2-02 (run-10 c2, TRC-01) + R17C16: byte-impacting settings now have a
+ * two-part server contract. `updateGallerySettings` returns
+ * `requiresBackfill: true` when a key's value actually changes (verified
+ * against a fresh DB read, not just the caller's own diff) AND at least one
+ * image has already been processed. For those same changes, it also acquires
+ * the shared color-backfill advisory lock before saving so settings cannot
+ * race a sidecar/in-app re-encode snapshot.
  *
  * These tests pin that contract independently of the client-side warning
  * banner (see settings-backfill-warning.test.ts / -source.test.ts), which

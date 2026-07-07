@@ -39,6 +39,24 @@ export interface PooledAdvisoryLockReleaser {
 }
 
 /**
+ * A failed `GET_LOCK` round-trip is ambiguous: MySQL may have granted the lock
+ * before the client observed the error. Close the pooled session so any
+ * possibly-held advisory lock is released server-side instead of returning a
+ * poisoned session to the pool.
+ */
+export function destroyPooledAdvisoryLockConnectionOnAcquireError(
+    conn: PoolConnection,
+    label: string,
+    err: unknown,
+): void {
+    console.error(
+        `GET_LOCK (${label}) failed; destroying pooled connection because acquisition state is ambiguous:`,
+        err,
+    );
+    conn.destroy();
+}
+
+/**
  * Staged variant for call sites that release several locks on one connection
  * at different points (e.g. the DB-restore path holds up to three chained
  * locks) and make a single terminal release/destroy decision at the end.

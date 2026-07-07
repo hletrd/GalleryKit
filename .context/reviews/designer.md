@@ -1,322 +1,372 @@
-# GalleryKit Designer UI/UX Review - Cycle 16
+# GalleryKit Designer UI/UX Review - Cycle 17
 
 Date: 2026-07-08
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `78778dd8`
-Reviewer lane: `designer`
-Mode: source-first UI/UX review with limited local browser validation
+HEAD reviewed: `fc15b235`
+Lane: designer subagent, no implementation changes
 
 ## Scope And Inventory
 
-I built the UI inventory first, then reviewed every relevant public/admin UI file and interaction surface rather than sampling a subset.
+I read `AGENTS.md`, the relevant `CLAUDE.md` UI/color/HDR/i18n/touch-target sections, `README.md`, `apps/web/README.md`, current `apps/web` UI source, UI tests, locale messages, app routes, and relevant historical reviews under `.context/reviews/`.
 
-Inventory covered:
+UI/UX inventory reviewed:
 
-- 51 localized app files under `apps/web/src/app/[locale]/**`, including public routes, admin routes, loading/error/not-found states, admin protected pages, and route-specific UI clients.
-- 61 component files under `apps/web/src/components/**`, including navigation, search, lightbox, photo viewer, admin upload/table workflows, map, dialogs, forms, theme, i18n, and primitive UI controls.
-- `apps/web/src/app/[locale]/globals.css` for theme, contrast, forced-colors, focus, and reduced-motion behavior.
-- `apps/web/messages/en.json` and `apps/web/messages/ko.json` for i18n parity and validation copy.
-- Relevant tests under `apps/web/src/__tests__/**` and `apps/web/e2e/**`.
+- App route files: 51 files under `apps/web/src/app/[locale]`, including public routes, photo pages, topic pages, map, timeline, year, shared galleries, upload, admin login, and protected admin routes.
+- Component files: 61 files under `apps/web/src/components`, including navigation, photo viewer, lightbox, image zoom, masonry/grid cards, search, filters, upload, admin data tools, token/user managers, color/HDR inspection components, map components, and admin shell components.
+- Design primitives: 21 files under `apps/web/src/components/ui`.
+- Global styling and tokens: `apps/web/src/app/globals.css`, `apps/web/tailwind.config.ts`, `apps/web/src/components/theme-provider.tsx`.
+- Locale messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- Playwright coverage: 10 files under `apps/web/e2e`.
+- Unit and contract tests: 357 files under `apps/web/src/__tests__`.
+- Prior UI reviews considered: current `.context/reviews/designer.md` before overwrite, cycle 10 designer/UI-UX reviews, cycle 96 designer/UI-UX reviews, cycle 97/98 UI reviews, and photographer-perspective context referenced by the repo docs.
 
-Interaction surfaces reviewed: public gallery home, topic/category/year/timeline/map/photo/share routes, nav/search/theme/locale controls, lightbox and bottom sheet, load-more, empty/maintenance/error states, admin login, dashboard, upload/dropzone, image table, bulk edit, category/tag managers, SEO/settings/password/users/tokens/database/analytics pages, dialogs, alerts, forms, and destructive confirms.
+No relevant UI source, route, message file, or listed UI test category was intentionally skipped. Authenticated admin runtime DOM and DB-backed public pages could not be fully browsed locally because MySQL was unavailable, so those findings are backed by source, tests, and partial browser evidence.
 
 ## Browser And Validation Evidence
 
-Local browser automation was attempted through the requested agent-browser path.
+Agent-browser CLI was available and used (`agent-browser 0.22.2`) with core, config, query, wait, network, visual, debug, interact/state-style commands where feasible.
 
-- `agent-browser --version` succeeded with `agent-browser 0.22.2`.
-- `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3100` could not start because Next reported an existing dev lock for PID `7042` on port `3000`. No matching process/listener was present, so this looked like a stale lock. I did not delete the lock because deleting files is destructive.
-- `npm run start --workspace=apps/web -- --hostname 127.0.0.1 --port 3100` started, but DB-backed pages rendered the global error shell because MySQL was unavailable: `connect ECONNREFUSED 127.0.0.1:3306`.
-- Browser snapshots of `/en`, `/en/admin`, and an unknown `/en/...` route confirmed the shell exposed a skip link, banner navigation, a single main error region, a heading, retry button, return link, and toast region. Full public/admin workflows could not be interactively validated without the DB.
+Runtime attempt:
 
-Fresh tests run:
+- Started built Next app with `PORT=3100 npm run start --workspace=apps/web -- --hostname 127.0.0.1`.
+- Server became ready at `http://127.0.0.1:3100`.
+- DB-backed pages logged `ECONNREFUSED 127.0.0.1:3306`; public `/en` rendered the app error shell instead of gallery content.
+- Unauthenticated `/en/admin` rendered successfully.
+
+Browser evidence:
+
+- `/en/admin` accessibility snapshot exposed a skip link, `main`, heading `Admin`, labels for Username and Password, a `Show password` button, and `Sign in`.
+- `/en/admin` had one `#main-content` target.
+- Mobile control metrics on `/en/admin`: username input `334x44`, password input `334x44`, show-password button `44x44`, sign-in button `334x44`.
+- `/en` error shell snapshot exposed skip link, banner navigation, `main`, region `Error`, heading `Error`, copy `Something went wrong loading this page.`, `Try again`, and `Return to Gallery`.
+- Screenshots captured for evidence: `/tmp/gallery-cycle17-admin-login-mobile.png`, `/tmp/gallery-cycle17-public-error.png`.
+- Browser metadata links on `/en/admin`: `/manifest.webmanifest`, `/icon?...`, `/apple-icon?...`.
+- HTTP evidence showed `/icon` and `/apple-icon` redirect to `/en/icon` and `/en/apple-icon`, which then route through localized topic handling and 500 when the DB is unavailable.
+
+Targeted verification:
 
 ```text
 npm test --workspace=apps/web -- --run \
   src/__tests__/touch-target-audit.test.ts \
   src/__tests__/i18n-key-parity.test.ts \
+  src/__tests__/focus-visible-links-scan.test.ts \
+  src/__tests__/password-form-a11y.test.ts \
   src/__tests__/theme-token-contract.test.ts \
-  src/__tests__/password-form-a11y.test.ts
+  src/__tests__/search-disclaimer.test.ts \
+  src/__tests__/image-zoom-source-contracts.test.ts \
+  src/__tests__/error-shell.test.ts
 ```
 
-Result: 4 test files passed, 20 tests passed.
-
-Positive implementation notes from current source:
-
-- `apps/web/src/app/[locale]/layout.tsx:101-107` sets locale `lang` and `dir`.
-- `apps/web/src/app/[locale]/layout.tsx:126-145` provides the global skip link and theme provider.
-- `apps/web/src/app/[locale]/(public)/layout.tsx:13-18` makes the skip target programmatically focusable.
-- `apps/web/src/app/[locale]/globals.css:253-279` suppresses motion for `prefers-reduced-motion`.
-- `apps/web/src/app/[locale]/globals.css:281-300` handles forced-colors photo overlays.
-- Dialog/lightbox/search code uses focus traps, modal isolation, i18n close labels, and live status regions in the main modal paths.
+Result: 8 test files passed, 50 tests passed.
 
 ## Confirmed Findings
 
-### DES-C16-01 - Mobile Home Still Places A Full Tag Wall Before The First Photo
+### DES-C17-01 - App icon routes are intercepted by locale routing
 
 Severity: Medium
 Confidence: High
-Status: Confirmed from current source
+Status: Confirmed by browser, HTTP, server logs, and source
 
 Evidence:
 
-- `apps/web/src/components/home-client.tsx:287-305` renders the page heading and full `TagFilter` before the photo grid.
-- `apps/web/src/components/home-client.tsx:318-330` starts the masonry grid after the filter block.
-- `apps/web/src/components/tag-filter.tsx:62-122` renders every tag as a wrapping chip group with no collapse, overflow rail, prioritization, or more control.
+- `apps/web/src/app/icon.tsx:4` defines the root metadata icon route.
+- `apps/web/src/app/apple-icon.tsx:4` defines the root Apple touch icon route.
+- `apps/web/src/app/manifest.ts:24` references `/icon`; `apps/web/src/app/manifest.ts:30` references `/apple-icon`.
+- `apps/web/src/proxy.ts:127` uses matcher `'/((?!api|_next|_vercel|.*\\..*).*)'`, which does not exclude extensionless metadata routes such as `/icon` and `/apple-icon`.
+- `apps/web/src/app/[locale]/(public)/[topic]/layout.tsx:21` queries topics for arbitrary localized path segments.
+- Runtime evidence: `/icon` returned `307` to `/en/icon`; `/apple-icon` returned `307` to `/en/apple-icon`; localized icon paths then hit topic lookup and 500 while the DB was unavailable.
 
 Why this is a problem:
 
-The home page's primary value is photo browsing, but mobile users and keyboard users meet a large taxonomy control before the first image. This weakens information architecture and makes first meaningful content slower to reach.
+Browser chrome assets and PWA install assets are part of perceived polish and page-load behavior. Redirecting them into localized app routes adds unnecessary work and can break icons entirely when the DB or topic route is unavailable.
 
 Concrete failure scenario:
 
-A phone visitor opens the gallery from a profile link and must scroll past or tab through many filter chips before seeing the first photo. A switch-control user pays the cost for every chip before reaching image content.
+A visitor opens the site during a DB incident or cold start. The gallery error shell may render, but favicon and install icons also fail because the browser is sent to `/en/icon`, creating extra failed app requests and broken browser/app-shell branding.
 
 Suggested fix:
 
-Keep `All` plus a few active/recent chips above the grid, and move the full taxonomy into a filter sheet, collapsible panel, or horizontal rail with an explicit expand affordance. Preserve `aria-pressed` and 44 px targets.
+Exclude root metadata assets from locale proxy handling, for example `/icon`, `/apple-icon`, `/manifest.webmanifest`, `/favicon.ico`, and any future `/icons/**` asset path. Add a regression test that asserts `/icon` and `/apple-icon` return image responses without locale redirects.
 
-### DES-C16-02 - Admin Create/Edit Server Validation Is Still Mostly Toast-Only
+### DES-C17-02 - Admin create/edit validation still relies on transient toasts
 
 Severity: Medium
 Confidence: High
-Status: Confirmed from current source
+Status: Confirmed by source
 
 Evidence:
 
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:91-107` handles create failures with `toast.error(...)`.
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:109-126` handles update failures with `toast.error(...)`.
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:205-223` renders create fields without persistent field errors, `aria-invalid`, or `aria-describedby`.
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:363-383` renders edit fields with the same gap.
-- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:53-68` handles update failure with `toast.error(...)`.
-- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:176-181` renders tag edit controls without field-linked server errors.
-- `apps/web/src/components/admin-user-manager.tsx:51-60` handles server create-user failure with toast only, while `apps/web/src/components/admin-user-manager.tsx:107-125` only field-links the confirm-password mismatch.
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:42-72` saves SEO settings with toast-only failure, while `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:98-184` provides help text but not persistent server-error states.
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:91` handles create errors with `toast.error(res.error)`.
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:109` handles update errors with `toast.error(res.error)`.
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:205` and `:363` render text fields without persistent server-error binding, `aria-invalid`, or error `aria-describedby`.
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:53` handles update errors with `toast.error(res.error)`.
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:176` renders editable fields without persistent server-error binding.
+- `apps/web/src/components/admin-user-manager.tsx:51` handles create errors with `toast.error(result.error)`.
+- `apps/web/src/components/admin-user-manager.tsx:107` through `:125` renders user fields; only the client-side confirm-password mismatch gets an inline error.
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:42` handles SEO save errors with `toast.error(result.error)`.
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:98` through `:184` renders SEO fields with hints but no server-error state.
 
 Why this is a problem:
 
-Toast-only validation is transient and not tied to the control that needs correction. It is weak for screen-reader users, keyboard users, long forms, duplicate slugs, invalid aliases, SEO sanitization, or server-side username errors. Native `required`/`pattern` bubbles are also browser-language, not consistently localized through the app.
+Toasts are easy to miss for screen-reader, keyboard-only, low-vision, and interrupted admin workflows. Server validation errors should be persistent, associated with the failed field or form, and discoverable after focus returns.
 
 Concrete failure scenario:
 
-An admin tries to rename a category to an already-used slug. A toast appears briefly while focus remains on the submit button. If the user misses the toast or returns after it disappears, there is no persistent indication of which field failed.
+An admin tries to create a category with a duplicate slug. The server rejects it, a toast appears briefly, focus remains in the form, and the slug field has no persistent invalid state or inline explanation. A screen-reader user may not know which field failed or how to recover.
 
 Suggested fix:
 
-Use the login/settings pattern consistently: keep server errors in component state, render a form-level `role="alert"` summary plus per-field text, set `aria-invalid` and `aria-describedby`, and focus the first invalid field after failure. Keep toast as secondary feedback only.
+Keep toast as a secondary notification, but add persistent form-level `role="alert"` plus field-level messages. Set `aria-invalid` and `aria-describedby` on invalid fields, and move focus to the first invalid field or the alert summary after submit failure.
 
-### DES-C16-03 - Admin Recent Uploads Uses A Dense Metadata Table As The Primary Photo Workbench
+### DES-C17-03 - Oversized DB restore file rejection clears state with toast-only feedback
+
+Severity: Medium
+Confidence: High
+Status: Confirmed by source
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:76` rejects oversized restore files in `handleRestore` using `toast.error(...)`.
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:80` clears `restoreFile`.
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:81` bumps `fileInputKey`, resetting the file input.
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:190` through `:205` repeats the same toast-and-reset behavior in the file input `onChange`.
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:209` shows a static size hint but no inline rejected-file state, `role="alert"`, `aria-invalid`, or `aria-describedby` on the file input.
+
+Why this is a problem:
+
+Database restore is a high-attention admin workflow. Clearing the selected file without persistent explanation makes the interface feel unreliable and makes the failure hard to recover from if the toast is missed.
+
+Concrete failure scenario:
+
+An admin selects a 300 MB backup. The file disappears from the control and the only failure explanation is a transient toast. If the admin is using assistive tech or looking at the file picker, the reason for the reset may be lost.
+
+Suggested fix:
+
+Store a persistent rejected-file error near the file input, associate it with the control using `aria-describedby`, and set `aria-invalid` while the error is present. Keep the rejected filename visible until the user selects another file or dismisses the error.
+
+### DES-C17-04 - Zoomed photos can be entered by keyboard but not panned by keyboard
+
+Severity: Medium
+Confidence: High
+Status: Confirmed by source and tests
+
+Evidence:
+
+- `apps/web/src/components/image-zoom.tsx:118` implements mouse drag panning.
+- `apps/web/src/components/image-zoom.tsx:230` implements touch pinch and drag panning.
+- `apps/web/src/components/image-zoom.tsx:198` implements keyboard zoom toggle for Enter/Space.
+- `apps/web/src/components/image-zoom.tsx:342` implements Escape reset.
+- `apps/web/src/components/image-zoom.tsx:368` makes the image zoom surface focusable with `role="button"`, but it does not handle arrow-key panning.
+- `apps/web/src/__tests__/image-zoom-source-contracts.test.ts` covers keyboard toggle contracts, not keyboard panning.
+
+Why this is a problem:
+
+The component exposes zoom as a keyboard-accessible action but does not expose the core inspection function, moving around the zoomed image. This creates an incomplete keyboard experience for a central photo-viewing affordance.
+
+Concrete failure scenario:
+
+A keyboard or switch-device user opens a detailed image, presses Enter to zoom, and can only inspect the centered crop. Areas outside the center are unavailable unless they use a pointer or touch gesture.
+
+Suggested fix:
+
+When zoomed and focused, support Arrow keys for panning, Shift+Arrow for larger steps, and Home/End or `0` for reset. Add localized instructions through `aria-describedby` and test the keyboard pan behavior.
+
+### DES-C17-05 - Admin recent uploads remain a dense horizontal-scroll table with embedded tag editing
 
 Severity: Medium
 Confidence: Medium-High
-Status: Confirmed from current source; authenticated hands-on validation still needed
+Status: Confirmed by source; authenticated browser validation blocked by missing DB/session
 
 Evidence:
 
-- `apps/web/src/components/image-manager.tsx:427-452` renders the recent uploads workbench as a horizontally scrollable multi-column table.
-- `apps/web/src/components/image-manager.tsx:473-499` places preview, title, description, and filename into compact cells.
-- `apps/web/src/components/image-manager.tsx:501-534` embeds tag editing inside each row.
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135` wraps recent uploads in `max-h-[70vh] overflow-auto`.
+- `apps/web/src/components/image-manager.tsx:427` renders an additional `overflow-x-auto` table wrapper.
+- `apps/web/src/components/image-manager.tsx:431` through `:452` defines many columns: preview, title, filename, topic, tags, gamut, date, actions.
+- `apps/web/src/components/image-manager.tsx:501` through `:534` embeds `TagInput` inside each row.
+- `apps/web/src/components/tag-input.tsx:184` makes the tag input container `relative`.
+- `apps/web/src/components/tag-input.tsx:231` positions suggestions as an absolutely positioned child with `top-full left-0 w-full z-50`.
 
 Why this is a problem:
 
-For a photographer-facing admin workflow, batch review and metadata cleanup are visual tasks. A dense table makes photo identity, comparison, and repeated metadata edits harder than a photo-first grid/list with an inspector or drawer.
+Horizontal scrolling tables are hard to operate on narrow screens, and an absolutely positioned suggestion list inside nested overflow containers can be clipped or visually separated from its input. This is especially risky because the row already contains multiple editable controls.
 
 Concrete failure scenario:
 
-After uploading a shoot, an admin needs to identify similar frames, assign categories, and fix tags. They have to scan small thumbnails and cramped row controls, losing the visual context needed to make quick decisions.
+An admin on a small laptop or tablet edits tags in the recent uploads table. They must horizontally scroll to the tag column, open suggestions, and the suggestion list can be clipped by the scrolling table or max-height dashboard region.
 
 Suggested fix:
 
-Make the default upload management view photo-first: larger thumbnails, key metadata, selection, and a side drawer or inline detail panel for category/tags. Keep the dense table as an optional power-user mode if needed.
+Use a responsive card or inspector layout below `md`, or move editing into a drawer/dialog launched from each row. If inline tag editing remains, render suggestions in a portal/popover positioned against the viewport instead of inside the overflow table.
 
-### DES-C16-04 - Truncated Technical Values Rely On Mouse-Only Native `title`
+### DES-C17-06 - Truncated technical values rely on native `title` tooltips
 
 Severity: Low-Medium
 Confidence: High
-Status: Confirmed from current source
+Status: Confirmed by source
 
 Evidence:
 
-- `apps/web/src/components/info-bottom-sheet.tsx:413-423` truncates camera/lens values and exposes the full value only through `title`.
-- `apps/web/src/components/photo-viewer.tsx:803-812` repeats the same EXIF pattern.
-- `apps/web/src/components/upload-dropzone.tsx:535-538` truncates filenames with `title`.
-- `apps/web/src/components/image-manager.tsx:497-499` truncates uploaded filenames with `title`.
+- `apps/web/src/components/info-bottom-sheet.tsx:413` and `:420` truncate camera/lens metadata and expose full text only through `title`.
+- `apps/web/src/components/photo-viewer.tsx:803` and `:810` use the same pattern in the desktop metadata panel.
+- `apps/web/src/components/upload-dropzone.tsx:535` truncates filenames with `title`.
+- `apps/web/src/components/image-manager.tsx:498` truncates filenames with `title`.
 
 Why this is a problem:
 
-Native `title` is unreliable on touch, keyboard, and assistive technology. Camera model, lens model, and original filenames are exact verification data for photographers and admins.
+Native `title` is not reliably available on touch devices, is inconsistent for keyboard users, and is not a strong accessibility mechanism. Technical photo metadata and filenames often need exact inspection.
 
 Concrete failure scenario:
 
-An admin on a tablet sees two uploaded filenames with identical prefixes. The visible text truncates and the full filename is only available via mouse hover, so the admin cannot confidently choose the right file.
+A mobile viewer sees a truncated lens name or an admin sees a truncated filename and cannot reveal the full value without switching devices or inspecting the DOM.
 
 Suggested fix:
 
-Use expandable text, a copyable metadata row, a details disclosure, or an accessible tooltip/popover triggered by focus, hover, and touch. For filenames in tables, allow wrapping in a detail drawer or provide a copy button with a clear label.
+Use accessible disclosure patterns: wrap long values, provide a copy button, or use a keyboard/touch accessible tooltip/popover with `aria-describedby`. For admin file names, consider a details drawer or expandable cell.
 
-### DES-C16-05 - Upload Progress Changes Are Not Fully Announced
+### DES-C17-07 - Upload progress is visually rich but not fully announced
 
 Severity: Low-Medium
 Confidence: Medium
-Status: Confirmed source gap; needs screen-reader runtime validation
+Status: Confirmed by source
 
 Evidence:
 
-- `apps/web/src/components/upload-dropzone.tsx:469-483` renders visible progress text and a `progressbar`.
-- `apps/web/src/components/upload-dropzone.tsx:484-488` adds `aria-live="polite"` only to the current filename, not the combined progress count/percent.
+- `apps/web/src/components/upload-dropzone.tsx:469` through `:483` renders visual upload count and a progressbar.
+- `apps/web/src/components/upload-dropzone.tsx:485` announces only the current filename in an `aria-live="polite"` element.
+- The visual progressbar has `aria-valuenow`, but it is not guaranteed to be announced if focus is elsewhere.
 
 Why this is a problem:
 
-Screen readers do not consistently announce changing `aria-valuenow` on an unfocused progressbar. The filename live region alone does not communicate "10 of 100, 10%" progress.
+Screen-reader users need the same progress model sighted users get: current file, count, total, and percent. Announcing only the filename does not communicate whether the upload is advancing or stalled.
 
 Concrete failure scenario:
 
-A screen-reader admin starts a large upload and focus remains on the disabled upload controls. They may hear a changing filename, but not whether progress is moving or how many files remain.
+An admin uploads 100 photos. The visible UI shows `10 / 100` and percent progress, but a screen-reader user only hears changing filenames and cannot easily know total completion state.
 
 Suggested fix:
 
-Add a dedicated `role="status" aria-live="polite" aria-atomic="true"` text node containing the localized count, total, percent, and current filename. Keep the `progressbar` for semantic value.
+Add a dedicated localized `role="status" aria-live="polite" aria-atomic="true"` message such as `Uploading 10 of 100, 42 percent, current file DSC_1234.jpg`. Keep the progressbar for visual and programmatic value semantics.
+
+### DES-C17-08 - Home page information architecture still lets tags dominate before photos
+
+Severity: Medium
+Confidence: Medium-High
+Status: Confirmed by source; full browser validation blocked by DB
+
+Evidence:
+
+- `apps/web/src/components/home-client.tsx:287` renders gallery heading and tag filtering before the photo grid.
+- `apps/web/src/components/home-client.tsx:298` renders `TagFilter` before the first photo result.
+- `apps/web/src/components/tag-filter.tsx:62` through `:122` renders every visible tag as a wrapping button list.
+- `apps/web/src/components/tag-filter.tsx:47` memoizes all available tags for display; there is no source-level cap, collapse, or progressive disclosure in the filter itself.
+
+Why this is a problem:
+
+GalleryKit is documented as a finished-photo publishing experience. If many tags exist, visitors can encounter a dense control wall before the first photograph, weakening the primary photo-first experience and increasing first-screen interaction cost.
+
+Concrete failure scenario:
+
+A gallery with dozens of tags opens on mobile. The first screen is mostly filters, so a viewer must scroll before seeing the first image and may interpret the page as a database interface rather than a gallery.
+
+Suggested fix:
+
+Show a compact default tag set, collapse the rest behind a disclosure, or move full tag browsing into a dedicated filter sheet. Keep the first row of photos visible on common mobile and desktop viewports.
 
 ## Likely Issues
 
-### DES-C16-06 - Tag Autocomplete Can Be Clipped Inside The Admin Table Scrollport
+### DES-C17-09 - Token management uses one pending state for independent operations
+
+Severity: Low-Medium
+Confidence: Medium
+Status: Likely issue from source; authenticated browser validation blocked
+
+Evidence:
+
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:28` creates a single `useTransition()` pending state.
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:40` through `:42` use one focus-restore target for retry, create, and revoke flows.
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:56` handles list refresh.
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:70` handles token creation.
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:106` handles revoke.
+- `apps/web/src/app/[locale]/admin/(protected)/users/tokens-client.tsx:187`, `:242`, and `:303` disable unrelated controls through the same `isPending`.
+
+Why this is a problem:
+
+Independent admin tasks share loading and focus behavior, so one slow operation can disable unrelated controls or restore focus to the wrong button.
+
+Concrete failure scenario:
+
+An admin triggers a token list retry and then tries to create or revoke another token. The shared pending state disables controls beyond the active operation, making the workflow feel frozen.
+
+Suggested fix:
+
+Split state into `isLoadingList`, `isCreating`, and per-token `isRevoking`. Scope disabled states, status copy, and focus restoration to the operation that actually started.
+
+### DES-C17-10 - Mobile admin navigation is a wrapped link cloud
 
 Severity: Medium
 Confidence: Medium
-Status: Likely from current DOM/CSS structure; needs authenticated visual confirmation
+Status: Likely issue from source; authenticated browser validation blocked
 
 Evidence:
 
-- `apps/web/src/components/image-manager.tsx:427-452` wraps the image table in `overflow-x-auto`.
-- `apps/web/src/components/image-manager.tsx:501-534` embeds `TagInput` in each row.
-- `apps/web/src/components/tag-input.tsx:184` positions the input container as `relative`.
-- `apps/web/src/components/tag-input.tsx:231-233` renders suggestions as an absolutely positioned child inside that subtree.
+- `apps/web/src/components/admin-header.tsx:13` through `:24` uses a wrapping header layout.
+- `apps/web/src/components/admin-nav.tsx:15` through `:25` defines 10 admin destinations.
+- `apps/web/src/components/admin-nav.tsx:28` renders the navigation as `flex flex-wrap gap-2`.
 
 Why this is a problem:
 
-An absolutely positioned dropdown cannot escape an overflow-clipping ancestor just by using `z-50`. On narrower admin widths, suggestions can be clipped or require horizontal scrolling while the user is trying to choose a tag.
+Ten wrapped text links create a noisy mobile admin header and a long tab sequence before content. This weakens information architecture for frequent admin tasks.
 
 Concrete failure scenario:
 
-An admin edits tags in the recent uploads table on a tablet. The suggestion list opens near the right edge of the scrollport and is partially hidden, so the admin assumes no matching tags exist or cannot reach an option.
+On a phone-width viewport, an admin must tab or scroll through multiple rows of navigation links before reaching the page controls, and the current section is harder to parse than in a drawer, tabs, or grouped menu.
 
 Suggested fix:
 
-Render suggestions through a portal/popover that positions relative to the input but escapes the table scroll container, or move row metadata editing into a drawer/inspector outside the scroll table. Verify keyboard arrows, Escape, outside click, and touch selection.
+Use a responsive admin navigation pattern below `md`: a disclosure menu, drawer, segmented section switcher, or grouped sidebar. Preserve `aria-current="page"` and keep the active destination visible.
 
-### DES-C16-07 - Lightroom Token Page Uses One Pending State For Independent Async Jobs
+### DES-C17-11 - Zoomed mobile pan may conflict with ancestor swipe navigation
 
-Severity: Low-Medium
-Confidence: Medium
-Status: Likely source issue; needs authenticated workflow timing validation
+Severity: Medium
+Confidence: Low-Medium
+Status: Risk requiring manual touch validation
 
 Evidence:
 
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:28` defines one `isPending` transition state.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:40-42` attaches focus restoration for retry, create, and revoke controls to that same pending state.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:56-61` uses it for list refresh.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-104` uses it for create.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:106-117` uses it for revoke.
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:187-194`, `242-245`, and `303-321` disable unrelated revoke/create/confirm controls from the shared state.
+- `apps/web/src/components/photo-viewer.tsx:697` mounts `PhotoNavigation` unless the lightbox or bottom sheet is open; zoom state is not part of the disabled condition.
+- `apps/web/src/components/photo-navigation.tsx:134` through `:146` registers native touch listeners on the media container.
+- `apps/web/src/components/photo-navigation.tsx:204` through `:221` navigates after horizontal swipe thresholds.
+- `apps/web/src/components/image-zoom.tsx:230` through `:307` handles pinch and drag gestures and calls propagation-prevention methods on synthetic touch events.
 
 Why this is a problem:
 
-Loading the list, creating a token, and revoking a token are different jobs with different user context. A shared pending state can disable unrelated controls, block closing a confirm dialog, or restore focus to the wrong action after an unrelated transition settles.
+If ancestor native listeners still observe zoom-pan gestures, a user trying to inspect a zoomed image could accidentally navigate to another photo. The source suggests competing gesture systems, but this needs device/browser validation because event ordering matters.
 
 Concrete failure scenario:
 
-A list refresh is slow after token creation. The admin opens the create dialog again and the create button is disabled by the list refresh, without a clear dialog-local reason. Focus restoration can also target a button unrelated to the action the user just took.
+A mobile user zooms in and drags horizontally to inspect an image edge. The ancestor swipe handler interprets the gesture as previous/next navigation.
 
 Suggested fix:
 
-Split state into `isLoadingList`, `isCreating`, and `isRevoking`, with separate focus restoration and dialog close gating. Show dialog-local status text for create/revoke and keep list refresh status inside the list region.
+When zoom scale is above 1, disable photo swipe navigation or have `ImageZoom` report active zoom/gesture state to `PhotoNavigation`. Add mobile Playwright or manual device coverage for zoom-pan versus gallery-swipe behavior.
 
-### DES-C16-08 - Archive Photo Grids Re-enable Viewport Prefetch That Other Grids Intentionally Disable
+## Fixed Or Not Re-filed From Prior Reviews
 
-Severity: Low
-Confidence: High
-Status: Likely performance issue from source
+- Timeline/year duplicate accessible names appear fixed. `apps/web/src/components/timeline-client.tsx:229` and `apps/web/src/components/year-client.tsx:192` include the photo id in the accessible title.
+- Timeline/year archive links now use `prefetch={false}` at `apps/web/src/components/timeline-client.tsx:250` and `apps/web/src/components/year-client.tsx:210`.
+- Search tag-result labeling appears improved. `apps/web/src/lib/search.ts` now carries `tag_names`, and `apps/web/src/components/search.tsx` uses richer result labels.
+- `TagInput` has active descendant wiring in `apps/web/src/components/tag-input.tsx:174` and option ids at `:240`.
+- Admin login skip-target and control sizing were verified in the browser.
+- Token Unicode truncation from an older review appears fixed with character `maxLength={256}` in token inputs.
+- Token load failure no longer appears to silently empty the page; source now carries explicit load error state and retry UI.
 
-Evidence:
+## Manual Validation Risks And Runtime Gaps
 
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:250-253` links each archive photo without `prefetch={false}`.
-- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:210-213` does the same.
-- `apps/web/src/components/masonry-card.tsx:78-81` disables prefetch for the main masonry cards.
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:199-209` disables prefetch for shared grids with an explicit resource-cost comment.
+- DB-backed public content, authenticated admin pages, real photo grids, maps, and media-heavy routes could not be fully exercised in the local browser because MySQL refused connections at `127.0.0.1:3306` and no admin session credentials were available.
+- Real Core Web Vitals were not measured. Perceived-performance review is therefore source-based: icon redirect failures, archive prefetch behavior, error shell behavior, and UI layout risks. LCP/CLS/INP should still be measured against a seeded local DB or production-like staging copy.
+- Dark/light mode was source and token-test reviewed; full visual regression across every route was blocked by the DB issue.
+- Mobile touch gesture interaction for zoom-pan versus photo-swipe needs real browser/device validation.
 
-Why this is a problem:
+## Final Missed-Issues Sweep
 
-Long masonry-like archive pages can schedule many photo-detail RSC prefetches as links enter the viewport. That competes with thumbnail loading and server/database work, especially on mobile or low-bandwidth connections. The main and shared grids already avoid this.
-
-Concrete failure scenario:
-
-A mobile visitor scrolls a year archive with many photos. The browser begins prefetching detail pages for visible tiles, making image loading and scrolling feel slower before the user clicks anything.
-
-Suggested fix:
-
-Add `prefetch={false}` to timeline/year photo links and rely on normal click navigation plus existing detail-page neighbor preloads.
-
-## Manual-Validation Risks
-
-### DES-C16-09 - Leaflet Map Accessibility Needs Real DOM And Keyboard Validation
-
-Severity: Low-Medium
-Confidence: Medium
-Status: Manual-validation risk
-
-Evidence:
-
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:80-89` provides a skip link and labelled/described section around the map.
-- `apps/web/src/components/map/map-client.tsx:109-140` renders `MapContainer` without explicit ARIA props, focus handling, or localized keyboard instructions on the Leaflet container itself.
-- Marker popup buttons are labelled at `apps/web/src/components/map/map-client.tsx:126-131`, but marker reachability depends on Leaflet's generated DOM.
-
-Why this is a problem:
-
-Leaflet injects its own focusable map viewport and controls. The wrapper section is labelled, but the generated interactive map may still be announced generically, lack localized keyboard instructions, or make marker access unclear.
-
-Concrete failure scenario:
-
-A keyboard/screen-reader visitor tabs into the map and hears a generic interactive region. They do not know how to pan, zoom, reach markers, or leave the map except by tabbing until the list.
-
-Suggested fix:
-
-When the map instance is ready, apply a localized accessible name/description to the Leaflet container and verify generated controls have useful labels. Keep the photo list fallback, and add visible-on-focus skip links before and after the map.
-
-### DES-C16-10 - Admin Navigation Is A Flat Ten-Link Wrap
-
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed source structure; needs authenticated responsive validation
-
-Evidence:
-
-- `apps/web/src/components/admin-nav.tsx:15-26` defines ten top-level links in one array.
-- `apps/web/src/components/admin-nav.tsx:28-49` renders one wrapping nav list.
-- `apps/web/src/components/admin-header.tsx:13-27` places brand, nav, and logout into a wrapping header row.
-
-Why this is a problem:
-
-The admin IA mixes content, discovery, account, system, database, analytics, and token workflows in one flat cluster. On narrow screens and Korean labels, wrapping changes spatial grouping, increasing visual rescanning cost.
-
-Concrete failure scenario:
-
-An admin moves between Uploads, Tags, SEO, Settings, DB, and Analytics. On a narrow viewport the link positions wrap differently, so repeated task navigation requires scanning the whole cluster each time.
-
-Suggested fix:
-
-Group admin navigation into stable sections such as Content, Discovery, System, and Account. Use a desktop sidebar or grouped top nav, and a mobile drawer/segmented menu with clear current-page state and 44 px targets.
-
-## Final Sweep
-
-Commonly missed areas checked:
-
-- Focus traps and modal isolation: present in search, lightbox, and info sheet.
-- Touch targets: targeted audit passed; button primitives and many custom links/chips use 44 px minimums.
-- Contrast/dark/forced colors: theme token tests passed; current source contains forced-colors and reduced-motion overrides.
-- Loading/empty/error states: public restore maintenance, token loading/error/empty, upload skipped-file warnings, image-processing placeholders, and global error shell are present. DB outage prevented end-to-end visual confirmation of data-loaded states.
-- i18n: key parity test passed for English/Korean. RTL is future-proofed via `dir`, but no RTL locale is shipped, so RTL layout remains unvalidated.
-- Perceived performance: photo grids generally use sized images, AVIF/WebP/JPEG sources, above-fold priority logic, and prefetch suppression in main/shared grids; timeline/year are the outliers.
-
-Skipped runtime validation:
-
-- Authenticated admin workflows, map marker navigation, upload progress, token lifecycle timing, and table autocomplete clipping could not be validated in a data-loaded local browser because the local MySQL dependency was unavailable and the dev server lock could not be cleared without deleting a file.
+I rechecked prior-cycle findings against current source before writing this report, then swept for route metadata, skip links, ARIA/focus patterns, touch targets, Korean/i18n parity, reduced motion, dark/light token coverage, truncation, toast-only errors, overflow containers, and pending/loading state. The icon-routing issue is newly confirmed by browser evidence in this cycle. The remaining filed items are current in source or marked as manual-validation risks where runtime access was blocked.

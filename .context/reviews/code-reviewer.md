@@ -1,45 +1,51 @@
-# Cycle 16 Code-Reviewer Review
+# Cycle 17 Code-Reviewer Review
 
-Date: 2026-07-08
+Date: 2026-07-08 KST
 
-Mode: whole-repository code review from the code quality, logic, SOLID, and maintainability angle. The only file intentionally written by this lane is this report.
+Mode: whole-repository code review from code quality, logic, SOLID, maintainability, correctness, and cross-file interaction angles. This lane did not implement fixes; the only write is this report.
 
 ## Scope And Inventory
 
-Instructions/context loaded: `AGENTS.md` from the prompt, `CLAUDE.md`, and the `code-review` skill.
+Instructions and project context read before judging behavior:
 
-Inventory built before findings:
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.context/plans/README.md`
+- `apps/web/README.md`
+- Current Cycle 16 aggregate/plan/deferred files used as recent review history, not as live runtime truth.
 
-- 685 review-relevant files under `apps/web/src`, `apps/web/scripts`, `scripts`, and `apps/web/drizzle` including tests.
-- 328 production/config/migration/script files after excluding `__tests__`.
-- 80 app route/action/page files under `apps/web/src/app`.
-- 179 core `lib`, `components`, `db`, and `i18n` TypeScript/TSX files.
-- Total reviewed production text surface: 56,452 lines from the production inventory.
+Review-relevant inventory built first:
 
-Files and interactions examined directly or via targeted sweeps:
+- 695 review-relevant app/script/migration/e2e text files under `apps/web/src`, `apps/web/scripts`, `scripts`, `apps/web/e2e`, and `apps/web/drizzle`.
+- 683 repo/document/config text files at shallow project scope, excluding dependency/build outputs.
+- Source breakdown: 81 app route/action/admin files, 61 components, 114 library modules, 3 DB modules, 1 i18n module, 361 unit-test files, 12 e2e files, 28 scripts, 33 migration/meta files, and 5 other source files.
+- TypeScript/JavaScript application/script/e2e surface: 107,782 lines.
+- Migrations: 30 SQL migrations plus Drizzle journal/meta; journal currently has 30 entries and the latest entry is `0029_feed_updated_indexes`.
 
-- Admin/session/PAT auth, same-origin action guards, public route rate limits, public/admin selector privacy, upload/delete/bulk image flows, Lightroom upload, processing queue, admin and semantic backfills, restore-maintenance fencing, backup/restore scripts, migration/journal handling, smart collections, public search/semantic/similar routes, share/feed/OG routes, gallery pagination/cursors, UI state components, service-worker cache helpers, storage helpers, and repo hygiene.
-- Static binary assets, fonts, generated screenshots, fixtures, dependency directories, and build output were excluded from behavioral findings. Historical `.context` plans/reviews were treated as review history, not live runtime behavior.
+Files and interactions examined directly or by full-surface targeted sweeps:
+
+- Admin/session/PAT auth, API wrappers, same-origin action guards, public route rate-limit contracts, route handlers, server actions, DB backup/restore, upload/LR-upload, upload quota/processing locks, image queue, color and semantic backfills, restore maintenance fences, public data selectors/privacy guards, sitemap/feed/OG/search routes, service worker/cache helpers, storage helpers, migrations, CI/deploy scripts, package/workflow config, current plans/reviews, and test contracts.
+- Binary fixtures, icons/fonts, generated images, `node_modules`, build output, and historical review/plan archives were not treated as live runtime behavior except where they affect current project guidance.
 
 ## Validation Evidence
 
-Read-only/static validation run in this lane:
+Read-only/static validation run:
 
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run lint:api-auth --workspace=apps/web` - PASS.
+- `npm run lint:action-origin --workspace=apps/web` - PASS.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - PASS.
 
-Additional sweeps performed:
+Additional sweeps:
 
-- Route export/auth/rate-limit inventory across all `route.ts(x)` files.
-- Server-action export inventory with same-origin/admin guard checks.
-- Raw SQL, advisory-lock, child-process, filesystem write/delete/rename, revalidation, `cache()`, `process.env`, timer, and catch/rollback pattern scans.
-- `TODO/FIXME/HACK`, TypeScript suppression, and ESLint suppression scans.
-- Final check for tracked `.omc`/runtime-state artifacts.
+- Route export/auth/rate-limit inventory across all route handlers.
+- Server-action guard inventory across all action files.
+- Raw SQL/advisory lock/connection acquisition/release scan.
+- Privacy selector and sensitive-field scan.
+- Secret-string, URL/fetch/JSON-LD, filesystem, child-process, queue/concurrency, migration/journal, and recent-commit diff scans.
 
 Not run:
 
-- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, or Playwright e2e. This was a review/report lane; the three custom guard scripts above were enough to validate the auth/origin/rate-limit claims made here, but full gates remain required before shipping fixes.
+- Full ESLint, typecheck, build, full Vitest, or Playwright. Cycle 16 plan records those gates as green at `fc15b235`; this review lane only re-ran the three custom guard scripts.
 
 ## Findings Summary
 
@@ -49,111 +55,102 @@ Not run:
 
 ## Confirmed Issues
 
-### 1. Admin deletion can throw an unstructured 500 when the dedicated advisory-lock connection cannot be acquired
+### 1. DB backup and restore actions can throw outside their typed action result on connection/setup failure
 
-- Location: `apps/web/src/app/actions/admin-users.ts:231`
+- Location: `apps/web/src/app/[locale]/admin/db-actions.ts:163-175`, `apps/web/src/app/[locale]/admin/db-actions.ts:349-358`, `apps/web/src/app/[locale]/admin/db-actions.ts:378-389`
 - Severity: Medium
 - Confidence: High
 - Category: confirmed issue
 
-`deleteAdminUser()` acquires its dedicated MySQL connection before entering the `try/catch/finally` that maps lock, transaction, and domain failures to localized action results. If `connection.getConnection()` rejects because the pool is exhausted, the database is restarting, or credentials/TLS are misconfigured, the rejection bypasses the structured error handling entirely and propagates as a server-action exception.
+`dumpDatabase()` creates the backup directory and then calls `connection.getConnection()` before entering the `try/finally` that maps backup lock handling and child-process failures into `{ success: false, error: ... }`. `restoreDatabase()` has the same acquisition gap: it calls `connection.getConnection()` before its lock/releaser `try/finally` begins. If the pool is exhausted, MySQL is restarting, TLS setup fails during acquisition, or `data/backups` cannot be created, these admin server actions reject through the framework instead of returning their documented localized result shape.
 
 Why this is a problem:
 
-- Sibling admin mutation paths generally convert transient DB/lock acquisition failures into `{ error: t(...) }`.
-- The function has careful transaction rollback and lock release logic after the connection exists, but the first infrastructure failure sits outside that envelope.
-- This creates an inconsistent admin UX and makes a routine infrastructure fault look like an application crash.
+- Cycle 16 fixed this exact class for `deleteAdminUser()` and `backfillClipEmbeddings()`, but the DB-maintenance actions still have the same cross-file reliability gap.
+- The UI calls these as typed admin actions and expects `{ success: false, error }`; a raw rejection becomes a generic server-action failure during high-stress maintenance, exactly when operators need clear recovery text.
+- The cleanup/release discipline after acquisition is careful, but the first acquisition/setup failures sit outside it.
 
 Concrete failure scenario:
 
-- An admin tries to delete a stale admin account while the DB pool is saturated by uploads/backfill/health probes.
-- `connection.getConnection()` rejects at line 231.
-- The caller receives a framework-level server-action failure instead of `failedToDeleteUser`; the UI may show a generic crash/toast and no localized recovery message.
+- An admin starts a DB backup while uploads/backfill/health checks saturate the 10-connection pool.
+- `connection.getConnection()` at line 173 rejects before `dbRestoreLockHeld` and the backup `try/finally` exist.
+- The admin sees a generic action crash instead of `backupFailed`/`restoreFailed`; no localized operator hint is returned.
 
 Suggested fix:
 
-- Move `connection.getConnection()` into a small guarded acquisition block, or widen the existing `try` to start before acquisition with `let conn: PoolConnection | null = null`.
-- In `finally`, release only when `conn` is non-null.
-- Return `t('failedToDeleteUser')` on acquisition failure and log the detail server-side.
+- For both actions, move connection acquisition inside a guarded block with nullable `conn`.
+- Return `{ success: false, error: t('backupFailed') }` or `{ success: false, error: t('restoreFailed') }` on acquisition/setup failure and log details server-side.
+- Guard `releasePooledAdvisoryLocks` / `conn.release()` calls on non-null connection state.
+- Add behavior tests that mock `connection.getConnection()` rejection for backup and restore.
 
-### 2. CLIP embedding backfill has the same unhandled dedicated-connection acquisition gap
+### 2. Current-cycle ledger still advertises completed Cycle 16 work as active/pending
 
-- Location: `apps/web/src/app/actions/embeddings.ts:113`
+- Location: `.context/plans/README.md:36-37`, `.context/plans/cycle-16-2026-07-08-plan.md:3`, `.context/reviews/_aggregate.md:1-35`
 - Severity: Medium
 - Confidence: High
-- Category: confirmed issue
+- Category: confirmed maintainability issue
 
-`backfillClipEmbeddings()` localizes and logs errors inside the `try/catch` beginning at line 115, but the advisory-lock connection is acquired at line 113 before that `try` starts. If the pool cannot hand out a connection, the server action rejects instead of returning `{ status: 'error', message: t('embeddingBackfillFailed') }`.
+The repository is at `HEAD == origin/master == fc15b235`, with Cycle 16 implementation commits present (`7a76d6a6`, `5c8aa0da`, `aab5f6db`, `38329ed6`, `fc15b235`). However, the active plan index still points at Cycle 16 as the active ledger, and the Cycle 16 plan still says `COMMIT/PUSH/DEPLOY PENDING`. The latest aggregate file also still presents fixed Cycle 16 findings as current review findings without terminal closure context.
 
 Why this is a problem:
 
-- The action already treats config read failures as disabled/no-op and later DB/encoder failures as structured `{ status: 'error' }`; connection acquisition is the one infrastructure error outside that policy.
-- The action is currently documented as not UI-wired, but it is exported and linted as an admin server action. Future wiring would inherit this rough failure mode.
+- This repo uses `.context/plans/README.md` as an agent orientation surface; stale active-state text sends later agents toward already-committed work.
+- The project policy says every pushed iteration should deploy; stale `DEPLOY PENDING` text makes it unclear whether production was updated or whether only the ledger was missed.
 
 Concrete failure scenario:
 
-- An admin/operator triggers embedding backfill during a production CLIP rollout while the DB pool is temporarily exhausted.
-- `connection.getConnection()` throws before `semanticBackfillLockHeld` exists.
-- The action boundary sees an uncaught exception rather than a localized `embeddingBackfillFailed` response.
+- A later cycle agent reads the plan index, assumes Cycle 16 push/deploy is still pending, and spends time re-closing already-shipped work or misreports deployment state.
 
 Suggested fix:
 
-- Match `acquireUploadProcessingContractLock()`'s posture: catch connection-acquisition failures and return a structured unavailable/error result.
-- Keep the current `releasePooledAdvisoryLocks()` discipline after a connection exists.
+- Move Cycle 16 from active to recently completed once the orchestrator confirms deploy evidence.
+- Record terminal commit/push/deploy status for `fc15b235` or explicitly record the deploy gap if deploy did not run.
+- Add a lightweight ledger check that flags `COMMIT/PUSH/DEPLOY PENDING` when `HEAD == origin/master` has advanced beyond the plan start HEAD.
 
 ## Likely Issues
 
-### 3. Tracked OMX/OMC runtime artifacts pollute the source and review inventory
+### 3. A tracked `.omc` runtime artifact remains in source control
 
-- Location: `.omc/plans/plan-cycle12-fixes.md:1`, `apps/web/src/__tests__/.omc/state/sessions/cf88ba27-b054-4385-83b8-446a5996bdbf/pre-tool-advisory-throttle.json:1`
+- Location: `.omc/plans/plan-cycle12-fixes.md:1`
 - Severity: Low
 - Confidence: High
 - Category: likely maintainability issue
 
-Two runtime/planning artifacts are tracked even though `.gitignore` ignores `.omc` at line 16. One is a stale completed plan under root `.omc`; the other is an agent throttle JSON file nested inside `apps/web/src/__tests__`.
-
-Why this is a problem:
-
-- `rg --files` and review inventories pick up `apps/web/src/__tests__/.omc/...` as part of the test tree.
-- The root `.omc` plan is not the project’s committed plan history (`.context/plans` is), and it references old source-line numbers and completed work.
-- Future agents and maintainers can mistake runtime state for authoritative repo context.
+`git ls-files` still shows a tracked `.omc` plan even though runtime state belongs outside source control. The nested `.omc` test-state artifact reported in Cycle 16 appears gone, but the root `.omc` plan remains.
 
 Concrete failure scenario:
 
-- A future review or code-search script includes `apps/web/src/__tests__/.omc/state/...json`, counts it as a test artifact, or reports stale advisory text as source.
-- Another agent reads `.omc/plans/plan-cycle12-fixes.md` as current planning context and reopens already-fixed work.
+- A review/inventory script or future agent includes this stale runtime plan as authoritative current-cycle context, reopening already-fixed work or inflating review scope.
 
 Suggested fix:
 
-- Remove the tracked `.omc` files from git while preserving `.context/plans` and `.context/reviews` as the committed review/plan surfaces.
-- Add a CI or lint check that fails if tracked paths match `(^|/)\\.omc/` or `(^|/)\\.omx/`.
+- After explicit deletion approval, remove tracked `.omc` artifacts from git and keep `.context/plans` / `.context/reviews` as the committed planning surfaces.
+- Add a repository check that fails on tracked paths matching `(^|/)\\.omc/` or `(^|/)\\.omx/`.
 
 ## Manual-Validation Risks
 
-### 4. Full quality gates were not run in this review lane
+### 4. This lane did not rerun the full quality gate suite
 
-- Location: `AGENTS.md` quality-gates section; `apps/web/package.json` scripts
+- Location: `AGENTS.md` quality-gates section; `apps/web/package.json`
 - Severity: Low
 - Confidence: High
 - Category: manual-validation risk
 
-The three custom guard scripts passed, but this lane did not run the full lint/typecheck/build/unit/e2e gate suite.
+The three custom guard scripts passed in this lane, and Cycle 16 records full gates green, but this review did not independently rerun full lint/typecheck/build/unit/e2e.
 
-Concrete failure scenario:
+Suggested validation before shipping fixes:
 
-- A TypeScript, Next build, ESLint, unit-test, or browser-flow failure unrelated to API auth/action-origin/public-route-rate-limit exists and is not detected by this review pass.
-
-Suggested validation:
-
-- In the implementation/verification lane, run `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, `npm test --workspace=apps/web`, and `npm run test:e2e --workspace=apps/web` where browser-flow coverage is required.
+- `npm run lint --workspace=apps/web`
+- `npm run typecheck --workspace=apps/web`
+- `npm run build --workspace=apps/web`
+- `npm test --workspace=apps/web`
+- `npm run test:e2e --workspace=apps/web` when browser-flow coverage is relevant
 
 ## Final Sweep Notes
 
-- Auth wrapper coverage: passed `lint:api-auth`; inspected `withAdminAuth`, cookie and PAT branches, response cache headers, token scope gates, and request-token context cleanup.
-- Server-action mutation guard coverage: passed `lint:action-origin`; inspected mutating image/topic/tag/share/settings/admin-user/token/restore-related paths for same-origin and restore-fence patterns.
-- Public route rate-limit coverage: passed `lint:public-route-rate-limit`; inspected search, similar, OG, feed, upload serving, health, and live routes.
-- Data/privacy boundaries: public selectors continue to omit admin-only fields with compile-time guards; map GPS exposure is isolated behind `map_visible`.
-- Upload/queue/backfill: quota claims, lock release, retry maps, file cleanup, restore maintenance checks, and queue side effects are mostly disciplined. The notable exception is the two dedicated connection-acquisition gaps above.
-- Pagination/search: cursor predicates are order-compatible with the `capture_date DESC, created_at DESC, id DESC` listing order; malformed load-more cursors fail closed.
-- Raw SQL/advisory-lock surfaces: most use parameterized queries and shared lock-release helpers. The remaining concern is acquisition placement, not SQL injection.
-- Skipped files: binary fixtures, fonts/icons, screenshots, generated output, and historical review artifacts were not treated as runtime behavior.
+- Auth/API/action coverage: custom guard scripts passed; no new admin API auth, mutating action origin, or public route rate-limit bypass found.
+- Data/privacy boundaries: public selectors still explicitly omit sensitive/admin-only fields, and map latitude/longitude remains isolated to `publicMapSelectFields`.
+- Advisory locks: pooled release discipline is mostly centralized through `advisory-lock-release.ts`; sidecar raw release sites remain intentionally allowlisted because process exit closes their connections.
+- Migrations/schema: no new migration files in this cycle; latest journal entry remains `0029_feed_updated_indexes`. Historical non-monotonic journal timestamps are documented and covered by `migrate.js` postconditions.
+- Recent Cycle 16 fixes: admin-delete and semantic-backfill acquisition gaps are closed in current source; color-settings/backfill coordination is present and covered by focused tests.
+- Files skipped as behavioral sources: binary fixtures/assets, generated images/fonts/icons, dependency/build outputs, and historical archived plans/reviews.

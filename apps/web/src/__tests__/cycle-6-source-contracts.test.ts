@@ -6,14 +6,16 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(path.join(root, relativePath), 'utf8');
 
 describe('cycle 6 source contracts', () => {
-    it('backfill-clip embeddings honors small SEMANTIC_SCAN_LIMIT values by limiting the query before processing', () => {
+    it('backfill-clip embeddings honors small SEMANTIC_SCAN_LIMIT values by limiting actual embedding attempts', () => {
         const source = read('scripts/backfill-clip-embeddings.ts');
 
-        expect(source).toContain('const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0)');
-        expect(source).toContain('.limit(Math.min(BATCH_SIZE, remainingScanBudget))');
+        expect(source).toContain('let attemptedEmbeddings = 0');
+        expect(source).toContain('const remainingEmbeddingBudget = Math.max(SEMANTIC_SCAN_LIMIT - attemptedEmbeddings, 0)');
+        expect(source).toContain('.limit(Math.min(BATCH_SIZE, remainingEmbeddingBudget))');
         expect(source).toContain('function logScanLimitReached()');
         expect(source).toContain('console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`)');
-        expect(source).toMatch(/if \(processed \+ failed >= SEMANTIC_SCAN_LIMIT\) \{\s*logScanLimitReached\(\);\s*break;\s*\}\s*if \(rows\.length < BATCH_SIZE\) break;/);
+        expect(source).toMatch(/if \(attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT\) \{\s*logScanLimitReached\(\);\s*break;\s*\}\s*if \(rows\.length < BATCH_SIZE\) break;/);
+        expect(source).not.toContain('SEMANTIC_SCAN_LIMIT - processed - failed');
         expect(source).not.toContain('processed + failed + rows.length > SEMANTIC_SCAN_LIMIT');
     });
 

@@ -55,7 +55,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
     const [newAlias, setNewAlias] = useState('');
     const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
-    const [deleteAliasInfo, setDeleteAliasInfo] = useState<{ topicSlug: string; alias: string } | null>(null);
+    const [deleteAliasInfo, setDeleteAliasInfo] = useState<{ topicSlug: string; topicLabel: string; alias: string } | null>(null);
     const [isDeletingTopic, setIsDeletingTopic] = useState(false);
     const [isDeletingAlias, setIsDeletingAlias] = useState(false);
     const [isAddingAlias, setIsAddingAlias] = useState(false);
@@ -391,7 +391,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                             <span>{alias}</span>
                                             <button
                                               type="button"
-                                              onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, alias })}
+                                              onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, topicLabel: editingTopic.label, alias })}
                                               className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground hover:text-destructive-text focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                               aria-label={t('categories.deleteAliasButton', { alias })}
                                             >
@@ -433,9 +433,15 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             <AlertDialog open={!!deleteAliasInfo} onOpenChange={(open) => { if (!open && !isDeletingAlias) setDeleteAliasInfo(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>{t('categories.deleteAliasTitle')}</AlertDialogTitle>
+                        <AlertDialogTitle>
+                            {deleteAliasInfo
+                                ? t('categories.deleteAliasTitle', { alias: deleteAliasInfo.alias, label: deleteAliasInfo.topicLabel })
+                                : t('categories.deleteAliasTitle', { alias: '', label: '' })}
+                        </AlertDialogTitle>
                         <AlertDialogDescription>
-                            {t('categories.deleteAliasConfirm')}
+                            {deleteAliasInfo
+                                ? t('categories.deleteAliasConfirm', { alias: deleteAliasInfo.alias, label: deleteAliasInfo.topicLabel })
+                                : t('categories.deleteAliasConfirm', { alias: '', label: '' })}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

@@ -37,6 +37,7 @@ type QueryResult = unknown;
  */
 function makeConn(acquiredValue: number | bigint | null) {
     const release = vi.fn();
+    const destroy = vi.fn();
     const query = vi.fn(async (sql: string, _params?: unknown[]): Promise<[QueryResult, unknown]> => {
         if (sql.includes('GET_LOCK')) {
             return [[{ acquired: acquiredValue }], undefined];
@@ -44,7 +45,7 @@ function makeConn(acquiredValue: number | bigint | null) {
         // RELEASE_LOCK
         return [[], undefined];
     });
-    return { query, release };
+    return { query, release, destroy };
 }
 
 beforeEach(() => {
@@ -115,16 +116,18 @@ describe('acquireUploadProcessingContractLock — error paths', () => {
         expect(lock).toBeNull();
     });
 
-    it('returns null and releases the connection when the GET_LOCK query throws after connect', async () => {
+    it('returns null and destroys the connection when the GET_LOCK query throws after connect', async () => {
         const release = vi.fn();
+        const destroy = vi.fn();
         const query = vi.fn(async () => {
             throw new Error('lost connection mid-GET_LOCK');
         });
-        getConnectionMock.mockResolvedValue({ query, release });
+        getConnectionMock.mockResolvedValue({ query, release, destroy });
 
         const lock = await acquireUploadProcessingContractLock(5);
         expect(lock).toBeNull();
-        expect(release).toHaveBeenCalledTimes(1);
+        expect(destroy).toHaveBeenCalledTimes(1);
+        expect(release).not.toHaveBeenCalled();
     });
 });
 

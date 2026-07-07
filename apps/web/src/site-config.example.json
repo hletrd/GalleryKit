@@ -4,6 +4,7 @@
     "url": "https://example.com",
     "locale": "en_US",
     "author": "GalleryKit",
+    "copyright": "© 2026 GalleryKit",
     "nav_title": "GalleryKit",
     "home_link": "/",
     "footer_text": "Powered by GalleryKit",

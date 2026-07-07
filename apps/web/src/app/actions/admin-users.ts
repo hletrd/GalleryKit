@@ -19,7 +19,7 @@ import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { LOCK_ADMIN_DELETE, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
-import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
@@ -238,10 +238,17 @@ export async function deleteAdminUser(id: number) {
 
     try {
         conn = await connection.getConnection();
-        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
-            'SELECT GET_LOCK(?, 5) AS acquired',
-            [lockName]
-        );
+        let lockRows: (RowDataPacket & { acquired: number })[];
+        try {
+            [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
+                'SELECT GET_LOCK(?, 5) AS acquired',
+                [lockName]
+            );
+        } catch (err) {
+            destroyPooledAdvisoryLockConnectionOnAcquireError(conn, 'admin delete', err);
+            conn = null;
+            throw err;
+        }
         lockAcquired = isAdvisoryLockAcquired(lockRows[0]?.acquired);
         if (!lockAcquired) {
             throw new Error('DELETE_LOCK_TIMEOUT');

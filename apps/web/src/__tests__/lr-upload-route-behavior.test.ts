@@ -8,6 +8,7 @@ const {
     dbSelectMock,
     deleteOriginalUploadFileMock,
     enqueueImageProcessingMock,
+    ensureUploadDirectoriesMock,
     getAdminAuthTokenMock,
     getClientIpMock,
     getGalleryConfigStrictMock,
@@ -27,6 +28,7 @@ const {
         dbSelectMock: vi.fn(),
         deleteOriginalUploadFileMock: vi.fn(),
         enqueueImageProcessingMock: vi.fn(),
+        ensureUploadDirectoriesMock: vi.fn(async () => undefined),
         getAdminAuthTokenMock: vi.fn(),
         getClientIpMock: vi.fn(),
         getGalleryConfigStrictMock: vi.fn(),
@@ -71,7 +73,7 @@ vi.mock('@/lib/process-image', async (importOriginal) => {
 });
 
 vi.mock('@/lib/upload-paths', () => ({
-    ensureUploadDirectories: vi.fn(async () => undefined),
+    ensureUploadDirectories: ensureUploadDirectoriesMock,
     deleteOriginalUploadFile: deleteOriginalUploadFileMock,
     UPLOAD_DIR_ORIGINAL: '/tmp/originals',
 }));
@@ -367,5 +369,34 @@ describe('Lightroom upload route behavior', () => {
         // The disk-space precheck runs before saving the original.
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(dbInsertMock).not.toHaveBeenCalled();
+    });
+
+    it('settles the quota claim when upload-directory preparation fails', async () => {
+        ensureUploadDirectoriesMock.mockRejectedValueOnce(new Error('EACCES'));
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Upload storage unavailable; retry shortly' });
+        expect(settleUploadTrackerClaimMock).toHaveBeenCalledWith(
+            uploadTracker,
+            'lr:42',
+            1,
+            1024,
+            0,
+            0,
+        );
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
+        expect(lockReleaseMock).toHaveBeenCalledOnce();
     });
 });

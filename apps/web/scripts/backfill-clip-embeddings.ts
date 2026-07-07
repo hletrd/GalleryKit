@@ -140,6 +140,7 @@ async function main(): Promise<number> {
 
         let processed = 0;
         let failed = 0;
+        let attemptedEmbeddings = 0;
         const failedImageIds: number[] = [];
     // COR-R4C19-04: keyset pagination instead of LIMIT/OFFSET. Each upsert
     // removes its row from the notExists() WHERE set, so advancing an OFFSET
@@ -153,8 +154,8 @@ async function main(): Promise<number> {
         for (;;) {
             assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
 
-            const remainingScanBudget = Math.max(SEMANTIC_SCAN_LIMIT - processed - failed, 0);
-            if (remainingScanBudget === 0) {
+            const remainingEmbeddingBudget = Math.max(SEMANTIC_SCAN_LIMIT - attemptedEmbeddings, 0);
+            if (remainingEmbeddingBudget === 0) {
                 logScanLimitReached();
                 break;
             }
@@ -183,7 +184,7 @@ async function main(): Promise<number> {
                     ),
                 )
                 .orderBy(asc(images.id))
-                .limit(Math.min(BATCH_SIZE, remainingScanBudget));
+                .limit(Math.min(BATCH_SIZE, remainingEmbeddingBudget));
 
             if (rows.length === 0) break;
             cursor = rows[rows.length - 1].id;
@@ -199,8 +200,10 @@ async function main(): Promise<number> {
                             if (!filenameOriginal) { failed++; failedImageIds.push(id); return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
                             if (!originalPath) { failed++; failedImageIds.push(id); return; }
+                            attemptedEmbeddings++;
                             embedding = await embedImageReal(originalPath);
                         } else {
+                            attemptedEmbeddings++;
                             embedding = embedImageStub(id);
                         }
                         // AGG-C10-01: store the RAW 2048-byte float32 buffer (not base64) so
@@ -231,7 +234,7 @@ async function main(): Promise<number> {
                 }));
             }
 
-            if (processed + failed >= SEMANTIC_SCAN_LIMIT) {
+            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) {
                 logScanLimitReached();
                 break;
             }

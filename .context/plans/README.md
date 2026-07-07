@@ -33,11 +33,13 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 16/100 Implementation Plan - active ledger from Cycle 16 aggregate at HEAD `4b237f7e`: color settings/backfill lock coordination, admin-action advisory connection error handling, current-cycle docs/copy drift, image-delete target naming, archive prefetch suppression, photo-viewer animation tuning, gates, push, and per-cycle deploy (`cycle-16-2026-07-08-plan.md`)
-- Run-10 Cycle 16/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for the 39 non-scheduled Cycle 16 findings under repo-policy/operator-boundary rules (`cycle-16-2026-07-08-deferred.md`)
+- Run-10 Cycle 17/100 Implementation Plan - active ledger from Cycle 17 aggregate at HEAD `fc15b235`: DB backup/restore typed failures, advisory-lock acquisition ambiguity, color/CLIP sidecar backfill correctness, Lightroom setup quota settlement, metadata icon routing, semantic-search operator copy, destructive confirmation context, localized analytics country names, gates, push, and per-cycle deploy (`cycle-17-2026-07-08-plan.md`)
+- Run-10 Cycle 17/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for the 48 non-scheduled Cycle 17 findings under repo-policy/operator-boundary rules (`cycle-17-2026-07-08-deferred.md`)
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 16/100 Implementation Plan - implementation commits are present on `master` through `fc15b235`; local gates and e2e are recorded green in the plan; commit/push completed, deploy evidence was not committed and is superseded by the Cycle 17 per-cycle deploy once this cycle finishes (`cycle-16-2026-07-08-plan.md`)
+- Run-10 Cycle 16/100 Deferred Findings - superseded by Cycle 17 deferred register where findings remain open (`cycle-16-2026-07-08-deferred.md`)
 - Run-10 Cycle 15/100 Recovery Implementation Plan - completed/superseded by the Cycle 16 active ledger; covered auth/restore mutation barriers, restore SQL scanner and queue quiesce hardening, upload privacy guards, topic/queue/lock/process-state correctness, and current-cycle provenance/docs (`cycle-15-2026-07-08-plan.md`)
 - Run-10 Cycle 15/100 Recovery Deferred Findings - superseded by Cycle 16 deferred register where findings remain open (`cycle-15-2026-07-08-deferred.md`)
 - Run-10 Cycle 7 (loop-B) Implementation Plan - completed/superseded by later run-10 ledgers (`cycle-7b-2026-07-07-plan.md`)

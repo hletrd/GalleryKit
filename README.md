@@ -64,6 +64,7 @@ File-backed site configuration lives in `apps/web/src/site-config.json` for stat
     "url": "https://your-site.com",
     "locale": "en_US",
     "author": "Author Name",
+    "copyright": "© 2026 Author Name",
     "nav_title": "Navigation Title",
     "home_link": "/",
     "footer_text": "Footer Text",

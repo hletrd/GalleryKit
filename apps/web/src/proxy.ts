@@ -129,5 +129,7 @@ export const config = {
   // NOTE: API routes (/api/*) are EXCLUDED from this middleware matcher.
   // Any new /api/admin/* route MUST implement its own auth check (e.g., isAdmin()).
   // The middleware cookie format check does NOT run for API routes.
-  matcher: ['/((?!api|_next|_vercel|.*\\..*).*)']
+  // Root metadata/PWA asset routes such as /icon and /apple-icon are
+  // extensionless, so the dotted-path exclusion does not protect them.
+  matcher: ['/((?!api|_next|_vercel|icon(?:/)?$|apple-icon(?:/)?$|icons(?:/|$)|.*\\..*).*)']
 };
