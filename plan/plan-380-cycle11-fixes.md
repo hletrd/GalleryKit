@@ -141,10 +141,10 @@ Acceptance:
 - [x] Prompt 2 plan written.
 - [x] WP1 implemented and tested. `topics-actions.test.ts` and `auth-mutation-barrier-source.test.ts` passed in the focused cycle-11 suite.
 - [x] WP2 implemented and tested. `image-url.test.ts` passed in the focused cycle-11 suite.
-- [x] WP3 implemented and tested. `cycle-11-rpf-source-contracts.test.ts` now pins Drizzle TLS CA parity.
+- [x] WP3 implemented and tested. `drizzle-tls-source.test.ts cycle-11-ui-copy-source-contracts.test.ts` now pins Drizzle TLS CA parity.
 - [x] WP4 verified. `failed-image-retry.test.ts`, `image-queue-permanent-failure.test.ts`, `lr-upload-route-behavior.test.ts`, `settings-hash.test.ts`, and `background-db-writes.test.ts` passed in the focused cycle-11 suite.
-- [x] WP5 implemented and tested. `search-disclaimer.test.ts` and `cycle-11-rpf-source-contracts.test.ts` passed in the focused cycle-11 suite.
-- [x] WP6 implemented and tested. Smart-collection delete guidance is covered by `cycle-11-rpf-source-contracts.test.ts`.
+- [x] WP5 implemented and tested. `search-disclaimer.test.ts` and `drizzle-tls-source.test.ts cycle-11-ui-copy-source-contracts.test.ts` passed in the focused cycle-11 suite.
+- [x] WP6 implemented and tested. Smart-collection delete guidance is covered by `drizzle-tls-source.test.ts cycle-11-ui-copy-source-contracts.test.ts`.
 - [x] WP7 implemented and checked. Tracked docs now mark ignored `.omc/wiki` cache notes as non-authoritative and reword the carry-forward `site-config.json` row as a product/runtime-editability decision.
 - [x] Full configured gates run. Final gate evidence:
   - `git diff --check`: passed.
@@ -159,4 +159,4 @@ Acceptance:
 - [ ] Commit/push complete.
 - [ ] Per-cycle deploy complete.
 
-Focused verification: `npm test --workspace=apps/web -- topics-actions.test.ts auth-mutation-barrier-source.test.ts image-url.test.ts search-disclaimer.test.ts cycle-11-rpf-source-contracts.test.ts failed-image-retry.test.ts image-queue-permanent-failure.test.ts lr-upload-route-behavior.test.ts settings-hash.test.ts background-db-writes.test.ts` passed 10 files / 99 tests.
+Focused verification: `npm test --workspace=apps/web -- topics-actions.test.ts auth-mutation-barrier-source.test.ts image-url.test.ts search-disclaimer.test.ts drizzle-tls-source.test.ts cycle-11-ui-copy-source-contracts.test.ts failed-image-retry.test.ts image-queue-permanent-failure.test.ts lr-upload-route-behavior.test.ts settings-hash.test.ts background-db-writes.test.ts` passed 10 files / 99 tests.

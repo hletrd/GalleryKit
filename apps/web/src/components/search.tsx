@@ -69,6 +69,7 @@ function SearchResultItem({
     const sizedSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, previewImageSizes);
     const baseSrc = imageUrl(`/uploads/jpeg/${image.filename_jpeg}`);
     const label = getPhotoResultLabel(image, `${t('common.photo')} ${image.id}`);
+    const resultLabel = `${label} #${image.id}`;
     const [imgSrc, setImgSrc] = useState<string>(sizedSrc);
     const fallbackTriedRef = useRef(false);
     return (
@@ -81,6 +82,7 @@ function SearchResultItem({
             href={localizePath(locale, `/p/${image.id}`)}
             onClick={onClose}
             className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
+            aria-label={resultLabel}
         >
             <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                 <Image
@@ -102,7 +104,7 @@ function SearchResultItem({
             </div>
             <div className="min-w-0 flex-1">
                 <p className="font-medium text-sm truncate">
-                    {label}
+                    {resultLabel}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">
                     {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, image.lens_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' · ')}

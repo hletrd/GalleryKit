@@ -311,6 +311,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => goToPhoto(prevId)}
                         aria-label={t('aria.previousPhoto')}
+                        aria-keyshortcuts="ArrowLeft"
                     >
                         <ChevronLeft className="h-6 w-6" />
                     </Button>
@@ -325,6 +326,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => goToPhoto(nextId)}
                         aria-label={t('aria.nextPhoto')}
+                        aria-keyshortcuts="ArrowRight"
                     >
                         <ChevronRight className="h-6 w-6" />
                     </Button>

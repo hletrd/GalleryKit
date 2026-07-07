@@ -21,7 +21,9 @@ describe('search disclaimer', () => {
 
     expect(src).toMatch(/import\s+\{\s*getPhotoResultLabel\s*\}\s+from '@\/lib\/photo-title'/);
     expect(itemBody).toContain('const label = getPhotoResultLabel(image, `${t(\'common.photo\')} ${image.id}`)');
-    expect(itemBody).toMatch(/<p className="font-medium text-sm truncate">\s*\{label\}\s*<\/p>/);
+    expect(itemBody).toContain('const resultLabel = `${label} #${image.id}`');
+    expect(itemBody).toContain('aria-label={resultLabel}');
+    expect(itemBody).toMatch(/<p className="font-medium text-sm truncate">\s*\{resultLabel\}\s*<\/p>/);
     expect(itemBody).not.toContain('image.title || image.description');
   });
 });
