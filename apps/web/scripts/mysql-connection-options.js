@@ -1,4 +1,4 @@
-const { readFileSync } = module.require('node:fs');
+const { readFileSync } = process.getBuiltinModule('node:fs');
 
 const LOCAL_DB_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 

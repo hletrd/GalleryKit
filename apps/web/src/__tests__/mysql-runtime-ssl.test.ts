@@ -12,6 +12,7 @@ const { getMysqlConnectionOptions } = require('../../scripts/mysql-connection-op
 };
 
 const dbIndexSource = readFileSync(path.join(__dirname, '..', 'db', 'index.ts'), 'utf8');
+const mysqlConnectionOptionsSource = readFileSync(path.join(__dirname, '..', '..', 'scripts', 'mysql-connection-options.js'), 'utf8');
 
 function withBaseEnv<T>(fn: () => T): T {
     const original = { ...process.env };
@@ -59,5 +60,11 @@ describe('runtime MySQL SSL configuration', () => {
         expect(dbIndexSource).toContain("throw new Error('DB_SSL_CA is required for non-local DB connections unless DB_SSL=false')");
         expect(dbIndexSource).toContain("readFileSync(caPath, 'utf8')");
         expect(dbIndexSource).toContain('rejectUnauthorized: true');
+    });
+
+    it('keeps the CommonJS helper compatible with standalone bundling', () => {
+        expect(mysqlConnectionOptionsSource).toContain("process.getBuiltinModule('node:fs')");
+        expect(mysqlConnectionOptionsSource).not.toContain('module.require');
+        expect(mysqlConnectionOptionsSource).not.toContain("require('node:fs')");
     });
 });
