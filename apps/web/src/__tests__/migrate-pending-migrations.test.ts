@@ -86,6 +86,13 @@ const journal = (whens: number[]) =>
         folderMillis: when,
     }));
 
+const journalWithTags = (entries: Array<[string, number]>) =>
+    entries.map(([tag, when], idx) => ({
+        tag,
+        hash: `hash-${idx}`,
+        folderMillis: when,
+    }));
+
 describe('prepareLegacyDatabaseIfNeeded — pending vs drift (FDR-01)', () => {
     it('leaves pending new-tail migrations unbaselined so drizzle applies them', async () => {
         const migrations = journal([1000, 2000, 3000]);
@@ -101,6 +108,27 @@ describe('prepareLegacyDatabaseIfNeeded — pending vs drift (FDR-01)', () => {
         expect(inserts).toHaveLength(0);
         const reconcileWork = calls.filter((c) => /ALTER TABLE|CREATE TABLE (?!IF NOT EXISTS __drizzle)/.test(c.sql));
         expect(reconcileWork).toHaveLength(0);
+    });
+
+    it('pre-creates failed-image columns before historical 0025 pending migration applies (C9-HIGH-01)', async () => {
+        const migrations = journalWithTags([
+            ['0024_drop_reactions', 2000],
+            ['0025_processing_settings_snapshot', 3000],
+        ]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: ['hash-0'],
+            cursor: 2000,
+        });
+
+        await migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations);
+
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(0);
+        const alterStatements = calls.map((c) => c.sql.replace(/\s+/g, ' ').trim());
+        expect(alterStatements).toContain('ALTER TABLE images ADD COLUMN processing_error varchar(512) DEFAULT NULL');
+        expect(alterStatements).toContain('ALTER TABLE images ADD COLUMN failed_at datetime DEFAULT NULL');
+        expect(alterStatements).not.toContain('ALTER TABLE images ADD COLUMN processing_settings_json text DEFAULT NULL');
     });
 
     it('returns without any writes when the journal is fully covered', async () => {

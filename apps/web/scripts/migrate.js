@@ -840,6 +840,21 @@ async function baselineAllJournalMigrations(connection, migrations, options = {}
     return inserts.length;
 }
 
+async function ensureHistoricalPendingMigrationPrerequisites(connection, dbName, missing) {
+    if (!missing.some((m) => m.tag === '0025_processing_settings_snapshot')) return;
+
+    // C9-HIGH-01: historical migration 0025 adds processing_settings_json
+    // `AFTER failed_at`, but processing_error/failed_at originally existed
+    // only in reconcileLegacySchema. A healthy DB at the 0024 cursor takes the
+    // pending-tail path below, so reconcile intentionally does not run before
+    // drizzle applies 0025. Create the two prerequisite columns idempotently so
+    // the historical migration can apply instead of failing on a missing
+    // failed_at column. Do not baseline 0025 here; drizzle must still run it
+    // and record its original hash.
+    await ensureColumn(connection, dbName, 'images', 'processing_error', 'ALTER TABLE images ADD COLUMN processing_error varchar(512) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'failed_at', 'ALTER TABLE images ADD COLUMN failed_at datetime DEFAULT NULL');
+}
+
 async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     await ensureMigrationTable(connection);
     const hasGalleryTables = await hasAnyGalleryTables(connection, dbName);
@@ -889,6 +904,7 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     const cursor = cursorRows?.[0]?.migration_cursor ?? null;
     const missing = migrations.filter((m) => !haveHashes.has(m.hash));
     if (cursor !== null && missing.every((m) => Number(m.folderMillis) > Number(cursor))) {
+        await ensureHistoricalPendingMigrationPrerequisites(connection, dbName, missing);
         const tags = missing.map((m) => m.tag).join(', ');
         console.log(`[Migration] ${missing.length} pending migration(s) above the recorded cursor will be applied by drizzle: ${tags}`);
         return;
