@@ -817,4 +817,80 @@ describe('topic actions', () => {
         expect(logAuditEventMock).not.toHaveBeenCalled();
         expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
     });
+
+// AGG9B-09 / TEST9-03 (loop-B cycle 9b): GET_LOCK returning 0 (the 5 s
+// route-lock wait expiring under contention) throws TopicRouteLockTimeoutError
+// — previously zero-covered across all five catch sites even though the
+// RELEASE_LOCK-failure sibling had a mock precedent in this file. These pin
+// (a) the localized error key per action, (b) the orphaned-cover-image
+// cleanup for create/update, and (c) that no DB mutation was attempted and
+// the never-acquired lock is not released.
+describe('topic route-lock timeout (GET_LOCK acquired: 0)', () => {
+    const timeoutLockOnce = () => {
+        lockQueryMock.mockImplementationOnce(async () => [[{ acquired: 0 }]]);
+    };
+
+    it('createTopic maps the timeout to failedToCreateTopic and cleans up the processed cover image', async () => {
+        timeoutLockOnce();
+        processTopicImageMock.mockResolvedValueOnce('cover-123.webp');
+
+        const formData = new FormData();
+        formData.set('label', 'Travel');
+        formData.set('slug', 'travel');
+        formData.set('order', '0');
+        formData.set('image', new File([new Uint8Array([1, 2, 3])], 'cover.jpg', { type: 'image/jpeg' }));
+
+        await expect(createTopic(formData)).resolves.toEqual({ error: 'failedToCreateTopic' });
+        expect(deleteTopicImageMock).toHaveBeenCalledWith('cover-123.webp');
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+        expect(releaseLockQueryMock).not.toHaveBeenCalled();
+    });
+
+    it('updateTopic maps the timeout to failedToUpdateTopic and cleans up the processed cover image', async () => {
+        timeoutLockOnce();
+        // Pre-lock current-topic lookup (topics.ts fetches the existing row
+        // before entering the route lock); the lock timeout fires after it.
+        selectMock.mockReturnValueOnce(makeSelectChain([{ image_filename: null }]));
+        processTopicImageMock.mockResolvedValueOnce('cover-456.webp');
+
+        const formData = new FormData();
+        formData.set('label', 'New Topic');
+        formData.set('slug', 'new-topic');
+        formData.set('order', '5');
+        formData.set('image', new File([new Uint8Array([1, 2, 3])], 'cover.jpg', { type: 'image/jpeg' }));
+
+        await expect(updateTopic('old-topic', formData)).resolves.toEqual({ error: 'failedToUpdateTopic' });
+        expect(deleteTopicImageMock).toHaveBeenCalledWith('cover-456.webp');
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(releaseLockQueryMock).not.toHaveBeenCalled();
+    });
+
+    it('deleteTopic maps the timeout to failedToDeleteTopic without opening the transaction', async () => {
+        timeoutLockOnce();
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ error: 'failedToDeleteTopic' });
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(deleteMock).not.toHaveBeenCalled();
+        expect(releaseLockQueryMock).not.toHaveBeenCalled();
+    });
+
+    it('createTopicAlias maps the timeout to failedToCreateTopic without inserting', async () => {
+        timeoutLockOnce();
+
+        await expect(createTopicAlias('travel', 'night')).resolves.toEqual({ error: 'failedToCreateTopic' });
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+        expect(releaseLockQueryMock).not.toHaveBeenCalled();
+    });
+
+    it('deleteTopicAlias maps the timeout to failedToDeleteAlias without deleting', async () => {
+        timeoutLockOnce();
+
+        await expect(deleteTopicAlias('travel', 'night')).resolves.toEqual({ error: 'failedToDeleteAlias' });
+        expect(deleteMock).not.toHaveBeenCalled();
+        expect(releaseLockQueryMock).not.toHaveBeenCalled();
+        expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
+    });
+});
 });
