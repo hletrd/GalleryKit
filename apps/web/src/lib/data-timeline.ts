@@ -9,7 +9,7 @@
  */
 
 import { db, images, imageTags, tags } from '@/db';
-import { eq, and, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, gte, isNotNull, lt } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import type { PrivacySensitiveKeys } from '@/lib/data';
 
@@ -84,6 +84,20 @@ const tagNamesAgg = sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER 
 
 /** Max photos returned by the On This Day widget. */
 const ON_THIS_DAY_LIMIT = 6;
+
+function padDatePart(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+function archiveRange(year: number, month?: number): { start: string; end: string } {
+    const startMonth = month ?? 1;
+    const endYear = month === undefined || month === 12 ? year + 1 : year;
+    const endMonth = month === undefined ? 1 : month + 1;
+    return {
+        start: `${year}-${padDatePart(startMonth)}-01 00:00:00`,
+        end: `${endYear}-${padDatePart(endMonth)}-01 00:00:00`,
+    };
+}
 
 /**
  * Return up to 6 processed photos whose capture_date matches today's
@@ -175,23 +189,17 @@ export type TimelinePage = {
  * at TIMELINE_PAGE_LIMIT, with a limit+1 lookahead driving the
  * `truncated` flag.
  *
- * Index note (R4C6 doc correction): `YEAR(capture_date) = ?` is NOT
- * sargable — only the `processed = true` prefix of
- * idx_images_processed_capture_date narrows the scan; the YEAR()/MONTH()
- * filters evaluate per-row within that prefix. Acceptable at
- * personal-gallery scale; revisit with a range predicate
- * (`capture_date >= 'Y-01-01' AND < 'Y+1-01-01'`) if the images table
- * ever grows past that envelope.
+ * Index note (C10): archive pages use an inclusive/exclusive capture_date
+ * range so idx_images_processed_capture_date can use the date key parts.
  */
 export async function getTimelineImages(year: number, month?: number): Promise<TimelinePage> {
+    const { start, end } = archiveRange(year, month);
     const conditions = [
         eq(images.processed, true),
         isNotNull(images.capture_date),
-        sql`YEAR(${images.capture_date}) = ${year}`,
+        gte(images.capture_date, start),
+        lt(images.capture_date, end),
     ];
-    if (month !== undefined) {
-        conditions.push(sql`MONTH(${images.capture_date}) = ${month}`);
-    }
 
     const rows = await db
         .select({

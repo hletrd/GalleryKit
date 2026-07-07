@@ -96,9 +96,13 @@ describe('data-timeline.ts — tagNamesAgg shape', () => {
 });
 
 describe('data-timeline.ts — getTimelineImages', () => {
-    it('getTimelineImages uses YEAR() predicate', () => {
+    it('getTimelineImages uses sargable capture_date ranges instead of YEAR()/MONTH() predicates', () => {
         const body = extractFunctionBody(readSource(), 'getTimelineImages');
-        expect(body).toMatch(/YEAR\(\$\{images\.capture_date\}\)\s*=\s*\$\{year\}/);
+        expect(body).toContain('archiveRange(year, month)');
+        expect(body).toContain('gte(images.capture_date, start)');
+        expect(body).toContain('lt(images.capture_date, end)');
+        expect(body).not.toMatch(/YEAR\(\$\{images\.capture_date\}\)/);
+        expect(body).not.toMatch(/MONTH\(\$\{images\.capture_date\}\)/);
     });
 
     it('getTimelineImages excludes NULL capture_date rows', () => {
