@@ -176,8 +176,13 @@ that image's reprocessing.
 - [x] WP13 — `510eea49` dead .ts recovery twin removed + .mjs/durable parity pins
 - [x] WP14 — CLAUDE.md IMAGE_BASE_URL row: production-scoped HTTPS wording (C7-14) + build-time-frozen remotePatterns callout (C7-06 doc half); C7-07 boundary comment + C7-13 topology comment landed in `ceb7c8a5`
 - [x] WP15 — this ledger + README/carry-forward updates (`bb67c6a5`)
-- [ ] Gates: eslint / typecheck / vitest / build / lint:api-auth / lint:action-origin /
-      lint:public-route-rate-limit / playwright e2e (recorded below when green)
+- [x] Gates (all green on the full tree, 2026-07-07 23:10-23:25 KST):
+      eslint PASS; typecheck PASS (app + scripts); vitest 3235 passed / 4 skipped;
+      build PASS (exit 0); lint:api-auth PASS; lint:action-origin PASS;
+      lint:public-route-rate-limit PASS; playwright e2e 45 passed / 2 skipped
+      (first full run had 5 contention flakes while the peer session ran heavy
+      work concurrently; each failing spec passed individually and the full
+      re-run was clean — exit 0).
 - [ ] Deploy (per-cycle): `npm run deploy` from repo root after checking for a concurrent peer run.
 
 ### Shared-worktree note (for provenance)
