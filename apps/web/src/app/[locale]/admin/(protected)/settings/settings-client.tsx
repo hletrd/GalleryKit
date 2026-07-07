@@ -855,6 +855,12 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                 </CardContent>
             </Card>
 
+            <div className="flex justify-end border-t pt-4">
+                <Button type="button" onClick={handleSave} disabled={isPending} className="min-h-11 gap-2">
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {isPending ? t('settings.saving') : t('settings.save')}
+                </Button>
+            </div>
         </div>
     );
 }

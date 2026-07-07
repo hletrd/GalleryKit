@@ -7,9 +7,13 @@ Usage:
 Read-only public-edge check for the deployed proxy topology. The check sends
 valid JSON POST probes to the public semantic-search route so the request
 reaches same-origin and client-IP/rate-limit handling before failing on normal
-disabled-mode or invalid-query validation. A safe edge overwrites inbound
-X-Forwarded-Host, X-Forwarded-Proto, and X-Forwarded-For before traffic reaches
-the app.
+disabled-mode or invalid-query validation.
+
+This status-code probe proves that spoofed forwarded host/proto headers do not
+change same-origin evaluation. It cannot prove that the edge overwrote inbound
+X-Forwarded-For or that the app selected the intended client-IP rate-limit
+bucket; verify real-IP behavior separately with edge logs or a diagnostic that
+observes the effective client key.
 `;
 
 function parseArgs(argv) {
@@ -125,6 +129,8 @@ async function main() {
   await checkDirectExposure(args.directUrl);
 
   console.log(`Proxy topology check passed for ${origin}`);
+  console.log('verified=same-origin forwarded-host/proto spoof resistance');
+  console.log('not-verified=effective client-IP bucket or X-Forwarded-For overwrite');
   console.log(`baseline=${baseline.status} spoofed-forwarded-headers=${spoofed.status}`);
 }
 

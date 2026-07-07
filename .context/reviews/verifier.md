@@ -1,129 +1,225 @@
-# Verifier Review - Cycle 13
+# Cycle 14 Verifier + Test-Engineer Review
 
 Date: 2026-07-07
-Reviewer: verifier
-HEAD reviewed: `d8fcb3d62a88d09bb69458e3672129ed902318ba` (`fix(security): 🐛 prefer host for origin checks`)
-Mode: evidence-based correctness review against AGENTS.md, CLAUDE.md, tests, route contracts, data privacy rules, release gates, and UI behavior.
+Repository: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `14d31ea4`
+Mode: read-only static review, except this report file.
 
-Application source and plans were not edited. Only this assigned review artifact was written.
+I did not implement fixes, commit, push, deploy, stop/remove containers, or modify CI/deploy pipeline files. I did not run the blocking gates because the prompt is read-only and the requested role is review/report generation. Evidence below is from source, test, workflow, and repository-state inspection.
 
-## Inventory
+## Inventory Reviewed
 
-Behavior-critical files inventoried before inspection:
+Review-relevant inventory built before findings:
 
-- Governance and stated behavior: `AGENTS.md` from the prompt, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- Current-cycle delta from `173668ea..HEAD`: `.github/workflows/quality.yml`, `.github/workflows/clip-preflight.yml`, `scripts/check-proxy-topology.mjs`, `package.json`, `package-lock.json`, `apps/web/Dockerfile`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/__tests__/cycle12-ops-contracts.test.ts`, and current review/plan artifacts.
-- Route/auth contracts: all `apps/web/src/app/actions/*`, `apps/web/src/app/api/**/route.{ts,tsx}`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/proxy.ts`.
-- Data privacy and public selectors: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/db/schema.ts`.
-- Stateful/runtime subsystems: upload/image actions, image queue/backfill, restore maintenance, CLIP semantic routes/model/backfill scripts, migration runner/journal, single-writer/proxy topology, deploy/Docker/nginx files.
-- UI behavior contracts: public/admin route pages and components under `apps/web/src/app/[locale]`, `apps/web/src/components/**`, touch target/focus/a11y tests, and Playwright e2e inventory.
+- Project instructions: `AGENTS.md`, `CLAUDE.md`, cycle 13 aggregate/deferred plan context under `.context/reviews/` and `.context/plans/`.
+- Current cycle changed files from `d8fcb3d6..HEAD`: `.context/*` review/plan files; `apps/web/messages/{en,ko}.json`; `apps/web/scripts/run-e2e-server.mjs`; source-contract and behavior tests; `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`; `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`; `apps/web/src/app/[locale]/admin/db-actions.ts`; `apps/web/src/app/sitemap.ts`; `apps/web/src/components/{footer,info-bottom-sheet,nav-client,photo-viewer,search}.tsx`; `apps/web/src/db/index.ts`; `apps/web/src/lib/content-security-policy.ts`; `scripts/check-proxy-topology.mjs`.
+- Broader source and test surface: 608 TS/TSX/JS/MJS files under `apps/web/src`; 348 Vitest test files; 10 Playwright E2E files; no `.only` focused tests found. The only `.skip` usage found is conditional opt-in/environment gating in `apps/web/e2e/admin.spec.ts` and `apps/web/e2e/origin-guard.spec.ts`.
+- Cross-file scans covered server actions, public/admin API auth and rate-limit contracts, E2E harness behavior, migration/reconcile tests, Docker/CI gates, public route sitemap/robots tests, and high-risk upload/restore/token flows.
 
-Fresh validation evidence:
+## Confirmed Issues
 
-- `npm run lint:api-auth --workspace=apps/web`: pass; 2 admin API routes OK.
-- `npm run lint:action-origin --workspace=apps/web`: pass; all mutating server actions enforce same-origin provenance or documented public rate-limit/exempt posture.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; public API route scanner OK.
-- `npm test --workspace=apps/web -- --run src/__tests__/request-origin.test.ts src/__tests__/cycle12-ops-contracts.test.ts src/__tests__/privacy-fields.test.ts`: pass; 3 files / 32 tests.
-- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/analytics-link-touch-targets.test.ts src/__tests__/gps-map-link-touch-targets.test.ts`: pass; 5 files / 36 tests.
-- `npm run typecheck --workspace=apps/web`: pass.
-- `npm run lint --workspace=apps/web`: pass.
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: pass; 0 vulnerabilities.
-- `npm run build --workspace=apps/web`: pass. Build emitted a sitemap fallback warning because local MySQL was not listening on `127.0.0.1:3306`; the build completed successfully and tracked files remained clean.
-- Direct predicate check: with `BASE_URL=https://gallerykit-ci.invalid`, `TRUST_PROXY=true`, `Host: 127.0.0.1:3100`, and `Origin: http://127.0.0.1:3100`, `hasTrustedSameOrigin()` returns `false`.
-
-## Findings
-
-### VER-C13-01 - CI E2E runtime inherits non-local `BASE_URL` and rejects localhost same-origin actions
-
-Severity: High
-Confidence: High
-
-File/region:
-- `.github/workflows/quality.yml:27-37`
-- `apps/web/playwright.config.ts:15-29`
-- `apps/web/playwright.config.ts:78-85`
-- `apps/web/scripts/run-e2e-server.mjs:49-57`
-- `apps/web/scripts/run-e2e-server.mjs:95-110`
-- `apps/web/src/lib/request-origin.ts:45-67`
-- `apps/web/src/app/actions/auth.ts:99-103`
-
-Issue:
-The required quality workflow sets `BASE_URL=https://gallerykit-ci.invalid` for the whole job. Playwright's default local target is `http://127.0.0.1:3100`, and `run-e2e-server.mjs` only overrides `BASE_URL` for the build child process. The runtime `server.js` child inherits the workflow-level `BASE_URL`, and current same-origin logic treats configured `BASE_URL` as the authoritative expected origin.
-
-Concrete failure scenario:
-CI reaches `npm run test:e2e`. The browser opens `http://127.0.0.1:3100/admin` and submits the admin login form. The request carries localhost `Origin`/`Host`, but the server expects `https://gallerykit-ci.invalid`, so `login()` returns `authFailed` before authentication/rate-limit work. Admin e2e flows that need mutating server actions cannot pass in the required quality workflow even though local builds and unit tests pass.
-
-Suggested fix:
-Separate build-time public metadata origin from runtime E2E origin. For local Playwright runs, start the runtime server with `BASE_URL=http://${host}:${port}` or unset `BASE_URL` for the runtime child so `Host` drives local same-origin checks. Keep the build child override for metadata validation, and add a regression test/source contract that `run-e2e-server.mjs` does not leak a non-local `BASE_URL` into the local runtime server.
-
-### VER-C13-02 - Proxy topology checker does not actually verify `X-Forwarded-For` scrubbing
+### VER-14-01 - Proxy topology check still cannot prove forwarded-client-IP safety
 
 Severity: Medium
 Confidence: High
+Status: Confirmed issue in validation tooling
 
-File/region:
-- `scripts/check-proxy-topology.mjs:7-10`
-- `scripts/check-proxy-topology.mjs:61-68`
-- `scripts/check-proxy-topology.mjs:108-119`
-- `apps/web/src/lib/request-origin.ts:60-80`
-- `apps/web/src/lib/rate-limit.ts:175-198`
-- `README.md:172-174`
+Evidence:
 
-Issue:
-The proxy topology helper says a safe edge overwrites `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For` before traffic reaches the app. The implemented spoof probe only observes whether spoofed forwarded host/proto changes same-origin evaluation: it sends one syntactically invalid `POST` with spoofed forwarded headers, treats `400/404/405/415/429/503` as success, and errors only on `403` or `5xx`. Current same-origin logic also prefers `BASE_URL` or `Host` over `X-Forwarded-Host`, so an edge can pass the probe while still forwarding attacker-controlled `X-Forwarded-For`.
+- `scripts/check-proxy-topology.mjs:7-12` claims the probe reaches same-origin and client-IP/rate-limit handling, and that a safe edge overwrites inbound `X-Forwarded-For`.
+- `scripts/check-proxy-topology.mjs:102-123` sends exactly one baseline POST and one spoofed POST with `X-Forwarded-For: 198.51.100.44, 203.0.113.99`, then only classifies the HTTP status.
+- `apps/web/src/app/api/search/semantic/route.ts:173-184` does call `getClientIp()` and pre-increments the semantic limiter before disabled-mode/body validation.
+- `apps/web/src/lib/rate-limit.ts:175-198` selects the client IP from `x-forwarded-for` when `TRUST_PROXY=true`; with the default trusted-hop count, a forwarded spoof chain can influence the selected limiter key if the edge passes inbound XFF through.
+
+Problem:
+
+The revised probe now reaches limiter code, but it still observes only response status. A status of `400`, `429`, or `503` cannot distinguish "edge overwrote XFF" from "app accepted attacker-supplied XFF and charged a spoofed bucket." The check can therefore print "Proxy topology check passed" while the condition it documents is false for client-IP/rate-limit safety.
 
 Concrete failure scenario:
-An operator runs `npm run check:proxy-topology -- --url https://gallery.example.com` against a proxy that correctly preserves `Host` but appends or forwards inbound `X-Forwarded-For`. The check passes because the request fails at content-type validation before rate-limit identity is observable. In production with `TRUST_PROXY=true`, `getClientIp()` trusts the forwarded chain and selects the client before the trusted suffix; attacker-supplied XFF entries can therefore split login/search/share/semantic budgets and weaken per-IP rate limiting even though the deployed topology check reported success.
+
+Production runs with `TRUST_PROXY=true` behind an edge that forwards inbound `X-Forwarded-For` instead of replacing it. The spoofed request in the checker reaches `getClientIp`, is charged to `198.51.100.44`, returns a normal disabled-mode or validation status, and the script passes. A client can rotate XFF values to split semantic-search or login-related budgets across attacker-chosen keys.
 
 Suggested fix:
-Either stop claiming the helper verifies XFF, or add an explicit XFF-sensitive check. A practical option is an opt-in active rate-limit probe that sends valid, charged requests through the same public endpoint and verifies repeated requests with different spoofed XFF values still hit one edge-derived bucket. If that is too invasive, add a dedicated read-only diagnostic endpoint available only in a deploy-check mode that returns the server-side `getClientIp()` decision without mutating state.
 
-### VER-C13-03 - Proxy topology checker accepts unexpected statuses as success
+Make the check observe the selected limiter bucket, not just route reachability. Options: add a diagnostic-only same-origin/admin probe that reports the effective client key; run repeated valid semantic probes that must share one rate-limit bucket across baseline/spoofed requests; or narrow the script wording to say it validates same-origin header handling only and not XFF overwrite/client-IP correctness. Add a regression test for the script's false-positive class.
+
+### VER-14-02 - CI quality gates still do not build the production Docker image
+
+Severity: Medium
+Confidence: High
+Status: Confirmed gate gap
+
+Evidence:
+
+- `.github/workflows/quality.yml:48-83` runs `npm ci`, lint, typecheck, security lints, `npm audit`, unit tests, DB init, Playwright E2E, and `npm run build`; it never executes `docker build`.
+- `apps/web/Dockerfile:50-62` has Linux-native optional dependency installation logic for Sharp, SWC, Parcel watcher, Next SWC, and Lightning CSS.
+- `apps/web/Dockerfile:76-85` repeats runtime native dependency installation and only then verifies `require('sharp')`.
+
+Problem:
+
+The required release artifact has a separate dependency/materialization path that CI does not exercise. The normal Next build can pass while the Docker image fails due to target architecture handling, optional native package drift, lockfile resolution, or the explicit `--no-save` native package versions.
+
+Concrete failure scenario:
+
+A package update changes the required `@next/swc-*`, `@img/sharp-*`, or `lightningcss-*` version. `npm run build` on the CI host succeeds, but Docker build fails at the explicit native install or runtime `require('sharp')` step. The failure is discovered only during deploy/build on the constrained host, after all quality gates were green.
+
+Suggested fix:
+
+Add a non-deploying CI step that builds the production image for the supported target architecture, or at least a scheduled/PR gate that runs the Dockerfile through the native dependency stages. Keep it non-publishing and separate from deployment.
+
+## Confirmed Test Coverage Gaps
+
+### VER-14-03 - Lightroom upload route has many high-value rejection and cleanup paths without behavior tests
+
+Severity: Medium
+Confidence: High
+Status: Confirmed coverage gap
+
+Evidence:
+
+- The route has distinct branches for chunked/content-length/total-size/file-size guards (`apps/web/src/app/api/admin/lr/upload/route.ts:101-158`), multipart parse failure (`178-186`), missing file and invalid filename/topic/title/description (`188-250`), late restore guard and upload lock denial (`252-279`), topic DB errors and missing topic (`285-299`), config read failure (`303-313`), disk-space errors (`322-344`), save/RAW failures (`346-370`), HDR/GPS/late-restore cleanup (`396-440`), insert/post-save cleanup (`500-509`), and post-commit bookkeeping isolation (`521-540` and following).
+- Current behavioral tests cover late HDR cleanup, PAT success/audit/queue behavior, entry restore guard, missing `Content-Length`, file-count cap, and low disk (`apps/web/src/__tests__/lr-upload-route-behavior.test.ts:182-370`).
+
+Problem:
+
+The route is a critical external ingest API with quota, lock, filesystem, DB, privacy, and audit side effects. Several branches that must settle preclaimed quota, release locks, delete originals, or return parseable JSON are not behavior-tested. Existing tests are good but still sparse against the route's current branch matrix.
+
+Concrete failure scenario:
+
+A future edit moves `settleTrackerToActual(false)` below the invalid filename/topic/title branch, skips `releaseMultipartParseSlot()` after a malformed multipart body, forgets original deletion after GPS stripping failure, or lets post-commit `revalidateAllAppData()` throw into a 500. The current route tests can still pass because they do not exercise those branches.
+
+Suggested fix:
+
+Add table-driven route tests for every branch with side effects: chunked upload, invalid/oversize `Content-Length`, body parse failure, missing file, invalid filename, invalid/missing topic slug, overlong title/description, late restore after parse, lock denial, topic SELECT throw, topic not found, config read failure, save `RawFileError`, generic save failure, GPS strip failure, late restore after save, insert failure, and post-commit enqueue/audit/revalidate throw behavior. For each case assert response status/body plus tracker settlement, lock release, parse slot release, cleanup calls, DB insert/queue/audit non-calls or calls as appropriate.
+
+### VER-14-04 - DB restore child-process cleanup is guarded mostly by source-string tests
+
+Severity: Medium
+Confidence: High
+Status: Confirmed coverage gap
+
+Evidence:
+
+- Runtime cleanup/error handling is concentrated in `failRestore`, watchdog, stream handlers, child `close`, and child `error` paths (`apps/web/src/app/[locale]/admin/db-actions.ts:807-873`).
+- The current test for this critical path reads `db-actions.ts` as text and asserts strings/order snippets such as `readStream.destroy()`, `restore.stdin.destroy()`, `restore.kill()`, and `cleanupTempFile()` (`apps/web/src/__tests__/db-restore.test.ts:47-74`).
+
+Problem:
+
+Source-string tests can confirm that important tokens appear, but they cannot prove runtime behavior under child-process, stream, timeout, or event-order failures. This restore path intentionally keeps maintenance active on failure; a runtime regression here has operational impact.
+
+Concrete failure scenario:
+
+A refactor keeps the same strings but changes event ordering, forgets to await or schedule cleanup reliably, calls `resolve` twice, misses a child `error` emitted before pipe setup, or leaves the watchdog armed after a close event. The source-string test remains green because it does not execute a fake child, fake streams, or fake timers.
+
+Suggested fix:
+
+Extract the restore runner behind injectable `spawn`, `createReadStream`, temp-file cleanup, and watchdog dependencies. Add fake-child/fake-stream tests for timeout, read error, stdin error, spawn error, nonzero close, zero close plus migration failure, zero close success, ignorable stdin `EPIPE`, and double-event races. Keep a small source-contract tripwire only for unextracted wiring if needed.
+
+### VER-14-05 - Admin token UI has no browser-level coverage for one-time plaintext, copy, create, or revoke flows
+
+Severity: Medium
+Confidence: High
+Status: Confirmed coverage gap
+
+Evidence:
+
+- The token client performs real hydrated UI flows: `createLrToken` then one-time plaintext state (`apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-103`), clipboard copy/acknowledgement (`119-128`), plaintext dialog close gating (`250-299`), and revoke confirmation (`303-324`).
+- The Playwright admin spec covers login/navigation, wrong password, GPS setting toggle, topic create/delete, and dashboard upload (`apps/web/e2e/admin.spec.ts:20-165`), but it does not navigate to or exercise `/admin/tokens`.
+- Existing token tests are action/domain or source-contract focused: server action behavior appears in `apps/web/src/__tests__/lr-tokens-action.test.ts`, while one-time plaintext UI is pinned by source strings in `apps/web/src/__tests__/cycle-22-source-contracts.test.ts:49-59`.
+
+Problem:
+
+The highest-risk token UX property is browser-stateful: the plaintext secret is shown once, cannot be dismissed before acknowledgement, can be copied, and revoke works from the rendered table. Server action tests and source-string assertions do not prove the hydrated UI can complete those flows.
+
+Concrete failure scenario:
+
+A component or dialog refactor breaks the acknowledgement checkbox, copy button, revoke confirmation, disabled state, or post-create list refresh. The server action tests still pass because token creation/revocation works directly, and the source test still passes if the relevant strings remain.
+
+Suggested fix:
+
+Add an opt-in admin E2E flow for `/admin/tokens`: create a uniquely labeled token, assert the plaintext dialog appears and the done button is disabled until acknowledgement, exercise copy with a clipboard mock or permission-aware fallback, close the dialog, assert the token row appears without plaintext, revoke it, and assert the row disappears. Ensure cleanup runs in `finally`.
+
+### VER-14-06 - No coverage report or coverage ratchet exists for critical changed code
 
 Severity: Low
 Confidence: High
+Status: Confirmed test-strategy gap
 
-File/region:
-- `scripts/check-proxy-topology.mjs:51-59`
-- `scripts/check-proxy-topology.mjs:61-69`
+Evidence:
 
-Issue:
-`classifyBaseline()` and `classifySpoof()` reject `403` and `>=500`, and allow a small known set of expected pre-work failures. They do not reject other unexpected non-500 statuses. A `200`, `204`, `302`, `401`, or other non-listed status falls through as success even though the helper text says the probes should fail before mutation/rate-limit work.
+- `apps/web/package.json:13-29` defines `test`, lint, typecheck, auth/origin/rate-limit lints, and E2E scripts, but no coverage script.
+- `apps/web/vitest.config.ts:16-39` configures include/exclude and timeout only; no coverage provider, thresholds, include/exclude policy, or changed-file ratchet exists.
+- `.github/workflows/quality.yml:69-83` runs unit tests, E2E, and build, but no coverage collection or threshold gate.
+
+Problem:
+
+The repository has a large and valuable test suite, but there is no quantitative signal for whether high-risk changed areas are behavior-tested versus source-string-tested or untested. That makes coverage regressions hard to detect across cycles.
 
 Concrete failure scenario:
-A misrouted proxy sends the semantic probe to a login page, CDN fallback, or custom 200 handler. The topology check exits successfully instead of flagging that the probe did not hit the expected route contract. Operators get a false-positive deploy check and may miss a broken or bypassed edge/app path.
+
+A new public API branch, admin action branch, or migration/reconcile edge case lands with only a source-contract test or no behavioral test. The suite remains green and reviewers must rediscover the missing coverage manually in later cycles.
 
 Suggested fix:
-Make both classifiers explicit allowlists. After accepting the intended statuses, throw on every other status with a message that includes the route and status. Keep the baseline/spoof messages distinct so operators can tell route misrouting from same-origin spoof failures.
 
-### VER-C13-04 - Quality workflow still does not exercise the production Docker build path
+Introduce a non-blocking Vitest coverage report first, then ratchet only critical directories (`app/api`, `app/actions`, `scripts/migrate.js`, `lib/rate-limit`, upload/restore paths). Avoid a blunt repo-wide threshold until generated/source-contract-heavy areas are accounted for.
+
+## Likely Issues
+
+### VER-14-07 - Sitemap omits public footer-linked `/map` pages while tests only expect `/timeline`
+
+Severity: Low
+Confidence: Medium
+Status: Likely issue
+
+Evidence:
+
+- Footer exposes public localized links to about, timeline, map, and privacy (`apps/web/src/components/footer.tsx:41-52`).
+- Sitemap reserves only one localized static public page beyond the homepage (`apps/web/src/app/sitemap.ts:54-55`) and emits only `/timeline` in `staticPublicEntries` (`apps/web/src/app/sitemap.ts:98-103`).
+- Sitemap tests assert localized `/timeline` but not `/map`, `/privacy`, or `/about-gallerykit` (`apps/web/src/__tests__/sitemap-robots.test.ts:46-58`, fallback expectation at `67-79`).
+
+Problem:
+
+The app now makes `/map` a first-class public footer destination, but sitemap coverage and sitemap output still treat timeline as the only static public experience page. This is either an SEO/discoverability mismatch or an undocumented policy choice.
+
+Concrete failure scenario:
+
+Sitemap-first crawlers or feed/search integrations discover home, topics, photos, feeds, and timeline but not the public map, even though users can navigate to it from every footer. The current tests would pass because they only lock `/timeline`.
+
+Suggested fix:
+
+Decide the policy explicitly. If `/map`, `/privacy`, and `/about-gallerykit` are intended sitemap pages, model static public paths as a shared array used by both reservation arithmetic and entry emission, then update tests for all paths. If they should be excluded, document the reason and add an assertion that only timeline is intentionally included.
+
+## Risks Needing Manual Validation
+
+### VER-14-08 - Migration reconcile parity still relies mainly on name/source tripwires, not schema equivalence
 
 Severity: Medium
-Confidence: High
+Confidence: Medium
+Status: Risk needing manual validation
 
-File/region:
-- `.github/workflows/quality.yml:48-83`
-- `apps/web/Dockerfile:50-62`
-- `apps/web/Dockerfile:76-85`
+Evidence:
 
-Issue:
-The default quality workflow installs the workspace, runs lint/typecheck/security gates/audit/unit/e2e, and runs `npm run build`, but it never builds the Docker image that production deploys. The Dockerfile has deployment-only behavior that local `npm run build` cannot cover: explicit Linux native package installs for Sharp/libvips, Parcel watcher, SWC, Next SWC, and Lightning CSS in the build stage, plus a separate production dependency stage that verifies `require('sharp')`.
+- The reconcile coverage test explicitly says it is a source tripwire and cannot verify types/defaults (`apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`).
+- It checks table creation and column-name mention by source text (`apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:86-103`), index-name mention (`157-172`), selected binary/vector pins (`175-180`), and FK-name repair calls (`216-225`).
+- The actual reconcile body spans many DDL/repair operations in `apps/web/scripts/migrate.js` and is the authoritative path for legacy/fresh baseline repairs.
+
+Problem:
+
+The tests are useful guardrails, but they do not prove structural equivalence between a database created by the full Drizzle migration journal and a database repaired/baselined through `reconcileLegacySchema`. Column type, nullability, default, collation, generated expression, FK action, index column order, and unique/nonunique mismatches can pass name-presence checks.
 
 Concrete failure scenario:
-A dependency update changes a native package version or workspace hoisting shape. CI remains green because the workspace build uses the normal `npm ci` tree, while production deploy fails in Docker when the manually pinned Linux native package list is stale or incomplete. This is especially easy to miss because the Dockerfile intentionally duplicates lockfile-sensitive native versions outside `package.json`.
+
+A migration changes a column from nullable to non-null with a default, adds an index with the right name but different column order, or changes `ON DELETE` behavior. `migrate.js` mentions the table/column/index/FK name, so the source tripwires pass, while fresh or legacy installs receive a schema that behaves differently from normally migrated databases.
 
 Suggested fix:
-Add a CI job or workflow step that runs `docker build -f apps/web/Dockerfile .` for the production target architecture, or at least a fast source/lockfile assertion that every manually installed native package/version in the Dockerfile matches `package-lock.json`. Keep the full Docker build as the stronger release gate because it also validates standalone output copying and runtime dependency layout.
 
-## Verified Non-Findings
-
-- Current request-origin hardening is consistent with the stated same-origin posture: `BASE_URL` is authoritative when configured, `Host` wins over spoofable forwarded host when present, right-most forwarded proto/host fallback is tested for trusted-proxy mode, and missing `Origin`/`Referer` fails closed by default.
-- Admin API, mutating server action, and public API rate-limit lint gates all passed fresh. I also inspected the semantic and similar-search routes around their same-origin, maintenance, body/ID validation, pre-increment rate-limit, semantic-mode, model-version, and public enrichment contracts.
-- Public privacy selectors are still guarded by explicit public allowlists and symmetric sensitive-key tests. `searchEnrichmentSelectFields` is shared by semantic/similar routes and carries the compile-time privacy guard.
-- UI touch-target and focus/a11y source-contract tests passed for the reviewed public/admin component surfaces.
-- Production dependency audit is now green at the reviewed lockfile.
-- Build/typecheck/lint passed. The build warning was a non-fatal sitemap DB fallback caused by absent local MySQL, not a compile failure.
+Add an integration validation lane that creates two disposable MySQL schemas: one through the full Drizzle journal and one through the reconcile/baseline path. Diff `information_schema` for columns, defaults, nullability, indexes, FK actions, and table options. Keep the source tripwires as fast unit checks, but make schema-equivalence the authoritative periodic or CI gate.
 
 ## Final Sweep
 
-Searched and inspected around: current-cycle changed files, route auth wrappers, action-origin scanner output, public rate-limit scanner output, request-origin callers, proxy trust/XFF handling, CLIP preflight workflow and model loader, Docker native dependency pins, data privacy selectors, semantic search enrichment, migration/reconcile rules, UI touch-target tests, and current review aggregates. No source or plan files were modified. The skipped full e2e suite is covered by the unchanged workflow and was not rerun locally in this verifier pass because the source delta is release/proxy-gate oriented and targeted UI/source checks plus build passed.
+- No focused `.only` tests were found.
+- Conditional E2E skips are environment guards, not accidental disabled tests.
+- The previous cycle's E2E `BASE_URL` production-branch risk appears closed by `apps/web/scripts/run-e2e-server.mjs`, which separates build-time `E2E_PUBLIC_BASE_URL` from runtime server `BASE_URL`.
+- The previous cycle's DB pool init-timeout leak appears closed by `apps/web/src/db/index.ts` using `connection.destroy()` on init timeout.
+- Admin API auth, server-action same-origin, and public route rate-limit lint coverage are present as blocking scripts in `apps/web/package.json`.
+- This review found 8 findings total: 2 confirmed issues, 4 confirmed coverage gaps, 1 likely issue, and 1 risk needing manual validation.

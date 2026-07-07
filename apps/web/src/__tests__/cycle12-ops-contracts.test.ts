@@ -31,6 +31,8 @@ describe('cycle 12 operational proof surfaces', () => {
         expect(script).toContain("'Content-Type': 'application/json'");
         expect(script).toContain("JSON.stringify({ query: '', topK: 1 })");
         expect(script).toContain('client-IP/rate-limit handling');
+        expect(script).toContain('cannot prove that the edge overwrote inbound');
+        expect(script).toContain('not-verified=effective client-IP bucket');
         expect(script).toContain('unexpected HTTP ${status}');
         expect(script).not.toContain("'Content-Type': 'text/plain'");
     });

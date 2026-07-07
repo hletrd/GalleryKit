@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TEST_BASE_URL = 'https://gallery.test';
+const STATIC_PUBLIC_PATHS = ['/timeline', '/map', '/privacy', '/about-gallerykit'];
 
 const dataMocks = vi.hoisted(() => ({
     env: (() => {
@@ -37,19 +38,21 @@ describe('sitemap route', () => {
         // the global feed entry (+1) and localized per-topic feed entries
         // (LOCALES.length * topics.length), on top of the original
         // homepage+topic reservation (LOCALES.length * (1 + topics.length)).
-        // With one mocked topic that totals LOCALES.length * 4 + 1:
-        // home, timeline, topic, topic feed, plus the global feed row.
-        const expectedImageBudget = Math.floor((50000 - (LOCALES.length * 4 + 1)) / LOCALES.length);
+        // With one mocked topic this reserves home, every static public path,
+        // topic, topic feed, plus the global feed row.
+        const expectedImageBudget = Math.floor((50000 - (LOCALES.length * (STATIC_PUBLIC_PATHS.length + 3) + 1)) / LOCALES.length);
         expect(dataMocks.getImageIdsForSitemap).toHaveBeenCalledWith(expectedImageBudget);
     });
 
-    it('emits localized homes, topics, images, root feed, and localized topic feeds', async () => {
+    it('emits localized homes, static public pages, topics, images, root feed, and localized topic feeds', async () => {
         const entries = await sitemap();
         const urls = entries.map((entry) => entry.url);
 
         for (const locale of LOCALES) {
             expect(urls).toContain(`${TEST_BASE_URL}/${locale}`);
-            expect(urls).toContain(`${TEST_BASE_URL}/${locale}/timeline`);
+            for (const path of STATIC_PUBLIC_PATHS) {
+                expect(urls).toContain(`${TEST_BASE_URL}/${locale}${path}`);
+            }
             expect(urls).toContain(`${TEST_BASE_URL}/${locale}/landscape`);
             expect(urls).toContain(`${TEST_BASE_URL}/${locale}/p/7`);
             expect(urls).toContain(`${TEST_BASE_URL}/${locale}/landscape/feed.xml`);
@@ -72,7 +75,7 @@ describe('sitemap route', () => {
 
         expect(urls).toEqual([
             ...LOCALES.map((locale) => `${TEST_BASE_URL}/${locale}`),
-            ...LOCALES.map((locale) => `${TEST_BASE_URL}/${locale}/timeline`),
+            ...STATIC_PUBLIC_PATHS.flatMap((path) => LOCALES.map((locale) => `${TEST_BASE_URL}/${locale}${path}`)),
             `${TEST_BASE_URL}/feed.xml`,
         ]);
         expect(dataMocks.getImageIdsForSitemap).not.toHaveBeenCalled();
@@ -103,9 +106,10 @@ describe('sitemap URL budget boundary (WP18 / C2-29)', () => {
 
         const entries = await sitemap();
 
-        // reservedNonImageUrls = L*(2+T) + 1 + L*T (homepage+timeline+topic,
-        // the global feed row, and localized per-topic feed rows).
-        const reservedNonImageUrls = LOCALES.length * (2 + topicCount) + 1 + LOCALES.length * topicCount;
+        // reservedNonImageUrls = L*(1+S+T) + 1 + L*T
+        // (homepage + static public paths + topics, global feed row, and
+        // localized per-topic feed rows).
+        const reservedNonImageUrls = LOCALES.length * (1 + STATIC_PUBLIC_PATHS.length + topicCount) + 1 + LOCALES.length * topicCount;
         const expectedBudget = Math.floor((50000 - reservedNonImageUrls) / LOCALES.length);
         expect(dataMocks.getImageIdsForSitemap).toHaveBeenCalledWith(expectedBudget);
 

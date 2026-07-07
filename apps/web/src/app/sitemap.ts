@@ -22,6 +22,7 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 // and localized per-topic feed entries) first, then spend the remaining slots
 // on images. A final `.slice(0, MAX_SITEMAP_URLS)` clamp guards the total.
 const MAX_SITEMAP_URLS = 50000;
+const STATIC_PUBLIC_PATHS = ['/timeline', '/map', '/privacy', '/about-gallerykit'] as const;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // AGG8F-02 / plan-234 follow-up: when this route is prerendered at build
@@ -45,14 +46,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ]);
     // WP18 (C2-29/CRIT-02, run-10 cycle-2): reserve budget for EVERY non-image
     // row appended below, not just homepage + topic pages. homepageEntries +
-    // topicEntries reserve `LOCALES.length * (1 + topics.length)`; feedEntry is
-    // a single global (non-localized) URL (+1); topicFeedEntries reserves one
-    // localized row per topic (`LOCALES.length * topics.length`). Previously
-    // only the first term was reserved, so feedEntry and topicFeedEntries
-    // could push the total past MAX_SITEMAP_URLS uncounted. Static public
-    // experience pages add one localized row per locale.
+    // staticPublicEntries + topicEntries reserve
+    // `LOCALES.length * (1 + STATIC_PUBLIC_PATHS.length + topics.length)`;
+    // feedEntry is a single global (non-localized) URL (+1);
+    // topicFeedEntries reserves one localized row per topic
+    // (`LOCALES.length * topics.length`). Previously only the first term was
+    // reserved, so feedEntry and topicFeedEntries could push the total past
+    // MAX_SITEMAP_URLS uncounted.
     const reservedNonImageUrls =
-      LOCALES.length * (2 + topics.length) + 1 + LOCALES.length * topics.length;
+      LOCALES.length * (1 + STATIC_PUBLIC_PATHS.length + topics.length) + 1 + LOCALES.length * topics.length;
     const imageBudget = Math.max(
       0,
       Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
@@ -95,12 +97,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
-  const staticPublicEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
-    url: localizeUrl(BASE_URL, locale, '/timeline'),
-    lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,
-    changeFrequency: 'weekly' as const,
-    priority: 0.6,
-  }));
+  const staticPublicEntries: MetadataRoute.Sitemap = STATIC_PUBLIC_PATHS.flatMap((path) =>
+    LOCALES.map((locale) => ({
+      url: localizeUrl(BASE_URL, locale, path),
+      lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,
+      changeFrequency: 'weekly' as const,
+      priority: 0.6,
+    }))
+  );
 
   // R18-L6: list the feed itself so sitemap-first aggregators (Inoreader,
   // Feedly) can auto-discover the syndication channel even when their
