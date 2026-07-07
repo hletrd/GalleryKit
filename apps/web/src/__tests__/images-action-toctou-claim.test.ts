@@ -41,6 +41,30 @@ describe('uploadImages TOCTOU claim ordering (R16C16 CR-16-01)', () => {
         expect(SRC).toContain('settleClaim(successCount, uploadedBytes)');
     });
 
+    /**
+     * AGG8b-23 / TEST8-03 (run-10 c8b): the two position pins above only
+     * relate the claim to TWO NAMED awaits — a NEW `await` inserted anywhere
+     * between the synchronous limit checks and the claim (the actual TOCTOU
+     * window) would pass them. Pin the whole window: from the first
+     * synchronous limit check to the claim there must be NO await token at
+     * all, so any future asynchronous insertion in the vulnerability window
+     * fails this test by construction.
+     */
+    it('the check-to-claim window contains no await (atomicity by construction)', () => {
+        const checkIdx = SRC.indexOf('if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW)');
+        const claimIdx = SRC.indexOf('tracker.bytes += totalSize');
+        expect(checkIdx).toBeGreaterThan(0);
+        expect(claimIdx).toBeGreaterThan(checkIdx);
+        // Strip comments first — prose in comments legitimately says "await".
+        const windowSrc = SRC.slice(checkIdx, claimIdx)
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/\/\/[^\n]*/g, '');
+        expect(windowSrc).not.toMatch(/\bawait\b/);
+        // The window must also stay free of promise chaining that would defer
+        // the claim without the `await` keyword.
+        expect(windowSrc).not.toContain('.then(');
+    });
+
     it('settles the claim then re-throws if the topic-exists query throws (R17C17 CR-17-1)', () => {
         // The topic SELECT sits AFTER the synchronous claim but the outer try is
         // finally-only (no catch), so an un-caught throw there would leak the

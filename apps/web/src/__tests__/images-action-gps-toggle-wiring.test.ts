@@ -74,4 +74,19 @@ describe('uploadImages GPS-toggle wiring (AGG-R7C2-02)', () => {
         expect(IMAGES_SRC).toContain('failedFiles.push(file.name)');
         expect(IMAGES_SRC).toContain('continue;');
     });
+
+    it('deletes the just-saved original inside the fail-closed block (AGG8b-24 / TEST8-04)', () => {
+        // VER-01 fail-closed contract: when the mandatory strip fails, the
+        // GPS-bearing original MUST be removed from disk before the upload is
+        // rejected — otherwise "rejected" uploads silently persist location
+        // data. Scope the assertion to the guard block window (same fixed-
+        // window technique as the exifDb test above) so the delete call being
+        // moved OUT of the block fails this test. The LR twin is pinned in
+        // lr-upload-hdr-gate.test.ts.
+        const failClosedIdx = IMAGES_SRC.search(/if\s*\(!gpsStripped\)\s*\{/);
+        expect(failClosedIdx).toBeGreaterThan(-1);
+        const block = IMAGES_SRC.slice(failClosedIdx, failClosedIdx + 400);
+        expect(block).toContain('await deleteOriginalUploadFile(savedOriginalFilename)');
+        expect(block).toContain('savedOriginalFilename = null');
+    });
 });
