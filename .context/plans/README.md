@@ -19,6 +19,12 @@ not be re-listed verbatim again. First application: `C77-ARCH-01` (restore mutat
 in run-10 cycle 1 after 8+ cycles of carry-forward; `C94-11` (`COUNT(*) OVER()` first-page cost) is
 re-opened on two-lane review agreement.
 
+MED-severity checkpoint (added run-10 cycle 4, C4-45): a deferred Medium-severity finding that crosses
+**16 cycles** unchanged must carry an explicit re-justification (why the exit criterion still has not
+fired) or be reclassified — closing the previously no-teeth gap for the long MED tail without forcing a
+premature product decision. This is a softer, longer-window sibling of the 8-cycle High rule; it makes
+the MED backlog re-review mechanical rather than open-ended, but does not by itself force scheduling.
+
 ## Consolidated carry-forward register
 
 - `deferred-carry-forward.md` (adopted run-10 cycle-3, C3-27) — one row per OPEN deferred
@@ -27,11 +33,13 @@ re-opened on two-lane review agreement.
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 3/100 Implementation Plan - 12-lane review from start HEAD `e08b6f97` (38 deduped findings); schedules 16 work packages incl. the migrate.js mixed-case batch-swallow fix (4-lane agreement, empirically reproduced), single-writer-guard keepalive + DB-scoped lock, detached backfill uncached-config, 404 robots-conflict fix, SW touchMeta durability, swipe-visual reset, embedding-scan cursor persistence, nginx nextimage zone + apply runbook, and test/docs batches (`cycle-3-2026-07-07-plan.md`)
-- Run-10 Cycle 3/100 Deferred Findings - defers the i18n client-payload trim, CSP memoization (conflicts with pinned fail-degrade semantics), tag lock-order, JSON-LD dev-warning validation, migrate-journal redesign, data.ts split, and the two operator halves (nginx apply, LB realip), each with exit criteria (`cycle-3-2026-07-07-deferred.md`)
+- Run-10 Cycle 4/100 Implementation Plan - 12-lane review from start HEAD `ec433dc4` (47 deduped findings, C4-01..C4-47); schedules 13 work packages incl. the migrate.js DML-baseline guard on every path, single-writer-guard self-healing re-acquire, gallery-config detached-accessor write-invalidation + honest rename, SW LRU phantom-entry accounting + respondWith de-gating, photo-viewer hydration determinism, shared-group shallow URL sync + prefetch=false, embedding-cursor model-version reset, image-zoom non-passive touchmove, and small-fix/docs/ledger batches (`cycle-4-2026-07-07-plan.md`)
+- Run-10 Cycle 4/100 Deferred Findings - defers the upload-contract reader/writer split, LR blob retention window, inert-nginx-limiter verification, image-queue god-object partition, maintenance-scheduler extraction (scheduled-next), component-behavior test harness, per-photo OG self-fetch transport, admin full-res preview thumbnailing, SW opaque/CDN caching, durable embedding cursor, and the fd-realpath serve hardening, each with exit criteria (`cycle-4-2026-07-07-deferred.md`)
 
 ## Recent Plans
 
+- Run-10 Cycle 3/100 Implementation Plan - COMPLETED + deployed (post-deploy verification `ec433dc4`): 12-lane review from start HEAD `e08b6f97` (38 deduped findings); shipped 16 work packages incl. the migrate.js mixed-case batch-swallow fix (4-lane agreement, empirically reproduced), single-writer-guard keepalive + DB-scoped lock, detached backfill uncached-config, 404 robots-conflict fix, SW touchMeta durability, swipe-visual reset, embedding-scan cursor persistence, nginx nextimage zone + apply runbook, and test/docs batches (`cycle-3-2026-07-07-plan.md`)
+- Run-10 Cycle 3/100 Deferred Findings - defers the i18n client-payload trim, CSP memoization (conflicts with pinned fail-degrade semantics), tag lock-order, JSON-LD dev-warning validation, migrate-journal redesign, data.ts split, and the two operator halves (nginx apply, LB realip), each with exit criteria (`cycle-3-2026-07-07-deferred.md`)
 - Run-10 Cycle 2/100 Implementation Plan - COMPLETED + deployed (post-deploy verification `e08b6f97`): 12-lane fresh review from start HEAD `642c5091`; mandatory carry-over fixed first (deploy-host container build, `223b3836`); shipped 26 work packages incl. Lightbox/Info-sheet focus restore, soft-404 status fix, byte-impacting-settings re-encode notice, single-writer boot guard, ISOBMFF parent-bound validation, SW 304 write-amplification fix, lean topics accessor, and a perf/test/docs batch (`cycle-2-2026-07-07-plan.md`)
 - Run-10 Cycle 2/100 Deferred Findings - defers map clustering, embedding-matrix cache, view-record round-trip fold, on-this-day index/migration, GPS-strip streaming, `updated_at` index migration, site-config runtime-mount decision, storage-module product decision, restore-drain slot re-scoping, scanner tokenizer rework, and the perf long-tail, each with exit criteria (`cycle-2-2026-07-07-deferred.md`)
 

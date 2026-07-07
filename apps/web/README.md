@@ -34,7 +34,7 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 | `npm run db:push` | Local throwaway schema push only; use committed migrations for shared/prod DBs |
 | `npm run db:seed` | Seed admin user |
 | `npm run init` | Apply committed migrations, then seed admin |
-| `npm test` | Vitest unit suite (2000+ tests) |
+| `npm test` | Vitest unit suite |
 | `npm run typecheck` | Type gate (app + scripts) |
 | `npm run test:e2e` | Playwright end-to-end tests |
 | `npx tsx scripts/download-clip-models.ts` | Local/dev CLIP weight seed helper; production sidecars must use the full mounted command in `CLAUDE.md` so `CLIP_MODELS_ROOT` points at persistent storage |
