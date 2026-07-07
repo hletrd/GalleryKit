@@ -17,6 +17,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // C6-09 (run-10 cycle-6): every toast gets a persistent, keyboard-reachable
+      // dismiss control (sonner renders none by default) and a longer default
+      // lifetime than sonner's 4s, so unbounded server-error strings and stacked
+      // upload warnings can actually be read/acted on. A per-toast `duration`
+      // override (e.g. Infinity for critical errors) still wins over this default.
+      closeButton
+      duration={6000}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
