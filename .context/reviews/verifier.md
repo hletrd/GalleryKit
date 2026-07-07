@@ -1,88 +1,87 @@
-# Cycle 21 Verifier Review
+# Cycle 22 Verifier Review
 
-Reviewed HEAD: `45b32d1db373e03d82a29511f53832051c770880`
-Mode: evidence-based correctness review against `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`.
+Role: `verifier`
+Repo: `/Users/hletrd/flash-shared/gallery`
+Current HEAD at write: `dabf8e8a` (intervening commits after `8b795862` changed other review artifacts only)
+Reviewed source HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
+Baseline: Cycle 21 review HEAD `45b32d1db373e03d82a29511f53832051c770880`
+
+## Inventory
+
+Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
+
+Relevant files/categories inspected:
+
+- Current Cycle 21 implementation ledger and index: `.context/plans/cycle-21-2026-07-08-plan.md`, `.context/plans/cycle-21-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, `.context/plans/README.md`.
+- Prior-cycle claims and assertions: `.context/reviews/_aggregate.md`, prior `.context/reviews/verifier.md`, prior `.context/reviews/test-engineer.md`, commit `8b795862`.
+- Mutation-barrier scanner and tests: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, all `apps/web/src/app/actions/**` acquired-slot call shapes.
+- Pending deletion ledger: `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts`.
+- Scheduled fix surfaces spot-checked: image queue permanent failures, MySQL datetime parsing, root script syntax gate, i18n keys, map marker naming, image-manager checkbox labels.
 
 ## Findings
 
-### VER-C21-01 — Mutation-barrier lint accepts an acquired check after the mutation
+### VER-C22-01 - Positive acquired-guard shape still lets mutations run outside the restore slot check
 
 - Severity: High
 - Confidence: High
-- Files/regions:
-  - `apps/web/scripts/check-action-origin.ts:628-678`
-  - `apps/web/src/__tests__/check-action-origin.test.ts:624-738`
-  - `.context/plans/cycle-20-2026-07-08-plan.md:49-54`
-- Contract: Cycle 20 WP2 explicitly required the scanner to "Require an acquired-state early-return gate before mutation" (`.context/plans/cycle-20-2026-07-08-plan.md:51-53`). `CLAUDE.md`/lint-gate contract says every mutating admin action must hold the restore-window mutation slot for the whole body and refuse work when the slot is not acquired.
-- Evidence: `bodyAcquiresAdminMutationSlot()` accepts any later statement that checks `mutationSlot.acquired` after the `using` declaration (`block.statements.slice(i + 1).some(...)` at `check-action-origin.ts:674-676`). It does not prove the check occurs before the first DB/server mutation. Existing negative fixtures cover spoofing, wrong imports, bare calls, non-`using`, and no acquired check, but not "mutation before acquired check".
-- Reproduction:
+- Status: Confirmed
+- Files/regions: `apps/web/scripts/check-action-origin.ts:641-650`, `apps/web/scripts/check-action-origin.ts:664-708`, `apps/web/src/__tests__/check-action-origin.test.ts:640-655`, `apps/web/src/app/actions/auth.ts:290-302`
+- Contract: Cycle 21 WP1 required the scanner to prove mutation-barrier acquisition before mutations; the positive `if (slot.acquired) { ... }` shape is only safe when protected mutations are lexically inside that branch.
+- Evidence: `statementIsMutationSlotPositiveGuard()` returns true for a bare `if (mutationSlot.acquired)` and `bodyAcquiresAdminMutationSlot()` accepts it solely because it is the next statement after `using`. It does not inspect whether later mutations are inside the branch. A focused reproduction passed:
 
 ```bash
 cd apps/web
-node --import tsx -e "import { checkActionSource } from './scripts/check-action-origin.ts'; const src = \`import { requireSameOriginAdmin } from '@/lib/action-guards'; import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier'; export async function updateSettings(input) { const originError = await requireSameOriginAdmin(); if (originError) return { error: originError }; using mutationSlot = acquireAdminMutationSlot(); await db.update(settings).set(input); if (!mutationSlot.acquired) return { error: 'restore in progress' }; return { success: true }; }\`; console.log(JSON.stringify(checkActionSource(src, 'src/app/actions/settings.ts'), null, 2));"
+node --import tsx -e "import { checkActionSource } from './scripts/check-action-origin.ts'; const src = \`import { requireSameOriginAdmin } from '@/lib/action-guards'; import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier'; import { db, images } from '@/db'; import { eq } from 'drizzle-orm'; export async function updateImage(id, input) { const originError = await requireSameOriginAdmin(); if (originError) return { error: originError }; using mutationSlot = acquireAdminMutationSlot(); if (mutationSlot.acquired) { console.log('guard observed'); } await db.update(images).set(input).where(eq(images.id, id)); return { success: true }; }\`; console.log(JSON.stringify(checkActionSource(src, 'src/app/actions/images.ts'), null, 2));"
 ```
 
-Output:
+Output included `"OK: src/app/actions/images.ts::updateImage"`. Current production actions mostly use the negative early-return shape; `logout()` uses the positive branch correctly at `apps/web/src/app/actions/auth.ts:290-302`.
+- Failure scenario: a future mutating action adds an empty/logging positive acquired check, then performs DB writes afterward. `npm run lint:action-origin` remains green while restore maintenance can be bypassed.
+- Suggested fix/test: for positive guards, require all mutation markers/protected writes after the `using` declaration to be lexically contained in the acquired branch, or disallow the positive shape except in explicitly reasoned exemptions. Add a negative fixture where `if (slot.acquired) {}` is followed by `await db.update(...)`.
 
-```json
-{"passed":["OK: src/app/actions/settings.ts::updateSettings"],"failed":[],"skipped":[]}
-```
+### VER-C22-02 - Pending file-deletion rows are durable but have no later retry/drain path
 
-- Concrete failure scenario: a future mutating admin action can run `await db.update(...)` while restore maintenance is active, then check `!mutationSlot.acquired` afterward. `npm run lint:action-origin` still passes, so the exact restore-race class the scanner is meant to prevent can be reintroduced without CI catching it.
-- Suggested fix: make the scanner reason about statement order. For the common early-return pattern, require `if (!slot.acquired) return/throw` immediately after the `using` declaration before any mutation marker/protected call; for the positive `if (slot.acquired) { ... }` pattern, require every mutation in the function to be lexically contained in that guarded branch. Add a negative fixture with mutation before the acquired check.
-
-### VER-C21-02 — Current Cycle 20 ledger still records the docs/deploy step as pending at HEAD
-
-- Severity: Low-Medium
+- Severity: High
 - Confidence: High
-- Files/regions:
-  - `.context/plans/cycle-20-2026-07-08-plan.md:3`
-  - `.context/plans/cycle-20-2026-07-08-plan.md:131-142`
-  - `.context/plans/cycle-20-2026-07-08-plan.md:157-163`
-  - `.context/plans/README.md:36-37`
-- Contract: `AGENTS.md` requires `npm run deploy` after every commit pushed to `master`; Cycle 20 WP5 repeats "Run `npm run deploy` after each pushed commit" and smoke the production URL (`cycle-20-2026-07-08-plan.md:131-133`).
-- Evidence: at HEAD, the active Cycle 20 plan says "final docs ledger commit/deploy is handled by the orchestrator after this file lands" (`:3`) and leaves the docs-ledger commit/deploy checkbox open (`:142`). The only committed deploy/smoke evidence is for source-fix commit `d8e604ef` (`:157-163`), not for current HEAD `45b32d1d`, which changed `.env.local.example` and review/plan ledgers. The HEAD commit trailer also says `Not-tested: ... post-docs deploy runs after this commit`, but no committed follow-up evidence was found.
-- Concrete failure scenario: the next cycle reads `.context/plans/README.md:36-37` and treats Cycle 20 as active and per-cycle deployed, while the authoritative plan still records an unfinished WP5 item. This can hide a missed deploy/smoke step for the final docs/env-example commit and weakens the repo's release-ledger reliability.
-- Suggested fix: after the docs/env-example commit is actually deployed and smoked, update `cycle-20-2026-07-08-plan.md` with current HEAD `45b32d1d`, mark WP5 complete, and record the deploy/smoke commands. If deployment is intentionally skipped for docs-only commits, document that as an explicit exception to the per-iteration policy rather than leaving the active ledger half-open.
+- Status: Confirmed
+- Files/regions: `.context/plans/cycle-21-2026-07-08-plan.md:53-68`, `apps/web/src/lib/pending-file-deletions.ts:70-90`, `apps/web/src/app/actions/images.ts:714-727`, `apps/web/src/app/actions/images.ts:864-907`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts:39-45`
+- Contract: Cycle 21 WP2 says failed cleanup should be preserved "so a later retry can finish cleanup" and acceptance says cleanup failures leave durable retry state.
+- Evidence: failed cleanup updates `pending_file_deletions.attempts` and `last_error`, but repo-wide search shows no reader/drain/scheduler/admin retry path for `pendingFileDeletions` outside the immediate delete call and migration/backup allowlists. The only cleanup executor is `cleanupPendingFileDeletion(record)`, called synchronously from `deleteImage()` and `deleteImages()`.
+- Failure scenario: a transient filesystem or permission failure leaves a public derivative on disk and records a ledger row. After the action returns success, no restart, scheduler tick, admin page, or operator command will consume that row, so the file can remain publicly available indefinitely unless someone writes ad hoc cleanup.
+- Suggested fix/test: add a bounded cleanup drain invoked at startup/maintenance and an admin/operator retry surface, with idempotent behavior for missing files. Add behavior tests that seed a failed ledger row, mock one transient failure then success, and prove a later drain deletes files and removes the ledger row.
+
+### VER-C22-03 - Cycle 21 deploy/release ledger remains unfinished at the pushed HEAD
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Files/regions: `.context/plans/cycle-21-2026-07-08-plan.md:1-6`, `.context/plans/cycle-21-2026-07-08-plan.md:221-253`, `.context/plans/README.md:34-37`, commit `8b795862`
+- Contract: Project policy requires `npm run deploy` after every pushed commit to `master`; Cycle 21 WP9 explicitly scheduled commit, push, and per-cycle deploy.
+- Evidence: `8b795862` is `HEAD -> master, origin/master`, so commit/push happened. The plan still says `commit/push/deploy pending`, the WP9 checkbox for signed commit/push/deploy is unchecked, and the commit trailer says `Not-tested: Production deploy pending until after signed commit is pushed per DEPLOY_MODE=per-cycle`.
+- Failure scenario: future cycles read the active plan index and treat Cycle 21 as the current complete release lineage, but the authoritative ledger still lacks production deploy/smoke evidence for the actual pushed HEAD.
+- Suggested fix/test: run/record the Cycle 21 deploy or explicitly mark it superseded by a later deploy with the exact commit hash and smoke result. Add a lightweight ledger check that a plan cannot claim active completion while its terminal deploy checkbox and HEAD hash evidence are missing.
 
 ## No Finding From Focused Checks
 
-- Restore drain ordering: `apps/web/src/app/[locale]/admin/db-actions.ts:47-64` adds a bounded shared-group flush and `:593-635` wires it as the first `runRestoreDrainChecklist` stage. `apps/web/src/__tests__/restore-drain-checklist.test.ts` rejects the old direct pre-checklist flush.
-- Service worker photo-page revocability: `apps/web/public/sw.template.js:59-64` and generated `apps/web/public/sw.js` classify `/p/:id` routes as revocable, and `apps/web/src/__tests__/sw-template-contract.test.ts:125-139` covers localized and unlocalized examples. The actual route tree contains `apps/web/src/app/[locale]/(public)/p/[id]/`.
-- `DB_SSL_CA` example wording: `apps/web/.env.local.example:9` now matches runtime, Drizzle Kit, and backup/restore CLI TLS behavior confirmed in `apps/web/src/db/index.ts`, `apps/web/drizzle.config.ts`, and `apps/web/scripts/mysql-connection-options.js`.
-
-## Inventory Built
-
-- Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
-- Current-cycle ledgers: `.context/plans/cycle-20-2026-07-08-plan.md`, `.context/plans/cycle-20-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, `.context/reviews/_aggregate.md`, and top-level `.context/reviews/*.md` inventory.
-- Explicitly documented/tested behavior categories mapped:
-  - Security/lint contracts: `apps/web/scripts/check-action-origin.ts`, `check-api-auth`, public route rate limit scanner, corresponding unit tests.
-  - Restore/DB contracts: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-drain-checklist.ts`, migration docs/tests/scripts.
-  - Service worker/PWA contracts: `apps/web/public/sw.template.js`, generated `sw.js`, `sw-template-contract.test.ts`.
-  - Deploy/ops contracts: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `.env.local.example`, nginx template/docs.
-  - Privacy/schema contracts: `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`, privacy-field tests, migration journal/reconcile rules.
-  - Current source-fix scope: files changed from `bd0cc170..45b32d1d`, with behavior-bearing review concentrated on `d8e604ef`.
+- The negative early-return mutation-barrier regression from Cycle 21 is fixed: `check-action-origin.test.ts:745-760` covers mutation before `if (!slot.acquired)`.
+- The new migration journal entry is monotonic: `0030_pending_file_deletions` has `when=1783463767421`, greater than all prior journal entries.
+- `APP_BACKUP_TABLES` includes `pending_file_deletions`, so own-backup restore scanning is not immediately broken by the new table.
+- Root `scripts/*.mjs` are covered by `check-js-scripts.mjs` discovery.
 
 ## Evidence Commands
 
 ```bash
-git rev-parse HEAD
-git log --oneline --decorate -n 12
-git diff --name-only bd0cc170..45b32d1d
+git rev-parse --short HEAD
+git diff --name-status 45b32d1d..8b795862
+git show --format=fuller --no-patch 8b795862
 npm run lint:action-origin --workspace=apps/web
-npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/sw-template-contract.test.ts
-git diff --check
+npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/mysql-datetime.test.ts src/__tests__/pending-file-deletions-source.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/check-js-scripts-contract.test.ts src/__tests__/sql-restore-scan.test.ts
 ```
 
-Results:
+Results: targeted tests passed; `lint:action-origin` passed on current files; the custom positive-guard reproduction still passed incorrectly.
 
-- HEAD matched requested `45b32d1db373e03d82a29511f53832051c770880`.
-- `npm run lint:action-origin --workspace=apps/web` passed for current files.
-- Targeted Vitest run passed: 3 files, 152 tests.
-- `git diff --check` produced no whitespace errors.
+## Final Missed-Issue Sweep / Uninspected
 
-## Final Sweep / Not Fully Inspected
-
-- I did not run the full blocking gate suite (`lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full `npm test`, full Playwright e2e`) because this was a review lane and the current source-fix plan already records a full sweep at `d8e604ef`; I ran the targeted gates for the changed contracts instead.
-- I did not inspect every historical file under `.context/plans/archive/` or `.context/reviews/archive/`; I used the active current-cycle README, current Cycle 20 plan/deferred pair, carry-forward register, and top-level review aggregate.
-- I did not verify live production deployment state or host nginx state; that would require external side-effecting deploy/operator checks outside this review request.
+- I did not run the full blocking suite (`lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full unit tests, Playwright e2e); this was a review lane and I ran targeted checks only.
+- I did not verify live production deploy/nginx/proxy state.
+- I did not inspect every historical archive under `.context/plans/archive/`; current plan/deferred/index/aggregate were inspected.

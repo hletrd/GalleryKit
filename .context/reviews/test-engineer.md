@@ -1,126 +1,95 @@
-# Test-Engineer Review - Cycle 21
+# Cycle 22 Test-Engineer Review
 
 Role: `test-engineer`
 Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `45b32d1db373e03d82a29511f53832051c770880`
-Review time: `2026-07-08`
-
-## Required Reads
-
-Read first, before findings:
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.context/plans/README.md`
-
-I also loaded the `code-review` skill surface because this is a review task. The hook-routed `TDD` workflow name does not have a directly available `tdd` skill in this session, so I handled TDD opportunities inside this test-engineer review.
+Current HEAD at write: `dabf8e8a` (intervening commits after `8b795862` changed other review artifacts only)
+Reviewed source HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
 
 ## Inventory
 
-Test-relevant files inventoried before findings:
+Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
 
-- Unit/source tests: 357 files under `apps/web/src/__tests__/`.
-- E2E tests: `apps/web/e2e/admin.spec.ts`, `focus-restore.spec.ts`, `hydration-photo-page.spec.ts`, `nav-visual-check.spec.ts`, `not-found-status.spec.ts`, `origin-guard.spec.ts`, `public.spec.ts`, `swipe-visual-reset.spec.ts`, `test-fixes.spec.ts`; helpers and fixtures in `apps/web/e2e/helpers.ts` and `apps/web/e2e/fixtures/`.
-- Check scripts: `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/scripts/check-js-scripts.mjs`, and root `scripts/check-proxy-topology.mjs`.
-- Package scripts: root `package.json` workspace gates plus `apps/web/package.json` scripts for `lint`, `typecheck`, `test`, `test:e2e`, `test:e2e:admin`, `test:clip:preflight`, and the three lint scanners.
-- Test configs and CI: `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/tsconfig.typecheck.json`, `apps/web/tsconfig.scripts.json`, `.github/workflows/quality.yml`, `.github/workflows/clip-preflight.yml`.
-- High-risk source/test interaction map: `apps/web/src/app/actions/`, `apps/web/src/app/api/`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/image-queue.ts`, `admin-backfill-runner.ts`, `process-image.ts`, `sql-restore-scan.ts`, `migrate.js`, semantic/CLIP routes and libs, service worker template/generated worker, upload browser/PAT paths, public/search/load-more client components, migrations/schema, deploy/nginx/operator scripts.
+Test inventory and high-risk interactions inspected:
 
-Unit-test inventory by dominant filename prefix: cycle/source contracts 22; image* 20; admin* 15; process* 14; clip* 10; upload/settings/semantic 9 each; data/auth 7 each; search/restore/photo/og/color 6 each. This confirms the suite is broad but also source-contract-heavy: 219 test files read source text or assert source-string shape somewhere.
-
-Relevant file categories inspected: unit tests, E2E tests, scanner scripts, package/CI scripts, migration/schema tests, backup/restore tests, upload/LR tests, image queue/backfill tests, semantic/CLIP tests, service worker tests, accessibility/touch-target tests, i18n tests, and deferred/carry-forward test-risk registers.
+- 376 test/e2e files under `apps/web/src/__tests__` and `apps/web/e2e`.
+- Blocking gate scripts from `package.json` and `apps/web/package.json`: ESLint, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `typecheck`, unit tests, Playwright e2e.
+- Scanner tests: `check-action-origin`, API auth, public route rate limit, JS script syntax, SQL restore scan.
+- Current-cycle tests around scheduled fixes: `check-action-origin.test.ts`, `pending-file-deletions-source.test.ts`, `image-queue-permanent-failure*.test.ts`, `mysql-datetime.test.ts`, `data-timeline.test.ts`, `check-js-scripts-contract.test.ts`.
+- Broader persistent test-risk categories: migration/reconcile source contracts, backup/restore child-process source contracts, client search/load-more source contracts, Playwright matrix, visual screenshots, hydration readiness.
 
 ## Findings
 
-### C21-TE-01 - Reconcile schema coverage is still a name-presence tripwire, not a DB-backed schema proof
+### TE-C22-01 - Missing negative fixture for positive acquired guards allowed the scanner bypass to survive
 
 - Severity: High
 - Confidence: High
-- Region: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-103`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175-180`; implementation in `apps/web/scripts/migrate.js:348-493`
-- Current-bug or hardening: broader hardening for a historically production-breaking class; no new migration at this HEAD.
-- Evidence: the test explicitly says it is a "SOURCE tripwire" and "cannot verify types or defaults"; the assertions mostly check that table, column, index, and FK names occur in `migrate.js`.
-- Failure scenario: a migration changes a type, nullability, default, FK action, index column order, or charset/collation while keeping the same names. The test passes, but a reconcile-baselined legacy/fresh DB diverges from Drizzle and can fail later at upload, restore, analytics, or semantic-search runtime.
-- Suggested fix/test: add a disposable-MySQL integration gate that runs the reconcile/baseline path, then diffs `INFORMATION_SCHEMA.COLUMNS`, `STATISTICS`, and FK metadata against the current Drizzle/migration contract. Write the failing drift fixture first, then edit `migrate.js`.
+- Status: Confirmed test gap with confirmed scanner behavior
+- Files/regions: `apps/web/src/__tests__/check-action-origin.test.ts:640-655`, `apps/web/src/__tests__/check-action-origin.test.ts:745-760`, `apps/web/scripts/check-action-origin.ts:641-650`, `apps/web/scripts/check-action-origin.ts:688-690`
+- Weakness: Cycle 21 added a negative test for "mutation before `if (!slot.acquired)`" but not for the positive-guard sibling shape. The existing positive test only proves the valid case where the mutation is inside `if (mutationSlot.acquired)`.
+- Failure scenario: a fixture with `using slot; if (slot.acquired) {}; await db.update(...)` passes today. That is exactly the kind of source-contract-vs-behavior weakness the scanner exists to prevent.
+- Suggested test: add a failing fixture where the positive branch does not contain all mutations. Assert the scanner fails it before changing scanner logic. Add one positive fixture for the real `logout()` pattern so valid contained work stays accepted.
 
-### C21-TE-02 - Backup/restore child-process paths remain source-pinned instead of execution-tested
+### TE-C22-02 - Pending file deletion durability is tested by source strings, not by executable cleanup behavior
 
 - Severity: High
-- Confidence: Medium
-- Region: `apps/web/src/__tests__/db-restore.test.ts:47-136`; implementation in `apps/web/src/app/[locale]/admin/db-actions.ts:157-405` and `apps/web/src/app/[locale]/admin/db-actions.ts:740-860`
-- Current-bug or hardening: broader hardening; the current helpers around dump headers/trailers and SQL scanning have unit coverage.
-- Evidence: critical guarantees around temp-file finalization, `mysqldump`/`mysql` spawn ordering, cleanup transfer, trailer validation, and maintenance retention are asserted by reading substrings and relative source positions.
-- Failure scenario: a refactor preserves the expected strings but breaks runtime stream settlement, `close`/`error` ordering, temp-file cleanup, child timeout cleanup, post-restore migration failure handling, or advisory-lock release. Tests pass because no child process path executes.
-- Suggested fix/test: build a stub-binary integration harness with a temp backup dir and `PATH` pointing to fake `mysqldump`/`mysql` scripts. Cover success, nonzero exit, timeout, bad header, truncated trailer, write error, stdin error, post-restore migration failure, and release failure.
+- Confidence: High
+- Status: Confirmed gap
+- Files/regions: `apps/web/src/__tests__/pending-file-deletions-source.test.ts:1-45`, `apps/web/src/lib/pending-file-deletions.ts:34-90`, `apps/web/src/app/actions/images.ts:714-727`, `apps/web/src/app/actions/images.ts:864-907`
+- Weakness: The new tests read source and assert names/order. They do not execute `collectImageCleanupFailures()`, do not mock strict unlink failures, do not verify DB updates/deletes, and do not prove a later retry/drain exists.
+- Failure scenario: cleanup can keep a row forever after one failed synchronous delete, or a future refactor can record attempts but never retry or remove successful rows. Source strings stay green.
+- Suggested test: extract DB/filesystem effects behind injectable helpers or mock modules with Vitest. TDD cases: all cleanup succeeds -> ledger row deleted; one target fails once then succeeds on later drain -> attempts increments then row removed; permanent failure preserves `last_error`; missing files are idempotent success; batch deletion aggregates failures without unbounded concurrency.
 
-### C21-TE-03 - High-risk client behavior still relies on source contracts rather than component behavior tests
+### TE-C22-03 - Timeline grouping tests still reimplement old `Date` logic instead of exercising the new parser-backed behavior
 
 - Severity: Medium
 - Confidence: High
-- Region: `apps/web/src/__tests__/search-stale-response.test.ts:1-35`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-30`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`; source in `apps/web/src/components/search.tsx:163-281` and `apps/web/src/components/load-more.tsx:43-111`
-- Current-bug or hardening: broader hardening; no live client regression confirmed at this HEAD.
-- Evidence: tests assert source text and ordering for stale semantic responses, cooldowns, live-region feedback, and scan-limit wiring. The comments acknowledge the lack of a jsdom/RTL harness.
-- Failure scenario: a stale semantic response still overwrites a newer query because closure state changes, a cooldown blocks the wrong branch, observer/click load-more races duplicate requests, or live-region text does not render. The strings can remain present and the tests still pass.
-- Suggested fix/test: extract small state-machine helpers or add a focused jsdom/React Testing Library harness. TDD cases: slow semantic response A vs newer response B, abort-on-query-change, 503 setup-required branch after `resp.clone().json()`, load-more transient cooldown, observer plus manual click double-fire, and status live-region rendering.
+- Status: Confirmed gap; production code uses the parser correctly
+- Files/regions: `apps/web/src/__tests__/data-timeline.test.ts:121-205`, `apps/web/src/lib/data-timeline.ts:244-266`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:100-110`, `apps/web/src/components/on-this-day-widget.tsx:48-52`, `apps/web/src/lib/mysql-datetime.ts:33-69`
+- Weakness: Cycle 21 correctly moved production timeline grouping to `parseMySqlDateTimeParts()`, but `data-timeline.test.ts` still validates inline fake grouping with `new Date(capture_date)`. That no longer tests the source contract it claims to test and could mask a future reintroduction of host-timezone parsing.
+- Failure scenario: a later refactor switches `getYearInReviewImages()` or the page grouping back to `new Date()`. Parser unit tests still pass, and the fake grouping tests continue to bless `Date` behavior.
+- Suggested test: export a small pure grouping helper or test `parseMySqlDateTimeParts`-based grouping directly. Add a TZ-sensitive fixture such as `2026-01-01 00:30:00` under a non-UTC timezone and assert the month remains January without `Date.parse`.
 
-### C21-TE-04 - Playwright matrix is single-project Desktop Chromium despite browser/touch/PWA-specific code
+### TE-C22-04 - Safety-critical source-contract concentration remains high
 
 - Severity: Medium
 - Confidence: High
-- Region: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/src/components/register-service-worker.tsx:13-23`, `apps/web/src/__tests__/sw-template-contract.test.ts:1-16`
-- Current-bug or hardening: broader future hardening.
-- Evidence: the only Playwright project is `chromium` with `devices['Desktop Chrome']`. Mobile coverage largely uses viewport resizing, and PWA/service-worker behavior is unit/source-tested rather than installed in a browser.
-- Failure scenario: Safari/WebKit touch events, iOS viewport behavior, Firefox color/HDR detection, service-worker registration scope, offline cache writes, or admin/share offline-bypass behavior breaks while CI remains green.
-- Suggested fix/test: add a small tagged matrix: one mobile WebKit smoke, one mobile Chromium touch smoke, and one production PWA spec that waits for `navigator.serviceWorker.ready`, caches a public page, goes offline, verifies the fallback, and proves admin/share/smart-collection/map routes are not served from the offline HTML cache.
+- Status: Risk / recurring gap
+- Files/regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/db-restore.test.ts:47-136`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`, `apps/web/src/__tests__/search-stale-response.test.ts:1-35`
+- Weakness: 167 unit test files read source with `readFileSync`; 221 files use at least one source/string assertion pattern. Some are useful tripwires, but high-risk runtime contracts still lack behavior-backed coverage.
+- Failure scenario: schema reconcile semantics, restore child-process settlement, semantic scan caps, or stale client response handling can drift while preserving expected strings/imports.
+- Suggested test strategy: keep source tripwires as lint-like checks, but add behavior gates for the highest-risk classes: disposable MySQL reconcile diff, fake `mysqldump`/`mysql` child-process harness, route-level semantic scan cap test, jsdom/RTL search stale-response test.
 
-### C21-TE-05 - Nav "visual" E2E checks write screenshots but never compare them
+### TE-C22-05 - Browser-flow coverage remains single-project Chromium with non-asserting visual artifacts
 
-- Severity: Low-Medium
+- Severity: Medium
 - Confidence: High
-- Region: `apps/web/e2e/nav-visual-check.spec.ts:40-86`
-- Current-bug or hardening: broader hardening.
-- Evidence: the spec checks visibility, touch-target size, and overlap, then writes PNGs to `test-results/nav-*.png` with `page.screenshot(...)`. There is no `toHaveScreenshot` or baseline comparison.
-- Failure scenario: spacing, icon alignment, density, color contrast, or responsive hierarchy regresses. The test still passes as long as targets remain visible, >=44 px, and non-overlapping; the generated PNG is only a manual artifact.
-- Suggested fix/test: either rename this as a manual screenshot-capture spec, or add stable `expect(page).toHaveScreenshot(...)` baselines for collapsed mobile, expanded mobile, and desktop nav states with seeded data and deterministic theme.
-
-### C21-TE-06 - Hydration E2E uses `networkidle`, which is a flakiness trigger as background work grows
-
-- Severity: Low-Medium
-- Confidence: Medium
-- Region: `apps/web/e2e/hydration-photo-page.spec.ts:20-49`
-- Current-bug or hardening: flakiness hardening; no failure reproduced during this review.
-- Evidence: after navigating to a photo, the spec waits for `page.waitForLoadState('networkidle')` to "give hydration a beat".
-- Failure scenario: service-worker registration, analytics, image probes, slow network, or future background requests keep the page from reaching Playwright's idle heuristic within timeout. The test then fails for runner timing rather than a hydration regression.
-- Suggested fix/test: replace `networkidle` with an app-specific readiness condition: wait for the photo viewer root and pinned/info control, then poll a short deterministic microtask/RAF boundary or a test-only hydration sentinel. Keep console-error collection unchanged.
-
-### C21-TE-07 - Root operator check script is outside the JS-script syntax gate and CI quality path
-
-- Severity: Low
-- Confidence: High
-- Region: `scripts/check-proxy-topology.mjs:1-131`, `apps/web/scripts/check-js-scripts.mjs:6-9`, `package.json:28`, `.github/workflows/quality.yml:54-83`
-- Current-bug or hardening: broader hardening for operator validation.
-- Evidence: `check-js-scripts.mjs` scans only `apps/web/scripts`; root `scripts/check-proxy-topology.mjs` is exposed as `npm run check:proxy-topology` but is not syntax-checked by `typecheck:scripts` and is not run in the CI quality workflow.
-- Failure scenario: a syntax error or argument-parsing regression in the proxy topology checker ships unnoticed. The operator reaches for the documented command during a proxy incident and the checker itself fails before proving anything.
-- Suggested fix/test: extend `check-js-scripts.mjs` or add a root-level syntax check for `scripts/*.mjs`, plus a tiny fixture test for `--help`, missing `--url`, malformed URL, and mocked `fetch` classification.
+- Status: Risk / recurring gap
+- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:36-38`
+- Weakness: CI installs/runs only Desktop Chromium. The nav "visual" spec writes screenshots but does not compare baselines, and hydration waits on `networkidle`, which is a timing heuristic vulnerable to service-worker/analytics/background work.
+- Failure scenario: WebKit/mobile touch, Firefox color capability, PWA install/offline behavior, visual spacing, or hydration readiness regresses while CI stays green or flakes.
+- Suggested test: add a small tagged matrix rather than broad parallelism: mobile WebKit smoke, mobile Chromium touch smoke, production service-worker offline smoke, and deterministic `toHaveScreenshot` baselines or rename the current screenshots as manual artifacts. Replace hydration `networkidle` with an app-specific readiness sentinel.
 
 ## Existing Strengths
 
-- The suite is broad and security-aware: admin API auth, action origin/barrier, public route rate limits, privacy-field guards, touch targets, i18n key parity, migration journal monotonicity, upload tracker, image queue, backfill, CLIP limits, SQL restore scanning, and service-worker cache logic all have focused tests.
-- The E2E runner uses a disposable-DB guard in `run-e2e-server.mjs` and serializes Playwright workers to avoid login/share-rate-limit flakiness.
-- Several old source-only risks have been converted to behavior tests, notably restore drain checklist, LR upload route behavior, smart collection pagination, upload path resolution, and SQL restore scanner helpers.
+- `lint:action-origin` is now AST-based and catches the Cycle 21 negative early-return bypass.
+- Migration journal monotonicity and app-backup-table coverage caught the new table/index integration points.
+- `mysql-datetime.test.ts` directly covers parser validity and MySQL DATETIME output shape.
+- Root operator script syntax is now part of `typecheck:scripts`.
 
-## TDD Opportunities
+## Evidence Commands
 
-- Before the next migration/schema change: write the failing DB-backed reconcile diff first.
-- Before the next backup/restore change: write a stub-child failing branch first.
-- Before changing search/load-more UI behavior: add executable stale-response/cooldown tests first.
-- Before changing service-worker logic: add a browser install/offline spec first.
-- Before broad admin UI work: split admin Playwright into workflow tags for settings save, token revoke, backup download, restore rejection, share create/revoke, image deletion, and semantic status banners.
+```bash
+npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/mysql-datetime.test.ts src/__tests__/pending-file-deletions-source.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/check-js-scripts-contract.test.ts src/__tests__/sql-restore-scan.test.ts
+npm run lint:action-origin --workspace=apps/web
+rg -n "pendingFileDeletions|pending_file_deletions|cleanupPendingFileDeletion" apps/web/src apps/web/scripts apps/web/drizzle
+rg -n "new Date\\(|Date\\.parse|getMonth|getDate" apps/web/src/lib/data-timeline.ts apps/web/src/components/on-this-day-widget.tsx "apps/web/src/app/[locale]/(public)/timeline/page.tsx" apps/web/src/__tests__/data-timeline.test.ts
+```
 
-## Final Sweep
+Results: targeted tests passed; `lint:action-origin` passed current files; repo-wide search confirmed no pending-deletion retry/drain path; `data-timeline.test.ts` still contains `new Date()` in fake grouping assertions.
 
-No `test.only` was found. Intentional skips/opt-ins remain:
+## Final Missed-Issue Sweep / Uninspected
 
-- `apps/web/e2e/admin.spec.ts:6-12` and `apps/web/e2e/origin-guard.spec.ts:28-58` gate credentialed/admin checks.
-- `apps/web/src/__tests__/clip-offline-load.test.ts:41` and `apps/web/src/__tests__/clip-semantic-integration.test.ts:31` skip without seeded CLIP/integration env.
-
-Relevant file categories I could not dynamically inspect: live production nginx/proxy behavior, real deployed CLIP weights, actual browser coverage outside Chromium, and numeric line/branch coverage percentages because the repository has no coverage collection gate configured. I did not run the full gate suite; this was a read-only repository-wide inspection plus this report write.
+- No `test.only` sweep was rerun in this lane; prior top-level review recorded this class, and I focused on changed/high-risk tests.
+- I did not run full Playwright, full unit, build, typecheck, or lint gates.
+- Live production deploy state, host nginx, real CLIP model weights, and non-Chromium browsers were not dynamically inspected.
