@@ -141,6 +141,8 @@ describe('client component source contracts', () => {
       expect(code, `${path} should load aria translations`).toContain("getTranslations('aria')");
       expect(code, `${path} should use localized untitled fallback`).toContain("tCommon('untitled')");
       expect(code, `${path} should use localized photo fallback`).toContain("tCommon('photo')");
+      expect(code, `${path} should append stable ids to repeated archive link labels`).toContain('const accessibleTitle = `${displayTitle} #${photo.id}`');
+      expect(code, `${path} should pass the stable id label to aria copy`).toContain("aria-label={tAria('viewPhoto', { title: accessibleTitle })}");
       expect(code, `${path} should use action-oriented photo link labels`).toContain("tAria('viewPhoto'");
       expect(code, `${path} should not hard-code English photo fallback for cards`).not.toContain("getPhotoDisplayTitleFromTagNames(photo, 'Photo')");
       expect(code, `${path} should not use bare title-only link labels`).not.toContain('aria-label={displayTitle}');

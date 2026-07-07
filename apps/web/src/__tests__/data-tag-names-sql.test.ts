@@ -221,7 +221,10 @@ describe('getImagesLite tag_names SQL shape', () => {
         // Verify searchFields and searchGroupByColumns are both in the function body
         const searchFnBody = extractFunctionBody(source, 'searchImages');
         expect(searchFnBody).toMatch(/const\s+searchFields\s*=\s*\{/);
+        expect(searchFnBody).toMatch(/const\s+searchFieldsWithNoTags\s*=\s*\{/);
+        expect(searchFnBody).toMatch(/const\s+searchFieldsWithTagNames\s*=\s*\{/);
         expect(searchFnBody).toMatch(/const\s+searchGroupByColumns\s*=\s*Object\.values\(searchFields\)/);
+        expect(searchFnBody).toContain('tag_names: tagNamesAgg');
         // Ensure the old inline .groupBy(images.id, ...) pattern is gone
         expect(searchFnBody).not.toMatch(/\.groupBy\(\s*images\.id,/);
         // Ensure the old manually-maintained array literal pattern is gone

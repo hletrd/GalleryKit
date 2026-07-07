@@ -227,6 +227,7 @@ export default async function TimelinePage({
                                     {monthPhotos.map((photo) => {
                                         const shouldEagerLoad = eagerArchiveImageIds.has(photo.id);
                                         const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
+                                        const accessibleTitle = `${displayTitle} #${photo.id}`;
                                         const altText = getConcisePhotoAltText(photo, tCommon('photo'));
                                         const baseAvif = photo.filename_avif.replace(/\.avif$/i, '');
                                         const baseWebp = photo.filename_webp.replace(/\.webp$/i, '');
@@ -248,7 +249,7 @@ export default async function TimelinePage({
                                             >
                                                 <Link
                                                     href={localizePath(locale, `/p/${photo.id}`)}
-                                                    aria-label={tAria('viewPhoto', { title: displayTitle })}
+                                                    aria-label={tAria('viewPhoto', { title: accessibleTitle })}
                                                 >
                                                     <div className="relative w-full">
                                                         <GridPicture

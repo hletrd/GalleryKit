@@ -83,12 +83,17 @@ export function getPhotoDisplayTitleFromTagNames(
 }
 
 export function getPhotoResultLabel(
-    image: { title: string | null | undefined; description?: string | null | undefined },
+    image: { title: string | null | undefined; description?: string | null | undefined; tag_names?: string | null | undefined },
     fallback: string,
 ): string {
     const title = image.title?.trim();
     if (title && !isFilenameLikeTitle(title)) {
         return title;
+    }
+
+    const tagTitle = getPhotoDisplayTitleFromTagNames({ title: null, tag_names: image.tag_names }, fallback);
+    if (tagTitle !== fallback) {
+        return tagTitle;
     }
 
     const description = image.description?.trim();

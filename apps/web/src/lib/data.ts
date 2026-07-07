@@ -1557,6 +1557,7 @@ interface SearchResult {
     id: number;
     title: string | null;
     description: string | null;
+    tag_names: string | null;
     filename_jpeg: string;
     width: number;
     height: number;
@@ -1603,6 +1604,14 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         lens_model: images.lens_model,
         capture_date: images.capture_date, created_at: images.created_at,
     };
+    const searchFieldsWithNoTags = {
+        ...searchFields,
+        tag_names: sql<string | null>`NULL`,
+    };
+    const searchFieldsWithTagNames = {
+        ...searchFields,
+        tag_names: tagNamesAgg,
+    };
 
     // R15C15 / A15-02: searchImages serves the ANONYMOUS public search surface
     // (searchImagesAction). searchFields was the one public image-row select set
@@ -1625,7 +1634,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     // does not JOIN imageTags or tags. The tag/alias branches below DO use
     // GROUP BY because they JOIN those tables. If a future refactor adds a
     // tag JOIN here, GROUP BY must be added to match those branches.
-    const results = await db.select(searchFields).from(images)
+    const results = await db.select(searchFieldsWithNoTags).from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
         .where(and(
             eq(images.processed, true),
@@ -1684,7 +1693,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const [tagResults, aliasResults] = remainingLimit <= 0
         ? [[], []] as [SearchResult[], SearchResult[]]
         : await Promise.all([
-            db.select(searchFields)
+            db.select(searchFieldsWithTagNames)
                 .from(images)
                 .leftJoin(topics, eq(images.topic, topics.slug))
                 .innerJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -1693,7 +1702,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 .groupBy(...searchGroupByColumns)
                 .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(remainingLimit),
-            aliasRemainingLimit <= 0 ? [] : db.select(searchFields)
+            aliasRemainingLimit <= 0 ? [] : db.select(searchFieldsWithNoTags)
                 .from(images)
                 .leftJoin(topics, eq(images.topic, topics.slug))
                 .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getConcisePhotoAltText, getPhotoDisplayTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoResultLabel } from '@/lib/photo-title';
 import { ALT_TEXT_STUB_PREFIX, stripStubPrefix } from '@/lib/caption-constants';
 
 const FALLBACK = 'Photo';
@@ -128,6 +128,22 @@ describe('getPhotoDisplayTitle — formatTitleAsTags empty-token fix (COR-R5C2-0
         );
         expect(result).toBe('#solo');
         expect(result).not.toMatch(/(^|\s)#(\s|$)/);
+    });
+});
+
+describe('getPhotoResultLabel — public search labels', () => {
+    it('uses tag-derived display context before falling back to generic photo labels', () => {
+        expect(getPhotoResultLabel(
+            { title: null, description: null, tag_names: 'Color_in_Music_Festival,JIHOON' },
+            'Photo 348',
+        )).toBe('#Color in Music Festival #JIHOON');
+    });
+
+    it('keeps meaningful titles ahead of tag labels', () => {
+        expect(getPhotoResultLabel(
+            { title: 'Final edit', description: 'caption', tag_names: 'behind_the_scenes' },
+            'Photo 12',
+        )).toBe('Final edit');
     });
 });
 
