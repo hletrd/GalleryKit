@@ -1,88 +1,129 @@
-# Verifier Review - Cycle 11
+# Verifier Review - Cycle 13
 
 Date: 2026-07-07
 Reviewer: verifier
-HEAD reviewed: `b965e3bf` (`docs(review): preserve cycle 6 review artifacts`)
-Mode: evidence-based correctness review against stated behavior in docs, tests, plans, scripts, and code.
+HEAD reviewed: `d8fcb3d62a88d09bb69458e3672129ed902318ba` (`fix(security): 🐛 prefer host for origin checks`)
+Mode: evidence-based correctness review against AGENTS.md, CLAUDE.md, tests, route contracts, data privacy rules, release gates, and UI behavior.
 
-Application source and plans were not edited. Only this assigned review file was written.
+Application source and plans were not edited. Only this assigned review artifact was written.
 
 ## Inventory
 
-Read/inspected:
+Behavior-critical files inventoried before inspection:
 
-- `AGENTS.md` instructions supplied in prompt, `CLAUDE.md`, and `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- Current review/plan evidence: `.context/reviews/_aggregate.md`, `.context/reviews/cycle-6-2026-07-07/*`, `.context/plans/cycle-10-2026-07-07-plan.md`, `.context/plans/cycle-10-2026-07-07-deferred.md`, `.context/plans/run10-cycle7/implementation-plan.md`.
-- Recent implementation scope from `git show --stat --name-only HEAD~10..HEAD`: Docker native pins, timeline ranges, embedding storage, maintenance shutdown, public analytics actions, topic deletion, search/archive labels, tracked secret scan, and review artifact commits.
-- Cross-file source surfaces: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/photo-title.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/0029_feed_updated_indexes.sql`, package manifests/lockfile, and focused tests.
+- Governance and stated behavior: `AGENTS.md` from the prompt, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
+- Current-cycle delta from `173668ea..HEAD`: `.github/workflows/quality.yml`, `.github/workflows/clip-preflight.yml`, `scripts/check-proxy-topology.mjs`, `package.json`, `package-lock.json`, `apps/web/Dockerfile`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/__tests__/cycle12-ops-contracts.test.ts`, and current review/plan artifacts.
+- Route/auth contracts: all `apps/web/src/app/actions/*`, `apps/web/src/app/api/**/route.{ts,tsx}`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/proxy.ts`.
+- Data privacy and public selectors: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/src/db/schema.ts`.
+- Stateful/runtime subsystems: upload/image actions, image queue/backfill, restore maintenance, CLIP semantic routes/model/backfill scripts, migration runner/journal, single-writer/proxy topology, deploy/Docker/nginx files.
+- UI behavior contracts: public/admin route pages and components under `apps/web/src/app/[locale]`, `apps/web/src/components/**`, touch target/focus/a11y tests, and Playwright e2e inventory.
 
 Fresh validation evidence:
 
 - `npm run lint:api-auth --workspace=apps/web`: pass; 2 admin API routes OK.
-- `npm run lint:action-origin --workspace=apps/web`: pass; public analytics actions classified as rate-limited, admin mutations guarded.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; 10 public route files OK.
-- `npm test --workspace=apps/web -- --run src/__tests__/data-timeline.test.ts src/__tests__/public-actions.test.ts src/__tests__/topics-actions.test.ts src/__tests__/semantic-embedding-storage-contract.test.ts src/__tests__/maintenance-scheduler-source.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/cycle-10-source-contracts.test.ts`: pass; 7 files / 93 tests.
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: fail on nested `next/node_modules/postcss@8.4.31`.
-- Focus-marker sweep: no `.only(` found under `apps/web/src/__tests__`, `apps/web/e2e`, or test configs.
-
-Not run:
-
-- Full lint/typecheck/build/unit/e2e, because this was a review-only pass and focused checks already covered the changed contracts. Build/typegen/e2e can write generated artifacts or disposable DB state.
+- `npm run lint:action-origin --workspace=apps/web`: pass; all mutating server actions enforce same-origin provenance or documented public rate-limit/exempt posture.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; public API route scanner OK.
+- `npm test --workspace=apps/web -- --run src/__tests__/request-origin.test.ts src/__tests__/cycle12-ops-contracts.test.ts src/__tests__/privacy-fields.test.ts`: pass; 3 files / 32 tests.
+- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/analytics-link-touch-targets.test.ts src/__tests__/gps-map-link-touch-targets.test.ts`: pass; 5 files / 36 tests.
+- `npm run typecheck --workspace=apps/web`: pass.
+- `npm run lint --workspace=apps/web`: pass.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: pass; 0 vulnerabilities.
+- `npm run build --workspace=apps/web`: pass. Build emitted a sitemap fallback warning because local MySQL was not listening on `127.0.0.1:3306`; the build completed successfully and tracked files remained clean.
+- Direct predicate check: with `BASE_URL=https://gallerykit-ci.invalid`, `TRUST_PROXY=true`, `Host: 127.0.0.1:3100`, and `Origin: http://127.0.0.1:3100`, `hasTrustedSameOrigin()` returns `false`.
 
 ## Findings
 
-### VER-C11-01 - Restore can hang indefinitely while draining background DB writes
+### VER-C13-01 - CI E2E runtime inherits non-local `BASE_URL` and rejects localhost same-origin actions
+
+Severity: High
+Confidence: High
+
+File/region:
+- `.github/workflows/quality.yml:27-37`
+- `apps/web/playwright.config.ts:15-29`
+- `apps/web/playwright.config.ts:78-85`
+- `apps/web/scripts/run-e2e-server.mjs:49-57`
+- `apps/web/scripts/run-e2e-server.mjs:95-110`
+- `apps/web/src/lib/request-origin.ts:45-67`
+- `apps/web/src/app/actions/auth.ts:99-103`
+
+Issue:
+The required quality workflow sets `BASE_URL=https://gallerykit-ci.invalid` for the whole job. Playwright's default local target is `http://127.0.0.1:3100`, and `run-e2e-server.mjs` only overrides `BASE_URL` for the build child process. The runtime `server.js` child inherits the workflow-level `BASE_URL`, and current same-origin logic treats configured `BASE_URL` as the authoritative expected origin.
+
+Concrete failure scenario:
+CI reaches `npm run test:e2e`. The browser opens `http://127.0.0.1:3100/admin` and submits the admin login form. The request carries localhost `Origin`/`Host`, but the server expects `https://gallerykit-ci.invalid`, so `login()` returns `authFailed` before authentication/rate-limit work. Admin e2e flows that need mutating server actions cannot pass in the required quality workflow even though local builds and unit tests pass.
+
+Suggested fix:
+Separate build-time public metadata origin from runtime E2E origin. For local Playwright runs, start the runtime server with `BASE_URL=http://${host}:${port}` or unset `BASE_URL` for the runtime child so `Host` drives local same-origin checks. Keep the build child override for metadata validation, and add a regression test/source contract that `run-e2e-server.mjs` does not leak a non-local `BASE_URL` into the local runtime server.
+
+### VER-C13-02 - Proxy topology checker does not actually verify `X-Forwarded-For` scrubbing
 
 Severity: Medium
 Confidence: High
-Validation: Confirmed by static cross-file inspection; focused tests do not cover a never-settling background write.
-File/line: `apps/web/src/lib/background-db-writes.ts:77`, `apps/web/src/app/[locale]/admin/db-actions.ts:545`
 
-Failure scenario: `restoreDatabase()` enters the maintenance window, holds restore-related locks/markers, then awaits `drainBackgroundDbWritesForRestore()`. That alias loops until tracked background/analytics promises settle and has no timeout. A stalled analytics DB promise can wedge restore preparation indefinitely before import starts, leaving maintenance active and uploads/admin mutations blocked without reaching the existing bounded maintenance/admin-mutation drains.
+File/region:
+- `scripts/check-proxy-topology.mjs:7-10`
+- `scripts/check-proxy-topology.mjs:61-68`
+- `scripts/check-proxy-topology.mjs:108-119`
+- `apps/web/src/lib/request-origin.ts:60-80`
+- `apps/web/src/lib/rate-limit.ts:175-198`
+- `README.md:172-174`
 
-Concrete fix: give the restore caller a bounded drain, e.g. `drainBackgroundDbWritesForRestore({ timeoutMs })` returning `false` on timeout, mirror the `drainMaintenanceSweepsForRestore()` / `drainAdminMutationsForRestore()` abort behavior, and add a regression test with a deliberately never-resolving tracked write.
+Issue:
+The proxy topology helper says a safe edge overwrites `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For` before traffic reaches the app. The implemented spoof probe only observes whether spoofed forwarded host/proto changes same-origin evaluation: it sends one syntactically invalid `POST` with spoofed forwarded headers, treats `400/404/405/415/429/503` as success, and errors only on `403` or `5xx`. Current same-origin logic also prefers `BASE_URL` or `Host` over `X-Forwarded-Host`, so an edge can pass the probe while still forwarding attacker-controlled `X-Forwarded-For`.
 
-### VER-C11-02 - Settings-hash tests/comments overstate invalid-value normalization and leave a mapper drift gap
+Concrete failure scenario:
+An operator runs `npm run check:proxy-topology -- --url https://gallery.example.com` against a proxy that correctly preserves `Host` but appends or forwards inbound `X-Forwarded-For`. The check passes because the request fails at content-type validation before rate-limit identity is observable. In production with `TRUST_PROXY=true`, `getClientIp()` trusts the forwarded chain and selects the client before the trusted suffix; attacker-supplied XFF entries can therefore split login/search/share/semantic budgets and weaken per-IP rate limiting even though the deployed topology check reported success.
 
-Severity: Medium
-Confidence: High
-Validation: Confirmed by source/test inspection.
-File/line: `apps/web/src/lib/settings-hash.ts:79`, `apps/web/src/lib/settings-hash.ts:82`, `apps/web/src/lib/settings-hash.ts:103`, `apps/web/src/__tests__/settings-hash.test.ts:162`, `CLAUDE.md:317`
+Suggested fix:
+Either stop claiming the helper verifies XFF, or add an explicit XFF-sensitive check. A practical option is an opt-in active rate-limit probe that sends valid, charged requests through the same public endpoint and verifies repeated requests with different spoofed XFF values still hit one edge-derived bucket. If that is too invasive, add a dedicated read-only diagnostic endpoint available only in a deploy-check mode that returns the server-side `getClientIp()` decision without mutating state.
 
-Failure scenario: the R8-H1 comment says the hash is built from resolved config values so invalid DB values such as `image_quality_avif=150` do not misalign with encoder defaults, but the no-arg DB path hashes raw strings and only normalizes `image_sizes`. The test title says invalid DB value produces the same hash as the validated default, while the assertion correctly expects the raw invalid hash to differ. Separately, `buildHashFromConfig()` hand-maps the same 9 keys that `COLOR_IMPACTING_KEYS` iterates, so a future byte-impacting key can be added to the authoritative list and still be missed by the config-arg hot path used by serving.
-
-Concrete fix: normalize the no-arg DB path through the same settings validator/config resolver, make the config mapper exhaustive over `COLOR_IMPACTING_KEYS`, and update the test to exercise both the DB/no-arg normalization and per-key config hash flips.
-
-### VER-C11-03 - Canonical index documentation omits the feed/sitemap updated_at indexes
+### VER-C13-03 - Proxy topology checker accepts unexpected statuses as success
 
 Severity: Low
 Confidence: High
-Validation: Confirmed static docs/schema/migration mismatch.
-File/line: `CLAUDE.md:242`, `CLAUDE.md:244`, `apps/web/src/db/schema.ts:126`, `apps/web/src/db/schema.ts:128`, `apps/web/drizzle/0029_feed_updated_indexes.sql:1`
 
-Failure scenario: `CLAUDE.md` is the canonical short-form operational reference for schema/query reasoning, but its `images` index list does not mention `idx_images_processed_updated_at` or `idx_images_topic_updated_at`, both present in schema, reconcile, and migration 0029. A future reviewer or migration author can reason from the docs and miss the feed/sitemap access paths, duplicating indexes or failing to preserve them during schema work.
+File/region:
+- `scripts/check-proxy-topology.mjs:51-59`
+- `scripts/check-proxy-topology.mjs:61-69`
 
-Concrete fix: add the two `updated_at` composite indexes to the `Database Indexes` section and note their feed/sitemap use.
+Issue:
+`classifyBaseline()` and `classifySpoof()` reject `403` and `>=500`, and allow a small known set of expected pre-work failures. They do not reject other unexpected non-500 statuses. A `200`, `204`, `302`, `401`, or other non-listed status falls through as success even though the helper text says the probes should fail before mutation/rate-limit work.
 
-### VER-C11-04 - Production dependency audit remains red on Next's nested PostCSS
+Concrete failure scenario:
+A misrouted proxy sends the semantic probe to a login page, CDN fallback, or custom 200 handler. The topology check exits successfully instead of flagging that the probe did not hit the expected route contract. Operators get a false-positive deploy check and may miss a broken or bypassed edge/app path.
+
+Suggested fix:
+Make both classifiers explicit allowlists. After accepting the intended statuses, throw on every other status with a message that includes the route and status. Keep the baseline/spoof messages distinct so operators can tell route misrouting from same-origin spoof failures.
+
+### VER-C13-04 - Quality workflow still does not exercise the production Docker build path
 
 Severity: Medium
 Confidence: High
-Validation: Confirmed by `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`.
-File/line: `package.json:7`, `apps/web/package.json:82`, `package-lock.json:9204`, `package-lock.json:9334`, `package-lock.json:9850`
 
-Failure scenario: the root override and top-level workspace dependency resolve `postcss@8.5.16`, but `next@16.2.10` still brings `next/node_modules/postcss@8.4.31`, so the production audit fails for GHSA-qx2v-qp2m-jg93. The current deferred register records the upstream/tooling blocker, but the repository still has a red production dependency audit.
+File/region:
+- `.github/workflows/quality.yml:48-83`
+- `apps/web/Dockerfile:50-62`
+- `apps/web/Dockerfile:76-85`
 
-Concrete fix: upgrade to a stable Next release that removes the vulnerable nested dependency, or prove a non-destructive npm override/lockfile regeneration path that replaces the nested copy without downgrading Next. Keep `npm audit --omit=dev --audit-level=moderate` as the verification.
+Issue:
+The default quality workflow installs the workspace, runs lint/typecheck/security gates/audit/unit/e2e, and runs `npm run build`, but it never builds the Docker image that production deploys. The Dockerfile has deployment-only behavior that local `npm run build` cannot cover: explicit Linux native package installs for Sharp/libvips, Parcel watcher, SWC, Next SWC, and Lightning CSS in the build stage, plus a separate production dependency stage that verifies `require('sharp')`.
+
+Concrete failure scenario:
+A dependency update changes a native package version or workspace hoisting shape. CI remains green because the workspace build uses the normal `npm ci` tree, while production deploy fails in Docker when the manually pinned Linux native package list is stale or incomplete. This is especially easy to miss because the Dockerfile intentionally duplicates lockfile-sensitive native versions outside `package.json`.
+
+Suggested fix:
+Add a CI job or workflow step that runs `docker build -f apps/web/Dockerfile .` for the production target architecture, or at least a fast source/lockfile assertion that every manually installed native package/version in the Dockerfile matches `package-lock.json`. Keep the full Docker build as the stronger release gate because it also validates standalone output copying and runtime dependency layout.
 
 ## Verified Non-Findings
 
-- The run-10 scheduled fixes for timeline/year archive sargable ranges, mediumblob embedding typing, maintenance scheduler shutdown wiring, topic deletion fail-closed behavior, public analytics request-context capture, Docker native SWC pin alignment, and search/archive label improvements are present in current source and their focused tests passed.
-- Public analytics queued callbacks no longer call `headers()` or rate-limit helpers inside the queued body; rate-limit admission occurs before queueing, matching the newer cycle-10 plan.
-- No focused `.only(` test marker was found. Intentional skips remain limited to admin e2e credential gating and CLIP model-weight suites.
+- Current request-origin hardening is consistent with the stated same-origin posture: `BASE_URL` is authoritative when configured, `Host` wins over spoofable forwarded host when present, right-most forwarded proto/host fallback is tested for trusted-proxy mode, and missing `Origin`/`Referer` fails closed by default.
+- Admin API, mutating server action, and public API rate-limit lint gates all passed fresh. I also inspected the semantic and similar-search routes around their same-origin, maintenance, body/ID validation, pre-increment rate-limit, semantic-mode, model-version, and public enrichment contracts.
+- Public privacy selectors are still guarded by explicit public allowlists and symmetric sensitive-key tests. `searchEnrichmentSelectFields` is shared by semantic/similar routes and carries the compile-time privacy guard.
+- UI touch-target and focus/a11y source-contract tests passed for the reviewed public/admin component surfaces.
+- Production dependency audit is now green at the reviewed lockfile.
+- Build/typecheck/lint passed. The build warning was a non-fatal sitemap DB fallback caused by absent local MySQL, not a compile failure.
 
-## Final Sweep Notes
+## Final Sweep
 
-Existing unowned worktree state before this verifier write: `.context/plans/deferred-carry-forward.md` modified, plus untracked `.context/reviews/cycle-6-2026-07-07/_aggregate.md` and `code-reviewer.md`. I did not edit those files.
-
-Commonly missed areas checked: docs vs schema indexes, settings-hash comments/tests vs code, restore drain symmetry, recent run-10 plan claims vs implementation, dependency audit, action/rate-limit scanners, focused regression tests, test focus markers, and skipped test surfaces.
+Searched and inspected around: current-cycle changed files, route auth wrappers, action-origin scanner output, public rate-limit scanner output, request-origin callers, proxy trust/XFF handling, CLIP preflight workflow and model loader, Docker native dependency pins, data privacy selectors, semantic search enrichment, migration/reconcile rules, UI touch-target tests, and current review aggregates. No source or plan files were modified. The skipped full e2e suite is covered by the unchanged workflow and was not rerun locally in this verifier pass because the source delta is release/proxy-gate oriented and targeted UI/source checks plus build passed.
