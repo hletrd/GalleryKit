@@ -286,8 +286,13 @@ export async function evictIfExpired(
   headerTimestamp: number | null = null,
   now: number = Date.now(),
 ): Promise<boolean> {
-  const entries = await meta.getAll();
-  const age = resolveCachedEntryAge(entries.get(url), headerTimestamp, now);
+  // C4-26 / TRC4-08 (run-10 c4): read the meta snapshot THROUGH the mutation
+  // queue so the eviction decision cannot observe a pre-touch snapshot while
+  // a touchMeta write for the same URL is queued but uncommitted. Mirrors the
+  // template's readMetaForUrl. (Do not nest further queue ops inside — the
+  // promise-chain queue is non-reentrant.)
+  const metaEntry = await withMetaMutation(async () => (await meta.getAll()).get(url));
+  const age = resolveCachedEntryAge(metaEntry, headerTimestamp, now);
   if (age > maxAgeMs) {
     await cache.delete(url);
     await removeEntry(url, meta);

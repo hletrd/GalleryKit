@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = 'ff098f0f-p7';
+const SW_VERSION = 'ccbc2e28-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -261,9 +261,20 @@ function cachedImageAge(response) {
 // meta record (a pre-change entry, or a meta read racing a missing/corrupt
 // record); using it unconditionally would age out entries the server keeps
 // confirming as fresh on every revalidation.
+// C4-26 / TRC4-08 (run-10 c4): serialize the recency READ behind any queued
+// touchMeta/recordAndEvict writes. A bare getMeta() here could observe a
+// pre-touch snapshot while another request's touch write for the same URL is
+// queued but uncommitted, and evict an entry that was just confirmed fresh at
+// the staleness boundary. Reading through the mutation queue closes that race.
+async function readMetaForUrl(url) {
+  return withMetaMutation(async () => {
+    const entries = await getMeta();
+    return entries.get(url);
+  });
+}
+
 async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
-  const entries = await getMeta();
-  const metaEntry = entries.get(url);
+  const metaEntry = await readMetaForUrl(url);
   const age =
     metaEntry && Number.isFinite(metaEntry.timestamp)
       ? Date.now() - metaEntry.timestamp
@@ -276,7 +287,21 @@ async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
   return false;
 }
 
-async function staleWhileRevalidateImage(request) {
+// C4-42 (run-10 c4): keep a background write lifetime-covered WITHOUT gating
+// the response on it. event.waitUntil extends the SW's lifetime until the
+// promise settles — the exact durability C3-10 needed — while the response
+// returns immediately. When no event is available (defensive), fall back to
+// awaiting inline so the write stays inside the respondWith chain.
+function extendLifetime(event, promise) {
+  const guarded = promise.catch(() => {});
+  if (event && typeof event.waitUntil === 'function') {
+    event.waitUntil(guarded);
+    return Promise.resolve();
+  }
+  return guarded;
+}
+
+async function staleWhileRevalidateImage(request, event) {
   const imageCache = await caches.open(IMAGE_CACHE);
   // C18-MED-01: use request.url (string) as the cache key so it matches
   // the string key used in recordAndEvict's imageCache.delete(entry.url).
@@ -360,14 +385,15 @@ async function staleWhileRevalidateImage(request) {
         if (head.status === 304) {
           // Server confirms cache is fresh — serve cached, no body fetch,
           // no local body rewrite (C2-11, run-10 c2). Meta-only recency touch.
-          // C3-10 (run-10 c3, TRC3-02/CRIT3-05): AWAIT the touch — the meta
-          // timestamp is the SOLE recency authority now, and an un-awaited
-          // write sits outside respondWith's lifetime, so SW termination (or
-          // a silent write failure) froze recency and spuriously evicted
-          // server-confirmed-fresh entries. Awaiting keeps the write inside
-          // the respondWith promise chain (lifetime-covered); the catch still
-          // serves the cached bytes if the meta write fails.
-          await touchMeta(request.url, cachedSize, () => responseSize(cached)).catch(() => {});
+          // C3-10 (run-10 c3): the meta timestamp is the SOLE recency
+          // authority, so the write MUST stay lifetime-covered — an untracked
+          // fire-and-forget write dropped on SW termination froze recency and
+          // spuriously evicted server-confirmed-fresh entries.
+          // C4-42 (run-10 c4, PERF4-03/CR4-01): lifetime coverage now rides
+          // event.waitUntil instead of gating the response — a warm masonry
+          // paint no longer serializes each tile's response behind the global
+          // meta-mutation queue (durability AND non-blocking).
+          await extendLifetime(event, touchMeta(request.url, cachedSize, () => responseSize(cached)));
           return cached;
         }
         if (head.status === 404 || head.status === 410) {
@@ -385,8 +411,8 @@ async function staleWhileRevalidateImage(request) {
           if (networkEtag && networkEtag === cachedEtag) {
             // Same as the 304 branch above (C2-11, run-10 c2): confirmed
             // fresh, no local body rewrite, meta-only recency touch —
-            // awaited for the same C3-10 lifetime/durability reasons.
-            await touchMeta(request.url, cachedSize, () => responseSize(cached)).catch(() => {});
+            // lifetime-covered via waitUntil for the same C3-10/C4-42 reasons.
+            await extendLifetime(event, touchMeta(request.url, cachedSize, () => responseSize(cached)));
             return cached;
           }
         }
@@ -409,7 +435,7 @@ async function staleWhileRevalidateImage(request) {
   return response ?? new Response('Network error', { status: 503 });
 }
 
-async function networkFirstHtml(request) {
+async function networkFirstHtml(request, event) {
   try {
     const networkResponse = await fetch(request.clone());
     // R4C6 COR-R4C6-05: deliberate Cache-Control exemption — see the
@@ -418,18 +444,32 @@ async function networkFirstHtml(request) {
     // (server-decided; the request Cookie header is unreadable in SW).
     // The image path keeps full isSensitiveResponse semantics.
     if (networkResponse.ok && networkResponse.headers.get('x-gk-admin-render') !== '1') {
-      const htmlCache = await caches.open(HTML_CACHE);
-      // Stamp the cached response with a timestamp so the 24 h max-age
-      // check on cache fallback (line ~148) is actually reachable.
+      // C4-08 / PERF4-02 (run-10 c4): tee the body SYNCHRONOUSLY (clone must
+      // happen before consumption starts) but do the put + eviction walk in
+      // the background via waitUntil — cache.put only resolves after the
+      // ENTIRE body is downloaded and stored, so awaiting it here gated
+      // first-paint/HTML streaming on the full download for every
+      // SW-controlled navigation. This cache is an offline-only best-effort
+      // fallback: a termination-dropped put costs one missed fallback entry
+      // (cache.put never stores partial bodies), so the C3-10 sole-authority
+      // durability rationale does NOT apply here.
       const headers = new Headers(networkResponse.headers);
+      // Stamp the cached response with a timestamp so the 24 h max-age
+      // check on cache fallback is actually reachable.
       headers.set('sw-cached-at', String(Date.now()));
       const responseToCache = new Response(networkResponse.clone().body, {
         status: networkResponse.status,
         statusText: networkResponse.statusText,
         headers,
       });
-      await htmlCache.put(request, responseToCache);
-      await evictHtmlCacheIfNeeded();
+      void extendLifetime(
+        event,
+        (async () => {
+          const htmlCache = await caches.open(HTML_CACHE);
+          await htmlCache.put(request, responseToCache);
+          await evictHtmlCacheIfNeeded();
+        })(),
+      );
     }
     return networkResponse;
   } catch {
@@ -500,7 +540,7 @@ self.addEventListener('fetch', (event) => {
 
   // Image derivatives — stale-while-revalidate
   if (isImageDerivative(pathname)) {
-    event.respondWith(staleWhileRevalidateImage(request));
+    event.respondWith(staleWhileRevalidateImage(request, event));
     return;
   }
 
@@ -512,7 +552,7 @@ self.addEventListener('fetch', (event) => {
 
   // HTML routes — network-first with 24 h fallback
   if (isHtmlRoute(request)) {
-    event.respondWith(networkFirstHtml(request));
+    event.respondWith(networkFirstHtml(request, event));
     return;
   }
 

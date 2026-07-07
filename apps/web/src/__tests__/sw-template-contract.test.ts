@@ -105,7 +105,7 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(TEMPLATE).toMatch(/map\\\/\?\$/);
         const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
         const shareBypassIdx = fetchHandler.indexOf('isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)');
-        const htmlCacheIdx = fetchHandler.indexOf('event.respondWith(networkFirstHtml(request))');
+        const htmlCacheIdx = fetchHandler.indexOf('event.respondWith(networkFirstHtml(request, event))');
         expect(shareBypassIdx).toBeGreaterThan(-1);
         expect(htmlCacheIdx).toBeGreaterThan(shareBypassIdx);
     });
@@ -290,16 +290,50 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(fn).not.toMatch(/recordAndEvict/);
     });
 
-    // C3-10 (run-10 c3, TRC3-02/CRIT3-05): the meta timestamp is the SOLE
-    // recency authority after C2-11, so the touch must be AWAITED — inside
-    // respondWith's promise chain the SW's lifetime covers the write; a
-    // fire-and-forget touch could be dropped on SW termination, freezing
-    // recency and spuriously evicting server-confirmed-fresh entries.
-    it('both confirmed-fresh branches AWAIT the recency touch (template + generated)', () => {
+    // C3-10 (run-10 c3) + C4-42 (run-10 c4): the meta timestamp is the SOLE
+    // recency authority after C2-11, so the touch must stay LIFETIME-COVERED —
+    // but not gate the response. Both confirmed-fresh branches route the touch
+    // through extendLifetime(event, ...) (event.waitUntil when available,
+    // inline-await fallback), so SW termination cannot drop the write AND a
+    // warm masonry paint no longer serializes tile responses behind the
+    // global meta-mutation queue. A bare fire-and-forget touch remains
+    // forbidden.
+    it('both confirmed-fresh branches keep the recency touch lifetime-covered without gating the response (template + generated)', () => {
         for (const src of [TEMPLATE, GENERATED_SW]) {
-            const matches = src.match(/await touchMeta\(request\.url, cachedSize, \(\) => responseSize\(cached\)\)\.catch\(\(\) => \{\}\);/g) ?? [];
+            const matches = src.match(/await extendLifetime\(event, touchMeta\(request\.url, cachedSize, \(\) => responseSize\(cached\)\)\);/g) ?? [];
             expect(matches.length).toBe(2);
             expect(src).not.toMatch(/^\s*touchMeta\(request\.url/m);
+            // The helper itself must waitUntil when an event exists and fall
+            // back to returning the guarded promise (inline await) otherwise.
+            expect(src).toMatch(/function extendLifetime\(event, promise\) \{/);
+            expect(src).toMatch(/event\.waitUntil\(guarded\);/);
+        }
+    });
+
+    // C4-08 / PERF4-02 (run-10 c4): the HTML network-first strategy must
+    // return the network response immediately — the put + eviction walk ride
+    // event.waitUntil so first-paint/HTML streaming is never gated on the
+    // full download + storage write. The body tee (clone) stays synchronous.
+    it('networkFirstHtml backgrounds the cache put via extendLifetime and passes the event through the fetch handler', () => {
+        for (const src of [TEMPLATE, GENERATED_SW]) {
+            const htmlFn = src.slice(
+                src.indexOf('async function networkFirstHtml'),
+                src.indexOf("self.addEventListener('install'"),
+            );
+            expect(htmlFn).toMatch(/async function networkFirstHtml\(request, event\)/);
+            expect(htmlFn).toMatch(/void extendLifetime\(/);
+            expect(htmlFn).not.toMatch(/await htmlCache\.put\(request, responseToCache\);\s*\n\s*await evictHtmlCacheIfNeeded\(\);\s*\n\s*\}\s*\n\s*return networkResponse;/);
+            expect(src).toMatch(/event\.respondWith\(networkFirstHtml\(request, event\)\)/);
+            expect(src).toMatch(/event\.respondWith\(staleWhileRevalidateImage\(request, event\)\)/);
+        }
+    });
+
+    // C4-26 / TRC4-08 (run-10 c4): the eviction-decision meta READ must go
+    // through the mutation queue so it cannot race a queued touch write.
+    it('evictExpiredCachedImage reads recency through the meta-mutation queue', () => {
+        for (const src of [TEMPLATE, GENERATED_SW]) {
+            expect(src).toMatch(/async function readMetaForUrl\(url\) \{\s*\n\s*return withMetaMutation\(/);
+            expect(src).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
         }
     });
 
@@ -370,8 +404,9 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const evictFnIdx = TEMPLATE.indexOf('async function evictExpiredCachedImage(imageCache, cacheKey, url, cached)');
         expect(evictFnIdx).toBeGreaterThan(-1);
         const evictFn = TEMPLATE.slice(evictFnIdx, TEMPLATE.indexOf('async function staleWhileRevalidateImage'));
-        expect(evictFn).toMatch(/const entries = await getMeta\(\);/);
-        expect(evictFn).toMatch(/const metaEntry = entries\.get\(url\);/);
+        // C4-26 (run-10 c4): the read now goes through the mutation queue via
+        // readMetaForUrl (still meta-first, header only as fallback).
+        expect(evictFn).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
         expect(evictFn).toMatch(/metaEntry && Number\.isFinite\(metaEntry\.timestamp\)\s*\n\s*\? Date\.now\(\) - metaEntry\.timestamp\s*\n\s*: cachedImageAge\(cached\)/);
         expect(TEMPLATE).toMatch(/age > IMAGE_MAX_STALE_MS/);
         expect(TEMPLATE).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*await deleteMeta\(url\);/);
@@ -387,7 +422,7 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(GENERATED_SW).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
         expect(GENERATED_SW).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
         expect(GENERATED_SW).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
-        expect(GENERATED_SW).toMatch(/const metaEntry = entries\.get\(url\);/);
+        expect(GENERATED_SW).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
     });
 
     it('evicts stale derivative cache entries when the server returns 404 or 410', () => {
