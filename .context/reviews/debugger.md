@@ -1,82 +1,84 @@
-# Debugger Review - Cycle 21
+# Cycle 22 Debugger Review
 
+Role lane: debugger
 Date: 2026-07-08 KST
-Lane: `debugger`
-HEAD: `45b32d1db373e03d82a29511f53832051c770880`
+Repository: `/Users/hletrd/flash-shared/gallery`
+Reviewed HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
+Write scope: `.context/reviews/debugger.md`
 
-Review-only. I did not edit source code, run deploys, commit, or push. Existing dirty peer review artifacts under `.context/reviews/` were left untouched except for this requested file.
-
-## Required Context Read
-
-- `AGENTS.md`: commit/deploy policy, schema/migration invariants, quality gates, privacy-field rules, and review artifact expectations.
-- `CLAUDE.md`: single-instance deployment, restore maintenance/drain protocol, upload and image-processing contracts, CLIP/search activation, migration drift runbook, service-worker cache policy, deploy and disk hygiene.
-- `.context/plans/README.md`: plan/review index and current planning history.
+Review-only. I did not implement fixes. I read `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`, then reviewed current source for latent bug surfaces, failure modes, regressions, and causal debugging hypotheses with special attention to upload/restore/queue/backfill/semantic-search/service-worker/database/admin/public route flows and Cycle 21 fixes.
 
 ## Bug-Prone Inventory
 
-- Server actions and admin/public routes: `apps/web/src/app/actions/*`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `/api/admin/lr/upload`, `/api/admin/db/download`, `/api/search/semantic`, `/api/search/similar/[id]`, upload serving, health/live, feed/sitemap/OG, public photo/share/group/timeline/map pages.
-- Image processing and queue: `process-image`, `image-queue`, upload paths, upload tracker, color/HDR settings hash, backfill runner, sidecar backfill scripts, CLIP embedding action/scripts.
-- Auth/session/PATs: `auth.ts`, `session.ts`, `api-auth.ts`, `action-guards.ts`, `admin-users.ts`, `lr-tokens.ts`, `admin-tokens.ts`, rate-limit helpers.
-- Restore/backup/migrate: DB backup/download/restore actions, SQL restore scanner, restore maintenance marker, advisory-lock release helpers, `scripts/migrate.js`, migration journal, deploy helper assumptions.
-- Public APIs and caches: search, similar search, analytics view recording, share lookup throttling, service worker HTML/image cache, sitemap/feed generation.
-- Stateful UI: upload dropzone, load-more, search modal, similar photos, photo viewer/lightbox/navigation/zoom, map client, admin settings/tokens/dashboard/category/tag managers.
-- Tests and gates: custom lint scanners, source-contract tests, migration/privacy/touch-target/queue/upload/search tests, Playwright e2e entry points.
+- Upload paths: browser upload action, Lightroom/PAT upload route, upload tracker state, upload-processing contract lock, GPS/HDR/color metadata handling, original persistence, queue enqueue, audit/revalidation cleanup.
+- Restore and maintenance: DB backup/restore actions, SQL scanner, durable restore marker, mutation barrier, queue/background/maintenance drains, advisory lock release helpers, migration/reconcile and journal.
+- Queue/backfill: image processing queue, retry/permanent-failure state, queue restore quiesce/resume, admin backfill runner, color sidecar scripts, pending file deletion ledger.
+- Public flows: search/load-more actions, map/timeline/home/photo/share/group/smart collection pages, semantic/similar APIs, analytics/view recording, service worker HTML/image caching.
+- Admin/UI flows: image manager delete/retry/bulk operations, settings backfill, dashboard failed-image retry, tokens/admin auth surfaces, map and accessibility changes from Cycle 21.
+- Tests and gates: custom lint scanners, source-contract tests, queue/backfill/migration/upload/search/SW tests, Playwright e2e entry points, root script syntax gate.
 
-I did not manually inspect binary fixtures/media bytes, generated `.next`, `node_modules`, runtime upload/data stores, or local secret/env files.
+I did not inspect binary fixtures/media bytes, generated build output, runtime upload/data stores, `node_modules`, live DB rows, live nginx/proxy state, or local secret/env files.
 
 ## Findings
 
-### DBG-C21-01 - Archive month/year rendering depends on JavaScript parsing of MySQL datetime strings
+### DBG-C22-01 - Pending file deletion rows persist after cleanup failure, but no current flow retries them
 
-Severity: Low
-Confidence: Medium
+- Severity: High
+- Confidence: High
+- Status: Confirmed current bug surface
+- File/region: `apps/web/src/lib/pending-file-deletions.ts:70-90`; `apps/web/src/app/actions/images.ts:680-727`, `808-907`; `apps/web/src/lib/maintenance-scheduler.ts:34-45`; `apps/web/scripts/migrate.js:486-502`; `apps/web/src/lib/sql-restore-scan.ts:12-31`.
+- Failure scenario: `deleteImage` or `deleteImages` inserts `pending_file_deletions` before deleting image rows, then `cleanupPendingFileDeletion()` retries once and records `attempts`/`last_error` if unlinking original or derivative files still fails. That is durable state, but `rg` finds no scheduler/startup/admin action/API route that selects old `pending_file_deletions` rows and calls `cleanupPendingFileDeletion()` again. A transient EIO/permission/NFS problem that clears five minutes later still leaves public derivative/original files on disk indefinitely unless another manual DB/script intervention is added outside the app.
+- Concrete fix: add a bounded maintenance task and/or admin repair action that selects `pending_file_deletions` ordered by `updated_at`, calls `cleanupPendingFileDeletion()`, caps attempts/backoff, and surfaces remaining failures in admin health/status. Include the task in restore/shutdown drain reasoning if it can run concurrently with restore. Add behavior tests with mocked cleanup failures and later success.
 
-File / region:
+### DBG-C22-02 - Large multipart upload/restore paths still fail before domain code can apply streaming controls
 
-- `apps/web/src/lib/data-timeline.ts:247-256` groups year-in-review rows with `new Date(img.capture_date).getMonth() + 1`.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:99-108` repeats the same month grouping in the timeline page.
-- `apps/web/src/components/on-this-day-widget.tsx:50-52` renders the photo year with `new Date(photo.capture_date).getFullYear()`.
-- `apps/web/src/__tests__/data-timeline.test.ts:127-138` and `apps/web/src/__tests__/data-timeline.test.ts:195-199` mirror the same parsing behavior, so tests lock in the brittle assumption instead of detecting it.
+- Severity: High
+- Confidence: High for source shape; Medium for live impact without RSS trace
+- Status: Confirmed current risk
+- File/region: `apps/web/next.config.ts:111-119`; `apps/web/src/lib/upload-limits.ts:1-6`, `19-35`; `apps/web/src/components/upload-dropzone.tsx:243-260`; `apps/web/src/app/actions/images.ts:129-149`; `apps/web/src/app/api/admin/lr/upload/route.ts:152-188`; `apps/web/src/app/[locale]/admin/db-actions.ts:717-739`.
+- Failure scenario: the app has good post-parse checks and disk streaming, but Server Actions and `request.formData()` parse large multipart bodies before `uploadImages()`, LR ingest, or `runRestore()` can enforce app backpressure. Near-limit uploads/restores can therefore produce RSS/GC/OOM failures whose stack traces point at framework body parsing rather than `saveOriginalAndGetMetadata()` or restore streaming code.
+- Concrete fix: replace the largest payload Server Action/formData paths with streaming route handlers and a shared temp-file handoff. Add RSS smoke coverage for concurrent near-limit browser upload, PAT upload, and restore.
 
-Failure scenario:
+### DBG-C22-03 - Browser and PAT upload adapters still duplicate the same ingest contract
 
-`capture_date` is documented and queried as a MySQL-style string such as `YYYY-MM-DD HH:mm:ss`. That is not the strict ECMAScript date-time interchange format. In the current Node/V8 runtime it usually parses as local time, but the behavior is implementation-dependent and fragile if this grouping logic moves to another JS runtime, an Edge runtime, or encounters a legacy/imported malformed value. A parse failure drops a photo from month sections; an invalid year in the widget can render a broken localized year label.
+- Severity: High
+- Confidence: High
+- Status: Likely regression class, not a newly reproduced divergence at HEAD
+- File/region: `apps/web/src/app/actions/images.ts:129-560`; `apps/web/src/app/api/admin/lr/upload/route.ts:84-630`.
+- Failure scenario: the browser action and Lightroom/PAT route separately implement topic/tag validation, config snapshotting, upload quota settlement, original save, GPS stripping, HDR rejection, blur validation, DB insert fields, queue payload fields, audit, revalidation, and cleanup. Cycle history shows this adapter split has repeatedly caused one-path-only fixes. A future privacy/color/audit/queue field can land in one path and silently diverge the other.
+- Concrete fix: extract a shared `ingestUploadedImage(...)` service that owns the post-auth transaction contract. Keep transport/auth/response shaping in the adapters only. Add parity tests that feed the same synthetic metadata through browser/PAT adapters and compare inserted columns plus queue payloads.
 
-Suggested fix:
+### DBG-C22-04 - Cached shared-group reader still owns a view-count side effect
 
-Add a tiny shared parser for persisted EXIF/MySQL datetimes that extracts `year`, `month`, and `day` by regex/string slicing and validates ranges without `Date.parse`. Reuse it in `data-timeline.ts`, `timeline/page.tsx`, and `on-this-day-widget.tsx`. Update `data-timeline.test.ts` to assert the parser path directly, including invalid strings and the exact `YYYY-MM-DD HH:mm:ss` storage format.
+- Severity: Medium
+- Confidence: Medium
+- Status: Confirmed current risk
+- File/region: `apps/web/src/lib/data.ts:1392-1407`, `1828-1834`; `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-142`; `apps/web/src/app/actions/public.ts:517-559`.
+- Failure scenario: `getSharedGroupCached = cache(getSharedGroup)` wraps a reader that can call `bufferGroupViewCount()` depending on options and selected photo state. The page separately records durable analytics with the same resolved selected-image decision. A future preload/render path or second cached call with different option semantics can let React request-local cache ordering decide whether the denormalized count side effect runs, while durable analytics still records or skips independently.
+- Concrete fix: split shared-group reads into a pure cached reader and explicit page/action orchestration for denormalized count increments. Keep `recordSharedGroupView()` independent but drive both counters from the same resolved page-level decision. Add a test that cached shared-group reads are side-effect-free.
 
-### DBG-C21-02 - Large multipart upload/restore paths still materialize before app-level streaming checks
+### DBG-C22-05 - Safety-critical tests still overfit source text for migration/restore and the new deletion ledger
 
-Severity: Medium
-Confidence: Medium
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed test-risk
+- File/region: `apps/web/src/__tests__/pending-file-deletions-source.test.ts:11-45`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-180`; `apps/web/src/__tests__/db-restore.test.ts:47-136`; `apps/web/scripts/migrate.js:486-502`, `720-724`; `apps/web/src/app/[locale]/admin/db-actions.ts:717-780`.
+- Failure scenario: the new deletion ledger, reconcile/schema equivalence, and restore child-process paths are mostly pinned by source text or structural scans. A refactor can preserve strings like `tx.insert(pendingFileDeletions)` or `CREATE TABLE IF NOT EXISTS pending_file_deletions` while changing transaction behavior, column defaults, FK/index details, child-process settlement, or cleanup retry behavior. Tests stay green while production failures appear only during migration, restore, or filesystem cleanup.
+- Concrete fix: keep source contracts as cheap tripwires, but add behavior tests: DB-backed reconcile/schema diff against `INFORMATION_SCHEMA`, stub-binary restore tests covering child success/failure/timeout/trailer cases, and mocked filesystem tests proving pending deletion rows are retried/deleted across separate maintenance invocations.
 
-File / region:
+## Cycle 21 Fixes Verified, Not Re-Raised
 
-- `apps/web/next.config.ts:111-119` raises Server Action/proxy body limits to the restore/upload cap.
-- `apps/web/src/lib/upload-limits.ts:1-6` allows 200 MiB photo files and 250 MiB restore files plus multipart overhead.
-- `apps/web/src/components/upload-dropzone.tsx:243-260` sends each browser upload through Server Action `FormData`.
-- `apps/web/src/app/actions/images.ts:129-149` receives framework-parsed `File` objects before app-level validation.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:174-188` calls `await request.formData()`; the parse slot serializes this, but the body is still materialized before file streaming.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:717-729` receives a parsed restore `File`, checks `file.size`, then streams it to disk.
+- `AGG-C21-01` mutation-barrier scanner order proof is fixed: `check-action-origin.ts:664-709` requires the acquired-state check immediately after the `using` declaration, and `check-action-origin.test.ts:745-760` fails a mutation-before-check fixture.
+- `AGG-C21-02` direct "no durable deletion row" bug is partially fixed: `images.ts:680-699` and `images.ts:814-834` insert `pending_file_deletions` rows before deleting image rows, and `pending-file-deletions.ts:78-88` keeps rows on cleanup failure. The remaining retry-consumer gap is filed separately as `DBG-C22-01`.
+- `AGG-C21-06` permanent-failure cap bypass is fixed: `image-queue.ts:374-387` centralizes `markPermanentlyFailed`, with production call sites at `image-queue.ts:782` and `image-queue.ts:1044`.
+- `AGG-C21-15` backfill candidate index is fixed in schema, migration, and reconcile: `schema.ts:123-128`, `0030_pending_file_deletions.sql:19`, `migrate.js:720-724`.
+- `DBG-C21-01` persisted datetime rendering is fixed in production code by `parseMySqlDateTimeParts` and its call sites. Some older `data-timeline.test.ts:121-204` helper assertions still use `new Date(...)`, but production no longer depends on that parser behavior and `mysql-datetime.test.ts:44-72` covers the parser.
+- Service worker revocable-object stale HTML caching remains fixed: `sw.template.js:59-64` and `sw.template.js:555-558` bypass offline HTML caching for photo/share/group/smart-collection/map routes.
 
-Failure scenario:
+## Final Missed-Issue Sweep
 
-An authenticated admin or PAT client submits a near-limit upload or restore while the process is also doing Sharp work, SSR, queue work, or semantic inference. The code correctly caps declared sizes and streams after receiving `File`, but Next/undici has already parsed the multipart body by then. On a memory-constrained host, one 200-250 MiB request can cause RSS pressure, long GC pauses, or OOM before `saveOriginalAndGetMetadata()` or the restore temp-file streaming path gets control.
+I rechecked upload, restore, queue, backfill, semantic-search, service-worker, DB/migration, admin, and public route flows after drafting findings. I did not find a current restore-write race beyond the listed large-body and pending-cleanup retry gaps. Auth/PAT wrappers, same-origin guards, restore maintenance barriers, queue quiesce/resume, and service-worker revocable-page exclusions match the documented contracts in the inspected source.
 
-Suggested fix:
+Uninspected categories: binary fixtures/media, generated build output, runtime upload/data directories, live production DB/proxy/nginx state, `node_modules`, and local secret/env files. I did not run the full test suite because this was a review-only lane with no code fixes; validation is static line-level inspection at the reviewed HEAD.
 
-Move the largest payload paths to streaming route handlers: authenticate and check origin/token first, enforce `Content-Length`, stream multipart parts to private temp files while enforcing per-part and total byte caps, then hand temp paths to the existing image metadata/queue or restore pipeline. At minimum, add a production-like RSS smoke test for concurrent near-limit browser upload, LR upload, and restore.
-
-## Not Re-Raised
-
-- Restore and upload race protections: current upload, delete, retry, settings, restore, queue, color backfill, and semantic backfill paths consistently use restore maintenance checks, mutation slots, advisory locks, or explicit exemptions. I did not find a current restore-write race in the inspected source.
-- Cycle-20 service-worker stale photo-page issue appears fixed at current HEAD: `apps/web/public/sw.template.js:59-64` classifies `/p`, `/c`, `/s`, `/g`, and `/map` as revocable, and `apps/web/public/sw.template.js:555-558` bypasses offline HTML caching for those routes.
-- Cycle-20 mutation-barrier scanner issue appears fixed at current HEAD: `apps/web/scripts/check-action-origin.ts:155-175` requires approved imports, `apps/web/scripts/check-action-origin.ts:651-695` requires `using ... = acquireAdminMutationSlot()` plus an acquired-state gate, and tests cover spoofed/bare/wrong-module calls.
-- Auth/session/PAT wrappers: production session secret fails closed, admin API token auth is scope-gated, same-origin checks are centralized, and limiter rollback behavior is documented per path.
-
-## Final Sweep
-
-Inspected categories covered the requested server actions/routes, image queue/processing, auth/session, restore/backup/migrate, public APIs, stateful UI components, scripts, and tests by source category. The main uninspected categories are binary fixtures/media, generated build output, runtime upload/data contents, `node_modules`, and local secret files.
-
-I did not run the full test suite because this was a review-only lane with no source fixes. Validation evidence is static line-number inspection at the requested HEAD plus targeted cross-checks of prior known-risk areas against current source.
+Findings: 5 total.
