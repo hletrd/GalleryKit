@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 
 const {
     acquireUploadProcessingContractLockMock,
@@ -11,6 +12,7 @@ const {
     getClientIpMock,
     getGalleryConfigStrictMock,
     getUploadTrackerMock,
+    isRestoreMaintenanceActiveMock,
     lockReleaseMock,
     logAuditEventMock,
     saveOriginalAndGetMetadataMock,
@@ -29,6 +31,7 @@ const {
         getClientIpMock: vi.fn(),
         getGalleryConfigStrictMock: vi.fn(),
         getUploadTrackerMock: vi.fn(() => tracker),
+        isRestoreMaintenanceActiveMock: vi.fn(),
         lockReleaseMock: vi.fn(),
         logAuditEventMock: vi.fn(async () => undefined),
         saveOriginalAndGetMetadataMock: vi.fn(),
@@ -110,7 +113,7 @@ vi.mock('@/lib/audit', () => ({
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
-    isRestoreMaintenanceActive: vi.fn(() => false),
+    isRestoreMaintenanceActive: isRestoreMaintenanceActiveMock,
     cleanupOriginalIfRestoreMaintenanceBegan: vi.fn(async () => false),
 }));
 
@@ -132,6 +135,7 @@ describe('Lightroom upload route behavior', () => {
     beforeEach(() => {
         uploadTracker.clear();
         vi.clearAllMocks();
+        isRestoreMaintenanceActiveMock.mockReturnValue(false);
         getAdminAuthTokenMock.mockReturnValue({ userId: 42 });
         getClientIpMock.mockReturnValue('203.0.113.42');
         acquireUploadProcessingContractLockMock.mockResolvedValue({ release: lockReleaseMock });
@@ -275,5 +279,93 @@ describe('Lightroom upload route behavior', () => {
             { topic: 'seoul', filename: 'pat-upload.jpg' },
         );
         expect(lockReleaseMock).toHaveBeenCalledOnce();
+    });
+
+    // C6-11 (run-10 cycle-6): drive the failure branches that were previously
+    // pinned only by source-string assertions, asserting the real Response.
+
+    it('rejects with 503 when a restore is in progress (entry guard)', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Restore in progress; retry shortly' });
+        // The restore guard runs before any save/insert/queue work.
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
+        expect(enqueueImageProcessingMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 411 when Content-Length is absent', async () => {
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        // No content-length header → declaredUploadBytes is NaN → 411.
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            body: form,
+        }));
+
+        expect(response.status).toBe(411);
+        await expect(response.json()).resolves.toEqual({ error: 'Content-Length is required for Lightroom uploads' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 429 when the per-window file-count cap is already reached', async () => {
+        // Pre-seed the actor's tracker (key lr:42) at the cap so count+1 > cap.
+        uploadTracker.set('lr:42', {
+            count: UPLOAD_MAX_FILES_PER_WINDOW,
+            bytes: 0,
+            windowStart: Date.now(),
+        });
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(429);
+        await expect(response.json()).resolves.toEqual({ error: 'Upload limit reached; retry later' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 507 when the upload volume has insufficient free space', async () => {
+        // bavail * bsize < 1 GiB → disk-space precheck fails.
+        statfsMock.mockResolvedValueOnce({ bavail: 1000, bsize: 1024 });
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(507);
+        await expect(response.json()).resolves.toEqual({ error: 'Insufficient disk space' });
+        // The disk-space precheck runs before saving the original.
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
     });
 });
