@@ -1,92 +1,108 @@
-# Cycle 11 Test-Engineer Review
+# Cycle 13 Test-Engineer Review
 
-Scope: whole-repo test review for missing tests, flaky tests, fixture realism, weak assertions, TDD opportunities, browser-flow gaps, quality-gate drift, and coverage of critical behavior. I inspected current source, tests, docs, CI wiring, prior review history, and the dirty worktree. I did not edit source or plans.
+Scope: deep test coverage and reliability review for missing regression tests, fragile tests, test-only type gaps, Playwright coverage, fixture risk, and TDD opportunities. I inspected `AGENTS.md`, `CLAUDE.md`, test configs, CI workflows, E2E setup/fixtures, and representative test/source pairs across app routes, server actions, client components, scripts, migrations, image/color/HDR, semantic search, and operational helpers. I did not modify source code or plans.
 
 ## Inventory
 
-- Project instructions read: `AGENTS.md`, `CLAUDE.md`.
-- Test surface: 345 Vitest files under `apps/web/src/__tests__`; 12 e2e files under `apps/web/e2e` including 9 specs, 1 helper, and 2 JPEG fixtures.
-- Source surface checked: app routes/actions, admin UI, public components, lib modules, scripts, Drizzle migrations/meta, package scripts, Vitest config, Playwright config, and GitHub Actions.
-- Current skips/focus: no `.only(` found. Conditional skips are admin/local e2e guards and the CLIP real-model suites.
-- Source-contract density: 155 test files match source-reading/source-contract patterns. These are useful tripwires, but several critical paths still lack behavior-level or browser-level oracles.
-- Current worktree note: unrelated edits exist in `.context/plans/*`, other review files, `apps/web/src/app/[locale]/admin/db-actions.ts`, and `apps/web/src/lib/sql-restore-scan.ts`. I reviewed current worktree content as source of truth and only wrote this file.
+- Test harness: `apps/web/vitest.config.ts:16-39` runs `src/__tests__/**/*.test.{ts,tsx}` with Node-default environment, `.next` excluded, and a 15s timeout; `apps/web/playwright.config.ts:48-87` runs E2E with one serialized Chromium project and a local seeded/build server by default.
+- Test count: 348 Vitest test files under `apps/web/src/__tests__`; 9 Playwright specs plus helper/fixtures under `apps/web/e2e`.
+- Source-contract density: 213 Vitest files match source-reading/source-contract patterns (`readFileSync`, `SOURCE`, `toContain`, `toMatch`, or fixture-style source scans). These are useful tripwires, but they also create false-green risk where behavior is not executed.
+- CI gates: `.github/workflows/quality.yml:54-83` runs lint, typecheck, custom auth/origin/rate-limit scanners, production dependency audit, Vitest, DB init, Chromium E2E, and build. `.github/workflows/clip-preflight.yml:1-46` separately runs scheduled/manual real CLIP preflight.
+- E2E data setup: `apps/web/scripts/run-e2e-server.mjs:91-101` guards DB safety, initializes, seeds, and builds before serving; `apps/web/scripts/seed-e2e.ts:169-183` refuses production/non-disposable DBs unless explicitly opted in.
+- Conditional skips/focus: no `.only` found. Skips are admin credential/baseURL guards (`apps/web/e2e/admin.spec.ts:6-12`, `apps/web/e2e/origin-guard.spec.ts:28-77`) and real CLIP env/fixture gates (`apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`).
 
 ## Findings
 
-### TE-C11-01 - Real CLIP production activation is still outside required gates
-
-- Severity: High
-- Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`, `apps/web/src/__tests__/semantic-route-production.test.ts:3-5`, `apps/web/package.json:21-24`, `.github/workflows/quality.yml:66-80`
-- Failure scenario: a dependency upgrade, model layout change, ONNX runtime issue, or `CLIP_MODELS_ROOT` path drift breaks offline `jina-clip-v2` loading. Default CI still passes because the real-model tests use `describe.skip` unless env/model weights are present, and the production route unit test mocks `embedTextReal`.
-- Concrete recommendation: add a scheduled or dependency-change CI job that seeds/caches the pinned CLIP weights and runs `npm run test:clip:preflight --workspace=apps/web`. If full weights are too heavy for normal PRs, require a preflight artifact before production mode can be enabled and add a lightweight hermetic loader contract for cache layout/revision handling.
-- TDD opportunity: first add a failing activation test that refuses production semantic mode when the latest real-model preflight marker is absent or stale.
-
-### TE-C11-02 - DB restore child-process failure cleanup is source-only
+### TE13-01 - Playwright browser/device coverage is too narrow for the UI risk profile
 
 - Severity: Medium
 - Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/src/__tests__/db-restore.test.ts:47-75`, `apps/web/src/__tests__/restore-upload-lock.test.ts:71-91`, `apps/web/src/app/[locale]/admin/db-actions.ts:783-820`
-- Failure scenario: a restore import spawn error, stdin error, read-stream error, or watchdog timeout stops killing the child process, stops destroying stdin/read streams, fails to clean the temp SQL file, or drops `keepMaintenance: true`. The current tests only assert that literal snippets exist in source, so reordering or unreachable code can stay green while a real failed restore leaves maintenance state or temp/process cleanup wrong.
-- Concrete recommendation: add a behavior harness around `restoreDatabase`/`runRestore` using mocked `child_process.spawn`, fake `stdin`, fake read stream, fake timers for the watchdog, and mocked `fs` cleanup. Assert returned result, `kill()`/`stdin.destroy()`/read destroy calls, temp cleanup, and maintenance retention for each failure event.
-- TDD opportunity: write the spawn-error behavior test first with a fake child that emits `error`; it should fail until cleanup and `keepMaintenance` are observable through behavior, not source text.
+- File/region: `apps/web/playwright.config.ts:48-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-87`, `apps/web/e2e/swipe-visual-reset.spec.ts:23-31`
+- Failure scenario: a regression affects iOS/WebKit touch handling, Safari focus/clipboard behavior, Firefox color-gamut/media-query behavior, or mobile viewport layout while desktop Chromium stays green. The suite defines only the Desktop Chrome project, CI installs only Chromium, and the swipe test synthesizes `TouchEvent`s inside a desktop Chromium context instead of using a real touch-capable/mobile project.
+- Suggested fix/test: add a small required Playwright matrix rather than duplicating all specs: mobile WebKit for nav/search/photo/lightbox/swipe, plus one Firefox or WebKit desktop smoke. Keep admin specs serialized, but split public mobile smoke into its own project so the login-rate-limit constraint does not block device coverage.
+- TDD opportunity: first add a mobile WebKit smoke that opens the mobile nav, search dialog, first photo, and lightbox; make it fail on any missing role/visibility before broadening.
 
-### TE-C11-03 - Lightroom upload route behavior harness covers only two branches
+### TE13-02 - Nav “visual” checks write screenshots but do not assert visual diffs
+
+- Severity: Low
+- Confidence: High
+- File/region: `apps/web/e2e/nav-visual-check.spec.ts:40-87`
+- Failure scenario: nav colors, spacing, logo/title alignment, menu panel composition, or visual regressions drift while tests pass because the spec only validates target sizes/non-overlap and writes PNG artifacts with `page.screenshot(...)`. No `toHaveScreenshot(...)` baseline or pixel comparison can fail the gate.
+- Suggested fix/test: either convert the three screenshots to Playwright `expect(page).toHaveScreenshot(...)` baselines or rename the spec to “nav layout metrics” and add a true screenshot-diff spec for the visual claim.
+- TDD opportunity: add a failing baseline for `mobile nav expanded` first, then update once the expected rendering is confirmed.
+
+### TE13-03 - Admin password-change UI has no browser-level regression test
 
 - Severity: Medium
 - Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:112-115`, `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:178-278`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:191-320`, `apps/web/src/app/api/admin/lr/upload/route.ts:94-158`, `apps/web/src/app/api/admin/lr/upload/route.ts:257-340`, `apps/web/src/app/api/admin/lr/upload/route.ts:407-424`
-- Failure scenario: regressions in early/late restore guards, missing or chunked `Content-Length`, quota count/byte rejection, multipart parse saturation, upload-contract lock denial, disk-space 507, GPS-strip fail-closed cleanup, topic lookup errors, or settings-load failure can pass the suite because most are pinned by source assertions. The real handler-level test currently exercises only late HDR rejection and one happy PAT upload.
-- Concrete recommendation: extend `lr-upload-route-behavior.test.ts` with table-driven handler calls for 503 early restore, 411 missing/chunked length, 429 count/byte quota, 429 parse-slot saturation, 409 lock denial, 507 low `statfs`, 422 GPS-strip failure with original cleanup, 404 topic missing, and 503 settings read failure. Make `isRestoreMaintenanceActive` and `stripGpsFromOriginal` hoisted mocks overridable per test.
-- TDD opportunity: start with the low-disk test by setting `statfsMock` to return `bavail * bsize < 1 GiB`; assert status 507, tracker settlement, and contract-lock release.
+- File/region: `apps/web/e2e/admin.spec.ts:20-43`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:36-45`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:65-120`, `apps/web/src/__tests__/password-form-a11y.test.ts:10-18`, `apps/web/src/__tests__/auth-actions-behavior.test.ts:241-254`, `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:31-103`
+- Failure scenario: the password page renders and navigation passes, but the form can stop calling `formAction(formData)`, input names can drift from the server action, client-side mismatch validation can stop announcing/focusing, pending disable/focus restore can regress, or successful password rotation can break in the real browser path. Existing tests cover source strings, action ordering, and one hostile-origin action branch, but no Playwright test submits the password form.
+- Suggested fix/test: add a non-destructive admin E2E for mismatched new/confirm passwords that asserts the inline/summary error and focus behavior without changing credentials. Add an opt-in destructive-safe local test that changes to a generated temporary password, logs in with it, then changes back in `finally`.
+- TDD opportunity: start with the mismatch-only E2E because it is reversible and does not mutate stored credentials.
 
-### TE-C11-04 - First-class admin UI surfaces remain e2e-shallow
-
-- Severity: Medium
-- Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/e2e/admin.spec.ts:20-43`, `apps/web/e2e/admin.spec.ts:73-165`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-128`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:202-325`, `apps/web/src/__tests__/client-source-contracts.test.ts:172-224`, `apps/web/src/__tests__/lr-tokens-action.test.ts:85-199`
-- Failure scenario: token creation can fail to show one-time plaintext, copy acknowledgement can fail, revoke confirmation can fail, token-list retry alerts can fail, or server label errors can fail to bind to the input. Unit/action tests cover mocked server behavior and source-contract tests assert JSX snippets, but no Playwright flow drives the actual token page. The admin e2e navigates to some pages and mutates topics/uploads, but it does not operate Tokens, SEO, Tags, Users, DB backup/restore, or most Settings controls.
-- Concrete recommendation: add a small admin Playwright project for high-value UI flows: create a Lightroom token, assert plaintext appears only once, copy/acknowledge/done closes it, list row appears, revoke removes it, and label validation focuses/announces the field error. Then add one smoke each for SEO save validation, tag create/delete, and DB backup download listing without doing a destructive restore.
-- TDD opportunity: first add a failing Tokens e2e that creates a token and requires the plaintext acknowledgement dialog; wire cleanup by revoking the created row in `finally`.
-
-### TE-C11-05 - Component interaction regressions are still frequently locked by source strings
+### TE13-04 - Service-worker registration can disappear while SW logic tests stay green
 
 - Severity: Medium
 - Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/src/__tests__/photo-viewer-auto-lightbox-source.test.ts:8-21`, `apps/web/src/__tests__/image-zoom-source-contracts.test.ts:19-22`, `apps/web/e2e/hydration-photo-page.spec.ts:44-49`, `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14-26`, `apps/web/src/components/info-bottom-sheet.tsx:558-595`
-- Failure scenario: photo auto-lightbox restoration can stop restoring, click-to-zoom can stop toggling, or the mobile bottom-sheet download dropdown can render outside the focus-trap subtree. Existing tests mostly assert source snippets. The hydration e2e assertion accepts either the restored `pinned` button or the fallback `info` button, so it does not prove restoration.
-- Concrete recommendation: introduce a minimal DOM/component harness (`jsdom` or Playwright component-style page) for client interactions that are now source-only. For immediate coverage, tighten `hydration-photo-page.spec.ts` to require the deterministic restored button state, and add a mobile Playwright test that opens the info sheet, opens the download dropdown for a wide-gamut fixture, asserts menu visibility inside the dialog subtree, keyboard focus, and close/focus return.
-- TDD opportunity: replace the `.or(...info...)` assertion with a strict `pinned` expectation first; then add behavior coverage before deleting any source-string lock.
+- File/region: `apps/web/src/components/register-service-worker.tsx:13-25`, `apps/web/src/app/[locale]/layout.tsx:13-14`, `apps/web/src/app/[locale]/layout.tsx:136-152`, `apps/web/src/__tests__/sw-template-contract.test.ts:22-28`
+- Failure scenario: a refactor removes `<RegisterServiceWorker />` from the root layout or changes the production-only registration path. The extensive SW template/cache tests still pass because they read `public/sw.template.js`, `scripts/build-sw.ts`, `proxy.ts`, and generated `public/sw.js`, not the runtime registration wiring.
+- Suggested fix/test: add a source/SSR contract that the locale root layout imports and renders `RegisterServiceWorker`, plus a small component test or Playwright production-build smoke that stubs `navigator.serviceWorker.register` and asserts `/sw.js` with `{ scope: '/' }` only in production.
+- TDD opportunity: write the layout wiring test first; then add the browser registration smoke once a DOM/component harness exists.
 
-### TE-C11-06 - Browser, device, and visual regression gates remain too narrow
-
-- Severity: Medium
-- Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:72-77`, `apps/web/e2e/nav-visual-check.spec.ts:40-87`
-- Failure scenario: Safari/WebKit mobile gestures, Firefox focus/clipboard/display-capability behavior, responsive navigation, or visual spacing/color drift breaks while desktop Chromium stays green. CI installs only Chromium and Playwright defines only Desktop Chrome. The nav "visual" spec saves PNG artifacts but never compares them with `toHaveScreenshot`, so visual drift cannot fail the gate.
-- Concrete recommendation: add a narrow required smoke matrix, not a full duplication: mobile WebKit for public nav/photo/lightbox/search/load-more, and Firefox or WebKit desktop for a small public/admin route smoke. Convert the nav screenshots to `expect(page).toHaveScreenshot(...)` baselines or rename the spec to clarify it is a metric-only layout audit.
-- TDD opportunity: add a mobile WebKit smoke that opens the nav, search, a photo, and the lightbox; keep it required once stable.
-
-### TE-C11-07 - No coverage report, threshold, or changed-file ratchet exists
+### TE13-05 - Client component behavior is over-represented by source-string tests
 
 - Severity: Medium
 - Confidence: High
-- Validation label: confirmed
-- File/region: `apps/web/package.json:13`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:66-80`
-- Failure scenario: a new public API route, server action, migration branch, queue path, or security helper lands with zero executed tests while the suite stays green. This is amplified by the large source-contract footprint: source presence can pass without behavior being exercised.
-- Concrete recommendation: add a non-blocking `test:coverage` baseline using Vitest V8 coverage, then enforce a changed-file ratchet for critical directories (`src/app/actions`, `src/app/api`, `src/lib`, `scripts/migrate.js`) before considering repo-wide thresholds. Exemptions should be explicit and reviewed.
-- TDD opportunity: add a temporary fixture branch with no coverage and make the changed-file coverage check fail against it before wiring the real gate.
+- File/region: `apps/web/vitest.config.ts:16-39`, `apps/web/package.json:72-88`, `apps/web/src/__tests__/use-restore-focus-after-pending.test.ts:5-21`, `apps/web/src/__tests__/search-status-source.test.ts:15-70`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-30`, `apps/web/src/__tests__/client-source-contracts.test.ts:172-224`
+- Failure scenario: search stale-response handling, load-more retry/backoff/live-region behavior, token creation pending guards, or field-error rendering changes behavior but preserves the asserted source tokens. The project currently has no jsdom/happy-dom/testing-library dependency and the Vitest config does not set a DOM environment, forcing many client tests to inspect strings instead of user-visible state.
+- Suggested fix/test: add a small DOM-capable test lane for high-value client islands (`Search`, `LoadMore`, `PasswordForm`, Tokens page interactions). Keep source contracts only for static architecture invariants that are hard to execute cheaply.
+- TDD opportunity: start by porting `search-status-source.test.ts` to a behavior test with mocked `searchImagesAction`/`fetch`, fake timers, and assertions that stale slow responses do not render visible status/results.
 
-## Missed-Issue Sweep
+### TE13-06 - Timeline/year-in-review tests partly reimplement behavior instead of executing it
 
-- Rechecked skipped/focused tests: no focused `.only(` usage found; skips are conditional admin/local e2e and CLIP real-model suites.
-- Rechecked previously reported cursor-normalizer gap: current `image-list-cursor.test.ts` directly covers strict date/id normalization, so I did not carry that finding forward.
-- Rechecked the new restore SQL raw-bridge worktree change: `sql-restore-scan.test.ts:291-320` has a direct behavioral test with a negative no-bridge control, so I did not report it as missing coverage.
-- Rechecked CI: lint, typecheck, custom auth/origin/rate-limit gates, unit tests, DB init, Chromium e2e, and build run in `.github/workflows/quality.yml`.
-- Full gates were not run; this was a review-only task and no application code changed.
+- Severity: Low
+- Confidence: High
+- File/region: `apps/web/src/__tests__/data-timeline.test.ts:121-204`, `apps/web/src/lib/data-timeline.ts:195-221`, `apps/web/src/lib/data-timeline.ts:243-267`
+- Failure scenario: `getYearInReviewImages()` stops calling `getTimelineImages(year)`, mishandles `truncated`, changes grouping behavior, or sorts sections incorrectly. The tests at `data-timeline.test.ts:121-204` validate inline fake grouping helpers and source snippets, not the exported function with a mocked `getTimelineImages`/DB result.
+- Suggested fix/test: refactor the month-grouping logic into a pure exported helper and test it directly, or mock the DB chain so `getYearInReviewImages(year)` executes against controlled rows and asserts `sections` plus `truncated`.
+- TDD opportunity: write a failing direct test where `getTimelineImages` returns `{ images: [...], truncated: true }` and assert `getYearInReviewImages` preserves `truncated` and groups by descending month.
+
+### TE13-07 - Test-only request mocks erase route contract types
+
+- Severity: Low
+- Confidence: Medium
+- File/region: `apps/web/src/__tests__/semantic-search-route.test.ts:83-105`, `apps/web/src/__tests__/semantic-search-route.test.ts:163-168`, `apps/web/src/__tests__/semantic-search-route.test.ts:294-298`, `apps/web/src/app/api/search/semantic/route.ts:107-184`
+- Failure scenario: the semantic route starts relying on another `NextRequest` property (`nextUrl`, `cookies`, a real `AbortSignal`, streaming body semantics, etc.) and tests continue compiling because partial object literals are force-cast with `as unknown as NextRequest`. Failures would appear as runtime-only surprises or be missed if the exercised branch never touches the missing property.
+- Suggested fix/test: use real `new NextRequest(new Request(...))` objects where possible, and centralize any partial mocks behind typed factories that satisfy the actual route access surface without `unknown` double-casts. Keep one explicit already-aborted factory, but type it as a minimal interface consumed by a helper if `NextRequest` cannot be constructed aborted.
+- TDD opportunity: add a typed request factory test that fails if route code accesses a property absent from the factory.
+
+### TE13-08 - Real HEIF/AVIF/HDR fixture gap remains documented but open
+
+- Severity: Medium
+- Confidence: High
+- File/region: `apps/web/__test_fixtures__/color/README.md:19-39`, `apps/web/__test_fixtures__/color/README.md:61-73`, `apps/web/src/__tests__/color-fixtures.test.ts:1-15`, `apps/web/src/__tests__/gain-map-detection.test.ts:1-12`, `apps/web/src/__tests__/process-image-color-roundtrip.test.ts:11-14`, `apps/web/src/__tests__/process-image-color-roundtrip.test.ts:81-114`
+- Failure scenario: hand-crafted ISOBMFF/ICC buffers and Sharp-generated synthetic images cover parser shapes, but a real iPhone HDR HEIC, real CICP-only AVIF, or real 10-bit PQ/HLG HEIF exposes box ordering, auxiliary-image references, decoder metadata, or ICC/CICP interactions not represented by the synthetic fixtures. The docs explicitly list these planned fixtures and explain they are absent.
+- Suggested fix/test: add compact real-world metadata fixtures for PQ HEIF, HLG HEIF, Rec.2020 CICP-only AVIF, DCI-P3 TIFF, and iPhone gain-map HEIC. If proprietary pixel data is a concern, keep metadata-only/pixel-stripped fixtures as suggested in the README and assert detection through the public `detectColorSignals` path.
+- TDD opportunity: start with a metadata-only `iphone-15-hdr.heic` fixture and a failing `detectColorSignals` test that asserts `hasGainMap === true`, `isHdr === true`, and NCLX precedence over ICC naming.
+
+### TE13-09 - No coverage report, threshold, or changed-file coverage ratchet exists
+
+- Severity: Low
+- Confidence: High
+- File/region: `apps/web/package.json:13-29`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:54-83`
+- Failure scenario: a new public API route, server action, migration reconciliation branch, queue path, or client component lands with no executed tests. The suite can still pass because there is no coverage measurement or changed-file coverage ratchet, and source-contract tests may assert static strings without covering execution.
+- Suggested fix/test: add a non-blocking `test:coverage` using Vitest V8 coverage, then introduce a changed-file ratchet for critical directories (`src/app/actions`, `src/app/api`, `src/lib`, `scripts/migrate.js`) before considering broad global thresholds. Require explicit reviewed exemptions for generated/source-contract-only cases.
+- TDD opportunity: create a temporary fixture module under a critical directory with no tests and make the ratchet fail before wiring it to CI.
+
+## Positive Coverage Notes
+
+- The migration/journal risk is well guarded: `migration-journal*.test.ts`, `migrate-pending-migrations.test.ts`, and `migrate-reconcile-coverage.test.ts` cover journal monotonicity, pending/drift behavior, DML baseline refusal, and reconcile coverage.
+- Security scanners are both implemented and tested: API auth, action origin, and public route rate-limit gates have fixture-based tests and are run in CI.
+- E2E seed safety is strong: destructive seed/init requires a disposable DB name or explicit opt-in before DB deletes/file removes.
+- CLIP production proof is not absent: it is split into a scheduled/manual workflow with seeded weights, which is appropriate for a heavy model path. The remaining risk is that normal PR quality does not run it.
+
+## Final Sweep
+
+- Missed coverage sweep checked route/action inventory, source-contract density, Playwright projects, skipped tests, E2E seed/build flow, CLIP preflight workflow, SW registration, client-only components, timeline grouping, color/HDR fixtures, and request mocks.
+- Flaky-test sweep found no focused tests. Existing reliability controls include serialized Playwright workers for login budgets, `.next` exclusion from Vitest discovery, raised source-scan timeout, deterministic E2E seed data, and guarded destructive seed setup.
+- Full gates were not run because this was a review-only task and no application source changed.

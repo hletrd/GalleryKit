@@ -1,186 +1,72 @@
-# Cycle 11 Critic Review
+# Cycle 13 Critic Review
 
 Date: 2026-07-07 KST
 Reviewer: critic
 Repository: `/Users/hletrd/flash-shared/gallery`
-Mode: whole-repository skeptical review. I did not edit source or plans; this file is the only assigned write.
+Mode: whole-repository, source-free critical review. I did not modify source code or plans; this review artifact is the only intended write.
 
 ## Inventory And Method
 
-Read first: `AGENTS.md`, `CLAUDE.md`, latest root/cycle review artifacts, latest deferred register, and current git history through `b965e3bf`.
+Primary contracts read first:
 
-Inspected broadly:
+- `AGENTS.md` from the active workspace prompt.
+- `CLAUDE.md` project knowledge base.
+- Current aggregate baseline: `.context/reviews/_aggregate.md`.
+- Recent archive baselines: `.context/reviews/archive/_aggregate-c12.md`, `_aggregate-c13.md`, `_aggregate-cycle12.md`, `_aggregate-cycle13.md`, and `_aggregate-cycle47-rpf-end-only.md`.
 
-- Product/public routes: home, timeline/year, map, photo/share pages, search/semantic/similar, feed/OG/upload routes.
-- Admin/security/ops surfaces: server actions, admin APIs, auth/origin/rate-limit lint gates, restore, deploy script, nginx template, Dockerfile, CI.
-- Data/architecture surfaces: `data.ts`, `data-timeline.ts`, Drizzle schema/migrations, `migrate.js`, queue/backfill, CLIP embeddings, maintenance scheduler, single-writer guard.
-- UX/test surfaces: Playwright specs, touch-target audit, bottom sheet/dropdown tests, visual screenshot checks.
-- Prior drift: compared Cycle 10 findings against the follow-up commits now on `master`.
+Review-relevant inventory:
 
-Validation evidence collected:
+- 681 source/config/script/test files across `apps/web/src/app`, `apps/web/src/lib`, `apps/web/src/components`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, and `apps/web/src/__tests__`.
+- Project and operations files: root `package.json`, `apps/web/package.json`, `.nvmrc`, `.github/workflows/*.yml`, `README.md`, `apps/web/README.md`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, `scripts/check-proxy-topology.mjs`, and service-worker source/generated output.
+- Excluded as non-review source: build/runtime output, dependency directories, binary/static fixture payloads, and generated artifacts whose source was separately checked.
 
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run typecheck --workspace=apps/web` passed.
-- Focused Vitest passed: `data-timeline`, `semantic-embedding-storage-contract`, `maintenance-scheduler-source`, `background-db-writes`, `topics-actions`, `touch-target-audit` = 6 files / 64 tests.
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate --json` failed with 2 moderate vulnerabilities via Next's nested PostCSS.
-- `npm view next version` returned `16.2.10`; `npm view postcss version` returned `8.5.16`; `npm ls postcss next --workspace=apps/web` shows top-level `postcss@8.5.16` plus `next/node_modules/postcss@8.4.31`.
+I examined the repository through direct reads of high-risk files plus repo-wide sweeps for common issue classes: admin/auth/origin/rate-limit coverage, raw SQL, unsafe HTML/JSON-LD sinks, service-worker caching, migration journal drift, restore/upload failure paths, public route cost, background queue concurrency, destructive filesystem operations, TODO/FIXME markers, source-string tests, and workflow/deploy mismatches.
 
-## Findings Summary
+## Fresh Validation Evidence
 
-- Critical: 0
-- High: 0
-- Medium: 8
-- Low: 1
+- `git status --short --branch`: clean `master...origin/master` before this artifact write.
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: passed, `found 0 vulnerabilities`.
+- Service worker generation check: `apps/web/public/sw.js` matches `apps/web/public/sw.template.js` after normalizing only the generated `SW_VERSION`.
+- Migration inventory check: 30 journal entries and 30 SQL files; newest committed entries remain monotonic above the historical cursor. The historical non-monotonic journal segment remains the known schema-drift class guarded by `apps/web/scripts/migrate.js`.
 
-Confirmed issues are source- or command-proven. Risks needing validation are real repository risk shapes whose production impact depends on live scale/topology/operator state.
+Full `lint`, `typecheck`, `build`, `vitest`, and Playwright suites were not rerun in this critic pass; this review relied on the targeted gates above plus static/manual inspection.
 
 ## Findings
 
-### C11-CRIT-01 - Production audit remains red on Next's nested PostCSS
+No new actionable findings were confirmed beyond the current Cycle 12 aggregate backlog.
 
-Severity: Medium
-Confidence: High
-Status: Confirmed issue
+I intentionally did not duplicate obvious archived findings that are still visible but not newly differentiated. The latest aggregate already records those with concrete citations and failure scenarios in `.context/reviews/_aggregate.md:36-393`. Reissuing them here would add noise rather than new review value.
 
-Locations: `apps/web/package.json:59`, `package.json:7-9`, `package-lock.json:9194`, `package-lock.json:9204`, `package-lock.json:9334`, `package-lock.json:9850`.
+## Prior-Cycle Items Not Reissued
 
-Why: the repo pins/overrides top-level PostCSS to `8.5.16`, but `next@16.2.10` still declares and installs nested `postcss@8.4.31`. `npm audit --omit=dev` reports GHSA-qx2v-qp2m-jg93 through `node_modules/next/node_modules/postcss`.
+Still actionable but already current in the aggregate baseline:
 
-Failure scenario: if any current or future path feeds attacker-influenced CSS through Next's bundled PostCSS stringify path and embeds it into a page, the known `</style>` escaping bug can become XSS. I did not confirm an arbitrary-CSS input today, so exposure is conditional, but the production dependency gate is failing now.
+- Dependency/tooling, proxy topology, date-query, map, listing aggregation, semantic scan, batch delete, smart collection, background pool, temp cleanup, byte-generation, single-writer, reconcile, browser coverage, source-string test, admin UI, restore, Lightroom upload, coverage, shared-group side effect, storage quarantine, navigation/discoverability, and admin UX risks are already enumerated in `.context/reviews/_aggregate.md:36-364`.
+- The strongest cross-agent carry-forward set is summarized in `.context/reviews/_aggregate.md:366-380`.
+- The final aggregate risk summary remains accurate at `.context/reviews/_aggregate.md:393-395`.
 
-Fix: upgrade to a stable Next release that removes the vulnerable nested dependency, or prove a targeted npm override/resolution replaces `next/node_modules/postcss` without breaking the full gate suite. Do not take `npm audit fix --force`; audit suggests a bad major downgrade.
+Examples of visible but non-duplicated current evidence:
 
-### C11-CRIT-02 - Date-function scans remain on dynamic public archive/home paths
+- Non-sargable date helpers are still present in `apps/web/src/lib/data-timeline.ts:111-155`, already tracked as `AGG-C12-05`.
+- The public map still caps and hydrates up to 10,000 markers via `apps/web/src/lib/data.ts:1741-1791`, already tracked as `AGG-C12-06`.
+- Public listing tag aggregation still happens before page limiting in `apps/web/src/lib/data.ts:786-828` and `apps/web/src/lib/data.ts:893-940`, already tracked as `AGG-C12-07`.
+- Startup orphan-temp cleanup still uses broad `Promise.all` fan-out in `apps/web/src/lib/image-queue.ts:40-96`, already tracked as `AGG-C12-12`.
+- Single-writer contention remains warn-only in `apps/web/src/lib/single-writer-guard.ts:6-16` and `apps/web/src/lib/single-writer-guard.ts:218-235`, already tracked as `AGG-C12-15`.
+- Legacy reconcile remains hand-written DDL beginning at `apps/web/scripts/migrate.js:348`, already tracked as `AGG-C12-16`.
+- Bottom-sheet dropdown protection still includes source-string tests in `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14-26`, already tracked as `AGG-C12-19`.
 
-Severity: Medium
-Confidence: High
-Status: Confirmed issue
+Prior issues that appear fixed or materially improved in this checkout:
 
-Locations: `apps/web/src/lib/data-timeline.ts:111`, `apps/web/src/lib/data-timeline.ts:124`, `apps/web/src/lib/data-timeline.ts:125`, `apps/web/src/lib/data-timeline.ts:143`, `apps/web/src/lib/data-timeline.ts:146`, `apps/web/src/lib/data-timeline.ts:155`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:77`, `apps/web/src/app/[locale]/(public)/page.tsx:232`, `apps/web/src/app/[locale]/(public)/page.tsx:234`, `apps/web/src/components/on-this-day-widget.tsx:15`, `apps/web/src/components/on-this-day-widget.tsx:21`.
-
-Why: Cycle 10 fixed `getTimelineImages()` to use sargable date ranges, but `getTimelineYears()` still uses `YEAR(capture_date)` for `SELECT DISTINCT` and ordering, while `getOnThisDayImages()` still uses `MONTH()` and `DAY()`. Both feed `revalidate = 0` public SSR paths.
-
-Failure scenario: as the gallery grows, homepage and `/timeline` requests from visitors or crawlers repeatedly force MySQL to scan/evaluate the processed dated image set instead of seeking fully through the `(processed, capture_date, created_at)` index. That competes with uploads, admin work, and normal public gallery reads on the single writer.
-
-Fix: for the year list, maintain a generated/indexed capture year or cached year rollup invalidated on image metadata changes. For On This Day, add generated/indexed `capture_mmdd` or `(capture_month, capture_day)` columns, or cache the daily result. Update `data-timeline.test.ts:50` so tests stop locking the non-sargable `MONTH()`/`DAY()` shape as expected behavior.
-
-### C11-CRIT-03 - Public map still ships a 10k-marker corpus and duplicate list
-
-Severity: Medium
-Confidence: Medium-High
-Status: Risk needing scale validation
-
-Locations: `apps/web/src/lib/data.ts:1750`, `apps/web/src/lib/data.ts:1759`, `apps/web/src/lib/data.ts:1768`, `apps/web/src/lib/data.ts:1776`, `apps/web/src/lib/data.ts:1777`, `apps/web/src/app/[locale]/(public)/map/page.tsx:14`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42`, `apps/web/src/app/[locale]/(public)/map/page.tsx:45`, `apps/web/src/app/[locale]/(public)/map/page.tsx:98`, `apps/web/src/app/[locale]/(public)/map/page.tsx:99`, `apps/web/src/components/map/map-client.tsx:87`, `apps/web/src/components/map/map-client.tsx:90`, `apps/web/src/components/map/map-client.tsx:120`.
-
-Why: `/map` is dynamic and `getMapImages()` can return `MAP_MAX_MARKERS + 1` rows. The server serializes up to 10,000 markers to the client, renders a fallback `<ul>` for each marker, and Leaflet renders one `<Marker>` per image. `FitBounds` allocates two full coordinate arrays and spreads them into `Math.min/max`.
-
-Failure scenario: a GPS-heavy archive or crawler traffic loads `/map` on mobile. The server emits a huge RSC/client payload, React hydrates thousands of links, Leaflet instantiates thousands of markers, and the main thread stalls before the map is usable.
-
-Fix: validate with `EXPLAIN ANALYZE` on sparse/dense GPS data. Add a map-oriented access path, then switch to viewport/bounds loading with clustering or a canvas/WebGL marker layer. Virtualize or paginate the accessible list and compute bounds in one pass.
-
-### C11-CRIT-04 - Legacy reconcile is still a second schema authority with mostly source-only coverage
-
-Severity: Medium
-Confidence: High
-Status: Confirmed maintainability risk
-
-Locations: `apps/web/scripts/migrate.js:348`, `apps/web/scripts/migrate.js:397`, `apps/web/scripts/migrate.js:684`, `apps/web/scripts/migrate.js:702`, `apps/web/scripts/migrate.js:717`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:15`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:100`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:157`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175`.
-
-Why: `reconcileLegacySchema()` hand-writes the current schema. The tests explicitly say they are source tripwires and cannot verify types/defaults, then mostly assert table/column/index/FK name presence. A small binary/vector structural pin was added, but most schema attributes remain unchecked.
-
-Failure scenario: a future migration changes a column type/default/nullability, index column order, uniqueness, or FK action while keeping the same names. CI passes because the names appear in `migrate.js`; a DB repaired through reconcile diverges from one built through normal migrations.
-
-Fix: add an integration parity gate using two disposable MySQL schemas: one built by committed migrations and one through reconcile/baseline, then diff `information_schema.columns`, `statistics`, and FK rules. If that is too heavy for every PR, run it in scheduled CI and require it for migration changes.
-
-### C11-CRIT-05 - Real CLIP activation proof is manual and skipped by default CI
-
-Severity: Medium
-Confidence: High
-Status: Confirmed release-risk gap
-
-Locations: `apps/web/src/__tests__/clip-offline-load.test.ts:15`, `apps/web/src/__tests__/clip-offline-load.test.ts:41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30`, `apps/web/package.json:21`, `apps/web/package.json:23`, `.github/workflows/quality.yml:66`, `.github/workflows/quality.yml:76`, `.github/workflows/quality.yml:79`.
-
-Why: the real model suites only run when seeded weights and env vars are present. The normal CI workflow runs unit/e2e/build gates but not `test:clip:preflight`. Route tests can pass with mocks/stubs while the offline ONNX/model-weight path is broken.
-
-Failure scenario: a dependency upgrade, model layout change, `CLIP_MODELS_ROOT` mismatch, or native runtime change breaks `embedTextReal`/`embedImageReal`. Default CI stays green; an operator enables production semantic search and public queries return 503 or bad rankings.
-
-Fix: add a scheduled or opt-in CI job that seeds/caches the pinned weights and runs `npm run test:clip:preflight --workspace=apps/web`, especially on CLIP/dependency changes. Alternatively make production activation require a recent preflight marker produced by the exact sidecar/runbook path.
-
-### C11-CRIT-06 - Nginx security/performance controls remain outside deploy visibility
-
-Severity: Medium
-Confidence: High
-Status: Risk needing live-host validation
-
-Locations: `CLAUDE.md:485`, `apps/web/deploy.sh:51`, `apps/web/deploy.sh:55`, `apps/web/nginx/default.conf:1`, `apps/web/nginx/default.conf:10`, `apps/web/nginx/default.conf:19`, `apps/web/nginx/default.conf:46`, `apps/web/nginx/default.conf:59`, `apps/web/nginx/default.conf:69`.
-
-Why: docs correctly state that deploys rebuild/restart Docker only; the committed nginx template is operator-applied. That template contains important public/admin rate limits, connection limits, body-size caps, HSTS, and proxy IP attribution caveats.
-
-Failure scenario: a future edge-rate-limit/body-size/proxy-header fix lands, all repo gates pass, and `npm run deploy` succeeds. Production keeps running the old host nginx config, so the issue is marked closed in source while live traffic remains exposed.
-
-Fix: make nginx drift visible. Add a deployed-template hash/version check to deploy output, or make nginx apply/reload an explicit gated deploy step with `nginx -t`, reload, and live limiter/body-size smoke evidence recorded in the cycle ledger.
-
-### C11-CRIT-07 - Single-writer correctness remains warn-only
-
-Severity: Medium
-Confidence: High
-Status: Confirmed operational risk
-
-Locations: `CLAUDE.md:236`, `CLAUDE.md:237`, `apps/web/src/instrumentation.ts:22`, `apps/web/src/instrumentation.ts:27`, `apps/web/src/lib/single-writer-guard.ts:7`, `apps/web/src/lib/single-writer-guard.ts:12`, `apps/web/src/lib/single-writer-guard.ts:218`, `apps/web/src/lib/single-writer-guard.ts:234`.
-
-Why: the app has correctness-relevant process-local state and a documented single-web-instance topology, but lock contention only logs a loud warning and startup continues.
-
-Failure scenario: a deploy system or manual operator starts two `gallerykit-web` containers against one DB. Both serve traffic. Upload quota tracking, restore fences, image queue state, in-memory fast-path rate limits, and status surfaces split across processes; users see inconsistent behavior before anyone notices logs.
-
-Fix: add an opt-in production enforcement mode, for example `GALLERYKIT_ENFORCE_SINGLE_WRITER=true`, that fails readiness or exits after persistent advisory-lock contention. Longer term, move correctness-critical coordination to DB/advisory-lock-backed state.
-
-### C11-CRIT-08 - Mobile bottom-sheet dropdown regression lock is source-string only
-
-Severity: Medium
-Confidence: High
-Status: Confirmed test-oracle gap
-
-Locations: `apps/web/src/components/info-bottom-sheet.tsx:562`, `apps/web/src/components/info-bottom-sheet.tsx:570`, `apps/web/src/components/info-bottom-sheet.tsx:573`, `apps/web/src/components/info-bottom-sheet.tsx:575`, `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14`, `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:20`, `apps/web/e2e/test-fixes.spec.ts:56`, `apps/web/e2e/test-fixes.spec.ts:64`, `apps/web/e2e/focus-restore.spec.ts:49`, `apps/web/e2e/focus-restore.spec.ts:52`.
-
-Why: the unit test asserts that source strings contain the portal container/ref wiring. Existing Playwright coverage opens/closes the sheet, but does not open the dropdown, assert it is visible inside the dialog stacking context, or verify focus/escape behavior.
-
-Failure scenario: a Radix, portal, ref, CSS, or focus-trap change leaves `container={sheetElement ?? undefined}` in source but renders the menu behind the overlay, outside the focus trap, clipped by the sheet, or unfocusable on mobile. Tests still pass.
-
-Fix: add a Playwright mobile behavior test that opens a photo, opens the info sheet, opens the download dropdown on a seeded wide-gamut/P3 photo, verifies menu visibility and dialog containment, selects/closes it, and checks focus return.
-
-### C11-CRIT-09 - Touch-target gate intentionally lets bare text links pass
-
-Severity: Low
-Confidence: High
-Status: Confirmed test-oracle gap
-
-Locations: `apps/web/src/__tests__/touch-target-audit.test.ts:457`, `apps/web/src/__tests__/touch-target-audit.test.ts:464`, `apps/web/src/__tests__/touch-target-audit.test.ts:1053`, `apps/web/src/__tests__/touch-target-audit.test.ts:1059`.
-
-Why: the repo policy says every interactive element should meet 44 px, but the source scanner explicitly lets plain text links with no sizing token pass. This is intentional for inline prose links, but it also allows future control-like links to bypass the gate.
-
-Failure scenario: a developer implements a mobile control as `<Link className="text-sm hover:underline">Delete</Link>` or a small nav/action link. The regex audit stays green while the rendered target is below the 44 px floor.
-
-Fix: add a DOM-level Playwright touch-target audit over representative pages, or require an explicit inline-text allowlist for bare links while keeping control-like links under the 44 px scanner.
-
-## Prior Drift Disposition
-
-Closed since Cycle 10:
-
-- Docker native pins now match the lockfile: `apps/web/Dockerfile:55-60` aligns with `package-lock.json:9216-9219` and `package-lock.json:9304-9310`.
-- Binary CLIP embedding schema is now `mediumblob`: `apps/web/src/db/schema.ts:292-295`.
-- `getTimelineImages()` now uses range predicates: `apps/web/src/lib/data-timeline.ts:195-215`.
-- Maintenance scheduler shutdown/drain is now wired: `apps/web/src/lib/maintenance-scheduler.ts:41-75`, `apps/web/src/instrumentation.ts:53-60`.
-- Analytics view params and rate-limit admission are captured before queueing: `apps/web/src/app/actions/public.ts:446-455`, `apps/web/src/app/actions/public.ts:486-495`, `apps/web/src/app/actions/public.ts:523-532`.
-- Topic deletion now fails closed on malformed smart collection predicates: `apps/web/src/app/actions/topics.ts:475-482`.
-- Search result labels now use title/tag/description fallback: `apps/web/src/components/search.tsx:71`, `apps/web/src/lib/photo-title.ts:85-105`.
-
-Still open or partially open:
-
-- PostCSS audit risk, map scale, reconcile structural parity, CLIP preflight, bottom-sheet behavior coverage, touch-target bare links, nginx deploy visibility, and single-writer enforcement remain valid.
-- The Cycle 10 date-query finding is partially closed only: `getTimelineImages()` is fixed, but `getTimelineYears()` and On This Day still use date functions on dynamic public paths.
+- The production dependency audit is now clean despite the earlier aggregate finding at `.context/reviews/_aggregate.md:36-44`; root overrides are present in `package.json:7-15`, Next remains at `apps/web/package.json:59`, and the targeted audit passed.
+- The Docker mutable-tag issue at `.context/reviews/_aggregate.md:66-74` is fixed by digest-pinned Node base images in `apps/web/Dockerfile:1` and `apps/web/Dockerfile:16`.
+- The CLIP production preflight gap at `.context/reviews/_aggregate.md:196-204` is materially improved by `.github/workflows/clip-preflight.yml:1-46`, which seeds cached CLIP weights and runs `npm run test:clip:preflight` on schedule/manual dispatch.
+- Required CI now includes a production dependency audit at `.github/workflows/quality.yml:66-67`.
 
 ## Final Missed-Issue Sweep
 
-I re-scanned route/action exemptions, skipped tests, TODO/FIXME/HACK/manual markers, dependency/version drift, sensitive-field projection tests, migration/reconcile coverage, and generated-vs-source claims after drafting. I did not find a current admin auth bypass, public original-file exposure, focused `.only` test, migration journal omission, or failed type/lint gate. Remaining blind spots are production cardinality, live host nginx state, real CLIP weights, and real mobile/browser interaction behavior for the bottom-sheet dropdown and touch targets.
+Final sweeps did not reveal a new admin auth bypass, same-origin mutating action bypass, public mutating route without a rate-limit gate, sensitive public field projection drift, generated service-worker drift, migration journal omission, focused `.only` test, obvious JSON-LD escaping regression, or a newly introduced dependency audit failure.
+
+Residual risk remains concentrated in the already archived classes: live production cardinality, live host nginx/proxy state, real CLIP model/runtime behavior, mobile/non-Chromium browser behavior, source-string test oracles, and operator-only deployment invariants.

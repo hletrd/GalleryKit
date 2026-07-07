@@ -33,11 +33,13 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 10/100 Implementation Plan - implemented and locally verified; commit/push/deploy ledger pending in the active cycle (`cycle-10-2026-07-07-plan.md`)
-- Run-10 Cycle 10/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for upstream/tooling, map/on-this-day/CLIP/default-gate/UI-test/operator-nginx/ignored-wiki/design-cleanup findings (`cycle-10-2026-07-07-deferred.md`)
+- Run-10 Cycle 13/100 Implementation Plan - active implementation ledger for E2E origin isolation, proxy topology checker accuracy, DB timeout hardening, service-worker registration coverage, analytics CSP, public discoverability, mobile similar photos, named delete confirmations, and plan index hygiene (`cycle-13-2026-07-07-plan.md`)
+- Run-10 Cycle 13/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for dependency override tooling, CI/Docker/deploy/nginx constraints, performance/schema redesign, broad test-strategy work, and larger admin/mobile IA redesign (`cycle-13-2026-07-07-deferred.md`)
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 10/100 Implementation Plan - implemented and locally verified; superseded by the cycle 13 active ledger (`cycle-10-2026-07-07-plan.md`)
+- Run-10 Cycle 10/100 Deferred Findings - preserved in historical cycle 10 register and superseded by the cycle 13 active deferred register where applicable (`cycle-10-2026-07-07-deferred.md`)
 - Run-10 Cycle 9/100 Implementation Plan - completed locally, pending commit/deploy ledger in current review-plan-fix run: migration compatibility, semantic embedding contract honesty, public privacy alias guards, maintenance single-flight, cursor normalizer coverage, doc/copy drift, explicit admin/CLIP proof commands, and PostCSS audit remediation attempt (`cycle-9-2026-07-07-plan.md`)
 - Run-10 Cycle 9/100 Deferred Findings - deferred register with preserved severity/confidence and exit criteria for broader performance/UI/operator/upstream findings (`cycle-9-2026-07-07-deferred.md`)
 

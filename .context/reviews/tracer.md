@@ -1,63 +1,115 @@
-# Cycle 11 Tracer Lane Review
+# Cycle 13 Tracer Review
 
 Role: `tracer`
-Scope: read-only causal tracing of suspicious flows and competing hypotheses across request/action lifecycles, background work, deploy/migration, upload/processing, auth/session, restore maintenance, and cache/revalidation.
+Scope: read-only causal tracing of suspicious flows and competing hypotheses: request auth/origin, upload processing, sharing/public routes, DB migration, deploy/build env, and client UI data flow.
 Allowed write: this report file only.
-Source / plan edits: none.
-Validation evidence: static causal tracing with exact source reads; `npm run lint:api-auth --workspace=apps/web`, `npm run lint:action-origin --workspace=apps/web`, and `npm run lint:public-route-rate-limit --workspace=apps/web` all passed.
+Source edits, plan edits, commits, pushes: none.
+Validation evidence: static causal tracing plus these gates passed:
+- `npm run lint:api-auth --workspace=apps/web`
+- `npm run lint:action-origin --workspace=apps/web`
+- `npm run lint:public-route-rate-limit --workspace=apps/web`
 
 ## Inventory
 
-- Required instructions/context: `AGENTS.md` from prompt, `CLAUDE.md`, and `code-review` skill instructions.
-- Upload and processing lifecycle: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-tracker*.ts`, upload route handlers, and upload/queue tests.
-- Restore and maintenance lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/scripts/restore-maintenance-recovery.*`, and related restore tests.
-- Auth/session lifecycle: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, `apps/web/src/lib/action-guards.ts`, admin-user/session rotation flows, token upload auth, and auth tests.
-- Background work: shared-group view count buffer, public analytics actions, audit logging, image queue side effects, admin color backfill runner, semantic embedding sidecar/in-app paths, shutdown drains.
-- Deploy/migration: `apps/web/scripts/migrate.js`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/deploy.sh`, `apps/web/scripts/entrypoint.sh`, Docker/nginx templates, migration/reconcile tests.
-- Cache/revalidation/serving: `apps/web/src/lib/revalidation.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/next.config.ts`, public pages with `revalidate = 0`, OG/feed routes, service-worker cache helpers.
-- Final missed-issue sweep: searched action/API exemptions, rate-limit exemptions, raw SQL, child processes, destructive filesystem calls, `dangerouslySetInnerHTML`, cache/revalidation calls, restore-maintenance references, embedding storage contracts, and previous review carry-forward.
+Trace-relevant files examined:
+- Instructions/context: `AGENTS.md` from the prompt, `CLAUDE.md`, and `code-review` skill instructions.
+- Request auth/origin flow: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, admin action/API lint scripts.
+- Upload processing flow: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, upload tracker/contract-lock helpers, processing settings snapshot callers.
+- Sharing/public route flow: `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/data.ts`, public search/OG routes, public route-rate-limit scanner.
+- DB migration flow: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/src/db/schema.ts`, migration startup path in the Docker image.
+- Deploy/build env flow: root `package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/scripts/entrypoint.sh`, `apps/web/next.config.ts`.
+- Client UI data flow: `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/similar-photos.tsx`.
+
+Skipped as non-trace-relevant for this lane: style-only components, locale copy, unrelated tests/fixtures, generated artifacts, and unchanged planning documents. Existing dirty file `.context/reviews/critic.md` was left untouched.
 
 ## Findings
 
-### TRC11-01 - `logout` can delete restored session rows after a DB restore starts
+No confirmed causal/race/flow findings in the requested scope.
 
-- Severity: Medium
-- Confidence: High
-- Validation label: Confirmed (static causal trace)
-- Location: `apps/web/src/app/actions/auth.ts:268-288`, `apps/web/src/app/[locale]/admin/db-actions.ts:540-590`, `apps/web/src/lib/admin-mutation-barrier.ts:76-129`
+Severity: None
+Confidence: High for the reviewed paths above
+Concrete failure scenario: not applicable because no high-confidence defect was confirmed
+Suggested fix: none
 
-Competing hypotheses:
-- Safe: every already-started foreground action that can write application state holds an admin mutation slot, so restore waits for it or rejects it before import.
-- Unsafe: `logout` only checks same-origin, then verifies and deletes a session without restore-maintenance entry check or mutation-slot participation.
+## Hypotheses Traced
+
+### Request Auth/Origin Flow
+
+Hypothesis: hostile origin or proxy header confusion can reach admin mutations or admin APIs before authentication.
+
+Result: rejected.
 
 Evidence:
-- Restore begins durable maintenance, drains queues/background writes/maintenance sweeps, then calls `drainAdminMutationsForRestore()` before `runRestore()` imports the dump (`db-actions.ts:540-590`).
-- The drain only observes actions that called `acquireAdminMutationSlot()`; the barrier blocks new slots once exclusive restore drain starts and waits for existing slot holders (`admin-mutation-barrier.ts:76-129`).
-- `updatePassword` participates in that barrier (`auth.ts:291-459`), but `logout` does not. It performs `verifySessionToken(token)` and then `db.delete(sessions).where(eq(sessions.id, hashSessionToken(token)))` without checking restore maintenance or acquiring a mutation slot (`auth.ts:268-288`).
-- The action-origin lint gate reports `logout` as OK because it enforces same-origin; that lint does not prove restore-drain participation.
+- Origin calculation prefers configured `BASE_URL` before request-derived host/proto, then fails closed when no expected origin exists (`apps/web/src/lib/request-origin.ts:60-80`, `apps/web/src/lib/request-origin.ts:99-118`).
+- Cookie-backed admin APIs run same-origin verification before `isAdmin()`, while PAT-backed API calls deliberately bypass same-origin only after token scope/rate-limit verification (`apps/web/src/lib/api-auth.ts:68-112`, `apps/web/src/lib/api-auth.ts:114-142`).
+- `logout` now checks same-origin, skips DB mutation during restore maintenance, and acquires the admin mutation slot before session verification/deletion (`apps/web/src/app/actions/auth.ts:268-294`). This closes the prior tracer finding. `updatePassword` follows the same same-origin plus restore-fence pattern (`apps/web/src/app/actions/auth.ts:297-318`).
+- Scanner evidence: `lint:api-auth` and `lint:action-origin` passed.
 
-Causal chain / failure scenario:
-1. Admin submits logout just before a restore begins.
-2. `logout` passes same-origin and starts session verification against the pre-restore DB.
-3. Restore sets the durable maintenance marker and drains known slot holders; `logout` is invisible to that drain because it never acquired a slot.
-4. Restore imports the backup and successfully recreates the `sessions` table contents.
-5. The still-running `logout` resumes and deletes `hashSessionToken(token)` from the freshly restored `sessions` table.
+### Upload Processing Flow
 
-Impact:
-The point-in-time restore is no longer exact for auth/session state. In the common case this just logs out the current admin from the restored snapshot; in a forensic or operational restore, it is still a post-restore mutation that the restore-maintenance design is supposed to exclude.
+Hypothesis: browser or Lightroom upload can preclaim quota, parse/save files, insert rows, or enqueue processing while restore/settings changes race the flow.
 
-Concrete fix:
-Make `logout` join the same restore fence as `updatePassword`: after same-origin passes and before `verifySessionToken()` / `db.delete()`, check restore maintenance and acquire `using mutationSlot = acquireAdminMutationSlot();`. If maintenance is active or the slot is refused, skip session deletion and redirect. Add a source/behavior test proving `logout` imports `acquireAdminMutationSlot`, acquires it before `verifySessionToken`, and performs no DB delete when the slot is refused.
+Result: rejected.
 
-## Traced Non-Findings
+Evidence:
+- Browser uploads check restore maintenance, same-origin, and the admin mutation slot before parsing upload payload data (`apps/web/src/app/actions/images.ts:129-147`).
+- Browser upload quota claims are settled on early exits and per-file failures, and the upload-processing contract lock spans topic verification, original save, DB insert, and enqueue (`apps/web/src/app/actions/images.ts:212-292`, `apps/web/src/app/actions/images.ts:377-623`, `apps/web/src/app/actions/images.ts:650-652`).
+- Lightroom upload rejects chunked/oversized bodies before parsing, preclaims quota before `formData()`, always releases the multipart parse slot, re-checks restore maintenance after parsing, and acquires the upload-processing contract lock before topic DB work (`apps/web/src/app/api/admin/lr/upload/route.ts:94-186`, `apps/web/src/app/api/admin/lr/upload/route.ts:252-306`).
+- Lightroom post-commit bookkeeping is isolated so a committed insert still returns success if enqueue/audit/revalidation later fail; bootstrap queue recovery covers missed enqueue (`apps/web/src/app/api/admin/lr/upload/route.ts:500-610`).
+- Queue workers claim rows conditionally, process from the original file, update only matching pending rows, and clean variants on delete races (`apps/web/src/lib/image-queue.ts:720-889`).
 
-- Upload -> processing -> restore: browser uploads hold the admin mutation slot plus upload-processing contract lock, and Lightroom uploads are fenced by the upload-processing contract lock before topic DB work/save/insert/enqueue. Restore acquires that same contract lock before setting maintenance, so an upload either finishes before restore can proceed or blocks the restore with `restoreBlockedByUpload`.
-- Backup/restore: `dumpDatabase` and `restoreDatabase` share `LOCK_DB_RESTORE`; an in-flight backup blocks restore instead of racing the import. Backup publication uses `.tmp` plus `rename()` after header/trailer checks.
-- Background analytics/audit: public view writes and audit writes are tracked through bounded background write sets/queues; restore drains them after setting maintenance, and queued analytics closures re-check maintenance before DB writes.
-- Semantic embedding storage: the prior root `tracer.md` finding about `image_embeddings` needing `(image_id, model_version)` is stale for this checkout. Current docs and tests intentionally define one active row per `image_id`, with `model_version` labelling the current vector and different modes destructively replacing that row (`CLAUDE.md:160`, `apps/web/README.md:73-75`, `apps/web/src/__tests__/semantic-embedding-storage-contract.test.ts:11-23`).
-- Cache/revalidation: derivative serving keeps a one-hour `must-revalidate` policy across Next static headers and route-handler fallback; route fallback ETags include pipeline/mtime/size/settings hash. The documented static-derivative settings-change limitation still requires re-encode and is not a new code defect.
-- Migration/deploy: migration startup retains per-entry baseline guards, DML-baseline refusal, pending-tail handling, and post-condition hash verification. Deploy pruning remains after successful health check and only prunes Docker-managed unused artifacts, not bind-mounted GalleryKit data.
+### Sharing/Public Route Flow
+
+Hypothesis: metadata generation, shared-grid prefetch, or selected-photo navigation can bypass share lookup rate limits or double-count view metrics.
+
+Result: rejected.
+
+Evidence:
+- Shared-photo metadata intentionally avoids rate-limit increments and DB lookups; the page validates the key, checks restore maintenance, rate-limits the lookup, then fetches the shared image (`apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:44-52`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:87-117`).
+- Shared-group metadata follows the same no-lookup rule; the page rate-limits once before `getSharedGroupCached()` (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:49-56`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:92-117`).
+- Shared group denormalized view increments and durable view recording use the same selected-photo decision: valid selected photos do not count as new group views, invalid/missing `photoId` does (`apps/web/src/lib/data.ts:1392-1407`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`).
+- Shared-grid links disable RSC prefetch so viewport entry cannot burn the per-IP share lookup budget (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:198-209`).
+- Public shared selects use public field sets and compile/test privacy guards rather than admin image fields (`apps/web/src/lib/data.ts:1240-1315`, `apps/web/src/lib/data.ts:1318-1362`).
+
+### DB Migration Flow
+
+Hypothesis: non-monotonic Drizzle journal timestamps can silently skip migrations, or fresh baselining can swallow DML.
+
+Result: rejected.
+
+Evidence:
+- Journal entries are read with their SQL hash and DML classification (`apps/web/scripts/migrate.js:198-227`).
+- Per-entry baselining refuses rows above the cursor and refuses unmirrored DML-bearing migrations (`apps/web/scripts/migrate.js:758-840`).
+- Historical pending migration prerequisites are created idempotently without baselining the pending migration (`apps/web/scripts/migrate.js:843-856`).
+- After Drizzle migrates, every committed journal hash must be present or startup fails loudly (`apps/web/scripts/migrate.js:949-974`).
+
+### Deploy/Build Env Flow
+
+Hypothesis: deploy/build env can drift from local config, source secrets unsafely, or boot without migrations.
+
+Result: rejected.
+
+Evidence:
+- Root deploy resolves `.env.deploy`, `$DEPLOY_ENV_FILE`, or the user secret path, refuses group/world-readable env files, and builds the SSH command from config rather than hardcoded host/key values (`scripts/deploy-remote.sh:22-92`).
+- Docker build passes public build args into the builder before `npm run build` and runs `ensure-site-config.mjs` first (`apps/web/Dockerfile:91-120`).
+- Runtime image includes migrations, migration helper scripts, runtime dependencies, persistence directories, liveness healthcheck, and starts with `node apps/web/scripts/migrate.js && exec node apps/web/server.js` (`apps/web/Dockerfile:150-198`).
+- Compose supplies build args/env file and runtime `TRUST_PROXY=true` while keeping data/uploads/resources/site config bind-mounted (`apps/web/docker-compose.yml:7-32`).
+- Remote deploy updates the repo, builds/starts via compose, waits for health, then prunes only after the new container is healthy (`apps/web/deploy.sh:10-104`).
+
+### Client UI Data Flow
+
+Hypothesis: slow client requests can clobber newer data, shared-photo query sync can trigger server rerenders/rate-limit burn, or similar-photo state can leak across image changes.
+
+Result: rejected.
+
+Evidence:
+- Load-more uses a query version, mounted guard, loading ref, cursor reset, and observer cleanup to prevent stale pagination commits (`apps/web/src/components/load-more.tsx:43-129`, `apps/web/src/components/load-more.tsx:131-159`).
+- Search increments request IDs, aborts semantic fetches, rechecks IDs after `fetch()` and `resp.json()`, and aborts on query changes/unmount (`apps/web/src/components/search.tsx:163-281`, `apps/web/src/components/search.tsx:283-315`).
+- Shared group photo navigation uses shallow `window.history.replaceState()` instead of App Router navigation, avoiding repeat server renders and share limiter burn (`apps/web/src/components/photo-viewer.tsx:341-356`).
+- Similar photos aborts close/unmount requests, uses request IDs/open guards before committing results, is hidden outside production semantic mode, and is keyed by image id in the viewer (`apps/web/src/components/similar-photos.tsx:63-141`, `apps/web/src/components/photo-viewer.tsx:795-800`).
 
 ## Final Sweep
 
-The final sweep did not surface another high-confidence causal failure. The main residual risk is test coverage shape: auth restore-barrier tests cover `updatePassword`, hostile-origin logout, and the barrier primitive, but not `logout` as a session-mutating action that must be drained before restore import.
+Final sweep checked auth/API/action scanners, public-route rate-limit scanner, route lookup ordering, upload quota settlement, post-commit upload behavior, migration hash/cursor guards, deploy env sourcing, and stale client state guards.
+
+No missed high-confidence causal, race, or flow issue was found. No trace-relevant file from the inventory was intentionally skipped.
