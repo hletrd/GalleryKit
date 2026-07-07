@@ -10,6 +10,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { ifNoneMatchMatches } from '@/lib/http-etag';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { getClientIp, preIncrementFeedAttempt } from '@/lib/rate-limit';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -34,13 +35,30 @@ function createAtomFeedEtag(xml: string): string {
     return `W/"atom-${createHash('sha256').update(xml).digest('base64url').slice(0, 22)}"`;
 }
 
-// @public-no-rate-limit-required: bounded Atom feed is read-only, capped at FEED_LIMIT, and served with public cache headers for syndication clients.
 export async function GET(request: NextRequest) {
     if (isRestoreMaintenanceActive()) {
         return new NextResponse('Service temporarily unavailable', {
             status: 503,
             headers: {
                 'Cache-Control': MAINTENANCE_CACHE_CONTROL,
+                'Content-Type': 'text/plain; charset=utf-8',
+                'X-Content-Type-Options': 'nosniff',
+            },
+        });
+    }
+
+    // AGG8b-08 / API-01+PAGE-01 (run-10 c8b): rate-limit parity with the
+    // per-topic feed. Both routes run the same DB-backed getImagesForFeed
+    // query; the root feed previously carried a no-rate-limit exemption
+    // while its same-shaped sibling pre-incremented — inconsistent, and the
+    // root URL is the MORE crawled of the two.
+    const ip = getClientIp(request.headers);
+    if (preIncrementFeedAttempt(ip, Date.now())) {
+        return new NextResponse('Too many requests', {
+            status: 429,
+            headers: {
+                'Cache-Control': MAINTENANCE_CACHE_CONTROL,
+                'Retry-After': '60',
                 'Content-Type': 'text/plain; charset=utf-8',
                 'X-Content-Type-Options': 'nosniff',
             },

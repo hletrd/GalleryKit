@@ -48,6 +48,32 @@ const SUITES: Array<[string, string]> = [
     ['topic /[locale]/[topic]/feed.xml', topicSource],
 ];
 
+// AGG8b-08 / API-01+PAGE-01 (run-10 c8b): BOTH feed routes are DB-backed
+// (getImagesForFeed) and must carry the same per-IP pre-increment limiter.
+// The root feed previously held a @public-no-rate-limit-required exemption
+// while its same-shaped topic sibling rate-limited — the exemption is gone
+// and must not come back.
+for (const [label, source] of SUITES) {
+    describe(`${label} — feed rate-limit parity (AGG8b-08)`, () => {
+        it('pre-increments the per-IP feed limiter before the DB query', () => {
+            expect(source).toContain('preIncrementFeedAttempt(ip, Date.now())');
+            const limiterIdx = source.indexOf('preIncrementFeedAttempt');
+            const queryIdx = source.indexOf('getImagesForFeed(FEED_LIMIT');
+            expect(limiterIdx).toBeGreaterThan(0);
+            expect(queryIdx).toBeGreaterThan(limiterIdx);
+        });
+
+        it('returns 429 with Retry-After on limiter rejection', () => {
+            expect(source).toContain('status: 429');
+            expect(source).toContain("'Retry-After': '60'");
+        });
+
+        it('does not carry a no-rate-limit exemption', () => {
+            expect(source).not.toContain('@public-no-rate-limit-required');
+        });
+    });
+}
+
 for (const [label, source] of SUITES) {
     describe(`${label} — R25-M1 config-driven sized-derivative selection`, () => {
         it('imports findNearestImageSize from @/lib/gallery-config-shared', () => {
