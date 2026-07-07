@@ -319,4 +319,47 @@ describe('containsDangerousSql', () => {
             expect(containsDangerousSql(bridged.combined), `${label} (bridge)`).toBe(true);
         }
     });
+
+    // C7-12 (run-10 cycle 7b): the rolling raw suffix must accumulate over the
+    // CUMULATIVE stream. The prior per-chunk shape dropped the previous suffix
+    // whenever a read returned fewer than SQL_SCAN_RAW_BRIDGE_BYTES bytes, so a
+    // legally-possible short fd.read() could split a dangerous keyword across
+    // THREE reads and evade the bridge ("DR" | "OP TAB" | "LE images;" — the
+    // middle chunk's tiny suffix lost the "DR").
+    it('detects dangerous keywords split across THREE short reads (cumulative raw suffix)', () => {
+        const cases: Array<[string, string, string]> = [
+            ['DR', 'OP TAB', 'LE images;'],
+            // (TRUNCATE is deliberately absent: `TRUNCATE ` ALONE is already a
+            // dangerous pattern, so a split TRUNCATE detects EARLY at read 2 —
+            // early detection is fine, but breaks this test's
+            // benign-intermediate shape.)
+            ['CREA', 'TE DATABA', 'SE evil;'],
+            ['DELE', 'TE FR', 'OM images;'],
+        ];
+
+        for (const [first, second, third] of cases) {
+            const label = `${first}|${second}|${third}`;
+            const w1 = appendSqlScanChunk('', first, SQL_SCAN_TAIL_BYTES, '');
+            expect(containsDangerousSql(w1.combined), `${label} (1)`).toBe(false);
+            const w2 = appendSqlScanChunk(w1.nextTail, second, SQL_SCAN_TAIL_BYTES, w1.nextRawSuffix);
+            expect(containsDangerousSql(w2.combined), `${label} (2)`).toBe(false);
+            const w3 = appendSqlScanChunk(w2.nextTail, third, SQL_SCAN_TAIL_BYTES, w2.nextRawSuffix);
+            expect(containsDangerousSql(w3.combined), `${label} (3)`).toBe(true);
+        }
+    });
+
+    // C7-19 (run-10 cycle 7b): the dangerous-SQL patterns carry the /i flag —
+    // pin case-insensitive matching so a future pattern rewrite cannot drop it.
+    it('matches dangerous statements case-insensitively', () => {
+        const variants = [
+            'drop table images;',
+            'DrOp TaBlE images;',
+            'truncate table images;',
+            'delete from images;',
+            'GRANT ALL ON *.* TO evil;'.toLowerCase(),
+        ];
+        for (const statement of variants) {
+            expect(containsDangerousSql(statement), statement).toBe(true);
+        }
+    });
 });

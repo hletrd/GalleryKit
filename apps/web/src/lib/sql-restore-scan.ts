@@ -301,8 +301,15 @@ export function appendSqlScanChunk(
     return {
         combined,
         nextTail: compactTail.slice(-maxTailBytes),
-        nextRawSuffix: chunk.length > SQL_SCAN_RAW_BRIDGE_BYTES
-            ? chunk.slice(-SQL_SCAN_RAW_BRIDGE_BYTES)
-            : chunk,
+        // C7-12 (run-10 cycle 7b): the rolling raw suffix must cover the
+        // CUMULATIVE stream, not just the current chunk. The previous
+        // per-chunk shape (`chunk.slice(-N)` / whole short chunk) DROPPED the
+        // prior suffix whenever a read returned fewer than N bytes — a
+        // legally-possible short fd.read() could then split a dangerous
+        // keyword across THREE reads ("DR" | "OP TAB" | "LE images;") and the
+        // middle chunk's tiny suffix lost the "DR", evading the bridge scan.
+        // Concatenating previous suffix + chunk before slicing keeps the last
+        // N raw bytes of everything seen so far, regardless of chunk sizes.
+        nextRawSuffix: `${previousRawSuffix}${chunk}`.slice(-SQL_SCAN_RAW_BRIDGE_BYTES),
     };
 }
