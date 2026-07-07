@@ -11,7 +11,7 @@
  */
 
 import { db, connection, images, imageEmbeddings } from '@/db';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { eq, notExists, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -110,9 +110,10 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     // honest and matching the sidecar if it is ever surfaced.
     const modelVersion = semanticMode === 'production' ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
-    const lockConn = await connection.getConnection();
+    let lockConn: PoolConnection | null = null;
     let semanticBackfillLockHeld = false;
     try {
+        lockConn = await connection.getConnection();
         const [lockRows] = await lockConn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
             'SELECT GET_LOCK(?, 0) AS acquired',
             [LOCK_SEMANTIC_EMBEDDING_BACKFILL],
@@ -200,14 +201,14 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         console.error('CLIP embedding backfill failed', err);
         return { status: 'error', message: t('embeddingBackfillFailed') };
     } finally {
-        if (semanticBackfillLockHeld) {
+        if (lockConn && semanticBackfillLockHeld) {
             // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
             // RELEASE_LOCK so the semantic-backfill lock cannot leak onto a
             // live pooled session (which would make every future backfill —
             // and the restore path's fail-fast probe — see it as running
             // until process restart). Never throws.
             await releasePooledAdvisoryLocks(lockConn, [LOCK_SEMANTIC_EMBEDDING_BACKFILL], 'semantic embedding backfill action');
-        } else {
+        } else if (lockConn) {
             lockConn.release();
         }
     }

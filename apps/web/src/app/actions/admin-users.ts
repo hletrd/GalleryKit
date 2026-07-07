@@ -1,7 +1,7 @@
 'use server';
 
 import * as argon2 from 'argon2';
-import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { connection, db, adminUsers } from '@/db';
 import { desc } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
@@ -228,7 +228,7 @@ export async function deleteAdminUser(id: number) {
     // and issue parameterized queries directly. All values are parameterized
     // to prevent SQL injection (defense in depth alongside Drizzle's
     // parameterization used elsewhere).
-    const conn = await connection.getConnection();
+    let conn: PoolConnection | null = null;
     let lockAcquired = false;
     // Serialize all admin deletions through one global advisory lock. The
     // protected invariant is table-wide ("never delete the last admin"), so
@@ -237,6 +237,7 @@ export async function deleteAdminUser(id: number) {
     const lockName = LOCK_ADMIN_DELETE;
 
     try {
+        conn = await connection.getConnection();
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
             'SELECT GET_LOCK(?, 5) AS acquired',
             [lockName]
@@ -289,7 +290,7 @@ export async function deleteAdminUser(id: number) {
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
-        await conn.rollback().catch(() => {});
+        await conn?.rollback().catch(() => {});
         if (e instanceof Error && e.message === 'DELETE_LOCK_TIMEOUT') {
             return { error: t('failedToDeleteUser') };
         }
@@ -302,13 +303,13 @@ export async function deleteAdminUser(id: number) {
         console.error('Delete user failed', e);
         return { error: t('failedToDeleteUser') };
     } finally {
-        if (lockAcquired) {
+        if (conn && lockAcquired) {
             // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
             // RELEASE_LOCK so the table-wide admin-delete lock cannot leak
             // onto a live pooled session (which would block every future
             // admin deletion until process restart). Never throws.
             await releasePooledAdvisoryLocks(conn, [lockName], 'admin delete');
-        } else {
+        } else if (conn) {
             conn.release();
         }
     }

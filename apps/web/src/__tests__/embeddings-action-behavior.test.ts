@@ -192,6 +192,17 @@ describe('backfillClipEmbeddings', () => {
         expect(conn.release).toHaveBeenCalledTimes(1);
     });
 
+    it('returns a localized error when the advisory-lock connection cannot be acquired', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'stub' });
+        getConnectionMock.mockRejectedValue(new Error('pool exhausted'));
+
+        await expect(backfillClipEmbeddings()).resolves.toEqual({ status: 'error', message: 'embeddingBackfillFailed' });
+        expect(selectMock).not.toHaveBeenCalled();
+
+        errorSpy.mockRestore();
+    });
+
     it('embeds pending rows with the stub encoder and upserts the stub model version (happy path)', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'stub' });
         const conn = makeLockConnection(1);

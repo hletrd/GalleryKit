@@ -79,6 +79,7 @@ function makeConn() {
 
 describe('deleteAdminUser audit detach (COR-R4C10-01)', () => {
     beforeEach(() => {
+        getConnectionMock.mockReset();
         getTranslationsMock.mockResolvedValue((key: string) => key);
         getCurrentUserMock.mockResolvedValue({ id: 1 }); // acting admin ≠ target
         requireSameOriginAdminMock.mockResolvedValue(null);
@@ -106,5 +107,14 @@ describe('deleteAdminUser audit detach (COR-R4C10-01)', () => {
         expect(params[detachIdx]).toEqual([TARGET_ID]);
         expect(conn.commit).toHaveBeenCalledTimes(1);
         expect(conn.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the localized delete failure when the dedicated DB connection cannot be acquired', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        getConnectionMock.mockRejectedValue(new Error('pool exhausted'));
+
+        await expect(deleteAdminUser(TARGET_ID)).resolves.toEqual({ error: 'failedToDeleteUser' });
+
+        errorSpy.mockRestore();
     });
 });
