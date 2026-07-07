@@ -89,10 +89,10 @@ vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: getGalleryConfigMock,
     // C2-10 (WP19): image-queue.ts's detached-context call sites (including
     // the post-processing embedding side-effect this file exercises) now use
-    // getGalleryConfigUncached instead of the request-cached export. Alias
+    // getGalleryConfigDetached instead of the request-cached export. Alias
     // the same mock fn so the existing getGalleryConfigMock assertions below
     // still observe the call.
-    getGalleryConfigUncached: getGalleryConfigMock,
+    getGalleryConfigDetached: getGalleryConfigMock,
 }));
 vi.mock('@/lib/clip-model', () => ({ embedImageReal: embedImageRealMock }));
 vi.mock('@/lib/clip-inference', () => ({ embedImageStub: embedImageStubMock }));

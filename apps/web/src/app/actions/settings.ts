@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData } from '@/lib/revalidation';
+import { invalidateDetachedGalleryConfigCache } from '@/lib/gallery-config';
 import { normalizeStringRecord } from '@/lib/sanitize';
 import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
@@ -223,6 +224,14 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         // Supported gallery settings affect public routes, metadata, and admin surfaces.
         // Revalidate the full app tree so stale cached photo/share pages do not linger.
         revalidateAllAppData();
+
+        // C4-07 / PERF4-08 (run-10 c4): also drop the detached-accessor
+        // micro-cache so background consumers (image-queue side-effect gates,
+        // the admin backfill runner's per-run snapshot) observe this commit
+        // immediately instead of up to DETACHED_CONFIG_TTL_MS later — a
+        // flip-setting-then-reencode sequence must never re-encode at the
+        // pre-flip settings.
+        invalidateDetachedGalleryConfigCache();
 
         // C1R-04: return the normalized values (including the canonicalized
         // image_sizes string) so the admin settings client can rehydrate from

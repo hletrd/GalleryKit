@@ -111,20 +111,30 @@ describe('serveUploadFile', () => {
         expect(wildcard.status).toBe(304);
     });
 
-    it('closes the file handle before returning non-stream 304 and HEAD responses (C35-PERF-01)', async () => {
+    it('never opens a file handle for 304/HEAD, and still closes the GET handle exactly once (C4-05/TEST4-01, was C35-PERF-01)', async () => {
+        // TEST4-01 (run-10 c4): the previous version of this test asserted
+        // `closeSpies.at(-1)` after each 304/HEAD call — but post-PERF3-07
+        // those branches serve from a path stat() and never call open(), so
+        // `.at(-1)` silently kept pointing at the initial GET's spy: a false
+        // positive that could not catch an fd leak regression on the
+        // bodyless branches. The REAL contract: open() fires exactly once
+        // (the streaming GET), the bodyless branches are fd-free, and the
+        // one GET handle closes exactly once after streaming.
         const jpegPath = path.join(uploadRoot, 'jpeg', 'close.jpg');
         await fsp.writeFile(jpegPath, 'close-data');
 
         const closeSpies: Array<ReturnType<typeof vi.spyOn>> = [];
+        const openMock = vi.fn(async (...args: unknown[]) => {
+            const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+            const handle = await actual.open(...(args as Parameters<typeof actual.open>));
+            closeSpies.push(vi.spyOn(handle, 'close'));
+            return handle;
+        });
         vi.doMock('fs/promises', async () => {
             const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
             return {
                 ...actual,
-                open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
-                    const handle = await actual.open(...args);
-                    closeSpies.push(vi.spyOn(handle, 'close'));
-                    return handle;
-                }),
+                open: openMock,
             };
         });
 
@@ -133,19 +143,24 @@ describe('serveUploadFile', () => {
         const etag = first.headers.get('ETag') ?? '';
         expect(etag).not.toBe('');
         await first.text();
+        expect(openMock).toHaveBeenCalledTimes(1);
 
         const matching = await serveUploadFile(['jpeg', 'close.jpg'], etag);
         expect(matching.status).toBe(304);
-        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
+        expect(openMock).toHaveBeenCalledTimes(1); // 304 is fd-free
 
         const wildcard = await serveUploadFile(['jpeg', 'close.jpg'], '*');
         expect(wildcard.status).toBe(304);
-        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
+        expect(openMock).toHaveBeenCalledTimes(1); // wildcard-304 is fd-free
 
         const head = await serveUploadFile(['jpeg', 'close.jpg'], null, 'HEAD');
         expect(head.status).toBe(200);
         expect(await head.text()).toBe('');
-        expect(closeSpies.at(-1)).toHaveBeenCalledTimes(1);
+        expect(openMock).toHaveBeenCalledTimes(1); // HEAD is fd-free
+
+        // The one fd that WAS opened (the streaming GET) closed exactly once.
+        expect(closeSpies).toHaveLength(1);
+        expect(closeSpies[0]).toHaveBeenCalledTimes(1);
     });
 
     // AGG-H5 (run-6 cycle-2): client-abort fd-release behavior.

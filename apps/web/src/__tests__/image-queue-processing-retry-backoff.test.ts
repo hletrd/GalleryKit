@@ -59,7 +59,7 @@ vi.mock('@/lib/upload-paths', () => ({
 }));
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: vi.fn(),
-    getGalleryConfigUncached: vi.fn(),
+    getGalleryConfigDetached: vi.fn(),
 }));
 vi.mock('@/lib/queue-shutdown', () => ({ drainProcessingQueueForShutdown: vi.fn() }));
 vi.mock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));

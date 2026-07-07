@@ -108,7 +108,7 @@ async function loadQueueModule({
     }));
     vi.doMock('@/lib/gallery-config', () => ({
         getGalleryConfig: vi.fn(async () => ({ semanticSearchMode })),
-        getGalleryConfigUncached: vi.fn(async () => ({ semanticSearchMode })),
+        getGalleryConfigDetached: vi.fn(async () => ({ semanticSearchMode })),
     }));
     vi.doMock('@/lib/queue-shutdown', () => ({ drainProcessingQueueForShutdown: vi.fn() }));
     vi.doMock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));

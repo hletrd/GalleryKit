@@ -38,8 +38,8 @@ vi.mock('@/lib/upload-paths', () => ({
 vi.mock('@/lib/gallery-config', () => ({
     getGalleryConfig: vi.fn(),
     // C2-10 (WP19): image-queue.ts's detached-context call sites now use
-    // getGalleryConfigUncached instead of the request-cached export.
-    getGalleryConfigUncached: vi.fn(),
+    // getGalleryConfigDetached instead of the request-cached export.
+    getGalleryConfigDetached: vi.fn(),
 }));
 
 vi.mock('@/lib/queue-shutdown', () => ({

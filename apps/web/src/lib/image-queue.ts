@@ -9,7 +9,7 @@ import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { MIN_IMAGE_SIZE, type JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
-import { getGalleryConfigUncached, type GalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfigDetached, type GalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
@@ -511,7 +511,7 @@ async function storeImageEmbeddingForMode(
 async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
     let semanticMode: 'disabled' | 'stub' | 'production';
     try {
-        const cfg = await getGalleryConfigUncached();
+        const cfg = await getGalleryConfigDetached();
         semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
     } catch {
         return;
@@ -784,7 +784,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                 // Bootstrap / legacy re-enqueue path: the job carries none of the
                 // processing settings, so load them all from current config.
                 try {
-                    const config = await getGalleryConfigUncached();
+                    const config = await getGalleryConfigDetached();
                     quality = {
                         webp: config.imageQualityWebp,
                         avif: config.imageQualityAvif,
@@ -902,7 +902,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             trackQueueSideEffect(state, (async () => {
                 let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
                 try {
-                    const cfg = await getGalleryConfigUncached();
+                    const cfg = await getGalleryConfigDetached();
                     semanticMode = applyRuntimeSemanticGate(cfg.semanticSearchMode);
                 } catch {
                     // DB unavailable — skip silently. Semantic embedding mode is

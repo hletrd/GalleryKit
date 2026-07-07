@@ -358,7 +358,9 @@ describe('post-lapse re-acquire loop (C4-06 / CRIT4-03)', () => {
             expect(createConnectionMock).toHaveBeenCalledTimes(2);
             expect(consoleErrorSpy).not.toHaveBeenCalled();
             expect(conn2.end).not.toHaveBeenCalled();
-            const reacquiredWarn = consoleWarnSpy.mock.calls.map((c) => c.join(' ')).find((m) => /re-acquired/i.test(m));
+            const reacquiredWarn = consoleWarnSpy.mock.calls
+                .map((c: unknown[]) => c.join(' '))
+                .find((m: string) => /re-acquired/i.test(m));
             expect(reacquiredWarn).toBeTruthy();
 
             // The keepalive is re-armed on the NEW connection.
@@ -451,7 +453,9 @@ describe('post-lapse re-acquire loop (C4-06 / CRIT4-03)', () => {
         // A fatal error delivered while shutdown tears the connection down
         // must not read as an alarming lapse.
         errorHandler(new Error('PROTOCOL_CONNECTION_LOST'));
-        const lapseWarns = consoleWarnSpy.mock.calls.map((c) => c.join(' ')).filter((m) => /lapsed/i.test(m));
+        const lapseWarns = consoleWarnSpy.mock.calls
+            .map((c: unknown[]) => c.join(' '))
+            .filter((m: string) => /lapsed/i.test(m));
         expect(lapseWarns).toHaveLength(0);
     });
 

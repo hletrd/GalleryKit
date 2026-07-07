@@ -45,7 +45,7 @@ async function loadQueueModule() {
     }));
     vi.doMock('@/lib/gallery-config', () => ({
         getGalleryConfig: vi.fn(),
-        getGalleryConfigUncached: vi.fn(),
+        getGalleryConfigDetached: vi.fn(),
     }));
     vi.doMock('@/lib/queue-shutdown', () => ({ drainProcessingQueueForShutdown: vi.fn() }));
     vi.doMock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));

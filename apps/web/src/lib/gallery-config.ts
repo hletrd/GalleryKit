@@ -184,8 +184,9 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
 }
 
 /**
- * Uncached gallery config accessor for detached background contexts (WP19,
- * C2-10, run-10 cycle-2).
+ * Detached-context gallery config accessor (renamed from
+ * `getGalleryConfigUncached`, C4-07/ARCH4-02 run-10 c4 — the old name lied
+ * once the micro-cache below landed; a deprecated alias is kept for one cycle).
  *
  * React's `cache()` (used by `getGalleryConfig` below) de-dupes lookups
  * within the AsyncLocalStorage store React maintains for the lifetime of a
@@ -195,24 +196,27 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
  * intended, silently pinning stale settings (e.g. a `semantic_search_mode`
  * flip an already-running background task never observes). Detached
  * background call sites — the three in `image-queue.ts` plus the admin
- * backfill runner's detached `runBackfill` (C3-04) — MUST use this uncached
- * accessor instead of `getGalleryConfig()` so every invocation re-reads
- * current admin settings. Request-path server components/actions should keep
- * using the cached `getGalleryConfig()` below.
+ * backfill runner's detached `runBackfill` (C3-04) — MUST use this accessor
+ * instead of `getGalleryConfig()`. Request-path server components/actions
+ * should keep using the cached `getGalleryConfig()` below.
  *
- * PERF3-01 / C3-16 (run-10 c3): the queue's per-image side-effect gate calls
- * this once per processed image (a 17-row `admin_settings` SELECT each, all
- * discarded after one field check in the default deployment). A tiny
- * module-level TTL micro-cache (2 s) with in-flight dedupe collapses
- * bootstrap-storm reads to ~one query per interval while keeping the
- * detached-context freshness contract: a settings flip is observed within a
- * 2 s skew, far below any human flip-setting-then-act workflow latency.
+ * FRESHNESS CONTRACT (C4-07/DOC4-02, stated exactly): every invocation
+ * observes current admin settings within `DETACHED_CONFIG_TTL_MS` (2 s) —
+ * NOT "always re-reads". The micro-cache (PERF3-01/C3-16: the queue's
+ * per-image side-effect gate otherwise pays a 17-row `admin_settings` SELECT
+ * per processed image) is additionally INVALIDATED by the settings mutation
+ * (`updateSettings` → `invalidateDetachedGalleryConfigCache()`), so in the
+ * shipped single-process topology a flip-setting-then-act sequence observes
+ * the new value immediately, not after the TTL. Note (TEST4-02): a failed DB
+ * read resolves to the fallback DEFAULT config and that fallback IS cached
+ * for the TTL — a DB blip can pin defaults for up to 2 s by design.
+ * Callers needing fail-closed semantics use `getGalleryConfigStrict`.
  */
-const UNCACHED_CONFIG_TTL_MS = 2_000;
+export const DETACHED_CONFIG_TTL_MS = 2_000;
 let uncachedConfigCache: { value: GalleryConfig; expiresAt: number } | null = null;
 let uncachedConfigInFlight: Promise<GalleryConfig> | null = null;
 
-export const getGalleryConfigUncached: typeof _getGalleryConfig = async () => {
+export const getGalleryConfigDetached: typeof _getGalleryConfig = async () => {
     const now = Date.now();
     if (uncachedConfigCache && uncachedConfigCache.expiresAt > now) {
         return uncachedConfigCache.value;
@@ -223,7 +227,7 @@ export const getGalleryConfigUncached: typeof _getGalleryConfig = async () => {
     uncachedConfigInFlight = (async () => {
         try {
             const value = await _getGalleryConfig();
-            uncachedConfigCache = { value, expiresAt: Date.now() + UNCACHED_CONFIG_TTL_MS };
+            uncachedConfigCache = { value, expiresAt: Date.now() + DETACHED_CONFIG_TTL_MS };
             return value;
         } finally {
             uncachedConfigInFlight = null;
@@ -232,11 +236,21 @@ export const getGalleryConfigUncached: typeof _getGalleryConfig = async () => {
     return uncachedConfigInFlight;
 };
 
-/** Test hook (C3-16): reset the uncached-accessor micro-cache between tests. */
-export function _uncachedConfigCacheReset(): void {
+/**
+ * First-class invalidation for the detached-accessor micro-cache (C4-07 /
+ * PERF4-08 — promoted from a test-only reset hook). Called by the settings
+ * mutation after commit so background consumers observe a settings flip
+ * immediately in the shipped single-process topology (cross-process readers
+ * still converge within the TTL; multi-instance is out of scope per the
+ * documented single-writer topology). Also used by tests.
+ */
+export function invalidateDetachedGalleryConfigCache(): void {
     uncachedConfigCache = null;
     uncachedConfigInFlight = null;
 }
+
+/** @deprecated C4-07 (run-10 c4): use `getGalleryConfigDetached` — kept one cycle for call-site compatibility. */
+export const getGalleryConfigUncached = getGalleryConfigDetached;
 
 /** Cached gallery config — deduped within a single SSR request via React cache(). */
 export const getGalleryConfig = cache(_getGalleryConfig);

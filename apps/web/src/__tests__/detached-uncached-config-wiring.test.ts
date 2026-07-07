@@ -32,29 +32,29 @@ const backfillSource = fs.readFileSync(
 const configSource = fs.readFileSync(path.join(__dirname, '..', 'lib', 'gallery-config.ts'), 'utf8');
 
 describe('detached modules use the uncached gallery-config accessor (C2-10 + C3-04)', () => {
-    it('gallery-config.ts exports getGalleryConfigUncached', () => {
-        expect(configSource).toMatch(/export const getGalleryConfigUncached/);
+    it('gallery-config.ts exports getGalleryConfigDetached', () => {
+        expect(configSource).toMatch(/export const getGalleryConfigDetached/);
     });
 
-    it('image-queue.ts imports getGalleryConfigUncached instead of the request-cached getGalleryConfig', () => {
-        expect(queueSource).toMatch(/import\s*\{\s*getGalleryConfigUncached[^}]*\}\s*from\s*'@\/lib\/gallery-config'/);
+    it('image-queue.ts imports getGalleryConfigDetached instead of the request-cached getGalleryConfig', () => {
+        expect(queueSource).toMatch(/import\s*\{\s*getGalleryConfigDetached[^}]*\}\s*from\s*'@\/lib\/gallery-config'/);
         expect(queueSource).not.toMatch(/\bgetGalleryConfig\s*\(/);
     });
 
     it('image-queue.ts calls the uncached accessor at all three detached-context call sites', () => {
         // bootstrapMissingActiveEmbeddings, the bootstrap/legacy re-enqueue
         // config gate, and the post-processing embedding side-effect.
-        const matches = queueSource.match(/await\s+getGalleryConfigUncached\s*\(\s*\)/g) ?? [];
+        const matches = queueSource.match(/await\s+getGalleryConfigDetached\s*\(\s*\)/g) ?? [];
         expect(matches.length).toBe(3);
     });
 
-    it('admin-backfill-runner.ts imports getGalleryConfigUncached instead of the request-cached getGalleryConfig', () => {
-        expect(backfillSource).toMatch(/import\s*\{\s*getGalleryConfigUncached\s*\}\s*from\s*'@\/lib\/gallery-config'/);
+    it('admin-backfill-runner.ts imports getGalleryConfigDetached instead of the request-cached getGalleryConfig', () => {
+        expect(backfillSource).toMatch(/import\s*\{\s*getGalleryConfigDetached\s*\}\s*from\s*'@\/lib\/gallery-config'/);
         expect(backfillSource).not.toMatch(/\bgetGalleryConfig\s*\(/);
     });
 
     it('admin-backfill-runner.ts reads config via the uncached accessor in the detached runBackfill', () => {
-        const matches = backfillSource.match(/await\s+getGalleryConfigUncached\s*\(\s*\)/g) ?? [];
+        const matches = backfillSource.match(/await\s+getGalleryConfigDetached\s*\(\s*\)/g) ?? [];
         expect(matches.length).toBe(1);
     });
 });
