@@ -121,6 +121,11 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C6-25 | LOW-MED/High | cycle-6-2026-07-07 | r10c6 | 0 | Peer cycle-10 closes AGG-C10-19/20, else fold next docs cycle (`.omc/wiki` CLIP "LIVE" drift) |
 | C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
 | C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |
+| C7b-06code | MED/High | cycle-7b-2026-07-07 | r10c7(loop-B) | 0 | `IMAGE_BASE_URL` configured in production (decide the boot-validation story once with C4-25/C2-37res), OR an operator restart-without-rebuild thumbnail incident (boot-time remotePatterns-vs-runtime probe; doc half shipped c7b WP14) |
+
+Cycle-7 (loop-B) age-budget check: one new row (C7b-06code, MED, age 0). No open High-severity
+carry-forward crosses the 8-cycle budget (C7-02/HIGH was SCHEDULED, not deferred, in
+`cycle-7b-2026-07-07-plan.md` WP1), and no MED row newly crosses the 16-cycle checkpoint.
 
 Cycle-6 age-budget check (this loop): all 15 new rows are age 0 and MED-or-lower — no open
 High-severity carry-forward crosses the 8-cycle budget, and none crosses the 16-cycle MED
