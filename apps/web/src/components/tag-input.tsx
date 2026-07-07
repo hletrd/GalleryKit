@@ -55,28 +55,45 @@ export function TagInput({
     const containerRef = React.useRef<HTMLDivElement>(null);
     const suggestionsId = React.useId();
 
+    // AGG8b-30 / PERF-REACT-02 (run-10 c8b): normalize the tag vocabulary
+    // and the selected set ONCE per prop change instead of re-running NFKC
+    // normalization over the whole availableTags list (twice) plus the
+    // selected list (per available tag) on every keystroke.
+    const normalizedAvailableTags = React.useMemo(
+        () => availableTags.map((tag) => ({ tag, normalized: normalizeTagInputValue(tag.name) })),
+        [availableTags],
+    );
+    const normalizedSelectedTags = React.useMemo(
+        () => new Set(selectedTags.map((tag) => normalizeTagInputValue(tag))),
+        [selectedTags],
+    );
+
+    const normalizedInputValue = normalizeTagInputValue(inputValue);
+
     const filteredTags = React.useMemo(() => {
         // R15C15 CR-15: normalize both sides with NFKC (matching hasSelectedTag /
         // resolveCanonicalTagName) so a fullwidth / composed-Unicode tag isn't
         // shown in the dropdown after it has already been selected.
-        const normalizedInput = normalizeTagInputValue(inputValue);
-        return availableTags
-            .filter(tag => !hasSelectedTag(selectedTags, tag.name)) // Exclude selected
-            .filter(tag => normalizeTagInputValue(tag.name).includes(normalizedInput)); // Match input
-    }, [availableTags, selectedTags, inputValue]);
+        return normalizedAvailableTags
+            .filter(({ normalized }) => !normalizedSelectedTags.has(normalized)) // Exclude selected
+            .filter(({ normalized }) => normalized.includes(normalizedInputValue)) // Match input
+            .map(({ tag }) => tag);
+    }, [normalizedAvailableTags, normalizedSelectedTags, normalizedInputValue]);
 
     // Check if the current input exactly matches an existing tag (case-insensitive)
-    const exactMatch = availableTags.find(
-        tag => normalizeTagInputValue(tag.name) === normalizeTagInputValue(inputValue)
-    );
+    const exactMatch = normalizedAvailableTags.find(
+        ({ normalized }) => normalized === normalizedInputValue
+    )?.tag;
 
-    // Determine if we should show "Create new tag" option
+    // Determine if we should show "Create new tag" option.
+    // normalizeTagInputValue trims first, so the Set lookup below is
+    // equivalent to the previous hasSelectedTag(selectedTags, cleanInputValue).
     const cleanInputValue = inputValue.trim();
     const showCreateOption = cleanInputValue.length > 0
         && !cleanInputValue.includes(',')
         && isValidTagName(cleanInputValue)
         && !exactMatch
-        && !hasSelectedTag(selectedTags, cleanInputValue);
+        && !normalizedSelectedTags.has(normalizedInputValue);
 
     const reset = () => {
         setInputValue('');
