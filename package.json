@@ -5,7 +5,14 @@
         "apps/*"
     ],
     "overrides": {
-        "postcss": "8.5.16"
+        "postcss": "8.5.16",
+        "next": {
+            ".": "^16.2.10",
+            "postcss": "8.5.16"
+        },
+        "@esbuild-kit/core-utils@3.3.2": {
+            "esbuild": "0.28.1"
+        }
     },
     "scripts": {
         "dev": "npm run dev --workspace=apps/web",
@@ -18,6 +25,7 @@
         "lint:api-auth": "npm run lint:api-auth --workspace=apps/web",
         "lint:action-origin": "npm run lint:action-origin --workspace=apps/web",
         "lint:public-route-rate-limit": "npm run lint:public-route-rate-limit --workspace=apps/web",
+        "check:proxy-topology": "node scripts/check-proxy-topology.mjs",
         "deploy": "./scripts/deploy-remote.sh"
     },
     "devDependencies": {

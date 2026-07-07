@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getTrustedRequestProtocol, hasTrustedSameOrigin, hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
+const originalBaseUrl = process.env.BASE_URL;
 
 function makeHeaders(values: Record<string, string | undefined>) {
     return {
@@ -18,6 +19,11 @@ describe('hasTrustedSameOrigin', () => {
             delete process.env.TRUST_PROXY;
         } else {
             process.env.TRUST_PROXY = originalTrustProxy;
+        }
+        if (originalBaseUrl === undefined) {
+            delete process.env.BASE_URL;
+        } else {
+            process.env.BASE_URL = originalBaseUrl;
         }
     });
 
@@ -77,6 +83,25 @@ describe('hasTrustedSameOrigin', () => {
             'x-forwarded-host': 'evil.example',
             'x-forwarded-proto': 'https',
             origin: 'https://evil.example',
+        }))).toBe(false);
+    });
+
+    it('uses configured BASE_URL instead of spoofable forwarded headers for expected origin', () => {
+        process.env.BASE_URL = 'https://gallery.atik.kr';
+        process.env.TRUST_PROXY = 'true';
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'http',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'https',
+            origin: 'https://attacker.invalid',
         }))).toBe(false);
     });
 

@@ -1,0 +1,46 @@
+name: CLIP production preflight
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 18 * * 0"
+
+jobs:
+  clip-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLIP_MODELS_ROOT: ${{ github.workspace }}/apps/web/data/models/clip
+      CLIP_OFFLINE_LOAD: "1"
+      CLIP_INTEGRATION: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare site config
+        run: cp apps/web/src/site-config.example.json apps/web/src/site-config.json
+
+      - name: Cache CLIP weights
+        uses: actions/cache@v4
+        with:
+          path: apps/web/data/models/clip
+          key: clip-jina-v2-${{ runner.os }}-${{ hashFiles('apps/web/scripts/download-clip-models.ts', 'apps/web/src/lib/clip-model-id.ts') }}
+          restore-keys: |
+            clip-jina-v2-${{ runner.os }}-
+
+      - name: Seed CLIP weights
+        run: npx tsx scripts/download-clip-models.ts
+        working-directory: apps/web
+
+      - name: Run CLIP production preflight
+        run: npm run test:clip:preflight
+        working-directory: apps/web

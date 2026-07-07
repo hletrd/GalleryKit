@@ -42,6 +42,11 @@ function getProtocolFromCandidate(candidate: string | null | undefined) {
     return origin ? new URL(origin).protocol.replace(/:$/, '') : null;
 }
 
+function getConfiguredBaseOrigin() {
+    const configured = process.env.BASE_URL?.trim();
+    return configured ? toOrigin(configured) : null;
+}
+
 export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
     const trustedForwardedProto = trustsProxyHeaders()
         ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-proto'))
@@ -53,6 +58,14 @@ export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
 }
 
 function getExpectedOrigin(requestHeaders: HeaderLookup) {
+    // Production deploys already carry the canonical public origin in BASE_URL
+    // for SEO/OG URLs. Use that value for CSRF provenance too so an edge that
+    // forgets to scrub X-Forwarded-Host/Proto cannot redefine "same origin".
+    const configuredBaseOrigin = getConfiguredBaseOrigin();
+    if (configuredBaseOrigin) {
+        return configuredBaseOrigin;
+    }
+
     const protocol = getTrustedRequestProtocol(requestHeaders);
 
     const trustedForwardedHost = trustsProxyHeaders()

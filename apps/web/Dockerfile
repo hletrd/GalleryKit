@@ -1,9 +1,10 @@
-FROM node:24-slim AS build-base
+FROM node:24-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc AS build-base
 
-# Supply-chain note: keep this base on the latest Node 24 LTS line, and record
-# the resolved `node:24-slim` digest in deploy/build logs before changing this
-# file. Debian security package updates are intentionally consumed from the
-# base image rather than frozen in apt install lines.
+# Supply-chain note: keep this base on the latest Node 24 LTS line, but refresh
+# the pinned manifest-list digest deliberately with:
+#   docker buildx imagetools inspect node:24-slim
+# Debian security package updates are consumed by an explicit digest refresh
+# rather than silently through a mutable tag.
 
 # Install build tooling needed to compile native dependencies during npm install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-FROM node:24-slim AS runner-base
+FROM node:24-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc AS runner-base
 
 # Install only the runtime tools the production container needs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
