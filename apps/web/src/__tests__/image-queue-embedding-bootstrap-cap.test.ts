@@ -30,6 +30,10 @@ async function loadQueueModule({
     vi.resetModules();
     delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for('gallerykit.imageProcessingQueue')];
 
+    // C4-09 (run-10 c4): the mode is read live from this holder so a test can
+    // flip stub<->production BETWEEN bootstrap invocations.
+    let currentMode: 'disabled' | 'stub' | 'production' = semanticSearchMode;
+
     const batches = [...embeddingBatches];
     const embeddingLimitMock = vi.fn(async () => batches.shift() ?? []);
     const embeddingOrderByMock = vi.fn(() => ({ limit: embeddingLimitMock }));
@@ -107,8 +111,8 @@ async function loadQueueModule({
         resolveOriginalUploadPath: vi.fn(async () => null),
     }));
     vi.doMock('@/lib/gallery-config', () => ({
-        getGalleryConfig: vi.fn(async () => ({ semanticSearchMode })),
-        getGalleryConfigDetached: vi.fn(async () => ({ semanticSearchMode })),
+        getGalleryConfig: vi.fn(async () => ({ semanticSearchMode: currentMode })),
+        getGalleryConfigDetached: vi.fn(async () => ({ semanticSearchMode: currentMode })),
     }));
     vi.doMock('@/lib/queue-shutdown', () => ({ drainProcessingQueueForShutdown: vi.fn() }));
     vi.doMock('@/lib/rate-limit', () => ({ purgeOldBuckets: vi.fn() }));
@@ -131,7 +135,11 @@ async function loadQueueModule({
     }));
 
     const queueModule = await import('@/lib/image-queue');
-    return { ...queueModule, embeddingLimitMock };
+    return {
+        ...queueModule,
+        embeddingLimitMock,
+        setSemanticMode: (mode: 'disabled' | 'stub' | 'production') => { currentMode = mode; },
+    };
 }
 
 describe('bootstrapMissingActiveEmbeddings scan cap (WP21 / C2-34)', () => {
@@ -209,13 +217,22 @@ describe('bootstrapMissingActiveEmbeddings scan cap (WP21 / C2-34)', () => {
  * makes EVERY scanned row a stuck row here — exactly the starvation shape.)
  */
 describe('embedding-scan cursor persistence (TRC3-01 / C3-07)', () => {
+    let originalAllowProduction: string | undefined;
+
     beforeEach(() => {
+        originalAllowProduction = process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+        delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'debug').mockImplementation(() => {});
     });
 
     afterEach(() => {
+        if (originalAllowProduction === undefined) {
+            delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+        } else {
+            process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] = originalAllowProduction;
+        }
         vi.restoreAllMocks();
         vi.resetModules();
         delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for('gallerykit.imageProcessingQueue')];
@@ -253,5 +270,39 @@ describe('embedding-scan cursor persistence (TRC3-01 / C3-07)', () => {
         const gtCalls = vi.mocked(drizzle.gt).mock.calls;
         expect(gtCalls.some((call) => call[1] === 100)).toBe(true);
         expect(state.embeddingScanCursorId).toBe(0);
+    });
+
+    it('restarts the scan from 0 when the active model version changes (PERF4-12 / C4-09)', async () => {
+        const batch1 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 1));
+        const batch2 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 51));
+        // Post-flip, a short batch so the production-model pass finishes cleanly.
+        const batch3 = Array.from({ length: 10 }, (_, i) => embeddingRow(i + 1));
+
+        const { bootstrapImageProcessingQueue, getProcessingQueueState, setSemanticMode } =
+            await loadQueueModule({ embeddingBatches: [batch1, batch2, batch3], semanticSearchMode: 'stub', scanLimit: 100 });
+
+        // Invocation 1 (stub): hits the cap and records the resume cursor at 100
+        // under the stub model version.
+        await bootstrapImageProcessingQueue();
+        const state = getProcessingQueueState();
+        await Promise.allSettled(Array.from(state.sideEffects));
+        expect(state.embeddingScanCursorId).toBe(100);
+        expect(state.embeddingScanModelVersion).toBe('stub-sha256-v1');
+
+        const drizzle = await import('drizzle-orm');
+        const gtCallsBeforeFlip = vi.mocked(drizzle.gt).mock.calls.length;
+
+        // Operator flips to production — the version-scoped isNull filter now
+        // marks every row missing, so the scan must RESTART from id > 0, not
+        // resume at id > 100 (which would strand ids 1..100 until wrap-around).
+        process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] = 'true';
+        setSemanticMode('production');
+        state.bootstrapped = false;
+        await bootstrapImageProcessingQueue();
+        await Promise.allSettled(Array.from(state.sideEffects));
+
+        const firstPostFlipGt = vi.mocked(drizzle.gt).mock.calls[gtCallsBeforeFlip];
+        expect(firstPostFlipGt?.[1]).toBe(0);
+        expect(state.embeddingScanModelVersion).toBe('jina-clip-v2-d512-q8');
     });
 });

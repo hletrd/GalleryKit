@@ -349,8 +349,25 @@ export type ProcessingQueueState = {
      *  SEMANTIC_SCAN_LIMIT consumed the whole scan budget on every
      *  invocation and starved newer rows indefinitely. The cursor now
      *  persists when the cap trips and resets to 0 only after a scan
-     *  completes cleanly (wrap-around retries the failed prefix). */
+     *  completes cleanly (wrap-around retries the failed prefix).
+     *
+     *  Process-local by design (DBG4-03 / TRC4-05, run-10 c4): the resume
+     *  point lives only on the in-process global — a per-commit deploy restart
+     *  (this project's release policy) drops it, so a brand-new process always
+     *  starts a fresh full scan from 0. The starvation protection is therefore
+     *  a WITHIN-process guarantee; it is not durable across restarts, and no
+     *  attempt is made to persist it (durable-cursor + per-row failure marking
+     *  is deferred — see cycle-4 register C4-09d). */
     embeddingScanCursorId: number;
+    /** PERF4-12 / C4-09 (run-10 c4): the active embedding model version the
+     *  persisted cursor was last advanced under. The missing-embedding join is
+     *  version-scoped (isNull against `modelVersion = activeModelVersion`), so
+     *  when an operator flips stub<->production between invocations EVERY row
+     *  becomes "missing" for the new version — a cursor left mid-scan under the
+     *  old version would then skip its whole id<=cursor prefix until
+     *  wrap-around. A change here resets the cursor to 0. Process-local like
+     *  the cursor itself. */
+    embeddingScanModelVersion: string | null;
     /** ARCH3-04 / C3-20 (run-10 c3): per-job claim/processing retry timers.
      *  Previously bare locals — invisible to shutdown and to the C2-33
      *  defensive re-init (which cleared only gcInterval), so a replaced
@@ -390,6 +407,9 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         }
         if (typeof existing.embeddingScanCursorId !== 'number') {
             existing.embeddingScanCursorId = 0;
+        }
+        if (typeof existing.embeddingScanModelVersion !== 'string' && existing.embeddingScanModelVersion !== null) {
+            existing.embeddingScanModelVersion = null;
         }
         return existing;
     }
@@ -434,6 +454,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         bootstrapCursorId: null,
         sideEffects: new Set<Promise<void>>(),
         embeddingScanCursorId: 0,
+        embeddingScanModelVersion: null,
         retryTimers: new Set<ReturnType<typeof setTimeout>>(),
     };
     globalWithQueue[processingQueueKey] = newState;
@@ -521,6 +542,20 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
     const activeModelVersion = semanticMode === 'production'
         ? PRODUCTION_MODEL_VERSION
         : STUB_MODEL_VERSION;
+    // PERF4-12 / C4-09 (run-10 c4): reset the resume cursor when the active
+    // model version changed since the last scan (operator flipped
+    // stub<->production). The isNull join is scoped to activeModelVersion, so
+    // after a flip every processed row is "missing" for the new version — a
+    // cursor left mid-scan under the old version would skip its entire
+    // id<=cursor prefix until wrap-around, delaying the new model's embeddings
+    // for the oldest photos.
+    if (state.embeddingScanModelVersion !== activeModelVersion) {
+        if (state.embeddingScanModelVersion !== null && state.embeddingScanCursorId !== 0) {
+            console.info(`[Queue] embedding model version changed (${state.embeddingScanModelVersion} -> ${activeModelVersion}); restarting the missing-embedding scan from the beginning`);
+        }
+        state.embeddingScanCursorId = 0;
+        state.embeddingScanModelVersion = activeModelVersion;
+    }
     // TRC3-01 / C3-07 (run-10 c3): resume from the persisted cursor. The
     // C2-34 design relied on embedded rows dropping out of the isNull filter,
     // which holds ONLY when every scanned row eventually embeds — a
