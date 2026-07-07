@@ -50,9 +50,11 @@ export async function register() {
                 const { flushBufferedSharedGroupViewCounts } = await import('@/lib/data');
                 const { drainBackgroundDbWrites } = await import('@/lib/background-db-writes');
                 const { stopSingleWriterGuard } = await import('@/lib/single-writer-guard');
+                const { stopMaintenanceScheduler } = await import('@/lib/maintenance-scheduler');
                 await Promise.race([
                     Promise.all([
                         shutdownImageProcessingQueue(),
+                        stopMaintenanceScheduler({ timeoutMs: 15_000 }),
                         flushBufferedSharedGroupViewCounts(),
                         drainBackgroundDbWrites(),
                         stopSingleWriterGuard(),

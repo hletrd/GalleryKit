@@ -66,6 +66,14 @@ export async function drainMaintenanceSweepsForRestore(timeoutMs = 5000): Promis
     return result;
 }
 
+export async function stopMaintenanceScheduler(options: { timeoutMs?: number } = {}): Promise<boolean> {
+    if (maintenanceInterval) {
+        clearInterval(maintenanceInterval);
+        maintenanceInterval = undefined;
+    }
+    return drainMaintenanceSweepsForRestore(options.timeoutMs ?? 5000);
+}
+
 export function startMaintenanceScheduler(): void {
     if (!startupSweepRun) {
         startupSweepRun = true;

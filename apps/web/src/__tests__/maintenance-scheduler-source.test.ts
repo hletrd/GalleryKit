@@ -38,4 +38,12 @@ describe('maintenance scheduler ownership (run-10 cycle 5)', () => {
         expect(MAINTENANCE_SRC).toContain('maintenanceSweepInFlight = sweep;');
         expect(MAINTENANCE_SRC).toContain('maintenanceSweepInFlight = undefined;');
     });
+
+    it('stops the production scheduler during graceful shutdown (C10)', () => {
+        expect(MAINTENANCE_SRC).toContain('export async function stopMaintenanceScheduler');
+        expect(MAINTENANCE_SRC).toContain('clearInterval(maintenanceInterval)');
+        expect(MAINTENANCE_SRC).toContain('return drainMaintenanceSweepsForRestore(options.timeoutMs ?? 5000)');
+        expect(INSTRUMENTATION_SRC).toContain("const { stopMaintenanceScheduler } = await import('@/lib/maintenance-scheduler')");
+        expect(INSTRUMENTATION_SRC).toContain('stopMaintenanceScheduler({ timeoutMs: 15_000 })');
+    });
 });
