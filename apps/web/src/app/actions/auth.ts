@@ -17,6 +17,7 @@ import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
+import { enqueuePendingSessionRevocation } from '@/lib/pending-session-revocations';
 import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-origin';
 import { countCodePoints } from '@/lib/utils';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
@@ -278,6 +279,7 @@ export async function logout(formData?: FormData) {
 
     if (token) {
         const maintenanceError = getRestoreMaintenanceMessage('restore in progress');
+        let revoked = false;
         if (!maintenanceError) {
             using mutationSlot = acquireAdminMutationSlot();
             if (mutationSlot.acquired) {
@@ -286,7 +288,17 @@ export async function logout(formData?: FormData) {
                     logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
                 }
                 await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
+                revoked = true;
             }
+        }
+        if (!revoked) {
+            // C7-01 (run-10 cycle 7b): a restore window blocked the DB-side
+            // revocation. Queue it so the post-restore flush (which runs
+            // AFTER the import replaces the sessions table — a pre-import
+            // delete would be undone anyway) or the hourly maintenance sweep
+            // actually kills the server-side session instead of silently
+            // leaving the token verifiable for its remaining lifetime.
+            enqueuePendingSessionRevocation(hashSessionToken(token));
         }
     }
 

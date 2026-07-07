@@ -5,6 +5,7 @@ import { purgeOldAuditLog } from '@/lib/audit';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { purgeOldViewEvents } from '@/lib/view-retention';
+import { flushPendingSessionRevocations } from '@/lib/pending-session-revocations';
 
 const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -33,6 +34,11 @@ async function runMaintenanceTask(label: string, task: () => Promise<unknown>): 
 async function runMaintenanceSweepOnce(): Promise<void> {
     if (isRestoreMaintenanceActive()) return;
     await runMaintenanceTask('purgeExpiredSessions', purgeExpiredSessions);
+    // C7-01 (run-10 cycle 7b): hourly backstop for logout revocations that a
+    // restore window skipped (primary flush point is the restore-marker clear
+    // in db-actions.ts). runMaintenanceTask's restore-active guard keeps this
+    // from deleting rows mid-import.
+    await runMaintenanceTask('flushPendingSessionRevocations', flushPendingSessionRevocations);
     await runMaintenanceTask('purgeOldBuckets', purgeOldBuckets);
     await runMaintenanceTask('purgeOldAuditLog', purgeOldAuditLog);
     await runMaintenanceTask('purgeOldViewEvents', purgeOldViewEvents);

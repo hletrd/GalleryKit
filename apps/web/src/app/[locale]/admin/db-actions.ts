@@ -25,6 +25,7 @@ import { drainBackgroundDbWritesForRestore } from "@/lib/background-db-writes";
 import { drainMaintenanceSweepsForRestore } from "@/lib/maintenance-scheduler";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
+import { flushPendingSessionRevocations } from "@/lib/pending-session-revocations";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES, isMysqldumpArtifactHeader, hasMysqldumpCompletionTrailer, MYSQLDUMP_TRAILER_SCAN_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
@@ -596,6 +597,12 @@ export async function restoreDatabase(formData: FormData) {
                         console.error('Failed to resume image-processing queue after restore', err);
                     });
                 }
+                // C7-01 (run-10 cycle 7b): flush logout revocations that the
+                // restore window skipped. This runs AFTER the import replaced
+                // the sessions table, so it also kills a session row the
+                // restore just re-imported (a pre-import delete would have
+                // been undone by the import). Never throws.
+                await flushPendingSessionRevocations();
             }
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if
