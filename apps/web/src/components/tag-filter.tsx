@@ -1,5 +1,6 @@
 'use client';
 
+import { memo, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -7,9 +8,18 @@ import { cn } from "@/lib/utils"
 import { useTranslation } from "@/components/i18n-provider";
 import { humanizeTagLabel } from "@/lib/photo-title";
 
-export function TagFilter({
+// AGG9B-05 / PERF9-01 / CR9-02 (loop-B cycle 9b): the chips fragment is
+// mounted TWICE (mobile <details> disclosure + desktop inline row — the
+// cycle-18 responsive split keeps both trees in the DOM so the breakpoint
+// swap is pure CSS and SSR-correct). Memoize the component and the chips so
+// HomeClient re-renders (infinite-scroll appends, viewport-bucket resizes)
+// stop re-reconciling both copies of every interactive chip; the fragment
+// itself is also built once per data change instead of once per render per
+// mount. The dual-mount DOM cost itself is a recorded deferred item
+// (cycle-9b deferred D9b-04).
+function TagFilterImpl({
     tags,
-    currentTags = [],
+    currentTags,
 }: {
     tags: { id: number, name: string, slug: string, count: number }[];
     currentTags?: string[];
@@ -18,9 +28,15 @@ export function TagFilter({
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const { t } = useTranslation();
-    const canonicalTags = currentTags.map(tag => tag.trim()).filter(Boolean);
+    // Key the canonical list on its joined value so an inline-constructed
+    // currentTags array with identical content cannot invalidate the memos.
+    const canonicalKey = (currentTags ?? []).map(tag => tag.trim()).filter(Boolean).join(',');
+    const canonicalTags = useMemo(
+        () => (canonicalKey ? canonicalKey.split(',') : []),
+        [canonicalKey],
+    );
 
-    const handleTagClick = (slug: string | null) => {
+    const handleTagClick = useCallback((slug: string | null) => {
         const params = new URLSearchParams(searchParams.toString());
 
         if (!slug) {
@@ -42,85 +58,87 @@ export function TagFilter({
 
         const queryString = params.toString();
         router.push(`${pathname}${queryString ? `?${queryString}` : ''}`);
-    };
+    }, [canonicalTags, pathname, router, searchParams]);
 
-    if (tags.length === 0) return null;
-
-    const handleKeyDown = (slug: string | null) => (e: React.KeyboardEvent) => {
+    const handleKeyDown = useCallback((slug: string | null) => (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             handleTagClick(slug);
         }
-    };
+    }, [handleTagClick]);
 
-    // F-5 / AGG1L-LOW-01: tag slugs canonically use `_` to separate
-    // words; render those as spaces via the shared `humanizeTagLabel`
-    // utility so all consumers (visible UI, alt text, JSON-LD `name`)
-    // produce the same humanized output.
-    const displayName = humanizeTagLabel;
+    const chips = useMemo(() => {
+        // F-5 / AGG1L-LOW-01: tag slugs canonically use `_` to separate
+        // words; render those as spaces via the shared `humanizeTagLabel`
+        // utility so all consumers (visible UI, alt text, JSON-LD `name`)
+        // produce the same humanized output.
+        const displayName = humanizeTagLabel;
 
-    const chips = (
-        <>
-            <Badge
-                asChild
-                variant={canonicalTags.length === 0 ? "default" : "outline"}
-                // DES-R4C15-03: min-h-11 (44 px) per the blocking touch-target
-                // policy — these chips are real <button>s on the mobile-priority
-                // home surface. Matches the nav topic pills' min-h-[44px].
-                className={cn("cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1", canonicalTags.length === 0 && "bg-primary text-primary-foreground")}
-            >
-                <button
-                    type="button"
-                    onClick={() => handleTagClick(null)}
-                    onKeyDown={handleKeyDown(null)}
-                    aria-pressed={canonicalTags.length === 0}
-                >
-                    {t('home.allTags')}
-                </button>
-            </Badge>
-            {tags.map(tag => (
+        return (
+            <>
                 <Badge
-                    key={tag.id}
                     asChild
-                    variant={canonicalTags.includes(tag.slug) ? "default" : "outline"}
-                    className={cn(
-                        // DES-R4C15-03: 44 px floor (see "All" chip above).
-                        "cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1",
-                        "flex gap-1",
-                        canonicalTags.includes(tag.slug) && "bg-primary text-primary-foreground"
-                    )}
+                    variant={canonicalTags.length === 0 ? "default" : "outline"}
+                    // DES-R4C15-03: min-h-11 (44 px) per the blocking touch-target
+                    // policy — these chips are real <button>s on the mobile-priority
+                    // home surface. Matches the nav topic pills' min-h-[44px].
+                    className={cn("cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1", canonicalTags.length === 0 && "bg-primary text-primary-foreground")}
                 >
                     <button
                         type="button"
-                        onClick={() => handleTagClick(tag.slug)}
-                        onKeyDown={handleKeyDown(tag.slug)}
-                        aria-pressed={canonicalTags.includes(tag.slug)}
+                        onClick={() => handleTagClick(null)}
+                        onKeyDown={handleKeyDown(null)}
+                        aria-pressed={canonicalTags.length === 0}
                     >
-                        {displayName(tag.name)}
-                        {/* AGG-R8-04 (run-8 c2): the count must inherit the chip
-                            foreground when the chip is ACTIVE. On the active
-                            chip (bg-primary), an unconditional text-muted-
-                            foreground computed 2.94:1 (light) / 2.45:1 (dark) —
-                            below WCAG 1.4.3 4.5:1 small-text — on the public home
-                            page. Gate the muted class on the INACTIVE state so
-                            an active chip's count uses text-primary-foreground
-                            (the chip's designed ≥4.5:1 pairing); inactive chips
-                            keep the muted 6.03:1 look. */}
-                        <span
-                            className={cn(
-                                "text-xs",
-                                canonicalTags.includes(tag.slug)
-                                    ? "text-primary-foreground/90"
-                                    : "text-muted-foreground"
-                            )}
-                        >
-                            ({tag.count})
-                        </span>
+                        {t('home.allTags')}
                     </button>
                 </Badge>
-            ))}
-        </>
-    );
+                {tags.map(tag => (
+                    <Badge
+                        key={tag.id}
+                        asChild
+                        variant={canonicalTags.includes(tag.slug) ? "default" : "outline"}
+                        className={cn(
+                            // DES-R4C15-03: 44 px floor (see "All" chip above).
+                            "cursor-pointer hover:bg-primary/90 min-h-11 min-w-11 justify-center px-3 py-1",
+                            "flex gap-1",
+                            canonicalTags.includes(tag.slug) && "bg-primary text-primary-foreground"
+                        )}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => handleTagClick(tag.slug)}
+                            onKeyDown={handleKeyDown(tag.slug)}
+                            aria-pressed={canonicalTags.includes(tag.slug)}
+                        >
+                            {displayName(tag.name)}
+                            {/* AGG-R8-04 (run-8 c2): the count must inherit the chip
+                                foreground when the chip is ACTIVE. On the active
+                                chip (bg-primary), an unconditional text-muted-
+                                foreground computed 2.94:1 (light) / 2.45:1 (dark) —
+                                below WCAG 1.4.3 4.5:1 small-text — on the public home
+                                page. Gate the muted class on the INACTIVE state so
+                                an active chip's count uses text-primary-foreground
+                                (the chip's designed ≥4.5:1 pairing); inactive chips
+                                keep the muted 6.03:1 look. */}
+                            <span
+                                className={cn(
+                                    "text-xs",
+                                    canonicalTags.includes(tag.slug)
+                                        ? "text-primary-foreground/90"
+                                        : "text-muted-foreground"
+                                )}
+                            >
+                                ({tag.count})
+                            </span>
+                        </button>
+                    </Badge>
+                ))}
+            </>
+        );
+    }, [tags, canonicalTags, handleTagClick, handleKeyDown, t]);
+
+    if (tags.length === 0) return null;
 
     return (
         <div className="w-full sm:w-auto">
@@ -143,3 +161,5 @@ export function TagFilter({
         </div>
     );
 }
+
+export const TagFilter = memo(TagFilterImpl);

@@ -76,8 +76,13 @@ describe('Cycle 7 public UI and API contracts', () => {
         const tagFilter = src('components/tag-filter.tsx');
         const homeClient = src('components/home-client.tsx');
 
-        expect(tagFilter).toContain('currentTags = []');
-        expect(tagFilter).toContain('const canonicalTags = currentTags.map');
+        // AGG9B-05 (loop-B cycle 9b): the memoized rewrite keys canonical
+        // tags on a joined string (identity-stable for the useMemo chain)
+        // but the invariant is unchanged — canonical tags derive from the
+        // server-boundary `currentTags` prop, never from client-side
+        // searchParams parsing.
+        expect(tagFilter).toContain("const canonicalKey = (currentTags ?? []).map(tag => tag.trim()).filter(Boolean).join(',')");
+        expect(tagFilter).toContain('const canonicalTags = useMemo(');
         expect(tagFilter).not.toContain("searchParams.get('tags')");
         expect(homeClient).toContain('<TagFilter tags={tags} currentTags={currentTags} />');
     });
