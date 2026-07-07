@@ -16,6 +16,7 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
 
 import { getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
@@ -659,11 +660,15 @@ async function acquireImageProcessingClaim(jobId: number): Promise<PoolConnectio
 async function releaseImageProcessingClaim(jobId: number, lockConnection: PoolConnection | null) {
     if (!lockConnection) return;
 
-    try {
-        await lockConnection.query('SELECT RELEASE_LOCK(?)', [getProcessingLockName(jobId)]);
-    } finally {
-        lockConnection.release();
-    }
+    // C7-02 (run-10 cycle 7b): a failed RELEASE_LOCK on a connection that is
+    // then released back to the pool leaks the per-image advisory lock onto a
+    // live pooled session, permanently blocking this image's reprocessing.
+    // The shared helper destroys the connection instead (and never throws).
+    await releasePooledAdvisoryLocks(
+        lockConnection,
+        [getProcessingLockName(jobId)],
+        `image processing claim ${jobId}`,
+    );
 }
 
 export async function shutdownImageProcessingQueue(
@@ -1042,13 +1047,12 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             state.bootstrapCursorId = null;
             scheduleBootstrapRetry(state, `[Queue] Job ${job.id} remains pending after ${MAX_RETRIES} processing attempts.`);
         } finally {
-            // C1-04 (run-10 cycle-1, TRC-01): a swallowed RELEASE_LOCK failure on
-            // a still-alive session leaks the advisory lock onto a pooled
-            // connection and can durably wedge every future claim for this id —
-            // log loudly, not at debug.
-            await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {
-                console.error(`[Queue] Failed to release lock for job ${job.id}:`, err);
-            });
+            // C1-04 (run-10 cycle-1, TRC-01) → C7-02 (cycle 7b): a failed
+            // RELEASE_LOCK no longer merely logs loudly — the shared helper
+            // destroys the pooled connection so the advisory lock cannot leak
+            // onto a live session and wedge future claims for this id. The
+            // helper never throws.
+            await releaseImageProcessingClaim(job.id, lockConnection);
             if (!retried) {
                 state.enqueued.delete(job.id);
                 state.retryCounts.delete(job.id);

@@ -25,6 +25,7 @@ import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
@@ -200,10 +201,14 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         return { status: 'error', message: t('embeddingBackfillFailed') };
     } finally {
         if (semanticBackfillLockHeld) {
-            await lockConn.query('SELECT RELEASE_LOCK(?)', [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
-                console.debug('RELEASE_LOCK (semantic embedding backfill action) failed:', err);
-            });
+            // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
+            // RELEASE_LOCK so the semantic-backfill lock cannot leak onto a
+            // live pooled session (which would make every future backfill —
+            // and the restore path's fail-fast probe — see it as running
+            // until process restart). Never throws.
+            await releasePooledAdvisoryLocks(lockConn, [LOCK_SEMANTIC_EMBEDDING_BACKFILL], 'semantic embedding backfill action');
+        } else {
+            lockConn.release();
         }
-        lockConn.release();
     }
 }

@@ -29,7 +29,7 @@ describe('restore/upload writer coordination', () => {
         expect(backfillGetLockIdx).toBeGreaterThan(uploadLockIdx);
         expect(maintenanceIdx).toBeGreaterThan(backfillGetLockIdx);
         expect(source).toContain('backfillLockHeld = true');
-        expect(source).toContain("console.debug('RELEASE_LOCK (backfill restore finally) failed:', err)");
+        expect(source).toContain("await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill restore finally')");
     });
 
     it('holds the semantic embedding backfill lock during database restore', () => {
@@ -42,7 +42,7 @@ describe('restore/upload writer coordination', () => {
         expect(semanticLockIdx).toBeGreaterThan(colorLockIdx);
         expect(maintenanceIdx).toBeGreaterThan(semanticLockIdx);
         expect(source).toContain('semanticBackfillLockHeld = true');
-        expect(source).toContain("console.debug('RELEASE_LOCK (semantic-backfill restore finally) failed:', err)");
+        expect(source).toContain("await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill restore finally')");
     });
 
     it('runs migrations after mysql import before reporting restore success', () => {
@@ -64,8 +64,9 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain('let dbRestoreLockHeld = false');
         expect(source).toContain('dbRestoreLockHeld = true');
         expect(source).toContain('upload-processing contract release (setup fallback) failed');
-        expect(source).toContain('RELEASE_LOCK (backfill setup fallback) failed');
-        expect(source).toContain('RELEASE_LOCK (setup fallback) failed');
+        expect(source).toContain("await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill setup fallback')");
+        expect(source).toContain("await lockReleaser.release(LOCK_DB_RESTORE, 'setup fallback')");
+        expect(source).toContain('lockReleaser.finish()');
     });
 
     it('keeps restore maintenance active after post-restore migration failure', () => {

@@ -19,6 +19,7 @@ import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { LOCK_ADMIN_DELETE, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
@@ -302,8 +303,13 @@ export async function deleteAdminUser(id: number) {
         return { error: t('failedToDeleteUser') };
     } finally {
         if (lockAcquired) {
-            await conn.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => {});
+            // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
+            // RELEASE_LOCK so the table-wide admin-delete lock cannot leak
+            // onto a live pooled session (which would block every future
+            // admin deletion until process restart). Never throws.
+            await releasePooledAdvisoryLocks(conn, [lockName], 'admin delete');
+        } else {
+            conn.release();
         }
-        conn.release();
     }
 }

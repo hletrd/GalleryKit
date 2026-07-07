@@ -21,7 +21,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const queryMock = vi.fn();
 const releaseMock = vi.fn();
-const lockConnection = { query: queryMock, release: releaseMock };
+const destroyMock = vi.fn();
+const lockConnection = { query: queryMock, release: releaseMock, destroy: destroyMock };
 
 vi.mock('@/db', () => ({
     connection: {
@@ -79,6 +80,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
 
         queryMock.mockReset();
         releaseMock.mockReset();
+        destroyMock.mockReset();
 
         // Advisory lock acquire returns success.
         // Order of queries the runner will issue on the lock connection:
@@ -140,8 +142,13 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         expect(state.lastError).toBeTruthy();
         expect(state.lastError).toContain('boom');
 
+        await vi.waitFor(() => {
+            expect(releaseMock).toHaveBeenCalled();
+        }, { timeout: 5000, interval: 10 });
+
         // Lock connection released back to the pool.
         expect(releaseMock).toHaveBeenCalled();
+        expect(destroyMock).not.toHaveBeenCalled();
 
         // RELEASE_LOCK actually issued before the connection went back.
         const releaseLockCall = queryMock.mock.calls.find(

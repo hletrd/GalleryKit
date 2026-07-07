@@ -41,6 +41,6 @@ describe('backfillClipEmbeddings action — model_version-aware selection', () =
   it('serializes the server action against restore with the semantic backfill advisory lock', () => {
     expect(actionSrc).toContain('LOCK_SEMANTIC_EMBEDDING_BACKFILL');
     expect(actionSrc).toContain('SELECT GET_LOCK(?, 0) AS acquired');
-    expect(actionSrc).toContain('SELECT RELEASE_LOCK(?)');
+    expect(actionSrc).toContain("releasePooledAdvisoryLocks(lockConn, [LOCK_SEMANTIC_EMBEDDING_BACKFILL], 'semantic embedding backfill action')");
   });
 });

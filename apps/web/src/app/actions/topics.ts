@@ -41,6 +41,7 @@ import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { LOCK_TOPIC_ROUTE_SEGMENTS, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     // C3L-CR-02: combined single query with UNION instead of two sequential
@@ -69,7 +70,6 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
 async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<T> {
     const conn = await connection.getConnection();
     let lockAcquired = false;
-    let releaseCleanly = true;
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
@@ -84,17 +84,12 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
         return await action();
     } finally {
         if (lockAcquired) {
-            try {
-                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_TOPIC_ROUTE_SEGMENTS]);
-            } catch (error) {
-                releaseCleanly = false;
-                console.error('RELEASE_LOCK (topic route segments) failed; destroying pooled connection to avoid leaking an advisory lock:', error);
-            }
-        }
-        if (releaseCleanly) {
-            conn.release();
+            // C7-02 (run-10 cycle 7b): the destroy-don't-release pattern this
+            // site pioneered (3acf638a) now lives in the shared helper so all
+            // pooled advisory-lock sites behave identically. Never throws.
+            await releasePooledAdvisoryLocks(conn, [LOCK_TOPIC_ROUTE_SEGMENTS], 'topic route segments');
         } else {
-            conn.destroy();
+            conn.release();
         }
     }
 }

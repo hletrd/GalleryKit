@@ -31,6 +31,7 @@ import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
 import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
+import { createPooledAdvisoryLockReleaser, releasePooledAdvisoryLocks } from "@/lib/advisory-lock-release";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
@@ -387,11 +388,14 @@ export async function dumpDatabase() {
         });
     } finally {
         if (dbRestoreLockHeld) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (backup finally) failed:', err);
-            });
+            // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
+            // RELEASE_LOCK — the restore lock is probed fail-fast
+            // (GET_LOCK(...,0)), so leaking it onto a live pooled session
+            // would wedge every future backup/restore until process restart.
+            await releasePooledAdvisoryLocks(conn, [LOCK_DB_RESTORE], 'backup finally');
+        } else {
+            conn.release();
         }
-        conn.release();
     }
 }
 
@@ -416,6 +420,13 @@ export async function restoreDatabase(formData: FormData) {
     // with pooled connections, GET_LOCK and RELEASE_LOCK may run on
     // different connections, making the lock unreliable.
     const conn = await connection.getConnection();
+    // C7-02 (run-10 cycle 7b): the restore connection holds up to three
+    // chained advisory locks released at different points. The staged
+    // releaser remembers any failed RELEASE_LOCK and the terminal finish()
+    // destroys the connection instead of releasing it back to the pool, so a
+    // transient release failure cannot leak a fail-fast lock onto a live
+    // pooled session (which would wedge every future restore attempt).
+    const lockReleaser = createPooledAdvisoryLockReleaser(conn);
     let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> = null;
     let dbRestoreLockHeld = false;
     let backfillLockHeld = false;
@@ -446,9 +457,7 @@ export async function restoreDatabase(formData: FormData) {
         // concurrent restore attempt (which uses restoreInProgress above).
         uploadContractLock = await acquireUploadProcessingContractLock(0);
         if (!uploadContractLock) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (upload-contract early-return) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'upload-contract early-return');
             dbRestoreLockHeld = false;
             return { success: false, error: t('restoreBlockedByUpload') };
         }
@@ -459,9 +468,7 @@ export async function restoreDatabase(formData: FormData) {
         );
         const backfillLockAcquired = backfillLockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(backfillLockAcquired)) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (backfill-lock early-return) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'backfill-lock early-return');
             dbRestoreLockHeld = false;
             await uploadContractLock.release();
             uploadContractLock = null;
@@ -478,13 +485,9 @@ export async function restoreDatabase(formData: FormData) {
         );
         const semanticBackfillLockAcquired = semanticBackfillLockRows[0]?.acquired;
         if (!isAdvisoryLockAcquired(semanticBackfillLockAcquired)) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
-                console.debug('RELEASE_LOCK (semantic-backfill early-return color-lock) failed:', err);
-            });
+            await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'semantic-backfill early-return color-lock');
             backfillLockHeld = false;
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (semantic-backfill early-return restore-lock) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'semantic-backfill early-return restore-lock');
             dbRestoreLockHeld = false;
             await uploadContractLock.release();
             uploadContractLock = null;
@@ -516,20 +519,14 @@ export async function restoreDatabase(formData: FormData) {
             // when the release itself fails (connection kill, DB
             // outage, etc.). Matches the sibling pattern at the outer
             // finally below.
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'maintenance-begin early-return');
             dbRestoreLockHeld = false;
             if (backfillLockHeld) {
-                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
-                    console.debug('RELEASE_LOCK (backfill maintenance-begin early-return) failed:', err);
-                });
+                await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill maintenance-begin early-return');
                 backfillLockHeld = false;
             }
             if (semanticBackfillLockHeld) {
-                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
-                    console.debug('RELEASE_LOCK (semantic-backfill maintenance-begin early-return) failed:', err);
-                });
+                await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill maintenance-begin early-return');
                 semanticBackfillLockHeld = false;
             }
             await uploadContractLock.release();
@@ -603,20 +600,14 @@ export async function restoreDatabase(formData: FormData) {
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if
             // the release round-trip errors.
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (restore finally) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'restore finally');
             dbRestoreLockHeld = false;
             if (backfillLockHeld) {
-                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
-                    console.debug('RELEASE_LOCK (backfill restore finally) failed:', err);
-                });
+                await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill restore finally');
                 backfillLockHeld = false;
             }
             if (semanticBackfillLockHeld) {
-                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
-                    console.debug('RELEASE_LOCK (semantic-backfill restore finally) failed:', err);
-                });
+                await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill restore finally');
                 semanticBackfillLockHeld = false;
             }
             await uploadContractLock?.release();
@@ -630,21 +621,17 @@ export async function restoreDatabase(formData: FormData) {
             uploadContractLock = null;
         }
         if (backfillLockHeld) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_COLOR_PIPELINE_BACKFILL]).catch((err) => {
-                console.debug('RELEASE_LOCK (backfill setup fallback) failed:', err);
-            });
+            await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill setup fallback');
         }
         if (semanticBackfillLockHeld) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_SEMANTIC_EMBEDDING_BACKFILL]).catch((err) => {
-                console.debug('RELEASE_LOCK (semantic-backfill setup fallback) failed:', err);
-            });
+            await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill setup fallback');
         }
         if (dbRestoreLockHeld) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
-                console.debug('RELEASE_LOCK (setup fallback) failed:', err);
-            });
+            await lockReleaser.release(LOCK_DB_RESTORE, 'setup fallback');
         }
-        conn.release();
+        // C7-02: terminal decision — release to the pool only when every
+        // RELEASE_LOCK above succeeded; destroy the connection otherwise.
+        lockReleaser.finish();
     }
 }
 

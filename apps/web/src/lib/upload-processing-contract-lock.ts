@@ -1,6 +1,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { connection } from '@/db';
 import { LOCK_UPLOAD_PROCESSING_CONTRACT, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 
 type UploadProcessingContractLock = {
     release: () => Promise<void>;
@@ -45,13 +46,12 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
             release: async () => {
                 if (released) return;
                 released = true;
-                try {
-                    await conn.query('SELECT RELEASE_LOCK(?)', [LOCK_UPLOAD_PROCESSING_CONTRACT]);
-                } catch (err) {
-                    console.debug('RELEASE_LOCK (upload processing contract) failed:', err);
-                } finally {
-                    conn.release();
-                }
+                // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed
+                // RELEASE_LOCK so the upload-processing contract lock cannot
+                // leak onto a live pooled session (which would block every
+                // future upload and image_sizes/strip_gps settings change
+                // until process restart). Never throws.
+                await releasePooledAdvisoryLocks(conn, [LOCK_UPLOAD_PROCESSING_CONTRACT], 'upload processing contract');
             },
         };
     } catch (err) {
@@ -59,14 +59,17 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
         // connection during GET_LOCK round-trip) into a null return so the
         // caller surfaces a friendly toast instead of a 500.
         console.debug('GET_LOCK (upload processing contract) query failed:', err);
-        if (lockAcquired && !released) {
-            await conn.query('SELECT RELEASE_LOCK(?)', [LOCK_UPLOAD_PROCESSING_CONTRACT]).catch(() => {});
-        }
         if (!released) {
-            try {
-                conn.release();
-            } catch (releaseErr) {
-                console.debug('connection.release() after GET_LOCK failure threw:', releaseErr);
+            released = true;
+            if (lockAcquired) {
+                // C7-02: same destroy-don't-release discipline on the error path.
+                await releasePooledAdvisoryLocks(conn, [LOCK_UPLOAD_PROCESSING_CONTRACT], 'upload processing contract (error path)');
+            } else {
+                try {
+                    conn.release();
+                } catch (releaseErr) {
+                    console.debug('connection.release() after GET_LOCK failure threw:', releaseErr);
+                }
             }
         }
         return null;

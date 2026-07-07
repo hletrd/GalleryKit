@@ -9,8 +9,8 @@ import * as path from 'path';
  *   processing_error + failed_at (admin panel visibility + bootstrap-scan
  *   exclusion via isNull(processing_error)) and track the id as permanently
  *   failed, instead of silently re-enqueueing the same job forever. The
- *   RELEASE_LOCK failure path must log at error level (a leaked advisory lock
- *   on a live pooled session durably wedges future claims).
+ *   RELEASE_LOCK failure path must destroy the pooled lock connection instead
+ *   of returning a possibly lock-holding session to the pool.
  * - C1-06 (PERF-01): bootstrapMissingActiveEmbeddings launches must be deduped
  *   by an in-flight guard so overlapping bootstrap invocations cannot stack
  *   concurrent full scans into the shared CLIP inference queue.
@@ -34,12 +34,13 @@ describe('C1-04: claim exhaustion surfaces to the admin', () => {
         expect(giveUpRegion).toMatch(/eq\s*\(\s*images\.processed,\s*false\s*\)/);
     });
 
-    it('logs RELEASE_LOCK failures at error level, not debug', () => {
-        const releaseCatchIdx = queueSource.indexOf('Failed to release lock for job');
-        expect(releaseCatchIdx).toBeGreaterThan(-1);
-        const around = queueSource.slice(releaseCatchIdx - 200, releaseCatchIdx + 100);
-        expect(around).toMatch(/console\.error/);
-        expect(around).not.toMatch(/console\.debug\s*\(\s*`\[Queue\] Failed to release lock/);
+    it('uses the pooled advisory-lock release helper for claim release', () => {
+        const releaseIdx = queueSource.indexOf('async function releaseImageProcessingClaim');
+        expect(releaseIdx).toBeGreaterThan(-1);
+        const around = queueSource.slice(releaseIdx, releaseIdx + 900);
+        expect(queueSource).toContain("from '@/lib/advisory-lock-release'");
+        expect(around).toContain('releasePooledAdvisoryLocks(');
+        expect(around).not.toMatch(/lockConnection\.release\s*\(\s*\)/);
     });
 });
 

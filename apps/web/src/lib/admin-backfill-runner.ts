@@ -62,6 +62,7 @@ import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveC
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
 import { getGalleryConfigDetached } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
@@ -343,13 +344,12 @@ async function acquireBackfillLock(): Promise<PoolConnection | null> {
 
 async function releaseBackfillLock(lockConn: PoolConnection | null) {
     if (!lockConn) return;
-    try {
-        await lockConn.query('SELECT RELEASE_LOCK(?)', [LOCK_COLOR_PIPELINE_BACKFILL]);
-    } catch {
-        // Connection close releases the lock anyway.
-    } finally {
-        lockConn.release();
-    }
+    // C7-02 (run-10 cycle 7b): the previous catch-and-release-anyway shape
+    // could return a connection that STILL HOLDS the global backfill lock to
+    // the pool, making every future in-app backfill return `already_running`
+    // until process restart. The shared helper destroys the connection on a
+    // failed RELEASE_LOCK instead (and never throws).
+    await releasePooledAdvisoryLocks(lockConn, [LOCK_COLOR_PIPELINE_BACKFILL], 'color pipeline backfill');
 }
 
 // TRC-R5C2-01 (AGG-R5C2-08): per-image processing claim. The runner re-encodes
@@ -380,11 +380,14 @@ async function acquireImageProcessingClaim(imageId: number): Promise<PoolConnect
 
 async function releaseImageProcessingClaim(imageId: number, lockConn: PoolConnection | null) {
     if (!lockConn) return;
-    try {
-        await lockConn.query('SELECT RELEASE_LOCK(?)', [getImageProcessingLockName(imageId)]);
-    } finally {
-        lockConn.release();
-    }
+    // C7-02 (run-10 cycle 7b): destroy-don't-release on a failed RELEASE_LOCK
+    // so the per-image claim cannot leak onto a live pooled session (which
+    // would permanently block this image's reprocessing). Never throws.
+    await releasePooledAdvisoryLocks(
+        lockConn,
+        [getImageProcessingLockName(imageId)],
+        `backfill image processing claim ${imageId}`,
+    );
 }
 
 async function fetchCandidateCount(): Promise<number> {
