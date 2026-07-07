@@ -29,6 +29,13 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
     const touchStartX = useRef(0);
     const touchStartY = useRef(0);
     const isSwiping = useRef(false);
+    // C4-15 (run-10 c4): one-shot flag set by a swipe-SUCCESS touchend just
+    // before it triggers an in-place photo switch. The [prevId,nextId] layout
+    // effect below checks-and-clears it to SKIP its hard (no-transition) reset
+    // once, so the 0.25s settle animation the success branch started is allowed
+    // to play out instead of being snapped to 0 instantly on the onSelectId
+    // (shared-group) path where the component never remounts.
+    const skipNextHardReset = useRef(false);
     // C2-18 (run-10 c2): swipe-feedback visuals are driven imperatively via
     // these refs so a per-frame touchmove writes opacity/transform/width
     // straight to the nodes instead of re-rendering the whole component on
@@ -110,6 +117,16 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
     // info-bottom-sheet.tsx useLayoutEffect idiom from the same refactor
     // cycle (fc21007a).
     useLayoutEffect(() => {
+        if (skipNextHardReset.current) {
+            // C4-15 (run-10 c4): a swipe-success settle animation is already
+            // running toward the resting state for THIS in-place switch — let
+            // it finish rather than snapping to 0 with no transition. One-shot;
+            // the success branch already reset opacity/transform to 0 (just
+            // animated), so the DBG3-01/C3-13 stale-visual guarantee holds.
+            skipNextHardReset.current = false;
+            isSwiping.current = false;
+            return;
+        }
         applySwipeVisuals(0, false);
         isSwiping.current = false;
     }, [prevId, nextId, applySwipeVisuals]);
@@ -190,12 +207,16 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 // in-place photo switch (shared-group onSelectId path) the
                 // component does not remount, and the static JSX style
                 // literals mean React never clears the drag styles.
+                // C4-15: settle with animation and tell the layout effect to
+                // let it play out instead of hard-resetting on the id change.
                 applySwipeVisuals(0, true);
+                skipNextHardReset.current = true;
                 vibrateForSwipe();
                 goToPhoto(nextId);
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
                 // Swipe right -> prev photo (same reset rationale as above).
                 applySwipeVisuals(0, true);
+                skipNextHardReset.current = true;
                 vibrateForSwipe();
                 goToPhoto(prevId);
             } else {
