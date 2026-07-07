@@ -27,6 +27,7 @@ test.describe('photo page hydration (C4-03)', () => {
         });
 
         await ensureEnglishLocale(page);
+        await page.goto('/');
         const firstPhoto = page.locator('main a[href*="/p/"]').first();
         await expect(firstPhoto).toBeVisible();
         await firstPhoto.click();
