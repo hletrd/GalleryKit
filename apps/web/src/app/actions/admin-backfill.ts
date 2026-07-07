@@ -13,6 +13,8 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { logAuditEvent } from '@/lib/audit';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import {
     triggerAdminBackfill,
     getAdminBackfillCandidateCount,
@@ -35,6 +37,14 @@ export async function triggerBackfill(): Promise<TriggerBackfillResult> {
     if (originError) return { ok: false, status: 'error', error: originError };
     if (!(await isAdmin())) {
         return { ok: false, status: 'error', error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { ok: false, status: 'unavailable', error: maintenanceError };
+    }
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) {
+        return { ok: false, status: 'unavailable', error: t('restoreInProgress') };
     }
 
     // AGG-20 (plan-330 Unit B): the candidate count `triggerAdminBackfill`

@@ -239,7 +239,10 @@ async function reprobeOnce(): Promise<void> {
     reprobeTimer = null;
     if (heldConnection || stopping) return;
     const opened = await openGuardConnection('re-probe');
-    if (!opened) return;
+    if (!opened) {
+        scheduleReacquire();
+        return;
+    }
     const { conn, lockName } = opened;
     try {
         if (await tryAcquire(conn, lockName)) {
@@ -257,14 +260,17 @@ async function reprobeOnce(): Promise<void> {
             holdConnection(conn);
             return;
         }
+        contentionEmittedSinceLapse = true;
         emitLoudTopologyError(lockName);
         await conn.end().catch(() => {});
+        scheduleReacquire();
     } catch (err) {
         console.warn(
-            '[single-writer-guard] Error while re-probing the singleton advisory lock; skipping (this does not affect the app):',
+            '[single-writer-guard] Error while re-probing the singleton advisory lock; will retry in the background (this does not affect the app):',
             err,
         );
         await conn.end().catch(() => {});
+        scheduleReacquire();
     }
 }
 

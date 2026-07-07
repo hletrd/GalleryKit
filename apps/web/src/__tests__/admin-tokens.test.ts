@@ -269,6 +269,19 @@ describe('verifyToken', () => {
         expect(mockExecute.mock.calls[0][0]).toBeDefined();
     });
 
+    it('markTokenUsed is fenced by the restore admin mutation barrier', () => {
+        const functionIndex = ADMIN_TOKENS_SRC.indexOf('export async function markTokenUsed');
+        expect(functionIndex).toBeGreaterThanOrEqual(0);
+        const slotIndex = ADMIN_TOKENS_SRC.indexOf('using mutationSlot = acquireAdminMutationSlot();', functionIndex);
+        const acquiredIndex = ADMIN_TOKENS_SRC.indexOf('if (!mutationSlot.acquired) return;', slotIndex);
+        const updateIndex = ADMIN_TOKENS_SRC.indexOf('UPDATE admin_tokens SET last_used_at', acquiredIndex);
+
+        expect(ADMIN_TOKENS_SRC).toContain("from '@/lib/admin-mutation-barrier'");
+        expect(slotIndex).toBeGreaterThan(functionIndex);
+        expect(acquiredIndex).toBeGreaterThan(slotIndex);
+        expect(updateIndex).toBeGreaterThan(acquiredIndex);
+    });
+
     it('scope enforcement: upload route requires lr:upload', async () => {
         // token with only lr:read should NOT satisfy lr:upload requirement
         const { plaintext, hash } = generateToken();

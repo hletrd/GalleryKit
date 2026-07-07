@@ -1,108 +1,110 @@
-# Cycle 13 Test-Engineer Review
+# Cycle 15 Test-Engineer Review
 
-Scope: deep test coverage and reliability review for missing regression tests, fragile tests, test-only type gaps, Playwright coverage, fixture risk, and TDD opportunities. I inspected `AGENTS.md`, `CLAUDE.md`, test configs, CI workflows, E2E setup/fixtures, and representative test/source pairs across app routes, server actions, client components, scripts, migrations, image/color/HDR, semantic search, and operational helpers. I did not modify source code or plans.
+Scope: whole-repository test coverage and testability review for review-plan-fix cycle 15. I read the required local instructions first: `AGENTS.md`, the testing/gates/security portions of `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, and `.context/reviews/prompts/test-engineer.md`. I did not run mutating gates or E2E because this was a review-only task and the Playwright path intentionally seeds and mutates a disposable runtime; validation here is static inventory, source/config inspection, and cross-file coverage comparison.
 
 ## Inventory
 
-- Test harness: `apps/web/vitest.config.ts:16-39` runs `src/__tests__/**/*.test.{ts,tsx}` with Node-default environment, `.next` excluded, and a 15s timeout; `apps/web/playwright.config.ts:48-87` runs E2E with one serialized Chromium project and a local seeded/build server by default.
-- Test count: 348 Vitest test files under `apps/web/src/__tests__`; 9 Playwright specs plus helper/fixtures under `apps/web/e2e`.
-- Source-contract density: 213 Vitest files match source-reading/source-contract patterns (`readFileSync`, `SOURCE`, `toContain`, `toMatch`, or fixture-style source scans). These are useful tripwires, but they also create false-green risk where behavior is not executed.
-- CI gates: `.github/workflows/quality.yml:54-83` runs lint, typecheck, custom auth/origin/rate-limit scanners, production dependency audit, Vitest, DB init, Chromium E2E, and build. `.github/workflows/clip-preflight.yml:1-46` separately runs scheduled/manual real CLIP preflight.
-- E2E data setup: `apps/web/scripts/run-e2e-server.mjs:91-101` guards DB safety, initializes, seeds, and builds before serving; `apps/web/scripts/seed-e2e.ts:169-183` refuses production/non-disposable DBs unless explicitly opted in.
-- Conditional skips/focus: no `.only` found. Skips are admin credential/baseURL guards (`apps/web/e2e/admin.spec.ts:6-12`, `apps/web/e2e/origin-guard.spec.ts:28-77`) and real CLIP env/fixture gates (`apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`).
+- Test harness and gates examined: root `package.json:17-29`, `apps/web/package.json:8-29`, `apps/web/vitest.config.ts:16-39`, `apps/web/playwright.config.ts:48-87`, AGENTS quality gates at `AGENTS.md:29-38`, CLAUDE test/gate docs at `CLAUDE.md:665-722`, and security surface notes at `CLAUDE.md:199-249`.
+- Active test surface examined: 355 Vitest files under `apps/web/src/__tests__`; 9 Playwright spec files plus `helpers.ts` and 2 image fixtures under `apps/web/e2e`; about 3213 `it(`/`test(` declarations across the unit and E2E trees.
+- Active specialty source inventory examined: 8 API route files under `apps/web/src/app/api`, 13 server-action files under `apps/web/src/app/actions`, 81 app-route files under `apps/web/src/app`, 61 component files, 114 library files, 3 DB entry files, 28 scripts, and 33 Drizzle migration/meta files.
+- Source-contract inventory: 168 test files read source files directly via `readFileSync`/`readFile(...)`. I treated these as useful tripwires but reviewed whether they execute the behavior they claim to protect.
+- Gate coverage comparison: the server-side custom scanners are strong and tested: API admin auth, action origin, public route rate limits, touch target audit, migration journal/reconcile, privacy-sensitive field guards, upload-path security, and rate-limit ordering all have dedicated tests or fixture scanners. The thinner areas are browser/device diversity, visual assertions, client component behavior, and real CLIP pre-activation proof.
+- Skipped/generated exclusions: `.git`, `node_modules`, `.next`, `test-results`, coverage/dist output, hidden agent/runtime caches, and binary fixtures except where they were part of E2E or CLIP/color/HDR coverage. No active review-relevant file in the inventory above was intentionally skipped; lower-risk source files were covered through full-tree inventory, static scans, and targeted cross-file reads.
 
-## Findings
+## Confirmed Issues
 
-### TE13-01 - Playwright browser/device coverage is too narrow for the UI risk profile
-
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/playwright.config.ts:48-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-87`, `apps/web/e2e/swipe-visual-reset.spec.ts:23-31`
-- Failure scenario: a regression affects iOS/WebKit touch handling, Safari focus/clipboard behavior, Firefox color-gamut/media-query behavior, or mobile viewport layout while desktop Chromium stays green. The suite defines only the Desktop Chrome project, CI installs only Chromium, and the swipe test synthesizes `TouchEvent`s inside a desktop Chromium context instead of using a real touch-capable/mobile project.
-- Suggested fix/test: add a small required Playwright matrix rather than duplicating all specs: mobile WebKit for nav/search/photo/lightbox/swipe, plus one Firefox or WebKit desktop smoke. Keep admin specs serialized, but split public mobile smoke into its own project so the login-rate-limit constraint does not block device coverage.
-- TDD opportunity: first add a mobile WebKit smoke that opens the mobile nav, search dialog, first photo, and lightbox; make it fail on any missing role/visibility before broadening.
-
-### TE13-02 - Nav “visual” checks write screenshots but do not assert visual diffs
-
-- Severity: Low
-- Confidence: High
-- File/region: `apps/web/e2e/nav-visual-check.spec.ts:40-87`
-- Failure scenario: nav colors, spacing, logo/title alignment, menu panel composition, or visual regressions drift while tests pass because the spec only validates target sizes/non-overlap and writes PNG artifacts with `page.screenshot(...)`. No `toHaveScreenshot(...)` baseline or pixel comparison can fail the gate.
-- Suggested fix/test: either convert the three screenshots to Playwright `expect(page).toHaveScreenshot(...)` baselines or rename the spec to “nav layout metrics” and add a true screenshot-diff spec for the visual claim.
-- TDD opportunity: add a failing baseline for `mobile nav expanded` first, then update once the expected rendering is confirmed.
-
-### TE13-03 - Admin password-change UI has no browser-level regression test
+### TE15-01 - Nav visual E2E writes screenshots but cannot fail on visual regressions
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/e2e/admin.spec.ts:20-43`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:36-45`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:65-120`, `apps/web/src/__tests__/password-form-a11y.test.ts:10-18`, `apps/web/src/__tests__/auth-actions-behavior.test.ts:241-254`, `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:31-103`
-- Failure scenario: the password page renders and navigation passes, but the form can stop calling `formAction(formData)`, input names can drift from the server action, client-side mismatch validation can stop announcing/focusing, pending disable/focus restore can regress, or successful password rotation can break in the real browser path. Existing tests cover source strings, action ordering, and one hostile-origin action branch, but no Playwright test submits the password form.
-- Suggested fix/test: add a non-destructive admin E2E for mismatched new/confirm passwords that asserts the inline/summary error and focus behavior without changing credentials. Add an opt-in destructive-safe local test that changes to a generated temporary password, logs in with it, then changes back in `finally`.
-- TDD opportunity: start with the mismatch-only E2E because it is reversible and does not mutate stored credentials.
+- File/region: `apps/web/e2e/nav-visual-check.spec.ts:40-58`, `apps/web/e2e/nav-visual-check.spec.ts:61-72`, `apps/web/e2e/nav-visual-check.spec.ts:75-85`; repo-wide screenshot search found only these `page.screenshot(...)` calls and no `toHaveScreenshot(...)`/snapshot comparison.
+- Why this is a problem: the spec name and artifacts imply visual coverage, but the assertions only prove visibility, 44 px target dimensions, and non-overlap. The screenshots are written to `test-results` and are not compared against a baseline.
+- Concrete failure scenario: a nav redesign breaks spacing, colors, logo alignment, active chip styling, or mobile panel composition while every target remains visible and non-overlapping. `npm run test:e2e --workspace=apps/web` still passes and the unreviewed PNG artifact is the only clue.
+- Suggested fix: either convert the three captures to Playwright `expect(page).toHaveScreenshot(...)` with committed baselines, or rename the spec to a geometry smoke and add a separate baseline-diff visual spec for mobile collapsed, mobile expanded, and desktop nav.
+- TDD opportunity: first add a failing baseline for the mobile expanded menu, verify the intended rendering manually once, then commit the accepted baseline.
 
-### TE13-04 - Service-worker registration can disappear while SW logic tests stay green
-
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/src/components/register-service-worker.tsx:13-25`, `apps/web/src/app/[locale]/layout.tsx:13-14`, `apps/web/src/app/[locale]/layout.tsx:136-152`, `apps/web/src/__tests__/sw-template-contract.test.ts:22-28`
-- Failure scenario: a refactor removes `<RegisterServiceWorker />` from the root layout or changes the production-only registration path. The extensive SW template/cache tests still pass because they read `public/sw.template.js`, `scripts/build-sw.ts`, `proxy.ts`, and generated `public/sw.js`, not the runtime registration wiring.
-- Suggested fix/test: add a source/SSR contract that the locale root layout imports and renders `RegisterServiceWorker`, plus a small component test or Playwright production-build smoke that stubs `navigator.serviceWorker.register` and asserts `/sw.js` with `{ scope: '/' }` only in production.
-- TDD opportunity: write the layout wiring test first; then add the browser registration smoke once a DOM/component harness exists.
-
-### TE13-05 - Client component behavior is over-represented by source-string tests
+### TE15-02 - There is no coverage report, threshold, or changed-file coverage ratchet
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/vitest.config.ts:16-39`, `apps/web/package.json:72-88`, `apps/web/src/__tests__/use-restore-focus-after-pending.test.ts:5-21`, `apps/web/src/__tests__/search-status-source.test.ts:15-70`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-30`, `apps/web/src/__tests__/client-source-contracts.test.ts:172-224`
-- Failure scenario: search stale-response handling, load-more retry/backoff/live-region behavior, token creation pending guards, or field-error rendering changes behavior but preserves the asserted source tokens. The project currently has no jsdom/happy-dom/testing-library dependency and the Vitest config does not set a DOM environment, forcing many client tests to inspect strings instead of user-visible state.
-- Suggested fix/test: add a small DOM-capable test lane for high-value client islands (`Search`, `LoadMore`, `PasswordForm`, Tokens page interactions). Keep source contracts only for static architecture invariants that are hard to execute cheaply.
-- TDD opportunity: start by porting `search-status-source.test.ts` to a behavior test with mocked `searchImagesAction`/`fetch`, fake timers, and assertions that stale slow responses do not render visible status/results.
+- File/region: root scripts at `package.json:17-29`, web scripts at `apps/web/package.json:8-29`, and Vitest config at `apps/web/vitest.config.ts:16-39`.
+- Why this is a problem: the repo has a very large suite, but no configured coverage command or threshold. A full-text search for coverage tooling found prose/comments and test names, not a runnable coverage gate. This matters because 168 tests are source-contract tests and may not execute the runtime branches they protect.
+- Concrete failure scenario: a new public API route, action branch, migration reconcile path, or client island lands with only source-string assertions or no test. Lint/typecheck/build/Vitest can still pass because no gate measures changed-file execution.
+- Suggested fix: add a non-blocking `test:coverage` first, then introduce a changed-file ratchet for high-risk directories (`src/app/api`, `src/app/actions`, `src/lib`, `scripts/migrate.js`, and high-traffic client components). Keep broad global thresholds optional until noisy generated/source-contract-only cases are classified.
+- TDD opportunity: add a temporary untested fixture under a critical directory and make the ratchet fail before enforcing it in CI.
 
-### TE13-06 - Timeline/year-in-review tests partly reimplement behavior instead of executing it
+## Likely Issues
 
-- Severity: Low
+### TE15-03 - Semantic scan caps are source-pinned instead of behavior-asserted
+
+- Severity: Medium
+- Confidence: Medium
+- File/region: `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:1-17`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-76`, `apps/web/src/__tests__/semantic-search-route.test.ts:372-382`, `apps/web/src/__tests__/semantic-search-route.test.ts:459-467`, `apps/web/src/__tests__/similar-route.test.ts:59-78`, runtime routes at `apps/web/src/app/api/search/semantic/route.ts:263-279` and `apps/web/src/app/api/search/similar/[id]/route.ts:177-190`.
+- Why this is a problem: the runtime code correctly applies `.limit(SEMANTIC_SCAN_LIMIT)`, but the behavioral DB mocks resolve from `.limit(...)` without recording or asserting the argument. The dedicated cap test reads route source and regexes `.limit(SEMANTIC_SCAN_LIMIT)`, which catches simple deletion but does not prove the scan query receives that cap.
+- Concrete failure scenario: a refactor leaves `.limit(SEMANTIC_SCAN_LIMIT)` in a dead/unrelated chain or changes the embedding-scan chain to call `.limit(topK)` while preserving the searched source tokens. The expensive vector scan can become too wide, and the behavioral tests still pass.
+- Suggested fix: in both semantic and similar route tests, make the embedding-scan `.limit` a spy and assert it is called with `SEMANTIC_SCAN_LIMIT` for the scan query, while the target lookup in similar remains `.limit(1)`. Keep the source-contract test as a secondary architecture tripwire only.
+- TDD opportunity: first change a local test double to fail when `.limit` receives anything other than `SEMANTIC_SCAN_LIMIT`, then wire the route test to that double.
+
+### TE15-04 - High-value client interactions are still mostly tested through source strings
+
+- Severity: Medium
 - Confidence: High
-- File/region: `apps/web/src/__tests__/data-timeline.test.ts:121-204`, `apps/web/src/lib/data-timeline.ts:195-221`, `apps/web/src/lib/data-timeline.ts:243-267`
-- Failure scenario: `getYearInReviewImages()` stops calling `getTimelineImages(year)`, mishandles `truncated`, changes grouping behavior, or sorts sections incorrectly. The tests at `data-timeline.test.ts:121-204` validate inline fake grouping helpers and source snippets, not the exported function with a mocked `getTimelineImages`/DB result.
-- Suggested fix/test: refactor the month-grouping logic into a pure exported helper and test it directly, or mock the DB chain so `getYearInReviewImages(year)` executes against controlled rows and asserts `sections` plus `truncated`.
-- TDD opportunity: write a failing direct test where `getTimelineImages` returns `{ images: [...], truncated: true }` and assert `getYearInReviewImages` preserves `truncated` and groups by descending month.
+- File/region: Node-only Vitest config at `apps/web/vitest.config.ts:16-39`; source-string tests at `apps/web/src/__tests__/search-status-source.test.ts:15-70`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-30`, and `apps/web/src/__tests__/map-thumb-wiring.test.ts:34-85`; runtime behavior in `apps/web/src/components/search.tsx:163-281`, `apps/web/src/components/search.tsx:283-315`, `apps/web/src/components/load-more.tsx:43-110`, `apps/web/src/components/map/map-client.tsx:53-72`, and `apps/web/src/app/[locale]/(public)/map/page.tsx:89-95`.
+- Why this is a problem: the tests assert tokens such as `requestIdRef.current++`, cooldown refs, `sizedImageUrl(`, and prop names. They do not execute user-visible behavior such as stale async search suppression, abort handling, retry cooldowns, live-region messaging, one-shot image fallback, or configured map thumbnail URL generation.
+- Concrete failure scenario: a slow stale semantic search response renders after a newer query, load-more transient retry suppression stops working, or map thumbnails regress to full-size images while the asserted strings remain present in helper comments or nearby code. The suite stays green because the contract is lexical rather than behavioral.
+- Suggested fix: avoid broad new dependencies unless approved, but move the highest-risk pieces into executable contracts: pure state helpers for search/load-more transitions, URL helper tests for thumbnail selection/fallback, and Playwright flows for search stale-response and load-more retry behavior. If a DOM-capable Vitest lane is acceptable later, port these client islands to jsdom/happy-dom behavior tests.
+- TDD opportunity: start with search stale-response handling: mock a slow first request and fast second request, assert only the second query's status/results become visible.
 
-### TE13-07 - Test-only request mocks erase route contract types
+### TE15-05 - Password-change UI has no browser-level submit regression test
+
+- Severity: Medium
+- Confidence: High
+- File/region: E2E only navigates to the password page at `apps/web/e2e/admin.spec.ts:36-38`; form behavior lives in `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:36-45` and `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:59-120`; existing tests are source/action-side at `apps/web/src/__tests__/password-form-a11y.test.ts:10-18`, `apps/web/src/__tests__/auth-actions-behavior.test.ts:241-254`, and `apps/web/src/app/actions/auth.ts:342-430`.
+- Why this is a problem: the action has coverage for server-side validation/order, and the E2E suite proves the form is visible, but no browser test submits the form. The client-only mismatch guard, `formAction(formData)` handoff, pending disable/focus restore, field names, and alert rendering are not exercised together.
+- Concrete failure scenario: a refactor changes the `name` of `confirmPassword`, prevents `formAction` from being called after a valid client submission, or breaks the mismatch alert/focus behavior. Unit/source tests still pass and admin E2E still passes because it never submits the form.
+- Suggested fix: add a non-destructive admin E2E that fills mismatched new/confirm passwords and asserts the visible error summary plus `aria-invalid` without changing credentials. Add a separately gated reversible test for real password rotation only if it can always restore the original password in `finally`.
+- TDD opportunity: mismatch-only E2E first, because it is deterministic and does not mutate stored credentials.
+
+### TE15-06 - Service-worker registration is source-pinned, not browser-proven
 
 - Severity: Low
 - Confidence: Medium
-- File/region: `apps/web/src/__tests__/semantic-search-route.test.ts:83-105`, `apps/web/src/__tests__/semantic-search-route.test.ts:163-168`, `apps/web/src/__tests__/semantic-search-route.test.ts:294-298`, `apps/web/src/app/api/search/semantic/route.ts:107-184`
-- Failure scenario: the semantic route starts relying on another `NextRequest` property (`nextUrl`, `cookies`, a real `AbortSignal`, streaming body semantics, etc.) and tests continue compiling because partial object literals are force-cast with `as unknown as NextRequest`. Failures would appear as runtime-only surprises or be missed if the exercised branch never touches the missing property.
-- Suggested fix/test: use real `new NextRequest(new Request(...))` objects where possible, and centralize any partial mocks behind typed factories that satisfy the actual route access surface without `unknown` double-casts. Keep one explicit already-aborted factory, but type it as a minimal interface consumed by a helper if `NextRequest` cannot be constructed aborted.
-- TDD opportunity: add a typed request factory test that fails if route code accesses a property absent from the factory.
+- File/region: registration component at `apps/web/src/components/register-service-worker.tsx:13-25`, root layout wiring at `apps/web/src/app/[locale]/layout.tsx:13` and `apps/web/src/app/[locale]/layout.tsx:152`, source contract at `apps/web/src/__tests__/client-source-contracts.test.ts:58-61`, and SW template tests anchored on generated worker contents at `apps/web/src/__tests__/sw-template-contract.test.ts:28`.
+- Why this is a problem: the generated service worker has extensive template tests, and the root layout import/render is source-pinned, but no test executes production-mode registration or proves `navigator.serviceWorker.register('/sw.js', { scope: '/' })` is called in the browser.
+- Concrete failure scenario: a refactor changes the registration path/scope, removes the production guard, or introduces a browser-only exception before registration. The SW template tests still pass because `public/sw.js` is correct, and the layout source contract can still pass if the component remains mounted.
+- Suggested fix: add a small browser smoke in a production-build context that stubs `navigator.serviceWorker.register` and asserts the path/scope call, or extract the registration decision into a tiny helper that can be executed under unit tests while keeping the browser smoke for integration.
+- TDD opportunity: write the helper test first for `NODE_ENV`/capability gating, then add the production Playwright smoke when the harness can stub `serviceWorker`.
 
-### TE13-08 - Real HEIF/AVIF/HDR fixture gap remains documented but open
+## Risks Requiring Manual Validation
+
+### TE15-07 - Playwright runs only Desktop Chrome
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/__test_fixtures__/color/README.md:19-39`, `apps/web/__test_fixtures__/color/README.md:61-73`, `apps/web/src/__tests__/color-fixtures.test.ts:1-15`, `apps/web/src/__tests__/gain-map-detection.test.ts:1-12`, `apps/web/src/__tests__/process-image-color-roundtrip.test.ts:11-14`, `apps/web/src/__tests__/process-image-color-roundtrip.test.ts:81-114`
-- Failure scenario: hand-crafted ISOBMFF/ICC buffers and Sharp-generated synthetic images cover parser shapes, but a real iPhone HDR HEIC, real CICP-only AVIF, or real 10-bit PQ/HLG HEIF exposes box ordering, auxiliary-image references, decoder metadata, or ICC/CICP interactions not represented by the synthetic fixtures. The docs explicitly list these planned fixtures and explain they are absent.
-- Suggested fix/test: add compact real-world metadata fixtures for PQ HEIF, HLG HEIF, Rec.2020 CICP-only AVIF, DCI-P3 TIFF, and iPhone gain-map HEIC. If proprietary pixel data is a concern, keep metadata-only/pixel-stripped fixtures as suggested in the README and assert detection through the public `detectColorSignals` path.
-- TDD opportunity: start with a metadata-only `iphone-15-hdr.heic` fixture and a failing `detectColorSignals` test that asserts `hasGainMap === true`, `isHdr === true`, and NCLX precedence over ICC naming.
+- File/region: `apps/web/playwright.config.ts:48-58` serializes the suite for admin login budgets; `apps/web/playwright.config.ts:72-77` defines a single `chromium` project using `Desktop Chrome`.
+- Why this needs manual validation: the public UI depends on mobile navigation, focus traps, touch/swipe behavior, color-scheme media, clipboard permissions, and photo viewer layout. Some specs set mobile viewport sizes, but they still run in Chromium's desktop engine rather than mobile WebKit or Firefox.
+- Concrete failure scenario: iOS/WebKit focus, viewport, pointer/touch, or status-bar behavior regresses while Desktop Chrome passes. This is especially relevant for search dialogs, mobile nav, lightbox/swipe, bottom sheets, and OLED/color UI.
+- Suggested fix: add a small required Playwright project for mobile WebKit covering home/nav/search/photo/lightbox, plus one Firefox or desktop WebKit smoke. Keep admin specs serialized or isolated so login-rate-limit constraints do not block public device coverage.
 
-### TE13-09 - No coverage report, threshold, or changed-file coverage ratchet exists
+### TE15-08 - Real CLIP production encoder proof is intentionally manual/env-gated
 
-- Severity: Low
+- Severity: Medium
 - Confidence: High
-- File/region: `apps/web/package.json:13-29`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:54-83`
-- Failure scenario: a new public API route, server action, migration reconciliation branch, queue path, or client component lands with no executed tests. The suite can still pass because there is no coverage measurement or changed-file coverage ratchet, and source-contract tests may assert static strings without covering execution.
-- Suggested fix/test: add a non-blocking `test:coverage` using Vitest V8 coverage, then introduce a changed-file ratchet for critical directories (`src/app/actions`, `src/app/api`, `src/lib`, `scripts/migrate.js`) before considering broad global thresholds. Require explicit reviewed exemptions for generated/source-contract-only cases.
-- TDD opportunity: create a temporary fixture module under a critical directory with no tests and make the ratchet fail before wiring it to CI.
+- File/region: operator runbook at `CLAUDE.md:610-618`, runtime limit docs at `CLAUDE.md:620-626`, script gate at `apps/web/package.json:21-23`, offline-load skip gate at `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, and semantic integration skip gate at `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`.
+- Why this needs manual validation: default CI has no model weights, so both real encoder tests are skipped unless an operator provides `CLIP_MODELS_ROOT` and env flags. This is documented and probably appropriate for a heavy model path, but it means normal PR gates do not prove production semantic search can load weights or rank real images.
+- Concrete failure scenario: model layout, pinned revision, native ONNX binding, or seeded volume path drifts. Stub-mode tests and source contracts pass; production semantic activation fails only when the operator flips the DB row without running preflight.
+- Suggested fix: keep the manual preflight mandatory, and consider writing a small activation checklist/marker that refuses or warns on production semantic mode unless the preflight script has succeeded against the current model root and revision.
 
-## Positive Coverage Notes
+## Positive Coverage Evidence
 
-- The migration/journal risk is well guarded: `migration-journal*.test.ts`, `migrate-pending-migrations.test.ts`, and `migrate-reconcile-coverage.test.ts` cover journal monotonicity, pending/drift behavior, DML baseline refusal, and reconcile coverage.
-- Security scanners are both implemented and tested: API auth, action origin, and public route rate-limit gates have fixture-based tests and are run in CI.
-- E2E seed safety is strong: destructive seed/init requires a disposable DB name or explicit opt-in before DB deletes/file removes.
-- CLIP production proof is not absent: it is split into a scheduled/manual workflow with seeded weights, which is appropriate for a heavy model path. The remaining risk is that normal PR quality does not run it.
+- Security gate coverage is comparatively strong: CLAUDE documents blocking auth/origin/rate-limit lint gates at `CLAUDE.md:678-695`, and the repo has fixture tests for those scanners. Public/admin API route inventory was checked against the scanner model, and current route files are either wrapped, rate-limited before expensive work, or explicitly exempted.
+- E2E seed safety is intentionally guarded: `apps/web/scripts/run-e2e-server.mjs` asserts disposable DB safety before init/seed/build, and `apps/web/scripts/seed-e2e.ts` refuses production/non-disposable databases unless explicitly opted in.
+- Touch target coverage is broad: `apps/web/src/__tests__/touch-target-audit.test.ts:17-23` documents a recursive audit, and `apps/web/src/__tests__/touch-target-audit.test.ts:84-88` scans components, admin route files, and public route files.
+- Admin E2E credentials are enforced when CI expects admin coverage: `apps/web/e2e/admin.spec.ts:6-12` and `apps/web/e2e/origin-guard.spec.ts:27-31`.
 
 ## Final Sweep
 
-- Missed coverage sweep checked route/action inventory, source-contract density, Playwright projects, skipped tests, E2E seed/build flow, CLIP preflight workflow, SW registration, client-only components, timeline grouping, color/HDR fixtures, and request mocks.
-- Flaky-test sweep found no focused tests. Existing reliability controls include serialized Playwright workers for login budgets, `.next` exclusion from Vitest discovery, raised source-scan timeout, deterministic E2E seed data, and guarded destructive seed setup.
-- Full gates were not run because this was a review-only task and no application source changed.
+- Commonly missed issue sweep covered: focused/skipped tests, source-contract tests, visual assertions, browser/device projects, admin credential gating, semantic/CLIP env gates, route/action scanners, touch-target audit, migration/schema gates, E2E seed safety, SW registration, search/load-more/map client behavior, password-change UI, and API/action route inventories.
+- No `.only` tests were found. Skips are limited to admin credential/baseURL guards and real CLIP env/fixture guards: `apps/web/e2e/admin.spec.ts:7-12`, `apps/web/e2e/origin-guard.spec.ts:29-58`, `apps/web/src/__tests__/clip-offline-load.test.ts:41`, and `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`.
+- I did not identify a new confirmed gap in the server-side auth/origin/rate-limit scanner coverage. The main remaining risk is that several high-value client and semantic-search contracts are still lexical or single-engine rather than behavior/device-proven.
+- Relevant active files from the inventory were examined through file inventories, static scans, and targeted full-file reads for each specialty surface. No relevant active file in the inventory was intentionally skipped.

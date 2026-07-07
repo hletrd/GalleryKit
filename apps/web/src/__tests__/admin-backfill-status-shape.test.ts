@@ -11,6 +11,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const ADMIN_BACKFILL_ACTION_SRC = fs.readFileSync(
+    path.resolve(__dirname, '..', 'app', 'actions', 'admin-backfill.ts'),
+    'utf8',
+);
 
 vi.mock('@/app/actions/auth', () => ({
     isAdmin: vi.fn(async () => true),
@@ -73,5 +80,19 @@ describe('AGG-6: getBackfillStatus forwards the extended runner-state shape', ()
         const res = await getBackfillStatus();
         expect(res.ok).toBe(false);
         expect(res.error).toBeTruthy();
+    });
+
+    it('triggerBackfill is fenced by restore maintenance and the admin mutation barrier', () => {
+        const functionIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('export async function triggerBackfill');
+        expect(functionIndex).toBeGreaterThanOrEqual(0);
+        const maintenanceIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('const maintenanceError = getRestoreMaintenanceMessage', functionIndex);
+        const slotIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('using mutationSlot = acquireAdminMutationSlot();', maintenanceIndex);
+        const triggerIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('const result = await triggerAdminBackfill();', slotIndex);
+
+        expect(ADMIN_BACKFILL_ACTION_SRC).toContain("from '@/lib/admin-mutation-barrier'");
+        expect(ADMIN_BACKFILL_ACTION_SRC).toContain("from '@/lib/restore-maintenance'");
+        expect(maintenanceIndex).toBeGreaterThan(functionIndex);
+        expect(slotIndex).toBeGreaterThan(maintenanceIndex);
+        expect(triggerIndex).toBeGreaterThan(slotIndex);
     });
 });

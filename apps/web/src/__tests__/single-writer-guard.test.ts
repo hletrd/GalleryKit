@@ -509,6 +509,19 @@ describe('post-lapse re-acquire loop (C4-06 / CRIT4-03)', () => {
             vi.useRealTimers();
         }
     });
+
+    it('re-probe failures and persistent contention hand off to the background re-acquire loop', () => {
+        const source = readFileSync(resolve(__dirname, '../lib/single-writer-guard.ts'), 'utf8');
+        const reprobeStart = source.indexOf('async function reprobeOnce');
+        const nextExport = source.indexOf('export async function startSingleWriterGuard', reprobeStart);
+        const reprobeBody = source.slice(reprobeStart, nextExport);
+
+        expect(reprobeBody).toContain('if (!opened) {');
+        expect(reprobeBody).toContain('scheduleReacquire();');
+        expect(reprobeBody).toContain('contentionEmittedSinceLapse = true;');
+        expect(reprobeBody).toContain('will retry in the background');
+        expect((reprobeBody.match(/scheduleReacquire\(\);/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    });
 });
 
 describe('stopSingleWriterGuard', () => {

@@ -102,6 +102,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
     if (!hasTrustedSameOrigin(requestHeaders)) {
         return { error: t('authFailed') };
     }
+
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) {
+        return { error: t('restoreInProgress') };
+    }
+
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
     const loginBucketStart = getRateLimitBucketStart(now, LOGIN_WINDOW_MS);
@@ -287,8 +293,12 @@ export async function logout(formData?: FormData) {
                 if (session) {
                     logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
                 }
-                await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
-                revoked = true;
+                try {
+                    await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token)));
+                    revoked = true;
+                } catch (err) {
+                    console.debug('Failed to delete session during logout; queuing revocation:', err);
+                }
             }
         }
         if (!revoked) {

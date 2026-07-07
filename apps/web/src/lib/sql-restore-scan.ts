@@ -30,12 +30,38 @@ export const APP_BACKUP_TABLES = [
     'topics',
 ] as const;
 
-const APP_BACKUP_TABLE_PATTERN = APP_BACKUP_TABLES.join('|');
+function escapeRegExp(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function tableNamePatternWithScannerBoundary(tableName: string): string {
+    // appendSqlScanChunk joins the compacted previous tail and current chunk
+    // with a literal newline. If that newline lands inside a known app table
+    // name, the allowed-drop mask must still recognize the dump's own
+    // `DROP TABLE IF EXISTS` prelude; otherwise the generic DROP TABLE guard
+    // false-positives on a valid backup. Restrict the tolerance to the scanner's
+    // injected newline rather than arbitrary SQL whitespace.
+    return Array.from(tableName).map(escapeRegExp).join('(?:\\n)?');
+}
+
+const APP_BACKUP_TABLE_PATTERN = APP_BACKUP_TABLES.map(tableNamePatternWithScannerBoundary).join('|');
 const APP_BACKUP_TABLE_SET = new Set<string>(APP_BACKUP_TABLES);
 const ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN = new RegExp(
     "\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\s+`?(?:" + APP_BACKUP_TABLE_PATTERN + ")`?\\s*;",
     'gi',
 );
+const TRAILING_APP_BACKUP_DROP_FRAGMENT_PATTERN = /\bDROP\s+TABLE\s+IF\s+EXISTS\s+`?([A-Za-z0-9_$\n]*)$/i;
+
+function maskAllowedAppBackupDrops(input: string): string {
+    const withoutCompleteDrops = maskMatches(input, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+    return withoutCompleteDrops.replace(TRAILING_APP_BACKUP_DROP_FRAGMENT_PATTERN, (match, rawTablePrefix: string) => {
+        const normalizedPrefix = rawTablePrefix.replace(/\n/g, '').toLowerCase();
+        if (APP_BACKUP_TABLES.some((tableName) => tableName.startsWith(normalizedPrefix))) {
+            return ' '.repeat(match.length);
+        }
+        return match;
+    });
+}
 const SQL_IDENTIFIER_PATTERN = '(?:`(?:``|[^`])+`|[A-Za-z0-9_$]+)';
 const SQL_SCHEMA_QUALIFIED_IDENTIFIER_PATTERN = new RegExp(
     `(?:^|[^A-Za-z0-9_$\`])${SQL_IDENTIFIER_PATTERN}\\s*\\.\\s*${SQL_IDENTIFIER_PATTERN}`,
@@ -154,7 +180,7 @@ export function stripSqlCommentsAndLiterals(input: string): string {
     const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
 
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '');
-    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+    const withoutAllowedAppBackupDrops = maskAllowedAppBackupDrops(withoutComments);
 
     return [
         /'(?:''|\\.|[^'\\])*'/gs,
@@ -171,7 +197,7 @@ export function stripSqlCommentsAndLiterals(input: string): string {
 function stripSqlCommentsAndLiteralsWithCommentSpaces(input: string): string {
     const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, (match) => ' '.repeat(match.length));
-    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+    const withoutAllowedAppBackupDrops = maskAllowedAppBackupDrops(withoutComments);
 
     return [
         /'(?:''|\\.|[^'\\])*'/gs,
@@ -186,7 +212,7 @@ function stripSqlCommentsAndLiteralsWithCommentSpaces(input: string): string {
 function stripSqlCommentsAndValueLiterals(input: string): string {
     const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '');
-    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+    const withoutAllowedAppBackupDrops = maskAllowedAppBackupDrops(withoutComments);
 
     return [
         /'(?:''|\\.|[^'\\])*'/gs,
@@ -200,7 +226,7 @@ function stripSqlCommentsAndValueLiterals(input: string): string {
 function stripSqlCommentsAsSpacesAndValueLiterals(input: string): string {
     const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, (match) => ' '.repeat(match.length));
-    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
+    const withoutAllowedAppBackupDrops = maskAllowedAppBackupDrops(withoutComments);
 
     return [
         /'(?:''|\\.|[^'\\])*'/gs,

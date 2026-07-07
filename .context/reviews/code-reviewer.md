@@ -1,55 +1,47 @@
-# Cycle 14 Code-Reviewer + Debugger Review
+# Cycle 15 Code-Reviewer Review
 
 Date: 2026-07-07
 
-Mode: read-only repository review. The only file written by this prompt is this report.
+Mode: read-only whole-repository review from the code quality/correctness/maintainability angle. The only file written by this prompt is this report.
 
 ## Scope And Inventory
 
+Required instructions read before review: `AGENTS.md`, the relevant `CLAUDE.md` architecture/security/testing/deploy sections, `.context/reviews/prompts/common_review_scope.md`, and `.context/reviews/prompts/code-reviewer.md`.
+
 Inventory basis:
 
-- `git ls-files` returned 3,443 tracked paths.
-- The live review-relevant set was 703 tracked paths: app code, server actions, route handlers, components, data/db modules, scripts, migrations, tests, e2e tests, nginx config, GitHub workflows, package files, and TypeScript/Next/Vitest/Playwright config.
-- Category counts reviewed:
-  - `apps/web/src/app`: 81 route/action/layout/page files
-  - `apps/web/src/components`: 61 component files
-  - `apps/web/src/lib`: 111 library/runtime files
-  - `apps/web/src/db`: 3 DB entry/schema files
-  - `apps/web/src/__tests__`: 353 unit/source-contract tests
-  - `apps/web/scripts`: 29 operational/check/build scripts
-  - `apps/web/e2e`: 12 Playwright files
-  - `apps/web/drizzle`: 33 migrations/meta files
-  - `apps/web/messages`: 2 locale message files
-  - `apps/web/nginx`: 1 nginx template
-  - `scripts`: 2 root scripts
-  - `.github`: 4 workflow/dependabot files
-- Historical `.context/reviews` and `.context/plans` material was treated as context/history rather than live runtime behavior. Binary/static assets and generated artifacts were not treated as code behavior.
+- `git ls-files` returned 3,468 tracked paths.
+- The live review-relevant inventory contained 707 tracked paths: app source, server actions, route handlers, components, data/db modules, scripts, migrations, tests, e2e tests, messages, workflows, package files, and TypeScript/Next/Vitest/Playwright config.
+- The production runtime TypeScript/TSX surface contained 261 files under `apps/web/src/{app,components,db,lib,i18n}` plus `proxy.ts` and `instrumentation.ts`.
+- Category counts reviewed: `apps/web/src/app` 80, `components` 61, `lib` 114, `db` 3, `src/__tests__` 355, `apps/web/scripts` 28, `apps/web/e2e` 12, `apps/web/drizzle` 33, `apps/web/messages` 2, `.github/workflows` 2.
+- Historical `.context/reviews` and `.context/plans` files were treated as context/history, not live behavior. Static/binary assets, build output, and dependency directories were excluded from live-code findings.
 
 Review focus:
 
-- Admin auth, token auth, same-origin guards, public-route rate limits, upload/delete/bulk-edit paths, Lightroom upload API, public analytics actions, semantic/similar search, OG routes, image processing queue, DB backup/restore, migrations and reconcile baselining, schema privacy guards, nginx/deploy topology, CI quality gates, and the test/source-contract suite.
+- Cross-file correctness around admin/session/PAT auth, same-origin guards, public route rate limits, public data privacy boundaries, upload/delete/bulk-edit flows, Lightroom upload, image queue/backfill/retry, restore/backup/migration flows, semantic search/CLIP gates, public share/feed/OG routes, pagination/cursor semantics, source-contract tests, and package/config quality gates.
 
 ## Validation Evidence
 
-Executed read-only/security-lint validation:
+Executed read-only guard checks:
 
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
 
+Additional review evidence:
+
+- Inventory-wide `rg` scans covered mutating calls, `catch`/rollback behavior, revalidation, rate-limit helpers, `cache()` usage, `process.env` usage, child processes, stream handling, filesystem cleanup, `TODO/FIXME/HACK`, TypeScript suppressions, and public/admin route surfaces.
+- Direct code reads covered the largest and highest-risk files, including `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/app/actions/auth.ts`, shared feed/share/photo/topic/collection pages, search routes, upload routes, and package scripts.
+
 Not run in this prompt:
 
-- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and Playwright e2e. Those commands can create/update `.next`, typegen, coverage/cache, browser artifacts, or DB state, and the prompt constrained this pass to read-only except this report.
-
-Note:
-
-- A direct raw `node apps/web/scripts/check-*.ts` experiment is not a finding. The package scripts intentionally run those TypeScript checkers through `tsx` (`apps/web/package.json:25-27`), and the npm lint-gate executions above passed.
+- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and Playwright e2e. Those commands can create/update `.next`, Next typegen, tsbuildinfo, cache, coverage, browser artifacts, or DB state, while this assignment forbids modifications outside this review file.
 
 ## Findings Summary
 
 - Confirmed issues: 0
 - Likely issues: 0
-- Risks needing manual validation: 2
+- Risks requiring manual validation: 0 code risks found; 1 validation gap noted below.
 
 ## Confirmed Issues
 
@@ -59,54 +51,44 @@ None found in this pass.
 
 None found in this pass.
 
-## Risks Needing Manual Validation
+## Risks Requiring Manual Validation
 
-### C14-CR-RISK-01: Reverse-proxy topology can collapse all app and nginx per-IP limits into one shared bucket
+No source-backed code risk was found that warrants a manual-validation finding.
 
-- Severity: High
-- Confidence: Medium
-- Location: `apps/web/nginx/default.conf:20-29`, `apps/web/nginx/default.conf:59-71`, `apps/web/src/lib/rate-limit.ts:175-205`, `CLAUDE.md:97-98`
-- Problem: The app only trusts forwarded client IP headers when `TRUST_PROXY=true`; otherwise `getClientIp()` returns `unknown` and all users share one bucket. The nginx template also overwrites `X-Forwarded-For` with `$remote_addr` and warns this is correct only when nginx's TCP peer is the real client. If an upstream load balancer or TLS terminator connects from its own IP and the host topology has not been adjusted, every client is treated as the LB or as `unknown`.
-- Concrete failure scenario: Production sits behind a TLS-terminating LB. Nginx receives every request from the LB IP, writes that IP into `X-Forwarded-For`, and the app either does not trust headers or trusts the wrong hop count. Five failed logins from one visitor can lock out all visitors for the login window; public page/image/search/share limits can false-positive under normal aggregate traffic; audit/rate-limit attribution becomes unreliable.
-- Suggested fix: Validate the live host topology before relying on per-IP controls: `TRUST_PROXY=true`, `TRUSTED_PROXY_HOPS` matches the actual proxy chain, nginx either receives the real client IP or appends/preserves the true `X-Forwarded-For`, and nginx `real_ip`/PROXY protocol is configured when `$binary_remote_addr` would otherwise be the LB. Use the existing `scripts/check-proxy-topology.mjs` as an operational check and keep the host nginx config aligned with the template.
+Validation gap:
 
-### C14-CR-RISK-02: CLIP production search availability depends on live host state outside the normal quality gate
-
-- Severity: Medium
-- Confidence: Medium
-- Location: `CLAUDE.md:168-169`, `.github/workflows/clip-preflight.yml:1-46`, `apps/web/src/lib/clip-model.ts:200-229`, `apps/web/src/app/api/search/semantic/route.ts:173-190`
-- Problem: Production semantic search requires the DB setting, `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, seeded offline model weights under `CLIP_MODELS_ROOT`, and production embeddings. The code correctly fails closed/offline-loads (`env.allowRemoteModels=false`), and the repository has a scheduled/manual CLIP preflight workflow, but this is not part of the normal `quality.yml` gate.
-- Concrete failure scenario: An operator enables `semantic_search_mode=production` in the DB but the deployed host lacks the seeded `jina-clip-v2-d512-q8` weights or has stale/missing embeddings. Public semantic/similar search requests are admitted to the route and then return degraded/503-style failures instead of working search, even though regular CI passed.
-- Suggested fix: Treat production semantic search activation as an operational runbook step: run the CLIP preflight against the same model root used by the host, verify the DB mode/env pair, and confirm production `image_embeddings` row coverage before advertising or relying on the feature. Consider adding a non-mutating deploy preflight/status check if this feature becomes always-on.
+- Location: `apps/web/package.json:8-29`, `AGENTS.md` quality-gate section.
+- Issue: This review did not run the full lint/typecheck/build/unit/e2e gate because of the write restriction above.
+- Failure scenario: A TypeScript, Next build, ESLint, or unit/e2e failure outside the three read-only custom guard scripts could still exist even though this source review did not identify one.
+- Suggested validation: after the write restriction is lifted or in the implementation lane, run `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, `npm test --workspace=apps/web`, and e2e where browser-flow coverage is required.
+- Confidence: High that this is a validation gap, not a confirmed code defect.
 
 ## Cross-File Review Notes
 
-- Admin API exports are wrapped by `withAdminAuth(...)`; the lint gate passed and the manually inspected token/session paths fail closed.
-- Mutating non-auth server actions consistently run same-origin checks and restore-maintenance fencing where relevant; the action-origin lint gate passed.
-- Public mutating/expensive route rate limits are present per the repo lint gate; route-level rate-limit rollback policies are documented in `apps/web/src/lib/rate-limit.ts` and match inspected OG/search/share/load-more behavior.
-- Public data selectors omit admin-only fields, and the compile-time privacy guards in `apps/web/src/lib/data.ts` cover the public select surfaces.
-- Drizzle migrations, journal metadata, and `apps/web/scripts/migrate.js` reconcile/post-condition logic were checked together; no journal ordering, baseline hash, or reconcile drift issue was found.
-- Upload, delete, batch delete, retry, Lightroom upload, and background queue paths were checked for race handling, filename validation, cleanup, restore fencing, and failure-state visibility. No confirmed defect found.
-- JSON-LD `dangerouslySetInnerHTML` call sites route through `safeJsonLd`; static grep did not reveal a raw unsafe JSON-LD injection path.
-- Static sweeps for `TODO/FIXME/HACK/BUG`, TypeScript suppressions, unsafe DOM sinks, storage/cookie usage, child-process use, filesystem writes/deletes, and external fetches did not reveal a confirmed live defect beyond the manual-validation risks above.
+- Admin API exports are wrapped by `withAdminAuth(...)`; the custom lint gate passed and the inspected PAT/session paths fail closed with no-store/nosniff response defaults.
+- Mutating non-auth server actions consistently run same-origin checks before mutation and hold restore-maintenance fencing where the action writes shared state; the action-origin lint gate passed.
+- Public expensive/mutating surfaces use pre-increment rate-limit helpers or explicit no-rate-limit annotations; route-level rollback policies in `apps/web/src/lib/rate-limit.ts` match inspected search, OG, share, feed, load-more, and analytics behavior.
+- Public selectors in `apps/web/src/lib/data.ts` maintain admin-only field boundaries, with compile-time privacy guards around public/list/search/map surfaces.
+- Pagination and cursor paths in `getImagesLite`, `getImagesForSmartCollection`, `loadMoreImages`, and `loadMoreSmartCollectionImages` use order-compatible cursor predicates and reject malformed server-action cursors before reaching the data layer.
+- Upload/delete/batch delete/retry/bulk edit paths were checked for quota claim settlement, file cleanup ordering, restore fences, queue-state cleanup, stale-row handling, audit/revalidation ordering, and input shape validation. No confirmed defect found.
+- Share/photo/group/feed metadata avoids unthrottled key existence lookups; page bodies enforce rate limits before enumeration-sensitive DB work.
+- Drizzle migrations, journal metadata, and `apps/web/scripts/migrate.js` reconcile/post-condition logic were checked together; no journal ordering, baseline, or reconcile drift issue was found.
+- JSON-LD injection sites route through `safeJsonLd`; no raw JSON-LD `dangerouslySetInnerHTML` path was found.
 
 ## Final Sweep
 
-Commonly missed areas checked:
+Commonly missed areas explicitly checked:
 
-- Auth/session/PAT token verification and rate limits.
-- Proxy/IP trust behavior.
-- Public route body-size/rate-limit admission.
-- DB restore, backup, migration journal, and legacy schema reconciliation.
-- Upload processing queue, retry maps, advisory locks, failed-image retry, and delete-during-processing cleanup.
-- Semantic search mode gates and CLIP offline model loading.
-- OG image generation and bounded photo fetch fallback.
+- Auth/session/PAT token verification and account/IP rate limits.
+- Server-action same-origin and restore-maintenance ordering.
+- Public route rate-limit admission and rollback/refund semantics.
+- Upload processing queue, retry maps, advisory locks, and delete-during-processing cleanup.
+- Shared group view buffering and shutdown flush behavior.
+- Smart collection parsing/compilation and public/private collection handling.
+- Semantic search mode gates, offline CLIP model loading, and embedding result shaping.
+- OG image generation, bounded photo fetch fallback, and feed/ETag generation.
 - Admin-only metadata privacy and public selector boundaries.
-- Nginx body caps, public/image/admin limit zones, and host-application caveats.
-- CI quality workflow and package script wiring.
+- Migration journal, legacy schema reconciliation, DB backup/restore child-process handling, and post-restore migration.
+- Package scripts and custom lint gate wiring.
 
-Skipped as live-code findings:
-
-- Prior `.context` review/plan artifacts.
-- Static/binary assets and generated build output.
-- The direct raw-Node invocation of TypeScript checker scripts, because the supported package scripts use `tsx` and passed.
+No relevant file in the 707-file live review inventory was intentionally skipped. Files excluded from live-code findings were historical review/plan artifacts, static/binary assets, generated output, dependency directories, and unrelated untracked review files created by other agents.

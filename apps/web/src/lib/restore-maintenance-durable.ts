@@ -10,6 +10,7 @@ const RESTORE_MAINTENANCE_MARKER_FILENAME = 'restore-maintenance.json';
 
 function dirname(filePath: string) {
     const slash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+    if (slash === 0) return filePath.slice(0, 1);
     return slash > 0 ? filePath.slice(0, slash) : '.';
 }
 

@@ -646,28 +646,36 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     }
 
     try {
-        const [delResult] = await db.delete(topicAliases).where(
-            and(
-                eq(topicAliases.alias, cleanAlias),
-                eq(topicAliases.topicSlug, cleanTopicSlug)
-            )
-        );
-        // Log audit event only when the alias was actually deleted — avoids
-        // duplicate entries when concurrent deletion causes the delete to affect 0 rows.
-        if (delResult.affectedRows > 0) {
-            const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
-        } else {
+        const result = await withTopicRouteMutationLock(async () => {
+            const [delResult] = await db.delete(topicAliases).where(
+                and(
+                    eq(topicAliases.alias, cleanAlias),
+                    eq(topicAliases.topicSlug, cleanTopicSlug)
+                )
+            );
+            // Log audit event only when the alias was actually deleted — avoids
+            // duplicate entries when concurrent deletion causes the delete to affect 0 rows.
+            if (delResult.affectedRows > 0) {
+                const currentUser = await getCurrentUser();
+                logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
+                return { success: true as const };
+            }
             return { error: t('aliasNotFound') };
+        });
+        if ('error' in result) {
+            return result;
         }
     } catch (e) {
+        if (e instanceof TopicRouteLockTimeoutError) {
+            return { error: t('failedToDeleteAlias') };
+        }
         console.error('Failed to delete topic alias:', e);
         return { error: t('failedToDeleteAlias') };
     }
 
     // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
     revalidateAllAppData();
-    return { success: true };
+    return { success: true as const };
 }
 
 // US-P21: toggle per-topic opt-in for the public /map GPS view.

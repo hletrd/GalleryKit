@@ -105,6 +105,9 @@ export async function recordAndEvict(
   maxBytes: number = MAX_IMAGE_CACHE_BYTES,
 ): Promise<number> {
   return withMetaMutation(async () => {
+    if (newSize <= 0) {
+      return 0;
+    }
     const entries = await meta.getAll();
 
     // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion

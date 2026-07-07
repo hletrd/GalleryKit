@@ -16,6 +16,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { db } from '@/db';
 import { sql } from 'drizzle-orm';
 import { safeInsertId } from '@/lib/validation';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 
 export const TOKEN_PREFIX = 'gk_';
 export const TOKEN_RANDOM_BYTES = 32;
@@ -168,6 +169,8 @@ export async function verifyToken(plaintext: string): Promise<VerifiedToken | nu
 }
 
 export async function markTokenUsed(tokenId: number): Promise<void> {
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) return;
     try {
         await db.execute(sql`UPDATE admin_tokens SET last_used_at = NOW() WHERE id = ${tokenId}`);
     } catch (err: unknown) {

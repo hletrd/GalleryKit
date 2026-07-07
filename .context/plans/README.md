@@ -33,13 +33,15 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
+- Run-10 Cycle 15/100 Recovery Implementation Plan - active recovery ledger from current Cycle 15 aggregate at HEAD `6256a988`: auth/restore mutation barriers, restore SQL scanner and queue quiesce hardening, upload privacy guards, topic/queue/lock/process-state correctness, and current-cycle provenance/docs (`cycle-15-2026-07-08-plan.md`)
+- Run-10 Cycle 15/100 Recovery Deferred Findings - active deferred register preserving severity/confidence and exit criteria for the 21 non-scheduled Cycle 15 findings under repo-policy/operator-boundary rules (`cycle-15-2026-07-08-deferred.md`)
 - Run-10 Cycle 7 (loop-B) Implementation Plan - active ledger for the second RPF loop's cycle 7 (review dir `.context/reviews/cycle-7-2026-07-07/`, 23 deduped findings): advisory-lock destroy-on-failed-release rollout (HIGH, 3-lane), restore-window logout revocation queue (5-lane), IMAGE_BASE_URL diagnostics, canonical-origin fallback parity, a11y/touch-target/label fixes, sql-restore-scan rolling raw tail, searchImages tag_names parity, watchdog/TLS/settings-hash/purge test batch, dead recovery-script retirement, and IMAGE_BASE_URL doc callouts (`cycle-7b-2026-07-07-plan.md`; "7b" because the peer loop's own cycle 7 owns the unsuffixed filename)
 - Run-10 Cycle 7 (loop-B) Deferred Findings - single deferral: boot-time remotePatterns-vs-runtime IMAGE_BASE_URL probe, gated on a CDN actually being configured (`cycle-7b-2026-07-07-deferred.md`)
-- Run-10 Cycle 14/100 Implementation Plan - active implementation ledger for current-cycle provenance, proxy topology checker truthfulness, static public sitemap coverage, and the long-settings-form save affordance (`../../plan/plan-384-cycle14-fixes.md`)
-- Run-10 Cycle 14/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for CI/Docker/nginx constraints, performance/schema redesign, broad test strategy, operator validation, and larger admin/mobile IA redesign (`../../plan/plan-385-cycle14-deferred.md`)
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 14/100 Implementation Plan - completed/superseded by the Cycle 15 recovery ledger; covered current-cycle provenance, proxy topology checker truthfulness, static public sitemap coverage, and the long-settings-form save affordance (`../../plan/plan-384-cycle14-fixes.md`)
+- Run-10 Cycle 14/100 Deferred Findings - superseded by Cycle 15 deferred register where findings remain open (`../../plan/plan-385-cycle14-deferred.md`)
 - Run-10 Cycle 13/100 Implementation Plan - completed and superseded by the Cycle 14 active ledger; covered E2E origin isolation, proxy topology checker accuracy, DB timeout hardening, service-worker registration coverage, analytics CSP, public discoverability, mobile similar photos, named delete confirmations, and plan index hygiene (`cycle-13-2026-07-07-plan.md`)
 - Run-10 Cycle 13/100 Deferred Findings - superseded by Cycle 14 deferred register where findings remain open (`cycle-13-2026-07-07-deferred.md`)
 - Run-10 Cycle 10/100 Implementation Plan - implemented and locally verified; superseded by the cycle 13 active ledger (`cycle-10-2026-07-07-plan.md`)

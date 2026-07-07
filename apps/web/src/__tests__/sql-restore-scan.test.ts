@@ -348,6 +348,21 @@ describe('containsDangerousSql', () => {
         }
     });
 
+    it('allows app-schema DROP TABLE when the scanner boundary splits inside a table name', () => {
+        const firstWindow = appendSqlScanChunk('', 'DROP TABLE IF EXISTS `ima', SQL_SCAN_TAIL_BYTES, '');
+        expect(containsDangerousSql(firstWindow.combined)).toBe(false);
+
+        const secondWindow = appendSqlScanChunk(
+            firstWindow.nextTail,
+            'ges`;',
+            SQL_SCAN_TAIL_BYTES,
+            firstWindow.nextRawSuffix,
+        );
+        expect(containsDangerousSql(secondWindow.combined)).toBe(false);
+
+        expect(containsDangerousSql('DROP TABLE IF EXISTS `not_gallerykit_owned`;')).toBe(true);
+    });
+
     // C7-19 (run-10 cycle 7b): the dangerous-SQL patterns carry the /i flag —
     // pin case-insensitive matching so a future pattern rewrite cannot drop it.
     it('matches dangerous statements case-insensitively', () => {

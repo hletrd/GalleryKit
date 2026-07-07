@@ -102,6 +102,19 @@ describe('stripGpsFromIsobmffBuffer malformed-box handling (R19C19 F2)', () => {
         expect(result?.stripped).toBe(false);
     });
 
+    it('returns null for a truncated iinf entry-count header', () => {
+        const iinf = Buffer.alloc(12);
+        iinf.writeUInt32BE(12, 0);
+        iinf.write('iinf', 4, 'ascii');
+        iinf.writeUInt8(0, 8);
+        // bytes 9-11 flags are present, but the required v0 entry_count bytes
+        // are missing. A partial item-info box must fail closed instead of
+        // reporting a clean no-GPS result.
+        const buf = metaBox(iinf);
+
+        expect(stripGpsFromIsobmffBuffer(buf)).toBeNull();
+    });
+
     it('R20C20 (CQ20-06): returns null when the walk aborts AFTER finding an Exif item', () => {
         // Container with a valid Exif infe (exifItemIds becomes non-empty) and an
         // empty iloc, followed by a malformed box that aborts the walk. BEFORE the

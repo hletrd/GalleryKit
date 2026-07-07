@@ -14,6 +14,7 @@
  *   docker run --rm --network host \
  *     -v .../apps/web/src:/app/apps/web/src:ro \
  *     -v .../apps/web/scripts:/app/apps/web/scripts:ro \
+ *     -v .../apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
  *     -v .../apps/web/data:/app/data \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \

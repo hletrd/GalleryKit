@@ -136,6 +136,20 @@ describe('sw-cache: recordAndEvict LRU eviction', () => {
     expect(snap.get('http://localhost/uploads/avif/a.avif')?.size).toBe(1024);
   });
 
+  it('skips zero-size records so LRU accounting cannot hide cached bytes', async () => {
+    const evicted = await recordAndEvict(
+      'http://localhost/uploads/avif/zero.avif',
+      0,
+      cache,
+      meta,
+      50 * 1024 * 1024,
+    );
+
+    expect(evicted).toBe(0);
+    expect(meta.snapshot().size).toBe(0);
+    expect(cache.deleted).toHaveLength(0);
+  });
+
   it('evicts the oldest entry when adding a new one would exceed cap', async () => {
     const cap = 10;
 

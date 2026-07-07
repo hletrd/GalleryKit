@@ -534,6 +534,7 @@ describe('topic actions', () => {
         deleteMock.mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
 
         await expect(deleteTopicAlias('travel', 'tokyo.2026')).resolves.toEqual({ success: true });
+        expect(lockQueryMock).toHaveBeenCalled();
         expect(deleteMock).toHaveBeenCalledTimes(1);
     });
 

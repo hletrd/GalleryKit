@@ -505,8 +505,12 @@ export async function restoreDatabase(formData: FormData) {
                 // drain either self-limits or races a timeout and ABORTS the
                 // restore on timeout (never imports over concurrent writes).
                 await flushBufferedSharedGroupViewCounts();
-                await quiesceImageProcessingQueueForRestore();
+                const imageQueueDrained = await quiesceImageProcessingQueueForRestore();
                 imageQueueQuiesced = true;
+                if (!imageQueueDrained) {
+                    console.error('Restore aborted: image-processing queue did not settle within the drain budget');
+                    return { success: false, error: t('restoreFailed') };
+                }
                 const backgroundWritesDrained = await drainBackgroundDbWritesForRestore();
                 if (!backgroundWritesDrained) {
                     console.error('Restore aborted: in-flight background DB writes did not settle within the drain budget');
@@ -681,41 +685,48 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             }
         }
 
-        const CHUNK_SIZE = 1024 * 1024;
-        const fileSize = (await fs.stat(tempPath)).size;
-        const scanFd = await fs.open(tempPath, 'r');
         let dangerousSqlDetected = false;
         try {
-            let scanTail = '';
-            // C6-01: carry the raw suffix of the previous chunk so
-            // appendSqlScanChunk can rejoin a dangerous keyword split exactly at
-            // the read boundary (the compacted `\n`-join alone would break it).
-            let scanRawSuffix = '';
-            for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
-                const readSize = Math.min(CHUNK_SIZE, fileSize - off);
-                const chunkBuf = Buffer.alloc(readSize);
-                // C7R-RPL-04 / AGG7R-04: capture bytesRead and decode only
-                // the actually-read prefix. Short reads are rare but legal
-                // and the current Buffer.alloc zero-fill would otherwise
-                // pad the decoded chunk with NULL characters.
-                const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, off);
-                if (bytesRead === 0) break;
-                const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
-                const { combined, nextTail, nextRawSuffix } = appendSqlScanChunk(
-                    scanTail,
-                    chunk,
-                    SQL_SCAN_TAIL_BYTES,
-                    scanRawSuffix,
-                );
-                if (containsDangerousSql(combined)) {
-                    dangerousSqlDetected = true;
-                    break;
+            const CHUNK_SIZE = 1024 * 1024;
+            const fileSize = (await fs.stat(tempPath)).size;
+            const scanFd = await fs.open(tempPath, 'r');
+            try {
+                let scanTail = '';
+                // C6-01: carry the raw suffix of the previous chunk so
+                // appendSqlScanChunk can rejoin a dangerous keyword split exactly at
+                // the read boundary (the compacted `\n`-join alone would break it).
+                let scanRawSuffix = '';
+                let scanOffset = 0;
+                while (scanOffset < fileSize) {
+                    const readSize = Math.min(CHUNK_SIZE, fileSize - scanOffset);
+                    const chunkBuf = Buffer.alloc(readSize);
+                    // C15-07: advance by the actual bytes consumed. `fd.read()`
+                    // may legally return a short read; adding CHUNK_SIZE would
+                    // skip the unread span and leave it unscanned.
+                    const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, scanOffset);
+                    if (bytesRead === 0) break;
+                    const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
+                    const { combined, nextTail, nextRawSuffix } = appendSqlScanChunk(
+                        scanTail,
+                        chunk,
+                        SQL_SCAN_TAIL_BYTES,
+                        scanRawSuffix,
+                    );
+                    if (containsDangerousSql(combined)) {
+                        dangerousSqlDetected = true;
+                        break;
+                    }
+                    scanTail = nextTail;
+                    scanRawSuffix = nextRawSuffix;
+                    scanOffset += bytesRead;
                 }
-                scanTail = nextTail;
-                scanRawSuffix = nextRawSuffix;
+            } finally {
+                await scanFd.close();
             }
-        } finally {
-            await scanFd.close();
+        } catch (err) {
+            console.error('Restore rejected: failed to scan SQL dump for disallowed statements', err);
+            await cleanupTempFile();
+            return { success: false, error: t('restoreFailed') };
         }
         if (dangerousSqlDetected) {
             await cleanupTempFile();

@@ -136,6 +136,8 @@ function populateState() {
     state.bootstrapped = true;
     state.bootstrapContinuationScheduled = true;
     state.bootstrapCursorId = 42;
+    state.embeddingScanCursorId = 99;
+    state.embeddingScanModelVersion = 'stub-sha256-v1';
     state.shuttingDown = false;
     if (state.bootstrapRetryTimer) {
         clearTimeout(state.bootstrapRetryTimer);
@@ -154,7 +156,7 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
         // with the deadlock error above; post-fix it resolves.
         await expect(
             quiesceImageProcessingQueueForRestore(state, queue),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe(true);
 
         // Post-quiesce state guarantees (unchanged contract): everything
         // reset so the post-restore bootstrap re-discovers pending rows.
@@ -166,6 +168,8 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
         expect(state.bootstrapped).toBe(false);
         expect(state.bootstrapContinuationScheduled).toBe(false);
         expect(state.bootstrapCursorId).toBeNull();
+        expect(state.embeddingScanCursorId).toBe(0);
+        expect(state.embeddingScanModelVersion).toBeNull();
         expect(state.bootstrapRetryTimer).toBeUndefined();
     });
 
@@ -179,6 +183,30 @@ describe('quiesceImageProcessingQueueForRestore — COR-R4C12-01 paused-queue li
         // clear-before-await; this pins quiesce to the same single
         // paused-queue ordering so the two consumers cannot drift again.
         expect(calls).toEqual(['pause', 'clear', 'onIdle']);
+    });
+
+    it('returns false and resets queue-local state when restore quiesce times out', async () => {
+        const state = populateState();
+        const calls: string[] = [];
+        const queue: FakeQueue = {
+            pause: () => calls.push('pause'),
+            clear: () => calls.push('clear'),
+            onIdle: () => {
+                calls.push('onIdle');
+                return new Promise<void>(() => {});
+            },
+        };
+
+        await expect(
+            quiesceImageProcessingQueueForRestore(state, queue, 5),
+        ).resolves.toBe(false);
+
+        expect(calls).toEqual(['pause', 'clear', 'onIdle']);
+        expect(state.enqueued.size).toBe(0);
+        expect(state.retryCounts.size).toBe(0);
+        expect(state.claimRetryCounts.size).toBe(0);
+        expect(state.embeddingScanCursorId).toBe(0);
+        expect(state.embeddingScanModelVersion).toBeNull();
     });
 
     it('declares and drains tracked side effects before reporting restore quiescence', async () => {

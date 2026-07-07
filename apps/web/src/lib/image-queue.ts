@@ -627,6 +627,33 @@ async function drainQueueSideEffects(state: ProcessingQueueState) {
     }
 }
 
+export const RESTORE_QUEUE_DRAIN_TIMEOUT_MS = 30_000;
+
+async function waitForQueueIdleAndSideEffectsForRestore(
+    state: ProcessingQueueState,
+    queue: Pick<PQueue, 'onIdle'>,
+    timeoutMs: number,
+): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const drainPromise = (async () => {
+        await queue.onIdle();
+        await drainQueueSideEffects(state);
+        return true;
+    })();
+    const timeoutPromise = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+        timer.unref?.();
+    });
+    const drained = await Promise.race([drainPromise, timeoutPromise]);
+    if (timer) clearTimeout(timer);
+    if (!drained) {
+        drainPromise.catch((err) => {
+            console.debug('Image queue restore quiesce finished with an error after timeout:', err);
+        });
+    }
+    return drained;
+}
+
 function getProcessingLockName(jobId: number) {
     return getImageProcessingLockName(jobId);
 }
@@ -773,6 +800,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // claim once then succeeds leaves claimRetryScheduled=true, so
             // claimRetryCounts is never deleted.
             claimRetryScheduled = false;
+            state.claimRetryCounts.delete(job.id);
 
             // US-009: Claim check — verify the row still exists and is unprocessed
             const [check] = await db.select({ id: images.id, topic: images.topic }).from(images)
@@ -1255,7 +1283,8 @@ export const bootstrapImageProcessingQueue = async () => {
 export async function quiesceImageProcessingQueueForRestore(
     state: ProcessingQueueState = getProcessingQueueState(),
     queue: Pick<PQueue, 'pause' | 'clear' | 'onIdle'> = state.queue,
-) {
+    timeoutMs: number = RESTORE_QUEUE_DRAIN_TIMEOUT_MS,
+): Promise<boolean> {
     // COR-R4C12-01: clear() MUST precede the onIdle() await. p-queue emits
     // `idle` only when size === 0 && pending === 0, and a PAUSED queue never
     // starts queued tasks — so `pause(); await onIdle()` deadlocked forever
@@ -1278,8 +1307,7 @@ export async function quiesceImageProcessingQueueForRestore(
     // enqueueImageProcessing rejects, and the queue is paused anyway.
     queue.pause();
     queue.clear();
-    await queue.onIdle();
-    await drainQueueSideEffects(state);
+    const drained = await waitForQueueIdleAndSideEffectsForRestore(state, queue, timeoutMs);
     state.enqueued.clear();
     state.retryCounts.clear();
     state.claimRetryCounts.clear();
@@ -1294,11 +1322,13 @@ export async function quiesceImageProcessingQueueForRestore(
     // entirely — reset the embedding-scan resume point and clear any parked
     // per-job retry timers whose jobs reference pre-restore rows.
     state.embeddingScanCursorId = 0;
+    state.embeddingScanModelVersion = null;
     clearTrackedRetryTimers(state);
     if (state.bootstrapRetryTimer) {
         clearTimeout(state.bootstrapRetryTimer);
         state.bootstrapRetryTimer = undefined;
     }
+    return drained;
 }
 
 export async function resumeImageProcessingQueueAfterRestore(

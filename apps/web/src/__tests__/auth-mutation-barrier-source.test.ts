@@ -11,6 +11,20 @@ function indexAfter(source: string, needle: string, fromIndex = 0): number {
 }
 
 describe('auth mutation barrier source contracts', () => {
+    it('holds the admin mutation barrier before login rate-limit and session writes', () => {
+        const functionIndex = indexAfter(authSource, 'export async function login');
+        const originIndex = indexAfter(authSource, 'if (!hasTrustedSameOrigin(requestHeaders))', functionIndex);
+        const slotIndex = indexAfter(authSource, 'using mutationSlot = acquireAdminMutationSlot();', originIndex);
+        const acquiredCheckIndex = indexAfter(authSource, 'if (!mutationSlot.acquired)', slotIndex);
+        const rateLimitIndex = indexAfter(authSource, "incrementRateLimit(ip, 'login'", acquiredCheckIndex);
+        const sessionInsertIndex = indexAfter(authSource, 'tx.insert(sessions)', rateLimitIndex);
+
+        expect(slotIndex).toBeGreaterThan(originIndex);
+        expect(acquiredCheckIndex).toBeGreaterThan(slotIndex);
+        expect(rateLimitIndex).toBeGreaterThan(acquiredCheckIndex);
+        expect(sessionInsertIndex).toBeGreaterThan(rateLimitIndex);
+    });
+
     it('holds the admin mutation barrier through updatePassword expensive work and DB mutation', () => {
         expect(authSource).toContain("from '@/lib/admin-mutation-barrier'");
         const functionIndex = indexAfter(authSource, 'export async function updatePassword');
@@ -44,5 +58,16 @@ describe('auth mutation barrier source contracts', () => {
         expect(verifyIndex).toBeGreaterThan(acquiredCheckIndex);
         expect(deleteIndex).toBeGreaterThan(verifyIndex);
         expect(cookieDeleteIndex).toBeGreaterThan(deleteIndex);
+    });
+
+    it('queues logout revocation unless the DB delete actually succeeds', () => {
+        const functionIndex = indexAfter(authSource, 'export async function logout');
+        const deleteIndex = indexAfter(authSource, 'await db.delete(sessions)', functionIndex);
+        const revokedIndex = indexAfter(authSource, 'revoked = true;', deleteIndex);
+        const queueIndex = indexAfter(authSource, 'enqueuePendingSessionRevocation(hashSessionToken(token))', revokedIndex);
+        const deleteWindow = authSource.slice(deleteIndex, revokedIndex);
+
+        expect(deleteWindow).not.toContain('.catch(() => {})');
+        expect(queueIndex).toBeGreaterThan(revokedIndex);
     });
 });

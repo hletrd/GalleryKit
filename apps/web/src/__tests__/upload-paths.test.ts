@@ -50,7 +50,7 @@ afterEach(async () => {
     // Clear both dirs between tests so file presence is deterministic.
     for (const dir of [primaryDir, legacyDir]) {
         for (const e of await fs.readdir(dir)) {
-            await fs.rm(path.join(dir, e), { force: true });
+            await fs.rm(path.join(dir, e), { recursive: true, force: true });
         }
     }
 });
@@ -153,6 +153,36 @@ describe('assertNoLegacyPublicOriginalUploads', () => {
             await expect(
                 mod.assertNoLegacyPublicOriginalUploads({ failInProduction: true }),
             ).rejects.toThrow(/legacy original upload/i);
+        } finally {
+            (process.env as Record<string, string>).NODE_ENV = prevEnv ?? 'test';
+        }
+    });
+
+    it('throws for nested legacy originals in production', async () => {
+        const nested = path.join(legacyDir, '2026', '07');
+        await fs.mkdir(nested, { recursive: true });
+        await fs.writeFile(path.join(nested, 'nested.jpg'), 'x');
+        const prevEnv = process.env.NODE_ENV;
+        try {
+            (process.env as Record<string, string>).NODE_ENV = 'production';
+            await expect(
+                mod.assertNoLegacyPublicOriginalUploads({ failInProduction: true }),
+            ).rejects.toThrow(/legacy original upload item/i);
+        } finally {
+            (process.env as Record<string, string>).NODE_ENV = prevEnv ?? 'test';
+        }
+    });
+
+    it('throws for symlinks in the legacy public original tree', async () => {
+        const outside = path.join(tmpRoot, 'outside-legacy.jpg');
+        await fs.writeFile(outside, 'secret');
+        await fs.symlink(outside, path.join(legacyDir, 'linked.jpg'));
+        const prevEnv = process.env.NODE_ENV;
+        try {
+            (process.env as Record<string, string>).NODE_ENV = 'production';
+            await expect(
+                mod.assertNoLegacyPublicOriginalUploads({ failInProduction: true }),
+            ).rejects.toThrow(/legacy original upload item/i);
         } finally {
             (process.env as Record<string, string>).NODE_ENV = prevEnv ?? 'test';
         }

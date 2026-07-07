@@ -767,7 +767,7 @@ async function getRecordedHashes(connection) {
  *     if (lastDbMigration.created_at < migration.folderMillis) apply
  *
  * The journal in this repo has non-monotonic `when` timestamps (idx 6 lands
- * in 2026-04 while idx 7-17 land in 2025-05). The previous baseline strategy
+ * in 2026-05 while idx 7-17 land in 2025-05). The previous baseline strategy
  * inserted a single row with `Math.max(...whens)` — that row's created_at
  * ended up greater than every entry 7-17's folderMillis, so drizzle silently
  * skipped them on every deploy.

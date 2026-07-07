@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '36c91deb-p7';
+const SW_VERSION = 'c3d20237-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -107,6 +107,7 @@ function withMetaMutation(operation) {
 
 async function recordAndEvict(url, newSize) {
   return withMetaMutation(async () => {
+    if (newSize <= 0) return;
     const imageCache = await caches.open(IMAGE_CACHE);
     const entries = await getMeta();
 

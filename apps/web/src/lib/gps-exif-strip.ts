@@ -431,6 +431,8 @@ export function stripGpsFromIsobmffBuffer(input: Buffer): GpsStripResult | null 
         if (box.type === 'iinf') {
             if (box.dataEnd - box.dataStart < 4) return null;
             const version = buf.readUInt8(box.dataStart);
+            const entryHeaderBytes = version === 0 ? 6 : 8;
+            if (box.dataEnd - box.dataStart < entryHeaderBytes) return null;
             const entriesStart = box.dataStart + (version === 0 ? 6 : 8);
             for (const infe of walkChildren(entriesStart, box.dataEnd, 2)) {
                 if (infe.type !== 'infe') continue;

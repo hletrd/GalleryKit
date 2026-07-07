@@ -171,21 +171,29 @@ async function resolveOriginalCandidate(
 }
 
 export async function assertNoLegacyPublicOriginalUploads(options: { failInProduction?: boolean } = {}) {
-    let fileCount = 0;
+    let legacyEntryCount = 0;
+    async function countLegacyEntries(dir: string): Promise<void> {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            legacyEntryCount++;
+            if (entry.isDirectory()) {
+                await countLegacyEntries(path.join(dir, entry.name));
+            }
+        }
+    }
     try {
-        const entries = await fs.readdir(LEGACY_UPLOAD_DIR_ORIGINAL, { withFileTypes: true });
-        fileCount = entries.filter((entry) => entry.isFile()).length;
+        await countLegacyEntries(LEGACY_UPLOAD_DIR_ORIGINAL);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
             return;
         }
         throw error;
     }
-    if (fileCount === 0) {
+    if (legacyEntryCount === 0) {
         return;
     }
 
-    const message = `Found ${fileCount} legacy original upload(s) in ${LEGACY_UPLOAD_DIR_ORIGINAL}. Move originals to ${UPLOAD_DIR_ORIGINAL} before serving traffic.`;
+    const message = `Found ${legacyEntryCount} legacy original upload item(s) in ${LEGACY_UPLOAD_DIR_ORIGINAL}. Move originals to ${UPLOAD_DIR_ORIGINAL} before serving traffic.`;
     if (options.failInProduction && process.env.NODE_ENV === 'production') {
         throw new Error(message);
     }

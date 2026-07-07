@@ -107,6 +107,7 @@ function withMetaMutation(operation) {
 
 async function recordAndEvict(url, newSize) {
   return withMetaMutation(async () => {
+    if (newSize <= 0) return;
     const imageCache = await caches.open(IMAGE_CACHE);
     const entries = await getMeta();
 

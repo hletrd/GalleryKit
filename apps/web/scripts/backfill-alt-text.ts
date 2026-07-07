@@ -14,8 +14,10 @@
  *
  * Idempotent: skips rows where alt_text_suggested is already set.
  *
- * Concurrency is capped at 1 (BATCH_CONCURRENCY) because Florence-2 ONNX
- * inference is heavy. Operators can raise this once the real model ships.
+ * Concurrency is capped at 1 (BATCH_CONCURRENCY) for predictable DB/write
+ * pressure. The current caption generator is a local EXIF/metadata hint path;
+ * real Florence-2 ONNX inference is still future work and should revisit this
+ * cap with CPU/RSS measurements when it lands.
  *
  * Requires auto_alt_text_enabled to be true in admin settings OR the
  * --force flag to override.

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -129,5 +129,10 @@ describe('restore maintenance state', () => {
         expect(() => assertNoDurableRestoreMaintenanceForScript('backfill-test')).toThrow(
             '[backfill-test] Restore maintenance is active',
         );
+    });
+
+    it('keeps a bare-root marker path rooted at slash in dirname helper', () => {
+        const source = readFileSync(join(process.cwd(), 'src/lib/restore-maintenance-durable.ts'), 'utf8');
+        expect(source).toContain('if (slash === 0) return filePath.slice(0, 1);');
     });
 });
