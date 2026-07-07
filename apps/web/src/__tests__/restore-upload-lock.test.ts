@@ -107,7 +107,10 @@ describe('restore/upload writer coordination', () => {
         const flagIdx = source.indexOf('let imageQueueQuiesced = false');
         const quiesceIdx = source.indexOf('await quiesceImageProcessingQueueForRestore()');
         const setIdx = source.indexOf('imageQueueQuiesced = true');
-        const drainIdx = source.indexOf('await drainBackgroundDbWritesForRestore()');
+        // AGG9B-07 (loop-B c9b): the drain now runs as a checklist stage
+        // thunk inside runRestoreDrainChecklist — same ordering, no await
+        // keyword at the call site.
+        const drainIdx = source.indexOf('drainBackgroundDbWritesForRestore()');
         const maintenanceExitIdx = source.indexOf('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
         const resumeConditionIdx = source.indexOf('if (restoreLifecycleVerified || imageQueueQuiesced)');
         const resumeIdx = source.indexOf('await resumeImageProcessingQueueAfterRestore()');

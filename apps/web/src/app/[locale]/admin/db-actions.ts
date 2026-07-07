@@ -25,6 +25,7 @@ import { drainBackgroundDbWritesForRestore } from "@/lib/background-db-writes";
 import { drainMaintenanceSweepsForRestore } from "@/lib/maintenance-scheduler";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
+import { runRestoreDrainChecklist } from "@/lib/restore-drain-checklist";
 import { flushPendingSessionRevocations } from "@/lib/pending-session-revocations";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES, isMysqldumpArtifactHeader, hasMysqldumpCompletionTrailer, MYSQLDUMP_TRAILER_SCAN_BYTES } from "@/lib/db-restore";
@@ -549,37 +550,52 @@ export async function restoreDatabase(formData: FormData) {
                 // here before the import replaces the tables, or the writer's
                 // in-flight commits corrupt the restored state. When adding a new
                 // buffered/queued DB writer (analytics timer, deferred metadata
-                // writer, etc.), add its bounded drain to this sequence. Each
+                // writer, etc.), add its bounded drain as a stage below. Each
                 // drain either self-limits or races a timeout and ABORTS the
                 // restore on timeout (never imports over concurrent writes).
+                // AGG9B-07 (loop-B cycle 9b): the stop-at-first-failure /
+                // later-stages-never-run ordering contract is enforced by the
+                // behavior-tested runRestoreDrainChecklist orchestrator.
                 await flushBufferedSharedGroupViewCounts();
-                const imageQueueDrained = await quiesceImageProcessingQueueForRestore();
-                imageQueueQuiesced = true;
-                if (!imageQueueDrained) {
-                    console.error('Restore aborted: image-processing queue did not settle within the drain budget');
-                    return { success: false, error: t('restoreFailed') };
-                }
-                const backgroundWritesDrained = await drainBackgroundDbWritesForRestore();
-                if (!backgroundWritesDrained) {
-                    console.error('Restore aborted: in-flight background DB writes did not settle within the drain budget');
-                    return { success: false, error: t('restoreFailed') };
-                }
-                const maintenanceDrained = await drainMaintenanceSweepsForRestore();
-                if (!maintenanceDrained) {
-                    console.error('Restore aborted: in-flight maintenance sweeps did not settle within the drain budget');
-                    return { success: false, error: t('restoreFailed') };
-                }
-                // C1-03 (run-10 cycle-1, closes C77-ARCH-01): drain FOREGROUND
-                // admin mutations too. Every mutating admin action holds a
-                // shared barrier slot for its whole body; the durable marker
-                // (set above) plus the exclusive flag refuse new entrants, and
-                // this wait ensures a mutation admitted BEFORE the marker
-                // flipped cannot still be mid-body writing into the database
-                // while the import replaces it. On timeout the restore ABORTS
-                // rather than importing over concurrent writes.
-                const mutationsDrained = await drainAdminMutationsForRestore();
-                if (!mutationsDrained) {
-                    console.error('Restore aborted: in-flight admin mutations did not settle within the drain budget');
+                const drainResult = await runRestoreDrainChecklist([
+                    {
+                        name: 'image-queue',
+                        drain: async () => {
+                            const drained = await quiesceImageProcessingQueueForRestore();
+                            // The finally below must resume the queue even when
+                            // the quiesce timed out — flag it as attempted
+                            // regardless of the drain outcome (previous inline
+                            // behavior preserved).
+                            imageQueueQuiesced = true;
+                            return drained;
+                        },
+                        abortLog: 'Restore aborted: image-processing queue did not settle within the drain budget',
+                    },
+                    {
+                        name: 'background-db-writes',
+                        drain: () => drainBackgroundDbWritesForRestore(),
+                        abortLog: 'Restore aborted: in-flight background DB writes did not settle within the drain budget',
+                    },
+                    {
+                        name: 'maintenance-sweeps',
+                        drain: () => drainMaintenanceSweepsForRestore(),
+                        abortLog: 'Restore aborted: in-flight maintenance sweeps did not settle within the drain budget',
+                    },
+                    {
+                        // C1-03 (run-10 cycle-1, closes C77-ARCH-01): drain
+                        // FOREGROUND admin mutations too. Every mutating admin
+                        // action holds a shared barrier slot for its whole
+                        // body; the durable marker (set above) plus the
+                        // exclusive flag refuse new entrants, and this wait
+                        // ensures a mutation admitted BEFORE the marker flipped
+                        // cannot still be mid-body writing into the database
+                        // while the import replaces it.
+                        name: 'admin-mutations',
+                        drain: () => drainAdminMutationsForRestore(),
+                        abortLog: 'Restore aborted: in-flight admin mutations did not settle within the drain budget',
+                    },
+                ]);
+                if (!drainResult.ok) {
                     return { success: false, error: t('restoreFailed') };
                 }
             } catch (err) {
