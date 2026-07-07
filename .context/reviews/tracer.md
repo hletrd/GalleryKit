@@ -1,94 +1,91 @@
-# Cycle 22 Causal Trace Review — tracer
+# Cycle 23 Tracer Review
 
-Date: 2026-07-08 KST
-Review HEAD: `856bbc86fded2f9deb99c3a17fb2175f3be31560`
-Role: `tracer`
-Scope: suspicious flow tracing across upload, restore, delete, retry, background jobs, and cross-request state. No fixes implemented.
+Scope: PROMPT 1 review only. This trace lane follows suspicious causal flows and records competing hypotheses, evidence, suggested validation, and current status. It does not implement fixes.
 
-## Inventory First
+## Trace Inventory
 
-- Restore causal chain: `src/app/[locale]/admin/db-actions.ts`, restore maintenance durable/process flags, admin mutation barrier, upload-processing contract lock, image queue quiesce, background DB write drain, maintenance scheduler drain, SQL restore scanner.
-- Upload chains: dashboard upload action, LR PAT upload route, original save/metadata, GPS strip, derivative queue enqueue, upload quota tracker, per-upload processing lock, restore maintenance cleanup.
-- Delete chains: single and batch delete actions, queue-state cleanup, pending file deletion ledger, strict original/variant deletion, public derivative serving.
-- Retry/background chains: image queue permanent failures, retry failed image action, semantic/caption backfills, maintenance scheduler, background analytics DB writes, pending session revocations.
-- Cross-request state: process-local rate-limit maps, upload quota tracker, queue state, restore barriers, singleton guard, config cache/semantic mode.
+- Upload causality: `apps/web/src/app/actions/images.ts`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`.
+- Background contention causality: `apps/web/src/db/index.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/app/api/search/semantic/route.ts`.
+- Browser responsiveness causality: `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/(public)/map/page.tsx`, `apps/web/src/components/map/map-client.tsx`.
+- Query-shape causality: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/db/schema.ts`.
+- Cache causality: `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`.
+- Context checked: `CLAUDE.md`, `.context/plans/README.md`, `.context/plans/deferred-carry-forward.md`.
 
-## Findings
+## Causal Traces
 
-### TRC-22-01 — Durable deletion ledger is not connected to any future retry driver
+### TRC-C23-01 - Upload RSS spike or slow ingest
 
+- Linked finding: PERF-C23-01
+- Severity: High
+- Confidence: Medium-high
+- Status: Likely/manual-validation.
+- Primary hypothesis: Browser server-action multipart parsing materializes bodies before application-level backpressure. Evidence: the action starts from `FormData` and enumerates `files` at `apps/web/src/app/actions/images.ts:87-106`; upload lock admission happens later at `apps/web/src/app/actions/images.ts:154-159`; only after that does `saveOriginalAndGetMetadata()` stream the already-created `File` to disk at `apps/web/src/lib/process-image.ts:882-888`.
+- Competing hypothesis A: Sharp processing causes the RSS spike after enqueue. Counter-evidence: heavy derivative generation is deferred through `enqueueImageProcessing()` at `apps/web/src/app/actions/images.ts:484-510`; global Sharp cache/concurrency controls exist at `apps/web/src/lib/process-image.ts:36-57`. This remains plausible for post-upload CPU/RSS, but not for RSS before DB insert/enqueue.
+- Competing hypothesis B: Client intentionally serializes browser uploads, so no real concurrency. Evidence for mitigation: one-file loop at `apps/web/src/components/upload-dropzone.tsx:289-296`. Counter-evidence: this only governs this UI; the server action still accepts multi-file `FormData` and concurrent calls from multiple tabs or non-UI callers.
+- Distinguishing validation: Capture process RSS, request count, and DB insert timestamps during concurrent browser uploads. If RSS rises before first insert, parse/materialization is the cause. If RSS rises only after queue starts, derivative processing is the cause. Compare against Lightroom route behavior, which has pre-parse slot/Content-Length gates at `apps/web/src/app/api/admin/lr/upload/route.ts:60-74`, `apps/web/src/app/api/admin/lr/upload/route.ts:101-128`, and `apps/web/src/app/api/admin/lr/upload/route.ts:152-187`.
+- Suggested fix: Route browser upload through a Node route handler with pre-parse admission and streaming multipart parsing; keep cumulative quota and upload-processing contract semantics.
+
+### TRC-C23-02 - Foreground latency during background work
+
+- Linked finding: PERF-C23-02
+- Severity: High
+- Confidence: High
+- Status: Confirmed source shape; likely under load.
+- Primary hypothesis: Independent background queues over-admit against the same MySQL pool. Evidence: pool has 10 connections and queueLimit 20 at `apps/web/src/db/index.ts:31-41`; image queue reserves live capacity locally at `apps/web/src/lib/image-queue.ts:121-153`; backfill reserves live capacity separately at `apps/web/src/lib/admin-backfill-runner.ts:97-143`; analytics separately permits two writes and up to 1000 pending at `apps/web/src/lib/background-db-writes.ts:3-10` and `apps/web/src/lib/background-db-writes.ts:42-64`.
+- Competing hypothesis A: CPU saturation from Sharp/libvips is the dominant cause, not DB waits. Evidence for plausibility: `processImageFormats()` fans WebP/AVIF/JPEG with `Promise.allSettled()` at `apps/web/src/lib/process-image.ts:1411-1418`; wide-gamut rgb16 paths can double resize memory at `apps/web/src/lib/process-image.ts:1236-1262`. Counter-evidence: Sharp has global thread/cache limits at `apps/web/src/lib/process-image.ts:36-57`, so CPU is bounded per process but not shared across all background producers.
+- Competing hypothesis B: CLIP inference queue is the main foreground blocker. Evidence for bounded but separate queue: `apps/web/src/lib/clip-model.ts:53-72` and `apps/web/src/lib/clip-model.ts:156-173`. This can add CPU pressure, but it does not explain DB pool waits unless combined with semantic scans.
+- Distinguishing validation: Add temporary timing around DB acquire/query duration, image queue active count, backfill active count, analytics active/pending, semantic scan row count, and process CPU. A DB-wait signature will show increased pool wait before query execution; CPU saturation will show high event-loop lag/libvips activity even when DB wait is low.
+- Suggested fix: Shared DB/CPU background-budget semaphores plus metrics. Foreground requests should bypass background tokens while background producers share one admission controller.
+
+### TRC-C23-03 - Public map page jank
+
+- Linked finding: PERF-C23-03
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed
-- Causal path:
-  - `apps/web/src/app/actions/images.ts:677-700`: `deleteImage()` creates `pending_file_deletions`, then deletes `images`.
-  - `apps/web/src/app/actions/images.ts:714-727`: it invokes `cleanupPendingFileDeletion()` once after the DB delete and returns success with a cleanup failure count.
-  - `apps/web/src/app/actions/images.ts:808-879`: `deleteImages()` does the same for each image in bounded chunks.
-  - `apps/web/src/lib/pending-file-deletions.ts:70-90`: failed cleanup only updates the row's attempts/error; it does not schedule work.
-  - `apps/web/src/lib/maintenance-scheduler.ts:34-45`: the periodic sweep omits `pending_file_deletions`.
-  - Repo-wide call-site search found no retry path outside the delete action bodies.
-- Competing hypotheses considered:
-  - Hypothesis A: the ledger is a real durable retry queue. Rejected by call-site search and maintenance scheduler inspection.
-  - Hypothesis B: the ledger only records operator-visible failure state. Supported by current code, but the comments at `images.ts:678-680` and `images.ts:809-811` say the row is "retry state"/"retryable", so behavior and causal contract diverge.
-  - Hypothesis C: cleanup failure is harmless because DB rows are deleted. Rejected for privacy/destructive semantics: files can remain addressable by direct derivative URL if the caller knows the UUID filename, and originals can remain on disk.
-- Concrete scenario: batch deletion succeeds in MySQL, but one filesystem unlink fails twice because the upload directory is briefly unavailable. The pending row records `attempts = attempts + 1`, but no background job later reads it. The admin UI can report deletion success, while the old derivative/original persists until a manual DB/file operation.
-- Suggested fix: wire `pending_file_deletions` into a bounded maintenance/backfill worker, guarded by restore maintenance. Trace tests should prove a failed cleanup row is retried on startup/hourly sweep, success deletes the row, repeated failures back off, and restore maintenance suppresses the sweep.
+- Status: Likely/manual-validation.
+- Primary hypothesis: Browser marker/list rendering dominates. Evidence: server returns up to 10000 markers at `apps/web/src/lib/data.ts:1766-1816`; the page maps all returned rows into client props and a full fallback list at `apps/web/src/app/[locale]/(public)/map/page.tsx:50-66` and `apps/web/src/app/[locale]/(public)/map/page.tsx:98-110`; the client allocates latitude/longitude arrays and renders one Leaflet `<Marker>` per row at `apps/web/src/components/map/map-client.tsx:77-94` and `apps/web/src/components/map/map-client.tsx:120-141`.
+- Competing hypothesis A: DB query latency dominates. Evidence for plausibility: GPS predicates are `IS NOT NULL` and there is no dedicated `(processed, topic/map_visible, latitude, longitude)` index in `apps/web/src/db/schema.ts:123-132`. Counter-evidence: query is capped at 10001 rows and the severe user-visible freeze would align more directly with hydration/Leaflet marker creation.
+- Competing hypothesis B: tile-network latency dominates. Counter-evidence: tile loading is independent of marker count, while the code creates marker components synchronously before tile interactions matter.
+- Distinguishing validation: Record server timing for `getMapImages()` and a Chrome Performance trace for hydration/marker creation on a seeded 5k/10k GPS dataset. If server timing is small but main-thread tasks are long, the browser-marker hypothesis wins.
+- Suggested fix: Cluster or viewport-page markers and virtualize/paginate the list. Add server timing and client marker-count telemetry before choosing thresholds.
 
-### TRC-22-02 — Restore drain checklist is strong but remains a manual registry for future writers
+### TRC-C23-04 - Semantic search latency or surprising misses
 
+- Linked finding: PERF-C23-04
+- Severity: Medium
+- Confidence: High
+- Status: Likely/manual-validation.
+- Primary hypothesis: Candidate selection is recency-capped brute force. Evidence: cap defaults/hard max are at `apps/web/src/lib/clip-embeddings.ts:36-48`; candidates are selected by `modelVersion` and `updatedAt DESC` at `apps/web/src/app/api/search/semantic/route.ts:263-279`; every selected BLOB is decoded and scored in JS at `apps/web/src/app/api/search/semantic/route.ts:292-311`; schema has a recency index but no vector-distance index at `apps/web/src/db/schema.ts:314-326`.
+- Competing hypothesis A: Text embedding queue wait dominates latency. Evidence: query embedding calls `embedTextReal()` before DB scan at `apps/web/src/app/api/search/semantic/route.ts:247-254`; CLIP queue limits and timeouts are in `apps/web/src/lib/clip-model.ts:53-72`. This explains latency under concurrent semantic requests, not old-photo misses.
+- Competing hypothesis B: Result enrichment query dominates. Evidence: enrichment only runs after top-k IDs are chosen at `apps/web/src/app/api/search/semantic/route.ts:317-330`, so it scales with result count rather than scan limit.
+- Distinguishing validation: Log per-request embedding wait, DB scan rows/time, decode+score time, top-k age distribution, and enrichment time. Misses with old relevant photos plus low embedding wait point to recency cap; slow high-concurrency requests point to CLIP queue.
+- Suggested fix: Add vector index/ANN or preloaded normalized matrix search; short-term metrics should separate encoder wait from DB scan and JS scoring.
+
+### TRC-C23-05 - On-this-day scale cliff
+
+- Linked finding: PERF-C23-05
+- Severity: Low-medium
+- Confidence: High
+- Status: Confirmed source shape, scale-dependent.
+- Primary hypothesis: Function predicates prevent index seek. Evidence: code documents the non-sargable tradeoff at `apps/web/src/lib/data-timeline.ts:103-110`; the predicate uses `MONTH(capture_date)` and `DAY(capture_date)` at `apps/web/src/lib/data-timeline.ts:121-131`; schema indexes include `processed, capture_date, created_at` but no generated date-part index at `apps/web/src/db/schema.ts:123-132`.
+- Competing hypothesis: The `limit(6)` prevents meaningful cost. Counter-evidence: MySQL must find matching month/day rows before the limit can terminate efficiently; without date-part index, the limit does not imply a six-row seek.
+- Distinguishing validation: `EXPLAIN ANALYZE` with realistic gallery row counts. Watch rows examined for today-like common days versus sparse days.
+- Suggested fix: Generated month/day columns or calendar index table.
+
+### TRC-C23-06 - Service-worker navigation stutter from HTML eviction
+
+- Linked finding: PERF-C23-06
 - Severity: Low
-- Confidence: Medium
-- Status: Risk
-- Causal path:
-  - `apps/web/src/lib/restore-drain-checklist.ts:10-17` documents that every process-local DB writer must be added to the restore drain stages.
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:580-635` drains shared-group view counts, image queue, background DB writes, maintenance sweeps, and admin mutations before import.
-  - `apps/web/src/lib/background-db-writes.ts:77-112` tracks and bounds background/analytics DB write drains.
-  - `apps/web/src/lib/maintenance-scheduler.ts:34-45` defines the tasks that are covered by the maintenance sweep drain.
-- Failure scenario: a future feature adds a buffered DB writer or a filesystem-backed cleanup worker and forgets to register its drain. Restore can then import while that writer later commits stale state into the restored DB or mutates files outside the snapshot boundary.
-- Suggested fix: keep the drain-checklist test close to every new queue/background writer. Consider an explicit registry API so new background writers cannot start without declaring a restore drain/restore-suppression policy.
+- Confidence: High
+- Status: Confirmed, bounded.
+- Primary hypothesis: HTML eviction reads every cached HTML response header when over cap. Evidence: `MAX_HTML_ENTRIES = 50` at `apps/web/public/sw.template.js:31-39`; over-cap path calls `keys()`, `match()` for every key, sorts, and deletes at `apps/web/public/sw.template.js:147-164`.
+- Competing hypothesis A: Image HEAD revalidation is the real SW responsiveness problem. Counter-evidence: image stale probe is bounded by 300 ms at `apps/web/public/sw.template.js:35-39`, and image metadata mutations are serialized through `withMetaMutation()` at `apps/web/public/sw.template.js:99-145`.
+- Distinguishing validation: On a low-end mobile browser, seed 51+ HTML entries and profile service-worker task duration during navigation. If stutter appears only on over-cap HTML writes, eviction is the cause; if image views stutter, inspect HEAD probe and image LRU instead.
+- Suggested fix: Store HTML recency metadata separately, mirroring the image LRU structure, so over-cap eviction does not need per-response `match()` reads.
 
-### TRC-22-03 — Single-writer warnings do not prevent causal splits across process-local state
+## Cross-Trace Stop Conditions
 
-- Severity: Medium
-- Confidence: Medium
-- Status: Risk / accepted topology constraint
-- Causal path:
-  - `CLAUDE.md:245-247` declares single web instance/single writer and lists process-local coordination state.
-  - `apps/web/src/lib/single-writer-guard.ts:6-16` says the boot guard detects but cannot enforce the topology.
-  - `apps/web/src/lib/single-writer-guard.ts:218-235` logs a loud warning and continues startup.
-- Failure scenario: a rolling deploy overlap is tolerated, but a misconfigured second permanent web instance keeps serving. Each process has its own upload quota tracker, queue memory, fast rate-limit maps, restore process flag, and backfill status. DB advisory locks reduce some races, but user-visible state and abuse controls can still diverge.
-- Suggested fix: preserve single-instance deployment as an operational invariant. If scale-out is introduced, first move the stateful guards/queues/rate buckets into a shared store or make persistent contention fail closed after the rolling-deploy grace period.
-
-### TRC-22-04 — Proxy/rate-limit causal evidence can collapse under a mismatched edge chain
-
-- Severity: Medium
-- Confidence: Medium
-- Status: Risk / manual-validation
-- Causal path:
-  - `apps/web/nginx/default.conf:20-28` notes edge limiter keys use nginx's TCP peer.
-  - `apps/web/nginx/default.conf:59-71` overwrites XFF with `$remote_addr`, correct only when that address is the true client.
-  - `apps/web/src/lib/rate-limit.ts:175-216` either derives a trusted client IP from configured proxy headers or returns `unknown`.
-- Failure scenario: CDN/LB -> nginx -> app without realip/hop alignment. Nginx limits by LB IP, the app may limit by LB IP or `unknown`, and audit/rate-limit records cannot separate users. A noisy client can cause broad 429s; a distributed attacker can hide behind edge aggregation depending on topology.
-- Suggested fix: add deployment evidence for the actual proxy chain: sample request headers at app, nginx access log client IP, `TRUST_PROXY`, `TRUSTED_PROXY_HOPS`, and `real_ip` config. Treat mismatches as release blockers for abuse-control claims.
-
-## Retired Or Lowered Hypotheses
-
-- Restore importing over known current writers: lowered. The code sets durable maintenance, holds DB/upload/backfill locks, and drains shared-group view counts, image queue, background writes, maintenance sweeps, and admin mutations before import (`db-actions.ts:580-635`).
-- LR upload parse-slot leak on multipart parse errors: lowered. The route releases the parse slot in a `finally` and settles quota claims on parse failure per inspected `api/admin/lr/upload/route.ts`.
-- Failed image retry reuses stale processing settings: lowered. `retryFailedImage` clears failure/settings fields under a failed-state predicate before requeueing.
-- Backup download path traversal: lowered. The route validates the filename, resolves/realpaths containment, opens a descriptor, stats it, and streams that descriptor (`api/admin/db/download/route.ts:21-89`).
-- Public privacy field regression: lowered. `data.ts:368-488` maintains explicit public omit blocks and compile-time guards; targeted privacy tests passed.
-
-## Missed-Issue Sweep
-
-- Cross-request state reviewed: upload quota tracker, image queue maps, permanently failed IDs, retry maps, admin mutation barrier, maintenance sweeps, background DB write queues, singleton guard, proxy-derived IP buckets.
-- Restore/upload/delete interleavings reviewed: upload blocks on maintenance and upload-processing contract lock; restore drains queue/background/admin mutation paths; delete removes queue state before DB delete and records pending cleanup before deleting image rows.
-- Retry/background reviewed: image retry, queue permanent failure, semantic backfill gating, analytics DB writes, pending session revocations, maintenance scheduler. The only confirmed missing retry driver is `pending_file_deletions`.
-- Product constraints preserved: no payment path, no culling/scoring flow, no supported remote storage path in causal flows.
-
-## Uninspected Or Partially Inspected
-
-- No live restore/upload/delete race was executed against a real MySQL/filesystem deployment.
-- No production nginx/CDN/request-header trace was available.
-- Full Playwright/admin browser flows and full test suite were not run in this lane.
-- Binary image fixtures, generated build output, and live upload directories were not inspected.
+- Confirmed implementation bugs: none changed in this review lane.
+- Findings needing manual validation before fix priority: upload RSS, combined background pool starvation, map jank, semantic latency/recall.
+- Low bounded residuals: on-this-day date-part scan and HTML SW eviction.
+- Final missed-issues sweep: repo search covered upload parsing, queue/concurrency, locks, sharp fan-out, cache keys/matches, scan limits, map markers, non-sargable date functions, offsets, grouping, and prior carry-forward plans. No additional higher-severity causal chain was found.

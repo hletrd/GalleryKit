@@ -1,93 +1,81 @@
-# Cycle 22 Performance / Concurrency / Responsiveness Review
+# Cycle 23 Performance Review
 
-Role lane: perf-reviewer
-Date: 2026-07-08 KST
-Repository: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
-Write scope: `.context/reviews/perf-reviewer.md`
+Scope: PROMPT 1 review only. No implementation changes. Reviewed AGENTS.md, CLAUDE.md, `.context/plans/README.md`, `.context/plans/deferred-carry-forward.md`, upload paths, image processing, queues, public data queries, semantic search, map UI, and service worker caching.
 
-Review-only. I did not implement fixes. I read `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`, then checked the current Cycle 21 fixes and the upload/restore/queue/backfill/semantic-search/service-worker/database/admin/public route flows against current source.
+## Inventory
 
-## Performance-Relevant Inventory
+Performance/concurrency/causal-flow relevant files examined:
 
-- Upload and restore ingress: browser upload Server Action, Lightroom/PAT upload route, DB backup/restore actions, upload size caps, Next transport caps, upload tracker and upload-processing contract lock.
-- Image processing and backfill: `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, sidecar backfill scripts, Sharp/libvips concurrency, derivative cleanup, pending file deletion ledger.
-- DB/query surfaces: schema/indexes, `data.ts`, `data-timeline.ts`, smart collections, search, map, analytics/view retention, rate-limit buckets, migration/reconcile.
-- Public request paths: home/timeline/year/map/topic/photo/share/group/smart collection pages, load-more/search actions, semantic/similar search APIs, OG/feed/sitemap/upload-serving routes.
-- Client responsiveness: upload dropzone, map client, search modal, load-more, similar photos, lightbox/photo viewer/histogram, admin image manager and dashboard.
-- Service worker/cache: `public/sw.template.js`, generated SW cache reference module, HTML fallback exclusions, derivative LRU/HEAD revalidation behavior.
-- Cycle 21 fix surfaces: action-origin mutation scanner, `pending_file_deletions`, `markPermanentlyFailed`, backfill candidate index, MySQL datetime parser, root script syntax coverage, map/a11y/i18n/docs changes.
-
-Generated build output, `node_modules`, runtime upload/data stores, local env/secrets, and binary fixture/media bytes were not inspected as source. This is static review; I did not run production profiling, browser traces, or DB `EXPLAIN`.
+- Upload and ingest: `apps/web/src/app/actions/images.ts`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-limits.ts`.
+- Image pipeline and queues: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`.
+- DB/query surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/pagination.ts`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, relevant migrations.
+- Public/browser surfaces: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/[locale]/(public)/map/page.tsx`, `apps/web/src/components/map/map-client.tsx`, search/home/topic/shared public pages.
+- Cache/SW: `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`.
+- Planning/context: `CLAUDE.md`, `.context/plans/README.md`, `.context/plans/deferred-carry-forward.md`.
 
 ## Findings
 
-### C22-PERF-01 - Image queue and admin backfill still budget independently against the same DB/CPU pool
+### PERF-C23-01 - Browser server-action upload still admits request bodies before app-level backpressure
+
+- Severity: High
+- Confidence: Medium-high
+- Status: Likely; source shape confirmed, requires prod RSS/load validation.
+- Evidence: Browser upload server action receives already-materialized `FormData` and enumerates `files` at `apps/web/src/app/actions/images.ts:87-106`; app-level upload lock is acquired only afterward at `apps/web/src/app/actions/images.ts:154-159`; the save path streams the framework-created `File` to disk only after that materialization at `apps/web/src/lib/process-image.ts:882-888`. The client mitigates normal UI use by sending one file at a time at `apps/web/src/components/upload-dropzone.tsx:240-296`, while the Lightroom route has an explicit pre-parse in-process slot and Content-Length gates before `request.formData()` at `apps/web/src/app/api/admin/lr/upload/route.ts:60-74`, `apps/web/src/app/api/admin/lr/upload/route.ts:101-128`, and `apps/web/src/app/api/admin/lr/upload/route.ts:152-187`.
+- Failure scenario: Multiple admin tabs, direct server-action clients, or framework retries can cause concurrent multipart bodies to be parsed before `acquireUploadProcessingContractLock()` or cumulative quota enforcement runs. Peak RSS rises with concurrent body size even though later processing is serialized and disk-streamed. For many small files, the sequential client loop also makes uploads feel slow because it avoids self-contention rather than using server-side reader/writer semantics.
+- Suggested fix: Move browser ingest to a Node route handler with the same pre-parse slot, declared-size gates, and quota preclaim used by the Lightroom route, ideally backed by a true streaming multipart parser. Keep the server action as a thin caller or remove the multi-file action surface.
+
+### PERF-C23-02 - Background DB/CPU budgets are local, so combined queue/backfill/search load can over-admit work
 
 - Severity: High
 - Confidence: High
-- Status: Confirmed current risk
-- File/region: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:121-153`, `761-800`, `1011-1085`; `apps/web/src/lib/admin-backfill-runner.ts:106-143`, `520-565`, `716-827`; `apps/web/src/lib/process-image.ts:36-57`, `1411-1418`.
-- Failure scenario: uploads are processing while an admin starts in-app re-encode. The image queue can run up to two workers and admin backfill can run up to two workers at the default 10-connection pool; backfill also holds a whole-run advisory lock. Each image encode fans out AVIF/WebP/JPEG in parallel. Public SSR, search, analytics, semantic routes, and admin actions can queue behind background connection and native CPU pressure even though each lane is locally capped.
-- Concrete fix: introduce a single process-wide background resource budget shared by queue processing, admin backfill, semantic embedding bootstrap, and other heavyweight background work. Acquire budget tokens before per-image advisory locks and Sharp encoding, or make admin backfill pause/refuse while queue workers are active. Add a combined-budget contract test.
+- Status: Confirmed source shape; latency impact likely, needs load validation.
+- Evidence: The MySQL pool is fixed at 10 connections with `queueLimit: 20` at `apps/web/src/db/index.ts:31-41`. The live image queue computes its own pool budget at `apps/web/src/lib/image-queue.ts:121-153`; admin backfill computes a separate budget and owns a separate `PQueue` at `apps/web/src/lib/admin-backfill-runner.ts:97-143` and `apps/web/src/lib/admin-backfill-runner.ts:716-727`; analytics writes have a separate in-memory queue and concurrency 2 at `apps/web/src/lib/background-db-writes.ts:3-10` and `apps/web/src/lib/background-db-writes.ts:42-64`; CLIP inference has a separate pending queue at `apps/web/src/lib/clip-model.ts:53-72` and `apps/web/src/lib/clip-model.ts:156-173`.
+- Failure scenario: Image processing, in-app backfill, semantic search, CLIP inference, and analytics can all be individually "within budget" while collectively consuming DB connections and CPU. Foreground gallery/photo requests then queue behind background work, and MySQL's small `queueLimit` can turn a burst into request failures rather than just slower responses.
+- Suggested fix: Introduce process-wide background semaphores for DB and CPU work with foreground reserve semantics. Make image queue, backfill, analytics, semantic scans, and embedding work acquire shared tokens, expose token/queue metrics, and keep foreground request DB work outside the background bucket.
 
-### C22-PERF-02 - Large browser upload, PAT upload, and restore bodies are still framework-materialized before app streaming/backpressure
-
-- Severity: High
-- Confidence: High for source shape; Medium for live impact without RSS traces
-- Status: Confirmed current risk
-- File/region: `apps/web/src/lib/upload-limits.ts:1-6`, `19-35`; `apps/web/next.config.ts:111-119`; `apps/web/src/components/upload-dropzone.tsx:243-260`; `apps/web/src/app/actions/images.ts:129-149`; `apps/web/src/app/api/admin/lr/upload/route.ts:152-188`; `apps/web/src/app/[locale]/admin/db-actions.ts:717-739`.
-- Failure scenario: an authenticated admin or PAT client submits a near-limit 200-250 MiB upload/restore while Sharp, SSR, queue work, or semantic inference is active. Domain code streams `File` to disk after entry, but the Server Action/`request.formData()` parser has already materialized multipart bodies. On the single small host this can spike RSS, trigger long GC pauses, or OOM before app-level quota and disk handoff can help.
-- Concrete fix: move large binary ingress to streaming route handlers with auth/origin/token checks before body consumption, `Content-Length` prechecks, part/total byte limits, a shared large-body semaphore, temp-file handoff to image ingest or restore, and production-like RSS smoke tests.
-
-### C22-PERF-03 - Public map can still serialize, SSR, hydrate, and fit 10,000 markers
+### PERF-C23-03 - Public map bounds DB rows but can still render 10k Leaflet markers plus a duplicate list
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed current risk
-- File/region: `apps/web/src/lib/data.ts:1766-1817`; `apps/web/src/db/schema.ts:49-50`, `123-131`; `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`; `apps/web/src/components/map/map-client.tsx:77-140`.
-- Failure scenario: a location-rich gallery approaches the 10,000 marker cap. `/map` performs a large dynamic DB query, serializes all markers to the client, SSR-renders a fallback list item for every marker, computes bounds via full-array spreads, and mounts one Leaflet marker per photo. Mobile first interaction and map pan/zoom responsiveness degrade sharply.
-- Concrete fix: lower the initial cap, serve map data by viewport/bbox/tile endpoint, add clustering, and virtualize or paginate the accessible list. If the full-map endpoint remains, add a GPS/map-visible query index and verify with `EXPLAIN`.
+- Status: Likely/manual-validation; DB cap and browser work source shape confirmed.
+- Evidence: `getMapImages()` returns up to `MAP_MAX_MARKERS = 10000` plus one sentinel at `apps/web/src/lib/data.ts:1766-1816`. The map page maps every returned row into `markers` and also renders every marker into a below-map list at `apps/web/src/app/[locale]/(public)/map/page.tsx:50-66` and `apps/web/src/app/[locale]/(public)/map/page.tsx:98-110`. The client computes bounds by allocating coordinate arrays and spreading them into `Math.min`/`Math.max` at `apps/web/src/components/map/map-client.tsx:77-94`, then renders one `<Marker>` and popup subtree per marker at `apps/web/src/components/map/map-client.tsx:120-141`.
+- Failure scenario: A map-visible topic with thousands of GPS photos produces a large SSR payload, a large DOM/list payload, and thousands of Leaflet marker instances. Mobile or low-power browsers can block the main thread during hydration, bounds fitting, marker layout, and popup setup even though the DB query is capped.
+- Suggested fix: Replace all-marker initial render with viewport-bbox fetching and clustering, or at minimum reduce the initial server cap sharply and progressively load markers by zoom/viewport. Virtualize or paginate the below-map list.
 
-### C22-PERF-04 - Home on-this-day remains a non-sargable date scan on every dynamic home render
-
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed current risk
-- File/region: `apps/web/src/components/on-this-day-widget.tsx:16-23`; `apps/web/src/lib/data-timeline.ts:103-131`; `apps/web/src/db/schema.ts:123-131`.
-- Failure scenario: the home page renders `OnThisDayWidget`, which calls `getOnThisDayImages()`. The query filters with `MONTH(capture_date)` and `DAY(capture_date)`, so the `(processed, capture_date, created_at)` index cannot seek a specific month/day. A large dated corpus plus crawler traffic turns a six-photo widget into repeated scans.
-- Concrete fix: add generated/stored `capture_month` and `capture_day` columns with an index such as `(processed, capture_month, capture_day, capture_date, created_at, id)`, or materialize/cache the daily result and invalidate on image metadata changes.
-
-### C22-PERF-05 - Public keyword search and smart-collection contains predicates still use leading-wildcard scans
+### PERF-C23-04 - Semantic search is a bounded brute-force BLOB scan with recency bias
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed current risk
-- File/region: `apps/web/src/app/actions/public.ts:247-329`; `apps/web/src/lib/data.ts:1574-1749`; `apps/web/src/lib/smart-collections.ts:221-223`, `261-267`.
-- Failure scenario: accepted searches for common substrings scan title, description, camera/lens, topic, topic label, tag, and alias branches with `%term%` predicates. Smart collection `contains` predicates compile to the same LIKE shape. Rate limits cap abuse, but each allowed request can still spend DB CPU and compete with SSR/background work.
-- Concrete fix: move public text search to an indexed search surface such as MySQL FULLTEXT/ngram, a materialized search-document table, or a dedicated search index. Short-term, raise minimum keyword length for keyword mode, cache hot queries briefly, add statement timeouts, and reject/warn on expensive public smart-collection `contains` predicates.
+- Status: Likely/manual-validation; source shape confirmed.
+- Evidence: `SEMANTIC_SCAN_LIMIT` defaults to 2000 and can be raised to a hard max of 25000 at `apps/web/src/lib/clip-embeddings.ts:36-48`. The route scans most-recent embeddings by `modelVersion` and `updatedAt` at `apps/web/src/app/api/search/semantic/route.ts:263-279`, decodes every returned MEDIUMBLOB and computes similarity in JS at `apps/web/src/app/api/search/semantic/route.ts:292-311`. Schema indexing supports the recency scan but not vector distance at `apps/web/src/db/schema.ts:314-326`.
+- Failure scenario: Larger galleries or higher semantic traffic make each request O(scan_limit * dimensions) CPU plus BLOB transfer. Raising the scan limit improves recall but directly increases DB and JS work. Keeping the default cap can miss older relevant images because candidates are selected by embedding freshness, not semantic likelihood.
+- Suggested fix: Add a vector index/ANN service or precomputed normalized embedding matrix with efficient top-k search. Short term, instrument scanned rows, decode time, scoring time, and result age distribution; consider topic/date filters before vector scoring.
 
-### C22-PERF-06 - Semantic and similar-photo routes score vector scans synchronously in the Node request path
+### PERF-C23-05 - On-this-day query remains non-sargable on `capture_date`
+
+- Severity: Low-medium
+- Confidence: High
+- Status: Confirmed source shape; scale-dependent.
+- Evidence: The code explicitly notes `MONTH()` and `DAY()` are not sargable at `apps/web/src/lib/data-timeline.ts:103-110`; the query applies those functions in the predicate at `apps/web/src/lib/data-timeline.ts:121-131`. The `images` table has processed/capture-date indexes, but no generated month/day columns at `apps/web/src/db/schema.ts:123-132`.
+- Failure scenario: On larger galleries, every widget render can scan/filter a broad processed capture-date range instead of seeking a narrow `(month, day)` index. This is currently bounded by a small result limit, but the predicate work happens before the limit.
+- Suggested fix: Add generated `capture_month` and `capture_day` columns or a compact calendar index table and query those fields directly. Keep the existing `limit(6)` and ordering.
+
+### PERF-C23-06 - HTML service-worker eviction does O(n) cache reads on each over-cap write
 
 - Severity: Low
 - Confidence: High
-- Status: Confirmed bounded risk
-- File/region: `apps/web/src/lib/clip-embeddings.ts:36-48`, `80-87`, `188-235`; `apps/web/src/app/api/search/semantic/route.ts:263-311`; `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`; `apps/web/src/db/schema.ts:299-310`.
-- Failure scenario: semantic mode is enabled and users open semantic/similar panels during upload or backfill. Each accepted request loads up to `SEMANTIC_SCAN_LIMIT` embedding blobs, decodes them, and scores them synchronously in the same Node process serving SSR and background queues. The hard cap now prevents accidental million-row scans, but CPU/heap/event-loop cost remains request-local.
-- Concrete fix: add a process-wide semantic scoring semaphore and scan latency/count telemetry. For larger galleries, move scoring to an ANN/vector index, worker thread, or process-owned copied matrix with explicit refresh invalidation.
+- Status: Confirmed, bounded.
+- Evidence: HTML cache size is capped at 50 entries at `apps/web/public/sw.template.js:31-39`. When over cap, eviction reads all cache keys, then `match()`es each cached response to read `sw-cached-at`, sorts, and deletes overflow entries at `apps/web/public/sw.template.js:147-164`.
+- Failure scenario: A navigation that writes the 51st HTML entry can trigger up to 51 Cache API reads plus a sort in the service worker. It is bounded and runs from `waitUntil`, but slow mobile storage can make offline-cache maintenance noisy during navigation-heavy sessions.
+- Suggested fix: Track HTML recency in a small metadata record like the image LRU path, or maintain insertion order by delete-then-put metadata so eviction is a head-walk rather than cache-body header reads.
 
-## Cycle 21 Fixes Verified, Not Counted
+## Non-findings and Current Mitigations
 
-- Mutation-barrier scanner order proof appears fixed: `check-action-origin.ts:664-709` only accepts a slot whose acquired-state gate is the next statement, and `check-action-origin.test.ts:745-760` covers the check-after-mutation negative case.
-- Pipeline backfill candidate index appears fixed: schema defines `idx_images_processed_pipeline_version` at `schema.ts:123-128`, migration creates it at `0030_pending_file_deletions.sql:19`, and reconcile mirrors it at `migrate.js:720-724`.
-- MySQL datetime rendering bug appears fixed in production code: `mysql-datetime.ts:33-69`, `data-timeline.ts:248-256`, `timeline/page.tsx:103`, and `on-this-day-widget.tsx:51` now use string parsing rather than `new Date(capture_date)` for rendered/grouped persisted datetimes.
-- Queue permanent-failure cap drift appears fixed: `image-queue.ts:374-387` owns `markPermanentlyFailed`, and production add sites now call it at `image-queue.ts:782` and `image-queue.ts:1044`.
-- Service-worker stale revocable page caching remains fixed: `sw.template.js:59-64` classifies photo/share/group/smart-collection/map pages as revocable and `sw.template.js:555-558` bypasses HTML offline caching for them.
+- No new public gallery N+1 finding: public image/tag list queries aggregate tags in SQL and split count/page work deliberately in `apps/web/src/lib/data.ts:802-947`.
+- Cursor pagination is present for public load-more paths, and legacy offset is capped in `apps/web/src/app/actions/public.ts:132-179`.
+- Sharp/libvips pressure is materially mitigated by global `sharp.concurrency()` and `sharp.cache(false)` at `apps/web/src/lib/process-image.ts:36-57`, file-path inputs, and sequential per-size work inside each format. The residual issue is shared CPU admission across independent queues, captured in PERF-C23-02.
+- Service-worker image cache races have recent guardrails: a metadata mutation queue and 300 ms HEAD timeout are present at `apps/web/public/sw.template.js:35-39` and `apps/web/public/sw.template.js:99-145`.
 
-## Final Missed-Issue Sweep
+## Final Missed-Issues Sweep
 
-I rechecked the requested upload, restore, queue, backfill, semantic-search, service-worker, database, admin, and public route flows after the inventory pass. No additional performance findings were confirmed beyond the six above. The main validation gaps are live RSS/CPU profiling, DB query plans on production-scale data, and browser traces on low-end mobile hardware.
-
-Uninspected categories: generated build output, binary fixtures/media bytes, runtime upload/data contents, `node_modules`, live production nginx/proxy state, live MySQL contents, and local secret/env files.
-
-Findings: 6 total.
+Searched for `formData()`, `MAP_MAX_MARKERS`, `MONTH()/DAY()`, `SEMANTIC_SCAN_LIMIT`, `Promise.all`, `PQueue`, `GET_LOCK`, `Cache.keys()/match()`, offsets, grouping, and queue/concurrency patterns across `apps/web/src`, `apps/web/public/sw.template.js`, and `.context/plans`. No additional high-confidence performance issue exceeded the findings above.
