@@ -69,6 +69,7 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
 async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<T> {
     const conn = await connection.getConnection();
     let lockAcquired = false;
+    let releaseCleanly = true;
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
@@ -83,9 +84,18 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
         return await action();
     } finally {
         if (lockAcquired) {
-            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_TOPIC_ROUTE_SEGMENTS]).catch(() => {});
+            try {
+                await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_TOPIC_ROUTE_SEGMENTS]);
+            } catch (error) {
+                releaseCleanly = false;
+                console.error('RELEASE_LOCK (topic route segments) failed; destroying pooled connection to avoid leaking an advisory lock:', error);
+            }
         }
-        conn.release();
+        if (releaseCleanly) {
+            conn.release();
+        } else {
+            conn.destroy();
+        }
     }
 }
 

@@ -277,11 +277,17 @@ export async function logout(formData?: FormData) {
     }
 
     if (token) {
-        const session = await verifySessionToken(token);
-        if (session) {
-            logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
+        const maintenanceError = getRestoreMaintenanceMessage('restore in progress');
+        if (!maintenanceError) {
+            using mutationSlot = acquireAdminMutationSlot();
+            if (mutationSlot.acquired) {
+                const session = await verifySessionToken(token);
+                if (session) {
+                    logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
+                }
+                await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
+            }
         }
-        await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
     }
 
     cookieStore.delete({ name: COOKIE_NAME, path: '/' });

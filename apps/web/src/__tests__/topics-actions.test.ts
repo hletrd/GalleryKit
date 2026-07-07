@@ -10,6 +10,8 @@ const {
     getConnectionMock,
     lockQueryMock,
     releaseLockQueryMock,
+    releaseConnectionMock,
+    destroyConnectionMock,
     isAdminMock,
     getCurrentUserMock,
     getTranslationsMock,
@@ -29,6 +31,8 @@ const {
     getConnectionMock: vi.fn(),
     lockQueryMock: vi.fn(),
     releaseLockQueryMock: vi.fn(),
+    releaseConnectionMock: vi.fn(),
+    destroyConnectionMock: vi.fn(),
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
     getTranslationsMock: vi.fn(),
@@ -157,6 +161,8 @@ describe('topic actions', () => {
         getConnectionMock.mockReset();
         lockQueryMock.mockReset();
         releaseLockQueryMock.mockReset();
+        releaseConnectionMock.mockReset();
+        destroyConnectionMock.mockReset();
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 1 });
         getTranslationsMock.mockResolvedValue((key: string) => key);
@@ -188,7 +194,8 @@ describe('topic actions', () => {
                 }
                 return [[]];
             }),
-            release: vi.fn(),
+            release: releaseConnectionMock,
+            destroy: destroyConnectionMock,
         });
     });
 
@@ -570,6 +577,35 @@ describe('topic actions', () => {
         expect(releaseLockQueryMock).toHaveBeenCalled();
         expect(lockQueryMock.mock.invocationCallOrder[0]).toBeLessThan(txDeleteMock.mock.invocationCallOrder[0]);
         expect(txDeleteMock.mock.invocationCallOrder[0]).toBeLessThan(releaseLockQueryMock.mock.invocationCallOrder[0]);
+    });
+
+    it('destroys the topic-route lock connection when RELEASE_LOCK fails', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        releaseLockQueryMock.mockRejectedValueOnce(new Error('release failed'));
+        const txSelectMock = vi
+            .fn()
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: null }]));
+        const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+        transactionMock.mockImplementationOnce(async (callback: (tx: {
+            select: typeof txSelectMock;
+            delete: typeof txDeleteMock;
+        }) => Promise<void>) => callback({
+            select: txSelectMock,
+            delete: txDeleteMock,
+        }));
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ success: true });
+
+        expect(releaseLockQueryMock).toHaveBeenCalled();
+        expect(destroyConnectionMock).toHaveBeenCalledTimes(1);
+        expect(releaseConnectionMock).not.toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('RELEASE_LOCK (topic route segments) failed'),
+            expect.any(Error),
+        );
+        errorSpy.mockRestore();
     });
 
     it('blocks topic deletion when a smart collection references the slug', async () => {
