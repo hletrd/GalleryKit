@@ -18,7 +18,7 @@ Reports written:
 
 ## Summary
 
-- Unique findings after dedupe: 30
+- Unique findings after dedupe: 31
 - Confirmed issues or confirmed coverage gaps: 22
 - Likely issues: 4
 - Manual-validation risks: 4
