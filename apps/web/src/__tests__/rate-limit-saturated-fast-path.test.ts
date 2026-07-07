@@ -24,7 +24,7 @@ const {
     decrementRateLimitMock,
     checkRateLimitMock,
     dbSelectMock,
-    trackBackgroundDbWriteMock,
+    trackAnalyticsDbWriteMock,
 } = vi.hoisted(() => ({
     headersMock: vi.fn(),
     getImagesLiteMock: vi.fn(),
@@ -34,7 +34,7 @@ const {
     decrementRateLimitMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
     dbSelectMock: vi.fn(),
-    trackBackgroundDbWriteMock: vi.fn(),
+    trackAnalyticsDbWriteMock: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({
@@ -60,7 +60,7 @@ vi.mock('@/lib/analytics', () => ({
 }));
 
 vi.mock('@/lib/background-db-writes', () => ({
-    trackBackgroundDbWrite: trackBackgroundDbWriteMock,
+    trackAnalyticsDbWrite: trackAnalyticsDbWriteMock,
 }));
 
 vi.mock('@/db', () => ({
@@ -111,7 +111,7 @@ function setupMocks(ip: string) {
     incrementRateLimitMock.mockResolvedValue(undefined);
     decrementRateLimitMock.mockResolvedValue(undefined);
     checkRateLimitMock.mockResolvedValue({ limited: false, count: 0 });
-    trackBackgroundDbWriteMock.mockResolvedValue(undefined);
+    trackAnalyticsDbWriteMock.mockResolvedValue(undefined);
     dbSelectMock.mockReturnValue({
         from: () => ({
             where: () => ({

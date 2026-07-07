@@ -16,7 +16,7 @@ import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { canonicalizeRequestedTagSlugs } from '@/lib/tag-slugs';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
-import { trackBackgroundDbWrite } from '@/lib/background-db-writes';
+import { trackAnalyticsDbWrite } from '@/lib/background-db-writes';
 
 type PublicImageListItem = Awaited<ReturnType<typeof getImagesLite>>[number];
 type PublicSearchItem = Awaited<ReturnType<typeof searchImages>>[number];
@@ -447,7 +447,7 @@ export async function recordPhotoView(imageId: number): Promise<void> {
         if (!visibleImage) return;
         if (isRestoreMaintenanceActive()) return;
         // Fire-and-forget: tracked for restore drain, but not awaited by pages.
-        trackBackgroundDbWrite(() => db.insert(imageViews).values({
+        trackAnalyticsDbWrite(() => db.insert(imageViews).values({
             imageId,
             referrer_host: params.referrer_host,
             country_code: params.country_code,
@@ -479,7 +479,7 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
             .limit(1);
         if (!visibleTopic) return;
         if (isRestoreMaintenanceActive()) return;
-        trackBackgroundDbWrite(() => db.insert(topicViews).values({
+        trackAnalyticsDbWrite(() => db.insert(topicViews).values({
             topic: topicSlug,
             referrer_host: params.referrer_host,
             country_code: params.country_code,
@@ -515,7 +515,7 @@ export async function recordSharedGroupView(groupId: number, groupKey: string): 
             .limit(1);
         if (!visibleGroup) return;
         if (isRestoreMaintenanceActive()) return;
-        trackBackgroundDbWrite(() => db.insert(sharedGroupViews).values({
+        trackAnalyticsDbWrite(() => db.insert(sharedGroupViews).values({
             groupId,
             referrer_host: params.referrer_host,
             country_code: params.country_code,

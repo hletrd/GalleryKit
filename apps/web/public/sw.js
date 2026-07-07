@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = 'ccbc2e28-p7';
+const SW_VERSION = '36c91deb-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -426,7 +426,7 @@ async function staleWhileRevalidateImage(request, event) {
     }
     // Serve stale immediately, revalidate in background (true SWR path:
     // no ETag to probe or the probe network-failed).
-    startRevalidate();
+    extendLifetime(event, startRevalidate());
     return cached;
   }
 

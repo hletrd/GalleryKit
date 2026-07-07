@@ -48,7 +48,9 @@ describe('upload embedding hook wiring', () => {
     expect(src).toContain('activeModelVersion');
     expect(src).toMatch(/eq\(images\.processed,\s*true\)/);
     expect(src).toMatch(/isNull\(imageEmbeddings\.imageId\)/);
-    expect(src).toMatch(/\.limit\(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE\)/);
+    expect(src).toContain('const remainingScanBudget = SEMANTIC_SCAN_LIMIT - scanned');
+    expect(src).toContain('const batchLimit = Math.min(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE, remainingScanBudget)');
+    expect(src).toMatch(/\.limit\(batchLimit\)/);
     expect(src).toContain('storeImageEmbeddingForMode(row.id, originalPath, semanticMode)');
     expect(src).toContain('await Promise.allSettled(tasks)');
   });

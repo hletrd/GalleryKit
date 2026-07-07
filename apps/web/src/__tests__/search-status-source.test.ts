@@ -61,4 +61,11 @@ describe('search dialog status ownership', () => {
         expect(SOURCE).toContain('aria-hidden="true"');
         expect(SOURCE).not.toContain("role=\"status\" aria-label={t('common.loading')}");
     });
+
+    it('uses platform-neutral keyboard shortcut copy', () => {
+        expect(SOURCE).not.toContain('navigator.platform');
+        expect(SOURCE).not.toContain('isMac');
+        expect(SOURCE).toContain('Ctrl/&#8984; K');
+        expect(SOURCE).toContain("{t('search.toggleHint')}");
+    });
 });

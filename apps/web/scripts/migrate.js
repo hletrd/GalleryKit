@@ -702,7 +702,9 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'image_tags', 'idx_image_tags_tag_id', 'CREATE INDEX idx_image_tags_tag_id ON image_tags (tag_id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_capture_date', 'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_created_at', 'CREATE INDEX idx_images_processed_created_at ON images (processed, created_at)');
+    await ensureIndex(connection, dbName, 'images', 'idx_images_processed_updated_at', 'CREATE INDEX idx_images_processed_updated_at ON images (processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic', 'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at)');
+    await ensureIndex(connection, dbName, 'images', 'idx_images_topic_updated_at', 'CREATE INDEX idx_images_topic_updated_at ON images (topic, processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_user_filename', 'CREATE INDEX idx_images_user_filename ON images (user_filename)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_uploaded_by', 'CREATE INDEX idx_images_uploaded_by ON images (uploaded_by)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_user_idx', 'CREATE INDEX audit_user_idx ON audit_log (user_id, created_at)');

@@ -52,6 +52,26 @@ describe('restore temp-file cleanup ownership', () => {
         expect(DB_ACTIONS_SRC).toMatch(/return\s+await\s+new\s+Promise<RestoreResult>/);
         expect(DB_ACTIONS_SRC).toMatch(/finally\s*\{[\s\S]*if\s*\(!cleanupTransferredToRestoreProcess\)\s*\{[\s\S]*await cleanupTempFile\(\)/);
     });
+
+    it('keeps maintenance active and cleans temp state on mysql child failure paths', () => {
+        const restoreIdx = DB_ACTIONS_SRC.indexOf('// Restore intentionally uses');
+        const restoreSource = DB_ACTIONS_SRC.slice(restoreIdx);
+        const failRestoreIdx = restoreSource.indexOf('const failRestore = (error: string, logLabel: string, reason: unknown) => {');
+        expect(failRestoreIdx).toBeGreaterThan(-1);
+        const failRestore = restoreSource.slice(failRestoreIdx, restoreSource.indexOf('};', failRestoreIdx) + 2);
+
+        expect(failRestore).toContain('clearRestoreWatchdog();');
+        expect(failRestore).toContain('readStream.destroy();');
+        expect(failRestore).toContain('restore.stdin.destroy();');
+        expect(failRestore).toContain('restore.kill();');
+        expect(failRestore).toContain('cleanupTempFile();');
+        expect(failRestore).toContain('keepMaintenance: true');
+
+        expect(restoreSource).toContain("failRestore(t('restoreFailed'), 'mysql restore timeout:', err)");
+        expect(restoreSource).toContain("failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err)");
+        expect(restoreSource).toContain("failRestore(t('restoreFailed'), 'mysql restore stdin error:', err)");
+        expect(restoreSource).toContain("failRestore(t('restoreFailed'), 'mysql restore spawn error:', err)");
+    });
 });
 
 describe('backup dump validation', () => {

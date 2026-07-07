@@ -254,6 +254,18 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
         expect(scriptSrc).toContain('errors += rejectedTaskResults.length;');
         expect(scriptSrc).toContain("[backfill-color-pipeline] queued task failed:");
     });
+
+    it('main() fetches sidecar candidates one keyset-limited page at a time', () => {
+        expect(scriptSrc).toContain('async function fetchCandidatePage(): Promise<ImageRow[]>');
+        expect(scriptSrc).toMatch(/WHERE \$\{whereClause\} AND id > \$\{lastCandidateId\}/);
+        expect(scriptSrc).toMatch(/LIMIT \$\{BATCH_SIZE\}/);
+        expect(scriptSrc).toContain('await processRows(rows);');
+        const candidateFetch = scriptSrc.slice(
+            scriptSrc.indexOf('async function fetchCandidatePage'),
+            scriptSrc.indexOf('// R7-L8: batch DB updates'),
+        );
+        expect(candidateFetch).not.toMatch(/ORDER BY id ASC\s*`\);/);
+    });
 });
 
 describe('countDeletedMidReencodeDetectionFailures (AGG-C4-04 — detection-failure∩deleted overlap)', () => {

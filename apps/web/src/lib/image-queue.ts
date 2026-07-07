@@ -3,17 +3,14 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { connection, db, images, sessions, imageEmbeddings, POOL_CONNECTION_LIMIT } from '@/db';
-import { eq, and, sql, asc, gt, notInArray, isNull } from 'drizzle-orm';
+import { connection, db, images, imageEmbeddings, POOL_CONNECTION_LIMIT } from '@/db';
+import { eq, and, asc, gt, notInArray, isNull } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { MIN_IMAGE_SIZE, type JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfigDetached, type GalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
-import { purgeOldBuckets } from '@/lib/rate-limit';
-import { purgeOldAuditLog } from '@/lib/audit';
-import { purgeOldViewEvents } from '@/lib/view-retention';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename, hasMySQLErrorCode } from '@/lib/validation';
@@ -100,8 +97,6 @@ export async function cleanOrphanedTmpFiles(now: number = Date.now()): Promise<v
 }
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
-/** Tracks whether one-time bootstrap cleanup has run in this process. */
-let bootstrapCleanupRun = false;
 const CLAIM_RETRY_DELAY_MS = 5000;
 // C2-32 (WP20, run-10 cycle-2): mirrors CLAIM_RETRY_DELAY_MS below — a
 // processing failure (Sharp crash, transient FS/DB blip) previously
@@ -570,11 +565,13 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
         // C2-34 (WP21, run-10 cycle-2): bound each invocation to the same
         // scan cap the semantic-search routes use, so a huge missing-
         // embedding backlog can't walk every processed row in one call.
-        if (scanned >= SEMANTIC_SCAN_LIMIT) {
+        const remainingScanBudget = SEMANTIC_SCAN_LIMIT - scanned;
+        if (remainingScanBudget <= 0) {
             state.embeddingScanCursorId = cursorId;
             console.warn(`[Queue] embedding bootstrap reached scan cap (${scanned}); a later bootstrap resumes from id > ${cursorId}`);
             break;
         }
+        const batchLimit = Math.min(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE, remainingScanBudget);
         const rows = await db.select({
             id: images.id,
             filename_original: images.filename_original,
@@ -590,7 +587,7 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
                 isNull(imageEmbeddings.imageId),
             ))
             .orderBy(asc(images.id))
-            .limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE);
+            .limit(batchLimit);
 
         scanned += rows.length;
 
@@ -613,7 +610,7 @@ async function bootstrapMissingActiveEmbeddings(state: ProcessingQueueState) {
         }
 
         const lastRow = rows.at(-1);
-        if (!lastRow || rows.length < BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE) {
+        if (!lastRow || rows.length < batchLimit) {
             // Clean completion (reached the end of the candidate set): reset
             // the persisted cursor so the NEXT invocation wraps around to 0
             // and re-attempts any still-isNull (previously failed) rows.
@@ -1067,14 +1064,6 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
     return true;
 };
 
-export async function purgeExpiredSessions() {
-    try {
-        await db.delete(sessions).where(sql`${sessions.expiresAt} < NOW()`);
-    } catch (err) {
-        console.error('Failed to purge expired sessions', err);
-    }
-}
-
 function isConnectionRefusedError(err: unknown): boolean {
     if (!(err instanceof Error)) return false;
     const directCode = 'code' in err ? (err as { code?: unknown }).code : undefined;
@@ -1241,33 +1230,11 @@ export const bootstrapImageProcessingQueue = async () => {
         cleanOrphanedTmpFiles().catch(err => console.debug('cleanOrphanedTmpFiles failed:', err));
         cleanOrphanedTopicTempFiles().catch(err => console.debug('cleanOrphanedTopicTempFiles failed:', err));
 
-        // US-004: Purge expired sessions, stale rate-limit buckets, and old audit log entries on startup and periodically
-        if (!bootstrapCleanupRun) {
-            bootstrapCleanupRun = true;
-            purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
-            purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
-            purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
-            // AGG-H2 (run-6 cycle-2): retention sweep for the anonymous
-            // *_views analytics tables (default 395 days / VIEW_RETENTION_DAYS)
-            // so per-IP-only-limited anonymous writes can't grow them unbounded
-            // on the single MySQL writer.
-            purgeOldViewEvents().catch(err => console.debug('purgeOldViewEvents failed:', err));
-        }
-        // AGG-M12 (run-6 cycle-2): arm the hourly GC timer ONCE. Previously
-        // every successful bootstrap batch cleared + re-armed a fresh 1-hour
-        // countdown, so during a large multi-batch bootstrap (e.g. 10k pending
-        // images = many BOOTSTRAP_BATCH_SIZE continuation runs) the periodic
-        // purges never fired — the timer kept getting reset before reaching the
-        // hour. Guarding on !state.gcInterval keeps the cadence stable across
-        // continuation batches. (bootstrapCleanupRun above already covers the
-        // one-shot startup purge, so dropping the per-batch re-arm loses nothing.)
+        // Keep queue-local retry maps from retaining abandoned job ids forever.
+        // Site-wide retention jobs are owned by maintenance-scheduler.ts and
+        // start from instrumentation independently of image queue bootstrap.
         if (!state.gcInterval) {
             state.gcInterval = setInterval(() => {
-                purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
-                purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
-                purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
-                // AGG-H2: hourly retention sweep for the *_views analytics tables.
-                purgeOldViewEvents().catch(err => console.debug('purgeOldViewEvents failed:', err));
                 pruneRetryMaps(state);
             }, 60 * 60 * 1000); // every hour
             state.gcInterval.unref?.();

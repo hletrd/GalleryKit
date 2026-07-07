@@ -4,6 +4,8 @@ export async function register() {
         syncRestoreMaintenanceFromDurable();
         const { assertNoLegacyPublicOriginalUploads } = await import('@/lib/upload-paths');
         await assertNoLegacyPublicOriginalUploads({ failInProduction: true });
+        const { startMaintenanceScheduler } = await import('@/lib/maintenance-scheduler');
+        startMaintenanceScheduler();
         const { bootstrapImageProcessingQueue } = await import('@/lib/image-queue');
         await bootstrapImageProcessingQueue();
 

@@ -310,6 +310,17 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         }
     });
 
+    it('the stale-image SWR branch keeps background revalidation lifetime-covered (template + generated)', () => {
+        for (const src of [TEMPLATE, GENERATED_SW]) {
+            const fn = src.slice(
+                src.indexOf('async function staleWhileRevalidateImage'),
+                src.indexOf('async function networkFirstHtml'),
+            );
+            expect(fn).toMatch(/extendLifetime\(event, startRevalidate\(\)\);\s*\n\s*return cached;/);
+            expect(fn).not.toMatch(/\n\s*startRevalidate\(\);\s*\n\s*return cached;/);
+        }
+    });
+
     // C4-08 / PERF4-02 (run-10 c4): the HTML network-first strategy must
     // return the network response immediately — the put + eviction walk ride
     // event.waitUntil so first-paint/HTML streaming is never gated on the

@@ -380,31 +380,6 @@ async function main() {
         whereClause = sql`processed = TRUE`;
     }
 
-    const rawRows = await db.execute(sql`
-        SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
-               icc_profile_name, color_primaries, width
-        FROM images
-        WHERE ${whereClause}
-        ORDER BY id ASC
-    `);
-    // drizzle's mysql2 `db.execute(sql)` returns the underlying mysql2 tuple
-    // `[rows, fields]`, not just the row array. Newer drizzle releases or
-    // different driver shims may return rows directly. Unwrap defensively
-    // so the script works either way — without this guard, iterating
-    // produces `[rows, fields]` as two "rows" and every field accessor
-    // returns undefined → resolveOriginalUploadPath crashes.
-    const rows = (Array.isArray(rawRows) && Array.isArray(rawRows[0])
-        ? rawRows[0]
-        : rawRows) as unknown as ImageRow[];
-
-    console.log(`[backfill-color-pipeline] ${rows.length} candidate image(s) found. (force=${forceReencode})`);
-
-    if (rows.length === 0) {
-        console.log('[backfill-color-pipeline] Nothing to do. Exiting.');
-        lockConn.release();
-        process.exit(0);
-    }
-
     const concurrency = parseBoundedPositiveInteger(process.env.BACKFILL_CONCURRENCY, {
         fallback: 2,
         max: 8,
@@ -426,7 +401,30 @@ async function main() {
     // mid-reencode. NOT a failure (the image is gone, idempotent retry is moot)
     // and NOT counted as processed — surfaced separately.
     let deletedMidReencode = 0;
-    const reportEvery = Math.max(1, Math.floor(rows.length / 20));
+    let totalCandidates = 0;
+    let lastCandidateId = 0;
+    let pageCount = 0;
+    const reportEvery = BATCH_SIZE;
+
+    async function fetchCandidatePage(): Promise<ImageRow[]> {
+        const rawRows = await db.execute(sql`
+            SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
+                   icc_profile_name, color_primaries, width
+            FROM images
+            WHERE ${whereClause} AND id > ${lastCandidateId}
+            ORDER BY id ASC
+            LIMIT ${BATCH_SIZE}
+        `);
+        // drizzle's mysql2 `db.execute(sql)` returns the underlying mysql2 tuple
+        // `[rows, fields]`, not just the row array. Newer drizzle releases or
+        // different driver shims may return rows directly. Unwrap defensively
+        // so the script works either way — without this guard, iterating
+        // produces `[rows, fields]` as two "rows" and every field accessor
+        // returns undefined → resolveOriginalUploadPath crashes.
+        return (Array.isArray(rawRows) && Array.isArray(rawRows[0])
+            ? rawRows[0]
+            : rawRows) as unknown as ImageRow[];
+    }
 
     // R7-L8: batch DB updates to reduce round-trips.
     // AGG-C4-02 (run-9 c1 ARCH-R9-01): carry the per-format filenames into each
@@ -522,54 +520,73 @@ async function main() {
         console.log(`  [batch-flush] ${updatedOk} row(s) updated (${derivativeItems.length} derivative-only)`);
     }
 
-    const queuedTasks: Promise<void>[] = [];
-    for (const [index, row] of rows.entries()) {
-        queuedTasks.push(queue.add(async () => {
-            assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
-            const result = await reprocessRow(row, backfillSettings, rowExists);
-            if (result.outcome === 'processed') {
-                processed++;
-                const files = rowFilenames(row);
-                if (result.signals) {
-                    updateBatch.push({ id: row.id, signals: result.signals, files });
-                } else if (result.derivativeOnly) {
-                    // AGG2-01: detection failed but encode succeeded — persist
-                    // the derivative columns without bumping pipeline_version.
-                    // AGG-C3-04: track these so the exit code/summary can flag
-                    // a run that left color metadata stale despite re-encoding.
-                    detectionFailures++;
-                    derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
+    async function processRows(rows: ImageRow[]): Promise<void> {
+        const queuedTasks: Promise<void>[] = [];
+        for (const row of rows) {
+            queuedTasks.push(queue.add(async () => {
+                assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+                const result = await reprocessRow(row, backfillSettings, rowExists);
+                if (result.outcome === 'processed') {
+                    processed++;
+                    const files = rowFilenames(row);
+                    if (result.signals) {
+                        updateBatch.push({ id: row.id, signals: result.signals, files });
+                    } else if (result.derivativeOnly) {
+                        // AGG2-01: detection failed but encode succeeded — persist
+                        // the derivative columns without bumping pipeline_version.
+                        // AGG-C3-04: track these so the exit code/summary can flag
+                        // a run that left color metadata stale despite re-encoding.
+                        detectionFailures++;
+                        derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
+                    }
+                    if (pendingUpdates() >= BATCH_SIZE) {
+                        await flushBatch();
+                    }
+                } else if (result.outcome === 'skipped') {
+                    skipped++;
+                } else if (result.outcome === 'deleted-mid-reencode') {
+                    deletedMidReencode++;
+                } else {
+                    errors++;
                 }
-                if (pendingUpdates() >= BATCH_SIZE) {
-                    await flushBatch();
+
+                if ((processed + skipped + errors + deletedMidReencode) % reportEvery === 0) {
+                    console.log(
+                        `  [progress] candidates=${totalCandidates} processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures}`,
+                    );
                 }
-            } else if (result.outcome === 'skipped') {
-                skipped++;
-            } else if (result.outcome === 'deleted-mid-reencode') {
-                deletedMidReencode++;
-            } else {
-                errors++;
-            }
-
-            if ((index + 1) % reportEvery === 0) {
-                console.log(
-                    `  [progress] ${index + 1}/${rows.length} processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures}`,
-                );
-            }
-        }));
-    }
-
-    const taskResults = await Promise.allSettled(queuedTasks);
-    const rejectedTaskResults = taskResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (rejectedTaskResults.length > 0) {
-        errors += rejectedTaskResults.length;
-        for (const result of rejectedTaskResults) {
-            console.error('[backfill-color-pipeline] queued task failed:', result.reason);
+            }));
         }
+
+        const taskResults = await Promise.allSettled(queuedTasks);
+        const rejectedTaskResults = taskResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (rejectedTaskResults.length > 0) {
+            errors += rejectedTaskResults.length;
+            for (const result of rejectedTaskResults) {
+                console.error('[backfill-color-pipeline] queued task failed:', result.reason);
+            }
+        }
+
+        await flushBatch();
     }
 
-    // Flush any remaining rows.
-    await flushBatch();
+    for (;;) {
+        assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
+        const rows = await fetchCandidatePage();
+        if (rows.length === 0) break;
+        pageCount++;
+        totalCandidates += rows.length;
+        lastCandidateId = rows.at(-1)?.id ?? lastCandidateId;
+        console.log(`  [page ${pageCount}] fetched ${rows.length} candidate image(s), last_id=${lastCandidateId}`);
+        await processRows(rows);
+        if (rows.length < BATCH_SIZE) break;
+    }
+
+    if (totalCandidates === 0) {
+        console.log(`[backfill-color-pipeline] No candidate image(s) found. (force=${forceReencode})`);
+    } else {
+        console.log(`[backfill-color-pipeline] ${totalCandidates} candidate image(s) scanned across ${pageCount} page(s). (force=${forceReencode})`);
+    }
 
     console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures} deletedMidReencode=${deletedMidReencode}`);
     if (detectionFailures > 0) {

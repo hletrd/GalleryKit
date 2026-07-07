@@ -135,6 +135,11 @@ export function buildContentSecurityPolicy({
     connectSources.push(...GA_CONNECT_SOURCES);
   }
 
+  // Production still allows inline styles because Next/font, Tailwind runtime
+  // style attributes, and Radix-style component sizing do not share the script
+  // nonce path. Scripts remain nonce-only in production; this style allowance
+  // should be revisited only with browser coverage that proves no hydration or
+  // component styles regress.
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(' ')}`,

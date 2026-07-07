@@ -9,8 +9,12 @@ vi.mock('@/lib/restore-maintenance', () => ({
 }));
 
 import {
+    ANALYTICS_DB_WRITE_CONCURRENCY,
+    ANALYTICS_DB_WRITE_MAX_PENDING,
     drainBackgroundDbWritesForRestore,
+    getAnalyticsDbWriteStateForTests,
     getBackgroundDbWriteCountForTests,
+    trackAnalyticsDbWrite,
     trackBackgroundDbWrite,
 } from '@/lib/background-db-writes';
 
@@ -44,5 +48,35 @@ describe('background DB write restore drain', () => {
 
         expect(write).not.toHaveBeenCalled();
         expect(getBackgroundDbWriteCountForTests()).toBe(0);
+    });
+
+    it('bounds anonymous analytics write concurrency and backlog', async () => {
+        const releases: Array<() => void> = [];
+        const write = vi.fn(() => new Promise<void>((resolve) => {
+            releases.push(resolve);
+        }));
+
+        const writes = Array.from(
+            { length: ANALYTICS_DB_WRITE_MAX_PENDING + 1 },
+            () => trackAnalyticsDbWrite(write),
+        );
+
+        expect(write).toHaveBeenCalledTimes(ANALYTICS_DB_WRITE_CONCURRENCY);
+        expect(getAnalyticsDbWriteStateForTests()).toEqual({
+            active: ANALYTICS_DB_WRITE_CONCURRENCY,
+            queued: ANALYTICS_DB_WRITE_MAX_PENDING - ANALYTICS_DB_WRITE_CONCURRENCY,
+            tracked: ANALYTICS_DB_WRITE_MAX_PENDING,
+        });
+
+        while (getAnalyticsDbWriteStateForTests().tracked > 0) {
+            for (const release of releases.splice(0)) {
+                release();
+            }
+            await Promise.resolve();
+        }
+        await drainBackgroundDbWritesForRestore();
+        await expect(Promise.all(writes)).resolves.toHaveLength(ANALYTICS_DB_WRITE_MAX_PENDING + 1);
+        expect(getAnalyticsDbWriteStateForTests()).toEqual({ active: 0, queued: 0, tracked: 0 });
+        expect(write).toHaveBeenCalledTimes(ANALYTICS_DB_WRITE_MAX_PENDING);
     });
 });

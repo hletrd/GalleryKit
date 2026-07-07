@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { buildContentSecurityPolicy } from '@/lib/content-security-policy';
 
@@ -62,5 +64,12 @@ describe('buildContentSecurityPolicy', () => {
 
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(csp).not.toContain('cdn.jsdelivr.net');
+  });
+
+  it('documents the remaining production inline-style allowance separately from scripts', () => {
+    const source = readFileSync(join(__dirname, '../lib/content-security-policy.ts'), 'utf8');
+
+    expect(source).toContain('Production still allows inline styles');
+    expect(source).toContain('Scripts remain nonce-only in production');
   });
 });

@@ -178,6 +178,27 @@ describe('bootstrapMissingActiveEmbeddings scan cap (WP21 / C2-34)', () => {
         );
     });
 
+    it('uses the remaining scan budget for non-multiple SEMANTIC_SCAN_LIMIT values', async () => {
+        const batch1 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 1));
+        const batch2 = Array.from({ length: 25 }, (_, i) => embeddingRow(i + 51));
+        const batch3 = Array.from({ length: 50 }, (_, i) => embeddingRow(i + 76));
+
+        const { bootstrapImageProcessingQueue, getProcessingQueueState, embeddingLimitMock } =
+            await loadQueueModule({ embeddingBatches: [batch1, batch2, batch3], scanLimit: 75 });
+
+        await bootstrapImageProcessingQueue();
+        const state = getProcessingQueueState();
+        await Promise.allSettled(Array.from(state.sideEffects));
+
+        expect(embeddingLimitMock).toHaveBeenCalledTimes(2);
+        expect(embeddingLimitMock).toHaveBeenNthCalledWith(1, 50);
+        expect(embeddingLimitMock).toHaveBeenNthCalledWith(2, 25);
+        expect(console.warn).toHaveBeenCalledWith(
+            expect.stringContaining('embedding bootstrap reached scan cap (75)'),
+        );
+        expect(state.embeddingScanCursorId).toBe(75);
+    });
+
     it('does not warn when the backlog finishes under the cap', async () => {
         const shortBatch = Array.from({ length: 10 }, (_, i) => embeddingRow(i + 1));
 

@@ -135,11 +135,6 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     const [loading, setLoading] = useState(false);
     const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | 'invalidSemantic' | 'semanticSetupRequired' | null>(null);
     const [useSemanticSearch, setUseSemanticSearch] = useState(false);
-    const [isMac] = useState(() => {
-        if (typeof navigator === 'undefined') return true;
-        const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
-        return /Mac|iPhone|iPad/.test(platform);
-    });
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -518,7 +513,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             {hasDisplayedResults && (
                                 <span className="mr-2">{t('search.keyboardInstructions')}</span>
                             )}
-                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
+                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">Ctrl/&#8984; K</kbd> {t('search.toggleHint')}
                         </p>
                     </div>
                     {semanticSearchMode !== 'disabled' && (

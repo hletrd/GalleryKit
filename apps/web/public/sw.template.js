@@ -426,7 +426,7 @@ async function staleWhileRevalidateImage(request, event) {
     }
     // Serve stale immediately, revalidate in background (true SWR path:
     // no ETag to probe or the probe network-failed).
-    startRevalidate();
+    extendLifetime(event, startRevalidate());
     return cached;
   }
 

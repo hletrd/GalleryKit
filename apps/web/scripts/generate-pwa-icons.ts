@@ -16,7 +16,7 @@
  */
 
 import sharp from 'sharp';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, renameSync, rmSync } from 'fs';
 import { resolve } from 'path';
 
 const root = resolve(__dirname, '..');
@@ -68,9 +68,16 @@ async function generate() {
   for (const { name, size, maskable } of sizes) {
     const svg = buildSvg(size, maskable);
     const outPath = resolve(iconsDir, name);
+    const tmpPath = resolve(iconsDir, `.${name}.${process.pid}.tmp`);
     await sharp(svg)
       .png()
-      .toFile(outPath);
+      .toFile(tmpPath);
+    try {
+      renameSync(tmpPath, outPath);
+    } catch (error) {
+      rmSync(tmpPath, { force: true });
+      throw error;
+    }
     console.log(`[generate-pwa-icons] wrote ${name} (${size}x${size}${maskable ? ', maskable' : ''})`);
   }
 }
