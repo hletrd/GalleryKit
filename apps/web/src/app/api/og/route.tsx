@@ -265,6 +265,10 @@ export async function GET(req: NextRequest) {
       status: 500,
       headers: {
         'Cache-Control': OG_ERROR_CACHE_CONTROL,
+        // C6-14 (run-10 cycle-6): match the per-photo OG route + every other
+        // public route's defense-in-depth response headers on the error path.
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }
