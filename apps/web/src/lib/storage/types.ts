@@ -50,13 +50,15 @@ export interface StorageBackend {
 
     /**
      * Write a file from a Node.js Readable stream.
-     * Used for upload pipeline (original files from browser).
+     * Intended for a future upload-pipeline integration; live browser uploads
+     * still use direct filesystem helpers.
      */
     writeStream(key: string, stream: Readable | import('stream/web').ReadableStream, contentType?: string): Promise<StorageWriteResult>;
 
     /**
      * Write a file from a Buffer.
-     * Used by Sharp output pipeline.
+     * Intended for a future Sharp-output integration; live derivative writes
+     * still use direct filesystem helpers.
      */
     writeBuffer(key: string, data: Buffer, contentType?: string): Promise<StorageWriteResult>;
 
@@ -68,7 +70,8 @@ export interface StorageBackend {
 
     /**
      * Create a readable stream for a file.
-     * Used by serve-upload.ts for streaming responses.
+     * Intended for a future serving integration; live public serving still uses
+     * direct filesystem helpers.
      */
     createReadStream(key: string): Promise<Readable>;
 
@@ -89,7 +92,8 @@ export interface StorageBackend {
 
     /**
      * Copy a file within the same backend.
-     * Used by Sharp pipeline for hardlink-equivalent behavior.
+     * Intended for future derivative-copy workflows once this abstraction is
+     * wired into the image pipeline.
      */
     copy(srcKey: string, destKey: string): Promise<void>;
 

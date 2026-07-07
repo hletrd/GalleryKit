@@ -10,6 +10,7 @@ describe('backfill re-embed contract', () => {
   it('uses the real encoder under --production', () => {
     expect(src).toContain('embedImageReal');
     expect(src).toContain('--production');
+    expect(src).toContain('SEMANTIC_SEARCH_ALLOW_PRODUCTION=true CLIP_MODELS_ROOT=/app/data/models/clip');
   });
   it('does not gate on the obsolete semantic_search_enabled key', () => {
     expect(src).not.toContain("'semantic_search_enabled'");

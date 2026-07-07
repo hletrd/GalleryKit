@@ -18,7 +18,7 @@
  *     -v .../apps/web/data:/app/data \
  *     --env-file .../apps/web/.env.local \
  *     --user root -w /app/apps/web web-web:latest \
- *     sh -c "CLIP_MODELS_ROOT=/app/data/models/clip npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
+ *     sh -c "SEMANTIC_SEARCH_ALLOW_PRODUCTION=true CLIP_MODELS_ROOT=/app/data/models/clip npx --yes tsx@4.22.4 scripts/backfill-clip-embeddings.ts --production --force"
  *
  * CLIP_INFERENCE_CONCURRENCY defaults to 1 and is capped by lib/clip-model.ts.
  * Raise it only after measuring CPU and RSS headroom on the deploy host.
