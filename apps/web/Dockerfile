@@ -1,4 +1,4 @@
-FROM node:24-slim AS build-base
+FROM node:26-slim AS build-base
 
 # Supply-chain note: keep this base on the latest Node 24 LTS line, and record
 # the resolved `node:24-slim` digest in deploy/build logs before changing this
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-FROM node:24-slim AS runner-base
+FROM node:26-slim AS runner-base
 
 # Install only the runtime tools the production container needs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
