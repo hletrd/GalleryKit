@@ -255,6 +255,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch { console.debug('sessionStorage remove failed') }
     }, []);
 
+    // C4-23 (run-10 c4): the neighbor-preload effect must not re-run when the
+    // info panel toggles. photoViewerSizes is derived from showInfo, so with it
+    // in the effect's dep array every info open/close tore down and re-created
+    // every neighbor <link rel=preload> — re-fetching both neighbors on a
+    // no-navigation UI toggle. Read the responsive `sizes` hint from a ref so
+    // the effect keys only on the displayed photo (image is a stable reference
+    // per id) + the size ladder.
+    const photoViewerSizesRef = useRef(photoViewerSizes);
+    useEffect(() => { photoViewerSizesRef.current = photoViewerSizes; }, [photoViewerSizes]);
+
     // Preload prev/next image files so they appear instantly on navigation.
     //
     // R4C8 PERF-R4C8-03: emit exactly ONE responsive preload per neighbor.
@@ -294,6 +304,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             links.push(link);
         };
 
+        const sizes = photoViewerSizesRef.current;
         getAvifSupportPromise().then((avifSupported) => {
             if (cancelled) return;
             for (const img of imgs) {
@@ -304,13 +315,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 // Single-format selection — mirrors the <picture> outcome.
                 if (avifSupported && baseAvif) {
                     const srcset = imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ');
-                    appendResponsivePreload('image/avif', srcset, photoViewerSizes);
+                    appendResponsivePreload('image/avif', srcset, sizes);
                 } else if (baseWebp) {
                     const srcset = imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ');
-                    appendResponsivePreload('image/webp', srcset, photoViewerSizes);
+                    appendResponsivePreload('image/webp', srcset, sizes);
                 } else if (baseJpeg) {
                     const srcset = imageSizes.map(w => `${imageUrl(`/uploads/jpeg/${baseJpeg}_${w}.jpg`)} ${w}w`).join(', ');
-                    appendResponsivePreload('image/jpeg', srcset, photoViewerSizes);
+                    appendResponsivePreload('image/jpeg', srcset, sizes);
                 }
             }
         });
@@ -321,7 +332,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 if (link.parentNode) link.parentNode.removeChild(link);
             }
         };
-    }, [image, imageSizes, photoViewerSizes]);
+    }, [image, imageSizes]);
 
     useEffect(() => {
         if (!syncPhotoQueryBasePath || !image) return;
