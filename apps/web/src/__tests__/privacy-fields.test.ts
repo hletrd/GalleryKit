@@ -18,6 +18,26 @@ function sourceBetween(source: string, startNeedle: string, endNeedle: string): 
     return source.slice(start, end);
 }
 
+// C6-13 (run-10 cycle-6): the leak-scan below is a `SENSITIVE_KEYS.filter(...)`
+// that returns [] (a PASS) when the extracted block contains no sensitive alias.
+// That is vacuously true if a marker rename/reorder/reformat drift makes
+// `sourceBetween` capture the wrong (or an empty) region. Assert the extraction
+// actually captured a select block — non-empty AND referencing ≥1 expected
+// public `images.<col>` — so drift fails loudly instead of passing silently.
+// NOTE: the leak regex assumes the schema table is imported as the literal
+// identifier `images` (e.g. `images.latitude`); a differently-aliased import
+// would need this sentinel + the regex updated in lockstep.
+function assertSelectBlockCaptured(block: string, label: string) {
+    expect(block.length, `${label}: extracted select block must be non-empty`).toBeGreaterThan(0);
+    const capturesPublicColumn = PUBLIC_SAFE_KEYS.some((key) =>
+        new RegExp(`\\bimages\\.${key}\\b`).test(block),
+    );
+    expect(
+        capturesPublicColumn,
+        `${label}: extraction must reference at least one expected public images.* column — otherwise a marker drift silently passes the leak scan`,
+    ).toBe(true);
+}
+
 const SENSITIVE_KEYS = [
     'latitude',
     'longitude',
@@ -194,6 +214,7 @@ describe('Privacy field separation', () => {
             'const searchFields = {',
             'type _SearchSensitive',
         );
+        assertSelectBlockCaptured(searchFieldsSource, 'searchFields');
         const leaked = SENSITIVE_KEYS.filter((key) =>
             new RegExp(`\\b[A-Za-z0-9_]+\\s*:\\s*images\\.${key}\\b`).test(searchFieldsSource),
         );
@@ -224,6 +245,7 @@ describe('Privacy field separation', () => {
         ];
 
         for (const { label, source } of publicSelectBlocks) {
+            assertSelectBlockCaptured(source, label);
             const leaked = SENSITIVE_KEYS.filter((key) =>
                 new RegExp(`\\b[A-Za-z0-9_]+\\s*:\\s*images\\.${key}\\b`).test(source),
             );
