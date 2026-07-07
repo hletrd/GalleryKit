@@ -68,11 +68,10 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
 
     const protocol = getTrustedRequestProtocol(requestHeaders);
 
-    const trustedForwardedHost = trustsProxyHeaders()
-        ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))
-        : '';
-    const rawHost = trustedForwardedHost
-        || normalizeHeaderValue(requestHeaders.get('host'));
+    const rawHost = normalizeHeaderValue(requestHeaders.get('host'))
+        || (trustsProxyHeaders()
+            ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))
+            : '');
     if (!rawHost) {
         return null;
     }

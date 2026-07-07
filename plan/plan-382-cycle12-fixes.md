@@ -142,7 +142,7 @@ Every new commit must show `%G?` as `G` and signer `128F2D0C0729A5AB` / `9AC5BC1
 - [x] Completed plan archived: `plan/plan-376-cycle19-fixes.md` moved to `plan/done/`.
 - [x] WP1 dependency audit override implemented and verified (`npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: 0 vulnerabilities).
 - [x] WP2 Docker base digest pinned and verified in source contract (`node:24-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc`; resolved with `docker buildx imagetools inspect node:24-slim`).
-- [x] WP3 proxy-topology validation surface implemented and verified; live pre-deploy probe exposed spoofed-forwarded-header influence, so app-side same-origin resolution was also hardened to prefer configured `BASE_URL`.
+- [x] WP3 proxy-topology validation surface implemented and verified; live pre-deploy probe exposed spoofed-forwarded-header influence, so app-side same-origin resolution was also hardened to prefer configured `BASE_URL` and the real `Host` header before `X-Forwarded-Host`.
 - [x] WP4 CLIP preflight workflow/contract implemented and verified.
 - [x] Full configured gates passed (`lint`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `typecheck`, `build`, `test`, production `npm audit`).
 - [ ] Signed commit pushed.

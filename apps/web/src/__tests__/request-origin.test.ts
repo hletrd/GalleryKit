@@ -105,30 +105,44 @@ describe('hasTrustedSameOrigin', () => {
         }))).toBe(false);
     });
 
-    it('trusts forwarded headers when TRUST_PROXY is enabled', () => {
+    it('falls back to forwarded host when TRUST_PROXY is enabled and Host is absent', () => {
         process.env.TRUST_PROXY = 'true';
 
         expect(hasTrustedSameOrigin(makeHeaders({
-            host: 'internal-proxy',
             'x-forwarded-host': 'gallery.atik.kr:443',
             'x-forwarded-proto': 'https',
             origin: 'https://gallery.atik.kr',
         }))).toBe(true);
     });
 
-
-    it('uses the trusted right-most forwarded host/proto when TRUST_PROXY is enabled', () => {
+    it('prefers Host over spoofable forwarded host when both are present', () => {
         process.env.TRUST_PROXY = 'true';
 
         expect(hasTrustedSameOrigin(makeHeaders({
-            host: 'internal-proxy',
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'https',
+            origin: 'https://attacker.invalid',
+        }))).toBe(false);
+    });
+
+    it('uses the trusted right-most forwarded host/proto fallback when TRUST_PROXY is enabled and Host is absent', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        expect(hasTrustedSameOrigin(makeHeaders({
             'x-forwarded-host': 'evil.example, gallery.atik.kr',
             'x-forwarded-proto': 'http, https',
             origin: 'https://gallery.atik.kr',
         }))).toBe(true);
 
         expect(hasTrustedSameOrigin(makeHeaders({
-            host: 'internal-proxy',
             'x-forwarded-host': 'evil.example, gallery.atik.kr',
             'x-forwarded-proto': 'http, https',
             origin: 'http://evil.example',
