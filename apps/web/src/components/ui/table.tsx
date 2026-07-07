@@ -67,8 +67,12 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
+    // C6-10 (run-10 cycle-6): default scope="col" so screen-reader table
+    // navigation reliably associates each header with its column (WCAG H63 /
+    // SC 1.3.1). A caller can override via props for a row/rowgroup header.
     <th
       data-slot="table-head"
+      scope="col"
       className={cn(
         "text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
