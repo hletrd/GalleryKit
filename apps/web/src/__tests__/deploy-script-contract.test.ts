@@ -8,6 +8,9 @@ const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const deployScript = readFileSync(resolve(repoRoot, 'apps/web/deploy.sh'), 'utf8');
 const remoteDeployScript = readFileSync(resolve(repoRoot, 'scripts/deploy-remote.sh'), 'utf8');
 const dockerfile = readFileSync(resolve(repoRoot, 'apps/web/Dockerfile'), 'utf8');
+const packageLock = JSON.parse(readFileSync(resolve(repoRoot, 'package-lock.json'), 'utf8')) as {
+    packages?: Record<string, { version?: string }>;
+};
 const entrypointScript = readFileSync(resolve(repoRoot, 'apps/web/scripts/entrypoint.sh'), 'utf8');
 const composeConfig = readFileSync(resolve(repoRoot, 'apps/web/docker-compose.yml'), 'utf8');
 const rootDockerignore = readFileSync(resolve(repoRoot, '.dockerignore'), 'utf8');
@@ -269,6 +272,14 @@ describe('deploy script safety contract', () => {
 
         for (const token of packageTokens) {
             expect(token, token).toMatch(/@\d+\.\d+\.\d+$/);
+            const match = token.match(/^(@(?:next|swc)\/[a-z0-9-]+\$\{npm_arch\}[a-z0-9-]*)@(\d+\.\d+\.\d+)$/);
+            if (!match) continue;
+            for (const arch of ['arm64', 'x64']) {
+                const packageName = match[1].replace('${npm_arch}', arch);
+                const lockedVersion = packageLock.packages?.[`node_modules/${packageName}`]?.version;
+                expect(lockedVersion, `missing lockfile package for ${packageName}`).toBeTruthy();
+                expect(match[2], token).toBe(lockedVersion);
+            }
         }
     });
 

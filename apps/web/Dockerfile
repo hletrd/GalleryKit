@@ -56,8 +56,8 @@ RUN npm ci --workspace=apps/web --include=optional && \
         @img/sharp-libvips-linux-${npm_arch}@1.2.4 \
         @img/sharp-linux-${npm_arch}@0.34.5 \
         @parcel/watcher-linux-${npm_arch}-glibc@2.5.6 \
-        @swc/core-linux-${npm_arch}-gnu@1.15.41 \
-        @next/swc-linux-${npm_arch}-gnu@16.2.9 \
+        @swc/core-linux-${npm_arch}-gnu@1.15.43 \
+        @next/swc-linux-${npm_arch}-gnu@16.2.10 \
         lightningcss-linux-${npm_arch}-gnu@1.32.0
 
 # Guarantee the workspace-nested tree exists even if a future lockfile hoists
