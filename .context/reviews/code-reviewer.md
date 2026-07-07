@@ -1,207 +1,155 @@
-# Cycle 12 Code-Reviewer + Critic Report
+# Cycle 13 Code Review - code-reviewer
 
 Date: 2026-07-07
-Reviewer: code-reviewer + critic lane
 Repository: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `173668ea0a0bb5f57a64cef581ac7b0f5abaef20`
+Review boundary: `173668ea0a0bb5f57a64cef581ac7b0f5abaef20..d8fcb3d6`
+Reviewer focus: code quality, logic, SOLID/maintainability, edge cases, and cross-file interactions.
 
-## Scope And Inventory
+## Inventory
 
-I reviewed the repository as a whole, not only diffs, and wrote only this review file. I read `AGENTS.md`, `CLAUDE.md`, `.context/plan/plan-c12.md`, `.context/reviews/_aggregate.md`, the prior `.context/reviews/code-reviewer.md`, and the current `.context/reviews/critic.md`.
+I first built the review inventory from `git diff --name-status 173668ea..HEAD` and then read every review-relevant changed file, not a sample.
 
-Inventory built before inspection:
+Changed paths:
 
-- Source inventory from `rg --files`: app source, configs, migrations, scripts, e2e tests, unit tests, docs, deploy helpers, and review/plan context.
-- `apps/web/src`: 615 files total, including 81 app route/action files, 111 library files, and 353 unit test files.
-- Operational surfaces reviewed: `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`, Docker/Next/Vitest/Playwright config, `package.json`, `package-lock.json`, and `.github/workflows/quality.yml`.
-- Application surfaces reviewed: public pages, admin pages, server actions, API routes, auth/session/rate-limit/origin wrappers, data layer, image queue/backfill, semantic search, migrations, tests, and deployment helpers.
+- Review/context docs only: `.context/reviews/_aggregate.md`, `.context/reviews/architect-document-specialist.md`, `.context/reviews/code-reviewer.md`, `.context/reviews/designer-ui-ux-reviewer.md`, `.context/reviews/perf-debugger-tracer.md`, `.context/reviews/security-reviewer.md`, `.context/reviews/verifier-test-engineer.md`
+- Plan docs only: `plan/done/plan-376-cycle19-fixes.md`, `plan/plan-382-cycle12-fixes.md`, `plan/plan-383-cycle12-deferred.md`
+- Reviewed source/config/test files: `.github/workflows/clip-preflight.yml`, `.github/workflows/quality.yml`, `apps/web/Dockerfile`, `apps/web/src/__tests__/cycle12-ops-contracts.test.ts`, `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/lib/request-origin.ts`, `package-lock.json`, `package.json`, `scripts/check-proxy-topology.mjs`
 
-Validation evidence:
+Cross-file interaction files read for behavior validation:
 
+- `apps/web/src/app/api/search/semantic/route.ts`
+- `apps/web/src/app/api/search/similar/[id]/route.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/playwright.config.ts`
+- `apps/web/scripts/run-e2e-server.mjs`
+- `apps/web/scripts/check-js-scripts.mjs`
+- `apps/web/nginx/default.conf`
+- `apps/web/package.json`
+- `apps/web/scripts/download-clip-models.ts`
+- `apps/web/src/__tests__/clip-offline-load.test.ts`
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts`
+- representative E2E specs/helpers around admin login and origin guard
+
+Validation evidence gathered:
+
+- `npm run lint --workspace=apps/web` passed.
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate --json` failed with 2 moderate findings through `next -> postcss`.
+- `npm run typecheck --workspace=apps/web -- --pretty false` passed; npm warned that `--pretty` is an unknown npm config.
+- Focused tests passed: `request-origin.test.ts`, `cycle12-ops-contracts.test.ts`, `semantic-search-route.test.ts`.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate --json` passed with 0 vulnerabilities.
+- `npm ci --dry-run --workspace=apps/web` passed.
+- `node --check scripts/check-proxy-topology.mjs` passed.
+- Registry check on 2026-07-07: latest stable values remain `next@16.2.10`, `drizzle-kit@0.31.10`, `postcss@8.5.16`, and `esbuild@0.28.1`.
 
-I did not run full lint/typecheck/build/unit/e2e because the task is review-only and those broader gates are already represented in the repo workflow; the targeted guard checks and audit were enough to validate the specific security contracts inspected here.
+## Confirmed Issues
 
-## Confirmed Findings
+### CR-C13-01 - CI/local E2E server inherits a non-local `BASE_URL`, so same-origin admin actions reject localhost browser requests
 
-### CR-C12-01 - Production dependency audit remains red through Next's nested PostCSS
+Severity: High
+Confidence: High
+Status: Confirmed issue
+Exact file/region:
+
+- `.github/workflows/quality.yml:27-37` sets `BASE_URL=https://gallerykit-ci.invalid` for the whole job.
+- `apps/web/playwright.config.ts:15-29` runs Playwright against `http://127.0.0.1:<port>` by default.
+- `apps/web/playwright.config.ts:78-85` starts the local server through `scripts/run-e2e-server.mjs`.
+- `apps/web/scripts/run-e2e-server.mjs:49-57` preserves parent env in child commands.
+- `apps/web/scripts/run-e2e-server.mjs:95-100` overrides `BASE_URL` only for the build child process.
+- `apps/web/scripts/run-e2e-server.mjs:106-110` starts the runtime server without overriding or unsetting `BASE_URL`.
+- `apps/web/src/lib/request-origin.ts:45-67` now prefers configured `BASE_URL` as the expected same-origin origin.
+- `apps/web/src/app/actions/auth.ts:99-103` rejects login when `hasTrustedSameOrigin()` fails.
+
+Failure scenario:
+
+The required CI E2E job exports `BASE_URL=https://gallerykit-ci.invalid`, then Playwright opens the local server at `http://127.0.0.1:3100`. The runtime server inherits the CI `BASE_URL`, so `hasTrustedSameOrigin()` expects `https://gallerykit-ci.invalid` while the browser sends `Origin: http://127.0.0.1:3100`. Admin login and other same-origin protected server actions reject before auth.
+
+I validated the core predicate directly:
+
+`BASE_URL=https://gallerykit-ci.invalid TRUST_PROXY=true` with `Host/Origin=http://127.0.0.1:3100` returns `false` from `hasTrustedSameOrigin()`.
+
+Suggested fix:
+
+Separate build-time public metadata origin from runtime E2E origin. In `run-e2e-server.mjs`, pass the actual local origin to the runtime server, for example `BASE_URL=http://${host}:${port}` at `spawn(... server.js ...)`, or explicitly unset `BASE_URL` for the runtime child and rely on `Host` for local E2E. Keep the production behavior of preferring `BASE_URL` intact.
+
+### CR-C13-02 - `check:proxy-topology` claims to validate `X-Forwarded-For`, but its probe returns before IP/rate-limit code runs
 
 Severity: Medium
 Confidence: High
 Status: Confirmed issue
-Duplicate/planned status: Duplicate of `.context/reviews/_aggregate.md` `AGG-C11-14`; still present at this HEAD.
-Exact file/region: `apps/web/package.json:59`, root `package.json:7-9`, `package-lock.json:9194-9204`, `package-lock.json:9334-9337`.
+Exact file/region:
+
+- `scripts/check-proxy-topology.mjs:7-10` says the safe edge overwrites `X-Forwarded-For`.
+- `scripts/check-proxy-topology.mjs:98-119` sends `Content-Type: text/plain` probes to `/api/search/semantic`.
+- `apps/web/src/app/api/search/semantic/route.ts:117-127` rejects non-JSON content type before protected work.
+- `apps/web/src/app/api/search/semantic/route.ts:173-184` is where `getClientIp()` and `preIncrementSemanticAttempt()` actually run.
+- `apps/web/src/lib/rate-limit.ts:175-205` is the `X-Forwarded-For` trust logic the probe is supposed to validate.
+- `apps/web/nginx/default.conf:59-71` documents the deployment contract whose failure mode is bad `X-Forwarded-For` handling.
+- `apps/web/src/__tests__/cycle12-ops-contracts.test.ts:20-31` only asserts that the script contains `X-Forwarded-For`, not that any probe reaches IP selection.
 
 Failure scenario:
 
-The workspace override pins top-level `postcss` to `8.5.16`, but `next@16.2.10` still installs nested `postcss@8.4.31`. The production audit still reports GHSA-qx2v-qp2m-jg93 through `node_modules/next/node_modules/postcss`. If a current or future path feeds attacker-influenced CSS into Next's bundled PostCSS stringify path and embeds it into a page, the known `</style>` escaping issue can become XSS. I did not confirm an arbitrary-CSS input today, so the exploit path is conditional, but the production audit gate is red now.
+An unsafe edge forwards client-supplied `X-Forwarded-For` through to an app running `TRUST_PROXY=true`. The operator runs `npm run check:proxy-topology -- --url ...`; the script sends a malformed semantic-search POST, the route returns `400` at content-type validation, and the script classifies that as pass. `getClientIp()` is never called, so spoofed or collapsed client IP handling is not tested.
 
 Suggested fix:
 
-Upgrade to a stable Next release that removes the vulnerable nested dependency, or prove a lockfile-effective override replaces `next/node_modules/postcss` without breaking the full gate suite. Do not take the audit suggestion to downgrade Next to 9.3.3.
+Either stop claiming this script validates `X-Forwarded-For`, or add a real read-only diagnostic that exercises `getClientIp()` without mutation. If using the semantic route, the probe must reach the pre-increment path and then observe a meaningful signal; otherwise it remains a string-presence check, not a topology check.
 
-### CR-C12-02 - Dynamic public archive/home queries still use date functions on indexed columns
-
-Severity: Medium
-Confidence: High
-Status: Confirmed issue
-Duplicate/planned status: Duplicate of `AGG-C11-06`; partially fixed only for `getTimelineImages`, not for these paths.
-Exact file/region: `apps/web/src/lib/data-timeline.ts:111-130`, `apps/web/src/lib/data-timeline.ts:143-155`, `apps/web/src/app/[locale]/(public)/page.tsx:232-235`, `apps/web/src/components/on-this-day-widget.tsx:15-22`.
-
-Failure scenario:
-
-`getOnThisDayImages()` filters with `MONTH(capture_date)` and `DAY(capture_date)`, and `getTimelineYears()` selects/orders by `YEAR(capture_date)`. Both feed dynamic public SSR surfaces (`revalidate = 0` pages and the home page widget). On a larger archive, visitors or crawlers repeatedly force MySQL to evaluate date functions across the processed dated image set instead of using the `(processed, capture_date, created_at)` index as a tight seek.
-
-Suggested fix:
-
-Add generated/indexed date keys such as `capture_year` and `capture_mmdd`, or cache year and on-this-day rollups invalidated by image metadata changes. Update tests so they no longer pin `MONTH()`/`DAY()`/`YEAR()` as the expected query shape.
-
-### CR-C12-03 - Public map can still ship and hydrate up to 10,000 markers plus a duplicate list
-
-Severity: Medium
-Confidence: High
-Status: Risk with source-confirmed scale shape
-Duplicate/planned status: Duplicate of `AGG-C11-09`; still present.
-Exact file/region: `apps/web/src/lib/data.ts:1750-1777`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`, `apps/web/src/components/map/map-client.tsx:87-90`, `apps/web/src/components/map/map-client.tsx:120-139`.
-
-Failure scenario:
-
-`getMapImages()` returns `MAP_MAX_MARKERS + 1`, with `MAP_MAX_MARKERS = 10000`. The page serializes those markers, renders an accessible `<ul>` entry for each, and the Leaflet client creates one `<Marker>` per row. `FitBounds` also allocates latitude/longitude arrays and spreads them into `Math.min`/`Math.max`. A GPS-heavy gallery or crawler traffic can create a large RSC/client payload and stall mobile hydration/main-thread work before the map is usable.
-
-Suggested fix:
-
-Switch map loading to viewport/bounds queries with clustering or a canvas/WebGL marker layer. Virtualize or paginate the accessible list. Compute bounds in one pass rather than allocating two arrays and spreading them.
-
-### CR-C12-04 - Public listing queries aggregate tags before limiting the page
-
-Severity: Medium
-Confidence: Medium
-Status: Likely performance issue
-Duplicate/planned status: Duplicate of `AGG-C11-07`; still present.
-Exact file/region: `apps/web/src/lib/data.ts:806-828`, `apps/web/src/lib/data.ts:937-940`.
-
-Failure scenario:
-
-`getImagesLite()` joins `image_tags` and `tags`, groups by `images.id`, orders, then applies the page limit/offset or cursor. That query shape does more tag aggregation work than needed for a 30-photo page, especially on broad public pages. The paged `getImages()` path likewise executes the grouped listing query and a count in parallel. As archives and tag fan-out grow, public page requests can spend time sorting/grouping rows that will not be returned.
-
-Suggested fix:
-
-First select the page image ids through image-table indexes and cursor predicates, then aggregate tags only for those ids. Keep the existing privacy select shape, but split pagination from tag enrichment.
-
-### CR-C12-05 - Semantic and similar search still brute-force embedding blobs on the request path
-
-Severity: Medium
-Confidence: Medium
-Status: Risk with source-confirmed cost shape
-Duplicate/planned status: Duplicate of `AGG-C11-08`; still present.
-Exact file/region: `apps/web/src/app/api/search/semantic/route.ts:270-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:181-214`.
-
-Failure scenario:
-
-Both routes scan up to `SEMANTIC_SCAN_LIMIT` embedding rows, transfer MEDIUMBLOB vectors into Node, decode them, score them, and run `topK` on the request path. The semantic route does this after the CLIP text embedding has already consumed inference capacity. Even with rate limiting, concurrent public searches can compete with normal SSR and upload/background work on the same Node process and MySQL pool.
-
-Suggested fix:
-
-Move production scoring to a vector index, worker thread, or bounded cached embedding matrix with explicit invalidation. If keeping brute force for now, set production limits based on measured CPU/RSS/tail latency and make expensive-work admission account for the scan size.
-
-### CR-C12-06 - Single-writer correctness remains warn-only while process-local state is correctness-relevant
-
-Severity: Medium
-Confidence: High
-Status: Confirmed operational risk
-Duplicate/planned status: Duplicate of `AGG-C11-19`; still present.
-Exact file/region: `apps/web/src/lib/single-writer-guard.ts:218-235`, `apps/web/src/lib/single-writer-guard.ts:271-304`, `apps/web/src/instrumentation.ts:22-31`.
-
-Failure scenario:
-
-The singleton guard detects advisory-lock contention and emits a loud warning, but startup continues. The app still has process-local state for restore fences, upload quota tracking, queue status, and several fast-path rate limits. If two `gallerykit-web` instances point at one database, both serve traffic and split those states, so users can see inconsistent mutation fences, quota behavior, and status surfaces before anyone sees logs.
-
-Suggested fix:
-
-Add an opt-in production enforcement mode, for example `GALLERYKIT_ENFORCE_SINGLE_WRITER=true`, that fails readiness or exits after persistent contention. Longer term, move correctness-critical coordination to DB/advisory-lock-backed state rather than process memory.
-
-## Maintainability And Validation Risks
-
-### CR-C12-07 - Legacy schema reconcile remains a second schema authority with mostly source-only parity coverage
-
-Severity: Medium
-Confidence: High
-Status: Confirmed maintainability risk
-Duplicate/planned status: Duplicate of `AGG-C11-16`; still present.
-Exact file/region: `apps/web/scripts/migrate.js:348-420`, `apps/web/scripts/migrate.js:684-725`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:157-179`.
-
-Failure scenario:
-
-`reconcileLegacySchema()` hand-writes current schema DDL. The tests mostly assert that table/column/index names appear in source and explicitly state they cannot verify types/defaults. A future migration can change a column type, nullability, default, index column order, uniqueness, or FK action while keeping the same names. CI can pass, but a DB repaired through reconcile diverges from one built by normal migrations.
-
-Suggested fix:
-
-Add a parity gate that creates two disposable MySQL schemas: one by committed migrations and one by reconcile/baseline, then diffs `information_schema.columns`, `statistics`, and FK rules. If too heavy for every PR, run it scheduled and require it for migration changes.
-
-### CR-C12-08 - Real CLIP production activation remains outside required CI gates
-
-Severity: Medium
-Confidence: High
-Status: Confirmed release-risk gap
-Duplicate/planned status: Duplicate of `AGG-C11-17`; still present.
-Exact file/region: `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`, `apps/web/package.json:21-23`, `.github/workflows/quality.yml:66-80`.
-
-Failure scenario:
-
-The real-model tests skip unless model weights and env flags are present. The quality workflow runs ordinary unit/e2e/build gates but does not seed weights or run `test:clip:preflight`. A dependency upgrade, model layout change, native runtime change, or `CLIP_MODELS_ROOT` mismatch can break production semantic search while default CI stays green.
-
-Suggested fix:
-
-Add a scheduled or manually triggered CI job that seeds/caches the pinned weights and runs `npm run test:clip:preflight --workspace=apps/web`. Consider requiring a recent preflight artifact before production mode is enabled.
-
-### CR-C12-09 - Critical browser behaviors are still protected by source-string tests
-
-Severity: Medium
-Confidence: High
-Status: Confirmed test-oracle gap
-Duplicate/planned status: Duplicates `AGG-C11-20`, `AGG-C11-21`, and part of `AGG-C11-28`; still present.
-Exact file/region: `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14-26`, implementation at `apps/web/src/components/info-bottom-sheet.tsx:562-575`, touch-target exception at `apps/web/src/__tests__/touch-target-audit.test.ts:457-465`, fixture at `apps/web/src/__tests__/touch-target-audit.test.ts:1053-1059`, Playwright browser scope at `apps/web/playwright.config.ts:72-77`.
-
-Failure scenario:
-
-The bottom-sheet dropdown test asserts that certain strings exist, but it does not open the dropdown in a mobile browser, prove it renders above the sheet, or verify focus/escape behavior. The touch-target scanner intentionally lets bare text links pass, which is right for prose but can miss future control-like links. Playwright only runs desktop Chromium, so mobile/WebKit regressions in these areas can ship while source-string checks stay green.
-
-Suggested fix:
-
-Add targeted Playwright behavior tests for mobile info-sheet dropdown visibility/focus, and add a DOM-level or explicit-allowlist touch-target check for representative pages. Keep source-string tests only as secondary tripwires.
-
-### CR-C12-10 - Shared-group data reader still owns a hidden view-count side effect
+### CR-C13-03 - `check:proxy-topology` accepts unexpected non-500 statuses as success
 
 Severity: Low
 Confidence: High
-Status: Confirmed maintainability issue
-Duplicate/planned status: Duplicate of prior code-review finding `CR-C11-02` and aggregate `AGG-C11-02`; still present.
-Exact file/region: `apps/web/src/lib/data.ts:1322-1407`, cached wrapper warning at `apps/web/src/lib/data.ts:1805-1809`, public caller at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-112`.
+Status: Confirmed issue
+Exact file/region:
+
+- `scripts/check-proxy-topology.mjs:51-59`
+- `scripts/check-proxy-topology.mjs:61-69`
 
 Failure scenario:
 
-`getSharedGroup()` looks like a read helper but buffers a view-count write unless callers pass `incrementViewCount:false` or a valid selected photo id. A future metadata, preview, moderation, or API path can call `getSharedGroupCached(key)` just to read the group and silently increment analytics. React `cache()` also makes call-order part of side-effect semantics if two callers use different count options in one render.
+`classifyBaseline()` and `classifySpoof()` reject `403` and `>=500`, and allow a small known set, but they do not reject other unexpected statuses. A `200`, `204`, `302`, `401`, or other non-500 response falls through as success even though the help text says the probes should fail before mutation/rate-limit work.
 
 Suggested fix:
 
-Split pure shared-group reads from explicit view-count recording. If the current behavior remains temporarily, export separately named helpers for read-only and count-capable access so accidental side effects are harder to introduce.
+Make the classifiers allowlist-only. After the known-safe status set, throw on every other status with a message that includes the status and probe type. Treat edge-side fail-closed statuses deliberately instead of relying on fallthrough.
 
-## Already Fixed During This Pass
+## Likely Risk
 
-I rechecked several cycle-11 findings and did not carry them forward:
+### CR-C13-04 - Audit overrides leave the npm dependency tree invalid under `npm ls`
 
-- Topic route advisory-lock release cleanup is fixed: `apps/web/src/app/actions/topics.ts:69-99` now destroys the pooled connection on `RELEASE_LOCK` failure.
-- Drizzle Kit TLS CA handling is fixed: `apps/web/drizzle.config.ts:10-17` now requires and reads `DB_SSL_CA` for non-local hosts unless `DB_SSL=false`.
-- Raw `IMAGE_BASE_URL` leakage is fixed: `apps/web/src/lib/constants.ts:6-19`, `apps/web/src/lib/image-url.ts:26-37`, and `apps/web/src/app/[locale]/layout.tsx:110-117` sanitize the value before public exposure.
-- Restore background-write drain is bounded: `apps/web/src/lib/background-db-writes.ts:93-112` and `apps/web/src/app/[locale]/admin/db-actions.ts:540-557`.
-- Settings-hash mapper drift is fixed: `apps/web/src/lib/settings-hash.ts:79-107` uses an exhaustive typed mapper.
-- `logout` is now same-origin and restore-barrier aware: `apps/web/src/app/actions/auth.ts:268-294`.
+Severity: Medium
+Confidence: Medium
+Status: Likely risk with confirmed tooling failure
+Exact file/region:
 
-## Final Missed-Issue Sweep
+- `package.json:7-15`
+- `package-lock.json:378-388`
+- `package-lock.json:6353-6366`
+- `package-lock.json:8809-8820`
+- `package-lock.json:9437-9458`
 
-Final sweep areas: auth/API wrappers, mutating server actions, public rate limits, advisory locks, restore drains, DB TLS, CDN URL sanitization, migration/reconcile, public query shapes, semantic search, map/timeline scale, source-string tests, deploy/nginx boundary, and dependency audit.
+Failure scenario:
 
-No Critical or High production defect was confirmed in this pass. The main residual risks are scale/operational/test-oracle risks already represented in the cycle-11 aggregate and still present in source. Guard evidence is good for admin API auth, server-action origin checks, and public expensive-route rate-limit checks. The production dependency audit remains red and should stay visible until the nested Next/PostCSS path is actually removed.
+The production audit is now green, but `npm ls postcss esbuild --all` exits with `ELSPROBLEMS` because `postcss@8.5.16` violates Next's exact `postcss: 8.4.31` dependency metadata and `esbuild@0.28.1` violates `@esbuild-kit/core-utils`'s `~0.18.20` dependency metadata. Current `npm ci --dry-run`, lint, typecheck, and focused tests pass, so this is not a current build failure. The risk is that dependency diagnostics, future npm behavior, or tooling that treats `npm ls` as a health check reports the workspace as invalid even while the audit gate is green.
+
+Suggested fix:
+
+Prefer an upstream-compatible release when available. If the out-of-range overrides are intentionally accepted as the short-term security tradeoff, add an explicit source/CI contract documenting that `npm ls` is expected to be red for these exact override edges, and avoid using `npm ls` as a dependency-health proof until the upstream ranges catch up.
+
+## Non-Findings Checked
+
+- The `BASE_URL` preference in `request-origin.ts` is directionally correct for production spoofed forwarded-host hardening; the confirmed issue is the local E2E runtime inheriting a non-local CI value.
+- `npm audit --omit=dev` is green after the dependency override change.
+- The CLIP preflight workflow runs a seed step and then the existing offline/integration tests with `CLIP_MODELS_ROOT`, `CLIP_OFFLINE_LOAD=1`, and `CLIP_INTEGRATION=1`; I did not find a code-level defect in the workflow itself.
+- Docker base-image digest pinning is applied to both production base stages.
+- Admin API auth, mutating action origin checks, and public route rate-limit static gates pass.
+
+## Final Sweep
+
+Final sweep covered auth/origin checks, proxy and forwarded-header trust, public API rate-limit ordering, CI workflow env propagation, local E2E server env propagation, dependency override behavior, Docker digest pinning, CLIP preflight seed/load wiring, root/app script syntax coverage, and source-string tests added for operational contracts.
+
+Skipped files: none in the review-relevant source/config/test inventory. Plan and review documents were read for boundary/context but not reviewed as executable source.
