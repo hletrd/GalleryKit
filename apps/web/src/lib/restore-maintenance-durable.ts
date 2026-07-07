@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {
     beginRestoreMaintenance,
     endRestoreMaintenance,
+    isRestoreMaintenanceActive,
     setRestoreMaintenanceActiveForProcess,
 } from '@/lib/restore-maintenance';
 
@@ -95,12 +96,22 @@ export function syncRestoreMaintenanceFromDurable() {
 }
 
 export function beginDurableRestoreMaintenance(options: { allowExisting?: boolean } = {}) {
+    // AGG9B-21 (loop-B cycle 9b): remember whether maintenance was ALREADY
+    // active before this call. With `allowExisting: true`,
+    // beginRestoreMaintenance() returns true for a window someone else owns
+    // (e.g. recovered from the durable marker at boot); a marker-write
+    // failure must then NOT clear the process-local flag out from under the
+    // actual owner — that would let uploads/mutations proceed while the
+    // on-disk marker still claims maintenance.
+    const wasActive = isRestoreMaintenanceActive();
     const started = beginRestoreMaintenance(options);
     if (started) {
         try {
             writeDurableRestoreMaintenance();
         } catch (err) {
-            endRestoreMaintenance();
+            if (!wasActive) {
+                endRestoreMaintenance();
+            }
             throw err;
         }
     }

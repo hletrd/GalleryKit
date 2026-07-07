@@ -90,6 +90,17 @@ describe('restore maintenance state', () => {
         expect(isRestoreMaintenanceActive()).toBe(false);
     });
 
+    it('keeps a pre-existing owner\'s maintenance active when the marker write fails under allowExisting', () => {
+        // AGG9B-21 (loop-B cycle 9b): another flow already owns the window
+        // (e.g. recovered from the durable marker at boot). A joining call
+        // whose marker write fails must NOT clear the owner's flag.
+        expect(beginRestoreMaintenance()).toBe(true);
+        vi.stubEnv('RESTORE_MAINTENANCE_MARKER_PATH', tempDir);
+
+        expect(() => beginDurableRestoreMaintenance({ allowExisting: true })).toThrow();
+        expect(isRestoreMaintenanceActive()).toBe(true);
+    });
+
     it('clears process maintenance even when durable marker removal fails', () => {
         const markerDir = join(tempDir, 'restore-maintenance.json');
         mkdirSync(markerDir);
